@@ -5,8 +5,8 @@
  *
  *  Implements the Aho-Corasick automaton at the core of the multi-pattern search engine:
  *
- *  - `aho_corasick_dictionary` builds the trie, completes it via the classic goto/failure BFS, splits the
- *    result into a frequency-ordered hot tier and a double-array cold tier, and exposes CSR-flattened
+ *  - `aho_corasick_dictionary` builds the trie, derives the walking automaton (below), splits the result
+ *    into a shallow-first, out-degree-ordered hot tier and a double-array cold tier, and exposes CSR-flattened
  *    match outputs through the shared `aho_corasick_view` contract. Construction allocates a constant
  *    number of flat buffers rather than one per state, and none of them outlives `try_build`.
  *  - `substrings` wraps the dictionary behind a `try_build` / `try_count` / `try_find` triple, with a
@@ -16,14 +16,14 @@
  *  Every other StringZillas engine exposes a single `operator()`; the triple exists here because a
  *  dictionary is compiled once and reused across many later calls, and counting is useful in its own right.
  *
- *  Case-folding works by preimage reconvergence. A case-insensitive dictionary cannot enumerate every
- *  spelling and insert each as its own path - that is multiplicative in the number of case-sensitive
- *  positions. Instead, one state is allocated per folded
- *  position, and every codepoint whose fold produces that position's folded subsequence gets its own edge
- *  into the very same successor state, so all spellings reconverge. Codepoints whose full fold changes the
- *  UTF-8 byte length - the Kelvin sign folding to 'k', sharp S folding to "ss" - mean two paths can reach the
- *  same folded position having consumed a different number of haystack bytes, so states are additionally
- *  keyed by the byte delta accumulated relative to the folded spelling's own canonical encoding.
+ *  Case-folding works in two layers. The @b spelling automaton keys states by `(folded position, byte
+ *  delta)`, so every spelling of a fold reconverges onto one state instead of enumerating a path each. That
+ *  makes it a DAG, on which Aho-Corasick failure links are not single-valued - a state two spellings reach
+ *  at different byte widths needs two failure continuations. The published @b walking automaton therefore
+ *  splits each spelling state by its `(spelling state, failure state)` pair, the coarsest split that keeps
+ *  failure links single-valued. Pathological doubling needles - "ssssss" case-insensitively - have a
+ *  provably exponential automaton and are declined with `overflow_risk_k` once the walking-state count would
+ *  overflow the id type, rather than built wrong.
  */
 #ifndef STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_
 #define STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_
@@ -140,7 +140,8 @@ struct aho_corasick_view {
     using state_id_t = state_id_type_;
     using output_t = substrings_output<state_id_t>;
 
-    /** @brief Hot tier: `hot_count * 256` goto-completed targets, row-major, frequency-ordered. */
+    /** @brief Hot tier: `hot_count * 256` goto-completed targets, row-major, shallow states first and each
+     *         depth band ordered by out-degree - a build-time proxy for how often text visits a state. */
     state_id_t const *hot_rows {};
 
     /** @brief Cold tier: transition target for `state` on `byte` is `base[state] + byte`, if owned. */
@@ -385,12 +386,27 @@ struct aho_corasick_dictionary {
         size_t next;
     };
 
-    /** @brief Per raw state: the list of matches ending on it, and the run it publishes once completed. */
+    /** @brief Per spelling state: the matches ending on it, shared by every walking state that spells it. */
     struct output_run_t {
         /** @brief Head of this state's own match list, most recent first. */
         size_t own_head = SZ_SIZE_MAX;
         /** @brief Matches ending exactly on this state, before failure-chain inheritance. */
         state_id_t own_count = 0;
+    };
+
+    /**
+     *  @brief One published state: a spelling state paired with the failure state its arrival demands.
+     *
+     *  Ids are assigned in discovery order, so a depth band is a contiguous id range and every failure id is
+     *  smaller than its own state's id.
+     */
+    struct walking_state_t {
+        /** @brief The spelling state this one spells: supplies its row bytes, own matches, and out-degree. */
+        state_id_t spelling_state = 0;
+        /** @brief The failure walking state; half of this state's identity, stored at creation. */
+        state_id_t failure_state = 0;
+        /** @brief Published double-array slot for this state; the old per-state `final_id`. */
+        state_id_t published_id = invalid_state_k;
         /** @brief Into `outputs_`: own matches followed by the failure state's whole run. */
         size_t total_offset = 0;
         state_id_t total_count = 0;
@@ -426,6 +442,8 @@ struct aho_corasick_dictionary {
     using edge_allocator_t = typename allocator_traits_t::template rebind_alloc<trie_edge_t>;
     using pending_output_allocator_t = typename allocator_traits_t::template rebind_alloc<pending_output_t>;
     using output_run_allocator_t = typename allocator_traits_t::template rebind_alloc<output_run_t>;
+    using walking_state_allocator_t = typename allocator_traits_t::template rebind_alloc<walking_state_t>;
+    using csr_edge_allocator_t = typename allocator_traits_t::template rebind_alloc<csr_edge_t>;
     using folded_position_allocator_t = typename allocator_traits_t::template rebind_alloc<folded_position_t>;
     using chain_slot_allocator_t = typename allocator_traits_t::template rebind_alloc<chain_slot_t>;
     using word_allocator_t = typename allocator_traits_t::template rebind_alloc<u64_t>;
@@ -449,14 +467,34 @@ struct aho_corasick_dictionary {
 
     /** @brief One block carved by `build_layout_` into the buffers whose size is fixed once insertion ends. */
     safe_vector<std::byte, byte_allocator_t> build_scratch_;
-    /** @brief Published slot -> raw state; grows with the double array, so it lives outside the layout. */
+
+    /** @brief Every walking state, in discovery order; index 0 is the root paired with itself. Sized by the
+     *         walking count, which the splitting pass only learns as it runs, so like `old_of_final_` it
+     *         lives outside the fixed layout. */
+    safe_vector<walking_state_t, walking_state_allocator_t> walking_states_;
+    /** @brief Walking-state CSR row starts, `walking_states_.size() + 1` entries. */
+    safe_vector<size_t, offset_allocator_t> walking_offsets_;
+    /** @brief Walking-state CSR rows: one `(child, byte)` per edge, same shape as the spelling CSR so the
+     *         packing and hot-row phases read it through the same code. */
+    safe_vector<csr_edge_t, csr_edge_allocator_t> walking_rows_;
+    /** @brief Walking states in depth-band, out-degree-descending order: the input to the published numbering. */
+    safe_vector<state_id_t, state_id_allocator_t> walking_order_;
+    /** @brief The root's goto-completed row, dense over the alphabet, so a failure chase ends in one lookup
+     *         rather than a scan of the root's whole edge list. */
+    safe_vector<state_id_t, state_id_allocator_t> walking_root_row_;
+    /** @brief Open-addressed `(spelling, failure) -> walking` memo, so a repeated pair reuses its state in
+     *         one probe; `SZ_SIZE_MAX` marks an empty slot, exactly as `edge_index_` does for edges. */
+    safe_vector<size_t, offset_allocator_t> walking_index_;
+
+    /** @brief Published slot -> walking state; grows with the double array, so it lives outside the layout. */
     safe_vector<state_id_t, state_id_allocator_t> old_of_final_;
     /** @brief One bit per double-array slot; the only record of what the packing search has claimed. */
     safe_vector<u64_t, word_allocator_t> occupied_bits_;
     /** @brief Lowest slot that could still be free; packing only fills forward, so it never moves back. */
     size_t lowest_free_cursor_ = 0;
 
-    /** @brief Hot tier: `hot_count_ * alphabet_size_k` goto-completed targets, row-major, frequency-ordered. */
+    /** @brief Hot tier: `hot_count_ * alphabet_size_k` goto-completed targets, row-major, shallow states
+     *         first and each depth band ordered by out-degree descending. */
     safe_vector<state_id_t, state_id_allocator_t> hot_rows_;
     /** @brief Cold tier: transition target for `state` on `byte` is `base_[state] + byte`, if `check_` confirms
      *         ownership. Sized `count_states_ + (alphabet_size_k - 1)`, since a child's ID is address
@@ -469,7 +507,7 @@ struct aho_corasick_dictionary {
     safe_vector<state_id_t, state_id_allocator_t> fail_;
     /** @brief CSR-flattened match outputs, addressed through `outputs_offsets_` / `outputs_counts_`. */
     safe_vector<output_t, output_allocator_t> outputs_;
-    /** @brief Number of outputs per state, frequency-ordered numbering, same length as `base_`. */
+    /** @brief Number of outputs per state, in the published band-ordered numbering, same length as `base_`. */
     safe_vector<state_id_t, state_id_allocator_t> outputs_counts_;
     /** @brief Exclusive prefix sum of `outputs_counts_`, same length as `base_`. */
     safe_vector<size_t, offset_allocator_t> outputs_offsets_;
@@ -483,7 +521,7 @@ struct aho_corasick_dictionary {
     /** @brief States `[0, hot_count_)` live in `hot_rows_`; `derive_hot_count_k` asks `try_build` to size
      *         the tier from `cpu_specs_t` instead, which `hot_count` overrides with any explicit value. */
     size_t hot_count_ = derive_hot_count_k;
-    /** @brief The root's ID in the frequency-ordered numbering; always `0`, since the root is the unique
+    /** @brief The root's ID in the published numbering; always `0`, since the root is the unique
      *         shallowest state and therefore always sorts first. */
     state_id_t root_ = 0;
 
@@ -540,6 +578,11 @@ struct aho_corasick_dictionary {
 
     status_t allocate_raw_state_(state_id_t &new_state) noexcept {
         if (count_states_ >= (size_t)invalid_state_k) return status_t::overflow_risk_k;
+        // `try_reserve` allocates exactly what is asked, so a bare `try_resize(count + 1)` per state would
+        // re-move the whole array on every allocation - quadratic in the state count. Reserving in
+        // power-of-two steps keeps the growth amortized-linear; the reserve is a no-op once capacity holds.
+        if (output_runs_.try_reserve(sz_size_bit_ceil(count_states_ + 1)) != status_t::success_k)
+            return status_t::bad_alloc_k;
         if (output_runs_.try_resize(count_states_ + 1) != status_t::success_k) return status_t::bad_alloc_k;
         new_state = static_cast<state_id_t>(count_states_);
         ++count_states_;
@@ -738,7 +781,12 @@ struct aho_corasick_dictionary {
                 if (status != status_t::success_k) return status;
             }
 
-            if (slot_exists) { chain_slots_[matching_slot].state = actual_target; }
+            if (slot_exists) {
+                // The splitting pass relies on one target per `(state, byte)`, so the repoint is checked.
+                sz_assert_(chain_slots_[matching_slot].state == actual_target &&
+                           "Two preimages of one window from one state must share their target");
+                chain_slots_[matching_slot].state = actual_target;
+            }
             else {
                 folded_position_t &target_position = folded_positions_[position + window];
                 chain_slot_t const fresh {child_delta, actual_target, target_position.chain_head, arrival};
@@ -812,9 +860,13 @@ struct aho_corasick_dictionary {
 
 #pragma region Build Phases
 
-    /** @brief Byte offsets of every construction buffer whose size is fixed once insertion ends. */
+    /**
+     *  @brief Byte offsets of the spelling-automaton CSR, the only construction buffers whose size is fixed
+     *         once insertion ends. Everything the splitting pass produces is sized by the walking-state
+     *         count, which it only learns as it runs, so those buffers are growable members instead.
+     */
     struct layout_t {
-        size_t edges = 0, edge_offsets = 0, failures = 0, bfs_order = 0, reorder = 0, final_id = 0, total = 0;
+        size_t edges = 0, edge_offsets = 0, total = 0;
     };
 
     layout_t build_layout_(cpu_specs_t const &specs) const noexcept {
@@ -822,11 +874,6 @@ struct aho_corasick_dictionary {
         layout_t layout;
         layout.edges = amount, amount += edges_.size() * sizeof(csr_edge_t);
         layout.edge_offsets = amount, amount += (count_states_ + 1) * sizeof(state_id_t);
-        layout.failures = amount, amount += count_states_ * sizeof(state_id_t);
-        layout.bfs_order = amount, amount += count_states_ * sizeof(state_id_t);
-        // The band sort finishes before packing writes the first `final_id`, so the two share one region.
-        layout.reorder = amount;
-        layout.final_id = amount, amount += count_states_ * sizeof(state_id_t);
         layout.total = amount;
         return layout;
     }
@@ -836,18 +883,6 @@ struct aho_corasick_dictionary {
     }
     state_id_t *edge_offsets_at_(layout_t const &layout) noexcept {
         return (state_id_t *)(build_scratch_.data() + layout.edge_offsets);
-    }
-    state_id_t *failures_at_(layout_t const &layout) noexcept {
-        return (state_id_t *)(build_scratch_.data() + layout.failures);
-    }
-    state_id_t *bfs_order_at_(layout_t const &layout) noexcept {
-        return (state_id_t *)(build_scratch_.data() + layout.bfs_order);
-    }
-    state_id_t *reorder_at_(layout_t const &layout) noexcept {
-        return (state_id_t *)(build_scratch_.data() + layout.reorder);
-    }
-    state_id_t *final_id_at_(layout_t const &layout) noexcept {
-        return (state_id_t *)(build_scratch_.data() + layout.final_id);
     }
 
     /**
@@ -870,34 +905,20 @@ struct aho_corasick_dictionary {
         offsets[0] = 0;
     }
 
-    /** @brief Goto-completed target for @p state on @p byte, chasing failure links across real edges only. */
-    state_id_t chase_(state_id_t state, u8_t byte, state_id_t const *failures) const noexcept {
-        for (state_id_t current = state;;) {
-            size_t const edge = find_edge_(current, byte);
-            if (edge != SZ_SIZE_MAX) return edges_[edge].child;
-            if (current == 0) return 0; // ? The root self-loops.
-            current = failures[current];
-        }
-    }
-
     /**
-     *  @brief Reorders one depth band of `bfs_order` by out-degree descending, so shallow high-fan-out
+     *  @brief Reorders one depth band of `walking_order_` by out-degree descending, so shallow high-fan-out
      *         states - the ones text keeps returning to - land in the hot tier regardless of dictionary
      *         content. A counting sort over a bounded degree.
+     *  @note A band is the contiguous walking-id range `[band_first, band_last)`, so the states being sorted
+     *        are exactly those ids; the scatter reads no `walking_order_` entry and writes it in place.
      */
-    void order_band_by_out_degree_(layout_t const &layout, size_t band_first, size_t band_last) noexcept {
+    void order_band_by_out_degree_(size_t band_first, size_t band_last) noexcept {
         if (band_last - band_first < 2) return;
-        state_id_t *const bfs_order = bfs_order_at_(layout);
-        state_id_t *const reorder = reorder_at_(layout);
-        state_id_t const *const offsets = edge_offsets_at_(layout);
 
-        // Positions into `bfs_order`, so they ride the state id like every other state ordinal - a hard-coded
-        // width would both overpay for a `u16` automaton and truncate a wider one.
+        // Positions into `walking_order_`, riding the state id like every other ordinal.
         state_id_t histogram[alphabet_size_k + 1] = {};
-        for (size_t index = band_first; index < band_last; ++index) {
-            state_id_t const state = bfs_order[index];
-            ++histogram[offsets[state + 1] - offsets[state]];
-        }
+        for (size_t state = band_first; state < band_last; ++state)
+            ++histogram[walking_offsets_[state + 1] - walking_offsets_[state]];
         // Suffix-summed, so the highest degree claims the lowest positions in the band.
         state_id_t running = state_id_of_(band_first);
         for (size_t degree = alphabet_size_k + 1; degree-- > 0;) {
@@ -905,45 +926,135 @@ struct aho_corasick_dictionary {
             histogram[degree] = running;
             running += count;
         }
-        for (size_t index = band_first; index < band_last; ++index) {
-            state_id_t const state = bfs_order[index];
-            reorder[histogram[offsets[state + 1] - offsets[state]]++] = state;
+        for (size_t state = band_first; state < band_last; ++state)
+            walking_order_[histogram[walking_offsets_[state + 1] - walking_offsets_[state]]++] = state_id_of_(state);
+    }
+
+    /** @brief Fills the dense root row from the root's walking edges, defaulting every other byte to the
+     *         self-looping root, so a failure chase that falls all the way back resolves in one lookup. */
+    status_t fill_root_row_() noexcept {
+        if (walking_root_row_.try_resize(alphabet_size_k) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t byte = 0; byte < alphabet_size_k; ++byte) walking_root_row_[byte] = 0;
+        for (size_t edge = walking_offsets_[0]; edge < walking_offsets_[1]; ++edge)
+            walking_root_row_[walking_rows_[edge].byte] = walking_rows_[edge].child;
+        return status_t::success_k;
+    }
+
+    /** @brief Child of @p walking_state on @p byte among its literal edges, or `invalid_state_k` if none. */
+    state_id_t find_walking_edge_(state_id_t walking_state, u8_t byte) const noexcept {
+        for (size_t edge = walking_offsets_[walking_state]; edge < walking_offsets_[walking_state + 1]; ++edge)
+            if (walking_rows_[edge].byte == byte) return walking_rows_[edge].child;
+        return invalid_state_k;
+    }
+
+    /** @brief Goto-completed target for @p walking_state on @p byte; the root answers from its dense row. */
+    state_id_t chase_walking_(state_id_t walking_state, u8_t byte) const noexcept {
+        for (state_id_t current = walking_state;;) {
+            if (current == 0) return walking_root_row_[byte];
+            state_id_t const child = find_walking_edge_(current, byte);
+            if (child != invalid_state_k) return child;
+            current = walking_states_[current].failure_state;
         }
-        for (size_t index = band_first; index < band_last; ++index) bfs_order[index] = reorder[index];
+    }
+
+    /** @brief Scrambles a `(spelling, failure)` pair into a starting probe; the memo stores no key of its own. */
+    static size_t walking_probe_(state_id_t spelling_state, state_id_t failure_state) noexcept {
+        u64_t const mixed = (((u64_t)spelling_state << 32) ^ (u64_t)failure_state) * 0x9E3779B97F4A7C15ull;
+        return (size_t)(mixed >> 32);
+    }
+
+    /** @brief Rebuilds `walking_index_` at @p new_capacity slots, reinserting every walking state's pair. */
+    status_t rehash_walking_index_(size_t new_capacity) noexcept {
+        if (walking_index_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t slot = 0; slot < new_capacity; ++slot) walking_index_[slot] = SZ_SIZE_MAX;
+        size_t const mask = new_capacity - 1;
+        for (size_t walking = 0; walking < walking_states_.size(); ++walking) {
+            size_t slot =
+                walking_probe_(walking_states_[walking].spelling_state, walking_states_[walking].failure_state) & mask;
+            while (walking_index_[slot] != SZ_SIZE_MAX) slot = (slot + 1) & mask;
+            walking_index_[slot] = walking;
+        }
+        return status_t::success_k;
+    }
+
+    /** @brief Appends a fresh walking state, seeding its identity position in `walking_order_` so a one-state
+     *         band sorts to itself. */
+    status_t append_walking_state_(state_id_t spelling_state, state_id_t failure_state,
+                                   state_id_t &walking_state) noexcept {
+        state_id_t const id = state_id_of_(walking_states_.size());
+        walking_state_t fresh;
+        fresh.spelling_state = spelling_state;
+        fresh.failure_state = failure_state;
+        if (walking_states_.try_push_back(fresh) != status_t::success_k) return status_t::bad_alloc_k;
+        if (walking_order_.try_push_back(id) != status_t::success_k) return status_t::bad_alloc_k;
+        walking_state = id;
+        return status_t::success_k;
+    }
+
+    /** @brief The walking state for @p spelling_state with failure @p failure_state, reused from the memo or
+     *         minted. The only ceiling is `invalid_state_k`, the same the edge count already hits. */
+    status_t walking_state_for_(state_id_t spelling_state, state_id_t failure_state,
+                                state_id_t &walking_state) noexcept {
+        // Grow the memo before it passes 3/4 load, so probe chains stay short.
+        if ((walking_states_.size() + 1) * 4 >= walking_index_.size() * 3) {
+            size_t const grown = walking_index_.size() < 1024 ? 1024 : walking_index_.size() * 2;
+            if (rehash_walking_index_(grown) != status_t::success_k) return status_t::bad_alloc_k;
+        }
+        size_t const mask = walking_index_.size() - 1;
+        size_t slot = walking_probe_(spelling_state, failure_state) & mask;
+        for (; walking_index_[slot] != SZ_SIZE_MAX; slot = (slot + 1) & mask) {
+            walking_state_t const &candidate = walking_states_[walking_index_[slot]];
+            if (candidate.spelling_state == spelling_state && candidate.failure_state == failure_state)
+                return walking_state = state_id_of_(walking_index_[slot]), status_t::success_k;
+        }
+        if (walking_states_.size() >= (size_t)invalid_state_k) return status_t::overflow_risk_k;
+        state_id_t fresh;
+        status_t const status = append_walking_state_(spelling_state, failure_state, fresh);
+        if (status != status_t::success_k) return status;
+        walking_index_[slot] = fresh;
+        walking_state = fresh;
+        return status_t::success_k;
     }
 
     /**
-     *  @brief Classic goto/failure completion, walked one depth band at a time so the band boundaries the
-     *         frequency ordering needs come for free - no depth array, and no separate discovered flag,
-     *         since `failures[state] == invalid_state_k` already means "not reached yet".
-     *  @return The number of live states, i.e. the root plus everything the BFS reached.
+     *  @brief Derives the walking automaton from the spelling CSR, splitting each spelling state by its
+     *         `(spelling, failure)` pair. A failure link is always shallower, so one shallow-to-deep pass
+     *         finishes; @p live_walking_count returns the state count.
      */
-    size_t complete_failure_links_(layout_t const &layout) noexcept {
-        state_id_t *const failures = failures_at_(layout);
-        state_id_t *const bfs_order = bfs_order_at_(layout);
-        state_id_t const *const offsets = edge_offsets_at_(layout);
-        csr_edge_t const *const rows = edges_at_(layout);
+    status_t build_walking_automaton_(layout_t const &layout, size_t &live_walking_count) noexcept {
+        state_id_t const *const spelling_offsets = edge_offsets_at_(layout);
+        csr_edge_t const *const spelling_rows = edges_at_(layout);
 
-        for (size_t state = 0; state < count_states_; ++state) failures[state] = invalid_state_k;
-        failures[0] = 0; // ? The root self-loops, and that also marks it discovered.
-        bfs_order[0] = 0;
-        size_t live_state_count = 1;
+        if (walking_offsets_.try_push_back(0) != status_t::success_k) return status_t::bad_alloc_k;
+        state_id_t root_walking;
+        status_t status = append_walking_state_(0, 0, root_walking); // ? The root pairs with itself.
+        if (status != status_t::success_k) return status;
 
-        for (size_t band_first = 0, band_last = 1; band_first != band_last;) {
-            for (size_t index = band_first; index < band_last; ++index) {
-                state_id_t const parent = bfs_order[index];
-                for (state_id_t edge = offsets[parent]; edge < offsets[parent + 1]; ++edge) {
-                    state_id_t const child = rows[edge].child;
-                    if (failures[child] != invalid_state_k) continue; // ? Reached by an earlier edge.
-                    // A depth-one state always fails to the root; anything deeper chases its parent's link.
-                    failures[child] = parent == 0 ? 0 : chase_(failures[parent], rows[edge].byte, failures);
-                    bfs_order[live_state_count++] = child;
+        for (state_id_t band_first = 0, band_last = 1; band_first != band_last;) {
+            for (state_id_t parent = band_first; parent < band_last; ++parent) {
+                // Copied out: `walking_state_for_` reallocates `walking_states_`, so a held reference dangles.
+                state_id_t const parent_spelling = walking_states_[parent].spelling_state;
+                state_id_t const parent_failure = walking_states_[parent].failure_state;
+                for (state_id_t edge = spelling_offsets[parent_spelling]; edge < spelling_offsets[parent_spelling + 1];
+                     ++edge) {
+                    u8_t const byte = spelling_rows[edge].byte;
+                    // A depth-one state fails to the root; anything deeper chases its parent's failure link.
+                    state_id_t const child_failure = parent == 0 ? 0 : chase_walking_(parent_failure, byte);
+                    state_id_t child_walking;
+                    status = walking_state_for_(spelling_rows[edge].child, child_failure, child_walking);
+                    if (status != status_t::success_k) return status;
+                    if (walking_rows_.try_push_back(csr_edge_t {child_walking, byte}) != status_t::success_k)
+                        return status_t::bad_alloc_k;
                 }
+                if (walking_offsets_.try_push_back(walking_rows_.size()) != status_t::success_k)
+                    return status_t::bad_alloc_k;
+                if (parent == 0 && (status = fill_root_row_()) != status_t::success_k) return status;
             }
-            order_band_by_out_degree_(layout, band_first, band_last);
-            band_first = band_last, band_last = live_state_count;
+            order_band_by_out_degree_(band_first, band_last);
+            band_first = band_last, band_last = state_id_of_(walking_states_.size());
         }
-        return live_state_count;
+        live_walking_count = walking_states_.size();
+        return status_t::success_k;
     }
 
     /** @brief Grows every slot-indexed array to hold @p minimum slots. */
@@ -1019,18 +1130,17 @@ struct aho_corasick_dictionary {
      *  `check_` verifies, but that slot is a relay - `publish_` recognizes it as a slot whose raw state's
      *  real slot is elsewhere, and points its failure link straight there.
      */
-    status_t pack_cold_tier_(layout_t const &layout, size_t live_state_count) noexcept {
-        state_id_t *const bfs_order = bfs_order_at_(layout);
-        state_id_t *const final_id = final_id_at_(layout);
-
-        for (size_t state = 0; state < count_states_; ++state) final_id[state] = invalid_state_k;
+    status_t pack_cold_tier_(size_t live_walking_count) noexcept {
+        // Every walking state is fresh with `published_id == invalid_state_k`, which the packing reads as
+        // "not placed yet", so no reset loop is needed.
         lowest_free_cursor_ = hot_count_; // ? Hot states own the low IDs outright.
         status_t status = ensure_slot_capacity_(hot_count_ + alphabet_size_k);
         if (status != status_t::success_k) return status;
 
         for (size_t hot_index = 0; hot_index < hot_count_; ++hot_index) {
-            final_id[bfs_order[hot_index]] = state_id_of_(hot_index);
-            old_of_final_[hot_index] = bfs_order[hot_index];
+            state_id_t const state = walking_order_[hot_index];
+            walking_states_[state].published_id = state_id_of_(hot_index);
+            old_of_final_[hot_index] = state;
             claim_slot_(hot_index);
         }
 
@@ -1041,13 +1151,13 @@ struct aho_corasick_dictionary {
             claim_slot_(assigned);
             check_[assigned] = state_id_of_(assigned);
             old_of_final_[assigned] = 0;
-            final_id[0] = state_id_of_(assigned);
+            walking_states_[0].published_id = state_id_of_(assigned);
             lowest_free_cursor_ = assigned + 1;
         }
 
-        for (size_t index = 0; index < live_state_count; ++index) {
-            state_id_t const parent = bfs_order[index];
-            status = index < hot_count_ ? pack_hot_children_(layout, parent) : pack_cold_children_(layout, parent);
+        for (size_t index = 0; index < live_walking_count; ++index) {
+            state_id_t const parent = walking_order_[index];
+            status = index < hot_count_ ? pack_hot_children_(parent) : pack_cold_children_(parent);
             if (status != status_t::success_k) return status;
         }
         return status_t::success_k;
@@ -1060,21 +1170,17 @@ struct aho_corasick_dictionary {
      *  `check_` for them and they need no shared base. A child some other parent already placed keeps the
      *  slot it has, since both routes resolve to the same target through the completed row.
      */
-    status_t pack_hot_children_(layout_t const &layout, state_id_t parent) noexcept {
-        state_id_t *const final_id = final_id_at_(layout);
-        state_id_t const *const offsets = edge_offsets_at_(layout);
-        csr_edge_t const *const rows = edges_at_(layout);
-
-        for (state_id_t edge = offsets[parent]; edge < offsets[parent + 1]; ++edge) {
-            state_id_t const child = rows[edge].child;
-            if (final_id[child] != invalid_state_k) continue;
+    status_t pack_hot_children_(state_id_t parent) noexcept {
+        for (size_t edge = walking_offsets_[parent]; edge < walking_offsets_[parent + 1]; ++edge) {
+            state_id_t const child = walking_rows_[edge].child;
+            if (walking_states_[child].published_id != invalid_state_k) continue;
             size_t assigned;
             status_t const status = next_free_slot_(lowest_free_cursor_, assigned);
             if (status != status_t::success_k) return status;
             claim_slot_(assigned);
             check_[assigned] = state_id_of_(assigned);
             old_of_final_[assigned] = child;
-            final_id[child] = state_id_of_(assigned);
+            walking_states_[child].published_id = state_id_of_(assigned);
             lowest_free_cursor_ = assigned + 1;
         }
         return status_t::success_k;
@@ -1086,18 +1192,15 @@ struct aho_corasick_dictionary {
      *  Candidates are scanned out of the occupancy bitmap anchored on the parent's smallest child byte, and
      *  the whole row is tested at once rather than probed child by child.
      */
-    status_t pack_cold_children_(layout_t const &layout, state_id_t parent) noexcept {
-        state_id_t *const final_id = final_id_at_(layout);
-        state_id_t const *const offsets = edge_offsets_at_(layout);
-        csr_edge_t const *const rows = edges_at_(layout);
-        if (offsets[parent] == offsets[parent + 1]) return status_t::success_k;
+    status_t pack_cold_children_(state_id_t parent) noexcept {
+        if (walking_offsets_[parent] == walking_offsets_[parent + 1]) return status_t::success_k;
 
         safe_array<state_id_t, alphabet_size_k> child_of_byte;
         sz_byteset_t child_mask;
         sz_byteset_init(&child_mask);
-        for (state_id_t edge = offsets[parent]; edge < offsets[parent + 1]; ++edge) {
-            sz_byteset_add_u8(&child_mask, rows[edge].byte);
-            child_of_byte[rows[edge].byte] = rows[edge].child;
+        for (size_t edge = walking_offsets_[parent]; edge < walking_offsets_[parent + 1]; ++edge) {
+            sz_byteset_add_u8(&child_mask, walking_rows_[edge].byte);
+            child_of_byte[walking_rows_[edge].byte] = walking_rows_[edge].child;
         }
 
         u8_t anchor_byte = 0;
@@ -1122,7 +1225,7 @@ struct aho_corasick_dictionary {
                 continue;
             }
 
-            state_id_t const parent_final = final_id[parent];
+            state_id_t const parent_final = walking_states_[parent].published_id;
             base_[parent_final] = state_id_of_(candidate_base);
             for (size_t quarter = 0; quarter < 4; ++quarter)
                 for (u64_t bits = child_mask._u64s[quarter]; bits; bits &= bits - 1) {
@@ -1132,8 +1235,9 @@ struct aho_corasick_dictionary {
                     claim_slot_(slot);
                     check_[slot] = parent_final;
                     old_of_final_[slot] = child;
-                    // The first slot to claim a raw state owns it; later ones become relays.
-                    if (final_id[child] == invalid_state_k) final_id[child] = state_id_of_(slot);
+                    // The first slot to claim a walking state owns it; later ones become relays.
+                    if (walking_states_[child].published_id == invalid_state_k)
+                        walking_states_[child].published_id = state_id_of_(slot);
                 }
             return status_t::success_k;
         }
@@ -1145,42 +1249,42 @@ struct aho_corasick_dictionary {
      *  A state's matches are its own plus its failure state's complete set, and BFS order guarantees the
      *  failure state is finished first, so the pool is written once at exactly the right size.
      */
-    status_t size_and_fill_outputs_(layout_t const &layout, size_t live_state_count) noexcept {
-        state_id_t const *const bfs_order = bfs_order_at_(layout);
-        state_id_t const *const failures = failures_at_(layout);
-
+    status_t size_and_fill_outputs_(size_t live_walking_count) noexcept {
         size_t running = 0;
-        for (size_t index = 0; index < live_state_count; ++index) {
-            state_id_t const state = bfs_order[index];
-            output_run_t &run = output_runs_[state];
-            // A state's matches are its own plus its failure state's whole run. That total is read on every
-            // byte step, so it rides `state_id_t` and the ceiling is refused here rather than assumed.
-            size_t const total = static_cast<size_t>(run.own_count) +
-                                 (state == 0 ? size_t {0}
-                                             : static_cast<size_t>(output_runs_[failures[state]].total_count));
+        for (size_t index = 0; index < live_walking_count; ++index) {
+            state_id_t const state = walking_order_[index];
+            walking_state_t &walking = walking_states_[state];
+            output_run_t const &spelling = output_runs_[walking.spelling_state];
+            // A state's matches are its own plus its failure state's whole run. Read on every byte step, so
+            // the total rides `state_id_t` and the ceiling is refused here rather than assumed. Depth-band
+            // order finished the failure state first, so its total is already set.
+            size_t const total =
+                static_cast<size_t>(spelling.own_count) +
+                (state == 0 ? size_t {0} : static_cast<size_t>(walking_states_[walking.failure_state].total_count));
             if (total > static_cast<size_t>(invalid_state_k)) return status_t::overflow_risk_k;
-            run.total_count = static_cast<state_id_t>(total);
-            run.total_offset = running;
-            running += run.total_count;
+            walking.total_count = static_cast<state_id_t>(total);
+            walking.total_offset = running;
+            running += walking.total_count;
         }
 
         if (outputs_.try_resize(running) != status_t::success_k) return status_t::bad_alloc_k;
-        for (size_t index = 0; index < live_state_count; ++index) {
-            state_id_t const state = bfs_order[index];
-            output_run_t const &run = output_runs_[state];
-            output_t *const destination = outputs_.data() + run.total_offset;
+        for (size_t index = 0; index < live_walking_count; ++index) {
+            state_id_t const state = walking_order_[index];
+            walking_state_t const &walking = walking_states_[state];
+            output_run_t const &spelling = output_runs_[walking.spelling_state];
+            output_t *const destination = outputs_.data() + walking.total_offset;
 
-            // The per-state list is most-recent-first, so filling it backwards restores insertion order.
-            size_t written = run.own_count;
-            for (size_t walk = run.own_head; walk != SZ_SIZE_MAX; walk = own_outputs_[walk].next) {
+            // The per-spelling list is most-recent-first, so filling it backwards restores insertion order.
+            size_t written = spelling.own_count;
+            for (size_t walk = spelling.own_head; walk != SZ_SIZE_MAX; walk = own_outputs_[walk].next) {
                 pending_output_t const &pending = own_outputs_[walk];
                 destination[--written] = output_t {pending.needle_index, pending.match_bytes};
             }
 
             if (state == 0) continue;
-            output_run_t const &inherited = output_runs_[failures[state]];
+            walking_state_t const &inherited = walking_states_[walking.failure_state];
             for (size_t position = 0; position < inherited.total_count; ++position)
-                destination[run.own_count + position] = outputs_[inherited.total_offset + position];
+                destination[spelling.own_count + position] = outputs_[inherited.total_offset + position];
         }
         return status_t::success_k;
     }
@@ -1193,63 +1297,56 @@ struct aho_corasick_dictionary {
      *  state's failure state is always hot and always already materialized - one row copy plus one store per
      *  literal edge, instead of a failure chase per cell.
      */
-    status_t materialize_hot_rows_(layout_t const &layout) noexcept {
-        state_id_t const *const bfs_order = bfs_order_at_(layout);
-        state_id_t const *const failures = failures_at_(layout);
-        state_id_t const *const final_id = final_id_at_(layout);
-        state_id_t const *const offsets = edge_offsets_at_(layout);
-        csr_edge_t const *const rows = edges_at_(layout);
-
+    status_t materialize_hot_rows_() noexcept {
         if (hot_rows_.try_resize(hot_count_ * alphabet_size_k) != status_t::success_k) return status_t::bad_alloc_k;
         if (hot_count_ == 0) return status_t::success_k;
 
         state_id_t *const root_row = hot_rows_.data();
         for (size_t byte = 0; byte < alphabet_size_k; ++byte) root_row[byte] = root_;
-        for (state_id_t edge = offsets[0]; edge < offsets[1]; ++edge)
-            root_row[rows[edge].byte] = final_id[rows[edge].child];
+        for (size_t edge = walking_offsets_[0]; edge < walking_offsets_[1]; ++edge)
+            root_row[walking_rows_[edge].byte] = walking_states_[walking_rows_[edge].child].published_id;
 
         for (size_t hot_index = 1; hot_index < hot_count_; ++hot_index) {
-            state_id_t const state = bfs_order[hot_index];
+            state_id_t const state = walking_order_[hot_index];
             // A failure state is strictly shallower, so depth-primary order places it earlier and its row is
             // already final. A real return rather than an assert: violated in a release build this would read
             // an unwritten row and bake wrong transitions into the published automaton, silently.
-            size_t const inherited_index = (size_t)final_id[failures[state]];
+            size_t const inherited_index = (size_t)walking_states_[walking_states_[state].failure_state].published_id;
             if (inherited_index >= hot_index) return status_t::unexpected_dimensions_k;
             state_id_t const *const inherited = hot_rows_.data() + inherited_index * alphabet_size_k;
             state_id_t *const row = hot_rows_.data() + hot_index * alphabet_size_k;
             for (size_t byte = 0; byte < alphabet_size_k; ++byte) row[byte] = inherited[byte];
-            for (state_id_t edge = offsets[state]; edge < offsets[state + 1]; ++edge)
-                row[rows[edge].byte] = final_id[rows[edge].child];
+            for (size_t edge = walking_offsets_[state]; edge < walking_offsets_[state + 1]; ++edge)
+                row[walking_rows_[edge].byte] = walking_states_[walking_rows_[edge].child].published_id;
         }
         return status_t::success_k;
     }
 
     /** @brief Fills `fail_`, `outputs_counts_`, and `outputs_offsets_` over the published slot range. */
-    status_t publish_(layout_t const &layout, size_t cold_capacity_published) noexcept {
-        state_id_t const *const failures = failures_at_(layout);
-        state_id_t const *const final_id = final_id_at_(layout);
+    status_t publish_(size_t cold_capacity_published) noexcept {
 
         if (fail_.try_resize(cold_capacity_published) != status_t::success_k) return status_t::bad_alloc_k;
         if (outputs_counts_.try_resize(cold_capacity_published) != status_t::success_k) return status_t::bad_alloc_k;
         if (outputs_offsets_.try_resize(cold_capacity_published) != status_t::success_k) return status_t::bad_alloc_k;
 
         for (size_t slot = 0; slot < cold_capacity_published; ++slot) {
-            state_id_t const raw_state = slot < old_of_final_.size() ? old_of_final_[slot] : invalid_state_k;
-            if (raw_state == invalid_state_k) {
+            state_id_t const raw_walking = slot < old_of_final_.size() ? old_of_final_[slot] : invalid_state_k;
+            if (raw_walking == invalid_state_k) {
                 outputs_counts_[slot] = 0, outputs_offsets_[slot] = 0;
                 if (slot >= hot_count_) fail_[slot] = root_;
                 continue;
             }
-            // A relay slot shares its raw state's run outright, so nothing is duplicated in `outputs_`.
-            output_run_t const &run = output_runs_[raw_state];
-            outputs_counts_[slot] = run.total_count;
-            outputs_offsets_[slot] = run.total_offset;
-            max_outputs_per_state_ = sz_max_of_two(max_outputs_per_state_, run.total_count);
+            // A relay slot shares its walking state's run outright, so nothing is duplicated in `outputs_`.
+            walking_state_t const &walking = walking_states_[raw_walking];
+            outputs_counts_[slot] = walking.total_count;
+            outputs_offsets_[slot] = walking.total_offset;
+            max_outputs_per_state_ = sz_max_of_two(max_outputs_per_state_, walking.total_count);
             if (slot < hot_count_) continue;
-            // A relay names a raw state whose real slot is elsewhere; one extra failure hop lands on that
-            // state's own children, which the relay itself does not own.
-            state_id_t const real_slot = final_id[raw_state];
-            fail_[slot] = real_slot != state_id_of_(slot) ? real_slot : final_id[failures[raw_state]];
+            // A relay names a walking state whose real slot is elsewhere; one extra failure hop lands on
+            // that state's own children, which the relay itself does not own.
+            state_id_t const real_slot = walking.published_id;
+            fail_[slot] = real_slot != state_id_of_(slot) ? real_slot
+                                                          : walking_states_[walking.failure_state].published_id;
         }
         return status_t::success_k;
     }
@@ -1262,9 +1359,10 @@ struct aho_corasick_dictionary {
 
     explicit aho_corasick_dictionary(allocator_t alloc) noexcept
         : edges_(alloc), edge_index_(alloc), own_outputs_(alloc), output_runs_(alloc), folded_positions_(alloc),
-          chain_slots_(alloc), build_scratch_(alloc), old_of_final_(alloc), occupied_bits_(alloc), hot_rows_(alloc),
-          base_(alloc), check_(alloc), fail_(alloc), outputs_(alloc), outputs_counts_(alloc), outputs_offsets_(alloc),
-          alloc_(alloc) {}
+          chain_slots_(alloc), build_scratch_(alloc), walking_states_(alloc), walking_offsets_(alloc),
+          walking_rows_(alloc), walking_order_(alloc), walking_root_row_(alloc), walking_index_(alloc),
+          old_of_final_(alloc), occupied_bits_(alloc), hot_rows_(alloc), base_(alloc), check_(alloc), fail_(alloc),
+          outputs_(alloc), outputs_counts_(alloc), outputs_offsets_(alloc), alloc_(alloc) {}
 
     aho_corasick_dictionary(aho_corasick_dictionary &&) noexcept = default;
     aho_corasick_dictionary &operator=(aho_corasick_dictionary &&) noexcept = default;
@@ -1280,6 +1378,12 @@ struct aho_corasick_dictionary {
         folded_positions_.reset();
         chain_slots_.reset();
         build_scratch_.reset();
+        walking_states_.reset();
+        walking_offsets_.reset();
+        walking_rows_.reset();
+        walking_order_.reset();
+        walking_root_row_.reset();
+        walking_index_.reset();
         old_of_final_.reset();
         occupied_bits_.reset();
         lowest_free_cursor_ = 0;
@@ -1354,9 +1458,9 @@ struct aho_corasick_dictionary {
      *  @brief Constructs the automaton from the vocabulary. Can only be called @b once.
      *  @param[in] specs Sizes the hot tier from the host's last-level cache, unless `hot_count` forced it.
      *
-     *  Seven phases, each named below: the edge pool becomes a CSR, goto/failure completion walks it one
-     *  depth band at a time while ordering each band by out-degree, the hot/cold split falls out of that
-     *  ordering, the double array packs the rest, and the outputs and hot rows are each materialized once.
+     *  Seven phases, each named below: the edge pool becomes the spelling CSR, the splitting pass derives the
+     *  walking automaton one depth band at a time while ordering each band by out-degree, the hot/cold split
+     *  falls out of that ordering, the double array packs the rest, and the outputs and hot rows materialize.
      */
     status_t try_build(cpu_specs_t const &specs = {}) noexcept {
         status_t status = ensure_root_();
@@ -1369,32 +1473,36 @@ struct aho_corasick_dictionary {
         // Every sub-buffer is written before it is read, so zeroing the block first would be pure waste.
         layout_t const layout = build_layout_(specs);
         if (build_scratch_.try_resize_uninitialized(layout.total) != status_t::success_k) return status_t::bad_alloc_k;
-
         compact_edges_into_csr_(layout);
-        size_t const live_state_count = complete_failure_links_(layout);
 
-        // The edge pool and its index have no reader past this point; the CSR carries every edge from here.
+        // The insertion pools have no reader past compaction; the spelling CSR in `build_scratch_` carries
+        // every edge, and the splitting pass below walks it rather than `find_edge_`.
         edges_.reset();
         edge_index_.reset();
+
+        size_t live_walking_count = 0;
+        status = build_walking_automaton_(layout, live_walking_count);
+        if (status != status_t::success_k) return status;
+
+        // The spelling CSR has no reader past the splitting pass; the walking CSR carries every edge now.
+        build_scratch_.reset();
 
         // Hot rows are shared, read-mostly, and re-entered on nearly every byte, so they're sized against
         // the last-level cache rather than a private L2 slice.
         if (hot_count_ == derive_hot_count_k) hot_count_ = specs.l3_bytes / (alphabet_size_k * sizeof(state_id_t));
-        hot_count_ = sz_min_of_two(hot_count_, live_state_count);
+        hot_count_ = sz_min_of_two(hot_count_, live_walking_count);
 
-        status = pack_cold_tier_(layout, live_state_count);
+        status = pack_cold_tier_(live_walking_count);
         if (status != status_t::success_k) return status;
 
-        state_id_t const *const bfs_order = bfs_order_at_(layout);
-        state_id_t const *const final_id = final_id_at_(layout);
-        root_ = final_id[0];
+        root_ = walking_states_[0].published_id;
         sz_assert_(root_ == 0 && "The root is the unique shallowest state, so it always sorts first");
 
         // The exclusive published bound: not `hot_count_` plus the cold-state count, since a packed child's
         // ID is address arithmetic and can skip past slots no state ever ended up owning.
         size_t state_count_published = hot_count_;
-        for (size_t index = 0; index < live_state_count; ++index)
-            state_count_published = sz_max_of_two(state_count_published, (size_t)final_id[bfs_order[index]] + 1);
+        for (size_t walking = 0; walking < live_walking_count; ++walking)
+            state_count_published = sz_max_of_two(state_count_published, (size_t)walking_states_[walking].published_id + 1);
         size_t const cold_capacity_published = state_count_published + (alphabet_size_k - 1);
 
         // `base_` and `check_` were written in place by the packing above; widening them here only extends
@@ -1402,11 +1510,11 @@ struct aho_corasick_dictionary {
         status = ensure_slot_capacity_(cold_capacity_published);
         if (status != status_t::success_k) return status;
 
-        status = size_and_fill_outputs_(layout, live_state_count);
+        status = size_and_fill_outputs_(live_walking_count);
         if (status != status_t::success_k) return status;
-        status = materialize_hot_rows_(layout);
+        status = materialize_hot_rows_();
         if (status != status_t::success_k) return status;
-        status = publish_(layout, cold_capacity_published);
+        status = publish_(cold_capacity_published);
         if (status != status_t::success_k) return status;
 
         count_states_ = state_count_published;
@@ -1485,9 +1593,18 @@ struct aho_corasick_dictionary {
         view_t const automaton = view();
         size_t total = 0;
         state_id_t current_state = automaton.root;
-        for (size_t offset = 0; offset < haystack.size(); ++offset) {
-            total += aho_corasick_step_counting(automaton, current_state, haystack[offset]);
+        // One 4-byte load feeds four transitions - the state chain stays strictly serial, and `sz_u32_load`
+        // absorbs misalignment itself, so only a tail loop remains.
+        size_t offset = 0;
+        for (; offset + 4 <= haystack.size(); offset += 4) {
+            sz_u32_vec_t const quad = sz_u32_load((sz_cptr_t)(haystack.data() + offset));
+            total += aho_corasick_step_counting(automaton, current_state, quad.u8s[0]);
+            total += aho_corasick_step_counting(automaton, current_state, quad.u8s[1]);
+            total += aho_corasick_step_counting(automaton, current_state, quad.u8s[2]);
+            total += aho_corasick_step_counting(automaton, current_state, quad.u8s[3]);
         }
+        for (; offset < haystack.size(); ++offset)
+            total += aho_corasick_step_counting(automaton, current_state, haystack[offset]);
         return total;
     }
 
@@ -1954,11 +2071,25 @@ struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         size_t matches_in_part = 0;
         matches_in_prefix = 0;
         state_id_t current_state = automaton.root;
-        for (; optimal_begin != overlapping_end; ++optimal_begin) {
+        // The prefix window spans at most `max_match_bytes` bytes and is the only region needing the
+        // per-byte attribution test, so it walks scalar; `prefix_end` never exceeds `overlapping_end`,
+        // both being clamped by the same haystack end.
+        for (; optimal_begin != prefix_end; ++optimal_begin) {
             state_id_t const output_count = aho_corasick_step_counting(automaton, current_state, *optimal_begin);
             matches_in_part += output_count;
-            matches_in_prefix += non_zero_if<size_t>(output_count, optimal_begin < prefix_end);
+            matches_in_prefix += output_count;
         }
+        // One 4-byte load feeds four transitions - the state chain stays strictly serial, and `sz_u32_load`
+        // absorbs misalignment itself, so only a tail loop remains.
+        for (; optimal_begin + 4 <= overlapping_end; optimal_begin += 4) {
+            sz_u32_vec_t const quad = sz_u32_load((sz_cptr_t)optimal_begin);
+            matches_in_part += aho_corasick_step_counting(automaton, current_state, quad.u8s[0]);
+            matches_in_part += aho_corasick_step_counting(automaton, current_state, quad.u8s[1]);
+            matches_in_part += aho_corasick_step_counting(automaton, current_state, quad.u8s[2]);
+            matches_in_part += aho_corasick_step_counting(automaton, current_state, quad.u8s[3]);
+        }
+        for (; optimal_begin != overlapping_end; ++optimal_begin)
+            matches_in_part += aho_corasick_step_counting(automaton, current_state, *optimal_begin);
 
         return matches_in_part;
     }

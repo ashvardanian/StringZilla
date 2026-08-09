@@ -16,6 +16,8 @@
 #include "stringzilla/types.hpp"
 #include "stringzillas/types.hpp" // `bytes_per_cell_t`, `one_byte_per_cell_k`
 
+#include <numeric> // `std::midpoint`
+
 #include <forkunion/types.hpp> // `limited_array` — inline storage for the per-device caches
 
 #include <cuda.h>         // `CUresult`, `cuLaunchKernelEx`, `cuFuncSetAttribute`, `cuGetErrorName`
@@ -548,6 +550,37 @@ inline cuda_status_t occupancy_grid_for(unsigned &blocks_per_grid, CUfunction fu
     if (occupancy_error != CUDA_SUCCESS) return make_cuda_status(occupancy_error);
     if (blocks_per_multiprocessor < 1) blocks_per_multiprocessor = 1;
     blocks_per_grid = static_cast<unsigned>(blocks_per_multiprocessor) * specs.streaming_multiprocessors;
+    return {status_t::success_k, cudaSuccess};
+}
+
+/**
+ *  @brief Largest dynamic shared-memory allocation keeping @p target_blocks resident, for an already-resolved
+ *         `CUfunction` whose opt-in ceiling is raised. `0` when no allocation admits that many.
+ *
+ *  Dividing an SM's shared memory by the target silently yields one block fewer, since the driver charges each
+ *  block a reserve of its own and rounds to an unreported granularity. `cuOccupancyAvailableDynamicSMemPerBlock`
+ *  repeats that same division, so the occupancy query answers instead.
+ */
+inline cuda_status_t shared_memory_budget_for_resident_blocks(size_t &budget, CUfunction function,
+                                                              unsigned threads_per_block, unsigned target_blocks,
+                                                              int device_id) noexcept {
+    int optin_ceiling = 0;
+    CUresult const attribute_error = cuDeviceGetAttribute(
+        &optin_ceiling, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, (CUdevice)device_id);
+    if (attribute_error != CUDA_SUCCESS) return make_cuda_status(attribute_error);
+
+    // Residency falls monotonically as the allocation grows, so binary search finds the largest admissible one.
+    budget = 0;
+    for (size_t low = 0, high = (size_t)optin_ceiling; low <= high;) {
+        size_t const middle = std::midpoint(low, high);
+        int resident_blocks = 0;
+        CUresult const occupancy_error =
+            cuOccupancyMaxActiveBlocksPerMultiprocessor(&resident_blocks, function, (int)threads_per_block, middle);
+        if (occupancy_error != CUDA_SUCCESS) return make_cuda_status(occupancy_error);
+        if (resident_blocks >= (int)target_blocks) budget = middle, low = middle + 1;
+        else if (middle == 0) break; // ? `high = middle - 1` would wrap on an unsigned zero
+        else high = middle - 1;
+    }
     return {status_t::success_k, cudaSuccess};
 }
 
@@ -1135,6 +1168,19 @@ SZ_DEVICE_INLINE u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
         "}"                                                        //
         : "=r"(result.u32)                                         //
         : "l"(ptr));
+    return result;
+}
+
+/**
+ *  @brief Loads 32 bits from a 4-byte-aligned address as one plain load.
+ *
+ *  PTX traps on a misaligned `ld.u32` rather than slowing down, so the compiler lowers a 4-byte `memcpy`
+ *  from an unproven pointer into four byte loads plus three `prmt` merges. A caller that peeled its cursor
+ *  to a 4-byte boundary states the guarantee here and gets the single `ld.u32` it earned.
+ */
+SZ_DEVICE_INLINE u32_vec_t sz_u32_load_aligned(void const *ptr) noexcept {
+    u32_vec_t result;
+    asm("ld.u32 %0, [%1];" : "=r"(result.u32) : "l"(ptr));
     return result;
 }
 
