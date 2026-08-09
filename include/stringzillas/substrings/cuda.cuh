@@ -455,20 +455,23 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
 
     /**
      *  @brief Indexes all of the @p needles strings into the FSM and uploads it to @p executor 's device.
-     *  @param[in] specs Sizes the host dictionary's hot tier from the last-level cache.
+     *  @param[in] specs Sizes the hot tier against the device's L2, the cache the walk actually reads through.
      *  @note Before reusing, please `reset` the FSM.
      *  @sa `aho_corasick_dictionary::try_insert` for the status codes this forwards.
      */
     template <typename needles_type_>
     cuda_status_t try_build(needles_type_ const &needles,
                             substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
-                            cuda_executor_t const &executor = {}, cpu_specs_t const &specs = {}) noexcept {
+                            cuda_executor_t const &executor = {}, gpu_specs_t const &specs = {}) noexcept {
         dictionary_.case_sensitivity(case_sensitivity);
         for (auto const &needle : needles) {
             status_t const status = dictionary_.try_insert(to_bytes_view(needle));
             if (status != status_t::success_k) return {status, cudaSuccess};
         }
-        status_t const built = dictionary_.try_build(specs);
+        // The tier split is a cache-residency decision, so it follows the cache the device walks through
+        // rather than the host's last level - which a default `cpu_specs_t` would put at 8 MB whatever the GPU.
+        dictionary_.hot_count(specs.l2_bytes / (substrings_alphabet_size_k * sizeof(state_id_t)));
+        status_t const built = dictionary_.try_build();
         if (built != status_t::success_k) return {built, cudaSuccess};
         return try_upload_(dictionary_.view(), executor);
     }
@@ -802,8 +805,10 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
         // scatter launch.
         CUresult const mid_sync_error = timer_.synchronize(executor.stream());
         if (mid_sync_error != CUDA_SUCCESS) return make_cuda_status(mid_sync_error);
+        // The total survives the refusal, so a caller that brought no buffer still learns what to allocate.
         size_t const matches_in_batch = chunk_match_offsets_[chunk_count];
-        if (matches_in_batch > matches_capacity) return {status_t::unexpected_dimensions_k, cudaSuccess};
+        if (matches_in_batch > matches_capacity)
+            return matches_found = matches_in_batch, cuda_status_t {status_t::unexpected_dimensions_k, cudaSuccess};
 
         // A unified output buffer stays zero-copy; host memory a kernel can't reach is staged and drained
         // with one copy after the sync.

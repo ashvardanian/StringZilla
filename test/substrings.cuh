@@ -209,6 +209,12 @@ inline std::vector<span<char const>> independent_uncased_matches_(span<char cons
     if (needle_length == 0) return matches;
     for (std::size_t start = 0; start + needle_length <= haystack_folded.size(); ++start) {
         if (!is_codepoint_start[start]) continue;
+        // The same discipline as the start, mirrored: a match consuming only a prefix of one codepoint's
+        // fold - two of the three runes U+1F54 folds to - has no byte of its own to end at, exactly as a
+        // match beginning on the sharp S's second "s" has none to start at.
+        bool const ends_on_boundary = start + needle_length == haystack_folded.size() || //
+                                      is_codepoint_start[start + needle_length];
+        if (!ends_on_boundary) continue;
         bool equal = true;
         for (std::size_t index = 0; index < needle_length; ++index)
             if (haystack_folded[start + index] != needle_folded[index]) {
@@ -236,7 +242,10 @@ inline void collect_independent_matches_(substrings_case_sensitivity_t sensitivi
         span<char const> const haystack = haystacks[haystack_index];
         for (std::size_t needle_index = 0; needle_index < needles.size(); ++needle_index) {
             span<char const> const needle = needles[needle_index];
-            if (needle.size() == 0 || needle.size() > haystack.size()) continue;
+            // No byte-length pre-filter for uncased matching: a needle longer than the haystack can still
+            // match, because folding expands haystack codepoints - the 3-byte U+1FC7 folds to 6 bytes, so
+            // 4 of them legitimately carry a 24-byte needle. The cased loop's own bound handles oversize.
+            if (needle.size() == 0) continue;
 
             if (sensitivity == substrings_uncased_k) {
                 for (auto const &match : independent_uncased_matches_(haystack, needle))
@@ -870,6 +879,43 @@ void test_substrings_unit() {
         };
         verify(matches == expected && "Spurious match starting mid-codepoint after a multi-byte accept");
     }
+
+    // Reconvergence hazards: a needle whose fold self-overlaps across a mixed-width fold image once merged
+    // two arrival paths onto one failure slot, so the walk reported a match starting inside a codepoint and
+    // dropped the true one. Each case pins the exact set the walking-automaton split must produce. `U+212A`
+    // is the Kelvin sign (folds to `k`), `U+017F` the long s (folds to `s`).
+    struct uncased_case_t {
+        std::vector<std::string> needles;
+        std::string haystack;
+        substrings_match_set_t expected;
+        char const *label;
+    };
+    uncased_case_t const uncased_cases[] = {
+        // The ASCII runs join their escapes directly, which is safe only because `k` and `s` are not hex
+        // digits. A case whose codepoint is followed by one of `a`-`f` must break the literal, or `\x9F`
+        // before an `a` would parse as the single overlong escape `\x9Fa`.
+        {{"kk"}, "\xE2\x84\xAAkk", {{0, 0, 0, 4}, {0, 0, 3, 2}}, "kk over Kelvin-k-k"},
+        {{"ss"}, "\xC5\xBFss", {{0, 0, 0, 3}, {0, 0, 2, 2}}, "ss over long-s-s"},
+        // Both codepoint-aligned windows of four folded s-runes, the sharp-S consumed whole by each.
+        {{"ssss"}, "ss\xC3\x9Fs", {{0, 0, 0, 4}, {0, 0, 1, 4}}, "ssss over s-s-sharp-s"},
+        {{"ssss"}, "\xC3\x9Fsss", {{0, 0, 0, 4}}, "ssss over sharp-s-s-s"},
+        // Nested needles: a wrong failure chain on one needle corrupts the other's reported matches too.
+        {{"k", "kk"}, "\xE2\x84\xAAk", {{0, 0, 0, 3}, {0, 1, 0, 4}, {0, 0, 3, 1}}, "nested k/kk over Kelvin-k"},
+    };
+    for (uncased_case_t const &probe : uncased_cases) {
+        arrow_strings_tape_t needles, haystacks;
+        std::vector<std::string> const haystack_strings {probe.haystack};
+        verify(needles.try_assign(probe.needles.data(), probe.needles.data() + probe.needles.size()) ==
+               status_t::success_k);
+        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + 1) == status_t::success_k);
+
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_uncased_k) == status_t::success_k);
+        substrings_match_set_t matches;
+        collect_matches_into_(engine, haystacks.view(), matches);
+        if (matches != probe.expected) std::fprintf(stderr, "Reconvergence hazard: %s\n", probe.label);
+        verify(matches == probe.expected && "Reconvergence hazard produced the wrong match set");
+    }
 }
 
 #pragma endregion // Unit
@@ -1224,6 +1270,9 @@ void check_substrings_tier_invariant_(substrings_case_sensitivity_t sensitivity,
         probe.case_sensitivity(sensitivity);
         for (std::size_t index = 0; index < needles_view.size(); ++index)
             verify(probe.try_insert(needles_view[index]) == status_t::success_k);
+        // Build it: uncased reconvergence splits states during the build, so the published state count -
+        // the true "all states hot" target for the sweep below - is only known after `try_build`.
+        verify(probe.try_build() == status_t::success_k);
         raw_state_count = probe.count_states();
     }
     verify(raw_state_count > 0);
@@ -1481,6 +1530,23 @@ void test_substrings_construction() {
         verify(dictionary.count_needles() == 1);
     }
 
+    // The doubling family: a run of `s` folds ambiguously (each `s` is also half a sharp-S), so its correct
+    // uncased automaton grows exponentially. The build declines the moment the walking-state count would
+    // overflow the id type - the same ceiling an oversized edge count hits - never a silent wrap. A `u16`
+    // dictionary declines a run a `u32` one still compiles, and both verdicts are deterministic.
+    {
+        std::string const long_run(11, 's'); // ? ~164k walking states: past u16's 65535, well inside u32's
+        substrings_u16_dictionary_t narrow;
+        narrow.case_sensitivity(substrings_uncased_k);
+        verify(narrow.try_insert({long_run.data(), long_run.size()}) == status_t::success_k);
+        verify(narrow.try_build() == status_t::overflow_risk_k && "u16 must decline the run cleanly, not wrap");
+
+        substrings_u32_dictionary_t wide;
+        wide.case_sensitivity(substrings_uncased_k);
+        verify(wide.try_insert({long_run.data(), long_run.size()}) == status_t::success_k);
+        verify(wide.try_build() == status_t::success_k && "u32 has room for this run");
+    }
+
     // Cold-tier double-array invariant: every slot a state claims sits within 256 of that state's own base,
     // and the failure chain from any cold state reaches the root. `hot_count` is forced to zero, so the cold
     // tier is genuinely exercised whatever the default hot tier would have been.
@@ -1613,16 +1679,29 @@ void test_substrings_buffer_contracts() {
     }
 
     // An undersized buffer must be refused before anything is written, on both backends, and the reported
-    // count must stay zero so a caller cannot mistake a refusal for a partial success.
+    // count must name the capacity the call wanted. The status already distinguishes a refusal from a
+    // success, so reporting the need costs no ambiguity and saves the caller a counting pass.
     {
         std::vector<substrings_match_t> too_small(required - 1);
         span<substrings_match_t> const too_small_view(too_small.data(), too_small.size());
         verify(serial_engine.try_find(haystacks.view(), too_small_view, matches_found) ==
                status_t::unexpected_dimensions_k);
-        verify(matches_found == 0);
+        verify(matches_found == required);
         verify(parallel_engine.try_find(haystacks.view(), too_small_view, matches_found) ==
                status_t::unexpected_dimensions_k);
-        verify(matches_found == 0);
+        verify(matches_found == required);
+    }
+
+    // The same refusal with no buffer at all is the canonical size query: one call, no allocation, and the
+    // need comes back in `matches_found`.
+    {
+        span<substrings_match_t> const no_capacity;
+        verify(serial_engine.try_find(haystacks.view(), no_capacity, matches_found) ==
+               status_t::unexpected_dimensions_k);
+        verify(matches_found == required);
+        verify(parallel_engine.try_find(haystacks.view(), no_capacity, matches_found) ==
+               status_t::unexpected_dimensions_k);
+        verify(matches_found == required);
     }
 
     // An oversized buffer is legal: `matches` supplies capacity, and `matches_found` states how much of it

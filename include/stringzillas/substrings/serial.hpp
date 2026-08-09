@@ -1676,7 +1676,8 @@ struct substrings<state_id_type_, allocator_type_, capability_,
 
     /**
      *  @brief Finds all occurrences of all needles in all the @p haystacks.
-     *  @param[out] matches_found Matches written, in ascending haystack order.
+     *  @param[out] matches_found Matches written, or - when @p matches is too small - the count that would be,
+     *              so `matches.size() == 0` is a size query rather than a wasted call.
      *  @retval `status_t::unexpected_dimensions_k` @p matches is too small; nothing is written in that case.
      */
     template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
@@ -1691,7 +1692,8 @@ struct substrings<state_id_type_, allocator_type_, capability_,
             status != status_t::success_k)
             return status;
 
-        if (matches_found > matches.size()) return matches_found = 0, status_t::unexpected_dimensions_k;
+        // The count survives the refusal, so a caller that brought no buffer still learns what to allocate.
+        if (matches_found > matches.size()) return status_t::unexpected_dimensions_k;
 
         size_t count_written = 0;
         for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index)
@@ -1903,7 +1905,8 @@ struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         for (size_t index = 1; index < counts.size(); ++index) offsets[index] = offsets[index - 1] + counts[index - 1];
         matches_total = offsets[counts.size() - 1] + counts[counts.size() - 1];
         if (matches_total <= matches_capacity) return status_t::success_k;
-        return matches_total = 0, status_t::unexpected_dimensions_k;
+        // The total survives the refusal, so a caller that brought no buffer still learns what to allocate.
+        return status_t::unexpected_dimensions_k;
     }
 
     /**
