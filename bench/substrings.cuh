@@ -4,12 +4,13 @@
  */
 #include <cstring> // `std::memcpy`, `std::memcmp`
 
-#include <algorithm> // `std::sort`, `std::unique`
-#include <numeric>   // `std::accumulate`
-#include <string>    // `std::string`
-#include <tuple>     // `std::tuple`, `std::apply`
-#include <utility>   // `std::declval`
-#include <vector>    // `std::vector`
+#include <algorithm>     // `std::sort`, `std::unique`
+#include <numeric>       // `std::accumulate`
+#include <string>        // `std::string`
+#include <string_view>   // `std::string_view` keys for the frequency map
+#include <unordered_map> // `std::unordered_map` for the word-frequency count
+#include <utility>       // `std::declval`
+#include <vector>        // `std::vector`
 
 #include "stringzillas/substrings/serial.hpp"
 
@@ -62,25 +63,35 @@ struct needle_slice_t {
 };
 
 /**
- *  @brief The post-cutoff vocabulary: distinct corpus terms with both noisy ends removed, frequency-ordered.
+ *  @brief The post-cutoff vocabulary: distinct corpus words with both noisy ends removed, frequency-ordered.
  *
+ *  Words are cut from the raw dataset by whitespace regardless of how `STRINGWARS_TOKENS` shapes the
+ *  haystacks, so `lines` and `file` searches draw needles from the same vocabulary a `words` search does.
  *  Two cutoffs, both applied before any slice is taken. The most frequent one percent are stopwords that
  *  match on nearly every byte while building no trie depth, so they measure output cost rather than
  *  automaton behaviour. Terms occurring once are hapax - mostly OCR noise and URLs no haystack reaches twice.
  *  Every span borrows from `env.dataset`, so building this copies no token bytes.
- *
- *  @note Needs `STRINGWARS_UNIQUE` unset or `0`. `build_environment` deduplicates `env.tokens` in place when
- *        it is set, which destroys the very frequency signal this selection rests on.
  */
 struct vocabulary_t {
     unified_vector<span<char const>> terms; // ? Frequency-descending, ties broken by first appearance.
     unified_vector<size_t> counts;          // ? Parallel to `terms`.
     size_t dropped_frequent = 0;
     size_t dropped_hapax = 0;
+    size_t dropped_short = 0;
+    size_t dropped_long = 0;
     size_t total_occurrences = 0;
 
     size_t size() const noexcept { return terms.size(); }
 };
+
+/** @brief Shortest word admitted into the vocabulary: anything under three bytes matches at nearly every
+ *         position, so the benchmark would measure match materialization rather than the automaton walk. */
+constexpr size_t vocabulary_min_word_bytes_k = 3;
+
+/** @brief Longest word admitted into the vocabulary. Longer whitespace-cut tokens are unsegmented CJK or
+ *         Thai runs and URLs rather than words - and the longest needle sets `max_match_bytes`, which every
+ *         GPU chunk re-walks as its warm-up, so one runaway "word" would tax every chunk in the corpus. */
+constexpr size_t vocabulary_max_word_bytes_k = 32;
 
 /** @brief Orders spans by content, so a sort groups equal terms into runs a single pass can count. */
 bool spans_less(span<char const> left, span<char const> right) noexcept {
@@ -90,35 +101,51 @@ bool spans_less(span<char const> left, span<char const> right) noexcept {
 }
 
 /**
- *  @brief Counts term frequencies over `env.tokens` and drops both noisy ends.
+ *  @brief Counts word frequencies over the whole dataset and drops both noisy ends.
  *  @param[in] frequent_cutoff Fraction of the frequency-ordered vocabulary discarded from the top.
  *  @param[in] minimum_occurrences Terms appearing fewer times than this are discarded outright.
  *
- *  Frequencies come from run lengths in a sorted array of spans, not a hash map.
+ *  One hashed counting pass over the corpus, then a sort over only the distinct survivors - the corpus has
+ *  hundreds of millions of words but only a few million distinct ones, so sorting every occurrence instead
+ *  used to dominate the whole suite's start-up.
  */
 vocabulary_t build_vocabulary(environment_t const &env, double frequent_cutoff = 0.01, size_t minimum_occurrences = 2) {
-    unified_vector<span<char const>> sorted;
-    sorted.reserve(env.tokens.size());
-    // No UTF-8 validation: tokens split on ASCII whitespace, so a malformed token means a malformed corpus,
+    // No UTF-8 validation: words split on ASCII whitespace, so a malformed word means a malformed corpus,
     // which should fail loudly from `try_build` rather than silently shrink the vocabulary here.
-    for (token_view_t const &token : env.tokens) {
-        if (token.size() < 3 || token.size() > 32) continue;
-        sorted.push_back({token.data(), token.size()});
+    // The library's own primitives do the walking: each `split` step is one `sz_find_byteset` SIMD scan and
+    // the map hashes through `sz_hash`. No `reserve` - growth rehashes move only the distinct entries,
+    // never the occurrences, so their total cost is a few multiples of the final table.
+    std::unordered_map<std::string_view, size_t, sz::hash, sz::equal_to> frequencies;
+    size_t dropped_short = 0, dropped_long = 0;
+    for (auto word : sz::string_view {env.dataset.data(), env.dataset.size()}.split()) {
+        if (word.size() == 0) continue; // ? Runs of separators yield empty segments, not words
+        if (word.size() < vocabulary_min_word_bytes_k) {
+            ++dropped_short;
+            continue;
+        }
+        if (word.size() > vocabulary_max_word_bytes_k) {
+            ++dropped_long;
+            continue;
+        }
+        ++frequencies[std::string_view {word.data(), word.size()}];
     }
-    std::sort(sorted.begin(), sorted.end(), spans_less);
 
-    // Equal terms are adjacent after the sort, so one linear pass over the runs yields every frequency.
-    auto const same_term = [](span<char const> left, span<char const> right) noexcept {
-        return left.size() == right.size() && std::memcmp(left.data(), right.data(), left.size()) == 0;
-    };
+    // The hapax filter runs before any sort, so the ranking pass touches only the few percent that survive.
+    // The top cutoff keeps its base: a fraction of ALL distinct terms, hapax included, so the slice matches
+    // what the run-length formulation selected.
     vocabulary_t vocabulary;
-    for (size_t run_start = 0; run_start < sorted.size();) {
-        size_t run_end = run_start + 1;
-        while (run_end < sorted.size() && same_term(sorted[run_start], sorted[run_end])) ++run_end;
-        vocabulary.terms.push_back(sorted[run_start]);
-        vocabulary.counts.push_back(run_end - run_start);
-        vocabulary.total_occurrences += run_end - run_start;
-        run_start = run_end;
+    vocabulary.dropped_short = dropped_short;
+    vocabulary.dropped_long = dropped_long;
+    vocabulary.terms.reserve(frequencies.size());
+    vocabulary.counts.reserve(frequencies.size());
+    for (auto const &entry : frequencies) {
+        vocabulary.total_occurrences += entry.second;
+        if (entry.second < minimum_occurrences) {
+            ++vocabulary.dropped_hapax;
+            continue;
+        }
+        vocabulary.terms.push_back({entry.first.data(), entry.first.size()});
+        vocabulary.counts.push_back(entry.second);
     }
 
     // Order by frequency first, then by content, so the ranking is deterministic across runs and platforms.
@@ -130,21 +157,14 @@ vocabulary_t build_vocabulary(environment_t const &env, double frequent_cutoff =
         return spans_less(vocabulary.terms[left], vocabulary.terms[right]);
     });
 
-    size_t const drop_from_top = (size_t)((double)order.size() * frequent_cutoff);
+    size_t const drop_from_top = (size_t)((double)frequencies.size() * frequent_cutoff);
+    vocabulary.dropped_frequent = drop_from_top < order.size() ? drop_from_top : order.size();
     unified_vector<span<char const>> kept_terms;
     unified_vector<size_t> kept_counts;
     kept_terms.reserve(order.size());
     kept_counts.reserve(order.size());
-    for (size_t rank = 0; rank < order.size(); ++rank) {
+    for (size_t rank = vocabulary.dropped_frequent; rank < order.size(); ++rank) {
         size_t const index = order[rank];
-        if (rank < drop_from_top) {
-            ++vocabulary.dropped_frequent;
-            continue;
-        }
-        if (vocabulary.counts[index] < minimum_occurrences) {
-            ++vocabulary.dropped_hapax;
-            continue;
-        }
         kept_terms.push_back(vocabulary.terms[index]);
         kept_counts.push_back(vocabulary.counts[index]);
     }
@@ -428,6 +448,21 @@ void bench_substrings_dictionary(                                        //
                     device_total, total_occurrences, matches_reference ? "" : " -- MISMATCH",
                     cuda_result.profiled_calls, cuda_result.profiled_seconds);
     }
+
+    // Sized from the serial `try_count` above, like the CPU `try_find` calls, so the scatter never grows
+    // device memory mid-benchmark.
+    size_t device_found = 0;
+    unified_vector<substrings_match_t> device_matches(total_occurrences);
+    auto cuda_find_call = make_substrings_callable(haystack_bytes, device_matches, [&] {
+        return device_engine.try_find(env.tokens,
+                                      span<substrings_match_t>(device_matches.data(), device_matches.size()),
+                                      device_found, cuda_executor_t {}, gpu_specs);
+    });
+    std::string const cuda_find_name = "substrings_find_cuda:" + dictionary_label;
+    bench_result_t const cuda_find_result = bench_nullary(env, cuda_find_name, cuda_find_call).log(serial_find_result);
+    if (!cuda_find_result.skipped && device_found != total_occurrences)
+        std::printf("> Checksum: %zu matches (device) vs %zu (host reference) -- MISMATCH\n", device_found,
+                    total_occurrences);
 #endif
 }
 
@@ -448,6 +483,9 @@ void bench_substrings(environment_t const &env) {
         " - Vocabulary: %zu terms after cutoffs, %zu occurrences, dropped %zu most-frequent and " //
         "%zu under-2-occurrence\n",                                                               //
         vocabulary.size(), vocabulary.total_occurrences, vocabulary.dropped_frequent, vocabulary.dropped_hapax);
+    std::printf(                                                                       //
+        " - Length gates: dropped %zu words under %zu bytes and %zu over %zu bytes\n", //
+        vocabulary.dropped_short, vocabulary_min_word_bytes_k, vocabulary.dropped_long, vocabulary_max_word_bytes_k);
 
     forkunion_executor_t pool;
     if (pool.try_spawn(std::thread::hardware_concurrency()) != status_t::success_k)

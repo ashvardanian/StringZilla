@@ -5,8 +5,11 @@
  *         and the fraction of byte steps that stay on the hot path - alongside the throughput they produce,
  *         since those properties dominate the number far more than the backend choice.
  *
+ *  Compute-bound: the automaton is rebuilt per sweep cell, so a 64 MiB slice exercises every hot- and cold-tier path, while a larger corpus only rebuilds the same states.
+ *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the haystack dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for
  *    N-grams) that turns the dataset into the haystacks searched. `file` reproduces a single-haystack scan,
  *    the shape the reference baselines below were measured with.
@@ -18,10 +21,10 @@
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
  *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter benchmark names.
  *
- *  Needles come from the corpus itself, deterministically: the most frequent one percent and every term
- *  occurring once are dropped, and each sweep cell draws one slice - most or least frequent, one or ten
- *  percent, or all of it - from the frequency-ordered remainder. Needs `STRINGWARS_UNIQUE` unset, which
- *  would otherwise flatten every count to one and make both cutoffs meaningless.
+ *  Needles come from the corpus itself, deterministically: whitespace-cut words regardless of how
+ *  `STRINGWARS_TOKENS` shapes the haystacks, with the most frequent one percent and every term occurring
+ *  once dropped. Each sweep cell draws one slice - most or least frequent, one or ten percent, or all of
+ *  it - from the frequency-ordered remainder.
  *
  *  Here are a few build & run commands:
  *
@@ -52,8 +55,9 @@ int main(int argc, char const **argv) {
         std::printf("Building up the environment...\n");
         environment_t env = build_environment( //
             argc, argv,                        //
-            "leipzig1M.txt",                   //
-            environment_t::tokenization_t::lines_k);
+            "xlsum.csv",                       //
+            environment_t::tokenization_t::lines_k,
+            compute_bound_slice_bytes_k);
 
         bench_substrings(env);
     }

@@ -431,9 +431,9 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/utf8_uncased.c
 )
 
-# Helper function used for `stringzilla_shared` and `stringzilla_bare` targets
-function (define_stringzilla_shared target public_name)
-    add_library(${target} SHARED ${STRINGZILLA_SHIM_SOURCES})
+# Helper function used for the `stringzilla_shared`, `stringzilla_bare`, and `stringzilla_static` targets
+function (define_stringzilla_library target public_name library_type)
+    add_library(${target} ${library_type} ${STRINGZILLA_SHIM_SOURCES})
 
     # `stringzilla_shared` is published as `stringzilla::shared`. Both spellings resolve, in-tree and installed.
     add_library(${PROJECT_NAME}::${public_name} ALIAS ${target})
@@ -459,7 +459,7 @@ endfunction ()
 
 if (STRINGZILLA_BUILD_SHARED)
 
-    define_stringzilla_shared(stringzilla_shared shared)
+    define_stringzilla_library(stringzilla_shared shared SHARED)
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
     target_include_directories(
@@ -481,7 +481,7 @@ if (STRINGZILLA_BUILD_SHARED)
     # Try compiling a version without linking the LibC ! This is only for Linux/MSVC, as on modern Arm-based MacOS
     # machines ! We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
     if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-        define_stringzilla_shared(stringzilla_bare bare)
+        define_stringzilla_library(stringzilla_bare bare SHARED)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
         target_include_directories(
@@ -502,6 +502,16 @@ if (STRINGZILLA_BUILD_SHARED)
         target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
         target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
     endif ()
+endif ()
+
+# The dispatch core as an archive, for in-tree consumers rather than for installation. StringZillas tests and
+# benchmarks inherit `SZ_DYNAMIC_DISPATCH=1` from the engines they link, which externs the `sz_*` entry points;
+# neither shipped library can resolve them, since both interpose LibC and fault the process before `main`.
+# The shim units default `SZ_OVERRIDE_LIBC` to `SZ_AVOID_LIBC`, so leaving both at zero is the whole difference.
+if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCHMARK)
+    define_stringzilla_library(stringzilla_static static STATIC)
+    target_compile_definitions(stringzilla_static PRIVATE "SZ_AVOID_LIBC=0")
+    target_include_directories(stringzilla_static PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 endif ()
 
 # Definitions every StringZillas translation unit shares.
@@ -748,6 +758,10 @@ if (STRINGZILLA_BUILD_BENCHMARK)
         target_link_libraries(stringzillas_bench_fingerprints_cpp20 PRIVATE stringzillas_cpus_static)
         target_link_libraries(stringzillas_bench_substrings_cpp20 PRIVATE stringzillas_cpus_static)
     endif ()
+    # Resolves the `sz_*` entry points the inherited `SZ_DYNAMIC_DISPATCH=1` externs.
+    target_link_libraries(stringzillas_bench_similarities_cpp20 PRIVATE stringzilla_static)
+    target_link_libraries(stringzillas_bench_fingerprints_cpp20 PRIVATE stringzilla_static)
+    target_link_libraries(stringzillas_bench_substrings_cpp20 PRIVATE stringzilla_static)
     if (STRINGZILLA_BUILD_CUDA)
         define_gpu_launcher(stringzillas_bench_similarities_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cu)
         define_gpu_launcher(stringzillas_bench_fingerprints_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/fingerprints.cu)
@@ -757,6 +771,10 @@ if (STRINGZILLA_BUILD_BENCHMARK)
             target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_bench_substrings_cu20 PRIVATE stringzillas_cuda_static)
         endif ()
+        # Resolves the `sz_*` entry points the inherited `SZ_DYNAMIC_DISPATCH=1` externs.
+        target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE stringzilla_static)
+        target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE stringzilla_static)
+        target_link_libraries(stringzillas_bench_substrings_cu20 PRIVATE stringzilla_static)
         # The host object pulls in `std::log` etc.; unlike the host-compiler driver used for the `cpp20` benches, nvcc's
         # final link does not implicitly add libm. Link it only where it exists as a separate library (Linux/glibc); on
         # macOS/MSVC the math symbols live in the C runtime.
