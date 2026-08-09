@@ -1522,6 +1522,63 @@ struct aho_corasick_dictionary {
         return status_t::success_k;
     }
 
+    /**
+     *  @brief Adopts an already-built @p wider dictionary, narrowing every published array to this width.
+     *
+     *  The walking automaton is derived once at the widest id and narrowed here, so a vocabulary that fits a
+     *  smaller id pays no second derivation - only a copy of the published arrays, whose rows then halve.
+     *  A `u16` row is 512 bytes against `u32`'s 1024, so twice the automaton stays cache-resident, which is
+     *  what the tier split is sized against in the first place.
+     *
+     *  Reads @p wider through its public view and accessors alone, so the two widths need no friendship.
+     *  @retval `status_t::overflow_risk_k` Some published value exceeds this width; @p wider stays usable.
+     *  @retval `status_t::bad_alloc_k` Memory allocation failed.
+     */
+    template <typename wider_id_type_, typename wider_allocator_type_>
+    status_t try_build(aho_corasick_dictionary<wider_id_type_, wider_allocator_type_> const &wider) noexcept {
+        static_assert(sizeof(state_id_t) <= sizeof(wider_id_type_), "This overload only ever narrows");
+        auto const source = wider.view();
+
+        // Every ceiling this width imposes, tested before a single element is copied. Slot ids reach past the
+        // state count by the alphabet's headroom, since a packed child's id is address arithmetic.
+        size_t const slots_published = (size_t)source.state_count + (alphabet_size_k - 1);
+        if (slots_published > (size_t)invalid_state_k) return status_t::overflow_risk_k;
+        if (wider.count_needles() > (size_t)invalid_state_k) return status_t::overflow_risk_k;
+        if ((size_t)source.max_match_bytes > (size_t)invalid_state_k) return status_t::overflow_risk_k;
+        if ((size_t)source.max_outputs_per_state > (size_t)invalid_state_k) return status_t::overflow_risk_k;
+
+        size_t const hot_cells = (size_t)source.hot_count * alphabet_size_k;
+        if (hot_rows_.try_resize(hot_cells) != status_t::success_k) return status_t::bad_alloc_k;
+        if (base_.try_resize(slots_published) != status_t::success_k) return status_t::bad_alloc_k;
+        if (check_.try_resize(slots_published) != status_t::success_k) return status_t::bad_alloc_k;
+        if (fail_.try_resize(slots_published) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_.try_resize(source.outputs_total) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_counts_.try_resize(slots_published) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_offsets_.try_resize(slots_published) != status_t::success_k) return status_t::bad_alloc_k;
+
+        for (size_t cell = 0; cell < hot_cells; ++cell)
+            hot_rows_[cell] = static_cast<state_id_t>(source.hot_rows[cell]);
+        for (size_t slot = 0; slot < slots_published; ++slot) {
+            base_[slot] = static_cast<state_id_t>(source.base[slot]);
+            check_[slot] = static_cast<state_id_t>(source.check[slot]);
+            fail_[slot] = static_cast<state_id_t>(source.fail[slot]);
+            outputs_counts_[slot] = static_cast<state_id_t>(source.outputs_counts[slot]);
+            outputs_offsets_[slot] = source.outputs_offsets[slot]; // ? Indexes a pool, so it stays `size_t`
+        }
+        for (size_t output = 0; output < source.outputs_total; ++output)
+            outputs_[output] = output_t {static_cast<state_id_t>(source.outputs[output].needle_index),
+                                          static_cast<state_id_t>(source.outputs[output].match_bytes)};
+
+        count_states_ = source.state_count;
+        count_needles_ = wider.count_needles();
+        hot_count_ = source.hot_count;
+        root_ = static_cast<state_id_t>(source.root);
+        max_match_bytes_ = static_cast<state_id_t>(source.max_match_bytes);
+        max_outputs_per_state_ = static_cast<state_id_t>(source.max_outputs_per_state);
+        case_sensitivity_ = wider.case_sensitivity();
+        return status_t::success_k;
+    }
+
 #pragma region Published View
 
     using view_t = aho_corasick_view<state_id_t>;
@@ -1658,6 +1715,18 @@ struct substrings<state_id_type_, allocator_type_, capability_,
     }
 
     /**
+     *  @brief Adopts an already-built @p wider automaton at this engine's narrower state id.
+     *
+     *  Named by the dictionary rather than the engine that owns it: the narrowing needs nothing else, and
+     *  the concrete parameter type is what keeps this overload from competing with the needles one above.
+     *  @sa `aho_corasick_dictionary::try_build` for the narrowing contract and its status codes.
+     */
+    template <typename wider_id_type_, typename wider_allocator_type_>
+    status_t try_build(aho_corasick_dictionary<wider_id_type_, wider_allocator_type_> const &wider) noexcept {
+        return dict_.try_build(wider);
+    }
+
+    /**
      *  @brief Occurrences of all needles in each of the @p haystacks, for filtering and ranking.
      *  @param[out] matches_total Sum of @p counts_per_haystack, which is what sizes a later `try_find` buffer.
      */
@@ -1758,6 +1827,18 @@ struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             if (status != status_t::success_k) return status;
         }
         return dict_.try_build(specs);
+    }
+
+    /**
+     *  @brief Adopts an already-built @p wider automaton at this engine's narrower state id.
+     *
+     *  Named by the dictionary rather than the engine that owns it: the narrowing needs nothing else, and
+     *  the concrete parameter type is what keeps this overload from competing with the needles one above.
+     *  @sa `aho_corasick_dictionary::try_build` for the narrowing contract and its status codes.
+     */
+    template <typename wider_id_type_, typename wider_allocator_type_>
+    status_t try_build(aho_corasick_dictionary<wider_id_type_, wider_allocator_type_> const &wider) noexcept {
+        return dict_.try_build(wider);
     }
 
     /**

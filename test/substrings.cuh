@@ -46,6 +46,7 @@ using ashvardanian::stringzillas::forkunion_executor_t;
 using ashvardanian::stringzillas::substrings_match_t;
 using ashvardanian::stringzillas::substrings_case_sensitivity_t;
 using ashvardanian::stringzillas::substrings_u16_dictionary_t;
+using ashvardanian::stringzillas::substrings_u16_serial_t;
 using ashvardanian::stringzillas::substrings_u32_dictionary_t;
 using ashvardanian::stringzillas::substrings_u32_parallel_t;
 using ashvardanian::stringzillas::substrings_u32_serial_t;
@@ -1545,6 +1546,37 @@ void test_substrings_construction() {
         wide.case_sensitivity(substrings_uncased_k);
         verify(wide.try_insert({long_run.data(), long_run.size()}) == status_t::success_k);
         verify(wide.try_build() == status_t::success_k && "u32 has room for this run");
+
+        // Narrowing that same run must decline for the same reason a fresh `u16` build does, rather than
+        // wrapping the ids it copies.
+        substrings_u16_dictionary_t adopted;
+        verify(adopted.try_build(wide) == status_t::overflow_risk_k && "narrowing inherits the id ceiling");
+    }
+
+    // Narrowing an automaton that does fit: the walking derivation runs once at the wider id and the narrower
+    // dictionary adopts its published arrays, so the two must answer identically on every haystack. Halving
+    // the row width is the point - a `u16` row is 512 bytes where `u32`'s is 1024.
+    {
+        std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(200), 3, 7);
+        std::vector<std::string> const haystack_strings = random_short_strings_(scale_iterations(64), 16, 96);
+        arrow_strings_tape_t needles, haystacks;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+               status_t::success_k);
+
+        substrings_u32_serial_t wide;
+        verify(wide.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        substrings_match_set_t wide_matches;
+        collect_matches_into_(wide, haystacks.view(), wide_matches);
+
+        substrings_u16_serial_t narrow;
+        verify(narrow.try_build(wide.dictionary()) == status_t::success_k);
+        verify(narrow.dictionary().count_states() == wide.dictionary().count_states());
+        verify(narrow.dictionary().count_needles() == wide.dictionary().count_needles());
+        substrings_match_set_t narrow_matches;
+        collect_matches_into_(narrow, haystacks.view(), narrow_matches);
+        verify(narrow_matches == wide_matches && "a narrowed automaton must match its source exactly");
     }
 
     // Cold-tier double-array invariant: every slot a state claims sits within 256 of that state's own base,

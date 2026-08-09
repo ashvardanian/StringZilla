@@ -476,6 +476,22 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
         return try_upload_(dictionary_.view(), executor);
     }
 
+    /**
+     *  @brief Adopts an already-built @p wider automaton at this engine's narrower state id, then uploads it.
+     *
+     *  Named by the dictionary rather than the engine that owns it: the narrowing needs nothing else, and
+     *  the concrete parameter type is what keeps this overload from competing with the needles one above.
+     *  The tier split arrives with @p wider, so no `gpu_specs_t` re-derives it here.
+     *  @sa `aho_corasick_dictionary::try_build` for the narrowing contract and its status codes.
+     */
+    template <typename wider_id_type_, typename wider_allocator_type_>
+    cuda_status_t try_build(aho_corasick_dictionary<wider_id_type_, wider_allocator_type_> const &wider,
+                            cuda_executor_t const &executor = {}) noexcept {
+        status_t const narrowed = dictionary_.try_build(wider);
+        if (narrowed != status_t::success_k) return {narrowed, cudaSuccess};
+        return try_upload_(dictionary_.view(), executor);
+    }
+
     dictionary_t const &dictionary() const noexcept { return dictionary_; }
 
   private:
