@@ -4,8 +4,11 @@
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *         validating the SIMD-accelerated backends against the serial baselines.
  *
+ *  Compute-bound: min-hash sketching does many hashes per window, so a 64 MiB slice exercises every path.
+ *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
@@ -54,7 +57,8 @@ int main(int argc, char const **argv) {
         environment_t env = build_environment( //
             argc, argv,                        //
             "leipzig1M.txt",                   //
-            environment_t::tokenization_t::lines_k);
+            environment_t::tokenization_t::lines_k,
+            compute_bound_slice_bytes_k);
 
         std::printf("Starting string fingerprinting search benchmarks...\n");
         bench_fingerprints(env);

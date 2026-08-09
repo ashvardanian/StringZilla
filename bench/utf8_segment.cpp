@@ -5,6 +5,8 @@
  *         each backend's result is validated (via a per-call checksum) against the serial reference — so this
  *         file doubles as a differential correctness harness.
  *
+ *  Compute-bound: UTF-8 segmentation is branch-heavy per codepoint, so a 64 MiB slice exercises every path.
+ *
  *  Benchmarks include:
  *  - UAX-29 word-boundary segmentation - @b utf8_wordbreaks.
  *  - UAX-29 grapheme-cluster segmentation - @b utf8_graphemes.
@@ -13,6 +15,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
@@ -187,7 +190,8 @@ int main(int argc, char const **argv) {
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual coverage
-        environment_t::tokenization_t::lines_k);
+        environment_t::tokenization_t::lines_k,
+        compute_bound_slice_bytes_k);
 
     std::printf("Starting UTF-8 segmentation benchmarks...\n");
 

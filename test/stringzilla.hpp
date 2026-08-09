@@ -49,7 +49,6 @@
 #include <algorithm> // `std::copy`, `std::generate`
 #include <chrono>    // `std::chrono::steady_clock` for per-test timing
 #include <exception> // `std::exception`
-#include <fstream>   // `std::ifstream`
 #include <random>    // `std::random_device`
 #include <regex>     // `std::regex_search` for `SZ_TESTS_FILTER`
 #include <string>    // `std::string`
@@ -122,17 +121,32 @@ template <typename value_type_>
 using unified_vector = std::vector<value_type_, stringzillas::unified_alloc<value_type_>>;
 #endif
 
-inline std::string read_file(std::string path) noexcept(false) {
-    std::ifstream stream(path);
-    if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
-    return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+/**
+ *  @brief Reads a file into a string via LibC `<cstdio>`. A non-zero @p max_bytes stops the read after
+ *         that many bytes, so the file tail is never touched.
+ */
+inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexcept(false) {
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    if (!file) throw std::runtime_error("Failed to open file: " + path);
+    std::size_t capacity = max_bytes;
+    if (capacity == 0) {
+        std::fseek(file, 0, SEEK_END);
+        long const size = std::ftell(file);
+        std::fseek(file, 0, SEEK_SET);
+        capacity = size > 0 ? static_cast<std::size_t>(size) : 0;
+    }
+    std::string content(capacity, '\0');
+    std::size_t const read_bytes = std::fread(content.data(), 1, capacity, file);
+    std::fclose(file);
+    content.resize(read_bytes);
+    return content;
 }
 
 inline void write_file(std::string path, std::string content) noexcept(false) {
-    std::ofstream stream(path);
-    if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
-    stream << content;
-    stream.close();
+    std::FILE *file = std::fopen(path.c_str(), "wb");
+    if (!file) throw std::runtime_error("Failed to open file: " + path);
+    std::fwrite(content.data(), 1, content.size(), file);
+    std::fclose(file);
 }
 
 /**

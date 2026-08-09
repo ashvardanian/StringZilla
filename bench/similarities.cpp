@@ -4,6 +4,8 @@
  *         It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
  *         alignment scores, and fingerprinting techniques combined with the Hamming distance.
  *
+ *  Compute-bound: the O(N*M) alignment is arithmetic-limited, so a 64 MiB slice exercises every path while the batch samples only what it needs.
+ *
  *  Benchmarks include:
  *  - Linear-complexity basic & bounded Hamming distance computations.
  *  - Quadratic-complexity basic & bounded Levenshtein edit-distance computations.
@@ -15,6 +17,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *  - `STRINGWARS_BATCH_PER_CORE=256` : Pairs scored per core; a CPU core and a GPU streaming-multiprocessor each
@@ -66,7 +69,8 @@ int main(int argc, char const **argv) {
         environment_t env = build_environment( //
             argc, argv,                        //
             "xlsum.csv",                       // Preferred for UTF-8 content
-            environment_t::tokenization_t::lines_k);
+            environment_t::tokenization_t::lines_k,
+            compute_bound_slice_bytes_k);
 
         std::printf("Starting string similarity benchmarks...\n");
         bench_levenshtein(env);

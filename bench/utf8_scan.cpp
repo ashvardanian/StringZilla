@@ -5,6 +5,8 @@
  *         across all available SIMD backends side-by-side, and each backend's result is validated (via a
  *         per-call checksum) against the serial reference — so this file doubles as a differential harness.
  *
+ *  Compute-bound: per-codepoint class scanning is branch-heavy, so a 64 MiB slice exercises every path.
+ *
  *  Benchmarks include:
  *  - Newline enumeration - @b utf8_newlines.
  *  - Whitespace enumeration - @b utf8_whitespaces (Unicode White_Space property).
@@ -12,6 +14,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
@@ -174,7 +177,8 @@ int main(int argc, char const **argv) {
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual coverage
-        environment_t::tokenization_t::lines_k);
+        environment_t::tokenization_t::lines_k,
+        compute_bound_slice_bytes_k);
 
     std::printf("Starting UTF-8 class-scan benchmarks...\n");
 

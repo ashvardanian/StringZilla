@@ -4,8 +4,11 @@
  *         The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
  *         references to mimic real-world scenarios dealing with individual strings of different lengths.
  *
+ *  Memory-bound: the copy, move, and fill primitives are pure bandwidth, so it reads the whole file by default and a larger buffer measures throughput truer.
+ *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *

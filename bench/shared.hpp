@@ -267,6 +267,32 @@ inline std::size_t bit_floor(std::size_t n) {
     return static_cast<std::size_t>(1) << most_significant_bit_position;
 }
 
+/**
+ *  @brief Parses a human byte size like `64mb` or `1gb` into bytes; `kb`/`mb`/`gb` are powers of 1024,
+ *         matching StringWars' `parse_size`. A bare number is bytes, and an empty or zero value is the whole file.
+ */
+inline std::size_t parse_size(std::string const &text) {
+    std::size_t cursor = 0;
+    while (cursor < text.size() && (std::isdigit((unsigned char)text[cursor]) || text[cursor] == '.')) ++cursor;
+    double const number = cursor == 0 ? 0.0 : std::stod(text.substr(0, cursor));
+    std::string unit;
+    for (; cursor < text.size(); ++cursor)
+        if (!std::isspace((unsigned char)text[cursor])) unit.push_back((char)std::tolower((unsigned char)text[cursor]));
+    std::size_t multiplier = 1;
+    if (unit.empty() || unit == "b") multiplier = 1;
+    else if (unit == "kb") multiplier = 1024ull;
+    else if (unit == "mb") multiplier = 1024ull * 1024ull;
+    else if (unit == "gb") multiplier = 1024ull * 1024ull * 1024ull;
+    else throw std::invalid_argument("Invalid STRINGWARS_DATASET_LIMIT unit: " + unit);
+    return static_cast<std::size_t>(number * (double)multiplier);
+}
+
+/**
+ *  @brief The smallest read that still exercises a compute-bound bench's control-flow paths on the
+ *         multilingual corpus. Memory-bound benches ignore it and read the whole file.
+ */
+static constexpr std::size_t compute_bound_slice_bytes_k = 64ull * 1024ull * 1024ull;
+
 #if !SZ_USE_CUDA
 using dataset_t = std::string;
 using token_view_t = std::string_view;
@@ -303,10 +329,23 @@ tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separat
     return tokens;
 }
 
-/** @brief Splits a string into words, using newlines, tabs, and whitespaces as delimiters using @b `std::isspace`. */
-inline tokens_t tokenize(std::string_view str) {
-    return tokenize(str, [](char c) { return std::isspace(c); });
+/**
+ *  @brief Tokenizes a string around the given separator @p byteset in one lazy SIMD pass.
+ *
+ *  Each step of the underlying `split` issues one `sz_find_byteset` scan. The whole corpus is already
+ *  bounded by the dataset read, so the walk runs to the end rather than carrying its own cap.
+ */
+inline tokens_t tokenize(std::string_view str, sz::byteset separators) {
+    tokens_t tokens;
+    for (auto token : sz::string_view {str.data(), str.size()}.split(separators)) {
+        if (token.size() == 0) continue; // ? Runs of separators yield empty segments
+        tokens.push_back({token.data(), token.size()});
+    }
+    return tokens;
 }
+
+/** @brief Splits a string into words around newlines, tabs, and other ASCII whitespaces. */
+inline tokens_t tokenize(std::string_view str) { return tokenize(str, sz::whitespaces_set()); }
 
 template <typename result_string_type_ = std::string_view, typename from_string_type_ = result_string_type_,
           typename comparator_type_ = std::equal_to<std::size_t>, typename allocator_type_ = std::allocator<char>>
@@ -359,8 +398,8 @@ struct environment_t {
     std::size_t stress_limit = 1;
     /** @brief Whether to deduplicate tokens before benchmarking. */
     bool unique = false;
-    /** @brief Optional cap on the number of tokens kept, 0 means unlimited; `STRINGWARS_MAX_TOKENS`. */
-    std::size_t max_tokens = 0;
+    /** @brief Read at most this many dataset bytes, 0 means the whole file; `STRINGWARS_DATASET_LIMIT`. */
+    std::size_t dataset_limit_bytes = 0;
     /** @brief Optional override for per-benchmark batch sizes, empty means the backend default; `STRINGWARS_BATCH`. */
     std::vector<std::size_t> batch_sizes_override;
     /** @brief Textual content of the dataset file, fully loaded into memory. */
@@ -401,6 +440,7 @@ struct environment_t {
 inline environment_t build_environment(                                        //
     int argc, char const *argv[],                                              //< Ignored
     std::string default_dataset, environment_t::tokenization_t default_tokens, //< Mandatory
+    std::size_t default_dataset_limit_bytes = 0,                               //< Optional, 0 = whole file
     std::size_t default_duration = SZ_DEBUG ? 1 : 10,                          //< Optional
     bool default_stress = true,                                                //
     std::string default_stress_dir = ".tmp",                                   //
@@ -412,6 +452,7 @@ inline environment_t build_environment(                                        /
 
     sz_unused_(argc && argv); // Unused in this context
     environment_t env;
+    env.dataset_limit_bytes = default_dataset_limit_bytes;
 
     // Use `STRINGWARS_DATASET` if set, otherwise `default_dataset`
     if (char const *env_var = std::getenv("STRINGWARS_DATASET")) { env.path = env_var; }
@@ -479,8 +520,8 @@ inline environment_t build_environment(                                        /
         env.unique = is_one;
     }
 
-    // Use `STRINGWARS_MAX_TOKENS` to cap the number of tokens kept, for faster and more targeted runs.
-    if (char const *env_var = std::getenv("STRINGWARS_MAX_TOKENS")) { env.max_tokens = std::stoull(env_var); }
+    // Use `STRINGWARS_DATASET_LIMIT` to bound the dataset read, so the file tail is never touched.
+    if (char const *env_var = std::getenv("STRINGWARS_DATASET_LIMIT")) { env.dataset_limit_bytes = parse_size(env_var); }
 
     // Use `STRINGWARS_BATCH` to override the per-benchmark batch sizes with a comma-separated list,
     // e.g. `STRINGWARS_BATCH=1024` to run a single batch and skip the slow/largest default sweep entries.
@@ -494,14 +535,13 @@ inline environment_t build_environment(                                        /
         }
     }
 
-    env.dataset = read_file(env.path);
-    env.dataset.resize(bit_floor(env.dataset.size())); // Shrink to the nearest power of two
+    env.dataset = read_file(env.path, env.dataset_limit_bytes); // A non-zero limit stops the read early
+    env.dataset.resize(bit_floor(env.dataset.size()));          // Shrink to the nearest power of two
 
-    // Tokenize the dataset according to the tokenization mode
+    // Tokenize the dataset according to the tokenization mode. The corpus is already bounded by the read,
+    // so each mode walks it to the end.
     if (env.tokenization == environment_t::file_k) { env.tokens.push_back({env.dataset.data(), env.dataset.size()}); }
-    else if (env.tokenization == environment_t::lines_k) {
-        env.tokens = tokenize(env.dataset, [](char c) { return c == '\n'; });
-    }
+    else if (env.tokenization == environment_t::lines_k) { env.tokens = tokenize(env.dataset, sz::byteset {'\n'}); }
     else if (env.tokenization == environment_t::words_k) { env.tokens = tokenize(env.dataset); }
     else {
         std::size_t n = static_cast<std::size_t>(env.tokenization);
@@ -515,8 +555,6 @@ inline environment_t build_environment(                                        /
         env.tokens.erase(last, env.tokens.end());
     }
 
-    // Optionally cap the token count before the power-of-two shrink, for faster and more targeted runs.
-    if (env.max_tokens != 0 && env.tokens.size() > env.max_tokens) env.tokens.resize(env.max_tokens);
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
@@ -552,6 +590,8 @@ inline environment_t build_environment(                                        /
     std::printf(" - Stress-testing: %s\n", env.stress ? "yes" : "no");
     std::printf(" - Unique tokens: %s\n", env.unique ? "yes" : "no");
     std::printf(" - Loaded dataset size: %zu bytes\n", env.dataset.size());
+    if (env.dataset_limit_bytes == 0) std::printf(" - Dataset limit: whole file\n");
+    else std::printf(" - Dataset limit: %zu bytes\n", env.dataset_limit_bytes);
     std::printf(" - Number of tokens: %zu\n", env.tokens.size());
     std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
 

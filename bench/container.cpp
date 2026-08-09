@@ -3,6 +3,8 @@
  *  @brief Benchmarks STL associative containers with @b `std::string_view`-compatible keys.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the lookup operations.
  *
+ *  Memory-bound: associative build and probe are latency-limited over the whole key set, so it reads the whole file by default.
+ *
  *  This file is the sibling of `bench_sequence.cpp`, `bench_find.cpp` and `bench_token.cpp`.
  *  It accepts a file with a list of words, constructs associative containers with string keys,
  *  using `std::string`, `std::string_view`, `sz::string_view`, and `sz::string`, and then
@@ -10,6 +12,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *

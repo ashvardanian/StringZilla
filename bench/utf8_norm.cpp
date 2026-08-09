@@ -4,6 +4,8 @@
  *         The program accepts a file path to a dataset and benchmarks the normalization operations,
  *         validating the SIMD-accelerated backends against the serial baselines.
  *
+ *  Compute-bound: Unicode normalization is table- and branch-heavy per codepoint, so a 64 MiB slice exercises every path on the multilingual corpus.
+ *
  *  Benchmarks include:
  *  - Unicode normalization for UTF-8 text - @b utf8_norm.
  *  - Normalization-form violation scanning (quick-check) - @b utf8_find_denormalized.
@@ -17,6 +19,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=line` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
@@ -221,7 +224,8 @@ int main(int argc, char const **argv) {
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual testing
-        environment_t::tokenization_t::lines_k);
+        environment_t::tokenization_t::lines_k,
+        compute_bound_slice_bytes_k);
 
     std::printf("Starting Unicode benchmarks...\n");
 
