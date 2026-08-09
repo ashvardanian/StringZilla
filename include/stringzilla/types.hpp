@@ -894,6 +894,7 @@ struct cpu_specs_t {
  */
 struct gpu_specs_t {
     size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
+    size_t l2_bytes = 40ul * 1024 * 1024;          // ? On A100 it's 40 MB, shared by every multiprocessor
     size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
     size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
     size_t streaming_multiprocessors = 108;        // ? On A100

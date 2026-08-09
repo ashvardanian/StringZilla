@@ -373,7 +373,7 @@ inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noex
 
     int multiprocessor_count = 0, warp_size = 0, major = 0, minor = 0;
     int constant_memory_bytes = 0, shared_per_multiprocessor = 0;
-    int max_blocks_per_multiprocessor = 0, reserved_shared_per_block = 0;
+    int max_blocks_per_multiprocessor = 0, reserved_shared_per_block = 0, l2_bytes = 0;
     size_t total_global_memory = 0;
     cuDeviceGetAttribute(&multiprocessor_count, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
     cuDeviceGetAttribute(&constant_memory_bytes, CU_DEVICE_ATTRIBUTE_TOTAL_CONSTANT_MEMORY, device);
@@ -383,12 +383,14 @@ inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noex
     cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
     cuDeviceGetAttribute(&max_blocks_per_multiprocessor, CU_DEVICE_ATTRIBUTE_MAX_BLOCKS_PER_MULTIPROCESSOR, device);
     cuDeviceGetAttribute(&reserved_shared_per_block, CU_DEVICE_ATTRIBUTE_RESERVED_SHARED_MEMORY_PER_BLOCK, device);
+    cuDeviceGetAttribute(&l2_bytes, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, device);
     cuDeviceTotalMem(&total_global_memory, device);
 
     // Set the GPU specs
     specs.streaming_multiprocessors = multiprocessor_count;
     specs.constant_memory_bytes = constant_memory_bytes;
     specs.vram_bytes = total_global_memory;
+    specs.l2_bytes = static_cast<size_t>(l2_bytes);
     specs.warp_size = warp_size;
 
     // Infer other global settings, that CUDA doesn't expose directly
