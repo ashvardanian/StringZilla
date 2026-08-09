@@ -32,13 +32,15 @@
 #include <stringzilla/stringzilla.h> // Primary C API
 
 #include "stringzilla.hpp" // `verify`, `run_test`, `global_random_generator`, `fuzzy_config_t`
-#include "utf8.hpp"        // `append_malformed_class_`, `utf8_random_segmentation_corpus_`
+#include "utf8.hpp"        // `malformed_classes_`, `utf8_random_segmentation_corpus_`
 
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
 
 using ashvardanian::stringzillas::dummy_executor_t;
+using ashvardanian::stringzillas::fold_preimage_of_rune;
+using ashvardanian::stringzillas::fold_preimage_of_runes;
 using ashvardanian::stringzillas::substrings_cased_k;
 using ashvardanian::stringzillas::forkunion_executor_t;
 using ashvardanian::stringzillas::substrings_match_t;
@@ -167,8 +169,7 @@ inline std::vector<std::string> random_short_strings_(std::size_t count, int min
  *  Shares no machinery with the Aho-Corasick engine under test beyond the one folding table every backend
  *  reads. @sa `reference_uncased_find_` in `test/uncased.cpp`, which reports only the first match.
  */
-inline std::vector<std::pair<std::size_t, std::size_t>> independent_uncased_matches_(span<char const> haystack,
-                                                                                     span<char const> needle) {
+inline std::vector<span<char const>> independent_uncased_matches_(span<char const> haystack, span<char const> needle) {
     std::vector<sz_rune_t> needle_folded;
     for (char const *cursor = needle.begin(), *end = needle.end(); cursor != end;) {
         sz_rune_t rune;
@@ -203,7 +204,7 @@ inline std::vector<std::pair<std::size_t, std::size_t>> independent_uncased_matc
         cursor += consumed;
     }
 
-    std::vector<std::pair<std::size_t, std::size_t>> matches;
+    std::vector<span<char const>> matches;
     std::size_t const needle_length = needle_folded.size();
     if (needle_length == 0) return matches;
     for (std::size_t start = 0; start + needle_length <= haystack_folded.size(); ++start) {
@@ -215,7 +216,8 @@ inline std::vector<std::pair<std::size_t, std::size_t>> independent_uncased_matc
                 break;
             }
         if (!equal) continue;
-        matches.emplace_back(source_begin[start], source_end[start + needle_length - 1] - source_begin[start]);
+        matches.emplace_back(haystack.data() + source_begin[start],
+                             source_end[start + needle_length - 1] - source_begin[start]);
     }
     return matches;
 }
@@ -238,7 +240,8 @@ inline void collect_independent_matches_(substrings_case_sensitivity_t sensitivi
 
             if (sensitivity == substrings_uncased_k) {
                 for (auto const &match : independent_uncased_matches_(haystack, needle))
-                    out.append({haystack_index, needle_index, match.first, match.second});
+                    out.append(
+                        {haystack_index, needle_index, (std::size_t)(match.data() - haystack.data()), match.size()});
                 continue;
             }
             for (std::size_t offset = 0; offset + needle.size() <= haystack.size(); ++offset)
@@ -251,23 +254,68 @@ inline void collect_independent_matches_(substrings_case_sensitivity_t sensitivi
 
 /** @brief Selects one closed-set adversarial needle vocabulary. */
 enum class substrings_needle_generator_t {
-    self_overlapping_k,     ///< "a", "aa", "aaa", … - every needle a suffix of the next, quadratic outputs.
-    mutual_overlap_k,       ///< One needle's suffix is another's prefix - the textbook failure-link case.
-    shared_prefix_fan_k,    ///< One long common prefix, diverging only at the final byte.
-    sparse_wide_alphabet_k, ///< Only bytes 0x01 and 0xFF - worst case for the double-array packer.
-    fold_expanding_k,       ///< Runs of "k", "ss", "ffl" - a 3:1 preimage byte expansion under folding.
-    random_short_k,         ///< A fixed core plus deduplicated random needles - the control.
-    count_k,                ///< One past the last generator, so the sweep can never drift from the list.
+    /** "a", "aa", "aaa", … - every needle a suffix of the next, quadratic outputs. */
+    self_overlapping_k,
+    /** One needle's suffix is another's prefix - the textbook failure-link case. */
+    mutual_overlap_k,
+    /** One long common prefix, diverging only at the final byte. */
+    shared_prefix_fan_k,
+    /** Only bytes 0x01 and 0xFF - worst case for the double-array packer. */
+    sparse_wide_alphabet_k,
+    /** Wide fold images sampled from the shipped tables - multi-rune expansions under folding. */
+    fold_expanding_k,
+    /** A fixed core plus deduplicated random needles - the control. */
+    random_short_k,
+    /** Needles of 1-3 runes sampled from the fold-preimage tables' image side. */
+    preimage_sampled_k,
+    /** One rune per UTF-8 width class 1-4, so a single needle spans every decode path. */
+    mixed_width_k,
+    /** One past the last generator, so the sweep can never drift from the list. */
+    count_k,
 };
 
-/** @brief Selects one closed-set adversarial haystack construction, built against the generated needles. */
-enum class substrings_haystack_generator_t {
-    planted_exact_k,        ///< Each needle embedded once inside disjoint-alphabet noise.
-    planted_concatenated_k, ///< Needles back to back with no separator - forces overlapping matches.
-    near_miss_k,            ///< Every needle with its final byte perturbed - a negative control.
-    fold_preimage_k,        ///< Needles re-encoded through case variants that only folding can match.
-    boundary_stress_k,      ///< Flush with the first byte, flush with the last, and self-repeats.
-    count_k,                ///< One past the last generator, so the sweep can never drift from the list.
+/** @brief Selects one byte-agnostic haystack skeleton; the planted bytes come from the transform. */
+enum class substrings_placement_t {
+    /** Noise, one transformed needle, noise. */
+    planted_in_noise_k,
+    /** Up to 4 consecutive needles' variants back to back - forces overlapping matches. */
+    concatenated_k,
+    /** The variant twice back to back, flush with the first byte and flush with the last. */
+    boundary_flush_k,
+    /** One ~16 KB haystack with variants planted every ~1 KB - pairs with the sliced-specs cells. */
+    straddling_k,
+    /** The variant interrupted by one byte no fold can bridge - the planting must never match. */
+    torn_codepoint_k,
+    /** One past the last placement, so the sweep can never drift from the list. */
+    count_k,
+};
+
+/** @brief Selects how a planted needle is re-spelled, decoupled from where it lands. */
+enum class substrings_transform_t {
+    /** The needle verbatim - preserved under both modes. */
+    identity_k,
+    /** Table-driven inverse folding - preserved uncased, defeated cased when any byte changed. */
+    fold_preimage_k,
+    /** `^0x20` on every ASCII letter - preserved uncased, defeated cased when any letter existed. */
+    case_flip_ascii_k,
+    /** `^0x01` on the last ASCII byte - defeated under BOTH modes, the true negative control. */
+    byte_perturb_k,
+    /** The final codepoint dropped - defeated under both modes. */
+    truncated_tail_k,
+    /** One past the last transform, so the sweep can never drift from the list. */
+    count_k,
+};
+
+/** @brief What a planting demands of the engine: the exact match record present, or absent. */
+enum class substrings_planting_effect_t {
+    preserved_k,
+    defeated_k,
+};
+
+/** @brief One planted variant's ground truth: the exact match record and what the engine owes it. */
+struct substrings_planting_t {
+    substrings_match_t match;
+    substrings_planting_effect_t effect;
 };
 
 /** @brief Whether a generator's needles are well-formed UTF-8, and so can be case-folded at all. Only the
@@ -290,21 +338,192 @@ constexpr char const *substrings_needle_generator_name(substrings_needle_generat
     case substrings_needle_generator_t::sparse_wide_alphabet_k: return "sparse_wide_alphabet";
     case substrings_needle_generator_t::fold_expanding_k: return "fold_expanding";
     case substrings_needle_generator_t::random_short_k: return "random_short";
+    case substrings_needle_generator_t::preimage_sampled_k: return "preimage_sampled";
+    case substrings_needle_generator_t::mixed_width_k: return "mixed_width";
     case substrings_needle_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
     }
     return "unknown";
 }
 
-constexpr char const *substrings_haystack_generator_name(substrings_haystack_generator_t kind) noexcept {
-    switch (kind) {
-    case substrings_haystack_generator_t::planted_exact_k: return "planted_exact";
-    case substrings_haystack_generator_t::planted_concatenated_k: return "planted_concatenated";
-    case substrings_haystack_generator_t::near_miss_k: return "near_miss";
-    case substrings_haystack_generator_t::fold_preimage_k: return "fold_preimage";
-    case substrings_haystack_generator_t::boundary_stress_k: return "boundary_stress";
-    case substrings_haystack_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
+constexpr char const *substrings_placement_name(substrings_placement_t placement) noexcept {
+    switch (placement) {
+    case substrings_placement_t::planted_in_noise_k: return "planted_in_noise";
+    case substrings_placement_t::concatenated_k: return "concatenated";
+    case substrings_placement_t::boundary_flush_k: return "boundary_flush";
+    case substrings_placement_t::straddling_k: return "straddling";
+    case substrings_placement_t::torn_codepoint_k: return "torn_codepoint";
+    case substrings_placement_t::count_k: break; // ? Never a real placement, only the sweep's bound
     }
     return "unknown";
+}
+
+constexpr char const *substrings_transform_name(substrings_transform_t transform) noexcept {
+    switch (transform) {
+    case substrings_transform_t::identity_k: return "identity";
+    case substrings_transform_t::fold_preimage_k: return "fold_preimage";
+    case substrings_transform_t::case_flip_ascii_k: return "case_flip_ascii";
+    case substrings_transform_t::byte_perturb_k: return "byte_perturb";
+    case substrings_transform_t::truncated_tail_k: return "truncated_tail";
+    case substrings_transform_t::count_k: break; // ? Never a real transform, only the sweep's bound
+    }
+    return "unknown";
+}
+
+/** @brief Sorts and deduplicates a locally built vocabulary pool, then assigns it into the tape. */
+inline void assign_deduplicated_(std::vector<std::string> &pool, arrow_strings_tape_t &needles) {
+    std::sort(pool.begin(), pool.end());
+    pool.erase(std::unique(pool.begin(), pool.end()), pool.end());
+    verify(needles.try_assign(pool.data(), pool.data() + pool.size()) == status_t::success_k);
+}
+
+/** @brief Appends @p rune to @p out as 1-4 UTF-8 bytes; sampled fold runes must always re-encode. */
+inline void append_rune_utf8_(sz_rune_t rune, std::string &out) {
+    sz_u8_t encoded[4];
+    sz_rune_length_t const encoded_length = sz_rune_encode(rune, encoded);
+    verify(encoded_length != sz_rune_invalid_k && "Sampled fold rune must re-encode");
+    out.append((char const *)encoded, (std::size_t)encoded_length);
+}
+
+/** @brief One fold-space rune drawn uniformly from the narrow preimage table's images within
+ *         `[first_rune, last_rune)`; the image array is sorted, so the range is a binary-searched slab. */
+inline sz_rune_t sample_fold_image_rune_(sz_rune_t first_rune, sz_rune_t last_rune) {
+    sz_u32_t const *const images_begin = szs_fold_preimage_narrow_images_;
+    sz_u32_t const *const images_end = images_begin + szs_fold_preimage_narrow_count_k;
+    sz_u32_t const *const slab_begin = std::lower_bound(images_begin, images_end, (sz_u32_t)first_rune);
+    sz_u32_t const *const slab_end = std::lower_bound(images_begin, images_end, (sz_u32_t)last_rune);
+    verify(slab_begin != slab_end && "The requested rune range holds no fold images");
+    std::uniform_int_distribution<std::size_t> slab_position(0, (std::size_t)(slab_end - slab_begin) - 1);
+    std::size_t const chosen_position = slab_position(global_random_generator());
+    return (sz_rune_t)slab_begin[chosen_position];
+}
+
+/**
+ *  @brief Appends @p needle re-encoded through fold space with every image swapped for one genuine
+ *         preimage - wide multi-rune images first - so only case folding can reconcile the result.
+ *         Returns the number of swapped images; runes without preimages pass through verbatim.
+ */
+inline std::size_t append_fold_preimage_variant_(span<char const> needle, std::string &out) {
+    std::vector<sz_rune_t> folded;
+    for (char const *cursor = needle.begin(), *end = needle.end(); cursor != end;) {
+        sz_rune_t rune;
+        sz_rune_length_t const consumed = sz_rune_decode(cursor, end, &rune);
+        verify(consumed != sz_rune_invalid_k && "Fold-preimage variants need well-formed UTF-8 needles");
+        sz_rune_t folded_runes[3];
+        std::size_t const folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+        for (std::size_t index = 0; index < folded_count; ++index) folded.push_back(folded_runes[index]);
+        cursor += consumed;
+    }
+
+    auto &generator = global_random_generator();
+    std::size_t swapped_images = 0;
+    for (std::size_t position = 0; position < folded.size();) {
+        // Wide images first, longest window first, so multi-rune expansions like the sharp S appear.
+        std::size_t const remaining_runes = folded.size() - position;
+        span<sz_rune_t const> preimages;
+        std::size_t consumed_runes = 1;
+        if (remaining_runes >= 3) //
+            preimages = fold_preimage_of_runes({folded.data() + position, 3}), consumed_runes = 3;
+        if (preimages.size() == 0 && remaining_runes >= 2)
+            preimages = fold_preimage_of_runes({folded.data() + position, 2}), consumed_runes = 2;
+        if (preimages.size() == 0) //
+            preimages = fold_preimage_of_rune(folded[position]), consumed_runes = 1;
+        if (preimages.size() == 0) {
+            append_rune_utf8_(folded[position], out);
+            position += 1;
+            continue;
+        }
+        std::uniform_int_distribution<std::size_t> preimage_position(0, preimages.size() - 1);
+        std::size_t const chosen_position = preimage_position(generator);
+        append_rune_utf8_(preimages[chosen_position], out);
+        ++swapped_images;
+        position += consumed_runes;
+    }
+    return swapped_images;
+}
+
+/** @brief Perturbs the last ASCII byte with `^0x01`, appending the variant; a needle without a single
+ *         ASCII byte is left un-appended. @return whether the perturbation applied. */
+inline bool try_perturb_last_ascii_byte_(span<char const> needle, std::string &out) {
+    std::size_t ascii_position = needle.size();
+    for (std::size_t index = needle.size(); index > 0; --index)
+        if ((unsigned char)needle[index - 1] < 0x80) {
+            ascii_position = index - 1;
+            break;
+        }
+    if (ascii_position == needle.size()) return false;
+    std::size_t const variant_begin = out.size();
+    out.append(needle.data(), needle.size());
+    out[variant_begin + ascii_position] = (char)(out[variant_begin + ascii_position] ^ 0x01);
+    return true;
+}
+
+/** @brief Drops the needle's final codepoint by walking back over continuation bytes - on a non-UTF-8
+ *         vocabulary the walk stops immediately, dropping one byte; a single-codepoint needle refuses. */
+inline bool try_truncate_needle_tail_(span<char const> needle, std::string &out) {
+    if (needle.size() < 2) return false;
+    std::size_t truncated_size = needle.size() - 1;
+    while (truncated_size > 0 && ((unsigned char)needle[truncated_size] & 0xC0) == 0x80) --truncated_size;
+    if (truncated_size == 0) return false;
+    out.append(needle.data(), truncated_size);
+    return true;
+}
+
+/**
+ *  @brief Appends one transform's variant of @p needle to @p out, answering what the planting demands of
+ *         the engine under @p sensitivity. Transforms that cannot apply fall through a terminating ladder:
+ *         a needle with no ASCII byte sends the perturbation to tail truncation, a single-codepoint needle
+ *         sends truncation to the perturbation, and the identity ends every path.
+ */
+inline substrings_planting_effect_t append_transformed_needle_( //
+    substrings_transform_t transform, substrings_case_sensitivity_t sensitivity,
+    substrings_needle_generator_t needle_kind, span<char const> needle, std::string &out) {
+
+    if (transform == substrings_transform_t::fold_preimage_k && !substrings_needles_are_utf8_(needle_kind))
+        transform = substrings_transform_t::case_flip_ascii_k; // ? Folding needs decodable needles.
+
+    std::size_t const variant_begin = out.size();
+    switch (transform) {
+    case substrings_transform_t::identity_k: break;
+
+    case substrings_transform_t::fold_preimage_k: {
+        [[maybe_unused]] std::size_t const swapped_images = append_fold_preimage_variant_(needle, out);
+        // A swap may reproduce the original spelling - the sharp S is its own preimage - so the cased
+        // verdict compares bytes, not swap counts.
+        bool const changed = out.size() - variant_begin != needle.size() ||
+                             std::memcmp(out.data() + variant_begin, needle.data(), needle.size()) != 0;
+        if (sensitivity == substrings_uncased_k || !changed) return substrings_planting_effect_t::preserved_k;
+        return substrings_planting_effect_t::defeated_k;
+    }
+
+    case substrings_transform_t::case_flip_ascii_k: {
+        bool any_letter_flipped = false;
+        for (std::size_t index = 0; index < needle.size(); ++index) {
+            char const letter = needle[index];
+            bool const is_ascii_letter = (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z');
+            any_letter_flipped |= is_ascii_letter;
+            out.push_back(is_ascii_letter ? (char)(letter ^ 0x20) : letter);
+        }
+        if (sensitivity == substrings_uncased_k || !any_letter_flipped)
+            return substrings_planting_effect_t::preserved_k;
+        return substrings_planting_effect_t::defeated_k;
+    }
+
+    case substrings_transform_t::byte_perturb_k: {
+        if (try_perturb_last_ascii_byte_(needle, out)) return substrings_planting_effect_t::defeated_k;
+        if (try_truncate_needle_tail_(needle, out)) return substrings_planting_effect_t::defeated_k;
+        break;
+    }
+
+    case substrings_transform_t::truncated_tail_k: {
+        if (try_truncate_needle_tail_(needle, out)) return substrings_planting_effect_t::defeated_k;
+        if (try_perturb_last_ascii_byte_(needle, out)) return substrings_planting_effect_t::defeated_k;
+        break;
+    }
+
+    case substrings_transform_t::count_k: break; // ? Never a real transform, only the sweep's bound
+    }
+    out.append(needle.data(), needle.size());
+    return substrings_planting_effect_t::preserved_k;
 }
 
 /**
@@ -362,25 +581,65 @@ inline void generate_substrings_needles_(substrings_needle_generator_t kind, std
 
     case substrings_needle_generator_t::fold_expanding_k: {
         // Needles whose fold preimages span more bytes than the needle itself - "k" also matches the 3-byte
-        // Kelvin sign, so `max_match_bytes` cannot be read off needle lengths.
-        char const *const seeds[] = {"k", "ss", "ffl", "st", "a"};
+        // Kelvin sign, so `max_match_bytes` cannot be read off needle lengths. The Kelvin anchor stays
+        // pinned; every following needle is a wide-table image repeated 1-4 times, so 2:1 and 3:1 byte
+        // expansions from every script appear organically rather than from a hand-picked seed list.
+        std::vector<std::string> pool {"k"};
+        auto &generator = global_random_generator();
+        std::uniform_int_distribution<std::size_t> row_position(0, szs_fold_preimage_wide_count_k - 1);
         for (std::size_t index = 0; index < count; ++index) {
-            char const *const seed = seeds[index % 5];
+            std::size_t const chosen_row = row_position(generator);
+            sz_u32_t const *const image = szs_fold_preimage_wide_images_[chosen_row];
             scratch.clear();
-            for (std::size_t repeat = 0; repeat <= index % 4; ++repeat) scratch.append(seed);
-            verify(needles.try_append({scratch.data(), scratch.size()}) == status_t::success_k);
+            for (std::size_t repeat = 0; repeat <= index % 4; ++repeat)
+                for (std::size_t rune_index = 0; rune_index < 3 && image[rune_index] != 0; ++rune_index)
+                    append_rune_utf8_((sz_rune_t)image[rune_index], scratch);
+            pool.push_back(scratch);
         }
+        assign_deduplicated_(pool, needles);
         return;
     }
 
     case substrings_needle_generator_t::random_short_k: {
-        // The one kind needing a whole-collection sort and deduplication before insertion, which a tape of
-        // variable-length ranges cannot do in place.
+        // A fixed textbook core plus random needles, deduplicated as one pool.
         std::vector<std::string> pool {"he", "she", "his", "hers"};
         for (std::string &value : random_short_strings_(count, 3, 6)) pool.push_back(std::move(value));
-        std::sort(pool.begin(), pool.end());
-        pool.erase(std::unique(pool.begin(), pool.end()), pool.end());
-        verify(needles.try_assign(pool.data(), pool.data() + pool.size()) == status_t::success_k);
+        assign_deduplicated_(pool, needles);
+        return;
+    }
+
+    case substrings_needle_generator_t::preimage_sampled_k: {
+        // 1-3 fold-space runes per needle, sampled from the narrow table's image side, so Greek, Cyrillic,
+        // Cherokee, and astral fold pairs appear by construction rather than from hand-picked literals.
+        std::vector<std::string> pool;
+        auto &generator = global_random_generator();
+        std::uniform_int_distribution<std::size_t> rune_count_distribution(1, 3);
+        for (std::size_t index = 0; index < count; ++index) {
+            scratch.clear();
+            std::size_t const rune_count = rune_count_distribution(generator);
+            for (std::size_t rune_index = 0; rune_index < rune_count; ++rune_index)
+                append_rune_utf8_(sample_fold_image_rune_(0, 0x110000), scratch);
+            pool.push_back(scratch);
+        }
+        assign_deduplicated_(pool, needles);
+        return;
+    }
+
+    case substrings_needle_generator_t::mixed_width_k: {
+        // One rune per UTF-8 width class - ASCII, 2-byte, 3-byte, 4-byte - so every needle drags the walk
+        // through every decode width, and match spans never equal codepoint counts.
+        std::vector<std::string> pool;
+        auto &generator = global_random_generator();
+        std::uniform_int_distribution<int> ascii_letter('a', 'z');
+        for (std::size_t index = 0; index < count; ++index) {
+            scratch.clear();
+            scratch.push_back((char)ascii_letter(generator));
+            append_rune_utf8_(sample_fold_image_rune_(0x80, 0x800), scratch);
+            append_rune_utf8_(sample_fold_image_rune_(0x800, 0x10000), scratch);
+            append_rune_utf8_(sample_fold_image_rune_(0x10000, 0x110000), scratch);
+            pool.push_back(scratch);
+        }
+        assign_deduplicated_(pool, needles);
         return;
     }
 
@@ -388,74 +647,117 @@ inline void generate_substrings_needles_(substrings_needle_generator_t kind, std
     }
 }
 
-/** @brief Fills @p haystacks with @p haystack_count adversarial haystacks built against @p needles. */
-inline void generate_substrings_haystacks_(substrings_haystack_generator_t kind, arrow_strings_view_t needles,
-                                           std::size_t haystack_count, arrow_strings_tape_t &haystacks) {
+/**
+ *  @brief Fills @p haystacks with @p haystack_count skeletons of @p placement, planting each needle's
+ *         @p transform variant and recording every planting's ground truth into @p plantings.
+ */
+inline void generate_substrings_placements_(substrings_placement_t placement, substrings_transform_t transform,
+                                            substrings_case_sensitivity_t sensitivity,
+                                            substrings_needle_generator_t needle_kind, arrow_strings_view_t needles,
+                                            std::size_t haystack_count, arrow_strings_tape_t &haystacks,
+                                            std::vector<substrings_planting_t> &plantings) {
     haystacks.reset();
+    plantings.clear();
     if (needles.size() == 0) return;
 
     auto &generator = global_random_generator();
     std::uniform_int_distribution<int> noise_length(4, 24);
     std::uniform_int_distribution<int> noise_byte('m', 'z'); // ? Disjoint from every needle alphabet above.
+    // Cased cells sprinkle malformed UTF-8 into the noise - lone continuation bytes - since the byte-exact
+    // oracle is total over arbitrary bytes, while the uncased oracle demands well-formed haystacks.
+    std::uniform_int_distribution<int> malformed_byte(0x80, 0xBF);
+    std::uniform_int_distribution<int> malformed_gate(0, 7);
     std::string scratch;
 
-    for (std::size_t haystack_index = 0; haystack_index < haystack_count; ++haystack_index) {
-        scratch.clear();
-        std::size_t const first_needle = haystack_index % needles.size();
-        switch (kind) {
-
-        case substrings_haystack_generator_t::planted_exact_k: {
-            span<char const> const needle = needles[first_needle];
-            for (int index = 0; index < noise_length(generator); ++index)
-                scratch.push_back((char)noise_byte(generator));
-            scratch.append(needle.data(), needle.size());
-            for (int index = 0; index < noise_length(generator); ++index)
-                scratch.push_back((char)noise_byte(generator));
-            break;
-        }
-
-        case substrings_haystack_generator_t::planted_concatenated_k:
-            // No separator, so matches of different needles overlap and nest at the seams.
-            for (std::size_t offset = 0; offset < 4 && offset < needles.size(); ++offset) {
-                span<char const> const needle = needles[(first_needle + offset) % needles.size()];
-                scratch.append(needle.data(), needle.size());
-            }
-            break;
-
-        case substrings_haystack_generator_t::near_miss_k: {
-            // Every planted needle has its final byte perturbed, so the walk descends deep and then fails.
-            span<char const> const needle = needles[first_needle];
-            scratch.append(needle.data(), needle.size());
-            if (!scratch.empty()) scratch.back() = (char)(scratch.back() ^ 0x20);
-            for (int index = 0; index < noise_length(generator); ++index)
-                scratch.push_back((char)noise_byte(generator));
-            break;
-        }
-
-        case substrings_haystack_generator_t::fold_preimage_k: {
-            // Only an uncased dictionary can match these; a cased one must report nothing at all.
-            span<char const> const needle = needles[first_needle];
-            for (std::size_t index = 0; index < needle.size(); ++index) {
-                char const letter = needle[index];
-                if (letter == 'k' && index + 1 == needle.size()) { scratch.append("\xE2\x84\xAA"); } // ? Kelvin U+212A
-                else if (letter >= 'a' && letter <= 'z') { scratch.push_back((char)(letter - 'a' + 'A')); }
-                else { scratch.push_back(letter); }
-            }
-            break;
-        }
-
-        case substrings_haystack_generator_t::boundary_stress_k: {
-            // Flush with the first byte and flush with the last, plus a self-repeat in between, so a match
-            // lands on every edge a chunked or windowed walk could mishandle.
-            span<char const> const needle = needles[first_needle];
-            scratch.append(needle.data(), needle.size());
-            scratch.append(needle.data(), needle.size());
-            break;
-        }
-
-        case substrings_haystack_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
-        }
+    auto append_noise = [&] {
+        for (int index = 0, length = noise_length(generator); index < length; ++index)
+            if (sensitivity == substrings_cased_k && malformed_gate(generator) == 0)
+                scratch.push_back((char)malformed_byte(generator));
+            else scratch.push_back((char)noise_byte(generator));
+    };
+    auto plant = [&](std::size_t haystack_index, std::size_t needle_index) {
+        std::size_t const offset = scratch.size();
+        substrings_planting_effect_t const effect = append_transformed_needle_(transform, sensitivity, needle_kind,
+                                                                               needles[needle_index], scratch);
+        plantings.push_back({{haystack_index, needle_index, offset, scratch.size() - offset}, effect});
+    };
+    auto tear_last_planting = [&] {
+        // One byte no fold can bridge - '0' appears in no vocabulary and in no letter's fold - lands inside
+        // the variant, so the planting must never match. The uncased oracle demands well-formed haystacks,
+        // so there the tear retreats to a codepoint boundary; single-codepoint variants stay whole.
+        substrings_planting_t &planting = plantings.back();
+        if (planting.match.byte_length < 2) return;
+        std::size_t tear_offset = planting.match.byte_offset + planting.match.byte_length / 2;
+        if (sensitivity == substrings_uncased_k)
+            while (tear_offset > planting.match.byte_offset && ((unsigned char)scratch[tear_offset] & 0xC0) == 0x80)
+                --tear_offset;
+        if (tear_offset == planting.match.byte_offset) return;
+        scratch.insert(scratch.begin() + (std::ptrdiff_t)tear_offset, '0');
+        planting.match.byte_length += 1;
+        planting.effect = substrings_planting_effect_t::defeated_k;
+    };
+    auto append_haystack = [&] {
         verify(haystacks.try_append({scratch.data(), scratch.size()}) == status_t::success_k);
+        scratch.clear();
+    };
+
+    switch (placement) {
+
+    case substrings_placement_t::planted_in_noise_k:
+        for (std::size_t haystack_index = 0; haystack_index < haystack_count; ++haystack_index) {
+            append_noise();
+            plant(haystack_index, haystack_index % needles.size());
+            append_noise();
+            append_haystack();
+        }
+        return;
+
+    case substrings_placement_t::concatenated_k:
+        // No separator, so matches of different needles' variants overlap and nest at the seams.
+        for (std::size_t haystack_index = 0; haystack_index < haystack_count; ++haystack_index) {
+            for (std::size_t offset = 0; offset < 4 && offset < needles.size(); ++offset)
+                plant(haystack_index, (haystack_index + offset) % needles.size());
+            append_haystack();
+        }
+        return;
+
+    case substrings_placement_t::boundary_flush_k:
+        // Flush with the first byte and flush with the last, plus a self-repeat in between, so a match
+        // lands on every edge a chunked or windowed walk could mishandle.
+        for (std::size_t haystack_index = 0; haystack_index < haystack_count; ++haystack_index) {
+            plant(haystack_index, haystack_index % needles.size());
+            plant(haystack_index, haystack_index % needles.size());
+            append_haystack();
+        }
+        return;
+
+    case substrings_placement_t::straddling_k: {
+        // One large haystack for the all-cores-on-one-haystack path: variants planted at a fixed stride,
+        // so under the sliced specs the matches keep crossing slice seams.
+        std::size_t const haystack_bytes = 16 * 1024;
+        std::size_t const stride_bytes = 1024;
+        std::size_t planted_count = 0;
+        while (scratch.size() < haystack_bytes) {
+            std::size_t const next_plant_offset = (std::min)(scratch.size() + stride_bytes, haystack_bytes);
+            while (scratch.size() < next_plant_offset) append_noise();
+            plant(0, planted_count % needles.size());
+            ++planted_count;
+        }
+        append_haystack();
+        return;
+    }
+
+    case substrings_placement_t::torn_codepoint_k:
+        for (std::size_t haystack_index = 0; haystack_index < haystack_count; ++haystack_index) {
+            append_noise();
+            plant(haystack_index, haystack_index % needles.size());
+            tear_last_planting();
+            append_noise();
+            append_haystack();
+        }
+        return;
+
+    case substrings_placement_t::count_k: break; // ? Never a real placement, only the sweep's bound
     }
 }
 
@@ -659,10 +961,12 @@ void test_substrings_uncased() {
         substrings_match_set_t engine_matches;
         collect_matches_into_(engine, haystacks.view(), engine_matches);
 
-        auto const oracle_matches = independent_uncased_matches_(haystacks.view()[0], needles[0]);
+        span<char const> const haystack_view = haystacks[0];
+        auto const oracle_matches = independent_uncased_matches_(haystack_view, needles[0]);
         substrings_match_set_t expected_matches;
         for (auto const &oracle_match : oracle_matches)
-            expected_matches.append({0, 0, oracle_match.first, oracle_match.second});
+            expected_matches.append(
+                {0, 0, (std::size_t)(oracle_match.data() - haystack_view.data()), oracle_match.size()});
         expected_matches.finalize();
 
         if (engine_matches != expected_matches) {
@@ -691,9 +995,31 @@ void test_substrings_uncased() {
 void test_substrings_agreement() {
     std::printf("  - testing one-needle agreement with sz_utf8_uncased_search...\n");
 
-    std::vector<std::string> const needle_pool {
-        "the", "quick", "STRASSE", "stra\xC3\x9F" "e", "ss", "K", "caf\xC3\xA9", "\xC3\x85ngstrom",
+    std::vector<std::string> needle_pool {
+        "the",
+        "quick",
+        "STRASSE",
+        "stra\xC3\x9F" "e", // ? Split so "\x9Fe" cannot parse as one escape.
+        "ss",
+        "K",
+        "caf\xC3\xA9",
+        "\xC3\x85ngstrom",
     };
+    // Beyond the pinned anchors, needles sampled from the fold tables, so the agreement claim covers every
+    // script with fold pairs rather than the hand-picked list: preimage re-spellings of each anchor, then
+    // fold-space runes drawn straight from the narrow table's image side.
+    for (std::size_t anchor_index = 0, anchors = needle_pool.size(); anchor_index < anchors; ++anchor_index) {
+        std::string variant;
+        span<char const> const anchor {needle_pool[anchor_index].data(), needle_pool[anchor_index].size()};
+        [[maybe_unused]] std::size_t const swapped_images = append_fold_preimage_variant_(anchor, variant);
+        needle_pool.push_back(std::move(variant));
+    }
+    for (std::size_t sample_index = 0; sample_index < 8; ++sample_index) {
+        std::string sampled;
+        append_rune_utf8_(sample_fold_image_rune_(0, 0x110000), sampled);
+        append_rune_utf8_(sample_fold_image_rune_(0, 0x110000), sampled);
+        needle_pool.push_back(std::move(sampled));
+    }
     span<string_view const> const empty_motifs;
     auto &generator = global_random_generator();
 
@@ -758,24 +1084,30 @@ void test_substrings_agreement() {
  *  buffers it owns, so one backing allocation survives the whole sweep.
  */
 struct substrings_adversarial_scratch_t {
-    /** @brief Which generator pair produced the current cell, so a failing check can name its configuration
+    /** @brief Which axis triple produced the current cell, so a failing check can name its configuration
      *         instead of leaving it to be reconstructed from a step index. */
     substrings_needle_generator_t needle_kind = substrings_needle_generator_t::self_overlapping_k;
-    substrings_haystack_generator_t haystack_kind = substrings_haystack_generator_t::planted_exact_k;
+    substrings_placement_t placement = substrings_placement_t::planted_in_noise_k;
+    substrings_transform_t transform = substrings_transform_t::identity_k;
+
+    /** @brief Default on most cells; every third cell shrinks `l2_bytes` so straddling haystacks slice. */
+    cpu_specs_t specs;
 
     arrow_strings_tape_t needles;
     arrow_strings_tape_t haystacks;
+    std::vector<substrings_planting_t> plantings;
     substrings_match_set_t engine_keys, oracle_keys, variant_keys;
 #if SZ_USE_CUDA
     substrings_match_set_t cuda_keys;
 #endif
 };
 
-/** @brief Reports @p what went wrong and which generator pair produced the cell, mirroring how
+/** @brief Reports @p what went wrong and which axis triple produced the cell, mirroring how
  *         `edit_distance_log_mismatch` prefixes a similarity failure with the pair that caused it. */
 void log_substrings_cell_mismatch_(substrings_adversarial_scratch_t const &scratch, char const *what) {
-    std::fprintf(stderr, "%s on needles=%s haystacks=%s\n", what, substrings_needle_generator_name(scratch.needle_kind),
-                 substrings_haystack_generator_name(scratch.haystack_kind));
+    std::fprintf(stderr, "%s on needles=%s placement=%s transform=%s\n", what,
+                 substrings_needle_generator_name(scratch.needle_kind), substrings_placement_name(scratch.placement),
+                 substrings_transform_name(scratch.transform));
 }
 
 /**
@@ -798,9 +1130,29 @@ void check_substrings_against_oracle_(substrings_case_sensitivity_t sensitivity,
     }
 }
 
-/** @brief Serial and fork-union-parallel must report the identical set on the same cell. */
+/**
+ *  @brief Construction-time truth: every preserved planting must appear among the engine's keys as its
+ *         exact record, every defeated one must not. A third witness beside the oracle - the generator
+ *         knows where it planted what, so a misconception the engine and oracle share cannot survive it.
+ *         Runs on every cell, right after the oracle check fills `engine_keys`.
+ */
+void check_substrings_declared_effects_(substrings_adversarial_scratch_t &scratch) {
+    for (substrings_planting_t const &planting : scratch.plantings) {
+        bool const present = std::binary_search(scratch.engine_keys.matches.begin(), scratch.engine_keys.matches.end(),
+                                                planting.match, substrings_match_less_);
+        bool const expected = planting.effect == substrings_planting_effect_t::preserved_k;
+        if (present == expected) continue;
+        log_substrings_cell_mismatch_(scratch, expected ? "Preserved planting missing" : "Defeated planting matched");
+        std::fprintf(stderr, "  haystack=%zu needle=%zu offset=%zu length=%zu\n", planting.match.haystack_index,
+                     planting.match.needle_index, planting.match.byte_offset, planting.match.byte_length);
+        verify(false && "The engine's matches contradict a planting's declared effect");
+    }
+}
+
+/** @brief Serial and fork-union-parallel must report the identical set on the same cell; the parallel
+ *         engine takes the real pool and the cell's specs, so sliced-L2 cells genuinely slice. */
 void check_substrings_backends_agree_(substrings_case_sensitivity_t sensitivity,
-                                      substrings_adversarial_scratch_t &scratch) {
+                                      substrings_adversarial_scratch_t &scratch, forkunion_executor_t &pool) {
     arrow_strings_view_t const needles_view = scratch.needles.view();
     arrow_strings_view_t const haystacks_view = scratch.haystacks.view();
 
@@ -810,7 +1162,7 @@ void check_substrings_backends_agree_(substrings_case_sensitivity_t sensitivity,
 
     substrings_u32_parallel_t parallel_engine;
     verify(parallel_engine.try_build(needles_view, sensitivity) == status_t::success_k);
-    collect_matches_into_(parallel_engine, haystacks_view, scratch.variant_keys, dummy_executor_t {});
+    collect_matches_into_(parallel_engine, haystacks_view, scratch.variant_keys, pool, scratch.specs);
     if (scratch.engine_keys != scratch.variant_keys) {
         log_substrings_cell_mismatch_(scratch, "Serial-vs-parallel divergence");
         verify(false && "Serial and parallel backends disagree");
@@ -992,41 +1344,54 @@ void test_substrings_cuda_memory_contract() {
 #endif
 
 /**
- *  @brief Crosses every adversarial needle vocabulary with every adversarial haystack construction.
+ *  @brief Crosses every needle vocabulary with every placement skeleton and every needle transform.
  *
  *  Walked by rotation rather than nested loops: `rotating_index` advances a phase each full turn, so
- *  crossing two rotations still reaches every pair, and `scale_iterations` decides how far into that product
- *  a run gets. Ground truth runs on every cell; the costlier properties rotate, keeping the per-cell price
- *  flat while the sweep as a whole still exercises each of them against each generator pair.
+ *  crossing the rotations still reaches every combination, and `scale_iterations` decides how far into that
+ *  product a run gets. Ground truth and the declared planting effects run on every cell; the costlier
+ *  properties rotate, keeping the per-cell price flat while the sweep as a whole still exercises each of
+ *  them against each axis triple.
  */
 void test_substrings_adversarial() {
-    std::printf("  - testing adversarial needle x haystack cross-product...\n");
+    std::printf("  - testing adversarial needle x placement x transform cross-product...\n");
     std::size_t const needle_generators = (std::size_t)substrings_needle_generator_t::count_k;
-    std::size_t const haystack_generators = (std::size_t)substrings_haystack_generator_t::count_k;
-    std::size_t const cells = scale_iterations(needle_generators * haystack_generators);
+    std::size_t const placements = (std::size_t)substrings_placement_t::count_k;
+    std::size_t const transforms = (std::size_t)substrings_transform_t::count_k;
+    std::size_t const cells = scale_iterations(needle_generators * placements * transforms);
     substrings_adversarial_scratch_t scratch; // ? Constructed once, refilled by every cell below.
+
+    // One real pool, so sliced-specs cells exercise the all-cores-on-one-haystack path; a dummy executor
+    // would run `for_slices` as a single slice and never slice at all.
+    forkunion_executor_t pool;
+    verify(pool.try_spawn(4) == status_t::success_k);
 
     for (std::size_t step = 0; step < cells; ++step) {
         auto const needle_kind = (substrings_needle_generator_t)rotating_index(step, needle_generators);
-        auto const haystack_kind = (substrings_haystack_generator_t)rotating_index(step, haystack_generators);
+        auto const placement = (substrings_placement_t)rotating_index(step, placements);
+        auto const transform = (substrings_transform_t)rotating_index(step, transforms);
         // A vocabulary of arbitrary bytes can only be matched byte-exactly: folding rejects malformed UTF-8
         // by contract, and the brute-force oracle decodes its inputs too.
         auto const sensitivity = step % 2 && substrings_needles_are_utf8_(needle_kind) ? substrings_uncased_k
                                                                                        : substrings_cased_k;
 
         scratch.needle_kind = needle_kind;
-        scratch.haystack_kind = haystack_kind;
+        scratch.placement = placement;
+        scratch.transform = transform;
+        scratch.specs = cpu_specs_t {};
+        if (step % 3 == 0) scratch.specs.l2_bytes = 1024; // ? Far below the fixtures, forcing haystack slicing.
 
         // A vocabulary whose output pool grows with the square of its depth takes the quadratic knob, so
         // doubling the multiplier doubles the work rather than quadrupling it.
         std::size_t const depth = substrings_needles_grow_quadratically_(needle_kind) ? scale_iterations_quadratic(10)
                                                                                       : scale_iterations(10);
         generate_substrings_needles_(needle_kind, depth, scratch.needles);
-        generate_substrings_haystacks_(haystack_kind, scratch.needles.view(), 6, scratch.haystacks);
+        generate_substrings_placements_(placement, transform, sensitivity, needle_kind, scratch.needles.view(), 6,
+                                        scratch.haystacks, scratch.plantings);
 
         check_substrings_against_oracle_(sensitivity, scratch);
+        check_substrings_declared_effects_(scratch);
         switch (rotating_index(step, 3)) {
-        case 0: check_substrings_backends_agree_(sensitivity, scratch); break;
+        case 0: check_substrings_backends_agree_(sensitivity, scratch, pool); break;
         case 1: check_substrings_narrow_width_(sensitivity, scratch); break;
         case 2: check_substrings_tier_invariant_(sensitivity, scratch); break;
         }
@@ -1193,7 +1558,7 @@ void test_substrings_construction() {
         for (substrings_match_t const &match : raw_matches) {
             // The match carries offsets only, so the bytes come from the haystack it names - the exact
             // recipe the match struct's own docstring prescribes.
-            span<char const> const haystack = haystacks.view()[match.haystack_index];
+            span<char const> const haystack = haystacks[match.haystack_index];
             std::size_t const end = match.byte_offset + match.byte_length;
             bool const start_is_boundary = (haystack[match.byte_offset] & 0xC0) != 0x80;
             bool const end_is_boundary = end == haystack.size() || (haystack[end] & 0xC0) != 0x80;
@@ -1277,14 +1642,14 @@ void test_substrings_safety() {
 
     auto &generator = global_random_generator();
 
-    // `append_malformed_class_`'s pool mixes ill-formed byte sequences with noncharacters, which are
-    // reserved codepoints but structurally well-formed UTF-8; only the former must be rejected. `sz_rune_decode`
-    // decides which is which, so this tracks structural well-formedness rather than assuming every sample is
-    // malformed.
+    // The malformed pool mixes ill-formed byte sequences with noncharacters, which are reserved codepoints but
+    // structurally well-formed UTF-8; only the former must be rejected. `sz_rune_decode` decides which is which,
+    // so this tracks structural well-formedness rather than assuming every sample is malformed. The sweep walks
+    // every class rather than sampling, so both outcomes are reached at any `SZ_TESTS_MULTIPLIER`.
+    sz::span<char const *const> const malformed_pool = malformed_classes_();
     bool saw_rejection = false, saw_acceptance = false;
-    for (std::size_t index = 0; index < scale_iterations(80); ++index) {
-        std::string malformed;
-        append_malformed_class_(malformed, generator);
+    for (std::size_t index = 0; index < malformed_pool.size(); ++index) {
+        std::string const malformed {malformed_pool[index]};
         std::vector<span<char const>> const needles {span<char const>(malformed.data(), malformed.size())};
 
         substrings_u32_serial_t exact_engine;
