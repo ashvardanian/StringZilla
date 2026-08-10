@@ -29,6 +29,7 @@
 #define STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_
 
 #include "stringzilla/types.hpp"                  // `status_t::status_t`
+#include "stringzilla/memory.h"                   // `sz_copy`
 #include "stringzilla/utf8_runes/serial.h"        // `sz_rune_decode`, `sz_rune_encode`
 #include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`
 #include "stringzillas/substrings/tables.h"       // `szs_fold_preimage_narrow_images_`
@@ -62,6 +63,16 @@ enum substrings_case_sensitivity_t {
     substrings_uncased_k,
 };
 
+/** @brief How matches that share bytes resolve: reported in full, or thinned to a leftmost run. */
+enum substrings_overlap_policy_t {
+    /** @brief Every match of every needle, including ones that share bytes and ones nested in others. */
+    substrings_overlapping_k,
+    /** @brief Matches sharing no bytes: earliest start, then longest span, then lower needle index. */
+    substrings_leftmost_longest_k,
+    /** @brief Matches sharing no bytes: earliest start, then lower needle index, however long the rival. */
+    substrings_leftmost_first_k,
+};
+
 /**
  *  @brief  One reported match: which needle matched, and how many haystack bytes the match actually spans.
  *
@@ -92,6 +103,59 @@ struct substrings_match_t {
     size_t byte_offset {};
     size_t byte_length {};
 };
+
+/**
+ *  @brief  Whether @p challenger outranks @p incumbent among matches sharing one start position.
+ *  @param[in] incumbent A zero `match_bytes` means no match has claimed that start yet.
+ *
+ *  The only place either leftmost policy is consulted, and it runs once per discovered match rather than
+ *  once per byte, so the policy stays an ordinary argument.
+ */
+template <typename state_id_type_>
+constexpr bool substrings_leftmost_wins(                 //
+    substrings_output<state_id_type_> const &challenger, //
+    substrings_output<state_id_type_> const &incumbent,  //
+    substrings_overlap_policy_t policy) noexcept {
+
+    if (incumbent.match_bytes == 0) return true;
+    if (policy == substrings_leftmost_longest_k && challenger.match_bytes != incumbent.match_bytes)
+        return challenger.match_bytes > incumbent.match_bytes;
+    return challenger.needle_index < incumbent.needle_index;
+}
+
+/**
+ *  @brief How many starts a leftmost walk can hold undecided, given the longest match in the dictionary.
+ *
+ *  A start can no longer be outbid once the walk is `max_match_bytes` past it, so that many slots suffice.
+ *  Rounded up to a power of two, which turns the walk's slot lookup into a mask instead of a division by a
+ *  value only known at runtime.
+ */
+inline size_t substrings_pending_starts_width(size_t max_match_bytes) noexcept {
+    return sz_size_bit_ceil(sz_max_of_two(max_match_bytes, (size_t)1));
+}
+
+/** @brief BM25's continuous parameters. */
+struct substrings_bm25_t {
+    /** @brief The literature's `k1`: how slowly repeated occurrences stop adding score. */
+    f32_t term_frequency_saturation = 1.2f;
+    /** @brief The literature's `b`, in [0, 1]: 0 ignores document length, 1 normalizes fully. */
+    f32_t length_normalization = 0.75f;
+    /** @brief Corpus-wide mean document length; zero disables length normalization. */
+    f32_t average_document_length = 0.0f;
+};
+
+/** @brief One needle's saturated contribution, before its weight. */
+constexpr f32_t substrings_bm25_term(substrings_bm25_t const &parameters, f32_t term_frequency,
+                                     f32_t document_length) noexcept {
+    // A zero mean length has no normalizer to divide by, so the length term collapses to one.
+    f32_t const normalized_length = parameters.average_document_length > 0.0f
+                                        ? 1.0f - parameters.length_normalization +
+                                              parameters.length_normalization * document_length /
+                                                  parameters.average_document_length
+                                        : 1.0f;
+    return term_frequency * (parameters.term_frequency_saturation + 1.0f) /
+           (term_frequency + parameters.term_frequency_saturation * normalized_length);
+}
 
 #pragma endregion Vocabulary
 
@@ -170,6 +234,9 @@ struct aho_corasick_view {
 
     /** @brief Longest match any needle can produce, in bytes. Sets the overlap when slicing a haystack. */
     state_id_t max_match_bytes {};
+
+    /** @brief Shortest match any needle can produce, in bytes; bounds how densely a rewrite can fire. */
+    state_id_t min_match_bytes {};
 
     /**
      *  @brief Most merged outputs any single state carries, so a consumer can bound one pass's match count:
@@ -515,6 +582,7 @@ struct aho_corasick_dictionary {
     size_t count_states_ = 0;
     size_t count_needles_ = 0;
     state_id_t max_match_bytes_ = 0;
+    state_id_t min_match_bytes_ = 0;
     state_id_t max_outputs_per_state_ = 0;
     substrings_case_sensitivity_t case_sensitivity_ = substrings_cased_k;
 
@@ -615,6 +683,7 @@ struct aho_corasick_dictionary {
         run.own_head = (own_outputs_.size() - 1);
         ++run.own_count;
         max_match_bytes_ = sz_max_of_two(max_match_bytes_, match_bytes_narrow);
+        min_match_bytes_ = min_match_bytes_ ? sz_min_of_two(min_match_bytes_, match_bytes_narrow) : match_bytes_narrow;
         return status_t::success_k;
     }
 
@@ -1258,9 +1327,9 @@ struct aho_corasick_dictionary {
             // A state's matches are its own plus its failure state's whole run. Read on every byte step, so
             // the total rides `state_id_t` and the ceiling is refused here rather than assumed. Depth-band
             // order finished the failure state first, so its total is already set.
-            size_t const total =
-                static_cast<size_t>(spelling.own_count) +
-                (state == 0 ? size_t {0} : static_cast<size_t>(walking_states_[walking.failure_state].total_count));
+            size_t const total = static_cast<size_t>(spelling.own_count) +
+                                 (state == 0 ? size_t {0}
+                                             : static_cast<size_t>(walking_states_[walking.failure_state].total_count));
             if (total > static_cast<size_t>(invalid_state_k)) return status_t::overflow_risk_k;
             walking.total_count = static_cast<state_id_t>(total);
             walking.total_offset = running;
@@ -1401,6 +1470,7 @@ struct aho_corasick_dictionary {
         count_states_ = 0;
         count_needles_ = 0;
         max_match_bytes_ = 0;
+        min_match_bytes_ = 0;
         max_outputs_per_state_ = 0;
         case_sensitivity_ = substrings_cased_k;
         hot_count_ = derive_hot_count_k;
@@ -1420,6 +1490,7 @@ struct aho_corasick_dictionary {
     size_t count_states() const noexcept { return count_states_; }
     size_t count_needles() const noexcept { return count_needles_; }
     state_id_t max_match_bytes() const noexcept { return max_match_bytes_; }
+    state_id_t min_match_bytes() const noexcept { return min_match_bytes_; }
     size_t hot_count() const noexcept { return hot_count_; }
     allocator_t const &allocator() const noexcept { return alloc_; }
 
@@ -1502,7 +1573,8 @@ struct aho_corasick_dictionary {
         // ID is address arithmetic and can skip past slots no state ever ended up owning.
         size_t state_count_published = hot_count_;
         for (size_t walking = 0; walking < live_walking_count; ++walking)
-            state_count_published = sz_max_of_two(state_count_published, (size_t)walking_states_[walking].published_id + 1);
+            state_count_published = sz_max_of_two(state_count_published,
+                                                  (size_t)walking_states_[walking].published_id + 1);
         size_t const cold_capacity_published = state_count_published + (alphabet_size_k - 1);
 
         // `base_` and `check_` were written in place by the packing above; widening them here only extends
@@ -1567,13 +1639,14 @@ struct aho_corasick_dictionary {
         }
         for (size_t output = 0; output < source.outputs_total; ++output)
             outputs_[output] = output_t {static_cast<state_id_t>(source.outputs[output].needle_index),
-                                          static_cast<state_id_t>(source.outputs[output].match_bytes)};
+                                         static_cast<state_id_t>(source.outputs[output].match_bytes)};
 
         count_states_ = source.state_count;
         count_needles_ = wider.count_needles();
         hot_count_ = source.hot_count;
         root_ = static_cast<state_id_t>(source.root);
         max_match_bytes_ = static_cast<state_id_t>(source.max_match_bytes);
+        min_match_bytes_ = static_cast<state_id_t>(source.min_match_bytes);
         max_outputs_per_state_ = static_cast<state_id_t>(source.max_outputs_per_state);
         case_sensitivity_ = wider.case_sensitivity();
         return status_t::success_k;
@@ -1601,6 +1674,7 @@ struct aho_corasick_dictionary {
         result.state_count = state_id_of_(count_states_);
         result.root = root_;
         result.max_match_bytes = max_match_bytes_;
+        result.min_match_bytes = min_match_bytes_;
         result.max_outputs_per_state = max_outputs_per_state_;
         return result;
     }
@@ -1665,6 +1739,97 @@ struct aho_corasick_dictionary {
         return total;
     }
 
+    /**
+     *  @brief Emits the matches of @p haystack that share no bytes, one per accepted start position.
+     *  @param[in] pending_starts Scratch of `substrings_pending_starts_width` entries, at least one;
+     *             contents on entry are ignored.
+     *  @param[in] callback Invoked as `callback(needle_index, match_offset, match_length)` in ascending
+     *             start order, returning `true` to continue.
+     *
+     *  Matches surface at their end, so the earliest start is not the first seen: over "abcd" against
+     *  {"bc", "abcd"}, "bc" completes first and "abcd" starts before it. A start settles only once the walk
+     *  is `max_match_bytes` past it, which is what the pending starts hold.
+     */
+    template <typename callback_type_>
+    void find_leftmost(span<byte_t const> haystack, span<output_t> pending_starts, substrings_overlap_policy_t policy,
+                       callback_type_ &&callback) const noexcept {
+
+        sz_assert_(policy != substrings_overlapping_k && "Overlapping matches are reported through `find`");
+        size_t const width = pending_starts.size();
+        sz_assert_(width >= substrings_pending_starts_width(max_match_bytes_));
+        sz_assert_((width & (width - 1)) == 0 && "A power-of-two width is what turns the lookup into a mask");
+        size_t const mask = width - 1;
+        for (size_t slot_index = 0; slot_index < width; ++slot_index) pending_starts[slot_index] = {};
+
+        size_t cursor = 0, settled = 0;
+        bool keep_going = true;
+        auto const accept_start = [&](size_t start) noexcept {
+            output_t &slot = pending_starts[start & mask];
+            if (slot.match_bytes != 0 && start >= cursor) {
+                keep_going = callback((size_t)slot.needle_index, start, (size_t)slot.match_bytes);
+                cursor = start + slot.match_bytes;
+            }
+            slot = {};
+        };
+
+        // `find` reports in non-decreasing end order, so the starts drain from the end each match reaches -
+        // no second walk, and the cursor test waits until a start can no longer be outbid.
+        size_t undrained_end = 0;
+        find(haystack, [&](size_t needle_index, size_t start, size_t length) noexcept {
+            size_t const settles_before = start + length > width ? start + length - width : 0;
+            for (; settled < settles_before && keep_going; ++settled) accept_start(settled);
+            if (!keep_going) return false;
+            output_t const challenger {(state_id_t)needle_index, (state_id_t)length};
+            output_t &slot = pending_starts[start & mask];
+            if (substrings_leftmost_wins(challenger, slot, policy)) slot = challenger;
+            undrained_end = sz_max_of_two(undrained_end, start + 1);
+            return true;
+        });
+
+        // Draining stops at the last start any match claimed rather than at the haystack's end: a slot is
+        // only ever occupied by a start a match reported, and visiting positions past the final one would
+        // both waste a pass over the whole haystack and re-report a stale slot at a position it never
+        // matched. A haystack no needle hits leaves this at zero and drains nothing at all.
+        for (; settled < undrained_end && keep_going; ++settled) accept_start(settled);
+    }
+
+    template <typename callback_type_>
+    void find_leftmost(span<char const> haystack, span<output_t> pending_starts, substrings_overlap_policy_t policy,
+                       callback_type_ &&callback) const noexcept {
+        find_leftmost(haystack.template cast<byte_t const>(), pending_starts, policy,
+                      std::forward<callback_type_>(callback));
+    }
+
+    /**
+     *  @brief Every match of @p haystack, in the order @p policy reports them.
+     *  @param[in] pending_starts Scratch the leftmost policies settle starts in; unused when they overlap.
+     *
+     *  This is the one place the policy picks a walk. Engines forward their argument here rather than
+     *  branching on it themselves, so a new backend implements this pair and nothing else.
+     */
+    template <typename callback_type_>
+    void visit(span<byte_t const> haystack, substrings_overlap_policy_t policy, span<output_t> pending_starts,
+               callback_type_ &&callback) const noexcept {
+        if (policy == substrings_overlapping_k) return find(haystack, std::forward<callback_type_>(callback));
+        find_leftmost(haystack, pending_starts, policy, std::forward<callback_type_>(callback));
+    }
+
+    /**
+     *  @brief How many matches `visit` would report, without enumerating them where it need not.
+     *  @param[in] pending_starts Scratch the leftmost policies settle starts in; unused when they overlap.
+     */
+    size_t count(span<byte_t const> haystack, substrings_overlap_policy_t policy,
+                 span<output_t> pending_starts) const noexcept {
+        // The overlapping tally has a dedicated four-byte-load walk that never enumerates an output run.
+        if (policy == substrings_overlapping_k) return count(haystack);
+        size_t total = 0;
+        find_leftmost(haystack, pending_starts, policy, [&](size_t, size_t, size_t) noexcept {
+            ++total;
+            return true;
+        });
+        return total;
+    }
+
 #pragma endregion Matching
 };
 
@@ -1672,6 +1837,101 @@ using substrings_u16_dictionary_t = aho_corasick_dictionary<u16_t, std::allocato
 using substrings_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocator<char>>;
 
 #pragma endregion Dictionary
+
+#pragma region Rewriting
+
+/** @brief Bytes @p haystack becomes once every match is swapped for its needle's replacement. */
+template <typename dictionary_type_, typename replacements_type_>
+size_t substrings_rewritten_size(dictionary_type_ const &dictionary, span<byte_t const> haystack,
+                                 span<typename dictionary_type_::output_t> pending_starts,
+                                 substrings_overlap_policy_t policy, replacements_type_ const &replacements) noexcept {
+    size_t removed = 0, added = 0;
+    dictionary.find_leftmost(haystack, pending_starts, policy,
+                             [&](size_t needle_index, size_t, size_t length) noexcept {
+                                 removed += length;
+                                 added += to_bytes_view(replacements[needle_index]).size();
+                                 return true;
+                             });
+    // Accumulated apart rather than netted per match, so a shrinking rewrite never wraps the unsigned sum.
+    return haystack.size() - removed + added;
+}
+
+/** @brief Writes the rewritten @p haystack at @p output, whose room the caller has already reserved. */
+template <typename dictionary_type_, typename replacements_type_>
+void substrings_rewrite(dictionary_type_ const &dictionary, span<byte_t const> haystack,
+                        span<typename dictionary_type_::output_t> pending_starts, substrings_overlap_policy_t policy,
+                        replacements_type_ const &replacements, char *output) noexcept {
+    size_t cursor = 0;
+    dictionary.find_leftmost(haystack, pending_starts, policy,
+                             [&](size_t needle_index, size_t offset, size_t length) noexcept {
+                                 span<byte_t const> const replacement = to_bytes_view(replacements[needle_index]);
+                                 sz_copy(output, (sz_cptr_t)(haystack.data() + cursor), offset - cursor);
+                                 output += offset - cursor;
+                                 sz_copy(output, (sz_cptr_t)replacement.data(), replacement.size());
+                                 output += replacement.size();
+                                 cursor = offset + length;
+                                 return true;
+                             });
+    sz_copy(output, (sz_cptr_t)(haystack.data() + cursor), haystack.size() - cursor);
+}
+
+/** @brief Rejects a rewrite under a policy that leaves no non-overlapping cover to substitute. */
+inline status_t substrings_check_rewritable(substrings_overlap_policy_t policy) noexcept {
+    return policy == substrings_overlapping_k ? status_t::unknown_k : status_t::success_k;
+}
+
+/** @brief Turns per-haystack sizes into `size() - 1` boundaries plus a terminator, in place. */
+inline void substrings_sizes_into_offsets(span<size_t> offsets, size_t &total) noexcept {
+    total = 0;
+    for (size_t index = 0; index + 1 < offsets.size(); ++index) {
+        size_t const size = offsets[index];
+        offsets[index] = total;
+        total += size;
+    }
+    offsets[offsets.size() - 1] = total;
+}
+
+#pragma endregion Rewriting
+
+#pragma region Scoring
+
+/** @brief Whether a caller supplied its own length for a document, or wants the haystack's byte count. */
+enum class substrings_document_length_t : bool {
+    /** @brief Take @p document_length as given, in whatever unit the pipeline normalizes by. */
+    given_k,
+    /** @brief Ignore @p document_length and measure the haystack in bytes, the only unit this engine owns. */
+    haystack_bytes_k,
+};
+
+/**
+ *  @brief One haystack's BM25 score, leaving @p frequencies zeroed again for whoever runs next.
+ *  @param[in] length_source Whether @p document_length is the caller's own or should be measured here.
+ *  @param[in] frequencies One counter per needle, zero on entry and on return.
+ *  @param[in] touched Room for the needles this haystack hits, so the reset skips the rest of the vocabulary.
+ */
+template <typename dictionary_type_>
+f32_t substrings_bm25_score(dictionary_type_ const &dictionary, span<byte_t const> haystack,
+                            substrings_document_length_t length_source, f32_t document_length,
+                            substrings_bm25_t parameters, span<f32_t const> needle_weights, span<u32_t> frequencies,
+                            span<u32_t> touched) noexcept {
+    size_t touched_count = 0;
+    dictionary.find(haystack, [&](size_t needle_index, size_t, size_t) noexcept {
+        if (frequencies[needle_index]++ == 0) touched[touched_count++] = (u32_t)needle_index;
+        return true;
+    });
+
+    if (length_source == substrings_document_length_t::haystack_bytes_k) document_length = (f32_t)haystack.size();
+    f32_t score = 0;
+    for (size_t slot = 0; slot < touched_count; ++slot) {
+        size_t const needle_index = touched[slot];
+        score += needle_weights[needle_index] *
+                 substrings_bm25_term(parameters, (f32_t)frequencies[needle_index], document_length);
+        frequencies[needle_index] = 0;
+    }
+    return score;
+}
+
+#pragma endregion Scoring
 
 #pragma region Primary API
 
@@ -1689,9 +1949,12 @@ struct substrings<state_id_type_, allocator_type_, capability_,
     using state_id_t = typename dictionary_t::state_id_t;
     using allocator_t = typename dictionary_t::allocator_t;
     using match_t = substrings_match_t;
+    using output_t = typename dictionary_t::output_t;
     static constexpr sz_capability_t capability_k = capability_;
 
     using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
+    using output_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<output_t>;
+    using u32_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
 
     explicit substrings(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
     void reset() noexcept { dict_.reset(); }
@@ -1728,36 +1991,44 @@ struct substrings<state_id_type_, allocator_type_, capability_,
 
     /**
      *  @brief Occurrences of all needles in each of the @p haystacks, for filtering and ranking.
+     *  @param[in] overlap_policy Whether every overlapping match counts, or only the leftmost ones.
      *  @param[out] matches_total Sum of @p counts_per_haystack, which is what sizes a later `try_find` buffer.
      */
     template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
-    status_t try_count(haystacks_type_ const &haystacks, span<size_t> counts_per_haystack, size_t &matches_total,
-                       executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
+    status_t try_count(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                       span<size_t> counts_per_haystack, size_t &matches_total, executor_type_ &&executor = {},
+                       cpu_specs_t const &specs = {}) noexcept {
         // A single-threaded walk has no split to schedule and no cache size to compare against.
         sz_unused_(executor);
         sz_unused_(specs);
         sz_assert_(counts_per_haystack.size() == haystacks.size());
+        if (status_t const reserved = try_reserve_pending_starts_(overlap_policy); reserved != status_t::success_k)
+            return reserved;
+
         matches_total = 0;
         for (size_t index = 0; index < counts_per_haystack.size(); ++index)
-            matches_total += counts_per_haystack[index] = dict_.count(to_bytes_view(haystacks[index]));
+            matches_total += counts_per_haystack[index] = dict_.count(to_bytes_view(haystacks[index]), overlap_policy,
+                                                                      pending_starts_span_());
         return status_t::success_k;
     }
 
     /**
-     *  @brief Finds all occurrences of all needles in all the @p haystacks.
+     *  @brief Finds all occurrences of all needles in all the @p haystacks, resolved under @p overlap_policy.
      *  @param[out] matches_found Matches written, or - when @p matches is too small - the count that would be,
      *              so `matches.size() == 0` is a size query rather than a wasted call.
      *  @retval `status_t::unexpected_dimensions_k` @p matches is too small; nothing is written in that case.
      */
     template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
-    status_t try_find(haystacks_type_ const &haystacks, span<substrings_match_t> matches, size_t &matches_found,
-                      executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
+    status_t try_find(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                      span<substrings_match_t> matches, size_t &matches_found, executor_type_ &&executor = {},
+                      cpu_specs_t const &specs = {}) noexcept {
 
         // Counting first is what makes the capacity refusable before any write.
         matches_found = 0;
         if (counts_per_haystack_.try_resize(haystacks.size()) != status_t::success_k) return status_t::bad_alloc_k;
         span<size_t> const counts_per_haystack {counts_per_haystack_.data(), haystacks.size()};
-        if (status_t const status = try_count(haystacks, counts_per_haystack, matches_found, executor, specs);
+        if (status_t const status = try_count(haystacks, overlap_policy, counts_per_haystack, matches_found, executor,
+                                              specs);
             status != status_t::success_k)
             return status;
 
@@ -1766,13 +2037,75 @@ struct substrings<state_id_type_, allocator_type_, capability_,
 
         size_t count_written = 0;
         for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index)
-            dict_.find(to_bytes_view(haystacks[haystack_index]),
-                       [&](size_t needle_index, size_t match_offset, size_t match_length) noexcept {
-                           matches[count_written] = {haystack_index, needle_index, match_offset, match_length};
-                           count_written++;
-                           return true;
-                       });
+            dict_.visit(to_bytes_view(haystacks[haystack_index]), overlap_policy, pending_starts_span_(),
+                        [&](size_t needle_index, size_t match_offset, size_t match_length) noexcept {
+                            matches[count_written] = {haystack_index, needle_index, match_offset, match_length};
+                            count_written++;
+                            return true;
+                        });
         sz_assert_(count_written == matches_found);
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Rewrites every haystack into one tape, substituting each match with its needle's replacement.
+     *  @param[in] overlap_policy Must name a leftmost policy; an overlapping rewrite is not a function.
+     *  @param[in] replacements One per needle, inserted verbatim.
+     *  @param[out] output_offsets Rewritten boundaries, `haystacks.size() + 1` entries; always filled.
+     *  @param[out] output_bytes_written Bytes written, or - when @p output_bytes is short - the size needed.
+     *  @retval `status_t::unexpected_dimensions_k` @p output_bytes is too small, and nothing was written.
+     */
+    template <typename haystacks_type_, typename replacements_type_, typename executor_type_ = dummy_executor_t>
+    status_t try_replace(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                         replacements_type_ const &replacements, span<char> output_bytes, span<size_t> output_offsets,
+                         size_t &output_bytes_written, executor_type_ &&executor = {},
+                         cpu_specs_t const &specs = {}) noexcept {
+        sz_unused_(executor), sz_unused_(specs);
+        sz_assert_(output_offsets.size() == haystacks.size() + 1);
+        output_bytes_written = 0;
+        if (status_t const rewritable = substrings_check_rewritable(overlap_policy); rewritable != status_t::success_k)
+            return rewritable;
+        if (status_t const reserved = try_reserve_pending_starts_(overlap_policy); reserved != status_t::success_k)
+            return reserved;
+
+        // Sizes land in the offsets array and become boundaries in place, so this needs no scratch of its own.
+        for (size_t index = 0; index < haystacks.size(); ++index)
+            output_offsets[index] = substrings_rewritten_size(dict_, to_bytes_view(haystacks[index]),
+                                                              pending_starts_span_(), overlap_policy, replacements);
+        substrings_sizes_into_offsets(output_offsets, output_bytes_written);
+        if (output_bytes_written > output_bytes.size()) return status_t::unexpected_dimensions_k;
+
+        for (size_t index = 0; index < haystacks.size(); ++index)
+            substrings_rewrite(dict_, to_bytes_view(haystacks[index]), pending_starts_span_(), overlap_policy,
+                               replacements, output_bytes.data() + output_offsets[index]);
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Scores every haystack against the compiled needle set in one walk.
+     *  @param[in] document_lengths One per haystack; an empty span uses byte lengths.
+     *  @param[in] needle_weights One IDF or boost per needle.
+     *  @param[out] scores One per haystack.
+     */
+    template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
+    status_t try_score_bm25(haystacks_type_ const &haystacks, span<f32_t const> document_lengths,
+                            substrings_bm25_t parameters, span<f32_t const> needle_weights, span<f32_t> scores,
+                            executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
+        sz_unused_(executor), sz_unused_(specs);
+        sz_assert_(scores.size() == haystacks.size());
+        sz_assert_(needle_weights.size() == dict_.count_needles());
+        sz_assert_(document_lengths.size() == 0 || document_lengths.size() == haystacks.size());
+
+        if (status_t const reserved = try_reserve_frequencies_(); reserved != status_t::success_k) return reserved;
+        span<u32_t> const frequencies {frequencies_.data(), frequencies_.size()};
+        span<u32_t> const touched {touched_needles_.data(), touched_needles_.size()};
+        substrings_document_length_t const length_source = document_lengths.size()
+                                                               ? substrings_document_length_t::given_k
+                                                               : substrings_document_length_t::haystack_bytes_k;
+        for (size_t index = 0; index < haystacks.size(); ++index)
+            scores[index] = substrings_bm25_score(dict_, to_bytes_view(haystacks[index]), length_source,
+                                                  document_lengths.size() ? document_lengths[index] : 0.0f, parameters,
+                                                  needle_weights, frequencies, touched);
         return status_t::success_k;
     }
 
@@ -1781,6 +2114,33 @@ struct substrings<state_id_type_, allocator_type_, capability_,
 
     /** @brief Grow-only per-call scratch, reused across calls; concurrent calls on one engine are unsafe. */
     safe_vector<size_t, size_allocator_t> counts_per_haystack_ {};
+    /** @brief The undecided starts a leftmost walk keeps; stays empty until a leftmost policy asks for it. */
+    safe_vector<output_t, output_allocator_t> pending_starts_ {};
+
+    /** @brief Sizes the pending-start scratch to the built dictionary, a no-op for the overlapping policy. */
+    status_t try_reserve_pending_starts_(substrings_overlap_policy_t policy) noexcept {
+        if (policy == substrings_overlapping_k) return status_t::success_k;
+        size_t const width = substrings_pending_starts_width(dict_.max_match_bytes());
+        return pending_starts_.size() == width ? status_t::success_k : pending_starts_.try_resize(width);
+    }
+
+    span<output_t> pending_starts_span_() noexcept { return {pending_starts_.data(), pending_starts_.size()}; }
+
+    /** @brief Sizes the frequency counters to the dictionary, leaving every one of them at zero. */
+    status_t try_reserve_frequencies_() noexcept {
+        size_t const needles = dict_.count_needles();
+        if (frequencies_.size() == needles) return status_t::success_k;
+        // `try_resize` leaves trivial types uninitialized, and the counters must start - and stay - zero.
+        if (frequencies_.try_resize(needles) != status_t::success_k ||
+            touched_needles_.try_resize(needles) != status_t::success_k)
+            return status_t::bad_alloc_k;
+        for (size_t index = 0; index < needles; ++index) frequencies_[index] = 0;
+        return status_t::success_k;
+    }
+
+    /** @brief How often each needle hit the haystack being scored, and which needles those were. */
+    safe_vector<u32_t, u32_allocator_t> frequencies_ {};
+    safe_vector<u32_t, u32_allocator_t> touched_needles_ {};
 };
 
 #pragma endregion Primary API
@@ -1804,9 +2164,12 @@ struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
     using state_id_t = typename dictionary_t::state_id_t;
     using allocator_t = typename dictionary_t::allocator_t;
     using match_t = substrings_match_t;
+    using output_t = typename dictionary_t::output_t;
     static constexpr sz_capability_t capability_k = sz_caps_sp_k;
 
     using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
+    using output_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<output_t>;
+    using u32_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
 
     explicit substrings(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
     void reset() noexcept { dict_.reset(); }
@@ -1850,10 +2213,121 @@ struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t try_count(haystacks_type_ const &haystacks, span<size_t> counts_per_haystack, size_t &matches_total,
-                       executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
-
+    status_t try_count(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                       span<size_t> counts_per_haystack, size_t &matches_total, executor_type_ &&executor = {},
+                       cpu_specs_t const &specs = {}) noexcept {
         sz_assert_(counts_per_haystack.size() == haystacks.size());
+        if (overlap_policy != substrings_overlapping_k)
+            return count_all_leftmost_(haystacks, overlap_policy, counts_per_haystack, matches_total, executor);
+        return count_all_overlapping_(haystacks, counts_per_haystack, matches_total, executor, specs);
+    }
+
+    /**
+     *  @brief Finds all occurrences of all needles in all the @p haystacks, resolved under @p overlap_policy.
+     *  @param[out] matches_found Matches written, or - when @p matches is too small - the count that would be.
+     *  @retval `status_t::unexpected_dimensions_k` @p matches is too small; nothing is written in that case.
+     */
+    template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    status_t try_find(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                      span<substrings_match_t> matches, size_t &matches_found, executor_type_ &&executor = {},
+                      cpu_specs_t const &specs = {}) noexcept {
+        if (overlap_policy != substrings_overlapping_k)
+            return find_all_leftmost_(haystacks, overlap_policy, matches, matches_found, executor);
+        return find_all_overlapping_(haystacks, matches, matches_found, executor, specs);
+    }
+
+    /**
+     *  @brief Rewrites every haystack into one tape, substituting each match with its needle's replacement.
+     *  @param[in] overlap_policy Must name a leftmost policy; an overlapping rewrite is not a function.
+     *  @param[in] replacements One per needle, inserted verbatim.
+     *  @param[out] output_offsets Rewritten boundaries, `haystacks.size() + 1` entries; always filled.
+     *  @param[out] output_bytes_written Bytes written, or - when @p output_bytes is short - the size needed.
+     *  @retval `status_t::unexpected_dimensions_k` @p output_bytes is too small, and nothing was written.
+     */
+    template <typename haystacks_type_, typename replacements_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    status_t try_replace(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                         replacements_type_ const &replacements, span<char> output_bytes, span<size_t> output_offsets,
+                         size_t &output_bytes_written, executor_type_ &&executor = {},
+                         cpu_specs_t const &specs = {}) noexcept {
+        sz_unused_(specs);
+        sz_assert_(output_offsets.size() == haystacks.size() + 1);
+        output_bytes_written = 0;
+        if (status_t const rewritable = substrings_check_rewritable(overlap_policy); rewritable != status_t::success_k)
+            return rewritable;
+        if (status_t const reserved = try_reserve_pending_starts_(executor.threads_count());
+            reserved != status_t::success_k)
+            return reserved;
+
+        using prong_t = typename std::decay<executor_type_>::type::prong_t;
+
+        // Sizes land in the offsets array and become boundaries in place, so this needs no scratch of its own.
+        executor.for_n_dynamic(haystacks.size(), [&](prong_t prong) noexcept {
+            output_offsets[prong.task] = substrings_rewritten_size(dict_, to_bytes_view(haystacks[prong.task]),
+                                                                   pending_starts_of_(prong.thread), overlap_policy,
+                                                                   replacements);
+        });
+        substrings_sizes_into_offsets(output_offsets, output_bytes_written);
+        if (output_bytes_written > output_bytes.size()) return status_t::unexpected_dimensions_k;
+
+        executor.for_n_dynamic(haystacks.size(), [&](prong_t prong) noexcept {
+            substrings_rewrite(dict_, to_bytes_view(haystacks[prong.task]), pending_starts_of_(prong.thread),
+                               overlap_policy, replacements, output_bytes.data() + output_offsets[prong.task]);
+        });
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Scores every haystack against the compiled needle set in one walk.
+     *  @param[in] document_lengths One per haystack; an empty span uses byte lengths.
+     *  @param[in] needle_weights One IDF or boost per needle.
+     *  @param[out] scores One per haystack.
+     */
+    template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    status_t try_score_bm25(haystacks_type_ const &haystacks, span<f32_t const> document_lengths,
+                            substrings_bm25_t parameters, span<f32_t const> needle_weights, span<f32_t> scores,
+                            executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
+        sz_unused_(specs);
+        sz_assert_(scores.size() == haystacks.size());
+        sz_assert_(needle_weights.size() == dict_.count_needles());
+        sz_assert_(document_lengths.size() == 0 || document_lengths.size() == haystacks.size());
+
+        if (status_t const reserved = try_reserve_frequencies_(executor.threads_count());
+            reserved != status_t::success_k)
+            return reserved;
+
+        substrings_document_length_t const length_source = document_lengths.size()
+                                                               ? substrings_document_length_t::given_k
+                                                               : substrings_document_length_t::haystack_bytes_k;
+        using prong_t = typename std::decay<executor_type_>::type::prong_t;
+        executor.for_n_dynamic(haystacks.size(), [&](prong_t prong) noexcept {
+            size_t const first = prong.thread * needles_per_core_;
+            scores[prong.task] = substrings_bm25_score(
+                dict_, to_bytes_view(haystacks[prong.task]), length_source,
+                document_lengths.size() ? document_lengths[prong.task] : 0.0f, parameters, needle_weights,
+                {frequencies_.data() + first, needles_per_core_}, {touched_needles_.data() + first, needles_per_core_});
+        });
+        return status_t::success_k;
+    }
+
+  private:
+    /**
+     *  @brief Counts every overlapping match, splitting one haystack across cores once it outgrows the L2.
+     *  @param[in] specs Picks the threading strategy per haystack, by comparing its size against the L2.
+     */
+    template <typename haystacks_type_, typename executor_type_>
+    status_t count_all_overlapping_(haystacks_type_ const &haystacks, span<size_t> counts_per_haystack,
+                                    size_t &matches_total, executor_type_ &executor,
+                                    cpu_specs_t const &specs) noexcept {
+
         matches_total = 0;
 
         using haystack_t = typename haystacks_type_::value_type;
@@ -1887,16 +2361,12 @@ struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
     }
 
     /**
-     *  @brief Finds all occurrences of all needles in all the @p haystacks.
+     *  @brief Locates every overlapping match, splitting one haystack across cores once it outgrows the L2.
      *  @param[out] matches_found Matches written, in ascending haystack order.
-     *  @retval `status_t::unexpected_dimensions_k` @p matches is too small; nothing is written in that case.
      */
-    template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
-#if SZ_HAS_CONCEPTS_
-        requires executor_like<executor_type_>
-#endif
-    status_t try_find(haystacks_type_ const &haystacks, span<substrings_match_t> matches, size_t &matches_found,
-                      executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
+    template <typename haystacks_type_, typename executor_type_>
+    status_t find_all_overlapping_(haystacks_type_ const &haystacks, span<substrings_match_t> matches,
+                                   size_t &matches_found, executor_type_ &executor, cpu_specs_t const &specs) noexcept {
 
         using haystack_t = typename haystacks_type_::value_type;
 
@@ -1960,12 +2430,112 @@ struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         return status_t::success_k;
     }
 
+    /** @brief Counts a leftmost walk's matches; the recurrence keeps one core per haystack, whatever its size. */
+    template <typename haystacks_type_, typename executor_type_>
+    status_t count_all_leftmost_(haystacks_type_ const &haystacks, substrings_overlap_policy_t policy,
+                                 span<size_t> counts_per_haystack, size_t &matches_total,
+                                 executor_type_ &executor) noexcept {
+
+        matches_total = 0;
+        if (status_t const reserved = try_reserve_pending_starts_(executor.threads_count());
+            reserved != status_t::success_k)
+            return reserved;
+
+        using prong_t = typename std::decay<executor_type_>::type::prong_t;
+        executor.for_n_dynamic(counts_per_haystack.size(), [&](prong_t prong) noexcept {
+            size_t total = 0;
+            dict_.find_leftmost(to_bytes_view(haystacks[prong.task]), pending_starts_of_(prong.thread), policy,
+                                [&](size_t, size_t, size_t) noexcept {
+                                    ++total;
+                                    return true;
+                                });
+            counts_per_haystack[prong.task] = total;
+        });
+
+        for (size_t haystack_index = 0; haystack_index < counts_per_haystack.size(); ++haystack_index)
+            matches_total += counts_per_haystack[haystack_index];
+        return status_t::success_k;
+    }
+
+    /** @brief Locates a leftmost walk's matches, counting into offsets so the scatter needs no atomics. */
+    template <typename haystacks_type_, typename executor_type_>
+    status_t find_all_leftmost_(haystacks_type_ const &haystacks, substrings_overlap_policy_t policy,
+                                span<substrings_match_t> matches, size_t &matches_found,
+                                executor_type_ &executor) noexcept {
+
+        matches_found = 0;
+        if (haystacks.size() == 0) return status_t::success_k;
+        if (counts_per_haystack_.try_resize(haystacks.size()) != status_t::success_k ||
+            offsets_per_haystack_.try_resize(haystacks.size()) != status_t::success_k)
+            return status_t::bad_alloc_k;
+
+        span<size_t> const counts_per_haystack {counts_per_haystack_.data(), haystacks.size()};
+        size_t counted_total = 0;
+        if (status_t const counted = count_all_leftmost_(haystacks, policy, counts_per_haystack, counted_total,
+                                                         executor);
+            counted != status_t::success_k)
+            return counted;
+
+        status_t const prologue = prefix_and_check_(counts_per_haystack_, offsets_per_haystack_, matches.size(),
+                                                    matches_found);
+        if (prologue != status_t::success_k) return prologue;
+
+        using prong_t = typename std::decay<executor_type_>::type::prong_t;
+        executor.for_n_dynamic(haystacks.size(), [&](prong_t prong) noexcept {
+            size_t written = 0;
+            size_t const base_offset = offsets_per_haystack_[prong.task];
+            dict_.find_leftmost(to_bytes_view(haystacks[prong.task]), pending_starts_of_(prong.thread), policy,
+                                [&](size_t needle_index, size_t match_offset, size_t match_length) noexcept {
+                                    matches[base_offset + written] = {prong.task, needle_index, match_offset,
+                                                                      match_length};
+                                    ++written;
+                                    return true;
+                                });
+            sz_assert_(written == counts_per_haystack_[prong.task]);
+        });
+
+        return status_t::success_k;
+    }
+
+    /** @brief Sizes one pending-start row per core, laid end to end so a core's slice needs no allocation. */
+    status_t try_reserve_pending_starts_(size_t cores_total) noexcept {
+        size_t const width = substrings_pending_starts_width(dict_.max_match_bytes());
+        if (pending_starts_width_ == width && pending_starts_.size() == width * cores_total) return status_t::success_k;
+        if (pending_starts_.try_resize(width * cores_total) != status_t::success_k) return status_t::bad_alloc_k;
+        pending_starts_width_ = width;
+        return status_t::success_k;
+    }
+
+    span<output_t> pending_starts_of_(size_t core_index) noexcept {
+        return {pending_starts_.data() + core_index * pending_starts_width_, pending_starts_width_};
+    }
+
+    /** @brief Sizes one frequency row per core, leaving every counter at zero. */
+    status_t try_reserve_frequencies_(size_t cores_total) noexcept {
+        needles_per_core_ = dict_.count_needles();
+        size_t const wanted = cores_total * needles_per_core_;
+        if (frequencies_.size() == wanted) return status_t::success_k;
+        // `try_resize` leaves trivial types uninitialized, and the counters must start - and stay - zero.
+        if (frequencies_.try_resize(wanted) != status_t::success_k ||
+            touched_needles_.try_resize(wanted) != status_t::success_k)
+            return status_t::bad_alloc_k;
+        for (size_t index = 0; index < wanted; ++index) frequencies_[index] = 0;
+        return status_t::success_k;
+    }
+
   private:
     dictionary_t dict_;
 
     /** @brief Grow-only per-call scratch, reused across calls; concurrent calls on one engine are unsafe. */
     safe_vector<size_t, size_allocator_t> counts_per_core_ {};
     safe_vector<size_t, size_allocator_t> counts_per_haystack_ {};
+    /** @brief One pending-start row per core, laid end to end so a core's slice needs no separate allocation. */
+    safe_vector<output_t, output_allocator_t> pending_starts_ {};
+    size_t pending_starts_width_ {};
+    /** @brief One frequency row and one touched-needle row per core, laid out the same way. */
+    safe_vector<u32_t, u32_allocator_t> frequencies_ {};
+    safe_vector<u32_t, u32_allocator_t> touched_needles_ {};
+    size_t needles_per_core_ {};
     safe_vector<size_t, size_allocator_t> offsets_per_haystack_ {};
     safe_vector<size_t, size_allocator_t> counts_per_core_per_large_ {};
 

@@ -18,6 +18,7 @@
 #error "This test requires C++17 or later."
 #endif
 
+#include <cmath>   // `std::fabs`
 #include <cstdio>  // `std::printf`, `std::fprintf`
 #include <cstring> // `std::memcmp`, `std::memcpy`
 
@@ -43,7 +44,12 @@ using ashvardanian::stringzillas::fold_preimage_of_rune;
 using ashvardanian::stringzillas::fold_preimage_of_runes;
 using ashvardanian::stringzillas::substrings_cased_k;
 using ashvardanian::stringzillas::forkunion_executor_t;
+using ashvardanian::stringzillas::substrings_bm25_t;
+using ashvardanian::stringzillas::substrings_leftmost_first_k;
+using ashvardanian::stringzillas::substrings_leftmost_longest_k;
 using ashvardanian::stringzillas::substrings_match_t;
+using ashvardanian::stringzillas::substrings_overlap_policy_t;
+using ashvardanian::stringzillas::substrings_overlapping_k;
 using ashvardanian::stringzillas::substrings_case_sensitivity_t;
 using ashvardanian::stringzillas::substrings_u16_dictionary_t;
 using ashvardanian::stringzillas::substrings_u16_serial_t;
@@ -67,6 +73,12 @@ inline bool substrings_match_less_(substrings_match_t const &left, substrings_ma
     if (left.needle_index != right.needle_index) return left.needle_index < right.needle_index;
     if (left.byte_offset != right.byte_offset) return left.byte_offset < right.byte_offset;
     return left.byte_length < right.byte_length;
+}
+/** @brief Position-only ordering for the cover's touch check; ignores needle index and length. */
+inline bool substrings_match_by_position_less_(substrings_match_t const &left,
+                                               substrings_match_t const &right) noexcept {
+    if (left.haystack_index != right.haystack_index) return left.haystack_index < right.haystack_index;
+    return left.byte_offset < right.byte_offset;
 }
 inline bool substrings_match_equal_(substrings_match_t const &left, substrings_match_t const &right) noexcept {
     return left.haystack_index == right.haystack_index && left.needle_index == right.needle_index &&
@@ -119,31 +131,52 @@ struct substrings_match_set_t {
 };
 
 /**
- *  @brief Runs a full count-then-find pass through @p engine and reduces every match to its identity in
- *         @p out, whose own buffers hold the intermediates. Every differential check in this file is driven
- *         through this one public-API shape.
+ *  @brief Runs a full count-then-find pass through @p engine under @p overlap_policy and reduces every match
+ *         to its identity in @p out, whose own buffers hold the intermediates. Every differential check in
+ *         this file is driven through this one public-API shape.
  *  @note `trailing_args_` forwards an executor (and optionally specs) to backends that want a specific one;
  *        an empty pack leaves each engine on its own defaults.
  */
 template <typename engine_type_, typename haystacks_type_, typename... trailing_args_>
-void collect_matches_into_(engine_type_ &engine, haystacks_type_ const &haystacks, substrings_match_set_t &out,
-                           trailing_args_ &&...trailing_args) {
+void collect_matches_under_(engine_type_ &engine, haystacks_type_ const &haystacks,
+                            substrings_overlap_policy_t overlap_policy, substrings_match_set_t &out,
+                            trailing_args_ &&...trailing_args) {
     out.collected_counts.assign(haystacks.size(), 0);
     std::size_t matches_total = 0;
-    verify(engine.try_count(haystacks, span<std::size_t>(out.collected_counts.data(), out.collected_counts.size()),
-                            matches_total, trailing_args...) == status_t::success_k);
+    span<std::size_t> const counts {out.collected_counts.data(), out.collected_counts.size()};
+
+    // The CUDA engine serves the overlapping policy alone, so it has no policy argument to take yet.
+    constexpr bool engine_is_cuda = (engine_type_::capability_k & sz_cap_cuda_k) != 0;
+    if constexpr (engine_is_cuda) {
+        verify(overlap_policy == substrings_overlapping_k && "CUDA has no leftmost kernels");
+        verify(engine.try_count(haystacks, counts, matches_total, trailing_args...) == status_t::success_k);
+    }
+    else
+        verify(engine.try_count(haystacks, overlap_policy, counts, matches_total, trailing_args...) ==
+               status_t::success_k);
 
     // Sized to exactly what counting promised, so a `try_find` overrun trips instead of writing into slack.
     out.collected_matches.assign(matches_total, substrings_match_t {});
     std::size_t matches_found = 0;
-    verify(engine.try_find(haystacks,
-                           span<substrings_match_t>(out.collected_matches.data(), out.collected_matches.size()),
-                           matches_found, trailing_args...) == status_t::success_k);
+    span<substrings_match_t> const matches {out.collected_matches.data(), out.collected_matches.size()};
+    if constexpr (engine_is_cuda)
+        verify(engine.try_find(haystacks, matches, matches_found, trailing_args...) == status_t::success_k);
+    else
+        verify(engine.try_find(haystacks, overlap_policy, matches, matches_found, trailing_args...) ==
+               status_t::success_k);
     verify(matches_found == matches_total && "try_count and try_find disagree on the match count");
 
     out.clear();
     for (substrings_match_t const &match : out.collected_matches) out.append(match);
     out.finalize();
+}
+
+/** @brief `collect_matches_under_` for the overlapping policy, which is what most checks compare against. */
+template <typename engine_type_, typename haystacks_type_, typename... trailing_args_>
+void collect_overlapping_matches_into_(engine_type_ &engine, haystacks_type_ const &haystacks,
+                                       substrings_match_set_t &out, trailing_args_ &&...trailing_args) {
+    collect_matches_under_(engine, haystacks, substrings_overlapping_k, out,
+                           std::forward<trailing_args_>(trailing_args)...);
 }
 
 /** @brief A vocabulary of short random needles/haystack fragments over a small alphabet, so the resulting
@@ -800,7 +833,7 @@ void test_substrings_unit() {
         substrings_u32_serial_t engine;
         verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
 
         substrings_match_set_t const expected {
             {0, 0, 2, 2}, // "he"   at byte [2, 4)
@@ -823,7 +856,7 @@ void test_substrings_unit() {
         substrings_u32_serial_t engine;
         verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
 
         substrings_match_set_t const expected {
             {0, 0, 0, 3}, // "cat" in haystack 0 at byte [0, 3)
@@ -848,7 +881,7 @@ void test_substrings_unit() {
         substrings_u32_serial_t engine;
         verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
 
         substrings_match_set_t const expected {
             {0, 0, 0, 1}, {0, 1, 0, 2}, {0, 2, 0, 3}, // "a", "ab", "abc" at the first occurrence
@@ -872,7 +905,7 @@ void test_substrings_unit() {
         substrings_u32_serial_t engine;
         verify(engine.try_build(needles.view(), substrings_uncased_k) == status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
 
         substrings_match_set_t const expected {
             {0, 0, 0, 2}, // "ss" matches the sharp-S codepoint at byte [0, 2)
@@ -913,7 +946,7 @@ void test_substrings_unit() {
         substrings_u32_serial_t engine;
         verify(engine.try_build(needles.view(), substrings_uncased_k) == status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
         if (matches != probe.expected) std::fprintf(stderr, "Reconvergence hazard: %s\n", probe.label);
         verify(matches == probe.expected && "Reconvergence hazard produced the wrong match set");
     }
@@ -937,16 +970,16 @@ static void check_uncased_needle_matches_(char const *needle, std::vector<std::s
         std::vector<span<char const>> const haystacks {span<char const>(haystack.data(), haystack.size())};
         std::vector<std::size_t> counts(1, 0);
         std::size_t matches_total = 0;
-        verify(engine.try_count(haystacks, span<std::size_t>(counts.data(), counts.size()), matches_total) ==
-               status_t::success_k);
+        verify(engine.try_count(haystacks, substrings_overlapping_k, span<std::size_t>(counts.data(), counts.size()),
+                                matches_total) == status_t::success_k);
         verify(counts[0] >= 1 && "Needle must match this haystack under full case folding");
     }
     for (std::string const &haystack : must_not_match) {
         std::vector<span<char const>> const haystacks {span<char const>(haystack.data(), haystack.size())};
         std::vector<std::size_t> counts(1, 0);
         std::size_t matches_total = 0;
-        verify(engine.try_count(haystacks, span<std::size_t>(counts.data(), counts.size()), matches_total) ==
-               status_t::success_k);
+        verify(engine.try_count(haystacks, substrings_overlapping_k, span<std::size_t>(counts.data(), counts.size()),
+                                matches_total) == status_t::success_k);
         verify(counts[0] == 0 && "Needle must not match this haystack");
     }
 }
@@ -1006,7 +1039,7 @@ void test_substrings_uncased() {
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
         substrings_match_set_t engine_matches;
-        collect_matches_into_(engine, haystacks.view(), engine_matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), engine_matches);
 
         span<char const> const haystack_view = haystacks[0];
         auto const oracle_matches = independent_uncased_matches_(haystack_view, needles[0]);
@@ -1086,7 +1119,7 @@ void test_substrings_agreement() {
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
 
         bool engine_found = false;
         std::size_t engine_offset = 0, engine_length = 0;
@@ -1168,7 +1201,7 @@ void check_substrings_against_oracle_(substrings_case_sensitivity_t sensitivity,
 
     substrings_u32_serial_t engine;
     verify(engine.try_build(needles_view, sensitivity) == status_t::success_k);
-    collect_matches_into_(engine, haystacks_view, scratch.engine_keys);
+    collect_overlapping_matches_into_(engine, haystacks_view, scratch.engine_keys);
     collect_independent_matches_(sensitivity, needles_view, haystacks_view, scratch.oracle_keys);
 
     if (scratch.engine_keys != scratch.oracle_keys) {
@@ -1205,11 +1238,11 @@ void check_substrings_backends_agree_(substrings_case_sensitivity_t sensitivity,
 
     substrings_u32_serial_t serial_engine;
     verify(serial_engine.try_build(needles_view, sensitivity) == status_t::success_k);
-    collect_matches_into_(serial_engine, haystacks_view, scratch.engine_keys);
+    collect_overlapping_matches_into_(serial_engine, haystacks_view, scratch.engine_keys);
 
     substrings_u32_parallel_t parallel_engine;
     verify(parallel_engine.try_build(needles_view, sensitivity) == status_t::success_k);
-    collect_matches_into_(parallel_engine, haystacks_view, scratch.variant_keys, pool, scratch.specs);
+    collect_overlapping_matches_into_(parallel_engine, haystacks_view, scratch.variant_keys, pool, scratch.specs);
     if (scratch.engine_keys != scratch.variant_keys) {
         log_substrings_cell_mismatch_(scratch, "Serial-vs-parallel divergence");
         verify(false && "Serial and parallel backends disagree");
@@ -1324,7 +1357,7 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
 
     substrings_u32_serial_t serial_engine;
     verify(serial_engine.try_build(needles_view, sensitivity) == status_t::success_k);
-    collect_matches_into_(serial_engine, haystacks_view, scratch.engine_keys);
+    collect_overlapping_matches_into_(serial_engine, haystacks_view, scratch.engine_keys);
 
     gpu_specs_t gpu_specs;
     verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
@@ -1334,7 +1367,7 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
 
     // One match type and one signature across backends: the device runs the very same collection body as
     // every CPU engine. The fixture tape is `unified_alloc`-backed under CUDA, so no copy exists anywhere.
-    collect_matches_into_(cuda_engine, haystacks_view, scratch.cuda_keys, executor, gpu_specs);
+    collect_overlapping_matches_into_(cuda_engine, haystacks_view, scratch.cuda_keys, executor, gpu_specs);
     if (scratch.cuda_keys != scratch.engine_keys) {
         log_substrings_cell_mismatch_(scratch, "CUDA-vs-serial divergence");
         verify(false && "CUDA backend disagrees with the serial reference");
@@ -1376,8 +1409,8 @@ void test_substrings_cuda_memory_contract() {
     arrow_strings_tape_t reference_haystacks;
     verify(reference_haystacks.try_assign(texts.data(), texts.data() + texts.size()) == status_t::success_k);
     substrings_match_set_t serial_keys, scattered_keys;
-    collect_matches_into_(serial_engine, reference_haystacks.view(), serial_keys);
-    collect_matches_into_(cuda_engine, scattered_view, scattered_keys, executor, gpu_specs);
+    collect_overlapping_matches_into_(serial_engine, reference_haystacks.view(), serial_keys);
+    collect_overlapping_matches_into_(cuda_engine, scattered_view, scattered_keys, executor, gpu_specs);
     verify(!serial_keys.empty() && "The fixture must produce matches");
     verify(scattered_keys == serial_keys && "Scattered unified allocations must match the packed reference");
 
@@ -1482,11 +1515,11 @@ void test_substrings_large_haystacks() {
     substrings_u32_serial_t serial_engine;
     verify(serial_engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
     substrings_match_set_t serial_keys, parallel_keys;
-    collect_matches_into_(serial_engine, haystacks.view(), serial_keys);
+    collect_overlapping_matches_into_(serial_engine, haystacks.view(), serial_keys);
 
     substrings_u32_parallel_t parallel_engine;
     verify(parallel_engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
-    collect_matches_into_(parallel_engine, haystacks.view(), parallel_keys, pool, sliced_specs);
+    collect_overlapping_matches_into_(parallel_engine, haystacks.view(), parallel_keys, pool, sliced_specs);
 
     verify(!serial_keys.empty() && "The fixture must produce matches");
     verify(parallel_keys == serial_keys && "The sliced parallel path disagrees with the serial reference");
@@ -1517,7 +1550,7 @@ void test_substrings_construction() {
         substrings_u32_serial_t engine;
         verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
         verify(matches.size() == 6 && "All matches are reported - this is not leftmost-longest matching");
     }
 
@@ -1568,14 +1601,14 @@ void test_substrings_construction() {
         substrings_u32_serial_t wide;
         verify(wide.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
         substrings_match_set_t wide_matches;
-        collect_matches_into_(wide, haystacks.view(), wide_matches);
+        collect_overlapping_matches_into_(wide, haystacks.view(), wide_matches);
 
         substrings_u16_serial_t narrow;
         verify(narrow.try_build(wide.dictionary()) == status_t::success_k);
         verify(narrow.dictionary().count_states() == wide.dictionary().count_states());
         verify(narrow.dictionary().count_needles() == wide.dictionary().count_needles());
         substrings_match_set_t narrow_matches;
-        collect_matches_into_(narrow, haystacks.view(), narrow_matches);
+        collect_overlapping_matches_into_(narrow, haystacks.view(), narrow_matches);
         verify(narrow_matches == wide_matches && "a narrowed automaton must match its source exactly");
     }
 
@@ -1642,15 +1675,16 @@ void test_substrings_construction() {
         verify(haystacks.try_assign(haystack_storage.data(), haystack_storage.data() + haystack_storage.size()) ==
                status_t::success_k);
         substrings_match_set_t matches;
-        collect_matches_into_(engine, haystacks.view(), matches);
+        collect_overlapping_matches_into_(engine, haystacks.view(), matches);
 
         std::vector<std::size_t> counts(haystacks.view().size(), 0);
         std::size_t matches_total = 0;
-        verify(engine.try_count(haystacks.view(), span<std::size_t>(counts.data(), counts.size()), matches_total) ==
-               status_t::success_k);
+        verify(engine.try_count(haystacks.view(), substrings_overlapping_k,
+                                span<std::size_t>(counts.data(), counts.size()), matches_total) == status_t::success_k);
         std::vector<substrings_match_t> raw_matches(matches_total);
         std::size_t matches_found = 0;
-        verify(engine.try_find(haystacks.view(), span<substrings_match_t>(raw_matches.data(), raw_matches.size()),
+        verify(engine.try_find(haystacks.view(), substrings_overlapping_k,
+                               span<substrings_match_t>(raw_matches.data(), raw_matches.size()),
                                matches_found) == status_t::success_k);
 
         for (substrings_match_t const &match : raw_matches) {
@@ -1670,6 +1704,288 @@ void test_substrings_construction() {
 }
 
 #pragma endregion // Construction
+
+#pragma region Matching
+
+/**
+ *  @brief The leftmost covers are a subset of the overlapping matches, and they share no bytes.
+ *
+ *  Stated against the overlapping walk rather than a second implementation: every match a cover reports must
+ *  be a match the exhaustive walk also found, and no two of them may touch.
+ */
+void test_substrings_cover() {
+    std::printf("  - testing that a leftmost cover is a non-overlapping subset of every match...\n");
+
+    std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(150), 2, 5);
+    std::vector<std::string> const haystack_strings = random_short_strings_(scale_iterations(40), 16, 64);
+    arrow_strings_tape_t needles, haystacks;
+    verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+           status_t::success_k);
+    verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+           status_t::success_k);
+
+    substrings_u32_serial_t engine;
+    verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+    substrings_match_set_t overlapping;
+    collect_matches_under_(engine, haystacks.view(), substrings_overlapping_k, overlapping);
+
+    substrings_overlap_policy_t const leftmost_policies[2] = {substrings_leftmost_longest_k,
+                                                              substrings_leftmost_first_k};
+    for (substrings_overlap_policy_t const policy : leftmost_policies) {
+        substrings_match_set_t cover;
+        collect_matches_under_(engine, haystacks.view(), policy, cover);
+
+        for (substrings_match_t const &match : cover)
+            verify(std::binary_search(overlapping.matches.begin(), overlapping.matches.end(), match,
+                                      substrings_match_less_) &&
+                   "A cover may only report matches the exhaustive walk also found");
+
+        // The set orders by needle before offset, so it has to be re-sorted by position before neighbours
+        // mean anything - only then does "no two neighbours touch" imply "no two matches touch".
+        std::vector<substrings_match_t> by_position = cover.matches;
+        std::sort(by_position.begin(), by_position.end(), substrings_match_by_position_less_);
+        for (std::size_t index = 1; index < by_position.size(); ++index) {
+            substrings_match_t const &earlier = by_position[index - 1];
+            substrings_match_t const &later = by_position[index];
+            if (earlier.haystack_index != later.haystack_index) continue;
+            verify(earlier.byte_offset + earlier.byte_length <= later.byte_offset &&
+                   "Two matches of one cover shared a byte");
+        }
+    }
+}
+
+#pragma endregion // Matching
+
+#pragma region Rewriting
+
+/** @brief The flat tape and per-haystack offsets a single rewrite pass produced. */
+struct substrings_rewrite_tape_t {
+    std::string text;
+    std::vector<std::size_t> offsets;
+
+    span<char const> operator[](std::size_t haystack_index) const noexcept {
+        return {text.data() + offsets[haystack_index], offsets[haystack_index + 1] - offsets[haystack_index]};
+    }
+};
+
+/** @brief Whether @p rewritten holds @p expected at @p haystack_index, compared as bytes. */
+inline bool rewritten_equals_(substrings_rewrite_tape_t const &rewritten, std::size_t haystack_index,
+                              std::string const &expected) noexcept {
+    span<char const> const produced = rewritten[haystack_index];
+    return produced.size() == expected.size() && std::memcmp(produced.data(), expected.data(), expected.size()) == 0;
+}
+
+/**
+ *  @brief Rewrites @p haystacks through @p engine under @p overlap_policy, returning the flat result tape.
+ *
+ *  Sizes the tape with a zero-capacity call first, which is the same size query `try_find` offers, so the
+ *  rewrite itself always runs against a buffer that is exactly big enough.
+ */
+template <typename engine_type_, typename haystacks_type_>
+substrings_rewrite_tape_t rewrite_all_(engine_type_ &engine, haystacks_type_ const &haystacks,
+                                       substrings_overlap_policy_t overlap_policy,
+                                       arrow_strings_tape_t const &replacements) {
+
+    substrings_rewrite_tape_t rewritten;
+    rewritten.offsets.assign(haystacks.size() + 1, 0);
+    span<std::size_t> const offsets_view(rewritten.offsets.data(), rewritten.offsets.size());
+    std::size_t needed = 0;
+    status_t const sized = engine.try_replace(haystacks, overlap_policy, replacements.view(), span<char>(),
+                                              offsets_view, needed);
+    verify((needed == 0 ? sized == status_t::success_k : sized == status_t::unexpected_dimensions_k) &&
+           "A zero-capacity rewrite must refuse and name the size it wanted");
+
+    rewritten.text.assign(needed, '\0');
+    std::size_t written = 0;
+    verify(engine.try_replace(haystacks, overlap_policy, replacements.view(), span<char>(rewritten.text.data(), needed),
+                              offsets_view, written) == status_t::success_k);
+    verify(written == needed && "The sizing pass and the writing pass must agree");
+    verify(rewritten.offsets[haystacks.size()] == written && "The terminator must close the last haystack");
+    return rewritten;
+}
+
+/**
+ *  @brief Rewriting under both leftmost policies, against the oracle a rewrite carries for free.
+ *
+ *  Replacing every needle with itself must reproduce the input byte for byte, whatever the vocabulary and
+ *  whichever cover resolved it - a property that needs no second implementation to check against.
+ */
+void test_substrings_rewriting() {
+    std::printf("  - testing rewriting against the self-replacement oracle...\n");
+
+    substrings_overlap_policy_t const leftmost_policies[2] = {substrings_leftmost_longest_k,
+                                                              substrings_leftmost_first_k};
+
+    // Replacing each needle with itself is the identity, so any deviation is the rewrite's own bug.
+    {
+        std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(200), 2, 6);
+        std::vector<std::string> const haystack_strings = random_short_strings_(scale_iterations(50), 16, 64);
+        arrow_strings_tape_t needles, haystacks, replacements;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+               status_t::success_k);
+        verify(replacements.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        for (substrings_overlap_policy_t const policy : leftmost_policies) {
+            substrings_rewrite_tape_t const rewritten = rewrite_all_(engine, haystacks.view(), policy, replacements);
+            verify(rewritten.offsets.size() == haystack_strings.size() + 1 && "One boundary per haystack, plus one");
+            for (std::size_t index = 0; index < haystack_strings.size(); ++index)
+                verify(rewritten_equals_(rewritten, index, haystack_strings[index]) &&
+                       "Replacing every needle with itself must reproduce the input");
+        }
+    }
+
+    // An empty replacement deletes, and a replacement shorter than its needle shrinks the output - the sizing
+    // pass accumulates removals and insertions apart, so neither can wrap the unsigned total.
+    {
+        std::vector<std::string> const needle_strings {"cat", "dog"};
+        std::vector<std::string> const haystack_strings {"cats and dogs", "dogcat", "no pets here"};
+        std::vector<std::string> const replacement_strings {"", "z"};
+        arrow_strings_tape_t needles, haystacks, replacements;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+               status_t::success_k);
+        verify(replacements.try_assign(replacement_strings.data(),
+                                       replacement_strings.data() + replacement_strings.size()) == status_t::success_k);
+
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        substrings_rewrite_tape_t const rewritten = rewrite_all_(engine, haystacks.view(),
+                                                                 substrings_leftmost_longest_k, replacements);
+        verify(rewritten_equals_(rewritten, 0, "s and zs") && "An empty replacement deletes and a shorter one shrinks");
+        verify(rewritten_equals_(rewritten, 1, "z") && "Both needles rewrite in one haystack");
+        verify(rewritten_equals_(rewritten, 2, haystack_strings[2]) &&
+               "A haystack with no match passes through untouched");
+    }
+
+    // A longer needle shadows a shorter one under `leftmost_longest`, while `leftmost_first` takes whichever
+    // needle was listed first - the same distinction the matching policies draw, carried into the rewrite.
+    {
+        std::vector<std::string> const needle_strings {"cat", "catalog"};
+        std::vector<std::string> const haystack_strings {"catalog"};
+        std::vector<std::string> const replacement_strings {"feline", "directory"};
+        arrow_strings_tape_t needles, haystacks, replacements;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+               status_t::success_k);
+        verify(replacements.try_assign(replacement_strings.data(),
+                                       replacement_strings.data() + replacement_strings.size()) == status_t::success_k);
+
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        verify(rewritten_equals_(rewrite_all_(engine, haystacks.view(), substrings_leftmost_longest_k, replacements), 0,
+                                 "directory") &&
+               "The longest needle shadows the shorter one it contains");
+        verify(rewritten_equals_(rewrite_all_(engine, haystacks.view(), substrings_leftmost_first_k, replacements), 0,
+                                 "felinealog") &&
+               "The lower needle index wins however long its rival");
+    }
+
+    // An overlapping rewrite is not a function - two matches sharing a byte have no single answer - so the
+    // policy is refused rather than resolved to some arbitrary winner.
+    {
+        std::vector<std::string> const needle_strings {"ab"};
+        std::vector<std::string> const haystack_strings {"abab"};
+        arrow_strings_tape_t needles, haystacks, replacements;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+               status_t::success_k);
+        verify(replacements.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        std::vector<std::size_t> offsets(haystacks.view().size() + 1, 0);
+        std::size_t written = 0;
+        verify(engine.try_replace(haystacks.view(), substrings_overlapping_k, replacements.view(), span<char>(),
+                                  span<std::size_t>(offsets.data(), offsets.size()), written) != status_t::success_k);
+    }
+}
+
+#pragma endregion // Rewriting
+
+#pragma region Scoring
+
+/**
+ *  @brief BM25 against scores worked out by hand, plus the bit-stability the header promises.
+ *
+ *  Term frequencies are raw overlapping counts, so a needle nested in another still contributes every one of
+ *  its own occurrences - which is what classic BM25 scores and what a leftmost cover would have suppressed.
+ */
+void test_substrings_scoring() {
+    std::printf("  - testing BM25 scores against hand-computed values...\n");
+
+    std::vector<std::string> const needle_strings {"cat", "dog"};
+    std::vector<std::string> const haystack_strings {"catcat", "dog", "nothing"};
+    arrow_strings_tape_t needles, haystacks;
+    verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+           status_t::success_k);
+    verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+           status_t::success_k);
+
+    substrings_u32_serial_t engine;
+    verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+
+    substrings_bm25_t const parameters {.term_frequency_saturation = 1.2f,
+                                        .length_normalization = 0.75f,
+                                        .average_document_length = 6.0f};
+    std::vector<float> const weights {1.0f, 2.0f};
+    std::vector<float> scores(haystack_strings.size(), 0.0f);
+    span<float const> const weights_view(weights.data(), weights.size());
+    span<float> const scores_view(scores.data(), scores.size());
+
+    verify(engine.try_score_bm25(haystacks.view(), span<float const>(), parameters, weights_view, scores_view) ==
+           status_t::success_k);
+
+    // "catcat" is 6 bytes against a 6-byte mean, so the length term is exactly one and "cat" twice scores
+    //   1.0 * 2 * (1.2 + 1) / (2 + 1.2 * 1) = 4.4 / 3.2
+    verify(std::fabs(scores[0] - 4.4f / 3.2f) < 1e-5f && "Two occurrences must saturate, not double");
+
+    // "dog" is 3 bytes against the same mean, so the length term is 1 - 0.75 + 0.75 * 3 / 6 = 0.625, and the
+    // needle's own weight of two scales the whole term: 2.0 * 1 * 2.2 / (1 + 1.2 * 0.625).
+    verify(std::fabs(scores[1] - 2.0f * 2.2f / (1.0f + 1.2f * 0.625f)) < 1e-5f &&
+           "A weight scales its needle's whole contribution");
+    verify(scores[2] == 0.0f && "A haystack no needle hits scores exactly zero");
+
+    // Bit-stability: the same call on the same engine must reproduce every score exactly, not merely closely.
+    std::vector<float> const first_scores = scores;
+    for (std::size_t repeat = 0; repeat < 4; ++repeat) {
+        std::fill(scores.begin(), scores.end(), 0.0f);
+        verify(engine.try_score_bm25(haystacks.view(), span<float const>(), parameters, weights_view, scores_view) ==
+               status_t::success_k);
+        verify(scores == first_scores && "Scores must be bit-identical across runs of one backend");
+    }
+
+    // An empty `document_lengths` means byte lengths, which the caller can also state outright.
+    {
+        std::vector<float> byte_lengths;
+        for (std::string const &haystack : haystack_strings) byte_lengths.push_back((float)haystack.size());
+        std::vector<float> explicit_scores(haystack_strings.size(), 0.0f);
+        verify(engine.try_score_bm25(
+                   haystacks.view(), span<float const>(byte_lengths.data(), byte_lengths.size()), parameters,
+                   weights_view, span<float>(explicit_scores.data(), explicit_scores.size())) == status_t::success_k);
+        verify(explicit_scores == first_scores && "Byte lengths stated outright must score identically");
+    }
+
+    // A zero weight removes its needle from the ranking without removing it from the automaton.
+    {
+        std::vector<float> const muted {0.0f, 0.0f};
+        std::vector<float> muted_scores(haystack_strings.size(), 1.0f);
+        verify(engine.try_score_bm25(haystacks.view(), span<float const>(), parameters,
+                                     span<float const>(muted.data(), muted.size()),
+                                     span<float>(muted_scores.data(), muted_scores.size())) == status_t::success_k);
+        for (float const score : muted_scores) verify(score == 0.0f && "Zero weights must score zero");
+    }
+}
+
+#pragma endregion // Scoring
 
 #pragma region Safety
 
@@ -1695,8 +2011,8 @@ void test_substrings_buffer_contracts() {
 
     std::vector<std::size_t> counts(haystacks.view().size(), 0);
     std::size_t required = 0;
-    verify(serial_engine.try_count(haystacks.view(), span<std::size_t>(counts.data(), counts.size()), required) ==
-           status_t::success_k);
+    verify(serial_engine.try_count(haystacks.view(), substrings_overlapping_k,
+                                   span<std::size_t>(counts.data(), counts.size()), required) == status_t::success_k);
     verify(required > 1 && "fixtures must produce several matches for the undersized case to mean anything");
 
     std::size_t matches_found = 0;
@@ -1706,7 +2022,8 @@ void test_substrings_buffer_contracts() {
     {
         std::vector<span<char const>> const no_haystacks;
         span<substrings_match_t> const no_matches;
-        verify(parallel_engine.try_find(no_haystacks, no_matches, matches_found) == status_t::success_k);
+        verify(parallel_engine.try_find(no_haystacks, substrings_overlapping_k, no_matches, matches_found) ==
+               status_t::success_k);
         verify(matches_found == 0);
     }
 
@@ -1716,10 +2033,10 @@ void test_substrings_buffer_contracts() {
     {
         std::vector<substrings_match_t> too_small(required - 1);
         span<substrings_match_t> const too_small_view(too_small.data(), too_small.size());
-        verify(serial_engine.try_find(haystacks.view(), too_small_view, matches_found) ==
+        verify(serial_engine.try_find(haystacks.view(), substrings_overlapping_k, too_small_view, matches_found) ==
                status_t::unexpected_dimensions_k);
         verify(matches_found == required);
-        verify(parallel_engine.try_find(haystacks.view(), too_small_view, matches_found) ==
+        verify(parallel_engine.try_find(haystacks.view(), substrings_overlapping_k, too_small_view, matches_found) ==
                status_t::unexpected_dimensions_k);
         verify(matches_found == required);
     }
@@ -1728,10 +2045,10 @@ void test_substrings_buffer_contracts() {
     // need comes back in `matches_found`.
     {
         span<substrings_match_t> const no_capacity;
-        verify(serial_engine.try_find(haystacks.view(), no_capacity, matches_found) ==
+        verify(serial_engine.try_find(haystacks.view(), substrings_overlapping_k, no_capacity, matches_found) ==
                status_t::unexpected_dimensions_k);
         verify(matches_found == required);
-        verify(parallel_engine.try_find(haystacks.view(), no_capacity, matches_found) ==
+        verify(parallel_engine.try_find(haystacks.view(), substrings_overlapping_k, no_capacity, matches_found) ==
                status_t::unexpected_dimensions_k);
         verify(matches_found == required);
     }
@@ -1741,9 +2058,11 @@ void test_substrings_buffer_contracts() {
     {
         std::vector<substrings_match_t> too_large(required + 16);
         span<substrings_match_t> const too_large_view(too_large.data(), too_large.size());
-        verify(serial_engine.try_find(haystacks.view(), too_large_view, matches_found) == status_t::success_k);
+        verify(serial_engine.try_find(haystacks.view(), substrings_overlapping_k, too_large_view, matches_found) ==
+               status_t::success_k);
         verify(matches_found == required);
-        verify(parallel_engine.try_find(haystacks.view(), too_large_view, matches_found) == status_t::success_k);
+        verify(parallel_engine.try_find(haystacks.view(), substrings_overlapping_k, too_large_view, matches_found) ==
+               status_t::success_k);
         verify(matches_found == required);
     }
 }
@@ -1817,11 +2136,13 @@ void test_substrings_safety() {
 
             std::vector<std::size_t> counts(1, 0);
             std::size_t matches_total = 0;
-            verify(engine.try_count(haystacks, span<std::size_t>(counts.data(), counts.size()), matches_total) ==
-                   status_t::success_k);
+            verify(engine.try_count(haystacks, substrings_overlapping_k,
+                                    span<std::size_t>(counts.data(), counts.size()),
+                                    matches_total) == status_t::success_k);
             std::vector<substrings_match_t> matches(matches_total);
             std::size_t matches_found = 0;
-            verify(engine.try_find(haystacks, span<substrings_match_t>(matches.data(), matches.size()),
+            verify(engine.try_find(haystacks, substrings_overlapping_k,
+                                   span<substrings_match_t>(matches.data(), matches.size()),
                                    matches_found) == status_t::success_k);
             verify(matches_found == counts[0] && "try_count and try_find disagree on match count");
         }
