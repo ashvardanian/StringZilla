@@ -579,8 +579,12 @@ The API is a three-call streaming state — `sz_sha256_state_init`, `sz_sha256_s
 Each backend is also exposed under its own suffix, like `sz_sha256_state_update_neonsha`, for the same manual-dispatch reasons as the rest of the library.
 
 Digesting one message is a serial dependency chain — 32 dependent `SHA256RNDS2` at 4 cycles each — so no wider instruction set can accelerate it, and the SHA-NI path already sits within 15% of that hardware floor.
+That is also why there is no Ice Lake tier for it: SHA-NI has no VEX or EVEX encoding, so `goldmont` is the widest single-message kernel there will ever be.
+
 Independent messages are a different story: they compress in parallel lanes, sixteen at a time on AVX-512 and eight on AVX2, which is what `sz_sha256_multistate_update` exposes.
-That lane-parallel form roughly doubles single-message SHA-NI throughput, and on an AVX-512 CPU without SHA-NI it is about ten times the scalar path.
+That lane-parallel form nearly triples the hash rate of dedicated SHA-NI silicon on token-sized inputs, and still leads by half again on line-sized ones.
+Lanes retire independently, so a batch of mixed lengths stays vectorized to each lane's own last block rather than dropping to scalar when one lane runs short.
+A group still costs as much as its longest member, so feeding inputs in length order is the caller's lever — `sz_sequence_argsort` produces that ordering, and per-backend numbers are in [`include/stringzilla/hash/README.md`](include/stringzilla/hash/README.md).
 
 ### AES-256 Encryption
 
@@ -605,9 +609,9 @@ The streaming decrypt is called `sz_aes256_gcm_decryptor_update_unverified` beca
 
 Backends cover AES-NI and PCLMUL, VAES and VPCLMULQDQ, Arm crypto extensions and SVE2-AES, RISC-V `Zvkned` with `Zvkg`, Power `vcipher` with `vpmsumd`, and a WebAssembly path that has no cipher instructions at all and emulates the round function through a constant-time tower-field substitution — where the 256-byte lookup table a serial implementation reaches for is itself the side channel.
 
-Against OpenSSL the authenticated path is a fair fight, traded back and forth by message size.
-Counter mode is not close, and that is an artifact of coverage rather than of arithmetic: OpenSSL ships hand-written AVX-512 assembly for Galois/counter mode and the cipher-block chaining variants, but not for counter mode, so the comparison is a vectorized kernel against a sixteen-byte one.
-The honest summary is that we win where the competition has not bothered to vectorize, and draw where it has.
+On realistic record sizes the authenticated path outruns both Ring and OpenSSL, in either direction, and unauthenticated counter mode is faster still.
+Counter mode's margin is an artifact of coverage rather than of arithmetic: OpenSSL ships hand-written AVX-512 assembly for Galois/counter mode and the cipher-block chaining variants, but not for counter mode, so that comparison is a vectorized kernel against a sixteen-byte one.
+Key setup runs the other way, since an AES-256 schedule is real work where adopting a stream-cipher key is a copy, so workloads that churn through short-lived keys favour the ChaCha implementations.
 Per-backend numbers are in [`include/stringzilla/cipher/README.md`](include/stringzilla/cipher/README.md).
 
 [faq-fips197]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf

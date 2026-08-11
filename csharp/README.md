@@ -98,7 +98,7 @@ foreach (var line in Sz.SplitWhitespaces(text).SkipEmpty()) Use(line); // collap
 foreach (long at in Sz.EnumerateMatches(haystack, "ab"u8)) Use(at); // every offset; .Overlapping() for overlaps
 foreach (var m in Sz.EnumerateUncasedMatches(haystack, "ß"u8)) Use(m); // caseless; m.Offset, m.Length
 
-var (before, separator, after) = Sz.Partition(text, "="u8); // cf. Python str.partition
+var (before, separator, after) = Sz.Partition(text, "="u8); // split at the first "="
 ```
 
 ## Case Folding and Normalization

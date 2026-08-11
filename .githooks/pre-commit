@@ -125,14 +125,16 @@ EOF
 fi
 
 # GitHub Actions job & step names: no parentheses, and the visible name starts with an uppercase letter
-# (or a `${{ … }}` expression). Checks job-level `name:` keys (8-space indent in our 4-space YAML style)
+# (or a `${{ … }}` expression). Checks job-level `name:` keys (4-space indent in our 2-space YAML style)
 # and step-level `- name:` items on ADDED lines only, so `with:` parameters like artifact names are
 # untouched. Prefer `Test Rust with compile-time dispatch` over `Test Rust (compile-time dispatch)`, and
-# `QEMU Tests ${{ matrix.target_arch }}` over `QEMU Tests (${{ matrix.target_arch }})`.
+# `QEMU Tests ${{ matrix.target_arch }}` over `QEMU Tests (${{ matrix.target_arch }})`. A leading `macOS`
+# is the one accepted lowercase start, since the platform spells its own name that way.
 workflow_names=$(git diff --cached --no-color -U0 -- '.github/workflows/*.yml' '.github/workflows/*.yaml' \
   | grep -E '^\+' | grep -vE '^\+\+\+' \
-  | grep -E '^\+( {8}name:| *- name:)' \
-  | grep -E '[()]|name:[[:space:]]*["'"'"']?[a-z]' || true)
+  | grep -E '^\+( {4}name:| *- name:)' \
+  | grep -E '[()]|name:[[:space:]]*["'"'"']?[a-z]' \
+  | grep -vE '^\+[^()]*name:[[:space:]]*["'"'"']?macOS[^()]*$' || true)
 if [ -n "$workflow_names" ]; then
   cat >&2 <<EOF
 pre-commit: workflow job/step names must avoid parentheses and start with an uppercase letter:

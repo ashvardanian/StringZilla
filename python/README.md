@@ -596,10 +596,10 @@ Each yields `Str` views into the original buffer, so segmentation stays allocati
 | Method / function                                                         | Standard                         | Yields                                                                                 |
 | ------------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------- |
 | `utf8_codepoints(string)`                                                 | scalar values                    | `int` code points; ill-formed bytes decode to `U+FFFD`, so iteration never raises.     |
-| `utf8_graphemes(string, skip_empty=False)`                                | TR29 grapheme clusters           | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
-| `utf8_wordbreaks(string, skip_empty=False)`                               | TR29 word boundaries             | all UAX-29 word segments (words and the separators between them; they tile).           |
-| `utf8_sentences(string, skip_empty=False)`                                | TR29 sentence boundaries         | sentences.                                                                             |
-| `utf8_linebreaks(string, skip_empty=False)`                               | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
+| `utf8_graphemes(string, skip_empty=False)`                                | UAX-29 grapheme clusters         | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
+| `utf8_wordbreaks(string, skip_empty=False)`                               | UAX-29 word boundaries           | all UAX-29 word segments (words and the separators between them; they tile).           |
+| `utf8_sentences(string, skip_empty=False)`                                | UAX-29 sentence boundaries       | sentences.                                                                             |
+| `utf8_linebreaks(string, skip_empty=False)`                               | UAX-14 line-break opportunities  | soft-wrap segments.                                                                    |
 | `utf8_split_newlines(string, skip_empty=False, with_separators=False)`    | 7 Unicode newlines + CRLF        | content BETWEEN hard newlines (LF, VT, FF, CR, NEL, `U+2028`, `U+2029`, CRLF).         |
 | `utf8_newlines(string, skip_empty=False)`                                 | 7 Unicode newlines + CRLF        | the newline runs themselves (the separators).                                          |
 | `utf8_split_whitespaces(string, skip_empty=False, with_separators=False)` | 25 Unicode `"White_Space"`       | content BETWEEN whitespace runs, like `str.split()` with no separator.                 |

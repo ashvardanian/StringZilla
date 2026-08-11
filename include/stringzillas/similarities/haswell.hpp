@@ -5232,8 +5232,9 @@ struct levenshtein_distance_myers<
 
         for (size_t position = 0; position != max_longer; ++position) {
             __m256i const active = _mm256_cmpgt_epi64(longer_vec, _mm256_set1_epi64x((long long)position));
-            __m256i const symbols = _mm256_cvtepu8_epi64(
-                _mm_loadl_epi64((__m128i const *)(transposed_text + position * lanes_k)));
+            // An exact `lanes_k`-byte load: the widening consumes only 4 bytes, and an 8-byte `_mm_loadl_epi64`
+            // would reach 4 bytes past the transposed buffer's end on the last position.
+            __m256i const symbols = _mm256_cvtepu8_epi64(_mm_loadu_si32(transposed_text + position * lanes_k));
             __m256i const equality = _mm256_i64gather_epi64((long long const *)match_masks,
                                                             _mm256_add_epi64(lane_offsets, symbols), 8);
             __m256i const carry_in = _mm256_or_si256(equality, vertical_negative);

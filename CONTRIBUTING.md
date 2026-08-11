@@ -22,18 +22,17 @@ The project is split into the following parts:
 - `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
 - `include/stringzillas/*` - parallel CPU/GPU header-only backends.
 - `c/*` - [C, C++, and CUDA](#c-and-c) sources for dynamic dispatch and parallel backends.
-- `rust/*` - [Rust](#rust) crate sources.
-- `python/*` - [Python](#python) bindings.
+- `rust/*` - [Rust](#rust) crate sources; `rust/stringzilla/*` and `rust/stringzillas/*` hold one module per kernel domain, re-exported through `rust/stringzilla.rs` and `rust/stringzillas.rs`.
+- `python/*` - [Python](#python) bindings; one translation unit per kernel domain, with `python/stringzilla.h` and `python/stringzillas.h` as the two extensions' private headers.
 - `swift/*` - [Swift](#swift) package sources and tests.
 - `javascript/*` - [JavaScript](#javascript) bindings.
 - `golang/*` - [Go](#golang) bindings.
 - `test/*` and `bench/*` - per-kernel test and benchmark sources.
-- `cli/*` - SIMD-accelerated CLI utilities.
 
 For minimal test coverage, check the following scripts:
 
 - `test/stringzilla.cpp` - drives every per-ISA C kernel directly, spot-checking the C++ wrappers in the `_unit` tier.
-- `test/*.py` - tests the Python API against native strings, split per kernel family (`test_string.py`, `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`) mirroring the C++ translation units, with shared helpers in `test_helpers.py` / `test_utf8_helpers.py`.
+- `test/*.py` - tests the Python API against native strings, split per kernel family (`string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `similarities.py`, `fingerprints.py`, `utf8_*.py`), with shared helpers in `sz_helpers.py`, `szs_helpers.py`, and `utf8_helpers.py`.
 - `test/stringzilla.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
@@ -46,11 +45,6 @@ They have the broadest coverage of the library, and are the most important to ke
 - `bench/similarities.cpp` - benchmark all edit distance backends.
 - `bench/fingerprints.cpp` - benchmark all Min-Hash fingerprinting backends.
 
-The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
-
-- `bench/find.(py|ipynb)` - compares against native Python `str`.
-- `bench/sequence.(py|ipynb)` - compares against `pandas`.
-- `bench/similarities.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
 
 ## Benchmarking Datasets
 
@@ -610,10 +604,10 @@ uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz
 StringZilla for Python seems to cover more OS and hardware combinations, than NumPy.
 That's why NumPy isn't a required dependency.
 Still, many tests may use NumPy, so consider installing it on mainstream platforms.
-Also considering the other optional dependencies for benchmarking and other scripts:
+Several suites also cross-check against reference implementations, and skip themselves when those are absent:
 
 ```bash
-uv pip install -r scripts/requirements.txt 
+uv pip install pycryptodome uniseg grapheme pysbd pyicu # oracles for the cipher and UTF-8 suites
 ```
 
 ### Packaging
@@ -787,7 +781,7 @@ Alternatively:
 
 ```bash
 export GO111MODULE="off"
-go run scripts/test.go
+go test
 go run bench/stringzilla.go
 ```
 

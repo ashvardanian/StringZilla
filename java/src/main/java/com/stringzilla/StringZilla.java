@@ -870,7 +870,7 @@ public final class StringZilla {
     }
 
     /** Splits at the first occurrence of {@code separator} into (before, separator, after) views; if
-     *  absent, returns ({@code text}, empty, empty). Mirrors Python's {@code str.partition}. */
+     *  absent, returns ({@code text}, empty, empty). */
     public static Partition partition(byte[] text, byte[] separator) {
         return partition(MemorySegment.ofArray(text), MemorySegment.ofArray(separator));
     }
@@ -886,8 +886,7 @@ public final class StringZilla {
                 text.asSlice(0, at), text.asSlice(at, separatorLength), text.asSlice(at + separatorLength));
     }
 
-    /** As {@link #partition} but at the last occurrence; if absent, returns (empty, empty, {@code text}).
-     *  Mirrors Python's {@code str.rpartition}. */
+    /** As {@link #partition} but at the last occurrence; if absent, returns (empty, empty, {@code text}). */
     public static Partition rpartition(byte[] text, byte[] separator) {
         return rpartition(MemorySegment.ofArray(text), MemorySegment.ofArray(separator));
     }
@@ -937,7 +936,7 @@ public final class StringZilla {
 
     // endregion
 
-    /** A 256-bit set of byte values (mirrors C sz_byteset_t). */
+    /** A 256-bit set of byte values. */
     public static final class Byteset {
         private final long[] w = new long[4];
 

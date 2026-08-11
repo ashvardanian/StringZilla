@@ -31,14 +31,14 @@ import StringZillaC
 /// Result of a three-way string comparison.
 ///
 /// Mirrors `Foundation.ComparisonResult` but is defined here so the package stays Foundation-free and usable
-/// on Linux and embedded targets. The cases match the `sz_order` / `sz_utf8_uncased_order` verdicts.
+/// on Linux and embedded targets. The cases match the verdicts of the exact and case-insensitive orderings.
 public enum StringZillaOrdering: Sendable {
     case ascending  // The receiver sorts before the argument.
     case equal  // The two compare as equal.
     case descending  // The receiver sorts after the argument.
 }
 
-/// Unicode normalization form selector, mirroring `sz_normal_form_t`.
+/// Unicode normalization form selector.
 public enum StringZillaNormalizationForm: RawRepresentable, Sendable {
     case nfd   // Canonical decomposition.
     case nfc   // Canonical decomposition + canonical composition.
@@ -453,8 +453,8 @@ extension StringZillaViewable {
     /// Splits the content on UTF-8 newline delimiters (the 7 line-break characters plus a CRLF pair).
     ///
     /// The delimiters partition the text into the N+1 *gaps* between them, so a string with N newlines
-    /// yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), which mirrors the
-    /// cross-language KEEP policy and matches `"a\n\nb\n".utf8Lines()` -> `["a", "", "b", ""]`.
+    /// yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), so
+    /// `"a\n\nb\n".utf8Lines()` -> `["a", "", "b", ""]`.
     ///
     /// - Note: This differs from the Swift standard library's `split(omittingEmptySubsequences: true)`,
     ///   which drops empty subsequences by default. Pass `skipEmpty: true` for that behavior.
@@ -467,8 +467,8 @@ extension StringZillaViewable {
     /// Splits the content on UTF-8 whitespace delimiters (all 25 Unicode `White_Space` characters).
     ///
     /// The delimiters partition the text into the N+1 *gaps* between them, so a string with N whitespace
-    /// characters yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), which mirrors
-    /// the cross-language KEEP policy. Pass `skipEmpty: true` to drop runs of whitespace as separators, e.g.
+    /// characters yields N+1 segments. By default empty segments are kept (`skipEmpty: false`).
+    /// Pass `skipEmpty: true` to drop runs of whitespace as separators, e.g.
     /// `"  hi  ".utf8Tokens(skipEmpty: true)` -> `["hi"]`.
     ///
     /// - Note: This differs from the Swift standard library's `split(omittingEmptySubsequences: true)`,
@@ -679,7 +679,7 @@ public class StringZillaHasher {
         return sz_hash_state_digest(&state)
     }
 
-    /// Alias for `finalize()` to match other bindings.
+    /// Alias for `finalize()`.
     public func digest() -> UInt64 { return finalize() }
 
     /// Resets the hasher to its initial state with the same seed.
@@ -739,7 +739,7 @@ public class StringZillaSha256 {
         return digest
     }
 
-    /// Alias for `finalize()` to match other bindings.
+    /// Alias for `finalize()`.
     public func digest() -> [UInt8] { return finalize() }
 
     /// Returns the current SHA-256 hash as a lowercase hexadecimal string.

@@ -649,6 +649,13 @@ struct arrow_strings_tape {
 
     template <typename strings_iterator_type_>
     status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
+        // The range is walked twice - once to measure, once to copy - so single-pass "input"
+        // iterators, like `std::istream_iterator`, would compile but silently copy nothing.
+        static_assert(
+            std::is_base_of<std::forward_iterator_tag,
+                            typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
+            "arrow_strings_tape::try_assign needs multi-pass (forward) iterators");
+
         reset(); // ? Drops the old contents, so every failure below leaves an empty tape rather than a stale one
 
         // Estimate required memory: total characters + one extra per string for the NULL.

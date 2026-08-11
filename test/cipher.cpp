@@ -340,22 +340,6 @@ void test_cipher_unit() {
 
     for (gcm_backend_t const &backend : gcm_backends_)
         for (known_gcm_t const &vector : known_gcm_vectors_) check_gcm_unit_(backend, vector);
-
-    // Transforming in place must agree with transforming into a separate buffer, in both modes.
-    for (ctr_backend_t const &backend : ctr_backends_) {
-        sz_u8_t secret[32], nonce[12];
-        for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 7 + 1);
-        for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index * 5 + 2);
-
-        sz_aes256_key_t key;
-        backend.key_init(&key, secret);
-        std::string original(300, '\0'), separate(300, '\0'), in_place;
-        randomize_string(&original[0], original.size());
-        backend.xor_bytes(&key, nonce, 0, original.data(), 300, &separate[0]);
-        in_place = original;
-        backend.xor_bytes(&key, nonce, 0, in_place.data(), 300, &in_place[0]);
-        if (in_place != separate) fail_backend_(backend.name, "in-place counter mode differs from out-of-place");
-    }
 }
 
 #pragma endregion // Unit
@@ -399,12 +383,24 @@ void test_ctr_equivalence(ctr_backend_t const &reference, ctr_backend_t const &c
         candidate.xor_bytes(&candidate_key, nonce, offset, whole.data() + offset, span - offset, &sliced[0]);
         if (std::memcmp(sliced.data(), whole_out.data() + offset, span - offset) != 0)
             fail_backend_(candidate.name, "seeking into the keystream landed on different bytes");
+
+        // Passing one pointer for both sides is what lets a caller transform a buffer without a copy.
+        // The seeked entry is the interesting one: its head block is the byte the kernel is likeliest
+        // to overwrite before it has finished reading.
+        std::string aliased(whole, offset, span - offset);
+        candidate.xor_bytes(&candidate_key, nonce, offset, aliased.data(), span - offset, &aliased[0]);
+        if (std::memcmp(aliased.data(), whole_out.data() + offset, span - offset) != 0)
+            fail_backend_(candidate.name, "counter mode in place differs from out-of-place");
     }
 }
 
 /**
  *  @brief Cross-checks an authenticated backend against a reference, one-shot and in chunks.
  *  @param inputs The longest message fuzzed, inclusive.
+ *
+ *  Also asserts the aliasing permission the header grants, which holds independently of any reference:
+ *  passing one pointer for both sides reaches the bytes and the tag two pointers would, and a rejected
+ *  tag still clears the buffer it was handed.
  */
 void test_gcm_equivalence(gcm_backend_t const &reference, gcm_backend_t const &candidate, sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12], reference_tag[16], candidate_tag[16];
@@ -441,6 +437,31 @@ void test_gcm_equivalence(gcm_backend_t const &reference, gcm_backend_t const &c
                               from_candidate.data(), length, &recovered[0], candidate_tag) != sz_success_k)
             fail_backend_(candidate.name, "refused a tag it had just produced");
         if (recovered != text) fail_backend_(candidate.name, "decryption did not recover its own plaintext");
+
+        // Sealing and opening inside the buffer a record arrived in is what lets a caller skip a copy
+        // per message, so one pointer for both sides must reach the bytes two pointers would.
+        std::string aliased = text;
+        sz_u8_t aliased_tag[16];
+        candidate.encrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, aliased.data(),
+                          length, &aliased[0], aliased_tag);
+        if (aliased != from_candidate) fail_backend_(candidate.name, "in-place sealing differs from out-of-place");
+        if (std::memcmp(aliased_tag, candidate_tag, 16) != 0)
+            fail_backend_(candidate.name, "in-place sealing produced a different tag than out-of-place");
+
+        if (candidate.decrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, aliased.data(),
+                              length, &aliased[0], candidate_tag) != sz_success_k)
+            fail_backend_(candidate.name, "in-place opening refused a tag it had just produced");
+        if (aliased != text) fail_backend_(candidate.name, "in-place opening recovered the wrong plaintext");
+
+        // A rejected tag clears the buffer even when that buffer is the ciphertext itself, so a caller
+        // who drops the status cannot act on forged data it opened in place.
+        aliased = from_candidate;
+        aliased_tag[0] = (sz_u8_t)(candidate_tag[0] ^ 0x01);
+        if (candidate.decrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, aliased.data(),
+                              length, &aliased[0], aliased_tag) != sz_authentication_failed_k)
+            fail_backend_(candidate.name, "in-place opening accepted a forged tag");
+        for (std::size_t index = 0; index != length; ++index)
+            if (aliased[index] != 0) fail_backend_(candidate.name, "forged plaintext survived opening in place");
     }
 
     // A chunk boundary must be invisible: the keystream block, the hash block, and the associated-data
@@ -487,6 +508,32 @@ void test_gcm_equivalence(gcm_backend_t const &reference, gcm_backend_t const &c
         if (reopened != text) fail_backend_(candidate.name, "chunked opening did not recover the plaintext");
         if (candidate.opener_verify(&decryptor, reference_tag) != sz_success_k)
             fail_backend_(candidate.name, "chunked opening refused a genuine tag");
+
+        // The streaming entries carry the same aliasing permission, and their mid-chunk resume path is
+        // where a kernel is likeliest to read a byte it has already overwritten.
+        std::string aliased = text;
+        sz_aes256_gcm_encryptor_t aliasing_encryptor;
+        candidate.sealer_init(&aliasing_encryptor, &candidate_key, nonce);
+        candidate.sealer_associate(&aliasing_encryptor, associated.data(), (sz_size_t)streamed_associated_length);
+        for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
+            std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
+            candidate.sealer_update(&aliasing_encryptor, aliased.data() + offset, (sz_size_t)taken, &aliased[offset]);
+        }
+        candidate.sealer_digest(&aliasing_encryptor, candidate_tag);
+        if (aliased != from_reference) fail_backend_(candidate.name, "chunked sealing in place differs from one-shot");
+        if (std::memcmp(reference_tag, candidate_tag, 16) != 0)
+            fail_backend_(candidate.name, "chunked sealing in place produced a different tag");
+
+        sz_aes256_gcm_decryptor_t aliasing_decryptor;
+        candidate.opener_init(&aliasing_decryptor, &candidate_key, nonce);
+        candidate.opener_associate(&aliasing_decryptor, associated.data(), (sz_size_t)streamed_associated_length);
+        for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
+            std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
+            candidate.opener_update(&aliasing_decryptor, aliased.data() + offset, (sz_size_t)taken, &aliased[offset]);
+        }
+        if (aliased != text) fail_backend_(candidate.name, "chunked opening in place did not recover the plaintext");
+        if (candidate.opener_verify(&aliasing_decryptor, reference_tag) != sz_success_k)
+            fail_backend_(candidate.name, "chunked opening in place refused a genuine tag");
     }
 }
 
@@ -520,6 +567,17 @@ void test_cipher_safety() {
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
             randomize_string(pointer, usable);
             sz_aes256_gcm_encrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, tag);
+        });
+        // Opening in place has to stay inside the buffer on both outcomes, and the rejected
+        // path writes the most: it clears every byte it was given.
+        with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
+            randomize_string(pointer, usable);
+            sz_aes256_gcm_encrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, tag);
+            sz_aes256_gcm_decrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, tag);
+            sz_u8_t forged[16];
+            std::memcpy(forged, tag, 16);
+            forged[0] ^= 0x01;
+            sz_aes256_gcm_decrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, forged);
         });
     }
 }

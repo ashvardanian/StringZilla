@@ -228,14 +228,16 @@ SZ_API_RUNTIME void sz_aes256_gcm_encrypt(             //
  *  @param associated_length Number of associated bytes, possibly zero.
  *  @param text The ciphertext.
  *  @param length Number of ciphertext bytes.
- *  @param output Receives @p length plaintext bytes on success, and zeros on failure.
+ *  @param output Receives @p length plaintext bytes on success, and zeros on failure; may equal @p text,
+ *                or must not overlap it at all.
  *  @param tag The 16-byte tag to check.
  *  @retval sz_success_k The tag matched and @p output holds the plaintext.
  *  @retval sz_authentication_failed_k The tag did not match; @p output is zeroed.
  *
  *  The comparison runs in time independent of where the tag first differs, and the output is cleared
  *  rather than left holding the unauthenticated plaintext, so a caller who ignores the status still
- *  cannot act on forged data.
+ *  cannot act on forged data. Decrypting in place therefore destroys the ciphertext when the tag is
+ *  rejected, which suits a caller that drops the message anyway and rules out one that must retry.
  *
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa sz_aes256_gcm_decrypt_serial, sz_aes256_gcm_decrypt_westmere, sz_aes256_gcm_decrypt_icelake,

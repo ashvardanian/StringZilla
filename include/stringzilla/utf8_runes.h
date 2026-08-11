@@ -76,7 +76,7 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_
  *
  *  It's a different story for emoji-heavy texts, which can mix 4-byte characters more frequently.
  *
- *  @b Contract (uniform across every backend, and the basis for the C++/Rust/Python codepoint iterators):
+ *  @b Contract (uniform across every backend, and the basis for every codepoint iterator built on it):
  *  - @b Fill-or-drain: emits runes until @p runes_capacity is reached or @p text is exhausted, looping
  *    internally - one call fills the buffer regardless of how many byte-widths the text mixes.
  *  - @b Total @b and @b safe: never reads past `text + length`; substitutes one @b U+FFFD per maximal

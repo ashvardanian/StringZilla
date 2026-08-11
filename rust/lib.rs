@@ -14,19 +14,8 @@ This crate provides two main modules:
 - `rocm`: Enable ROCm GPU backend
 "]
 
-/// Core single-string operations with SIMD acceleration.
-///
-/// Provides fast string search, comparison, hashing, and manipulation
-/// functions optimized with SWAR and SIMD instructions.
 pub mod stringzilla;
 
-/// High-performance parallel string algorithms with CPU/GPU acceleration.
-///
-/// Requires `cpus`, `cuda`, or `rocm` features. Provides:
-/// - Levenshtein distances (binary and UTF-8)  
-/// - Needleman-Wunsch global alignment
-/// - Smith-Waterman local alignment
-/// - Min-Hash fingerprinting
 #[cfg(any(feature = "cpus", feature = "cuda", feature = "rocm"))]
 pub mod stringzillas;
 

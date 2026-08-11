@@ -25,13 +25,13 @@ console.log(sz.capabilities); // e.g. "serial,haswell,skylake"
 
 ## Runtimes
 
-The binding is a native __Node-API__ addon, built from `javascript/lib.c` against `node_api.h`.
+The binding is a native __Node-API__ addon, compiled from C against `node_api.h`.
 Node-API is a stable, runtime-agnostic ABI, so the same compiled `.node` addon runs beyond Node.js.
 It also loads on __Bun__ and __Deno__ through their Node-API compatibility layers, which implement the `napi_*` interface that this addon links against.
 No Bun- or Deno-specific build is required; the addon and its `bindings`-based loader are shared across all three runtimes.
 
 Separately, StringZilla's C/C++ core __compiles to WebAssembly__.
-The `cmake/toolchain-wasm32.cmake` toolchain targets `wasm32-wasip1` with `-msimd128` and `-mrelaxed-simd`, which auto-enables the core's `SZ_USE_V128` and `SZ_USE_V128RELAXED` SIMD backends (the same v128 kernels under `include/stringzilla/`).
+Targeting `wasm32-wasip1` with `-msimd128` and `-mrelaxed-simd` auto-enables the core's `SZ_USE_V128` and `SZ_USE_V128RELAXED` SIMD backends — the same v128 kernels the native addon uses.
 This is a capability of the C core, exercised by the WebAssembly test builds; the npm package itself ships the N-API native addon and does not bundle a prebuilt `.wasm` artifact.
 
 ## Searching and Counting
