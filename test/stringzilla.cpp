@@ -169,6 +169,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_memory_stability_unit(1024)", [] { test_memory_stability_unit(1024); });
     failures += run_test("test_memory_stability_unit(14)", [] { test_memory_stability_unit(14); });
     failures += run_test("test_string_updates_unit", [] { test_string_updates_unit(); }); // ! Defaulted arg
+    failures += run_test("test_strings_tape_assign_unit", test_strings_tape_assign_unit);
 
     failures += run_test("test_compare_unit", test_compare_unit);
     failures += run_test("test_find_unit", test_find_unit);
