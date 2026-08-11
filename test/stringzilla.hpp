@@ -638,6 +638,7 @@ using ashvardanian::stringzilla::scripts::scale_iterations;
 
 void test_arithmetic_unit();
 void test_sequence_unit();
+void test_strings_tape_overflow_unit();
 void test_allocator_unit();
 void test_byteset_unit();
 

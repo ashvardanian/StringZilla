@@ -342,6 +342,36 @@ void test_sequence_unit() {
     }
 }
 
+/**
+ *  @brief Validates that `arrow_strings_tape` refuses to grow past the range of its offset type.
+ *         Regression test: offsets used to silently wrap around, corrupting every stored string.
+ */
+void test_strings_tape_overflow_unit() {
+    // 8-bit offsets hit the same code path as 32-bit offsets past 4 GiB, but already at 256 bytes.
+    using tape_t = sz::arrow_strings_tape<char, std::uint8_t, std::allocator<char>>;
+
+    // Appending past the offset range must fail cleanly and leave the stored strings untouched.
+    {
+        tape_t tape;
+        std::string const big(200, 'x');
+        verify(tape.try_append(sz::to_view(std::string_view(big))) == sz::status_t::success_k);
+        // Two 200-byte strings need 402 bytes of buffer - past the 255 maximum of 8-bit offsets.
+        verify(tape.try_append(sz::to_view(std::string_view(big))) == sz::status_t::overflow_risk_k);
+        verify(tape.size() == 1);
+        // The first string must still sit at offset 0, ending at 201 with its NULL terminator.
+        verify(tape.offsets()[0] == 0);
+        verify(tape.offsets()[1] == 201);
+        verify(std::memcmp(tape.buffer().data(), big.data(), big.size()) == 0);
+    }
+
+    // Same for bulk assignment: the combined size must fit the offset range.
+    {
+        tape_t tape;
+        std::vector<std::string> strings {std::string(200, 'x'), std::string(200, 'y')};
+        verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
+    }
+}
+
 #pragma endregion // Sequence
 
 #pragma region Allocator

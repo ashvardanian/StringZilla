@@ -135,6 +135,7 @@
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
+#include <limits>           // `std::numeric_limits`
 #include <memory>           // `std::allocator_traits` for allocator rebinding
 #include <type_traits>      // `is_same_type`, `std::enable_if`, etc.
 #endif
@@ -658,6 +659,11 @@ struct arrow_strings_tape {
         for (auto it = first; it != last; ++it, ++count) combined_length += it->length();
         combined_length += count; // ? NULL-terminate every string
 
+        // The offsets are stored as `offset_t`, so the tape can't grow past the range of that type.
+        // Without this check the offsets silently wrap around, corrupting every string view.
+        if (combined_length > static_cast<size_t>((std::numeric_limits<offset_t>::max)()))
+            return status_t::overflow_risk_k;
+
         // Allocate exactly the required memory
         buffer_ = {char_alloc_.allocate(combined_length), combined_length};
         offsets_ = {offset_alloc_.allocate(count + 1), count + 1};
@@ -690,6 +696,11 @@ struct arrow_strings_tape {
         size_t const string_length = string.length();
         size_t const required = string_length + 1; // Space needed for the new string and its NULL
         size_t current_used = count_ > 0 ? offsets_.data_[count_] : 0;
+
+        // The offsets are stored as `offset_t`, so the tape can't grow past the range of that type.
+        // Without this check the offsets silently wrap around, corrupting every string view.
+        size_t const max_offset = static_cast<size_t>((std::numeric_limits<offset_t>::max)());
+        if (required > max_offset - current_used) return status_t::overflow_risk_k;
 
         // Reallocate the buffer if needed (oversubscribe in powers of two).
         if (current_used + required > buffer_.size_) {
