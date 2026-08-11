@@ -343,6 +343,23 @@ void test_sequence_unit() {
     }
 }
 
+/**
+ *  @brief Validates that `arrow_strings_tape::try_assign` works with multi-pass forward iterators.
+ *         It walks the range twice, once to measure and once to copy, so single-pass input
+ *         iterators like `std::istream_iterator` are rejected at compile time.
+ */
+void test_strings_tape_assign_unit() {
+    sz::arrow_strings_tape<char, std::uint32_t, std::allocator<char>> tape;
+
+    // A forward list can only be walked forward, but any number of times - exactly what `try_assign` needs.
+    std::forward_list<std::string> strings {"alpha", "", "gamma"};
+    verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::success_k);
+    verify(tape.size() == 3);
+    verify(sz::string_view(tape[0].data(), tape[0].size()) == "alpha"_sv);
+    verify(tape[1].size() == 0);
+    verify(sz::string_view(tape[2].data(), tape[2].size()) == "gamma"_sv);
+}
+
 #pragma endregion // Sequence
 
 #pragma region Allocator
@@ -1614,23 +1631,6 @@ void test_string_updates_unit(std::size_t repetitions) {
             verify(sz::string_view(stl_string) == sz::string_view(sz_string));
         }
     }
-}
-
-/**
- *  @brief Validates that `arrow_strings_tape::try_assign` works with multi-pass forward iterators.
- *         It walks the range twice - once to measure, once to copy - so single-pass input iterators
- *         like `std::istream_iterator` are now rejected at compile time.
- */
-void test_strings_tape_assign_unit() {
-    sz::arrow_strings_tape<char, std::uint32_t, std::allocator<char>> tape;
-
-    // A forward list can only be walked forward, but any number of times - exactly what `try_assign` needs.
-    std::forward_list<std::string> strings {"alpha", "", "gamma"};
-    verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::success_k);
-    verify(tape.size() == 3);
-    verify(sz::string_view(tape[0].data(), tape[0].size()) == "alpha"_sv);
-    verify(tape[1].size() == 0);
-    verify(sz::string_view(tape[2].data(), tape[2].size()) == "gamma"_sv);
 }
 
 #pragma endregion // String Class
