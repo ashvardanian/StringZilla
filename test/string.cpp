@@ -354,9 +354,9 @@ void test_strings_tape_overflow_unit() {
     {
         tape_t tape;
         std::string const big(200, 'x');
-        verify(tape.try_append(sz::to_view(std::string_view(big))) == sz::status_t::success_k);
-        // Two 200-byte strings need 402 bytes of buffer - past the 255 maximum of 8-bit offsets.
-        verify(tape.try_append(sz::to_view(std::string_view(big))) == sz::status_t::overflow_risk_k);
+        verify(tape.try_append(sz::to_view(big)) == sz::status_t::success_k);
+        // Two 200-byte strings need 402 bytes of buffer, past the 255 maximum of 8-bit offsets.
+        verify(tape.try_append(sz::to_view(big)) == sz::status_t::overflow_risk_k);
         verify(tape.size() == 1);
         // The first string must still sit at offset 0, ending at 201 with its NULL terminator.
         verify(tape.offsets()[0] == 0);
