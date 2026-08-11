@@ -1521,6 +1521,44 @@ void test_string_constructors_unit() {
     verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
+/**
+ *  @brief Validates that shrinking `reserve` calls are harmless no-ops, just like in the STL.
+ *         Regression test: shrinking used to overflow the heap buffer in release builds.
+ */
+void test_string_reserve_unit() {
+    // C API: grow, then shrink - the buffer, length, and contents must stay intact.
+    {
+        sz_memory_allocator_t alloc;
+        sz_memory_allocator_init_default(&alloc);
+
+        sz_string_t str;
+        sz_ptr_t start = sz_string_init_length(&str, 100, &alloc);
+        verify(start != nullptr);
+        std::memset(start, 'a', 100);
+
+        sz_ptr_t grown = sz_string_reserve(&str, 200, &alloc);
+        verify(grown != nullptr);
+        verify(sz_string_length(&str) == 100);
+
+        // Shrinking must be a no-op: same buffer, same length, same contents.
+        sz_ptr_t shrunk = sz_string_reserve(&str, 50, &alloc);
+        verify(shrunk == grown);
+        verify(sz_string_length(&str) == 100);
+        for (sz_size_t i = 0; i != 100; ++i) verify(shrunk[i] == 'a');
+
+        sz_string_free(&str, &alloc);
+    }
+    // C++ API: `sz::string::reserve` shrinking must match `std::string` behavior - keep the contents.
+    {
+        sz::string str(100, 'a');
+        std::size_t const capacity_before = str.capacity();
+        str.reserve(50);
+        verify(str.size() == 100);
+        verify(str.capacity() == capacity_before);
+        verify(str == sz::string(100, 'a'));
+    }
+}
+
 /** @brief Checks for memory leaks in the string class using the `accounting_allocator`. */
 void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
 
