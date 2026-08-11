@@ -342,10 +342,7 @@ void test_sequence_unit() {
     }
 }
 
-/**
- *  @brief Validates that `arrow_strings_tape` refuses to grow past the range of its offset type.
- *         Regression test: offsets used to silently wrap around, corrupting every stored string.
- */
+/** @brief Validates that `arrow_strings_tape` refuses to grow past the range of its offset type. */
 void test_strings_tape_overflow_unit() {
     // 8-bit offsets hit the same code path as 32-bit offsets past 4 GiB, but already at 256 bytes.
     using tape_t = sz::arrow_strings_tape<char, std::uint8_t, std::allocator<char>>;
@@ -353,22 +350,26 @@ void test_strings_tape_overflow_unit() {
     // Appending past the offset range must fail cleanly and leave the stored strings untouched.
     {
         tape_t tape;
-        std::string const big(200, 'x');
-        verify(tape.try_append(sz::to_view(big)) == sz::status_t::success_k);
+        std::string const oversized_string(200, 'x');
+        verify(tape.try_append(sz::to_view(oversized_string)) == sz::status_t::success_k);
         // Two 200-byte strings need 402 bytes of buffer, past the 255 maximum of 8-bit offsets.
-        verify(tape.try_append(sz::to_view(big)) == sz::status_t::overflow_risk_k);
+        verify(tape.try_append(sz::to_view(oversized_string)) == sz::status_t::overflow_risk_k);
         verify(tape.size() == 1);
         // The first string must still sit at offset 0, ending at 201 with its NULL terminator.
         verify(tape.offsets()[0] == 0);
         verify(tape.offsets()[1] == 201);
-        verify(std::memcmp(tape.buffer().data(), big.data(), big.size()) == 0);
+        verify(std::memcmp(tape.buffer().data(), oversized_string.data(), oversized_string.size()) == 0);
     }
 
     // Same for bulk assignment: the combined size must fit the offset range.
     {
         tape_t tape;
+        std::string const stored_string(10, 'z');
+        verify(tape.try_append(sz::to_view(stored_string)) == sz::status_t::success_k);
         std::vector<std::string> strings {std::string(200, 'x'), std::string(200, 'y')};
         verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
+        // A rejected assignment releases the old contents, so the tape must not keep reporting them.
+        verify(tape.size() == 0);
     }
 }
 
