@@ -181,6 +181,7 @@ SZ_API_COMPTIME sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t le
 /**
  *  @brief Doesn't change the contents or the length of the string, but grows the available memory capacity.
  *         This is beneficial, if several insertions are expected, and we want to minimize allocations.
+ *         Reserving less than the current capacity is a harmless no-op, like `std::string::reserve`.
  *
  *  @param string       String to grow.
  *  @param new_capacity The number of characters to reserve space for, including existing ones.
@@ -353,7 +354,9 @@ SZ_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_ca
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
-    sz_assert_(new_space > string_space && "New space must be larger than current.");
+    // Shrinking is a no-op, matching `std::string::reserve` semantics. Without this check a smaller
+    // `new_capacity` would allocate a smaller buffer and then overflow it with the old contents.
+    if (new_space <= string_space) return string->external.start;
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return SZ_NULL_CHAR;
