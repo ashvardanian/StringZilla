@@ -141,8 +141,9 @@ int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t *result
     // degrading to serial would hide it, and the `DeviceScope` arm above already raises for the same case.
     *result = requested_caps & ceiling;
     if (*result == 0) {
-        PyErr_Format(PyExc_ValueError, "No requested capability is available here; available: %s",
-                     sz_capabilities_to_string_implementation_(ceiling));
+        char available[256];
+        sz_capabilities_to_string_implementation_(ceiling, available, sizeof(available));
+        PyErr_Format(PyExc_ValueError, "No requested capability is available here; available: %s", available);
         return -1;
     }
 
@@ -189,7 +190,8 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     }
     Py_DECREF(caps_tuple);
 
-    sz_cptr_t caps_str = sz_capabilities_to_string_implementation_(caps);
+    char caps_str[256];
+    sz_capabilities_to_string_implementation_(caps, caps_str, sizeof(caps_str));
     if (PyObject_SetAttrString(self, "__capabilities_str__", PyUnicode_FromString(caps_str)) != 0) { return NULL; }
 
     Py_RETURN_NONE;
@@ -359,7 +361,8 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
         }
 
         // Also keep the old comma-separated string version for backward compatibility
-        sz_cptr_t caps_str = sz_capabilities_to_string_implementation_(caps);
+        char caps_str[256];
+        sz_capabilities_to_string_implementation_(caps, caps_str, sizeof(caps_str));
         PyModule_AddStringConstant(m, "__capabilities_str__", caps_str);
     }
 

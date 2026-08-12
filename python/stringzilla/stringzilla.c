@@ -105,8 +105,9 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
     // degrading to serial would hide it.
     *result = requested_caps & sz_capabilities();
     if (*result == 0) {
-        PyErr_Format(PyExc_ValueError, "No requested capability is available here; available: %s",
-                     sz_capabilities_to_string_implementation_(sz_capabilities()));
+        char available[256];
+        sz_capabilities_to_string_implementation_(sz_capabilities(), available, sizeof(available));
+        PyErr_Format(PyExc_ValueError, "No requested capability is available here; available: %s", available);
         return -1;
     }
     return 0;
