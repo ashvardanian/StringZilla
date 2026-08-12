@@ -27,13 +27,24 @@ sz_status_t emplace_substrings_engine(szs_substrings_t *engine_punned, char cons
     return propagate_error(sz::status_t::success_k, error_message);
 }
 
+/** @brief Narrows the C policy to the engine's own enumeration, rather than assuming the two orders match. */
+inline szs::substrings_overlap_policy_t szs_substrings_policy_(
+    szs_substrings_overlap_policy_t overlap_policy) noexcept {
+    switch (overlap_policy) {
+    case szs_substrings_leftmost_longest_k: return szs::substrings_leftmost_longest_k;
+    case szs_substrings_leftmost_first_k: return szs::substrings_leftmost_first_k;
+    default: return szs::substrings_overlapping_k;
+    }
+}
+
 /**
  *  @brief Counts every needle's occurrences in every haystack, on whichever scope @p device_punned names.
  *  @sa `szs_levenshtein_cross_` for the same dispatch skeleton.
  */
 template <typename haystacks_type_>
 inline sz_status_t szs_substrings_count_(szs_substrings_t engine_punned, szs_device_scope_t device_punned,
-                                         haystacks_type_ const &haystacks, sz_size_t *counts,
+                                         haystacks_type_ const &haystacks,
+                                         szs_substrings_overlap_policy_t overlap_policy, sz_size_t *counts,
                                          char const **error_message) noexcept {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(device_punned != nullptr && "Device must be initialized");
@@ -43,6 +54,8 @@ inline sz_status_t szs_substrings_count_(szs_substrings_t engine_punned, szs_dev
     auto &device = *reinterpret_cast<device_scope_t *>(device_punned);
     sz::span<size_t> const counts_span {counts, haystacks.size()};
     size_t matches_total = 0; // ? `szs_substrings_count` publishes only the per-haystack breakdown
+    szs::substrings_overlap_policy_t const policy = szs_substrings_policy_(overlap_policy);
+    char const *refusal = nullptr;
 
     sz::status_t const status = std::visit(
         [&](auto &engine_variant) -> sz::status_t {
@@ -51,8 +64,8 @@ inline sz_status_t szs_substrings_count_(szs_substrings_t engine_punned, szs_dev
 #if SZ_USE_CUDA
                 auto [gpu_scope, scope_status] = gpu_scope_for(device);
                 if (scope_status.status != sz::status_t::success_k) return scope_status.status;
-                return engine_variant.try_count(haystacks, counts_span, matches_total, get_executor(gpu_scope),
-                                                get_specs(gpu_scope));
+                return engine_variant.try_count(haystacks, policy, counts_span, matches_total,
+                                                get_executor(gpu_scope), get_specs(gpu_scope));
 #else
                 return sz::status_t::missing_gpu_k;
 #endif
@@ -63,13 +76,13 @@ inline sz_status_t szs_substrings_count_(szs_substrings_t engine_punned, szs_dev
                         using scope_t = std::decay_t<decltype(scope_variant)>;
                         if constexpr (!is_cpu_scope<scope_t>()) return sz::status_t::device_code_mismatch_k;
                         else
-                            return engine_variant.try_count(haystacks, counts_span, matches_total,
+                            return engine_variant.try_count(haystacks, policy, counts_span, matches_total,
                                                             get_executor(scope_variant), get_specs(scope_variant));
                     },
                     device.variants);
         },
         engine.variants);
-    return propagate_error(status, error_message);
+    return propagate_error(status, error_message, refusal);
 }
 
 /**
@@ -77,15 +90,25 @@ inline sz_status_t szs_substrings_count_(szs_substrings_t engine_punned, szs_dev
  *
  *  The caller's array IS the output on every arm, viewed as the C++ match. Capacity checks and host-memory
  *  staging live in the engines, not here.
+ *
+ *  Capacity is the engine's call alone. It counts before it can check anything anyway, and it reports the
+ *  size it wanted rather than zero, which makes `matches_capacity == 0` a single-call size query. Summing
+ *  the caller's @p counts here would only duplicate that decision from data this layer cannot validate -
+ *  counts taken under a different @p overlap_policy would refuse an adequate buffer and misreport the need.
+ *  The parameter stays reserved for the scatter path that can genuinely skip the counting walk.
  */
 template <typename haystacks_type_>
 inline sz_status_t szs_substrings_find_(szs_substrings_t engine_punned, szs_device_scope_t device_punned,
-                                        haystacks_type_ const &haystacks, szs_substrings_match_t *matches,
-                                        sz_size_t matches_capacity, sz_size_t *matches_found_out,
-                                        char const **error_message) noexcept {
+                                        haystacks_type_ const &haystacks,
+                                        szs_substrings_overlap_policy_t overlap_policy, sz_size_t const *counts,
+                                        szs_substrings_match_t *matches, sz_size_t matches_capacity,
+                                        sz_size_t *matches_found_out, char const **error_message) noexcept {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(device_punned != nullptr && "Device must be initialized");
     sz_assert_(matches_found_out != nullptr && "Matches-found output cannot be null");
+
+    *matches_found_out = 0;
+    sz_unused_(counts); // ? Reserved for the scatter path that will consume it; the engine sizes itself today
 
     static_assert(
         sizeof(szs::substrings_match_t) == sizeof(szs_substrings_match_t) &&
@@ -99,8 +122,9 @@ inline sz_status_t szs_substrings_find_(szs_substrings_t engine_punned, szs_devi
     auto &device = *reinterpret_cast<device_scope_t *>(device_punned);
     sz::span<szs::substrings_match_t> const matches_out {reinterpret_cast<szs::substrings_match_t *>(matches),
                                                          matches_capacity};
-    *matches_found_out = 0;
     size_t matches_found = 0;
+    szs::substrings_overlap_policy_t const policy = szs_substrings_policy_(overlap_policy);
+    char const *refusal = nullptr;
 
     sz::status_t const status = std::visit(
         [&](auto &engine_variant) -> sz::status_t {
@@ -109,8 +133,8 @@ inline sz_status_t szs_substrings_find_(szs_substrings_t engine_punned, szs_devi
 #if SZ_USE_CUDA
                 auto [gpu_scope, scope_status] = gpu_scope_for(device);
                 if (scope_status.status != sz::status_t::success_k) return scope_status.status;
-                return engine_variant.try_find(haystacks, matches_out, matches_found, get_executor(gpu_scope),
-                                               get_specs(gpu_scope));
+                return engine_variant.try_find(haystacks, policy, matches_out, matches_found,
+                                               get_executor(gpu_scope), get_specs(gpu_scope));
 #else
                 return sz::status_t::missing_gpu_k;
 #endif
@@ -121,17 +145,124 @@ inline sz_status_t szs_substrings_find_(szs_substrings_t engine_punned, szs_devi
                         using scope_t = std::decay_t<decltype(scope_variant)>;
                         if constexpr (!is_cpu_scope<scope_t>()) return sz::status_t::device_code_mismatch_k;
                         else
-                            return engine_variant.try_find(haystacks, matches_out, matches_found,
+                            return engine_variant.try_find(haystacks, policy, matches_out, matches_found,
                                                            get_executor(scope_variant), get_specs(scope_variant));
                     },
                     device.variants);
         },
         engine.variants);
 
-    sz_status_t const result = propagate_error(status, error_message);
-    if (result != sz_success_k) return result;
+    // The engines report the capacity they wanted rather than zeroing it, so the refused-buffer arm needs no
+    // second walk here - `matches_found` already names the need, which is what makes a zero capacity a size query.
     *matches_found_out = (sz_size_t)matches_found;
-    return sz_success_k;
+    return propagate_error(status, error_message, refusal);
+}
+
+/**
+ *  @brief Scores every haystack against the compiled dictionary. @sa `szs_substrings_count_`.
+ *
+ *  Weights are one per needle rather than a matrix: the dictionary @b is the query, so a second weighting
+ *  is a second call. No overlap policy either - term frequencies are raw counts, which is classic BM25.
+ */
+template <typename haystacks_type_>
+inline sz_status_t szs_substrings_score_bm25_(szs_substrings_t engine_punned, szs_device_scope_t device_punned,
+                                              haystacks_type_ const &haystacks, sz_f32_t const *document_lengths,
+                                              szs_substrings_bm25_t parameters, sz_f32_t const *needle_weights,
+                                              sz_f32_t *scores, char const **error_message) noexcept {
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(device_punned != nullptr && "Device must be initialized");
+    sz_assert_(scores != nullptr && "Scores output cannot be null");
+
+    // The engines only assert the weight count, and asserts compile out of release builds.
+    if (needle_weights == nullptr)
+        return propagate_error(sz::status_t::unexpected_dimensions_k, error_message,
+                               "BM25 needs one weight per needle");
+
+    auto &engine = *reinterpret_cast<substrings_backends_t *>(engine_punned);
+    auto &device = *reinterpret_cast<device_scope_t *>(device_punned);
+    szs::substrings_bm25_t const engine_parameters {
+        parameters.term_frequency_saturation, parameters.length_normalization, parameters.average_document_length};
+    sz::span<sz::f32_t> const scores_span {scores, haystacks.size()};
+    sz::span<sz::f32_t const> const lengths_span {document_lengths, document_lengths ? haystacks.size() : 0};
+    char const *refusal = nullptr;
+
+    sz::status_t const status = std::visit(
+        [&](auto &engine_variant) -> sz::status_t {
+            using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+            sz::span<sz::f32_t const> const weights_span {needle_weights, engine_variant.dictionary().count_needles()};
+            if constexpr (is_gpu_capability(engine_variant_t::capability_k)) {
+                refusal = "BM25 scoring has no CUDA kernel yet";
+                return sz::status_t::unknown_k;
+            }
+            else
+                return std::visit(
+                    [&](auto &scope_variant) -> sz::status_t {
+                        using scope_t = std::decay_t<decltype(scope_variant)>;
+                        if constexpr (!is_cpu_scope<scope_t>()) return sz::status_t::device_code_mismatch_k;
+                        else
+                            return engine_variant.try_score_bm25(haystacks, lengths_span, engine_parameters,
+                                                                 weights_span, scores_span, get_executor(scope_variant),
+                                                                 get_specs(scope_variant));
+                    },
+                    device.variants);
+        },
+        engine.variants);
+    return propagate_error(status, error_message, refusal);
+}
+
+/**
+ *  @brief Rewrites every haystack into one output tape. @sa `szs_substrings_count_`.
+ *
+ *  Tape in, tape out, because a rewrite's product is itself a tape. The offsets array is always filled,
+ *  even when the byte capacity is refused, so a refused call still names the size it wanted.
+ */
+template <typename haystacks_type_>
+inline sz_status_t szs_substrings_replace_(szs_substrings_t engine_punned, szs_device_scope_t device_punned,
+                                           haystacks_type_ const &haystacks,
+                                           szs_substrings_overlap_policy_t overlap_policy,
+                                           sz_sequence_t const *replacements, sz_ptr_t output_data,
+                                           sz_size_t output_data_capacity, sz_u64_t *output_offsets,
+                                           sz_size_t *output_bytes_written, char const **error_message) noexcept {
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(device_punned != nullptr && "Device must be initialized");
+    sz_assert_(replacements != nullptr && "Replacement collection cannot be null");
+    sz_assert_(output_offsets != nullptr && "Offsets output cannot be null");
+    sz_assert_(output_bytes_written != nullptr && "Bytes-written output cannot be null");
+
+    *output_bytes_written = 0;
+    auto &engine = *reinterpret_cast<substrings_backends_t *>(engine_punned);
+    auto &device = *reinterpret_cast<device_scope_t *>(device_punned);
+    auto const replacements_container = sz_sequence_as_cpp_container_t {replacements};
+    sz::span<char> const output_span {output_data, output_data_capacity};
+    sz::span<size_t> const offsets_span {output_offsets, haystacks.size() + 1};
+    size_t bytes_written = 0;
+    char const *refusal = nullptr;
+
+    sz::status_t const status = std::visit(
+        [&](auto &engine_variant) -> sz::status_t {
+            using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+            if constexpr (is_gpu_capability(engine_variant_t::capability_k)) {
+                refusal = "Rewriting has no CUDA kernel yet";
+                return sz::status_t::unknown_k;
+            }
+            else
+                return std::visit(
+                    [&](auto &scope_variant) -> sz::status_t {
+                        using scope_t = std::decay_t<decltype(scope_variant)>;
+                        if constexpr (!is_cpu_scope<scope_t>()) return sz::status_t::device_code_mismatch_k;
+                        else
+                            return engine_variant.try_replace(
+                                haystacks, szs_substrings_policy_(overlap_policy), replacements_container, output_span,
+                                offsets_span, bytes_written, get_executor(scope_variant), get_specs(scope_variant));
+                    },
+                    device.variants);
+        },
+        engine.variants);
+
+    // The engines report the capacity they wanted rather than zeroing it, which is what makes a zero
+    // capacity a size query rather than a wasted call.
+    *output_bytes_written = (sz_size_t)bytes_written;
+    return propagate_error(status, error_message, refusal);
 }
 
 #pragma endregion Dispatch
@@ -181,67 +312,211 @@ SZ_API_RUNTIME sz_status_t szs_substrings_init(                                 
                                                                    std::move(engine_variant));
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_count(                      //
-    szs_substrings_t engine_punned, szs_device_scope_t device_punned, //
-    sz_sequence_t const *haystacks, sz_size_t *counts,                //
+SZ_API_RUNTIME sz_status_t szs_substrings_stats( //
+    szs_substrings_t engine_punned, szs_substrings_stats_t *stats, char const **error_message) {
+
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(stats != nullptr && "Stats output cannot be null");
+
+    auto &engine = *reinterpret_cast<substrings_backends_t *>(engine_punned);
+    std::visit(
+        [&](auto &engine_variant) {
+            using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+            using state_id_t = typename engine_variant_t::state_id_t;
+            auto const &dictionary = engine_variant.dictionary();
+            stats->needles_count = (sz_size_t)dictionary.count_needles();
+            stats->states_count = (sz_size_t)dictionary.count_states();
+            stats->hot_states_count = (sz_size_t)dictionary.hot_count();
+            stats->transitions_bytes = (sz_size_t)dictionary.transitions_bytes();
+            stats->max_folded_match_bytes = (sz_size_t)dictionary.max_folded_match_bytes();
+            stats->max_source_match_bytes = (sz_size_t)dictionary.max_source_match_bytes();
+            stats->state_id_bytes = (sz_size_t)sizeof(state_id_t);
+
+            // Both scratch rows are per core, so a caller multiplying by its thread count sees the real bill:
+            // one frequency counter and one touched slot per needle, and one pending start per settling byte.
+            using pending_start_t = typename engine_variant_t::pending_start_t;
+            stats->scoring_scratch_bytes = (sz_size_t)(dictionary.count_needles() * sizeof(sz::u32_t) * 2);
+            stats->pending_starts_bytes = (sz_size_t)(
+                szs::substrings_pending_starts_width(dictionary.max_source_match_bytes()) * sizeof(pending_start_t));
+        },
+        engine.variants);
+    return propagate_error(sz::status_t::success_k, error_message);
+}
+
+SZ_API_RUNTIME sz_status_t szs_substrings_count(                                    //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,               //
+    sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t *counts,                                                              //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
-    return szs_substrings_count_(engine_punned, device_punned, sz_sequence_as_cpp_container_t {haystacks}, counts,
-                                 error_message);
+    return szs_substrings_count_(engine_punned, device_punned, sz_sequence_as_cpp_container_t {haystacks},
+                                 overlap_policy, counts, error_message);
 }
 
 SZ_API_RUNTIME sz_status_t szs_substrings_find(                                            //
     szs_substrings_t engine_punned, szs_device_scope_t device_punned,                      //
-    sz_sequence_t const *haystacks,                                                        //
+    sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy,        //
+    sz_size_t const *counts,                                                               //
     szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
-    return szs_substrings_find_(engine_punned, device_punned, sz_sequence_as_cpp_container_t {haystacks}, matches,
-                                matches_capacity, matches_found, error_message);
+    return szs_substrings_find_(engine_punned, device_punned, sz_sequence_as_cpp_container_t {haystacks},
+                                overlap_policy, counts, matches, matches_capacity, matches_found, error_message);
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_count_u32tape(              //
-    szs_substrings_t engine_punned, szs_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *haystacks, sz_size_t *counts,        //
+SZ_API_RUNTIME sz_status_t szs_substrings_count_u32tape(                                    //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                       //
+    sz_sequence_u32tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t *counts,                                                                      //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
     return szs_substrings_count_(engine_punned, device_punned, sz_sequence_u32tape_as_cpp_container_t {haystacks},
-                                 counts, error_message);
+                                 overlap_policy, counts, error_message);
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_count_u64tape(              //
-    szs_substrings_t engine_punned, szs_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *haystacks, sz_size_t *counts,        //
+SZ_API_RUNTIME sz_status_t szs_substrings_count_u64tape(                                    //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                       //
+    sz_sequence_u64tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t *counts,                                                                      //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
     return szs_substrings_count_(engine_punned, device_punned, sz_sequence_u64tape_as_cpp_container_t {haystacks},
-                                 counts, error_message);
+                                 overlap_policy, counts, error_message);
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_find_u32tape(                                    //
-    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                      //
-    sz_sequence_u32tape_t const *haystacks,                                                //
-    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
+SZ_API_RUNTIME sz_status_t szs_substrings_find_u32tape(                                     //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                       //
+    sz_sequence_u32tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t const *counts,                                                                //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found,  //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
     return szs_substrings_find_(engine_punned, device_punned, sz_sequence_u32tape_as_cpp_container_t {haystacks},
-                                matches, matches_capacity, matches_found, error_message);
+                                overlap_policy, counts, matches, matches_capacity, matches_found, error_message);
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_find_u64tape(                                    //
-    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                      //
-    sz_sequence_u64tape_t const *haystacks,                                                //
-    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
+SZ_API_RUNTIME sz_status_t szs_substrings_find_u64tape(                                     //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                       //
+    sz_sequence_u64tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t const *counts,                                                                //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found,  //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
     return szs_substrings_find_(engine_punned, device_punned, sz_sequence_u64tape_as_cpp_container_t {haystacks},
-                                matches, matches_capacity, matches_found, error_message);
+                                overlap_policy, counts, matches, matches_capacity, matches_found, error_message);
+}
+
+SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25(                 //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_t const *haystacks,                                   //
+    sz_f32_t const *document_lengths,                                 //
+    szs_substrings_bm25_t parameters,                                 //
+    sz_f32_t const *needle_weights, sz_f32_t *scores,                 //
+    char const **error_message) {
+
+    sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
+    return szs_substrings_score_bm25_(engine_punned, device_punned, sz_sequence_as_cpp_container_t {haystacks},
+                                      document_lengths, parameters, needle_weights, scores, error_message);
+}
+
+SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25_u32tape(         //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *haystacks,                           //
+    sz_f32_t const *document_lengths,                                 //
+    szs_substrings_bm25_t parameters,                                 //
+    sz_f32_t const *needle_weights, sz_f32_t *scores,                 //
+    char const **error_message) {
+
+    sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
+    return szs_substrings_score_bm25_(engine_punned, device_punned, sz_sequence_u32tape_as_cpp_container_t {haystacks},
+                                      document_lengths, parameters, needle_weights, scores, error_message);
+}
+
+SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25_u64tape(         //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *haystacks,                           //
+    sz_f32_t const *document_lengths,                                 //
+    szs_substrings_bm25_t parameters,                                 //
+    sz_f32_t const *needle_weights, sz_f32_t *scores,                 //
+    char const **error_message) {
+
+    sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
+    return szs_substrings_score_bm25_(engine_punned, device_punned, sz_sequence_u64tape_as_cpp_container_t {haystacks},
+                                      document_lengths, parameters, needle_weights, scores, error_message);
+}
+
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_bound(  //
+    szs_substrings_t engine_punned,                       //
+    sz_sequence_t const *replacements,                    //
+    sz_size_t input_bytes, sz_size_t *output_bytes_bound, //
+    char const **error_message) {
+
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(replacements != nullptr && "Replacement collection cannot be null");
+    sz_assert_(output_bytes_bound != nullptr && "Bound output cannot be null");
+
+    auto &engine = *reinterpret_cast<substrings_backends_t *>(engine_punned);
+    auto const replacements_container = sz_sequence_as_cpp_container_t {replacements};
+    sz_status_t result = sz_success_k;
+    std::visit(
+        [&](auto &engine_variant) {
+            auto const &dictionary = engine_variant.dictionary();
+            if (replacements_container.size() != dictionary.count_needles()) {
+                result = propagate_error(sz::status_t::unexpected_dimensions_k, error_message,
+                                         "One replacement per needle, no more and no fewer");
+                return;
+            }
+
+            // The densest rewrite tiles the input with the shortest match there is and swaps each one for
+            // the widest replacement there is, so that ratio repeated over the whole input is the ceiling.
+            size_t widest_replacement = 0;
+            for (size_t needle_index = 0; needle_index < replacements_container.size(); ++needle_index)
+                widest_replacement = sz_max_of_two(widest_replacement, replacements_container[needle_index].size());
+            size_t const shortest_match = sz_max_of_two((size_t)dictionary.min_source_match_bytes(), (size_t)1);
+
+            // A dictionary that only ever shrinks still bounds at the input length, never below it.
+            *output_bytes_bound = (sz_size_t)sz_max_of_two(input_bytes,
+                                                           (input_bytes / shortest_match) * widest_replacement);
+            result = propagate_error(sz::status_t::success_k, error_message);
+        },
+        engine.variants);
+    return result;
+}
+
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u32tape(                          //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,               //
+    sz_sequence_u32tape_t const *haystacks,                                         //
+    szs_substrings_overlap_policy_t overlap_policy,                                 //
+    sz_sequence_t const *replacements,                                              //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_u64_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                //
+    char const **error_message) {
+
+    sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
+    return szs_substrings_replace_(engine_punned, device_punned, sz_sequence_u32tape_as_cpp_container_t {haystacks},
+                                   overlap_policy, replacements, output_data, output_data_capacity, output_offsets,
+                                   output_bytes_written, error_message);
+}
+
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u64tape(                          //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,               //
+    sz_sequence_u64tape_t const *haystacks,                                         //
+    szs_substrings_overlap_policy_t overlap_policy,                                 //
+    sz_sequence_t const *replacements,                                              //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_u64_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                //
+    char const **error_message) {
+
+    sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
+    return szs_substrings_replace_(engine_punned, device_punned, sz_sequence_u64tape_as_cpp_container_t {haystacks},
+                                   overlap_policy, replacements, output_data, output_data_capacity, output_offsets,
+                                   output_bytes_written, error_message);
 }
 
 SZ_API_RUNTIME void szs_substrings_free(szs_substrings_t engine_punned) {

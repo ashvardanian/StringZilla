@@ -13,17 +13,17 @@ namespace stringzillas {
  *  keeping the generated host code well-formed for host compilers that enforce [temp.expl.spec] ordering
  *  (Clang) rather than tolerating the inversion (GCC). */
 template __global__ void substrings_walk_per_cuda_chunk_<u16_t, substrings_pass_t::counting_k>(
-    aho_corasick_view<u16_t>, u16_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
-    span<size_t const>, span<substrings_match_t>);
+    aho_corasick_view<u16_t>, u16_t, span<u32_t const>, u32_t, span<span<byte_t const> const>, span<size_t const>,
+    size_t, size_t, span<size_t>, span<substrings_match_t>, substrings_overlap_policy_t);
 template __global__ void substrings_walk_per_cuda_chunk_<u32_t, substrings_pass_t::counting_k>(
-    aho_corasick_view<u32_t>, u32_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
-    span<size_t const>, span<substrings_match_t>);
+    aho_corasick_view<u32_t>, u32_t, span<u32_t const>, u32_t, span<span<byte_t const> const>, span<size_t const>,
+    size_t, size_t, span<size_t>, span<substrings_match_t>, substrings_overlap_policy_t);
 template __global__ void substrings_walk_per_cuda_chunk_<u16_t, substrings_pass_t::scattering_k>(
-    aho_corasick_view<u16_t>, u16_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
-    span<size_t const>, span<substrings_match_t>);
+    aho_corasick_view<u16_t>, u16_t, span<u32_t const>, u32_t, span<span<byte_t const> const>, span<size_t const>,
+    size_t, size_t, span<size_t>, span<substrings_match_t>, substrings_overlap_policy_t);
 template __global__ void substrings_walk_per_cuda_chunk_<u32_t, substrings_pass_t::scattering_k>(
-    aho_corasick_view<u32_t>, u32_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
-    span<size_t const>, span<substrings_match_t>);
+    aho_corasick_view<u32_t>, u32_t, span<u32_t const>, u32_t, span<span<byte_t const> const>, span<size_t const>,
+    size_t, size_t, span<size_t>, span<substrings_match_t>, substrings_overlap_policy_t);
 template __global__ void exclusive_sum_across_cuda_device_<size_t>(size_t const *, size_t, size_t *);
 
 template struct substrings_cuda<u16_t, unified_alloc_t, sz_cap_cuda_k>;

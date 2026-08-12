@@ -12,7 +12,7 @@
  *  haystack, sized against the corpus's total byte count rather than the haystack count, so occupancy does
  *  not depend on how the corpus is split, and no needle can straddle the seam between two documents.
  *
- *  A thread starts its walk `max_match_bytes - 1` bytes before its chunk, clamped to its own haystack's
+ *  A thread starts its walk `max_source_match_bytes - 1` bytes before its chunk, clamped to its own haystack's
  *  start. Aho-Corasick is self-synchronizing, so that warm-up makes chunking exact rather than approximate:
  *  the automaton reaches the same state at the chunk boundary wherever the walk began.
  *
@@ -106,7 +106,7 @@ SZ_DEVICE_INLINE size_t substrings_resolve_haystack_(span<size_t const> haystack
 }
 
 /**
- *  @brief Walks one chunk's transitions, warming up `max_match_bytes - 1` bytes before @p chunk_begin -
+ *  @brief Walks one chunk's transitions, warming up `max_source_match_bytes - 1` bytes before @p chunk_begin -
  *         clamped to the haystack's own start, never earlier - so a match ending inside the chunk is found
  *         regardless of where its needle started, without reading another haystack. Counts or writes
  *         every match ending in `[chunk_begin, chunk_end)` whose start offset is still within this haystack,
@@ -119,8 +119,9 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_( //
     span<u32_t const> accepts_words, span<byte_t const> haystack, size_t chunk_begin, size_t chunk_end,
     size_t haystack_index, size_t output_base_offset, span<substrings_match_t> matches_out) noexcept {
 
-    // Offsets are relative to this haystack, so the warm-up clamps against its own start at zero.
-    size_t const warm_up_bytes = view.max_match_bytes > 0 ? (size_t)view.max_match_bytes - 1 : 0;
+    // Offsets are relative to this haystack, so the warm-up clamps against its own start at zero. Sized in
+    // source bytes, the unit a haystack window is measured in, not in the folded bytes a needle is.
+    size_t const warm_up_bytes = view.max_source_match_bytes > 0 ? (size_t)view.max_source_match_bytes - 1 : 0;
     size_t const walk_begin = chunk_begin >= warm_up_bytes ? chunk_begin - warm_up_bytes : 0;
 
     // Every 64-bit quantity is resolved here, once, and the per-byte loops below ride 32-bit deltas from it.
@@ -148,12 +149,12 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_( //
             substrings_output<state_id_type_> const &output = outputs_at_state[output_index];
             // `walk_begin` is clamped to the haystack's own start, so underflowing the walk and underflowing
             // the haystack are the same test - and this one needs no absolute offset.
-            if (position + 1 < static_cast<small_size_t>(output.match_bytes)) continue;
+            if (position + 1 < static_cast<small_size_t>(output.folded_match_bytes)) continue;
             if constexpr (pass_ == substrings_pass_t::scattering_k) {
                 size_t const match_end = walk_begin + position + 1;
                 matches_at_chunk[matches_found] = substrings_match_t {haystack_index, (size_t)output.needle_index,
-                                                                      match_end - output.match_bytes,
-                                                                      (size_t)output.match_bytes};
+                                                                      match_end - output.folded_match_bytes,
+                                                                      (size_t)output.folded_match_bytes};
             }
             ++matches_found;
         }
@@ -183,6 +184,283 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_( //
     for (; delta < walk_span; ++delta) {
         state = substrings_step_device_(view, shared_hot_rows, shared_rows_count, state, walk_base[delta]);
         emit_matches_at(delta);
+    }
+    return matches_found;
+}
+
+/**
+ *  @brief Widest pending-start ring a device chunk carries, sizing a per-thread array and so a real cost.
+ *
+ *  A start settles once the walk is one ring width past it, and slots are addressed by `start & (width - 1)`,
+ *  so a dictionary whose longest match outruns this width would both settle starts early and alias two live
+ *  ones onto one slot. `substrings_cuda::try_build` refuses such a dictionary rather than reporting silently
+ *  wrong covers.
+ */
+static constexpr size_t substrings_device_pending_width_k = 128;
+
+/**
+ *  @brief The last position at or before @p limit whose cursor is known without any earlier history.
+ *
+ *  A position `q` is a restart when no match spans it - when every match discovered before `q` also ended
+ *  at or before `q`. The greedy cursor is always at most the largest end among *accepted* matches, which is
+ *  at most the largest end among *all* earlier matches, so at a restart the cursor is exactly `q` no matter
+ *  what came before. That is what lets a chunk resolve a leftmost cover without talking to its neighbours.
+ *
+ *  Restarts are dense in practice - a segment between two of them holds one match at the median and never
+ *  more than a few dozen - so searching a window twice the longest match finds one almost always. A chunk
+ *  that finds none falls back to walking from its haystack's start, where the cursor is exactly zero.
+ */
+template <typename state_id_type_>
+SZ_DEVICE_INLINE size_t substrings_restart_before_( //
+    aho_corasick_view<state_id_type_> const &view, span<state_id_type_ const> shared_hot_rows,
+    small_size_t shared_rows_count, span<byte_t const> haystack, size_t limit) noexcept {
+
+    size_t const longest = (size_t)view.max_source_match_bytes;
+    size_t const search_begin = limit >= longest * 3 ? limit - longest * 3 : 0;
+    if (search_begin == 0) return 0; // ? A haystack's own start is a restart, the cursor there being zero.
+    // A match spanning a judged position starts within `longest` of it, so judging only past that much of
+    // the window guarantees every such match was seen - anything starting earlier is invisible here.
+    size_t const judge_begin = search_begin + longest;
+
+    // A match spanning `q` is only discovered once the walk reaches its end, so the walk runs `longest`
+    // bytes ahead of the position being judged, and `end_by_start` carries what it learned back.
+    size_t const width = substrings_device_pending_width_k;
+    size_t const mask = width - 1;
+    u32_t end_by_start[substrings_device_pending_width_k];
+    for (size_t slot = 0; slot < width; ++slot) end_by_start[slot] = 0;
+
+    state_id_type_ state = view.root;
+    size_t reach = 0, restart = 0, judged_next = judge_begin;
+    bool found = false;
+    size_t const walk_end = sz_min_of_two(limit + longest, haystack.size());
+
+    // Both walks feed the same judgement below: a source position and the furthest end of anything starting
+    // there. The judgement trails `longest` bytes behind, by which point every match starting at it is known.
+    auto const record = [&](size_t start, size_t end) noexcept {
+        if (start < search_begin) return;
+        u32_t &slot = end_by_start[start & mask];
+        slot = sz_max_of_two(slot, (u32_t)end);
+    };
+    auto const judge_up_to = [&](size_t reached) noexcept {
+        for (; judged_next + longest <= reached && judged_next <= limit; ++judged_next) {
+            if (reach <= judged_next) restart = judged_next, found = true;
+            reach = sz_max_of_two(reach, (size_t)end_by_start[judged_next & mask]);
+            end_by_start[judged_next & mask] = 0;
+        }
+    };
+
+    if (view.case_sensitivity == substrings_uncased_k) {
+        size_t const folded_begin = sz_utf8_rune_start_at_((cptr_t)haystack.data(), haystack.size(), search_begin);
+        span<byte_t const> const walked {haystack.data() + folded_begin, haystack.size() - folded_begin};
+        substrings_folded_cursor_t cursor_bytes;
+        substrings_folded_cursor_init(cursor_bytes, walked);
+        size_t folded = 0, last_break_folded_end = 0;
+        substrings_folded_byte_t step;
+        while (substrings_folded_cursor_next(cursor_bytes, step)) {
+            size_t const source_end = folded_begin + step.codepoint_end;
+            if (source_end > walk_end) break;
+            ++folded;
+            if (step.malformed) { state = view.root; judge_up_to(source_end); continue; }
+            state = substrings_step_device_(view, shared_hot_rows, shared_rows_count, state, step.byte);
+            if (!step.rune_end) continue;
+            if (step.breaks_boundary) last_break_folded_end = folded + step.trailing;
+            state_id_type_ const output_count = view.outputs_counts[state];
+            substrings_output<state_id_type_> const *const outputs = view.outputs + view.outputs_offsets[state];
+            for (state_id_type_ index = 0; index < output_count; ++index) {
+                size_t const folded_length = (size_t)outputs[index].folded_match_bytes;
+                if (folded < folded_length) continue;
+                substrings_resolved_match_t const resolved =
+                    substrings_folded_span(walked, step, folded, last_break_folded_end, folded_length);
+                if (resolved.repeats) continue;
+                record(folded_begin + resolved.source_offset, source_end);
+            }
+            judge_up_to(source_end);
+        }
+    }
+    else {
+        for (size_t offset = search_begin; offset < walk_end; ++offset) {
+            state = substrings_step_device_(view, shared_hot_rows, shared_rows_count, state, (u8_t)haystack[offset]);
+            state_id_type_ const output_count = view.outputs_counts[state];
+            substrings_output<state_id_type_> const *const outputs = view.outputs + view.outputs_offsets[state];
+            for (state_id_type_ index = 0; index < output_count; ++index) {
+                size_t const length = (size_t)outputs[index].folded_match_bytes;
+                if (offset + 1 >= length) record(offset + 1 - length, offset + 1);
+            }
+            judge_up_to(offset + 1);
+        }
+    }
+    return found ? restart : 0;
+}
+
+/**
+ *  @brief Walks one chunk resolving a leftmost cover, independently of every other chunk.
+ *
+ *  Seeds the greedy at the last restart position at or before the chunk, where the cursor is known outright,
+ *  then runs exactly the rule `find_leftmost` runs: matches surface at their ends, a start settles once the
+ *  walk is `max_source_match_bytes` past it, and a settled start is accepted when it begins at or after the
+ *  cursor. Only starts inside `[chunk_begin, chunk_end)` are reported, so every match belongs to one chunk.
+ */
+template <typename state_id_type_, substrings_pass_t pass_>
+SZ_DEVICE_INLINE size_t substrings_walk_chunk_leftmost_( //
+    aho_corasick_view<state_id_type_> const &view, span<state_id_type_ const> shared_hot_rows,
+    span<u32_t const> accepts_words, span<byte_t const> haystack, size_t chunk_begin, size_t chunk_end,
+    size_t haystack_index, size_t output_base_offset, span<substrings_match_t> matches_out,
+    substrings_overlap_policy_t policy) noexcept {
+
+    small_size_t const shared_rows_count = static_cast<small_size_t>(shared_hot_rows.size() /
+                                                                     substrings_alphabet_size_k);
+    size_t const longest = (size_t)view.max_source_match_bytes;
+    size_t const width = substrings_device_pending_width_k;
+    size_t const mask = width - 1;
+    substrings_match_t *const matches_at_chunk = matches_out.data() + output_base_offset;
+
+    size_t const restart = substrings_restart_before_(view, shared_hot_rows, shared_rows_count, haystack,
+                                                      chunk_begin);
+    substrings_pending_start<state_id_type_> pending[substrings_device_pending_width_k];
+    for (size_t slot = 0; slot < width; ++slot) pending[slot] = {};
+
+    state_id_type_ state = view.root;
+    size_t cursor = restart, settled = restart, matches_found = 0;
+    size_t const walk_end = sz_min_of_two(chunk_end + longest, haystack.size());
+
+    // Settles one start: the cover accepts it when it begins at or after the cursor, and only this chunk's
+    // own starts are reported. Shared by the running settle and the final drain, which differ only in bound.
+    auto const drain_one = [&](size_t position) noexcept {
+        substrings_pending_start<state_id_type_> &slot = pending[position & mask];
+        if (slot.source_match_bytes != 0 && position >= cursor) {
+            if (position >= chunk_begin && position < chunk_end) {
+                if constexpr (pass_ == substrings_pass_t::scattering_k)
+                    matches_at_chunk[matches_found] = substrings_match_t {haystack_index, (size_t)slot.needle_index,
+                                                                          position, (size_t)slot.source_match_bytes};
+                ++matches_found;
+            }
+            cursor = position + slot.source_match_bytes;
+        }
+        slot = {};
+    };
+
+    // Both walks hand the cover the same thing - a `(start, source length, needle)` triple in non-decreasing
+    // end order - so the ring, the settle rule and the cursor below are written once and shared.
+    auto const offer = [&](size_t start, size_t length, state_id_type_ needle) noexcept {
+        if (start < restart) return;
+        // Every start more than one ring width behind can no longer be outbid, so it settles now.
+        size_t const settles_before = start + length > width ? start + length - width : 0;
+        for (; settled < settles_before; ++settled) drain_one(settled);
+        substrings_pending_start<state_id_type_> const challenger {needle, (state_id_type_)length};
+        substrings_pending_start<state_id_type_> &slot = pending[start & mask];
+        if (substrings_leftmost_wins(challenger, slot, policy)) slot = challenger;
+    };
+
+    if (view.case_sensitivity == substrings_uncased_k) {
+        span<byte_t const> const walked {haystack.data() + restart, haystack.size() - restart};
+        substrings_folded_cursor_t cursor_bytes;
+        substrings_folded_cursor_init(cursor_bytes, walked);
+        size_t folded = 0, last_break_folded_end = 0;
+        substrings_folded_byte_t step;
+        while (substrings_folded_cursor_next(cursor_bytes, step)) {
+            size_t const source_end = restart + step.codepoint_end;
+            if (source_end > walk_end) break;
+            ++folded;
+            if (step.malformed) { state = view.root; continue; }
+            state = substrings_step_device_(view, shared_hot_rows, shared_rows_count, state, step.byte);
+            if (!step.rune_end) continue;
+            if (step.breaks_boundary) last_break_folded_end = folded + step.trailing;
+            if (((accepts_words[state >> 5] >> (state & 31u)) & 1u) == 0) continue;
+
+            state_id_type_ const output_count = view.outputs_counts[state];
+            substrings_output<state_id_type_> const *const outputs = view.outputs + view.outputs_offsets[state];
+            for (state_id_type_ index = 0; index < output_count; ++index) {
+                size_t const folded_length = (size_t)outputs[index].folded_match_bytes;
+                if (folded < folded_length) continue;
+                substrings_resolved_match_t const resolved =
+                    substrings_folded_span(walked, step, folded, last_break_folded_end, folded_length);
+                if (resolved.repeats) continue;
+                offer(restart + resolved.source_offset, step.codepoint_end - resolved.source_offset,
+                      outputs[index].needle_index);
+            }
+        }
+    }
+    else {
+        for (size_t offset = restart; offset < walk_end; ++offset) {
+            state = substrings_step_device_(view, shared_hot_rows, shared_rows_count, state, (u8_t)haystack[offset]);
+            if (((accepts_words[state >> 5] >> (state & 31u)) & 1u) == 0) continue;
+            state_id_type_ const output_count = view.outputs_counts[state];
+            substrings_output<state_id_type_> const *const outputs = view.outputs + view.outputs_offsets[state];
+            for (state_id_type_ index = 0; index < output_count; ++index) {
+                size_t const length = (size_t)outputs[index].folded_match_bytes;
+                if (offset + 1 < length) continue;
+                offer(offset + 1 - length, length, outputs[index].needle_index);
+            }
+        }
+    }
+
+    for (; settled < chunk_end; ++settled) drain_one(settled);
+    return matches_found;
+}
+
+/**
+ *  @brief Walks one chunk as folded bytes, the case-insensitive twin of `substrings_walk_chunk_`.
+ *
+ *  Folding makes the walk restart-safe only at a codepoint start, so the warm-up snaps back to one before it
+ *  begins - three bytes at most, and always earlier, so the extra transitions only prime state further. Match
+ *  ends are reported at the source codepoint's end, which is what keeps chunk ownership comparable against
+ *  the unsnapped `[chunk_begin, chunk_end)` the planner handed out.
+ */
+template <typename state_id_type_, substrings_pass_t pass_>
+SZ_DEVICE_INLINE size_t substrings_walk_chunk_uncased_( //
+    aho_corasick_view<state_id_type_> const &view, span<state_id_type_ const> shared_hot_rows,
+    span<u32_t const> accepts_words, span<byte_t const> haystack, size_t chunk_begin, size_t chunk_end,
+    size_t haystack_index, size_t output_base_offset, span<substrings_match_t> matches_out) noexcept {
+
+    size_t const warm_up_bytes = view.max_source_match_bytes > 0 ? (size_t)view.max_source_match_bytes - 1 : 0;
+    size_t walk_begin = chunk_begin >= warm_up_bytes ? chunk_begin - warm_up_bytes : 0;
+    walk_begin = sz_utf8_rune_start_at_((cptr_t)haystack.data(), haystack.size(), walk_begin);
+
+    substrings_match_t *const matches_at_chunk = matches_out.data() + output_base_offset;
+    small_size_t const shared_rows_count = static_cast<small_size_t>(shared_hot_rows.size() /
+                                                                     substrings_alphabet_size_k);
+    state_id_type_ state = view.root;
+    small_size_t matches_found = 0;
+
+    span<byte_t const> const walked {haystack.data() + walk_begin, haystack.size() - walk_begin};
+    substrings_folded_cursor_t cursor;
+    substrings_folded_cursor_init(cursor, walked);
+
+    size_t folded = 0, last_break_folded_end = 0;
+    substrings_folded_byte_t step;
+    while (substrings_folded_cursor_next(cursor, step)) {
+        size_t const source_end = walk_begin + step.codepoint_end;
+        if (source_end > chunk_end) break;
+        ++folded;
+        if (step.malformed) {
+            state = view.root;
+            continue;
+        }
+
+        state = substrings_step_device_(view, shared_hot_rows, shared_rows_count, state, step.byte);
+        if (!step.rune_end) continue;
+        if (step.breaks_boundary) last_break_folded_end = folded + step.trailing;
+        // The warm-up primes state without reporting, exactly as the byte-exact walk's prefix does.
+        if (source_end <= chunk_begin) continue;
+        if (((accepts_words[state >> 5] >> (state & 31u)) & 1u) == 0) continue;
+
+        state_id_type_ const output_count = view.outputs_counts[state];
+        substrings_output<state_id_type_> const *const outputs_at_state = view.outputs + view.outputs_offsets[state];
+        for (state_id_type_ output_index = 0; output_index < output_count; ++output_index) {
+            substrings_output<state_id_type_> const &output = outputs_at_state[output_index];
+            size_t const folded_length = output.folded_match_bytes;
+            if (folded < folded_length) continue;
+
+            substrings_resolved_match_t const resolved =
+                substrings_folded_span(walked, step, folded, last_break_folded_end, folded_length);
+            if (resolved.repeats) continue;
+            size_t const match_offset = resolved.source_offset;
+            if constexpr (pass_ == substrings_pass_t::scattering_k)
+                matches_at_chunk[matches_found] = substrings_match_t {haystack_index, (size_t)output.needle_index,
+                                                                      walk_begin + match_offset,
+                                                                      step.codepoint_end - match_offset};
+            ++matches_found;
+        }
     }
     return matches_found;
 }
@@ -221,7 +499,8 @@ template <typename state_id_type_, substrings_pass_t pass_>
 __global__ void substrings_walk_per_cuda_chunk_(
     aho_corasick_view<state_id_type_> view, state_id_type_ shared_rows_count, span<u32_t const> accepts_words,
     u32_t staged_accepts_words, span<span<byte_t const> const> haystacks, span<size_t const> haystack_chunk_offsets,
-    size_t chunk_bytes, size_t chunk_count, span<size_t> chunk_match_slots, span<substrings_match_t> matches_out) {
+    size_t chunk_bytes, size_t chunk_count, span<size_t> chunk_match_slots, span<substrings_match_t> matches_out,
+    substrings_overlap_policy_t overlap_policy) {
     extern __shared__ unsigned char substrings_shared_bytes_[];
     span<state_id_type_> const shared_hot_rows {reinterpret_cast<state_id_type_ *>(substrings_shared_bytes_),
                                                 (size_t)shared_rows_count * substrings_alphabet_size_k};
@@ -245,9 +524,20 @@ __global__ void substrings_walk_per_cuda_chunk_(
 
         size_t const output_base_offset = pass_ == substrings_pass_t::scattering_k ? chunk_match_slots[chunk_index]
                                                                                    : (size_t)0;
-        size_t const matches_in_chunk = substrings_walk_chunk_<state_id_type_, pass_>( //
-            view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index, output_base_offset,
-            matches_out);
+        // One dictionary is byte-exact or folded, and one launch carries one policy, for their whole
+        // lifetime - so every thread takes the same side and the branches cost no divergence.
+        size_t const matches_in_chunk =
+            overlap_policy != substrings_overlapping_k
+                ? substrings_walk_chunk_leftmost_<state_id_type_, pass_>( //
+                      view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index,
+                      output_base_offset, matches_out, overlap_policy)
+            : view.case_sensitivity == substrings_uncased_k
+                ? substrings_walk_chunk_uncased_<state_id_type_, pass_>( //
+                      view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index,
+                      output_base_offset, matches_out)
+                : substrings_walk_chunk_<state_id_type_, pass_>( //
+                      view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index,
+                      output_base_offset, matches_out);
         if constexpr (pass_ == substrings_pass_t::counting_k) chunk_match_slots[chunk_index] = matches_in_chunk;
         else sz_unused_(matches_in_chunk);
     }
@@ -285,6 +575,7 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
     using dictionary_t = aho_corasick_dictionary<state_id_t, allocator_t>;
     using view_t = aho_corasick_view<state_id_t>;
     using match_t = substrings_match_t;
+    using pending_start_t = typename dictionary_t::pending_start_t;
     static constexpr sz_capability_t capability_k = capability_;
 
     /**
@@ -477,6 +768,16 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
     }
 
     /**
+     *  @brief Whether a leftmost cover can be resolved on the device for the dictionary as built.
+     *
+     *  The per-chunk cover rides a fixed-width ring of pending starts, so a match longer than that width
+     *  would settle its own start early and alias it onto a live neighbour's slot.
+     */
+    bool leftmost_fits_device_ring_() const noexcept {
+        return (size_t)dictionary_.max_source_match_bytes() <= substrings_device_pending_width_k;
+    }
+
+    /**
      *  @brief Adopts an already-built @p wider automaton at this engine's narrower state id, then uploads it.
      *
      *  Named by the dictionary rather than the engine that owns it: the narrowing needs nothing else, and
@@ -613,7 +914,7 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
      *         start, the chunk plan, and the counting pass whose exclusive scan both then read.
      */
     cuda_status_t plan_and_count_(size_t total_bytes, cuda_executor_t const &executor, gpu_specs_t const &specs,
-                                  planned_pass_t &pass) noexcept {
+                                  substrings_overlap_policy_t overlap_policy, planned_pass_t &pass) noexcept {
         cuda_status_t const current_status = executor.ensure_current();
         if (current_status.status != status_t::success_k) return current_status;
         if (haystack_descriptors_.size() == 0 || total_bytes == 0) return {status_t::success_k, cudaSuccess};
@@ -634,7 +935,7 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
 
         cuda_status_t const count_status = count_into_offsets_(executor, pass.kernel_table, pass.shared_memory_bytes,
                                                                pass.blocks_per_grid, pass.chunk_bytes,
-                                                               pass.chunk_count);
+                                                               pass.chunk_count, overlap_policy);
         if (count_status.status != status_t::success_k) return count_status;
 
         pass.has_work = true;
@@ -670,7 +971,9 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
         // The kernel's 32-bit deltas span one thread's warm-up prefix plus its chunk. This bounds that reach,
         // not the input - haystack offsets themselves stay 64-bit.
         view_t const automaton = dictionary_.view();
-        size_t const warm_up_bytes = automaton.max_match_bytes > 0 ? (size_t)automaton.max_match_bytes - 1 : 0;
+        size_t const warm_up_bytes = automaton.max_source_match_bytes > 0
+                                         ? (size_t)automaton.max_source_match_bytes - 1
+                                         : 0;
         if (chunk_bytes + warm_up_bytes > (size_t)std::numeric_limits<small_size_t>::max())
             return {status_t::overflow_risk_k, cudaSuccess};
 
@@ -715,7 +1018,7 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
      *         `try_count` and `try_find`. */
     cuda_status_t count_into_offsets_(cuda_executor_t const &executor, kernels_t const &kernel_table,
                                       unsigned shared_memory_bytes, unsigned blocks_per_grid, size_t chunk_bytes,
-                                      size_t chunk_count) noexcept {
+                                      size_t chunk_count, substrings_overlap_policy_t overlap_policy) noexcept {
         if (chunk_match_offsets_.try_resize_uninitialized(chunk_count + 1) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
@@ -730,7 +1033,8 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
         size_t chunk_count_argument = chunk_count;
         span<size_t> chunk_match_slots_argument {chunk_match_offsets_.data(), chunk_match_offsets_.size()};
         span<substrings_match_t> no_matches_argument;
-        void *count_arguments[10] = {&view_argument,
+        substrings_overlap_policy_t overlap_policy_argument = overlap_policy;
+        void *count_arguments[11] = {&view_argument,
                                      &shared_rows_argument,
                                      &accepts_words_argument,
                                      &staged_accepts_words_argument,
@@ -739,7 +1043,8 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
                                      &chunk_bytes_argument,
                                      &chunk_count_argument,
                                      &chunk_match_slots_argument,
-                                     &no_matches_argument};
+                                     &no_matches_argument,
+                                     &overlap_policy_argument};
         CUresult const count_error = cuda_launch_t {}
                                          .grid(blocks_per_grid)
                                          .block(substrings_threads_per_block_k)
@@ -766,8 +1071,11 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
      *  haystack boundary, so the per-haystack breakdown is a subtraction over the counting pass's offsets.
      */
     template <typename haystacks_type_>
-    cuda_status_t try_count(haystacks_type_ const &haystacks, span<size_t> counts_per_haystack, size_t &matches_total,
+    cuda_status_t try_count(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                            span<size_t> counts_per_haystack, size_t &matches_total,
                             cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
+        if (overlap_policy != substrings_overlapping_k && !leftmost_fits_device_ring_())
+            return {status_t::overflow_risk_k, cudaSuccess};
         matches_total = 0;
         sz_assert_(counts_per_haystack.size() == haystacks.size());
         for (size_t index = 0; index < counts_per_haystack.size(); ++index) counts_per_haystack[index] = 0;
@@ -777,7 +1085,7 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
         if (describe_status.status != status_t::success_k) return describe_status;
 
         planned_pass_t pass;
-        cuda_status_t const pass_status = plan_and_count_(total_bytes, executor, specs, pass);
+        cuda_status_t const pass_status = plan_and_count_(total_bytes, executor, specs, overlap_policy, pass);
         if (pass_status.status != status_t::success_k || !pass.has_work) return pass_status;
 
         CUresult const stop_error = timer_.record_stop(executor.stream());
@@ -800,8 +1108,11 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
      *          case. See `try_count` for the @p haystacks contract.
      */
     template <typename haystacks_type_>
-    cuda_status_t try_find(haystacks_type_ const &haystacks, span<match_t> matches_out, size_t &matches_found,
-                           cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
+    cuda_status_t try_find(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
+                           span<match_t> matches_out, size_t &matches_found, cuda_executor_t const &executor = {},
+                           gpu_specs_t specs = {}) noexcept {
+        if (overlap_policy != substrings_overlapping_k && !leftmost_fits_device_ring_())
+            return {status_t::overflow_risk_k, cudaSuccess};
         size_t const matches_capacity = matches_out.size();
         matches_found = 0;
 
@@ -810,7 +1121,7 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
         if (describe_status.status != status_t::success_k) return describe_status;
 
         planned_pass_t pass;
-        cuda_status_t const pass_status = plan_and_count_(total_bytes, executor, specs, pass);
+        cuda_status_t const pass_status = plan_and_count_(total_bytes, executor, specs, overlap_policy, pass);
         if (pass_status.status != status_t::success_k || !pass.has_work) return pass_status;
         auto const &kernel_table = pass.kernel_table;
         unsigned const shared_memory_bytes = pass.shared_memory_bytes, blocks_per_grid = pass.blocks_per_grid;
@@ -850,7 +1161,8 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
         // Bounded to what the counting pass actually found, not to the caller's capacity, so a debug index
         // assert inside the kernel catches an over-write rather than merely staying inside the allocation.
         span<match_t> matches_out_argument = scatter_target;
-        void *scatter_arguments[10] = {&view_argument,
+        substrings_overlap_policy_t overlap_policy_argument = overlap_policy;
+        void *scatter_arguments[11] = {&view_argument,
                                        &shared_rows_argument,
                                        &accepts_words_argument,
                                        &staged_accepts_words_argument,
@@ -859,7 +1171,8 @@ struct substrings_cuda<state_id_type_, allocator_type_, capability_,
                                        &chunk_bytes_argument,
                                        &chunk_count_argument,
                                        &chunk_match_slots_argument,
-                                       &matches_out_argument};
+                                       &matches_out_argument,
+                                       &overlap_policy_argument};
         CUresult const scatter_error = cuda_launch_t {}
                                            .grid(blocks_per_grid)
                                            .block(substrings_threads_per_block_k)

@@ -31,6 +31,7 @@ namespace scripts {
 using ashvardanian::stringzillas::substrings_alphabet_size_k;
 using ashvardanian::stringzillas::substrings_cased_k;
 using ashvardanian::stringzillas::substrings_match_t;
+using ashvardanian::stringzillas::substrings_overlapping_k;
 using ashvardanian::stringzillas::substrings_case_sensitivity_t;
 using ashvardanian::stringzillas::substrings_u32_dictionary_t;
 using ashvardanian::stringzillas::substrings_u32_parallel_t;
@@ -89,7 +90,7 @@ struct vocabulary_t {
 constexpr size_t vocabulary_min_word_bytes_k = 3;
 
 /** @brief Longest word admitted into the vocabulary. Longer whitespace-cut tokens are unsegmented CJK or
- *         Thai runs and URLs rather than words - and the longest needle sets `max_match_bytes`, which every
+ *         Thai runs and URLs rather than words - and the longest needle sets `max_source_match_bytes`, which every
  *         GPU chunk re-walks as its warm-up, so one runaway "word" would tax every chunk in the corpus. */
 constexpr size_t vocabulary_max_word_bytes_k = 32;
 
@@ -239,7 +240,8 @@ void print_dictionary_properties(substrings_u32_dictionary_t const &dictionary, 
                 state_count ? 100.0 * (double)hot_count / (double)state_count : 0.0, state_count - hot_count);
     std::printf(" - Hot tier: %zu bytes (%.2f MiB)\n", hot_tier_bytes, hot_tier_bytes / (1024.0 * 1024.0));
     std::printf(" - Cold tier: %zu bytes (%.2f MiB)\n", cold_tier_bytes, cold_tier_bytes / (1024.0 * 1024.0));
-    std::printf(" - Max match length: %zu bytes, max outputs per state: %zu\n", (size_t)dictionary.max_match_bytes(),
+    std::printf(" - Max match length: %zu bytes, max outputs per state: %zu\n",
+                (size_t)dictionary.max_source_match_bytes(),
                 (size_t)dictionary.view().max_outputs_per_state);
 }
 
@@ -373,15 +375,16 @@ void bench_substrings_dictionary(                                        //
 
     size_t serial_total = 0, parallel_total = 0;
     auto serial_call = make_substrings_callable(haystack_bytes, serial_counts, [&] {
-        return serial_engine.try_count(env.tokens, span<size_t>(serial_counts.data(), serial_counts.size()),
-                                       serial_total);
+        return serial_engine.try_count(env.tokens, substrings_overlapping_k,
+                                       span<size_t>(serial_counts.data(), serial_counts.size()), serial_total);
     });
     std::string const serial_name = "substrings_count_serial:" + dictionary_label;
     bench_result_t const serial_result = bench_nullary(env, serial_name, serial_call).log();
 
     auto parallel_call = make_substrings_callable(haystack_bytes, parallel_counts, [&] {
-        return parallel_engine.try_count(env.tokens, span<size_t>(parallel_counts.data(), parallel_counts.size()),
-                                         parallel_total, pool, cpu_specs);
+        return parallel_engine.try_count(env.tokens, substrings_overlapping_k,
+                                         span<size_t>(parallel_counts.data(), parallel_counts.size()), parallel_total,
+                                         pool, cpu_specs);
     });
     std::string const parallel_name = "substrings_count_parallel:" + dictionary_label;
     bench_result_t const parallel_result = bench_nullary(env, parallel_name, serial_call, parallel_call,
@@ -404,15 +407,16 @@ void bench_substrings_dictionary(                                        //
     size_t serial_found = 0, parallel_found = 0;
     unified_vector<substrings_match_t> serial_matches(total_occurrences);
     auto serial_find_call = make_substrings_callable(haystack_bytes, serial_matches, [&] {
-        return serial_engine.try_find(
-            env.tokens, span<substrings_match_t>(serial_matches.data(), serial_matches.size()), serial_found);
+        return serial_engine.try_find(env.tokens, substrings_overlapping_k,
+                                      span<substrings_match_t>(serial_matches.data(), serial_matches.size()),
+                                      serial_found);
     });
     std::string const serial_find_name = "substrings_find_serial:" + dictionary_label;
     bench_result_t const serial_find_result = bench_nullary(env, serial_find_name, serial_find_call).log();
 
     unified_vector<substrings_match_t> parallel_matches(total_occurrences);
     auto parallel_find_call = make_substrings_callable(haystack_bytes, parallel_matches, [&] {
-        return parallel_engine.try_find(env.tokens,
+        return parallel_engine.try_find(env.tokens, substrings_overlapping_k,
                                         span<substrings_match_t>(parallel_matches.data(), parallel_matches.size()),
                                         parallel_found, pool, cpu_specs);
     });
@@ -436,8 +440,9 @@ void bench_substrings_dictionary(                                        //
     size_t device_total = 0;
 
     auto cuda_call = make_substrings_callable(haystack_bytes, device_counts, [&] {
-        return device_engine.try_count(env.tokens, span<size_t>(device_counts.data(), device_counts.size()),
-                                       device_total, cuda_executor_t {}, gpu_specs);
+        return device_engine.try_count(env.tokens, substrings_overlapping_k,
+                                       span<size_t>(device_counts.data(), device_counts.size()), device_total,
+                                       cuda_executor_t {}, gpu_specs);
     });
     std::string const cuda_name = "substrings_count_cuda:" + dictionary_label;
     bench_result_t const cuda_result = bench_nullary(env, cuda_name, cuda_call).log(serial_result);
@@ -454,7 +459,7 @@ void bench_substrings_dictionary(                                        //
     size_t device_found = 0;
     unified_vector<substrings_match_t> device_matches(total_occurrences);
     auto cuda_find_call = make_substrings_callable(haystack_bytes, device_matches, [&] {
-        return device_engine.try_find(env.tokens,
+        return device_engine.try_find(env.tokens, substrings_overlapping_k,
                                       span<substrings_match_t>(device_matches.data(), device_matches.size()),
                                       device_found, cuda_executor_t {}, gpu_specs);
     });
