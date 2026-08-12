@@ -460,16 +460,10 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
 }
 
 /**
- *  @brief  Left-pack the set-bit positions of a 32-bit lane @p mask into @p out as a dense, ascending array of
- *          byte-offsets in [0, 32), returning the count - the AVX2 `vpcompressb`-free start-compaction shared with the
- *          NEON / LASX / PowerVSX backends. Replaces a scalar `ctz` walk with a 2 KB shuffle-LUT (`leftpack8`) keyed by
- *          each 8-bit sub-mask: for every 16-lane half the mask splits into a low and a high byte, each `vpshufb` over
- *          the LUT row of its set-bit positions, the high half offset by +8, the two stitched at `popcount(low8)` via a
- *          gap-shift `vpshufb` (no scalar per-lane index walk). The half offset `h*16` is added in vector; one loop over
- *          the two halves.
+ *  @brief  Ascending set-bit positions of every 8-bit sub-mask, eight bytes per row, keyed by the sub-mask.
+ *          Unused slots are 0x80, whose high bit makes `vpshufb` read zero and never store.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *out) {
-    static sz_u8_t const leftpack8[256 * 8] = {
+static sz_u8_t const sz_utf8_leftpack8_haswell_[256 * 8] = {
         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x00
         0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x01
         0x01, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x02
@@ -726,7 +720,18 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_
         0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x80, // 0xFD
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x80, // 0xFE
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // 0xFF
-    };
+};
+
+/**
+ *  @brief  Left-pack the set-bit positions of a 32-bit lane @p mask into @p out as a dense, ascending array of
+ *          byte-offsets in [0, 32), returning the count - the AVX2 `vpcompressb`-free start-compaction shared with the
+ *          NEON / LASX / PowerVSX backends. Replaces a scalar `ctz` walk with a 2 KB shuffle-LUT keyed by each 8-bit
+ *          sub-mask: for every 16-lane half the mask splits into a low and a high byte, each `vpshufb` over the LUT row
+ *          of its set-bit positions, the high half offset by +8, the two stitched at `popcount(low8)` via a gap-shift
+ *          `vpshufb` (no scalar per-lane index walk). The half offset `h*16` is added in vector; one loop over the two
+ *          halves.
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *out) {
     __m128i const lane_iota_u8x16 = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     __m128i const constant_eight_u8x16 = _mm_set1_epi8(8);
 
@@ -741,8 +746,10 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_
 
         // Ascending set-bit positions for each 8-bit byte; the high byte's positions are +8 (lanes 8..15). Unused slots
         // are 0x80 (high bit set → `vpshufb` reads 0, never stored).
-        __m128i const packed_offsets_low_u8x16 = _mm_loadl_epi64((__m128i const *)(leftpack8 + low8 * 8));
-        __m128i const packed_offsets_high_raw_u8x16 = _mm_loadl_epi64((__m128i const *)(leftpack8 + high8 * 8));
+        __m128i const packed_offsets_low_u8x16 =
+            _mm_loadl_epi64((__m128i const *)(sz_utf8_leftpack8_haswell_ + low8 * 8));
+        __m128i const packed_offsets_high_raw_u8x16 =
+            _mm_loadl_epi64((__m128i const *)(sz_utf8_leftpack8_haswell_ + high8 * 8));
         __m128i const packed_offsets_high_adjusted_u8x16 = _mm_add_epi8(packed_offsets_high_raw_u8x16,
                                                                         _mm_set1_epi8(8));
         __m128i const packed_halves_u8x16 = _mm_unpacklo_epi64(packed_offsets_low_u8x16,

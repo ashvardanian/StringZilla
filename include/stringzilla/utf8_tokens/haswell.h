@@ -37,6 +37,17 @@ SZ_HELPER_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a_u8x32, __m256i b
  *  lanes [0,29] are trusted and the cursor steps 30, so any 2-/3-byte delimiter is fully loaded. */
 
 /**
+ *  @brief  Left-pack table: row `[m]` holds the 8 dword indices that gather the `m`-selected u64 lanes (of 4,
+ *          each a dword pair) to the front for `_mm256_permutevar8x32_epi32`.
+ */
+static sz_u32_t const sz_utf8_compact_lut_haswell_[16][8] = {
+    {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
+    {4, 5, 0, 0, 0, 0, 0, 0}, {0, 1, 4, 5, 0, 0, 0, 0}, {2, 3, 4, 5, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 0, 0},
+    {6, 7, 0, 0, 0, 0, 0, 0}, {0, 1, 6, 7, 0, 0, 0, 0}, {2, 3, 6, 7, 0, 0, 0, 0}, {0, 1, 2, 3, 6, 7, 0, 0},
+    {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
+};
+
+/**
  *  @brief  Peel the window's first `emit_count` matches with a `vpermd` left-pack, 4 lanes per sub-block.
  *          Each sub-block gathers its set lanes to the front and masked-stores them at the advancing cursor.
  */
@@ -44,15 +55,6 @@ SZ_HELPER_AUTO void sz_utf8_iterate_peel_haswell_(                             /
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
-
-    // Per-file copy of the sorting backend's left-pack table: row `[m]` holds the 8 dword indices that gather the
-    // `m`-selected u64 lanes (of 4, each a dword pair) to the front for `_mm256_permutevar8x32_epi32`.
-    static sz_u32_t const compact_lut[16][8] = {
-        {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
-        {4, 5, 0, 0, 0, 0, 0, 0}, {0, 1, 4, 5, 0, 0, 0, 0}, {2, 3, 4, 5, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 0, 0},
-        {6, 7, 0, 0, 0, 0, 0, 0}, {0, 1, 6, 7, 0, 0, 0, 0}, {2, 3, 6, 7, 0, 0, 0, 0}, {0, 1, 2, 3, 6, 7, 0, 0},
-        {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
-    };
 
     __m256i const lane_ramp_u64x4 = _mm256_setr_epi64x(0, 1, 2, 3);
     sz_size_t emitted = 0;
@@ -74,7 +76,7 @@ SZ_HELPER_AUTO void sz_utf8_iterate_peel_haswell_(                             /
             _mm256_set1_epi64x(1),
             _mm256_add_epi64(two_byte_add_u64x4, _mm256_add_epi64(three_byte_add_u64x4, three_byte_add_u64x4)));
 
-        __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)compact_lut[submask]);
+        __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)sz_utf8_compact_lut_haswell_[submask]);
         __m256i const packed_offsets_u64x4 = _mm256_permutevar8x32_epi32(offsets_u64x4, permutation_u32x8);
         __m256i const packed_lengths_u64x4 = _mm256_permutevar8x32_epi32(lengths_u64x4, permutation_u32x8);
 

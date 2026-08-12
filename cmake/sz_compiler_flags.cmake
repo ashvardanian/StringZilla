@@ -3,6 +3,13 @@
 # `SZ_USE_*` stamps. Included after the option block: the helpers read `STRINGZILLA_USE_SANITIZERS`,
 # `STRINGZILLA_BUILD_COVERAGE`, and the `SZ_IS_64BIT_*` platform facts at call time.
 
+# `SZ_HELPER_AUTO` is `constexpr` in C++, which is what lets a CUDA kernel call the scalar helpers. A helper
+# reaching an intrinsic can never be constant-evaluated, and the diagnostic correctly reports that. C sees no
+# `constexpr` and rejects the flag outright, so it is scoped to the C++ sources of a mixed-language target.
+function (set_invalid_constexpr_flag target)
+    target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-constexpr>")
+endfunction ()
+
 # Maximum warnings level & warnings as error. MSVC uses numeric values: > 4068 for "unknown pragmas",
 # > 4146 for "unary minus operator applied to unsigned type"; `/utf-8` keeps UTF-8 symbols in tests intact.
 function (set_warning_flags target compiler_id)
@@ -15,10 +22,12 @@ function (set_warning_flags target compiler_id)
             PRIVATE
                 "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
         )
+        set_invalid_constexpr_flag(${target})
     elseif (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang")
         target_compile_options(
             ${target} PRIVATE "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion"
         )
+        set_invalid_constexpr_flag(${target})
     elseif (compiler_id MATCHES "MSVC")
         target_compile_options(
             ${target}

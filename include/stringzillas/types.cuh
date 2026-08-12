@@ -13,9 +13,6 @@
 #ifndef STRINGZILLAS_TYPES_CUH_
 #define STRINGZILLAS_TYPES_CUH_
 
-#include "stringzilla/types.hpp"
-#include "stringzillas/types.hpp" // `bytes_per_cell_t`, `one_byte_per_cell_k`
-
 #include <numeric> // `std::midpoint`
 
 #include <forkunion/types.hpp> // `limited_array` — inline storage for the per-device caches
@@ -25,6 +22,9 @@
 
 #include <cub/block/block_reduce.cuh> // `cub::BlockReduce` — block collective behind our `_across_cuda_device_` reductions
 #include <cub/block/block_scan.cuh> // `cub::BlockScan` — block collective behind our `exclusive_sum_across_cuda_device_`
+
+#include "stringzilla/types.hpp"
+#include "stringzillas/types.hpp" // `bytes_per_cell_t`, `one_byte_per_cell_k`
 
 namespace ashvardanian {
 namespace stringzillas {

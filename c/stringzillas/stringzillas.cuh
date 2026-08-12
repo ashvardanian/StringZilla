@@ -8,13 +8,12 @@
 #ifndef STRINGZILLAS_SCAFFOLDING_CUH_
 #define STRINGZILLAS_SCAFFOLDING_CUH_
 
-#include <stringzillas/stringzillas.h> // StringZillas library header
-
 #include <cstring> // For `std::memcpy`
 
-#include <variant>     // For `std::variant`
 #include <string_view> // For `std::string_view`
+#include <variant>     // For `std::variant`
 
+#include <stringzillas/stringzillas.h>   // StringZillas library header
 #include <stringzillas/substrings.hpp>   // C++ templates for multi-pattern search
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 #include <stringzillas/similarities.hpp> // C++ templates for string similarity

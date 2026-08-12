@@ -6,11 +6,12 @@
 #ifndef STRINGZILLAS_TYPES_HPP_
 #define STRINGZILLAS_TYPES_HPP_
 
-#include <thread>   // `std::thread::hardware_concurrency`
+#include <cstdlib> // `std::malloc`, `std::free`
+
 #include <atomic>   // `std::atomic`, `std::memory_order`
 #include <concepts> // `std::convertible_to`, `std::same_as`
-#include <cstdlib>  // `std::malloc`, `std::free`
 #include <memory>   // `std::addressof`
+#include <thread>   // `std::thread::hardware_concurrency`
 
 #include <forkunion.h> // `fu_pool_t`, `fu_topology_t`, capability-dispatched parallel loops
 
