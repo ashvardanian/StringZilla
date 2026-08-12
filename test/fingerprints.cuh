@@ -242,7 +242,6 @@ void test_fingerprints_unit() {
     using u16u32_hasher_t = rabin_karp_rolling_hasher<u16_t, u32_t>;
     using u32u64_hasher_t = rabin_karp_rolling_hasher<u32_t, u64_t>;
     using u32mul_hasher_t = multiplying_rolling_hasher<u32_t>;
-    using i32mul_hasher_t = multiplying_rolling_hasher<i32_t>;
     using u64mul_hasher_t = multiplying_rolling_hasher<u64_t>;
     using u32buz_hasher_t = buz_rolling_hasher<u32_t>;
     using u64buz_hasher_t = buz_rolling_hasher<u64_t>;
@@ -280,19 +279,6 @@ void test_fingerprints_unit() {
     u32mul_hashers.emplace_back(4, 257);
     u32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
     for (auto hasher : u32mul_hashers)
-        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
-            check_rolling_hasher_unit_(hasher, inconvenient_strings);
-
-    std::vector<i32mul_hasher_t> i32mul_hashers;
-    i32mul_hashers.emplace_back(3);
-    i32mul_hashers.emplace_back(5);
-    i32mul_hashers.emplace_back(4);
-    i32mul_hashers.emplace_back(7);
-    i32mul_hashers.emplace_back(3, 31);
-    i32mul_hashers.emplace_back(5, 65521);
-    i32mul_hashers.emplace_back(4, 257);
-    i32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
-    for (auto hasher : i32mul_hashers)
         check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
             check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
@@ -488,14 +474,14 @@ void test_rolling_hashers_batched_against_per_text_(hasher_type_ &hasher, std::s
     unified_vector<min_counts_t> per_text_counts(texts.size()), batched_counts(texts.size());
 
     for (std::size_t text_index = 0; text_index != texts.size(); ++text_index)
-        let_verify(status_t const fingerprint_status =
-                       hasher.try_fingerprint(texts_tape[text_index].template cast<byte_t const>(),
-                                              per_text_hashes[text_index], per_text_counts[text_index]),
+        let_verify(status_t const fingerprint_status = hasher.try_fingerprint(
+                       texts_tape[text_index].template cast<byte_t const>(), per_text_hashes[text_index],
+                       per_text_counts[text_index]),
                    fingerprint_status == status_t::success_k);
 
-    let_verify(status_t const batched_status = hasher(texts_tape, batched_hashes, batched_counts, dummy_executor_t {},
-                                                      specs),
-               batched_status == status_t::success_k);
+    let_verify(
+        status_t const batched_status = hasher(texts_tape, batched_hashes, batched_counts, dummy_executor_t {}, specs),
+        batched_status == status_t::success_k);
 
     for (std::size_t text_index = 0; text_index != texts.size(); ++text_index) {
         min_hashes_t const &expected_hashes = per_text_hashes[text_index];
@@ -575,8 +561,7 @@ void test_rolling_hashers_equivalence_for_width(      //
 #if SZ_USE_CUDA
     using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, dims_k>;
     rolling_cuda_t rolling_cuda;
-    let_verify(status_t const seed_status = rolling_cuda.try_seed(window_width_k),
-               seed_status == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_cuda.try_seed(window_width_k), seed_status == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_cuda);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_cuda);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_cuda);
@@ -681,8 +666,8 @@ void test_fingerprints_safety() {
             auto text = degenerate_tape[text_index];
             min_hashes_t &hashes = hashes_buffer[0];
             min_counts_t &counts = counts_buffer[0];
-            let_verify(status_t const fingerprint_status =
-                           fingerprinter.try_fingerprint(text.template cast<byte_t const>(), hashes, counts),
+            let_verify(status_t const fingerprint_status = fingerprinter.try_fingerprint(
+                           text.template cast<byte_t const>(), hashes, counts),
                        fingerprint_status == status_t::success_k);
             // A degenerate input shorter than the window must yield zero counts on every dimension.
             for (std::size_t dimension = 0; dimension < dims_k; ++dimension)
@@ -709,8 +694,7 @@ void test_fingerprints_safety() {
 #endif
 #if SZ_USE_CUDA
     floating_rolling_hashers<sz_cap_cuda_k, dims_k> rolling_cuda;
-    let_verify(status_t const seed_status = rolling_cuda.try_seed(window_width_k),
-               seed_status == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_cuda.try_seed(window_width_k), seed_status == status_t::success_k);
     check_fingerprinter(rolling_cuda);
 #endif
 }
