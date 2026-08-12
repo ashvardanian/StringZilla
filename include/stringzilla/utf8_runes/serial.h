@@ -15,7 +15,7 @@ extern "C" {
 
 /** @brief Whether @p byte is a UTF-8 continuation byte (`0x80..0xBF`). The single low-level predicate every decode
  *         path shares, so `sz_rune_decode` and `sz_utf8_maximal_subpart_` can never disagree on validity. */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_is_continuation_(sz_u8_t byte) { return (sz_bool_t)((byte & 0xC0) == 0x80); }
+SZ_HELPER_AUTO sz_bool_t sz_utf8_is_continuation_(sz_u8_t byte) { return (sz_bool_t)((byte & 0xC0) == 0x80); }
 
 /** @brief Whether @p second is a valid @b first continuation for lead byte @p lead: a continuation byte that also
  *         satisfies the E0/ED/F0/F4 overlong/surrogate/range constraint (Unicode Table 3-7). For C2..DF and the
@@ -289,6 +289,19 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_previous_rune_start_(sz_cptr_t text, sz_size_t 
     sz_size_t previous = position - 1;
     while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
     return previous;
+}
+
+/**
+ *  @brief Moves `position`, which may sit mid-codepoint, back to the lead byte of the codepoint holding it.
+ *  Bounded to three steps, the widest continuation run a well-formed codepoint has; malformed input therefore
+ *  bounds the cost rather than guaranteeing a real lead byte.
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_start_at_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+    for (sz_size_t step = 0; step < 3 && position > 0 && position < length; ++step) {
+        if (((sz_u8_t)text[position] & 0xC0) != 0x80) break;
+        --position;
+    }
+    return position;
 }
 
 #pragma region Shared bitmask boundary algebra

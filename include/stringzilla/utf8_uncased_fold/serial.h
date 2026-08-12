@@ -19,6 +19,38 @@ extern "C" {
  */
 SZ_HELPER_AUTO sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
 
+enum {
+    /** @brief Most source bytes one folded byte can come from - the Kelvin sign's three, folding to `k`. */
+    sz_utf8_fold_max_contraction_k = 3,
+    /** @brief Most folded bytes one source byte can produce; the mirror bound. */
+    sz_utf8_fold_max_expansion_k = 3,
+};
+
+/**
+ *  @brief Whether any codepoint beginning with @p lead folds to something other than itself.
+ *
+ *  49 of the 256 lead bytes qualify, so the answer is a bit in a 256-bit mask carried as four immediates -
+ *  no table, and therefore no memory access on either a CPU or a GPU. Generated from
+ *  `sz_unicode_fold_codepoint_`, so it cannot disagree with the fold it guards:
+ *
+ *  @code{.py}
+ *  for codepoint in range(0x110000):
+ *      if 0xD800 <= codepoint <= 0xDFFF: continue
+ *      if fold(codepoint) != [codepoint]:
+ *          lead = encode(codepoint)[0]
+ *          mask[lead >> 6] |= 1 << (lead & 63)
+ *  @endcode
+ */
+SZ_HELPER_AUTO sz_bool_t sz_utf8_lead_may_fold_(sz_u8_t lead) {
+    sz_u64_t word;
+    switch (lead >> 6) {
+    case 1: word = 0x0000000007FFFFFEull; break;  // 0x40-0x7F: 'A'-'Z'
+    case 3: word = 0x00018406007FE3FCull; break;  // 0xC0-0xFF: C2-D6 Latin through Cyrillic, E1 E2 EA EF, F0
+    default: return sz_false_k;                   // 0x00-0x3F punctuation, 0x80-0xBF continuation bytes
+    }
+    return (sz_bool_t)((word >> (lead & 63)) & 1u);
+}
+
 /**
  *  @brief Folded-rune representation of a byte that does not begin a well-formed codepoint.
  *

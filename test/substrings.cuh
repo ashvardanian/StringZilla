@@ -40,8 +40,6 @@ namespace stringzilla {
 namespace scripts {
 
 using ashvardanian::stringzillas::dummy_executor_t;
-using ashvardanian::stringzillas::fold_preimage_of_rune;
-using ashvardanian::stringzillas::fold_preimage_of_runes;
 using ashvardanian::stringzillas::substrings_cased_k;
 using ashvardanian::stringzillas::forkunion_executor_t;
 using ashvardanian::stringzillas::substrings_bm25_t;
@@ -145,25 +143,15 @@ void collect_matches_under_(engine_type_ &engine, haystacks_type_ const &haystac
     std::size_t matches_total = 0;
     span<std::size_t> const counts {out.collected_counts.data(), out.collected_counts.size()};
 
-    // The CUDA engine serves the overlapping policy alone, so it has no policy argument to take yet.
-    constexpr bool engine_is_cuda = (engine_type_::capability_k & sz_cap_cuda_k) != 0;
-    if constexpr (engine_is_cuda) {
-        verify(overlap_policy == substrings_overlapping_k && "CUDA has no leftmost kernels");
-        verify(engine.try_count(haystacks, counts, matches_total, trailing_args...) == status_t::success_k);
-    }
-    else
-        verify(engine.try_count(haystacks, overlap_policy, counts, matches_total, trailing_args...) ==
-               status_t::success_k);
+    verify(engine.try_count(haystacks, overlap_policy, counts, matches_total, trailing_args...) ==
+           status_t::success_k);
 
     // Sized to exactly what counting promised, so a `try_find` overrun trips instead of writing into slack.
     out.collected_matches.assign(matches_total, substrings_match_t {});
     std::size_t matches_found = 0;
     span<substrings_match_t> const matches {out.collected_matches.data(), out.collected_matches.size()};
-    if constexpr (engine_is_cuda)
-        verify(engine.try_find(haystacks, matches, matches_found, trailing_args...) == status_t::success_k);
-    else
-        verify(engine.try_find(haystacks, overlap_policy, matches, matches_found, trailing_args...) ==
-               status_t::success_k);
+    verify(engine.try_find(haystacks, overlap_policy, matches, matches_found, trailing_args...) ==
+           status_t::success_k);
     verify(matches_found == matches_total && "try_count and try_find disagree on the match count");
 
     out.clear();
@@ -198,7 +186,7 @@ inline std::vector<std::string> random_short_strings_(std::size_t count, int min
 /**
  *  @brief Independent case-folded substring oracle: folds haystack and needle codepoint by codepoint via
  *         `sz_unicode_fold_codepoint_`, then slides the folded needle over the folded haystack, reporting
- *         every start position whose folded run matches - overlaps included.
+ *         every distinct source span whose folded run matches - overlaps included.
  *
  *  Shares no machinery with the Aho-Corasick engine under test beyond the one folding table every backend
  *  reads. @sa `reference_uncased_find_` in `test/uncased.cpp`, which reports only the first match.
@@ -217,10 +205,6 @@ inline std::vector<span<char const>> independent_uncased_matches_(span<char cons
 
     std::vector<sz_rune_t> haystack_folded;
     std::vector<std::size_t> source_begin, source_end;
-    // ? Only the first folded rune a codepoint contributes marks a legal match start; a codepoint whose own
-    // full fold spans multiple runes - the sharp S folding to "s","s" - must not let a match begin on its
-    // second rune, which has no byte of its own to start at.
-    std::vector<bool> is_codepoint_start;
     for (char const *cursor = haystack.begin(), *end = haystack.end(); cursor != end;) {
         sz_rune_t rune;
         sz_rune_length_t const consumed = sz_rune_decode(cursor, end, &rune);
@@ -233,22 +217,19 @@ inline std::vector<span<char const>> independent_uncased_matches_(span<char cons
             haystack_folded.push_back(folded[index]);
             source_begin.push_back(codepoint_begin);
             source_end.push_back(codepoint_end);
-            is_codepoint_start.push_back(index == 0);
         }
         cursor += consumed;
     }
 
+    // A match is any contiguous run of the folded haystack, including one that begins or ends part-way
+    // through an expansion - "s" does match inside the sharp S. Neither end has a byte of its own there, so
+    // both snap outward to the codepoint that produced them, and two runs that snap to one span are one
+    // match. This is the same rule `sz_utf8_uncased_search` follows.
+    std::set<std::pair<std::size_t, std::size_t>> spans;
     std::vector<span<char const>> matches;
     std::size_t const needle_length = needle_folded.size();
     if (needle_length == 0) return matches;
     for (std::size_t start = 0; start + needle_length <= haystack_folded.size(); ++start) {
-        if (!is_codepoint_start[start]) continue;
-        // The same discipline as the start, mirrored: a match consuming only a prefix of one codepoint's
-        // fold - two of the three runes U+1F54 folds to - has no byte of its own to end at, exactly as a
-        // match beginning on the sharp S's second "s" has none to start at.
-        bool const ends_on_boundary = start + needle_length == haystack_folded.size() || //
-                                      is_codepoint_start[start + needle_length];
-        if (!ends_on_boundary) continue;
         bool equal = true;
         for (std::size_t index = 0; index < needle_length; ++index)
             if (haystack_folded[start + index] != needle_folded[index]) {
@@ -256,8 +237,9 @@ inline std::vector<span<char const>> independent_uncased_matches_(span<char cons
                 break;
             }
         if (!equal) continue;
-        matches.emplace_back(haystack.data() + source_begin[start],
-                             source_end[start + needle_length - 1] - source_begin[start]);
+        std::size_t const from = source_begin[start], to = source_end[start + needle_length - 1];
+        if (!spans.emplace(from, to).second) continue;
+        matches.emplace_back(haystack.data() + from, to - from);
     }
     return matches;
 }
@@ -427,17 +409,66 @@ inline void append_rune_utf8_(sz_rune_t rune, std::string &out) {
     out.append((char const *)encoded, (std::size_t)encoded_length);
 }
 
+/**
+ *  @brief Which source codepoints fold onto each image, built once by folding every codepoint forward.
+ *
+ *  The engine has no use for this direction - it folds needles and haystacks the same way and compares - so
+ *  the index is the test's own, derived from `sz_unicode_fold_codepoint_` rather than from a shipped table.
+ *  Deriving it here is also what keeps the fixtures honest: they cannot drift from the fold under test.
+ */
+struct fold_preimage_index_t {
+    /** @brief Single-rune images, ascending, so a range of them can be binary-searched. */
+    std::vector<sz_rune_t> narrow_images;
+    /** @brief Multi-rune images, each zero-padded to three runes. */
+    std::vector<std::array<sz_rune_t, 3>> wide_images;
+    /** @brief Sources per image, keyed by the image's runes. */
+    std::map<std::vector<sz_rune_t>, std::vector<sz_rune_t>> sources_of_image;
+};
+
+/** @brief The one index, folded on first use and shared by every generator that needs a preimage. */
+inline fold_preimage_index_t const &fold_preimage_index_() {
+    static fold_preimage_index_t const index = [] {
+        fold_preimage_index_t built;
+        for (sz_rune_t rune = 0; rune <= 0x10FFFF; ++rune) {
+            if (rune >= 0xD800 && rune <= 0xDFFF) continue; // ? Surrogates are not codepoints on their own
+            sz_rune_t images[3];
+            std::size_t const runes = sz_unicode_fold_codepoint_(rune, images);
+            if (runes == 1 && images[0] == rune) continue; // ? Folds to itself, so it is nobody's preimage
+            built.sources_of_image[std::vector<sz_rune_t>(images, images + runes)].push_back(rune);
+        }
+        for (auto const &entry : built.sources_of_image) {
+            if (entry.first.size() == 1) { built.narrow_images.push_back(entry.first[0]); continue; }
+            std::array<sz_rune_t, 3> padded {};
+            for (std::size_t index = 0; index < entry.first.size(); ++index) padded[index] = entry.first[index];
+            built.wide_images.push_back(padded);
+        }
+        std::sort(built.narrow_images.begin(), built.narrow_images.end());
+        return built;
+    }();
+    return index;
+}
+
+/** @brief Source codepoints whose full fold is exactly @p image, or an empty span when it folds to itself. */
+inline span<sz_rune_t const> fold_preimage_of_runes_(span<sz_rune_t const> image) {
+    auto const &sources = fold_preimage_index_().sources_of_image;
+    auto const found = sources.find(std::vector<sz_rune_t>(image.begin(), image.end()));
+    if (found == sources.end()) return {};
+    return {found->second.data(), found->second.size()};
+}
+
+/** @brief Source codepoints whose full fold is the single rune @p image. */
+inline span<sz_rune_t const> fold_preimage_of_rune_(sz_rune_t image) { return fold_preimage_of_runes_({&image, 1}); }
+
 /** @brief One fold-space rune drawn uniformly from the narrow preimage table's images within
  *         `[first_rune, last_rune)`; the image array is sorted, so the range is a binary-searched slab. */
 inline sz_rune_t sample_fold_image_rune_(sz_rune_t first_rune, sz_rune_t last_rune) {
-    sz_u32_t const *const images_begin = szs_fold_preimage_narrow_images_;
-    sz_u32_t const *const images_end = images_begin + szs_fold_preimage_narrow_count_k;
-    sz_u32_t const *const slab_begin = std::lower_bound(images_begin, images_end, (sz_u32_t)first_rune);
-    sz_u32_t const *const slab_end = std::lower_bound(images_begin, images_end, (sz_u32_t)last_rune);
+    std::vector<sz_rune_t> const &images = fold_preimage_index_().narrow_images;
+    auto const slab_begin = std::lower_bound(images.begin(), images.end(), first_rune);
+    auto const slab_end = std::lower_bound(images.begin(), images.end(), last_rune);
     verify(slab_begin != slab_end && "The requested rune range holds no fold images");
     std::uniform_int_distribution<std::size_t> slab_position(0, (std::size_t)(slab_end - slab_begin) - 1);
     std::size_t const chosen_position = slab_position(global_random_generator());
-    return (sz_rune_t)slab_begin[chosen_position];
+    return slab_begin[chosen_position];
 }
 
 /**
@@ -465,11 +496,11 @@ inline std::size_t append_fold_preimage_variant_(span<char const> needle, std::s
         span<sz_rune_t const> preimages;
         std::size_t consumed_runes = 1;
         if (remaining_runes >= 3) //
-            preimages = fold_preimage_of_runes({folded.data() + position, 3}), consumed_runes = 3;
+            preimages = fold_preimage_of_runes_({folded.data() + position, 3}), consumed_runes = 3;
         if (preimages.size() == 0 && remaining_runes >= 2)
-            preimages = fold_preimage_of_runes({folded.data() + position, 2}), consumed_runes = 2;
+            preimages = fold_preimage_of_runes_({folded.data() + position, 2}), consumed_runes = 2;
         if (preimages.size() == 0) //
-            preimages = fold_preimage_of_rune(folded[position]), consumed_runes = 1;
+            preimages = fold_preimage_of_rune_(folded[position]), consumed_runes = 1;
         if (preimages.size() == 0) {
             append_rune_utf8_(folded[position], out);
             position += 1;
@@ -624,19 +655,19 @@ inline void generate_substrings_needles_(substrings_needle_generator_t kind, std
 
     case substrings_needle_generator_t::fold_expanding_k: {
         // Needles whose fold preimages span more bytes than the needle itself - "k" also matches the 3-byte
-        // Kelvin sign, so `max_match_bytes` cannot be read off needle lengths. The Kelvin anchor stays
-        // pinned; every following needle is a wide-table image repeated 1-4 times, so 2:1 and 3:1 byte
-        // expansions from every script appear organically rather than from a hand-picked seed list.
+        // Kelvin sign, so `max_source_match_bytes` cannot be read off needle lengths. The Kelvin anchor stays
+        // pinned; every following needle is a wide image repeated 1-4 times, so 2:1 and 3:1 byte expansions
+        // from every script appear organically rather than from a hand-picked seed list.
         std::vector<std::string> pool {"k"};
         auto &generator = global_random_generator();
-        std::uniform_int_distribution<std::size_t> row_position(0, szs_fold_preimage_wide_count_k - 1);
+        std::vector<std::array<sz_rune_t, 3>> const &wide_images = fold_preimage_index_().wide_images;
+        std::uniform_int_distribution<std::size_t> row_position(0, wide_images.size() - 1);
         for (std::size_t index = 0; index < count; ++index) {
-            std::size_t const chosen_row = row_position(generator);
-            sz_u32_t const *const image = szs_fold_preimage_wide_images_[chosen_row];
+            std::array<sz_rune_t, 3> const &image = wide_images[row_position(generator)];
             scratch.clear();
             for (std::size_t repeat = 0; repeat <= index % 4; ++repeat)
                 for (std::size_t rune_index = 0; rune_index < 3 && image[rune_index] != 0; ++rune_index)
-                    append_rune_utf8_((sz_rune_t)image[rune_index], scratch);
+                    append_rune_utf8_(image[rune_index], scratch);
             pool.push_back(scratch);
         }
         assign_deduplicated_(pool, needles);
@@ -890,9 +921,9 @@ void test_substrings_unit() {
         verify(matches == expected && "Nested-prefix overlap example mismatched");
     }
 
-    // A multi-byte source codepoint immediately followed by a byte that itself continues a valid preimage
-    // chain must produce exactly the one match the accepting codepoint completes - not an extra match
-    // starting mid-codepoint, at the continuation byte, once the walk carries on past it.
+    // A match may begin part-way through an expansion, and then reports the whole codepoint it began inside.
+    // Folding "\xC3\x9Fsoft" gives "sssoft", so "ss" matches both the sharp S alone and the run crossing from
+    // its second "s" into the literal one - the second snapping outward to byte 0 and running to byte 3.
     {
         std::vector<std::string> const needle_strings {"ss", "\xC3\x9F"};
         std::vector<std::string> const haystack_strings {"\xC3\x9Fsoft"};
@@ -910,14 +941,15 @@ void test_substrings_unit() {
         substrings_match_set_t const expected {
             {0, 0, 0, 2}, // "ss" matches the sharp-S codepoint at byte [0, 2)
             {0, 1, 0, 2}, // "\xC3\x9F" matches itself at byte [0, 2)
+            {0, 0, 0, 3}, // "ss" again, from the sharp S's second "s" into the literal one
+            {0, 1, 0, 3}, // and "\xC3\x9F" folds to the same "ss", so it matches that run too
         };
-        verify(matches == expected && "Spurious match starting mid-codepoint after a multi-byte accept");
+        verify(matches == expected && "Mid-expansion matches must snap outward to the codepoint they begin in");
     }
 
-    // Reconvergence hazards: a needle whose fold self-overlaps across a mixed-width fold image once merged
-    // two arrival paths onto one failure slot, so the walk reported a match starting inside a codepoint and
-    // dropped the true one. Each case pins the exact set the walking-automaton split must produce. `U+212A`
-    // is the Kelvin sign (folds to `k`), `U+017F` the long s (folds to `s`).
+    // Needles whose fold self-overlaps across a mixed-width fold image: the folded stream lines up in more
+    // ways than the source bytes do, so each case pins both which windows match and which source span each
+    // one snaps to. `U+212A` is the Kelvin sign (folds to `k`), `U+017F` the long s (folds to `s`).
     struct uncased_case_t {
         std::vector<std::string> needles;
         std::string haystack;
@@ -930,9 +962,11 @@ void test_substrings_unit() {
         // before an `a` would parse as the single overlong escape `\x9Fa`.
         {{"kk"}, "\xE2\x84\xAAkk", {{0, 0, 0, 4}, {0, 0, 3, 2}}, "kk over Kelvin-k-k"},
         {{"ss"}, "\xC5\xBFss", {{0, 0, 0, 3}, {0, 0, 2, 2}}, "ss over long-s-s"},
-        // Both codepoint-aligned windows of four folded s-runes, the sharp-S consumed whole by each.
+        // Both windows of four folded s-runes. Over "ss\xC3\x9Fs" each one starts on a codepoint; over
+        // "\xC3\x9Fsss" the second starts on the sharp S's *second* "s", so it snaps back to byte 0 and runs
+        // to the end.
         {{"ssss"}, "ss\xC3\x9Fs", {{0, 0, 0, 4}, {0, 0, 1, 4}}, "ssss over s-s-sharp-s"},
-        {{"ssss"}, "\xC3\x9Fsss", {{0, 0, 0, 4}}, "ssss over sharp-s-s-s"},
+        {{"ssss"}, "\xC3\x9Fsss", {{0, 0, 0, 4}, {0, 0, 0, 5}}, "ssss over sharp-s-s-s"},
         // Nested needles: a wrong failure chain on one needle corrupts the other's reported matches too.
         {{"k", "kk"}, "\xE2\x84\xAAk", {{0, 0, 0, 3}, {0, 1, 0, 4}, {0, 0, 3, 1}}, "nested k/kk over Kelvin-k"},
     };
@@ -1372,6 +1406,21 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
         log_substrings_cell_mismatch_(scratch, "CUDA-vs-serial divergence");
         verify(false && "CUDA backend disagrees with the serial reference");
     }
+
+    // The leftmost covers are a sequential greedy over each haystack, which the device resolves per chunk by
+    // seeding each one at the last position whose cursor is knowable without any earlier history. Both
+    // policies are checked, since they differ only in which match wins a start and that choice propagates.
+    substrings_overlap_policy_t const covers[] = {substrings_leftmost_first_k, substrings_leftmost_longest_k};
+    for (substrings_overlap_policy_t const policy : covers) {
+        collect_matches_under_(serial_engine, haystacks_view, policy, scratch.engine_keys);
+        collect_matches_under_(cuda_engine, haystacks_view, policy, scratch.cuda_keys, executor, gpu_specs);
+        if (scratch.cuda_keys != scratch.engine_keys) {
+            log_substrings_cell_mismatch_(scratch, policy == substrings_leftmost_first_k
+                                                       ? "CUDA-vs-serial divergence under leftmost-first"
+                                                       : "CUDA-vs-serial divergence under leftmost-longest");
+            verify(false && "CUDA leftmost cover disagrees with the serial reference");
+        }
+    }
 }
 
 /**
@@ -1420,8 +1469,9 @@ void test_substrings_cuda_memory_contract() {
     for (std::string const &text : texts) host_spans.push_back({text.data(), text.size()});
     unified_vector<std::size_t> counts(host_spans.size());
     std::size_t matches_total = 0;
-    auto const host_status = cuda_engine.try_count(host_spans, span<std::size_t>(counts.data(), counts.size()),
-                                                   matches_total, executor, gpu_specs);
+    auto const host_status = cuda_engine.try_count(host_spans, substrings_overlapping_k,
+                                                   span<std::size_t>(counts.data(), counts.size()), matches_total,
+                                                   executor, gpu_specs);
     verify(host_status == status_t::device_memory_mismatch_k && "Host input must be refused, not copied");
 }
 #endif
@@ -1523,6 +1573,39 @@ void test_substrings_large_haystacks() {
 
     verify(!serial_keys.empty() && "The fixture must produce matches");
     verify(parallel_keys == serial_keys && "The sliced parallel path disagrees with the serial reference");
+
+    // The same split, folded. Several of the four cuts land mid-codepoint on this fixture, which a folded
+    // walk cannot restart on, so the slices snap back to a codepoint start before folding. Attribution by
+    // start position makes an unsnapped cut safe on its own - no match can begin inside the codepoint a cut
+    // lands in - so this pins parallel and serial agreement over multi-byte content rather than the snap.
+    {
+        std::vector<std::string> const folded_needles {"ss", "\xC3\x9F", "k", "\xE2\x84\xAA"};
+        arrow_strings_tape_t uncased_needles;
+        verify(uncased_needles.try_assign(folded_needles.data(), folded_needles.data() + folded_needles.size()) ==
+               status_t::success_k);
+
+        std::string multibyte;
+        char const *const cycle[] = {"\xC3\x9F", "\xC5\xBF", "\xE2\x84\xAA", "s", "k"};
+        for (std::size_t index = 0; index < scale_iterations(4) * 1024; ++index) multibyte += cycle[index % 5];
+        std::vector<std::string> const uncased_haystack_strings {multibyte};
+        arrow_strings_tape_t uncased_haystacks;
+        verify(uncased_haystacks.try_assign(uncased_haystack_strings.data(),
+                                            uncased_haystack_strings.data() + 1) == status_t::success_k);
+
+        substrings_u32_serial_t uncased_serial;
+        verify(uncased_serial.try_build(uncased_needles.view(), substrings_uncased_k) == status_t::success_k);
+        substrings_match_set_t uncased_serial_keys, uncased_parallel_keys;
+        collect_overlapping_matches_into_(uncased_serial, uncased_haystacks.view(), uncased_serial_keys);
+
+        substrings_u32_parallel_t uncased_parallel;
+        verify(uncased_parallel.try_build(uncased_needles.view(), substrings_uncased_k) == status_t::success_k);
+        collect_overlapping_matches_into_(uncased_parallel, uncased_haystacks.view(), uncased_parallel_keys, pool,
+                                          sliced_specs);
+
+        verify(!uncased_serial_keys.empty() && "The folded fixture must produce matches");
+        verify(uncased_parallel_keys == uncased_serial_keys &&
+               "The sliced parallel path disagrees with the serial reference on folded multi-byte content");
+    }
 }
 
 #pragma endregion // Adversarial
@@ -1564,26 +1647,30 @@ void test_substrings_construction() {
         verify(dictionary.count_needles() == 1);
     }
 
-    // The doubling family: a run of `s` folds ambiguously (each `s` is also half a sharp-S), so its correct
-    // uncased automaton grows exponentially. The build declines the moment the walking-state count would
-    // overflow the id type - the same ceiling an oversized edge count hits - never a silent wrap. A `u16`
-    // dictionary declines a run a `u32` one still compiles, and both verdicts are deterministic.
+    // The doubling family: a run of `s` folds ambiguously, since each `s` is also half a sharp-S. Folding the
+    // stream leaves one path per needle, so the run is a plain chain of its own folded length and every id
+    // width has room for it, whatever `state_id_t` is.
     {
-        std::string const long_run(11, 's'); // ? ~164k walking states: past u16's 65535, well inside u32's
+        std::string const long_run(11, 's');
         substrings_u16_dictionary_t narrow;
         narrow.case_sensitivity(substrings_uncased_k);
         verify(narrow.try_insert({long_run.data(), long_run.size()}) == status_t::success_k);
-        verify(narrow.try_build() == status_t::overflow_risk_k && "u16 must decline the run cleanly, not wrap");
+        verify(narrow.try_build() == status_t::success_k && "The doubling family is linear once the stream folds");
+        verify(narrow.count_states() == long_run.size() + 1 && "One state per folded byte, plus the root");
 
         substrings_u32_dictionary_t wide;
         wide.case_sensitivity(substrings_uncased_k);
         verify(wide.try_insert({long_run.data(), long_run.size()}) == status_t::success_k);
-        verify(wide.try_build() == status_t::success_k && "u32 has room for this run");
+        verify(wide.try_build() == status_t::success_k);
+        verify(wide.count_states() == narrow.count_states() && "The id width cannot change the automaton's shape");
 
-        // Narrowing that same run must decline for the same reason a fresh `u16` build does, rather than
-        // wrapping the ids it copies.
-        substrings_u16_dictionary_t adopted;
-        verify(adopted.try_build(wide) == status_t::overflow_risk_k && "narrowing inherits the id ceiling");
+        // Both widths still find the sharp S spelling of the same run, which is what makes it the hard case.
+        std::string const spelled = "\xC3\x9F\xC3\x9F\xC3\x9F\xC3\x9F\xC3\x9Fs";
+        std::size_t found = 0;
+        wide.find({spelled.data(), spelled.size()}, [&](std::size_t, std::size_t, std::size_t) {
+            return ++found, true;
+        });
+        verify(found != 0 && "Eleven folded s-runes are spelled by five sharp-S codepoints and one s");
     }
 
     // Narrowing an automaton that does fit: the walking derivation runs once at the wider id and the narrower

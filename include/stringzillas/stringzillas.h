@@ -683,8 +683,10 @@ typedef struct szs_substrings_stats_t {
     sz_size_t hot_states_count;
     /** Bytes held by both transition tiers together. */
     sz_size_t transitions_bytes;
-    /** Longest span any needle can match, after folding. */
-    sz_size_t max_match_bytes;
+    /** Longest needle, in the folded bytes the automaton walks. */
+    sz_size_t max_folded_match_bytes;
+    /** Longest span any needle can match in the @b haystack, which a fold can stretch to three times the above. */
+    sz_size_t max_source_match_bytes;
     /** 2 or 4: the state-id width construction settled on. */
     sz_size_t state_id_bytes;
     /** Bytes of frequency scratch @b one core reserves to score; a BM25 call multiplies this by its threads. */
@@ -786,7 +788,7 @@ SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25(   //
  *  @brief Bound the bytes a rewrite can produce, from the dictionary and @p replacements alone.
  *
  *  A cover's matches share no bytes and each consumes at least its needle's shortest matchable span, so
- *  every input byte emits at most `max over needles of replacement_bytes / min_match_bytes`. Sizing an
+ *  every input byte emits at most `max over needles of replacement_bytes / min_source_match_bytes`. Sizing an
  *  output tape to this bound makes `szs_substrings_replace` a single call that cannot be refused, at the
  *  cost of over-allocating whenever the corpus does not consist entirely of the widest-expanding needle.
  *

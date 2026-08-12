@@ -3,7 +3,9 @@
 The substrings engine matches a __whole dictionary of needles__ against a __whole collection of haystacks__ in a single pass, the workhorse of __log scanning__, __protocol dispatch__, __content filtering__, and __signature matching__.
 It compiles the needle set once into an Aho-Corasick automaton and reuses it across every later call, so the dictionary is paid for once rather than per haystack.
 The automaton is __goto-completed__ and split into two tiers: a dense 256-wide row per frequently-visited state, and a double array for the rest, so a step is one load with no failure-following at runtime.
-`substrings_cased_k` matches raw bytes and accepts any needle, while `substrings_uncased_k` bakes __full Unicode case folding__ into the transitions themselves, matching case variants of the original haystack bytes without folding the haystack at runtime.
+`substrings_cased_k` matches raw bytes and accepts any needle, while `substrings_uncased_k` applies __full Unicode case folding__ to both sides of the comparison: the needle is folded once at build time, and the haystack one codepoint at a time as the walk consumes it, never into a buffer.
+A match is therefore any contiguous run of the folded haystack, so it may begin or end part-way through an expansion - `"s"` matches inside `"ß"` - with both ends reported in original haystack bytes, snapped outward to the codepoint they fall in.
+That is the same rule `sz_utf8_uncased_search` follows, so the single-pattern and multi-pattern engines agree.
 Every engine runs across a slice of CPU cores or a CUDA GPU, advancing many haystacks concurrently rather than making any single haystack faster.
 
 Throughput is reported in __MB/s__ of haystack bytes consumed, the rate at which the automaton advances over the corpus.
