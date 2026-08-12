@@ -1,6 +1,6 @@
 /**
  *  @brief Hardware-accelerated UTF-8 newline, whitespace, and general delimiter scanning.
- *  @file utf8_tokens.h
+ *  @file include/stringzilla/utf8_tokens.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_H_

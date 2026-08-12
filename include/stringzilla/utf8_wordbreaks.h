@@ -1,6 +1,6 @@
 /**
  *  @brief Hardware-accelerated UAX-29 word boundary segmentation.
- *  @file utf8_wordbreaks.h
+ *  @file include/stringzilla/utf8_wordbreaks.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_H_

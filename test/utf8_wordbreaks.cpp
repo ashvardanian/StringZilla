@@ -1,7 +1,7 @@
 /**
  *  @brief  UAX-29 word-boundary (Word_Break) tests: known-answer goldens, malformed-input safety, and the
  *          serial-vs-ISA differential over hardened corpora.
- *  @file   scripts/test_utf8_wordbreaks.cpp
+ *  @file   test/utf8_wordbreaks.cpp
  *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing

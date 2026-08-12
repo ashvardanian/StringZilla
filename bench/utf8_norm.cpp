@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_utf8_norm.cpp
+ *  @file bench/utf8_norm.cpp
  *  @brief Benchmarks the @b `sz_utf8_norm_*` family — Unicode normalization and quick-check scanning.
  *         The program accepts a file path to a dataset and benchmarks the normalization operations,
  *         validating the SIMD-accelerated backends against the serial baselines.

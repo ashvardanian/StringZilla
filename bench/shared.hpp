@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench.hpp
+ *  @file bench/shared.hpp
  *  @brief Helper structures and functions for C++ benchmarks.
  *
  *  The StringZilla benchmarking suite doesn't use any external frameworks like Criterion or Google Benchmark.

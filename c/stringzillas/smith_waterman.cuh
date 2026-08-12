@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_SZS_SMITH_WATERMAN_CUH_
-#define STRINGZILLAS_SZS_SMITH_WATERMAN_CUH_
+#ifndef SZS_SMITH_WATERMAN_CUH_
+#define SZS_SMITH_WATERMAN_CUH_
 #include "stringzillas.cuh"
 
 /**
@@ -235,4 +235,4 @@ SZ_API_RUNTIME void szs_smith_waterman_scores_free(szs_smith_waterman_scores_t e
 #pragma endregion Smith Waterman
 }
 
-#endif // STRINGZILLAS_SZS_SMITH_WATERMAN_CUH_
+#endif // SZS_SMITH_WATERMAN_CUH_

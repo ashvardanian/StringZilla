@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_substrings.cu
+ *  @file bench/substrings.cu
  *  @brief Benchmarks the multi-pattern search engine (Aho-Corasick) on the GPU.
  *         Builds the dictionary on the host - construction is never a bottleneck, so it's never worth
  *         accelerating - uploads it once, and reports the device-measured throughput of scanning the whole

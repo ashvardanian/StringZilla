@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_find.cpp
+ *  @file bench/find.cpp
  *  @brief Benchmarks for bidirectional string search operations.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *         validating the SIMD-accelerated backends against the serial baselines.

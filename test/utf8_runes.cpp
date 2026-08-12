@@ -1,6 +1,6 @@
 /**
  *  @brief  UTF-8 codepoint counting, nth-character finding, and streaming rune-unpacking tests.
- *  @file scripts/test_utf8_runes.cpp
+ *  @file test/utf8_runes.cpp
  *  @author Ash Vardanian
  *  @date June 20, 2026
  */

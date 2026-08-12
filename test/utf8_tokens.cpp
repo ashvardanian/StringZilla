@@ -1,6 +1,6 @@
 /**
  *  @brief  UTF-8 newline/whitespace boundary equivalence and C++ line/token splitting semantics.
- *  @file   scripts/test_utf8_tokens.cpp
+ *  @file   test/utf8_tokens.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

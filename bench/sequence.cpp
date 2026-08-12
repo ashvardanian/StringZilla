@@ -1,6 +1,6 @@
 
 /**
- *  @file scripts/bench_sequence.cpp
+ *  @file bench/sequence.cpp
  *  @brief Benchmarks sorting, partitioning, and merging operations on string sequences.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *         validating the SIMD-accelerated backends against the serial baselines.

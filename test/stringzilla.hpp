@@ -1,6 +1,6 @@
 /**
  *  @brief  Helper structures and functions for C++ unit- and stress-tests.
- *  @file   scripts/test_stringzilla.hpp
+ *  @file   test/stringzilla.hpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  *

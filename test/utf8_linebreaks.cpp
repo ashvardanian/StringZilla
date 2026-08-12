@@ -1,7 +1,7 @@
 /**
  *  @brief  UAX-14 line-break (linewrap) tests: known-answer goldens, malformed-input safety, and the
  *          serial-vs-ISA differential over hardened corpora.
- *  @file   scripts/test_utf8_linebreaks.cpp
+ *  @file   test/utf8_linebreaks.cpp
  *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing

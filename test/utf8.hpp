@@ -1,6 +1,6 @@
 /**
  *  @brief  Shared harness for the UTF-8 segmentation family tests (words / graphemes / sentences / linebreaks).
- *  @file   scripts/test_utf8.hpp
+ *  @file   test/utf8.hpp
  *  @author Ash Vardanian
  *
  *  Each segmentation family lives in its own translation unit (`test_utf8_<family>.cpp`) and pulls its substrate

@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_fingerprints.cu
+ *  @file bench/fingerprints.cu
  *  @brief Benchmarks for exact multi-pattern substring search algorithms on the GPU.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *         validating the SIMD-accelerated backends against the serial baselines.

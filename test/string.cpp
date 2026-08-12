@@ -1,6 +1,6 @@
 /**
  *  @brief  Arithmetic/struct plumbing, ASCII utilities, memory, STL-compat, conversions, extensions, and the string class.
- *  @file   scripts/test_string.cpp
+ *  @file   test/string.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

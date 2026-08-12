@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_SZS_FINGERPRINTS_CUH_
-#define STRINGZILLAS_SZS_FINGERPRINTS_CUH_
+#ifndef SZS_FINGERPRINTS_CUH_
+#define SZS_FINGERPRINTS_CUH_
 #include "stringzillas.cuh"
 
 /**
@@ -264,4 +264,4 @@ SZ_API_RUNTIME void szs_fingerprints_utf8_free(szs_fingerprints_utf8_t engine_pu
 #pragma endregion Fingerprints UTF8
 }
 
-#endif // STRINGZILLAS_SZS_FINGERPRINTS_CUH_
+#endif // SZS_FINGERPRINTS_CUH_

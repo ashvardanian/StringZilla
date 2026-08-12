@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_substrings.cpp
+ *  @file bench/substrings.cpp
  *  @brief Benchmarks the multi-pattern search engine (Aho-Corasick) on CPU: serial and fork-union-parallel.
  *         Sweeps dictionary sizes and reports the dictionary properties - state count, hot/cold tier split,
  *         and the fraction of byte steps that stay on the hot path - alongside the throughput they produce,

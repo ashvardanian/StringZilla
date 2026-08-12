@@ -1,6 +1,6 @@
 /**
  *  @brief  Comparisons, search/find_all/split, misaligned-repetition search, and replacement tests.
- *  @file   scripts/test_find.cpp
+ *  @file   test/find.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

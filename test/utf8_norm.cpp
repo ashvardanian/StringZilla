@@ -1,6 +1,6 @@
 /**
  *  @brief  UTF-8 normalization (NFC/NFD/NFKC/NFKD) known-answer, serial-vs-ISA equivalence, and safety.
- *  @file   scripts/test_utf8_norm.cpp
+ *  @file   test/utf8_norm.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

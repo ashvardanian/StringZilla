@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_SZS_LEVENSHTEIN_CUH_
-#define STRINGZILLAS_SZS_LEVENSHTEIN_CUH_
+#ifndef SZS_LEVENSHTEIN_CUH_
+#define SZS_LEVENSHTEIN_CUH_
 #include "stringzillas.cuh"
 
 /**
@@ -368,4 +368,4 @@ SZ_API_RUNTIME void szs_levenshtein_distances_utf8_free(szs_levenshtein_distance
 #pragma endregion Levenshtein UTF8 Distances
 }
 
-#endif // STRINGZILLAS_SZS_LEVENSHTEIN_CUH_
+#endif // SZS_LEVENSHTEIN_CUH_

@@ -1,6 +1,6 @@
 /**
  *  @brief  Uncased UTF-8 case-folding equivalence/fuzzing and uncased substring search tests.
- *  @file   scripts/test_uncased.cpp
+ *  @file   test/uncased.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

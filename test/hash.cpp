@@ -1,6 +1,6 @@
 /**
  *  @brief  Hashing, multi-seed hashing, random-generator, and SHA256 equivalence tests.
- *  @file   scripts/test_hash.cpp
+ *  @file   test/hash.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

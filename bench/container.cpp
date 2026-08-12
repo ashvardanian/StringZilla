@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_container.cpp
+ *  @file bench/container.cpp
  *  @brief Benchmarks STL associative containers with @b `std::string_view`-compatible keys.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the lookup operations.
  *

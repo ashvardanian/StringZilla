@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_fingerprints.cuh
+ *  @file bench/fingerprints.cuh
  *  @brief Shared code for CPU and GPU batched parallel exact substring search.
  */
 #include <tuple> // `std::tuple`

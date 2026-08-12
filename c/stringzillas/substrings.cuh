@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date August 6, 2026
  */
-#ifndef STRINGZILLAS_SZS_SUBSTRINGS_CUH_
-#define STRINGZILLAS_SZS_SUBSTRINGS_CUH_
+#ifndef SZS_SUBSTRINGS_CUH_
+#define SZS_SUBSTRINGS_CUH_
 #include "stringzillas.cuh"
 
 #include <cstddef> // `offsetof`
@@ -253,4 +253,4 @@ SZ_API_RUNTIME void szs_substrings_free(szs_substrings_t engine_punned) {
 #pragma endregion Substrings
 }
 
-#endif // STRINGZILLAS_SZS_SUBSTRINGS_CUH_
+#endif // SZS_SUBSTRINGS_CUH_

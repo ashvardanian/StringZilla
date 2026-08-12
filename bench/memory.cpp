@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_memory.cpp
+ *  @file bench/memory.cpp
  *  @brief Benchmarks for memory operations like copying, moving, resetting, and converting with lookup tables.
  *         The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
  *         references to mimic real-world scenarios dealing with individual strings of different lengths.

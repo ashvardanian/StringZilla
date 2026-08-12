@@ -1,6 +1,6 @@
 /**
  *  @brief  Test entry point and template instantiations; registers every per-domain unit and driver.
- *  @file   scripts/test_stringzilla.cpp
+ *  @file   test/stringzilla.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

@@ -2,7 +2,7 @@
  *  @brief Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
  *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file scripts/test_fingerprints.cuh
+ *  @file test/fingerprints.cuh
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

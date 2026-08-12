@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_utf8_uncased.cpp
+ *  @file bench/utf8_uncased.cpp
  *  @brief Benchmarks the @b `sz_utf8_uncased_*` family — case folding and uncased search.
  *         The program accepts a file path to a dataset and benchmarks the case folding operations,
  *         validating the SIMD-accelerated backends against the serial baselines.

@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_fingerprints.cpp
+ *  @file bench/fingerprints.cpp
  *  @brief Benchmarks for exact multi-pattern substring search algorithms.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *         validating the SIMD-accelerated backends against the serial baselines.

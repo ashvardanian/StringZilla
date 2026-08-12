@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_similarities.cuh
+ *  @file bench/similarities.cuh
  *  @brief Shared code for CPU and GPU batched string similarity kernels.
  */
 #include <tuple>   // `std::tuple`

@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_similarities.cu
+ *  @file bench/similarities.cu
  *  @brief Benchmarks string similarity computations.
  *         It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
  *         alignment scores, and fingerprinting techniques combined with the Hamming distance.

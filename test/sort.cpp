@@ -1,6 +1,6 @@
 /**
  *  @brief  Sequence sort equivalence/backends/algorithms and intersection tests.
- *  @file   scripts/test_sort.cpp
+ *  @file   test/sort.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */

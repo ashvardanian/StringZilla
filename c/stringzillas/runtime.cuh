@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_RUNTIME_CUH_
-#define STRINGZILLAS_RUNTIME_CUH_
+#ifndef SZS_RUNTIME_CUH_
+#define SZS_RUNTIME_CUH_
 #include "stringzillas.cuh"
 
 extern "C" {
@@ -222,4 +222,4 @@ SZ_API_RUNTIME void szs_unified_free(void *ptr, sz_size_t size_bytes) {
 #pragma endregion Unified Allocator
 }
 
-#endif // STRINGZILLAS_RUNTIME_CUH_
+#endif // SZS_RUNTIME_CUH_

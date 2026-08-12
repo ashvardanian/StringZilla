@@ -1,6 +1,6 @@
 /**
  *  @brief Hardware-accelerated UAX-29 sentence segmentation.
- *  @file utf8_sentences.h
+ *  @file include/stringzilla/utf8_sentences.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_H_

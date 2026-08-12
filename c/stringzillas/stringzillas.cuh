@@ -1,12 +1,12 @@
 /**
- *  @file c/stringzillas.cuh
+ *  @file c/stringzillas/stringzillas.cuh
  *  @brief StringZillas shared scaffolding (scopes, backend variant lists, dispatch) included by
  *         the per-algorithm CPU & CUDA shims.
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_SCAFFOLDING_CUH_
-#define STRINGZILLAS_SCAFFOLDING_CUH_
+#ifndef SZS_STRINGZILLAS_CUH_
+#define SZS_STRINGZILLAS_CUH_
 
 #include <cstring> // For `std::memcpy`
 
@@ -702,4 +702,4 @@ sz_status_t szs_fingerprints_for_(                                      //
     return result;
 }
 
-#endif // STRINGZILLAS_SCAFFOLDING_CUH_
+#endif // SZS_STRINGZILLAS_CUH_
