@@ -84,14 +84,22 @@ message(STATUS "C++ Compiler Version: ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
 
 # Detect CUDA Support
+# `check_language` caches the compiler it finds together with the host compiler it happened to pair with it,
+# and that pairing then outranks a caller's `CMAKE_CUDA_HOST_COMPILER` - which is why the probe runs only to
+# pick the default below. A caller who asks for CUDA outright gets the real detection from `enable_language`,
+# whose own failure message says everything this probe would have.
 set(STRINGZILLA_CAN_BUILD_CUDA OFF)
-include(CheckLanguage)
-check_language(CUDA)
-if (CMAKE_CUDA_COMPILER)
-    set(STRINGZILLA_CAN_BUILD_CUDA ON)
-    message(STATUS "CUDA compiler available")
+if (DEFINED STRINGZILLA_BUILD_CUDA)
+    set(STRINGZILLA_CAN_BUILD_CUDA ${STRINGZILLA_BUILD_CUDA})
 else ()
-    message(STATUS "CUDA compiler not available")
+    include(CheckLanguage)
+    check_language(CUDA)
+    if (CMAKE_CUDA_COMPILER)
+        set(STRINGZILLA_CAN_BUILD_CUDA ON)
+        message(STATUS "CUDA compiler available")
+    else ()
+        message(STATUS "CUDA compiler not available")
+    endif ()
 endif ()
 
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -328,6 +336,9 @@ if (STRINGZILLA_BUILD_CUDA)
         PATH_SUFFIXES cccl
         NO_DEFAULT_PATH
     )
+    include(cmake/sz_cuda_probes.cmake)
+    sz_cuda_probe_native_arch_()
+
     message(STATUS "CUDA support enabled")
     message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
     message(STATUS "CUDA Compiler ID: ${CMAKE_CUDA_COMPILER_ID}")

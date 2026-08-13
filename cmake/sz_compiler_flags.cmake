@@ -50,10 +50,13 @@ function (set_warning_flags target compiler_id)
                     "-Xcompiler=/Zc:preprocessor;-Xcompiler=/Zc:__cplusplus;-Xcompiler=/W3;-Xcompiler=/WX;-Xcompiler=/wd4068;-Xcompiler=/wd5030;-Xcompiler=/wd5051;-Xcompiler=/wd4146;-Xcompiler=/wd4996;-Xcompiler=/wd4244;-Xcompiler=/wd4267;-Xcompiler=/utf-8"
             )
         else ()
+            # `-Wno-invalid-constexpr` reaches the host compiler here for the reason `set_invalid_constexpr_flag`
+            # gives, and it has to: a Clang host makes that diagnostic an error, so every CUDA source including
+            # the C layer fails without it.
             target_compile_options(
                 ${target}
                 PRIVATE
-                    "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Xcompiler=-Wno-error=array-bounds;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
+                    "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Xcompiler=-Wno-error=array-bounds;-Xcompiler=-Wno-invalid-constexpr;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
             )
         endif ()
     endif ()
@@ -79,28 +82,32 @@ function (set_optimization_flags target compiler_id target_type)
         target_compile_options(${target} PRIVATE "$<$<CONFIG:Release>:-O2>")
     elseif (compiler_id STREQUAL "NVIDIA")
         if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            set(sz_nvcc_debug_ "-G" # Device debug symbols
-                               "-no-compress" # No compression of debug info
-                               "-Xcompiler=/Zi" # Host debugging symbols
-                               "-Xcompiler=/Oy-" # Frame pointers for stack traces
-                               "-Xcompiler=/Ob0" # Prevent host inlining
-                               "-maxrregcount=0" # No register count limits
+            set(sz_nvcc_debug_
+                "-G" # Device debug symbols
+                "-no-compress" # No compression of debug info
+                "-Xcompiler=/Zi" # Host debugging symbols
+                "-Xcompiler=/Oy-" # Frame pointers for stack traces
+                "-Xcompiler=/Ob0" # Prevent host inlining
+                "-maxrregcount=0" # No register count limits
             )
-            set(sz_nvcc_release_ "-O2" # NVCC optimizations
-                                 "-Xptxas=-O2" # PTX assembler optimizations
-                                 "-Xcompiler=/O2" # Host optimizations
+            set(sz_nvcc_release_
+                "-O2" # NVCC optimizations
+                "-Xptxas=-O2" # PTX assembler optimizations
+                "-Xcompiler=/O2" # Host optimizations
             )
         else ()
-            set(sz_nvcc_debug_ "-G" # Device debug symbols
-                               "-no-compress" # No compression of debug info
-                               "-Xcompiler=-g" # Host debugging symbols explicitly
-                               "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
-                               "-Xcompiler=-fno-inline" # Prevent host inlining
-                               "-maxrregcount=0" # No register count limits
+            set(sz_nvcc_debug_
+                "-G" # Device debug symbols
+                "-no-compress" # No compression of debug info
+                "-Xcompiler=-g" # Host debugging symbols explicitly
+                "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
+                "-Xcompiler=-fno-inline" # Prevent host inlining
+                "-maxrregcount=0" # No register count limits
             )
-            set(sz_nvcc_release_ "-O2" # NVCC optimizations
-                                 "-Xptxas=-O2" # PTX assembler optimizations
-                                 "-Xcompiler=-O2" # Host optimizations
+            set(sz_nvcc_release_
+                "-O2" # NVCC optimizations
+                "-Xptxas=-O2" # PTX assembler optimizations
+                "-Xcompiler=-O2" # Host optimizations
             )
         endif ()
         target_compile_options(
@@ -221,11 +228,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                     else ()
                         target_compile_options(${target} PRIVATE "-Xcompiler=/arch:AVX2")
                     endif ()
-                else ()
-                    check_cxx_compiler_flag("-march=native" supports_march_native)
-                    if (supports_march_native)
-                        target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
-                    endif ()
+                elseif (STRINGZILLA_CUDA_ACCEPTS_NATIVE_ARCH)
+                    target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
                 endif ()
             elseif (NOT (compiler_id MATCHES "MSVC"))
                 check_cxx_compiler_flag("-march=native" supports_march_native)
