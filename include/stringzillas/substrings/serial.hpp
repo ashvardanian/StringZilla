@@ -2049,7 +2049,7 @@ struct substrings<allocator_type_, capability_,
         std::visit([](auto &dict) noexcept { dict.reset(); }, dict_);
     }
 
-    /** @brief The state-id width `try_build` settled on, which the needle set alone decides. */
+    /** @brief The state-id width `try_index` settled on, which the needle set alone decides. */
     substrings_state_width_t state_width() const noexcept {
         return std::holds_alternative<narrow_dictionary_t>(dict_) ? substrings_state_width_t::u16_k
                                                                   : substrings_state_width_t::u32_k;
@@ -2464,6 +2464,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
             return reserved;
         if (status_t const reserved = try_reserve_rewrite_shares_(cores, large_total); reserved != status_t::success_k)
             return reserved;
+        if (status_t const reserved = try_reserve_spanned_(cores); reserved != status_t::success_k) return reserved;
 
         using prong_t = typename std::decay<executor_type_>::type::prong_t;
 
@@ -2544,12 +2545,10 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         visit_dictionary([&](auto const &dict) noexcept {
             executor.for_n_dynamic(haystacks.size(), [&](prong_t prong) noexcept {
                 if (is_large_(to_bytes_view(haystacks[prong.task]).size(), specs)) return;
-                size_t const first = prong.thread * needles_per_core_;
                 scores[prong.task] = substrings_bm25_score(
                     dict, to_bytes_view(haystacks[prong.task]), length_source,
                     document_lengths.size() ? document_lengths[prong.task] : 0.0f, parameters, needle_weights,
-                    {frequencies_.data() + first, needles_per_core_},
-                    {touched_needles_.data() + first, needles_per_core_});
+                    frequencies_of_(prong.thread), touched_needles_of_(prong.thread));
             });
         });
 
@@ -2648,8 +2647,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
             if (!is_large_(haystack.size(), specs)) continue;
             auto const haystack_bytes = to_bytes_view(haystack);
 
-            span<size_t> const counts_per_core {counts_per_core_per_large_.data() + large_index * cores_total,
-                                                cores_total};
+            span<size_t> const counts_per_core = counts_of_large_(large_index, cores_total);
             count_matches_per_core_by_start_(haystack_bytes, executor, counts_per_core);
             size_t total = 0;
             for (size_t core_index = 0; core_index < cores_total; ++core_index)
@@ -2670,8 +2668,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
             if (!is_large_(haystack.size(), specs)) continue;
             auto const haystack_bytes = to_bytes_view(haystack);
 
-            span<size_t const> const counts_per_core {counts_per_core_per_large_.data() + large_index * cores_total,
-                                                      cores_total};
+            span<size_t const> const counts_per_core = counts_of_large_(large_index, cores_total);
             scatter_matches_of_one_large_(haystack_bytes, haystack_index, offsets_per_haystack_[haystack_index],
                                           counts_per_core, matches, executor);
             ++large_index;
@@ -2779,27 +2776,24 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         size_t output_offset {};
     };
 
-    /**
-     *  @brief Sizes one share record per core per large haystack, and one coverage row per core.
-     *
-     *  The shares are per haystack because the sizing pass settles them and the writing pass reads them back;
-     *  the coverage row is per core only, being scratch one walk consumes before the next reuses it. The two
-     *  therefore grow on different triggers, and testing them under one condition would skip a resize whenever
-     *  only the other moved.
-     *
-     *  The coverage row is as wide as the restart search's window - four times the longest match - since that
-     *  is the span a difference array has to mark before a position can be judged unspanned.
-     */
+    /** @brief Sizes one share record per core for each large haystack, so both passes read the same cover. */
     status_t try_reserve_rewrite_shares_(size_t cores_total, size_t large_total) noexcept {
-        size_t const shares_wanted = cores_total * large_total;
-        if (rewrite_shares_.size() != shares_wanted &&
-            rewrite_shares_.try_resize(shares_wanted) != status_t::success_k)
-            return status_t::bad_alloc_k;
+        size_t const wanted = cores_total * large_total;
+        if (rewrite_shares_.size() == wanted) return status_t::success_k;
+        return rewrite_shares_.try_resize(wanted);
+    }
+
+    /**
+     *  @brief Sizes one coverage row per core, the difference array the restart search marks matches into.
+     *
+     *  As wide as the restart search's window - four times the longest match - since that is the span a
+     *  difference array has to mark before a position can be judged unspanned.
+     */
+    status_t try_reserve_spanned_(size_t cores_total) noexcept {
         size_t const width = max_source_match_bytes() * 4 + 1;
-        if (spanned_width_ != width || spanned_.size() != width * cores_total) {
-            if (spanned_.try_resize(width * cores_total) != status_t::success_k) return status_t::bad_alloc_k;
-            spanned_width_ = width;
-        }
+        if (spanned_width_ == width && spanned_.size() == width * cores_total) return status_t::success_k;
+        if (spanned_.try_resize(width * cores_total) != status_t::success_k) return status_t::bad_alloc_k;
+        spanned_width_ = width;
         return status_t::success_k;
     }
 
@@ -2808,14 +2802,29 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         return {rewrite_shares_.data() + large_index * cores_total, cores_total};
     }
 
+    /** @brief One large haystack's row of per-core match counts, which the scatter reads back as offsets. */
+    span<size_t> counts_of_large_(size_t large_index, size_t cores_total) noexcept {
+        return {counts_per_core_per_large_.data() + large_index * cores_total, cores_total};
+    }
+
     span<i32_t> spanned_of_(size_t core_index) noexcept {
         return {spanned_.data() + core_index * spanned_width_, spanned_width_};
     }
 
+    /** @brief One core's tally row, indexed by @b needle index; row zero doubles as the merge target. */
+    span<u32_t> frequencies_of_(size_t core_index) noexcept {
+        return {frequencies_.data() + core_index * frequencies_width_, frequencies_width_};
+    }
+
+    /** @brief One core's list of the needles it touched, indexed by @b slot - not by needle index. */
+    span<u32_t> touched_needles_of_(size_t core_index) noexcept {
+        return {touched_needles_.data() + core_index * frequencies_width_, frequencies_width_};
+    }
+
     /** @brief Sizes one frequency row per core, leaving every counter at zero. */
     status_t try_reserve_frequencies_(size_t cores_total) noexcept {
-        needles_per_core_ = count_needles();
-        size_t const wanted = cores_total * needles_per_core_;
+        frequencies_width_ = count_needles();
+        size_t const wanted = cores_total * frequencies_width_;
         if (frequencies_.size() == wanted) return status_t::success_k;
         // `try_resize` leaves trivial types uninitialized, and the counters must start - and stay - zero.
         if (frequencies_.try_resize(wanted) != status_t::success_k ||
@@ -2825,9 +2834,8 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         return status_t::success_k;
     }
 
-  private:
     allocator_t alloc_ {};
-    /** @brief The compiled automaton, at whichever state-id width `try_build` found it fits. */
+    /** @brief The compiled automaton, at whichever state-id width `try_index` settled on. */
     std::variant<narrow_dictionary_t, wide_dictionary_t> dict_;
 
     /** @brief Grow-only per-call scratch, reused across calls; concurrent calls on one engine are unsafe. */
@@ -2839,7 +2847,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
     /** @brief One frequency row and one touched-needle row per core, laid out the same way. */
     safe_vector<u32_t, u32_allocator_t> frequencies_ {};
     safe_vector<u32_t, u32_allocator_t> touched_needles_ {};
-    size_t needles_per_core_ {};
+    size_t frequencies_width_ {};
     /** @brief One share per core per large haystack, settled while sizing and read back while writing, so the
      *         cover is resolved once and both passes agree on who owns a match straddling a slice boundary. */
     safe_vector<rewrite_share_t, typename std::allocator_traits<allocator_t>::template rebind_alloc<rewrite_share_t>>
@@ -3057,9 +3065,8 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
             size_t const walk_begin = slice_begin >= longest ? slice_begin - longest : 0;
             span<byte_t const> const walked {haystack.data() + walk_begin, slice_end - walk_begin};
 
-            size_t const first = core_index * needles_per_core_;
-            span<u32_t> const frequencies {frequencies_.data() + first, needles_per_core_};
-            span<u32_t> const touched {touched_needles_.data() + first, needles_per_core_};
+            span<u32_t> const frequencies = frequencies_of_(core_index);
+            span<u32_t> const touched = touched_needles_of_(core_index);
             size_t touched_count = 0;
             visit_dictionary([&](auto const &dict) noexcept {
                 dict.find(walked, [&](size_t needle_index, size_t match_offset, size_t match_length) noexcept {
@@ -3073,16 +3080,18 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         });
 
         // Merge into the first core's row, in ascending needle order so the sum is the one the header names.
-        span<u32_t> const merged {frequencies_.data(), needles_per_core_};
-        span<u32_t> const merged_touched {touched_needles_.data(), needles_per_core_};
+        span<u32_t> const merged = frequencies_of_(0);
+        span<u32_t> const merged_touched = touched_needles_of_(0);
         size_t merged_count = counts_per_core_[0];
         for (size_t core_index = 1; core_index < cores; ++core_index) {
-            size_t const first = core_index * needles_per_core_;
+            span<u32_t> const frequencies = frequencies_of_(core_index);
+            span<u32_t> const touched = touched_needles_of_(core_index);
             for (size_t slot = 0; slot < counts_per_core_[core_index]; ++slot) {
-                u32_t const needle_index = touched_needles_[first + slot];
+                // The touched row is keyed by slot, the frequency row by needle index - two rows, two keys.
+                u32_t const needle_index = touched[slot];
                 if (merged[needle_index] == 0) merged_touched[merged_count++] = needle_index;
-                merged[needle_index] += frequencies_[first + needle_index];
-                frequencies_[first + needle_index] = 0;
+                merged[needle_index] += frequencies[needle_index];
+                frequencies[needle_index] = 0;
             }
         }
 

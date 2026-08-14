@@ -918,6 +918,10 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
          *         which lists its cell widths the same way. */
         struct by_width_t {
             kernel_shape_t u16, u32;
+
+            kernel_shape_t const &for_width(substrings_state_width_t width) const noexcept {
+                return width == substrings_state_width_t::u16_k ? u16 : u32;
+            }
         };
         kernel_shape_t chunks_per_haystack;
         by_width_t count_chunk;
@@ -1089,17 +1093,6 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return state_width() == substrings_state_width_t::u16_k ? sizeof(u16_t) : sizeof(u32_t);
     }
 
-    /** @brief The three width-bound shapes, picked for the automaton this engine settled on. */
-    kernel_shape_t const &walk_shape_(kernels_t const &table) const noexcept {
-        return state_width() == substrings_state_width_t::u16_k ? table.count_chunk.u16 : table.count_chunk.u32;
-    }
-    kernel_shape_t const &scatter_shape_(kernels_t const &table) const noexcept {
-        return state_width() == substrings_state_width_t::u16_k ? table.scatter_chunk.u16 : table.scatter_chunk.u32;
-    }
-    kernel_shape_t const &score_shape_(kernels_t const &table) const noexcept {
-        return state_width() == substrings_state_width_t::u16_k ? table.score_bm25.u16 : table.score_bm25.u32;
-    }
-
     /** @brief The settled automaton at @p state_id_type_, which `try_build` has already pinned. */
     template <typename state_id_type_>
     aho_corasick_dictionary<state_id_type_, allocator_t> const &settled_dictionary_() const noexcept {
@@ -1137,7 +1130,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     cuda_status_t try_budget_staging_(cuda_executor_t const &executor) noexcept {
         auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
-        CUfunction const walk_function = walk_shape_(kernel_table).function; // ? The scatter kernel shares its shape
+        CUfunction const walk_function = kernel_table.count_chunk.for_width(state_width()).function; // ? The scatter kernel shares its shape
 
         // Occupancy first, staging only out of what is left over. The walk chases a data-dependent transition
         // load, so resident warps are the only thing hiding its latency, while the rows it would stage are
@@ -1364,7 +1357,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         sz_assert_(staged_bytes <= std::numeric_limits<unsigned>::max() &&
                    "The staged prefix is budgeted against one multiprocessor's shared memory in `try_build`");
         shared_memory_bytes = static_cast<unsigned>(staged_bytes);
-        cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, walk_shape_(kernel_table).function,
+        cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, kernel_table.count_chunk.for_width(state_width()).function,
                                                                   substrings_threads_per_block_k, shared_memory_bytes,
                                                                   specs);
         if (occupancy_status.status != status_t::success_k) return occupancy_status;
@@ -1410,47 +1403,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     cuda_status_t count_into_offsets_(cuda_executor_t const &executor, gpu_specs_t const &specs,
                                       kernels_t const &kernel_table, unsigned shared_memory_bytes,
                                       unsigned blocks_per_grid, size_t chunk_bytes, size_t chunk_count) noexcept {
-        return state_width() == substrings_state_width_t::u16_k
-                   ? count_into_offsets_at_<u16_t>(executor, specs, kernel_table, shared_memory_bytes, blocks_per_grid,
-                                                   chunk_bytes, chunk_count)
-                   : count_into_offsets_at_<u32_t>(executor, specs, kernel_table, shared_memory_bytes, blocks_per_grid,
-                                                   chunk_bytes, chunk_count);
-    }
-
-    template <typename state_id_type_>
-    cuda_status_t count_into_offsets_at_(cuda_executor_t const &executor, gpu_specs_t const &specs,
-                                         kernels_t const &kernel_table, unsigned shared_memory_bytes,
-                                         unsigned blocks_per_grid, size_t chunk_bytes, size_t chunk_count) noexcept {
         if (chunk_match_offsets_.try_resize_uninitialized(chunk_count + 1) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
-        aho_corasick_view<state_id_type_> view_argument = settled_dictionary_<state_id_type_>().view();
-        state_id_type_ shared_rows_argument = static_cast<state_id_type_>(shared_rows_);
-        span<u32_t const> accepts_words_argument {accepts_words_.data(), accepts_words_.size()};
-        u32_t staged_accepts_words_argument = staged_accepts_words_;
-        span<span<byte_t const> const> haystacks_argument {haystack_descriptors_.data(), haystack_descriptors_.size()};
-        span<size_t const> haystack_chunk_offsets_argument {haystack_chunk_offsets_.data(),
-                                                            haystack_chunk_offsets_.size()};
-        size_t chunk_bytes_argument = chunk_bytes;
-        size_t chunk_count_argument = chunk_count;
-        span<size_t> chunk_match_slots_argument {chunk_match_offsets_.data(), chunk_match_offsets_.size()};
-        span<substrings_match_t> no_matches_argument;
-        void *count_arguments[10] = {&view_argument,
-                                     &shared_rows_argument,
-                                     &accepts_words_argument,
-                                     &staged_accepts_words_argument,
-                                     &haystacks_argument,
-                                     &haystack_chunk_offsets_argument,
-                                     &chunk_bytes_argument,
-                                     &chunk_count_argument,
-                                     &chunk_match_slots_argument,
-                                     &no_matches_argument};
-        CUresult const count_error = cuda_launch_t {}
-                                         .grid(blocks_per_grid)
-                                         .block(substrings_threads_per_block_k)
-                                         .shared(shared_memory_bytes)
-                                         .stream(executor.stream())
-                                         .launch(walk_shape_(kernel_table).function, count_arguments);
+        // Counting hands the walk no output span: the pass writes each chunk's tally into its slot instead.
+        CUresult const count_error =
+            launch_walk_(substrings_pass_t::counting_k, kernel_table, blocks_per_grid, shared_memory_bytes,
+                         chunk_bytes, chunk_count, span<match_t> {}, executor);
         if (count_error != CUDA_SUCCESS) return make_cuda_status(count_error);
 
         // In place: each chunk's slot holds its raw count going in and its exclusive offset coming out - the
@@ -1567,13 +1526,32 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
      */
     CUresult launch_scatter_(planned_pass_t const &pass, span<match_t> target,
                              cuda_executor_t const &executor) noexcept {
-        return state_width() == substrings_state_width_t::u16_k ? launch_scatter_at_<u16_t>(pass, target, executor)
-                                                                : launch_scatter_at_<u32_t>(pass, target, executor);
+        // Bounded to what the counting pass actually found, not to the caller's capacity, so a debug index
+        // assert inside the kernel catches an over-write rather than merely staying inside the allocation.
+        return launch_walk_(substrings_pass_t::scattering_k, pass.kernel_table, pass.blocks_per_grid,
+                            pass.shared_memory_bytes, pass.chunk_bytes, pass.chunk_count, target, executor);
+    }
+
+    /**
+     *  @brief Launches one walk over every chunk, in whichever pass @p pass_kind names.
+     *
+     *  Both passes take the same ten arguments in the same order - the counting one simply leaves @p target
+     *  empty and tallies into the chunk slots - so the argument block is written here once.
+     */
+    CUresult launch_walk_(substrings_pass_t pass_kind, kernels_t const &kernel_table, unsigned blocks_per_grid,
+                          unsigned shared_memory_bytes, size_t chunk_bytes, size_t chunk_count,
+                          span<match_t> target, cuda_executor_t const &executor) noexcept {
+        return state_width() == substrings_state_width_t::u16_k
+                   ? launch_walk_at_<u16_t>(pass_kind, kernel_table, blocks_per_grid, shared_memory_bytes, chunk_bytes,
+                                            chunk_count, target, executor)
+                   : launch_walk_at_<u32_t>(pass_kind, kernel_table, blocks_per_grid, shared_memory_bytes, chunk_bytes,
+                                            chunk_count, target, executor);
     }
 
     template <typename state_id_type_>
-    CUresult launch_scatter_at_(planned_pass_t const &pass, span<match_t> target,
-                                cuda_executor_t const &executor) noexcept {
+    CUresult launch_walk_at_(substrings_pass_t pass_kind, kernels_t const &kernel_table, unsigned blocks_per_grid,
+                             unsigned shared_memory_bytes, size_t chunk_bytes, size_t chunk_count,
+                             span<match_t> target, cuda_executor_t const &executor) noexcept {
         aho_corasick_view<state_id_type_> view_argument = settled_dictionary_<state_id_type_>().view();
         state_id_type_ shared_rows_argument = static_cast<state_id_type_>(shared_rows_);
         span<u32_t const> accepts_words_argument {accepts_words_.data(), accepts_words_.size()};
@@ -1581,28 +1559,28 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         span<span<byte_t const> const> haystacks_argument {haystack_descriptors_.data(), haystack_descriptors_.size()};
         span<size_t const> haystack_chunk_offsets_argument {haystack_chunk_offsets_.data(),
                                                             haystack_chunk_offsets_.size()};
-        size_t chunk_bytes_argument = pass.chunk_bytes;
-        size_t chunk_count_argument = pass.chunk_count;
+        size_t chunk_bytes_argument = chunk_bytes;
+        size_t chunk_count_argument = chunk_count;
         span<size_t> chunk_match_slots_argument {chunk_match_offsets_.data(), chunk_match_offsets_.size()};
-        // Bounded to what the counting pass actually found, not to the caller's capacity, so a debug index
-        // assert inside the kernel catches an over-write rather than merely staying inside the allocation.
         span<match_t> matches_out_argument = target;
-        void *scatter_arguments[10] = {&view_argument,
-                                       &shared_rows_argument,
-                                       &accepts_words_argument,
-                                       &staged_accepts_words_argument,
-                                       &haystacks_argument,
-                                       &haystack_chunk_offsets_argument,
-                                       &chunk_bytes_argument,
-                                       &chunk_count_argument,
-                                       &chunk_match_slots_argument,
-                                       &matches_out_argument};
+        void *walk_arguments[10] = {&view_argument,
+                                    &shared_rows_argument,
+                                    &accepts_words_argument,
+                                    &staged_accepts_words_argument,
+                                    &haystacks_argument,
+                                    &haystack_chunk_offsets_argument,
+                                    &chunk_bytes_argument,
+                                    &chunk_count_argument,
+                                    &chunk_match_slots_argument,
+                                    &matches_out_argument};
+        kernels_t::by_width_t const &shapes =
+            pass_kind == substrings_pass_t::counting_k ? kernel_table.count_chunk : kernel_table.scatter_chunk;
         return cuda_launch_t {}
-            .grid(pass.blocks_per_grid)
+            .grid(blocks_per_grid)
             .block(substrings_threads_per_block_k)
-            .shared(pass.shared_memory_bytes)
+            .shared(shared_memory_bytes)
             .stream(executor.stream())
-            .launch(scatter_shape_(pass.kernel_table).function, scatter_arguments);
+            .launch(shapes.for_width(state_width()).function, walk_arguments);
     }
 
   public:
@@ -1975,7 +1953,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                     (size_t)staged_accepts_words_ * sizeof(u32_t); // ? Settled per call
         unsigned const shared_memory_bytes = static_cast<unsigned>(staged_bytes);
         unsigned blocks_per_grid = 0;
-        cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, score_shape_(kernel_table).function,
+        cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, kernel_table.score_bm25.for_width(state_width()).function,
                                                                   substrings_threads_per_block_k, shared_memory_bytes,
                                                                   specs);
         if (occupancy_status.status != status_t::success_k) return occupancy_status;
@@ -2077,7 +2055,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
             .block(substrings_threads_per_block_k)
             .shared(shared_memory_bytes)
             .stream(executor.stream())
-            .launch(score_shape_(kernel_table).function, score_arguments);
+            .launch(kernel_table.score_bm25.for_width(state_width()).function, score_arguments);
     }
 };
 

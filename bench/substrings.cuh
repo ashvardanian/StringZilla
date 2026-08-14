@@ -38,6 +38,7 @@ using ashvardanian::stringzillas::substrings_case_sensitivity_t;
 using ashvardanian::stringzillas::substrings_parallel_t;
 using ashvardanian::stringzillas::substrings_serial_t;
 using ashvardanian::stringzillas::substrings_uncased_k;
+using ashvardanian::stringzillas::dummy_executor_t;
 using ashvardanian::stringzillas::forkunion_executor_t;
 
 // StringZillas library symbols provided only by the CUDA backend:
@@ -377,19 +378,22 @@ void bench_substrings_dictionary(                                        //
     unified_vector<size_t> serial_counts(env.tokens.size());
     unified_vector<size_t> parallel_counts(env.tokens.size());
 
+    // One shape per operation, invoked once per backend: the three differ only in which engine runs and in the
+    // `(executor, specs)` pair every engine entry point already takes.
     size_t serial_total = 0, parallel_total = 0;
-    auto serial_call = make_substrings_callable(haystack_bytes, serial_counts, [&] {
-        return serial_engine.try_count(env.tokens, substrings_overlapping_k,
-                                       span<size_t>(serial_counts.data(), serial_counts.size()), serial_total);
-    });
+    auto count_with = [&](auto &engine, auto &&executor, auto const &specs, unified_vector<size_t> &counts,
+                          size_t &total) {
+        return make_substrings_callable(haystack_bytes, counts, [&] {
+            return engine.try_count(env.tokens, substrings_overlapping_k,
+                                    span<size_t>(counts.data(), counts.size()), total, executor, specs);
+        });
+    };
+
+    auto serial_call = count_with(serial_engine, dummy_executor_t {}, cpu_specs, serial_counts, serial_total);
     std::string const serial_name = "substrings_count_serial:" + dictionary_label;
     bench_result_t const serial_result = bench_nullary(env, serial_name, serial_call).log();
 
-    auto parallel_call = make_substrings_callable(haystack_bytes, parallel_counts, [&] {
-        return parallel_engine.try_count(env.tokens, substrings_overlapping_k,
-                                         span<size_t>(parallel_counts.data(), parallel_counts.size()), parallel_total,
-                                         pool, cpu_specs);
-    });
+    auto parallel_call = count_with(parallel_engine, pool, cpu_specs, parallel_counts, parallel_total);
     std::string const parallel_name = "substrings_count_parallel:" + dictionary_label;
     bench_nullary(env, parallel_name, serial_call, parallel_call, callable_no_op_t {}, arrays_equality<size_t> {})
         .log(serial_result);
@@ -408,21 +412,21 @@ void bench_substrings_dictionary(                                        //
     }
 
     size_t serial_found = 0, parallel_found = 0;
+    auto find_with = [&](auto &engine, auto &&executor, auto const &specs,
+                         unified_vector<substrings_match_t> &matches, size_t &found) {
+        return make_substrings_callable(haystack_bytes, matches, [&] {
+            return engine.try_find(env.tokens, substrings_overlapping_k,
+                                   span<substrings_match_t>(matches.data(), matches.size()), found, executor, specs);
+        });
+    };
+
     unified_vector<substrings_match_t> serial_matches(total_occurrences);
-    auto serial_find_call = make_substrings_callable(haystack_bytes, serial_matches, [&] {
-        return serial_engine.try_find(env.tokens, substrings_overlapping_k,
-                                      span<substrings_match_t>(serial_matches.data(), serial_matches.size()),
-                                      serial_found);
-    });
+    auto serial_find_call = find_with(serial_engine, dummy_executor_t {}, cpu_specs, serial_matches, serial_found);
     std::string const serial_find_name = "substrings_find_serial:" + dictionary_label;
     bench_result_t const serial_find_result = bench_nullary(env, serial_find_name, serial_find_call).log();
 
     unified_vector<substrings_match_t> parallel_matches(total_occurrences);
-    auto parallel_find_call = make_substrings_callable(haystack_bytes, parallel_matches, [&] {
-        return parallel_engine.try_find(env.tokens, substrings_overlapping_k,
-                                        span<substrings_match_t>(parallel_matches.data(), parallel_matches.size()),
-                                        parallel_found, pool, cpu_specs);
-    });
+    auto parallel_find_call = find_with(parallel_engine, pool, cpu_specs, parallel_matches, parallel_found);
     std::string const parallel_find_name = "substrings_find_parallel:" + dictionary_label;
     bench_nullary(env, parallel_find_name, serial_find_call, parallel_find_call, callable_no_op_t {},
                   arrays_equality<substrings_match_t> {})
@@ -446,11 +450,7 @@ void bench_substrings_dictionary(                                        //
     unified_vector<size_t> device_counts(env.tokens.size(), 0);
     size_t device_total = 0;
 
-    auto cuda_call = make_substrings_callable(haystack_bytes, device_counts, [&] {
-        return device_engine.try_count(env.tokens, substrings_overlapping_k,
-                                       span<size_t>(device_counts.data(), device_counts.size()), device_total,
-                                       cuda_executor_t {}, gpu_specs);
-    });
+    auto cuda_call = count_with(device_engine, cuda_executor_t {}, gpu_specs, device_counts, device_total);
     std::string const cuda_name = "substrings_count_cuda:" + dictionary_label;
     bench_nullary(env, cuda_name, serial_call, cuda_call, callable_no_op_t {}, arrays_equality<size_t> {})
         .log(serial_result);
@@ -459,11 +459,7 @@ void bench_substrings_dictionary(                                        //
     // device memory mid-benchmark.
     size_t device_found = 0;
     unified_vector<substrings_match_t> device_matches(total_occurrences);
-    auto cuda_find_call = make_substrings_callable(haystack_bytes, device_matches, [&] {
-        return device_engine.try_find(env.tokens, substrings_overlapping_k,
-                                      span<substrings_match_t>(device_matches.data(), device_matches.size()),
-                                      device_found, cuda_executor_t {}, gpu_specs);
-    });
+    auto cuda_find_call = find_with(device_engine, cuda_executor_t {}, gpu_specs, device_matches, device_found);
     std::string const cuda_find_name = "substrings_find_cuda:" + dictionary_label;
     bench_nullary(env, cuda_find_name, serial_find_call, cuda_find_call, callable_no_op_t {},
                   arrays_equality<substrings_match_t> {})
@@ -492,21 +488,20 @@ void bench_substrings_dictionary(                                        //
             throw std::runtime_error("Rewrite sizing query did not name an output size");
         unified_vector<char> rewritten(rewrite_bytes);
 
-        size_t serial_rewrote = 0;
-        auto serial_replace_call = make_substrings_callable(haystack_bytes, rewritten, [&] {
-            return serial_engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
-                                             span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
-                                             serial_rewrote);
-        });
+        size_t serial_rewrote = 0, parallel_rewrote = 0;
+        auto replace_with = [&](auto &engine, auto &&executor, auto const &specs, size_t &written) {
+            return make_substrings_callable(haystack_bytes, rewritten, [&] {
+                return engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
+                                          span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
+                                          written, executor, specs);
+            });
+        };
+
+        auto serial_replace_call = replace_with(serial_engine, dummy_executor_t {}, cpu_specs, serial_rewrote);
         std::string const serial_replace_name = "substrings_replace_serial:" + dictionary_label;
         bench_result_t const serial_replace_result = bench_nullary(env, serial_replace_name, serial_replace_call).log();
 
-        size_t parallel_rewrote = 0;
-        auto parallel_replace_call = make_substrings_callable(haystack_bytes, rewritten, [&] {
-            return parallel_engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
-                                               span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
-                                               parallel_rewrote, pool, cpu_specs);
-        });
+        auto parallel_replace_call = replace_with(parallel_engine, pool, cpu_specs, parallel_rewrote);
         bench_nullary(env, "substrings_replace_parallel:" + dictionary_label, serial_replace_call,
                       parallel_replace_call, callable_no_op_t {}, arrays_equality<char> {})
             .log(serial_replace_result);
@@ -518,39 +513,32 @@ void bench_substrings_dictionary(                                        //
         bm25_parameters.average_document_length = env.tokens.size() ? (float)haystack_bytes / (float)env.tokens.size()
                                                                     : 0.0f;
 
-        auto serial_score_call = make_substrings_callable(haystack_bytes, scores, [&] {
-            return serial_engine.try_score_bm25(env.tokens, span<float const>(), bm25_parameters, weights_view,
-                                                span<float>(scores.data(), scores.size()));
-        });
+        auto score_with = [&](auto &engine, auto &&executor, auto const &specs) {
+            return make_substrings_callable(haystack_bytes, scores, [&] {
+                return engine.try_score_bm25(env.tokens, span<float const>(), bm25_parameters, weights_view,
+                                             span<float>(scores.data(), scores.size()), executor, specs);
+            });
+        };
+
+        auto serial_score_call = score_with(serial_engine, dummy_executor_t {}, cpu_specs);
         std::string const serial_score_name = "substrings_score_bm25_serial:" + dictionary_label;
         bench_result_t const serial_score_result = bench_nullary(env, serial_score_name, serial_score_call).log();
 
         // Scores carry no equality validator where every other accelerated cell does: each backend combines
         // the per-needle terms in an order fixed by its own shape, so the sums agree numerically but not to
         // the last bit, and an exact comparison would report a mismatch on correct output.
-        auto parallel_score_call = make_substrings_callable(haystack_bytes, scores, [&] {
-            return parallel_engine.try_score_bm25(env.tokens, span<float const>(), bm25_parameters, weights_view,
-                                                  span<float>(scores.data(), scores.size()), pool, cpu_specs);
-        });
+        auto parallel_score_call = score_with(parallel_engine, pool, cpu_specs);
         bench_nullary(env, "substrings_score_bm25_parallel:" + dictionary_label, parallel_score_call)
             .log(serial_score_result);
 
 #if SZ_USE_CUDA
-        auto cuda_replace_call = make_substrings_callable(haystack_bytes, rewritten, [&] {
-            size_t written = 0;
-            return device_engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
-                                             span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
-                                             written, cuda_executor_t {}, gpu_specs);
-        });
+        size_t device_rewrote = 0;
+        auto cuda_replace_call = replace_with(device_engine, cuda_executor_t {}, gpu_specs, device_rewrote);
         bench_nullary(env, "substrings_replace_cuda:" + dictionary_label, serial_replace_call, cuda_replace_call,
                       callable_no_op_t {}, arrays_equality<char> {})
             .log(serial_replace_result);
 
-        auto cuda_score_call = make_substrings_callable(haystack_bytes, scores, [&] {
-            return device_engine.try_score_bm25(env.tokens, span<float const>(), bm25_parameters, weights_view,
-                                                span<float>(scores.data(), scores.size()), cuda_executor_t {},
-                                                gpu_specs);
-        });
+        auto cuda_score_call = score_with(device_engine, cuda_executor_t {}, gpu_specs);
         bench_nullary(env, "substrings_score_bm25_cuda:" + dictionary_label, cuda_score_call).log(serial_score_result);
 #endif
     }
