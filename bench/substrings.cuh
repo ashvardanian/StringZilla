@@ -31,11 +31,12 @@ namespace scripts {
 using ashvardanian::stringzillas::substrings_alphabet_size_k;
 using ashvardanian::stringzillas::substrings_cased_k;
 using ashvardanian::stringzillas::substrings_match_t;
+using ashvardanian::stringzillas::substrings_bm25_t;
+using ashvardanian::stringzillas::substrings_leftmost_longest_k;
 using ashvardanian::stringzillas::substrings_overlapping_k;
 using ashvardanian::stringzillas::substrings_case_sensitivity_t;
-using ashvardanian::stringzillas::substrings_u32_dictionary_t;
-using ashvardanian::stringzillas::substrings_u32_parallel_t;
-using ashvardanian::stringzillas::substrings_u32_serial_t;
+using ashvardanian::stringzillas::substrings_parallel_t;
+using ashvardanian::stringzillas::substrings_serial_t;
 using ashvardanian::stringzillas::substrings_uncased_k;
 using ashvardanian::stringzillas::forkunion_executor_t;
 
@@ -43,7 +44,7 @@ using ashvardanian::stringzillas::forkunion_executor_t;
 #if SZ_USE_CUDA
 using ashvardanian::stringzillas::cuda_executor_t;
 using ashvardanian::stringzillas::cuda_status_t;
-using ashvardanian::stringzillas::substrings_u32_cuda_t;
+using ashvardanian::stringzillas::substrings_cuda_t;
 using ashvardanian::stringzillas::gpu_specs_fetch;
 #endif
 
@@ -228,10 +229,13 @@ needle_slice_t needle_slice_of(vocabulary_t const &vocabulary, vocabulary_slice_
 /** @brief Structural facts about one compiled automaton. Construction @b throughput is not printed here -
  *         it is measured by `bench_nullary` like every other operation, so it carries the same units and
  *         the same min-of-N latency. */
-void print_dictionary_properties(substrings_u32_dictionary_t const &dictionary, needle_slice_t const &needles) {
+template <typename dictionary_type_>
+void print_dictionary_properties(dictionary_type_ const &dictionary, needle_slice_t const &needles) {
     size_t const state_count = dictionary.count_states();
     size_t const hot_count = dictionary.hot_count();
-    size_t const hot_tier_bytes = hot_count * substrings_alphabet_size_k * sizeof(u32_t);
+    // Sized at the width this automaton actually settled on - a narrowed one halves every hot row.
+    size_t const hot_tier_bytes =
+        hot_count * substrings_alphabet_size_k * sizeof(typename dictionary_type_::state_id_t);
     size_t const cold_tier_bytes = dictionary.transitions_bytes() - hot_tier_bytes;
 
     std::printf(" - Needles: %zu requested, %zu inserted, %zu bytes\n", needles.size(), dictionary.count_needles(),
@@ -241,8 +245,7 @@ void print_dictionary_properties(substrings_u32_dictionary_t const &dictionary, 
     std::printf(" - Hot tier: %zu bytes (%.2f MiB)\n", hot_tier_bytes, hot_tier_bytes / (1024.0 * 1024.0));
     std::printf(" - Cold tier: %zu bytes (%.2f MiB)\n", cold_tier_bytes, cold_tier_bytes / (1024.0 * 1024.0));
     std::printf(" - Max match length: %zu bytes, max outputs per state: %zu\n",
-                (size_t)dictionary.max_source_match_bytes(),
-                (size_t)dictionary.view().max_outputs_per_state);
+                (size_t)dictionary.max_source_match_bytes(), (size_t)dictionary.view().max_outputs_per_state);
 }
 
 #pragma endregion Reporting
@@ -275,7 +278,8 @@ struct substrings_callable {
     call_result_t operator()() noexcept(false) {
         engine_timing_t const timing = invoke_engine_(invocable);
         if (timing.status != status_t::success_k)
-            throw std::runtime_error(std::string("substrings operation failed: ") + status_name(timing.status));
+            throw std::runtime_error(std::string("substrings operation failed: ") + status_name(timing.status) + " (" +
+                                     std::to_string((int)timing.status) + ")");
         kernel_milliseconds_total += timing.kernel_milliseconds;
         kernel_bytes_total += (double)total_bytes;
 
@@ -349,26 +353,26 @@ void bench_substrings_dictionary(                                        //
     }
 
     // Construction reports needle-bytes per second through the same callable as the searches below.
-    substrings_u32_serial_t rebuilt_engine;
+    substrings_serial_t rebuilt_engine;
     auto build_call = make_substrings_callable(needles.total_bytes, rebuilt_engine, [&] {
         rebuilt_engine.reset(); // ? Rebuilding from scratch on every call IS the measured operation
-        return rebuilt_engine.try_build(needles.terms, cell.sensitivity, cpu_specs);
+        return rebuilt_engine.try_index(needles.terms, cell.sensitivity, cpu_specs);
     });
     bench_nullary(env, "substrings_build_serial:" + dictionary_label, build_call).log();
 
-    substrings_u32_serial_t serial_engine;
-    status_t const serial_build_status = serial_engine.try_build(needles.terms, cell.sensitivity, cpu_specs);
+    substrings_serial_t serial_engine;
+    status_t const serial_build_status = serial_engine.try_index(needles.terms, cell.sensitivity, cpu_specs);
     if (serial_build_status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the serial dictionary: ") +
                                  status_name(serial_build_status));
 
-    substrings_u32_parallel_t parallel_engine;
-    status_t const parallel_build_status = parallel_engine.try_build(needles.terms, cell.sensitivity, cpu_specs);
+    substrings_parallel_t parallel_engine;
+    status_t const parallel_build_status = parallel_engine.try_index(needles.terms, cell.sensitivity, cpu_specs);
     if (parallel_build_status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the parallel dictionary: ") +
                                  status_name(parallel_build_status));
 
-    print_dictionary_properties(serial_engine.dictionary(), needles);
+    serial_engine.visit_dictionary([&](auto const &dictionary) { print_dictionary_properties(dictionary, needles); });
 
     unified_vector<size_t> serial_counts(env.tokens.size());
     unified_vector<size_t> parallel_counts(env.tokens.size());
@@ -387,9 +391,8 @@ void bench_substrings_dictionary(                                        //
                                          pool, cpu_specs);
     });
     std::string const parallel_name = "substrings_count_parallel:" + dictionary_label;
-    bench_result_t const parallel_result = bench_nullary(env, parallel_name, serial_call, parallel_call,
-                                                         callable_no_op_t {}, arrays_equality<size_t> {})
-                                               .log(serial_result);
+    bench_nullary(env, parallel_name, serial_call, parallel_call, callable_no_op_t {}, arrays_equality<size_t> {})
+        .log(serial_result);
 
     // Printed once per cell: the same number for every backend, and a bytes-per-second figure means little
     // without it, since a match-saturated dictionary and a near-miss one differ by an order of magnitude.
@@ -421,15 +424,19 @@ void bench_substrings_dictionary(                                        //
                                         parallel_found, pool, cpu_specs);
     });
     std::string const parallel_find_name = "substrings_find_parallel:" + dictionary_label;
-    bench_result_t const parallel_find_result =
-        bench_nullary(env, parallel_find_name, parallel_find_call).log(serial_find_result);
+    bench_nullary(env, parallel_find_name, serial_find_call, parallel_find_call, callable_no_op_t {},
+                  arrays_equality<substrings_match_t> {})
+        .log(serial_find_result);
 
 #if SZ_USE_CUDA
     gpu_specs_t gpu_specs;
     if (gpu_specs_fetch(gpu_specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 
-    substrings_u32_cuda_t device_engine;
-    cuda_status_t const device_build_status = device_engine.try_build(needles.terms, cell.sensitivity);
+    // The tier split follows the device's own L2, so the fetched specs have to reach the build - a default
+    // `gpu_specs_t` describes an A100 and would tier this dictionary against hardware that is not here,
+    // beside CPU dictionaries tiered against the real machine.
+    substrings_cuda_t device_engine;
+    cuda_status_t const device_build_status = device_engine.try_index(needles.terms, cell.sensitivity, gpu_specs);
     if (device_build_status.status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the device dictionary: ") +
                                  status_name(device_build_status.status));
@@ -445,14 +452,8 @@ void bench_substrings_dictionary(                                        //
                                        cuda_executor_t {}, gpu_specs);
     });
     std::string const cuda_name = "substrings_count_cuda:" + dictionary_label;
-    bench_result_t const cuda_result = bench_nullary(env, cuda_name, cuda_call).log(serial_result);
-    if (!cuda_result.skipped) {
-        bool const matches_reference = arrays_equality<size_t> {}(reinterpret_cast<check_value_t>(&device_counts),
-                                                                  reinterpret_cast<check_value_t>(&serial_counts));
-        std::printf("> Checksum: %zu occurrences (device) vs %zu (host reference)%s, %zu calls, %.3f raw seconds\n",
-                    device_total, total_occurrences, matches_reference ? "" : " -- MISMATCH",
-                    cuda_result.profiled_calls, cuda_result.profiled_seconds);
-    }
+    bench_nullary(env, cuda_name, serial_call, cuda_call, callable_no_op_t {}, arrays_equality<size_t> {})
+        .log(serial_result);
 
     // Sized from the serial `try_count` above, like the CPU `try_find` calls, so the scatter never grows
     // device memory mid-benchmark.
@@ -464,11 +465,95 @@ void bench_substrings_dictionary(                                        //
                                       device_found, cuda_executor_t {}, gpu_specs);
     });
     std::string const cuda_find_name = "substrings_find_cuda:" + dictionary_label;
-    bench_result_t const cuda_find_result = bench_nullary(env, cuda_find_name, cuda_find_call).log(serial_find_result);
-    if (!cuda_find_result.skipped && device_found != total_occurrences)
-        std::printf("> Checksum: %zu matches (device) vs %zu (host reference) -- MISMATCH\n", device_found,
-                    total_occurrences);
+    bench_nullary(env, cuda_find_name, serial_find_call, cuda_find_call, callable_no_op_t {},
+                  arrays_equality<substrings_match_t> {})
+        .log(serial_find_result);
 #endif
+
+    // Rewriting and scoring, the two capabilities that reached the GPU last. Both are sized once against the
+    // serial engine so no call allocates inside a measured loop.
+    {
+        // Every needle collapses to the same two bytes, so the rewrite shrinks and its cost is the splice
+        // rather than the vocabulary - one shared literal keeps the table itself out of the measurement.
+        static char const replacement_literal[] = "<>";
+        unified_vector<span<char const>> replacement_spans(
+            needles.terms.size(), span<char const> {replacement_literal, sizeof(replacement_literal) - 1});
+        span<span<char const> const> const replacements {replacement_spans.data(), replacement_spans.size()};
+
+        std::vector<size_t> rewrite_offsets(env.tokens.size() + 1, 0);
+        span<size_t> const rewrite_offsets_view(rewrite_offsets.data(), rewrite_offsets.size());
+        // A zero-capacity rewrite is the size query, so it refuses and names what it wanted. Letting that
+        // refusal pass unread would leave `rewrite_bytes` at zero and time every rewrite below against an
+        // empty tape, which still prints a throughput.
+        size_t rewrite_bytes = 0;
+        status_t const rewrite_sizing = serial_engine.try_replace(
+            env.tokens, substrings_leftmost_longest_k, replacements, span<char>(), rewrite_offsets_view, rewrite_bytes);
+        if (rewrite_sizing != status_t::unexpected_dimensions_k || rewrite_bytes == 0)
+            throw std::runtime_error("Rewrite sizing query did not name an output size");
+        unified_vector<char> rewritten(rewrite_bytes);
+
+        size_t serial_rewrote = 0;
+        auto serial_replace_call = make_substrings_callable(haystack_bytes, rewritten, [&] {
+            return serial_engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
+                                             span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
+                                             serial_rewrote);
+        });
+        std::string const serial_replace_name = "substrings_replace_serial:" + dictionary_label;
+        bench_result_t const serial_replace_result = bench_nullary(env, serial_replace_name, serial_replace_call).log();
+
+        size_t parallel_rewrote = 0;
+        auto parallel_replace_call = make_substrings_callable(haystack_bytes, rewritten, [&] {
+            return parallel_engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
+                                               span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
+                                               parallel_rewrote, pool, cpu_specs);
+        });
+        bench_nullary(env, "substrings_replace_parallel:" + dictionary_label, serial_replace_call,
+                      parallel_replace_call, callable_no_op_t {}, arrays_equality<char> {})
+            .log(serial_replace_result);
+
+        std::vector<float> const weights(needles.terms.size(), 1.0f);
+        span<float const> const weights_view(weights.data(), weights.size());
+        unified_vector<float> scores(env.tokens.size(), 0.0f);
+        substrings_bm25_t bm25_parameters;
+        bm25_parameters.average_document_length = env.tokens.size() ? (float)haystack_bytes / (float)env.tokens.size()
+                                                                    : 0.0f;
+
+        auto serial_score_call = make_substrings_callable(haystack_bytes, scores, [&] {
+            return serial_engine.try_score_bm25(env.tokens, span<float const>(), bm25_parameters, weights_view,
+                                                span<float>(scores.data(), scores.size()));
+        });
+        std::string const serial_score_name = "substrings_score_bm25_serial:" + dictionary_label;
+        bench_result_t const serial_score_result = bench_nullary(env, serial_score_name, serial_score_call).log();
+
+        // Scores carry no equality validator where every other accelerated cell does: each backend combines
+        // the per-needle terms in an order fixed by its own shape, so the sums agree numerically but not to
+        // the last bit, and an exact comparison would report a mismatch on correct output.
+        auto parallel_score_call = make_substrings_callable(haystack_bytes, scores, [&] {
+            return parallel_engine.try_score_bm25(env.tokens, span<float const>(), bm25_parameters, weights_view,
+                                                  span<float>(scores.data(), scores.size()), pool, cpu_specs);
+        });
+        bench_nullary(env, "substrings_score_bm25_parallel:" + dictionary_label, parallel_score_call)
+            .log(serial_score_result);
+
+#if SZ_USE_CUDA
+        auto cuda_replace_call = make_substrings_callable(haystack_bytes, rewritten, [&] {
+            size_t written = 0;
+            return device_engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
+                                             span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
+                                             written, cuda_executor_t {}, gpu_specs);
+        });
+        bench_nullary(env, "substrings_replace_cuda:" + dictionary_label, serial_replace_call, cuda_replace_call,
+                      callable_no_op_t {}, arrays_equality<char> {})
+            .log(serial_replace_result);
+
+        auto cuda_score_call = make_substrings_callable(haystack_bytes, scores, [&] {
+            return device_engine.try_score_bm25(env.tokens, span<float const>(), bm25_parameters, weights_view,
+                                                span<float>(scores.data(), scores.size()), cuda_executor_t {},
+                                                gpu_specs);
+        });
+        bench_nullary(env, "substrings_score_bm25_cuda:" + dictionary_label, cuda_score_call).log(serial_score_result);
+#endif
+    }
 }
 
 /** @brief The whole sweep: builds the vocabulary once, then walks every slice and sensitivity on every

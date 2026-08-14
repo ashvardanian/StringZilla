@@ -14,15 +14,15 @@
 namespace ashvardanian {
 namespace stringzillas {
 
-// A `u16` automaton halves the hot-row footprint, so twice as much of it stays cache-resident.
+// Both state-id widths, because the engine holds whichever one its needle set fits: a `u16` automaton halves
+// the hot-row footprint, so twice as much of it stays cache-resident.
+template struct aho_corasick_dictionary<u16_t, std::allocator<char>>;
+template struct aho_corasick_dictionary<u32_t, std::allocator<char>>;
+
 // Both capabilities are listed: the serial engine is what the C shim builds for a single-threaded scope, so
 // omitting it only moves its instantiation into every consumer translation unit.
-template struct aho_corasick_dictionary<u16_t, std::allocator<char>>;
-template struct substrings<u16_t, std::allocator<char>, sz_cap_serial_k>;
-template struct substrings<u16_t, std::allocator<char>, sz_caps_sp_k>;
-template struct aho_corasick_dictionary<u32_t, std::allocator<char>>;
-template struct substrings<u32_t, std::allocator<char>, sz_cap_serial_k>;
-template struct substrings<u32_t, std::allocator<char>, sz_caps_sp_k>;
+template struct substrings<std::allocator<char>, sz_cap_serial_k>;
+template struct substrings<std::allocator<char>, sz_caps_sp_k>;
 
 } // namespace stringzillas
 } // namespace ashvardanian

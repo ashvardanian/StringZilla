@@ -576,8 +576,8 @@ inline cuda_status_t shared_memory_budget_for_resident_blocks(size_t &budget, CU
     for (size_t low = 0, high = (size_t)optin_ceiling; low <= high;) {
         size_t const middle = std::midpoint(low, high);
         int resident_blocks = 0;
-        CUresult const occupancy_error =
-            cuOccupancyMaxActiveBlocksPerMultiprocessor(&resident_blocks, function, (int)threads_per_block, middle);
+        CUresult const occupancy_error = cuOccupancyMaxActiveBlocksPerMultiprocessor(&resident_blocks, function,
+                                                                                     (int)threads_per_block, middle);
         if (occupancy_error != CUDA_SUCCESS) return make_cuda_status(occupancy_error);
         if (resident_blocks >= (int)target_blocks) budget = middle, low = middle + 1;
         else if (middle == 0) break; // ? `high = middle - 1` would wrap on an unsigned zero
@@ -760,6 +760,9 @@ struct cuda_launch_t {
 /** @brief Block dimension of every collective primitive; the block collectives need it as a compile-time constant. */
 static constexpr unsigned cuda_device_collective_threads_k = 256;
 
+/** @brief Grid ceiling of every collective primitive; past it a wider grid only adds contention on the merge slot. */
+static constexpr size_t cuda_device_collective_max_blocks_k = 1024;
+
 /** @brief @b sz_max_of_two as a reduction operator; `cuda::maximum` needs CUDA 12.9 and `cub::Max` is deprecated. */
 struct max_of_two_t {
     template <typename value_type_>
@@ -817,6 +820,60 @@ __global__ void exclusive_sum_across_cuda_device_(value_type_ const *input, size
     if (threadIdx.x == 0) output[count] = running;
 }
 
+/**
+ *  @brief Reduces block @p blockIdx.x 's tile of @p input[0, count) into `partials[blockIdx.x]` - the first of the
+ *         three phases @ref cuda_launch_exclusive_sum_ splits a long scan into.
+ *
+ *  Tile `t` is `[t * elements_per_tile, min(count, (t + 1) * elements_per_tile))`, owned outright rather than
+ *  grid-strided, so this phase and @ref exclusive_sum_apply_tiles_across_cuda_device_ partition identically
+ *  without the host telling either one anything but the tile width.
+ */
+template <typename value_type_>
+__global__ void exclusive_sum_reduce_tiles_across_cuda_device_(value_type_ const *input, size_t count,
+                                                               size_t elements_per_tile, value_type_ *partials) {
+    using block_reduce_t = cub::BlockReduce<value_type_, cuda_device_collective_threads_k>;
+    __shared__ typename block_reduce_t::TempStorage temp_storage;
+    size_t const begin = (size_t)blockIdx.x * elements_per_tile;
+    size_t const end = sz_min_of_two(begin + elements_per_tile, count);
+    value_type_ running = value_type_(0);
+    for (size_t base = begin; base < end; base += blockDim.x) {
+        size_t const i = base + threadIdx.x;
+        value_type_ const value = i < end ? input[i] : value_type_(0);
+        value_type_ const block_aggregate = block_reduce_t(temp_storage).Sum(value);
+        if (threadIdx.x == 0) running += block_aggregate;
+        __syncthreads(); // reuse of `temp_storage` on the next tile must wait for this tile's readers
+    }
+    if (threadIdx.x == 0) partials[blockIdx.x] = running;
+}
+
+/**
+ *  @brief Scans block @p blockIdx.x 's tile of @p input[0, count) into @p output, seeded by `partials[blockIdx.x]`,
+ *         and writes the grand total `partials[gridDim.x]` to @p output[count].
+ *
+ *  Each thread reads `input[i]` into a register before writing `output[i]`, and tiles are disjoint, so one buffer
+ *  may serve as both - the same in-place contract the single-block @ref exclusive_sum_across_cuda_device_ offers.
+ */
+template <typename value_type_>
+__global__ void exclusive_sum_apply_tiles_across_cuda_device_(value_type_ const *input, size_t count,
+                                                              size_t elements_per_tile, value_type_ const *partials,
+                                                              value_type_ *output) {
+    using block_scan_t = cub::BlockScan<value_type_, cuda_device_collective_threads_k>;
+    __shared__ typename block_scan_t::TempStorage temp_storage;
+    size_t const begin = (size_t)blockIdx.x * elements_per_tile;
+    size_t const end = sz_min_of_two(begin + elements_per_tile, count);
+    value_type_ running = partials[blockIdx.x];
+    for (size_t base = begin; base < end; base += blockDim.x) {
+        size_t const i = base + threadIdx.x;
+        value_type_ const value = i < end ? input[i] : value_type_(0);
+        value_type_ exclusive = value_type_(0), block_aggregate = value_type_(0);
+        block_scan_t(temp_storage).ExclusiveSum(value, exclusive, block_aggregate);
+        if (i < end) output[i] = running + exclusive;
+        running += block_aggregate;
+        __syncthreads(); // reuse of `temp_storage` on the next tile must wait for this tile's readers
+    }
+    if (blockIdx.x == 0 && threadIdx.x == 0) output[count] = partials[gridDim.x];
+}
+
 /** @brief Three `u32` values reduced together — one per output field of a fused maxima pass. */
 struct u32x3_t {
     u32_t a, b, c;
@@ -861,8 +918,8 @@ inline cuda_status_t cuda_launch_reduce_maxima3_(kernel_shape_t const &shape, ta
     extractor_ extract_arg = extract;
     u32_t *output_arg = output;
     void *args[4] = {(void *)&tasks_arg, (void *)&count_arg, (void *)&extract_arg, (void *)&output_arg};
-    unsigned const blocks = static_cast<unsigned>(
-        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    unsigned const blocks = static_cast<unsigned>(sz_min_of_two(
+        divide_round_up<size_t>(count, cuda_device_collective_threads_k), cuda_device_collective_max_blocks_k));
     CUresult error = cuda_launch_t {}
                          .grid(blocks ? blocks : 1u)
                          .block(cuda_device_collective_threads_k)
@@ -910,8 +967,8 @@ inline cuda_status_t cuda_launch_reduce_minmax_(kernel_shape_t const &shape, inp
     value_type_ *min_arg = out_min;
     value_type_ *max_arg = out_max;
     void *args[4] = {(void *)&input_arg, (void *)&count_arg, (void *)&min_arg, (void *)&max_arg};
-    unsigned const blocks = static_cast<unsigned>(
-        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    unsigned const blocks = static_cast<unsigned>(sz_min_of_two(
+        divide_round_up<size_t>(count, cuda_device_collective_threads_k), cuda_device_collective_max_blocks_k));
     CUresult error = cuda_launch_t {}
                          .grid(blocks ? blocks : 1u)
                          .block(cuda_device_collective_threads_k)
@@ -943,10 +1000,88 @@ inline cuda_status_t cuda_launch_segmented_reduce_max_(kernel_shape_t const &sha
     return {status_t::success_k, cudaSuccess};
 }
 
-/** @brief Launches the single-block @ref exclusive_sum_across_cuda_device_ (writes directly, no pre-init). */
+/**
+ *  @brief The three resolved handles @ref cuda_launch_exclusive_sum_ picks between - one whole-array scan on one
+ *         block, or a reduce-then-scan across many when the array is long enough to make that block the bottleneck.
+ */
+struct exclusive_sum_shapes_t {
+    kernel_shape_t whole {};
+    kernel_shape_t reduce_tiles {}; // ? Left unresolved by callers whose counts never leave one tile
+    kernel_shape_t apply_tiles {};
+};
+
+/**
+ *  @brief Exclusive prefix sum of @p input[0,count) into @p output[0,count), inclusive total at @p output[count].
+ *
+ *  A single block scans the whole array in one launch, which is O(count / 256) dependent block-scan rounds on one
+ *  multiprocessor. Past one tile's worth of work that latency chain is the bottleneck rather than the bandwidth, so
+ *  a long array is split into one tile per block and folded in three launches: reduce each tile, scan the tile
+ *  totals on one block, then re-scan each tile seeded by its total. @p partials holds those totals and needs
+ *  `blocks + 1` elements, at most @ref cuda_device_collective_max_blocks_k + 1; too small a span - an empty one
+ *  included - simply keeps the single-block route, so the primitive can never fail for want of scratch.
+ *
+ *  @p input and @p output may be the same buffer on either route; every element is read into a register by the same
+ *  thread that writes it back. The value type must be integral for the two routes to agree bit for bit, since they
+ *  group the additions differently.
+ */
 template <typename value_type_>
-inline cuda_status_t cuda_launch_exclusive_sum_(kernel_shape_t const &shape, value_type_ const *input, size_t count,
-                                                value_type_ *output, CUstream stream) noexcept {
+inline cuda_status_t cuda_launch_exclusive_sum_(exclusive_sum_shapes_t const &shapes, value_type_ const *input,
+                                                size_t count, value_type_ *output, span<value_type_> partials,
+                                                gpu_specs_t const &specs, CUstream stream) noexcept {
+
+    static_assert(std::is_integral<value_type_>::value, "Tiling regroups the additions, which only integers survive");
+
+    // Every block wants at least one full tile of its own, so the grid follows the work rather than the device
+    // once the array is short - and the tile stays a multiple of the block so no thread sits out a whole round.
+    size_t const target_blocks = sz_min_of_two(
+        sz_max_of_two((size_t)shapes.reduce_tiles.blocks_per_multiprocessor * specs.streaming_multiprocessors,
+                      (size_t)1),
+        cuda_device_collective_max_blocks_k);
+    size_t const elements_per_tile = divide_round_up<size_t>(divide_round_up<size_t>(count, target_blocks),
+                                                             cuda_device_collective_threads_k) *
+                                     cuda_device_collective_threads_k;
+    size_t const blocks = elements_per_tile ? divide_round_up<size_t>(count, elements_per_tile) : (size_t)0;
+
+    if (blocks > 1 && partials.size() > blocks) {
+        value_type_ const *input_arg = input;
+        size_t count_arg = count;
+        size_t elements_per_tile_arg = elements_per_tile;
+        value_type_ *partials_arg = partials.data();
+        void *reduce_args[4] = {(void *)&input_arg, (void *)&count_arg, (void *)&elements_per_tile_arg,
+                                (void *)&partials_arg};
+        CUresult error = cuda_launch_t {}
+                             .grid((unsigned)blocks)
+                             .block(cuda_device_collective_threads_k)
+                             .shared(0)
+                             .stream(stream)
+                             .launch(shapes.reduce_tiles.function, reduce_args);
+        if (error != CUDA_SUCCESS) return make_cuda_status(error);
+
+        // In place, so `partials[blocks]` comes out holding the grand total the apply phase publishes.
+        value_type_ const *partials_input_arg = partials.data();
+        size_t blocks_arg = blocks;
+        void *scan_args[3] = {(void *)&partials_input_arg, (void *)&blocks_arg, (void *)&partials_arg};
+        error = cuda_launch_t {}
+                    .grid(1u)
+                    .block(cuda_device_collective_threads_k)
+                    .shared(0)
+                    .stream(stream)
+                    .launch(shapes.whole.function, scan_args);
+        if (error != CUDA_SUCCESS) return make_cuda_status(error);
+
+        value_type_ *output_arg = output;
+        void *apply_args[5] = {(void *)&input_arg, (void *)&count_arg, (void *)&elements_per_tile_arg,
+                               (void *)&partials_input_arg, (void *)&output_arg};
+        error = cuda_launch_t {}
+                    .grid((unsigned)blocks)
+                    .block(cuda_device_collective_threads_k)
+                    .shared(0)
+                    .stream(stream)
+                    .launch(shapes.apply_tiles.function, apply_args);
+        if (error != CUDA_SUCCESS) return make_cuda_status(error);
+        return {status_t::success_k, cudaSuccess};
+    }
+
     value_type_ const *input_arg = input;
     size_t count_arg = count;
     value_type_ *output_arg = output;
@@ -956,7 +1091,7 @@ inline cuda_status_t cuda_launch_exclusive_sum_(kernel_shape_t const &shape, val
                          .block(cuda_device_collective_threads_k)
                          .shared(0)
                          .stream(stream)
-                         .launch(shape.function, args);
+                         .launch(shapes.whole.function, args);
     if (error != CUDA_SUCCESS) return make_cuda_status(error);
     return {status_t::success_k, cudaSuccess};
 }
@@ -1001,8 +1136,8 @@ inline cuda_status_t cuda_launch_scatter_tasks_by_bucket_(kernel_shape_t const &
     task_type_ *output_arg = output;
     void *args[5] = {(void *)&tasks_arg, (void *)&count_arg, (void *)&bucket_arg, (void *)&cursors_arg,
                      (void *)&output_arg};
-    unsigned const blocks = static_cast<unsigned>(
-        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    unsigned const blocks = static_cast<unsigned>(sz_min_of_two(
+        divide_round_up<size_t>(count, cuda_device_collective_threads_k), cuda_device_collective_max_blocks_k));
     CUresult error = cuda_launch_t {}
                          .grid(blocks ? blocks : 1u)
                          .block(cuda_device_collective_threads_k)
@@ -1076,8 +1211,8 @@ inline cuda_status_t cuda_launch_histogram_tasks_by_bucket_(kernel_shape_t const
     u32_t *counts_arg = bucket_counts;
     void *args[5] = {(void *)&tasks_arg, (void *)&count_arg, (void *)&bucket_arg, (void *)&bucket_count_arg,
                      (void *)&counts_arg};
-    unsigned const blocks = static_cast<unsigned>(
-        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    unsigned const blocks = static_cast<unsigned>(sz_min_of_two(
+        divide_round_up<size_t>(count, cuda_device_collective_threads_k), cuda_device_collective_max_blocks_k));
     CUresult error = cuda_launch_t {}
                          .grid(blocks ? blocks : 1u)
                          .block(cuda_device_collective_threads_k)
@@ -1137,8 +1272,8 @@ inline cuda_status_t cuda_launch_histogram_dense_(kernel_shape_t const &shape, i
     u32_t bucket_count_arg = bucket_count;
     u32_t *out_arg = out;
     void *args[4] = {(void *)&buckets_arg, (void *)&count_arg, (void *)&bucket_count_arg, (void *)&out_arg};
-    unsigned const blocks = static_cast<unsigned>(
-        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    unsigned const blocks = static_cast<unsigned>(sz_min_of_two(
+        divide_round_up<size_t>(count, cuda_device_collective_threads_k), cuda_device_collective_max_blocks_k));
     CUresult error = cuda_launch_t {}
                          .grid(blocks ? blocks : 1u)
                          .block(cuda_device_collective_threads_k)
@@ -1392,8 +1527,9 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     if (cuda_launch_histogram_dense_(tier_histogram_shape, tier_bucket_iterator, total_tasks, 3u, tier_counts, stream)
             .status != status_t::success_k)
         return result;
-    if (cuda_launch_exclusive_sum_(exclusive_sum_u32_shape, tier_counts, 3u, tier_cursors, stream).status !=
-        status_t::success_k)
+    if (cuda_launch_exclusive_sum_(exclusive_sum_shapes_t {exclusive_sum_u32_shape}, tier_counts, 3u, tier_cursors,
+                                   span<u32_t> {}, gpu_specs_t {}, stream)
+            .status != status_t::success_k)
         return result;
     if (cuda_launch_scatter_tasks_by_bucket_(tier_scatter_shape, tasks.data(), total_tasks, tier_of, tier_cursors,
                                              partition_buffer, stream)

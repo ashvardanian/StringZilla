@@ -606,9 +606,8 @@ SZ_API_RUNTIME void szs_fingerprints_free(szs_fingerprints_t engine);
  *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  *
  *  Beyond counting and locating matches, the engine scores haystacks against per-needle weights with BM25
- *  and rewrites haystacks by substituting matches. Those two entry points and the two cover policies are
- *  part of the stable ABI, but their kernels are pending: they currently return `sz_status_unknown_k`
- *  with a descriptive message.
+ *  and rewrites haystacks by substituting matches, on every backend. A rewrite needs a cover whose matches
+ *  share no bytes, so `szs_substrings_overlapping_k` is the one policy it refuses.
  *
  *  @section Case Sensitivity
  *
@@ -673,52 +672,46 @@ typedef struct szs_substrings_bm25_t {
     sz_f32_t average_document_length;
 } szs_substrings_bm25_t;
 
-/** @brief Dictionary shape: the states, tiers, and widths construction settled on; what `repr` shows. */
-typedef struct szs_substrings_stats_t {
-    /** Needles compiled in; every reported `needle_index` is below this. */
-    sz_size_t needles_count;
-    /** Automaton states, hot tier plus cold. */
-    sz_size_t states_count;
-    /** States in the dense goto-completed tier. */
-    sz_size_t hot_states_count;
-    /** Bytes held by both transition tiers together. */
-    sz_size_t transitions_bytes;
-    /** Longest needle, in the folded bytes the automaton walks. */
-    sz_size_t max_folded_match_bytes;
-    /** Longest span any needle can match in the @b haystack, which a fold can stretch to three times the above. */
-    sz_size_t max_source_match_bytes;
-    /** 2 or 4: the state-id width construction settled on. */
-    sz_size_t state_id_bytes;
-    /** Bytes of frequency scratch @b one core reserves to score; a BM25 call multiplies this by its threads. */
-    sz_size_t scoring_scratch_bytes;
-    /** Bytes of pending-start scratch @b one core reserves; a leftmost walk multiplies this by its threads. */
-    sz_size_t pending_starts_bytes;
-} szs_substrings_stats_t;
-
 /**
- *  @brief Initialize a multi-pattern search engine from a set of needles.
- *  @param[in] needles Needle collection to compile into the automaton.
- *  @param[in] case_sensitivity Byte-exact or case-folded matching.
+ *  @brief Create a multi-pattern search engine on the backend @p capabilities names.
+ *
+ *  Unlike the other engines, this one is constructed in two steps: the automaton's hot/cold tier is sized
+ *  from the cache that will walk it, and no scope reaches a constructor. This call picks the backend and
+ *  allocates the handle; @ref szs_substrings_index compiles a needle set into it. Every operation refuses an
+ *  engine that has not been indexed.
+ *
  *  @param[in] alloc Memory allocator (NULL for default).
- *  @param[in] capabilities Hardware capabilities mask.
+ *  @param[in] capabilities Hardware capabilities mask, which selects the backend.
  *  @param[out] engine Pointer to initialized engine handle.
  *  @param[out] error_message Optional output pointer for detailed error information.
- *  @retval `sz_invalid_utf8_k` A needle is not well-formed UTF-8 while folding is requested.
- *  @retval `sz_unexpected_dimensions_k` A needle is empty.
  */
-SZ_API_RUNTIME sz_status_t szs_substrings_init(                                       //
-    sz_sequence_t const *needles, szs_substrings_case_sensitivity_t case_sensitivity, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                 //
+SZ_API_RUNTIME sz_status_t szs_substrings_init(                       //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
     szs_substrings_t *engine, char const **error_message);
 
 /**
- *  @brief Report the compiled dictionary's shape.
- *  @param[in] engine Initialized search engine.
- *  @param[out] stats Filled with the dictionary's sizes and tier split.
+ *  @brief Compile @p needles into @p engine, tiered for @p device.
+ *
+ *  Replaces any needle set the engine already held, so one engine can be re-indexed for a new vocabulary or
+ *  re-tiered for another device. The state-id width is not a caller's choice: it follows from the needle set,
+ *  so construction derives the automaton wide and keeps the narrower one whenever its ceilings hold.
+ *
+ *  Operations may later name a different scope - the automaton is reachable from every device - but the tier
+ *  stays as this call sized it.
+ *
+ *  @param[in] engine Engine handle from @ref szs_substrings_init.
+ *  @param[in] needles Needle collection to compile into the automaton.
+ *  @param[in] case_sensitivity Byte-exact or case-folded matching.
+ *  @param[in] device Device scope whose cache sizes the hot tier, and whose backend must match the engine's.
  *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @retval `sz_invalid_utf8_k` A needle is not well-formed UTF-8 while folding is requested.
+ *  @retval `sz_unexpected_dimensions_k` A needle is empty.
+ *  @retval `sz_device_code_mismatch_k` @p device names a backend the engine was not created for.
  */
-SZ_API_RUNTIME sz_status_t szs_substrings_stats( //
-    szs_substrings_t engine, szs_substrings_stats_t *stats, char const **error_message);
+SZ_API_RUNTIME sz_status_t szs_substrings_index(                                          //
+    szs_substrings_t engine, sz_sequence_t const *needles,                                //
+    szs_substrings_case_sensitivity_t case_sensitivity, szs_device_scope_t device,        //
+    char const **error_message);
 
 /**
  *  @brief Count matches of every needle in every haystack.
@@ -727,12 +720,13 @@ SZ_API_RUNTIME sz_status_t szs_substrings_stats( //
  *  @param[in] haystacks Input haystack collection.
  *  @param[in] overlap_policy Whether overlapping matches all count, or only a leftmost cover.
  *  @param[out] counts Output array of per-haystack match counts, one entry per haystack.
+ *  @param[out] matches_total Matches across every haystack, the sum @p counts would produce.
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
 SZ_API_RUNTIME sz_status_t szs_substrings_count(                                    //
     szs_substrings_t engine, szs_device_scope_t device,                             //
     sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
-    sz_size_t *counts,                                                              //
+    sz_size_t *counts, sz_size_t *matches_total,                                    //
     char const **error_message);
 
 /**
@@ -741,8 +735,6 @@ SZ_API_RUNTIME sz_status_t szs_substrings_count(                                
  *  @param[in] device Device scope for execution.
  *  @param[in] haystacks Input haystack collection.
  *  @param[in] overlap_policy Whether overlapping matches are all reported, or only a leftmost cover.
- *  @param[in] counts Optional per-haystack counts from `szs_substrings_count` under the @b same
- *             @p overlap_policy; NULL recounts internally.
  *  @param[out] matches Output match array, filled in ascending haystack order.
  *  @param[in] matches_capacity Number of entries @p matches can hold.
  *  @param[out] matches_found Matches written, or - when capacity is short - the count that would be.
@@ -753,7 +745,6 @@ SZ_API_RUNTIME sz_status_t szs_substrings_count(                                
 SZ_API_RUNTIME sz_status_t szs_substrings_find(                                            //
     szs_substrings_t engine, szs_device_scope_t device,                                    //
     sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy,        //
-    sz_size_t const *counts,                                                               //
     szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
     char const **error_message);
 
@@ -763,8 +754,9 @@ SZ_API_RUNTIME sz_status_t szs_substrings_find(                                 
  *  The dictionary @b is the query: `needle_weights[needle_index]` is that needle's IDF or boost, and one
  *  score comes back per haystack. Term frequencies are raw overlapping counts, which is classic BM25 - a
  *  leftmost cover would suppress genuine occurrences of any needle nested in another, so no overlap policy
- *  applies here. Frequencies are integers and the reduction runs in ascending needle order, so scores are
- *  bit-stable across runs of one backend.
+ *  applies here. Frequencies are integers and each backend combines the terms in an order fixed by its own
+ *  shape - ascending needle order on the CPU, a block-wide tree on the GPU - so scores are bit-stable across
+ *  runs of one backend, and agree numerically rather than bitwise between two.
  *
  *  @param[in] engine Initialized search engine.
  *  @param[in] device Device scope for execution.
@@ -855,21 +847,20 @@ SZ_API_RUNTIME sz_status_t szs_substrings_replace_u64tape(                      
 SZ_API_RUNTIME sz_status_t szs_substrings_count_u32tape(                                    //
     szs_substrings_t engine, szs_device_scope_t device,                                     //
     sz_sequence_u32tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
-    sz_size_t *counts,                                                                      //
+    sz_size_t *counts, sz_size_t *matches_total,                                            //
     char const **error_message);
 
 /** @copydoc szs_substrings_count */
 SZ_API_RUNTIME sz_status_t szs_substrings_count_u64tape(                                    //
     szs_substrings_t engine, szs_device_scope_t device,                                     //
     sz_sequence_u64tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
-    sz_size_t *counts,                                                                      //
+    sz_size_t *counts, sz_size_t *matches_total,                                            //
     char const **error_message);
 
 /** @copydoc szs_substrings_find */
 SZ_API_RUNTIME sz_status_t szs_substrings_find_u32tape(                                     //
     szs_substrings_t engine, szs_device_scope_t device,                                     //
     sz_sequence_u32tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
-    sz_size_t const *counts,                                                                //
     szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found,  //
     char const **error_message);
 
@@ -877,7 +868,6 @@ SZ_API_RUNTIME sz_status_t szs_substrings_find_u32tape(                         
 SZ_API_RUNTIME sz_status_t szs_substrings_find_u64tape(                                     //
     szs_substrings_t engine, szs_device_scope_t device,                                     //
     sz_sequence_u64tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
-    sz_size_t const *counts,                                                                //
     szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found,  //
     char const **error_message);
 

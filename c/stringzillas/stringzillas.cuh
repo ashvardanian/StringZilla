@@ -563,13 +563,14 @@ struct substrings_backends_t {
 
     /**
      *  Multi-pattern search has no per-ISA CPU kernels - a transition is one data-dependent load - so the
-     *  alternatives are just the threading tiers plus the CUDA engine.
+     *  alternatives are one per capability, exactly as the similarity engines list theirs. The state-id width
+     *  is not an axis here: each engine settles it from its own needle set and stores whichever automaton won.
      */
     std::variant<
 #if SZ_USE_CUDA
-        szs::substrings_u32_cuda_t,
+        szs::substrings_cuda_t,
 #endif
-        szs::substrings_u32_parallel_t, szs::substrings_u32_serial_t>
+        szs::substrings_parallel_t, szs::substrings_serial_t>
         variants;
 
     template <typename... variants_arguments_>

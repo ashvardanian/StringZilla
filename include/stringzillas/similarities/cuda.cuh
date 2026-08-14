@@ -1938,8 +1938,10 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, rle_scratch_t
                                                                    static_cast<u32_t>(tier_count), dense_tier_counts,
                                                                    executor.stream());
     if (hist_status.status != status_t::success_k) return hist_status;
-    cuda_status_t const scan_status = cuda_launch_exclusive_sum_(
-        scan_u32_shape, dense_tier_counts, static_cast<size_t>(tier_count), bucket_cursors, executor.stream());
+    cuda_status_t const scan_status =
+        cuda_launch_exclusive_sum_(exclusive_sum_shapes_t {scan_u32_shape}, dense_tier_counts,
+                                   static_cast<size_t>(tier_count), bucket_cursors, span<u32_t> {}, gpu_specs_t {},
+                                   executor.stream());
     if (scan_status.status != status_t::success_k) return scan_status;
     cuda_status_t const scatter_status = cuda_launch_scatter_tasks_by_bucket_(
         router_scatter_shape, buffers.tasks_.data(), count, dense_tier_functor, bucket_cursors,

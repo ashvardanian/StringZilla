@@ -176,11 +176,15 @@
 
 #define SZ_API_COMPTIME SZ_MAYBE_UNUSED SZ_C_INLINE
 
-// A scalar helper, inline in whichever translation unit uses it, and `constexpr` wherever the language has
-// the word. That qualifier is what lets a caller fold the helper at compile time, and what lets a CUDA
-// kernel call it at all - `--expt-relaxed-constexpr` reaches a host `constexpr` function from device code,
-// so this layer never has to name an execution space of its own.
-#ifdef __cplusplus
+// A scalar helper, inline in whichever translation unit uses it, and `constexpr` from C++20 onwards. That
+// qualifier is what lets a caller fold the helper at compile time, and what lets a CUDA kernel call it at
+// all - `--expt-relaxed-constexpr` reaches a host `constexpr` function from device code, so this layer
+// never has to name an execution space of its own.
+//
+// C++20 is the floor rather than C++11 because these helpers declare their locals before filling them, and
+// only C++20 permits an uninitialized local in a `constexpr` function. An older dialect - the Python
+// extensions build at C++17 - gets the same plain inline function it had before the qualifier existed.
+#if defined(__cplusplus) && __cplusplus >= 202002L
 #define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE constexpr
 #else
 #define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE
