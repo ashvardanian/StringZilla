@@ -133,6 +133,7 @@ extern PyTypeObject LevenshteinDistancesUTF8Type;
 extern PyTypeObject NeedlemanWunschType;
 extern PyTypeObject SmithWatermanType;
 extern PyTypeObject FingerprintsType;
+extern PyTypeObject SubstringsType;
 
 /** Shared documentation of the `__capabilities__` getter every engine exposes. */
 extern char const doc_capabilities[];

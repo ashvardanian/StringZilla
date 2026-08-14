@@ -62,26 +62,6 @@ sz_size_t Strs_get_length_(void const *handle, sz_size_t i) {
     return 0;
 }
 
-static sz_cptr_t sz_py_strs_sequence_member_start_if_fragmented(void const *sequence_punned, sz_size_t index) {
-    Strs *strs = (Strs *)sequence_punned;
-    sz_assert_(strs->layout == STRS_FRAGMENTED && "Expected a reordered Strs layout");
-    if (index < 0 || index >= strs->data.fragmented.count) {
-        PyErr_SetString(PyExc_IndexError, "Index out of bounds");
-        return NULL;
-    }
-    return strs->data.fragmented.spans[index].start;
-}
-
-static sz_size_t sz_py_strs_sequence_member_length_if_fragmented(void const *sequence_punned, sz_size_t index) {
-    Strs *strs = (Strs *)sequence_punned;
-    sz_assert_(strs->layout == STRS_FRAGMENTED && "Expected a reordered Strs layout");
-    if (index < 0 || index >= strs->data.fragmented.count) {
-        PyErr_SetString(PyExc_IndexError, "Index out of bounds");
-        return 0;
-    }
-    return strs->data.fragmented.spans[index].length;
-}
-
 /**
  *  @brief  Helper function to export a `Strs` or similar sequence objects into a `sz_sequence_t`.
  */
@@ -90,12 +70,14 @@ sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequ
 
     if (PyObject_TypeCheck(object, &StrsType)) {
         Strs *strs = (Strs *)object;
-        sz_assert_(strs->layout == STRS_FRAGMENTED && "View as tapes!");
 
+        // Every layout, not just the reordered one. A caller holding a tape normally prefers the tape
+        // exporters, which hand the kernel its offsets directly - but an entry point with no tape overload,
+        // like the multi-pattern engine's needle set, has nowhere else to go and must get a sequence here.
         sequence->handle = strs;
-        sequence->count = strs->data.fragmented.count;
-        sequence->get_start = sz_py_strs_sequence_member_start_if_fragmented;
-        sequence->get_length = sz_py_strs_sequence_member_length_if_fragmented;
+        sequence->count = (sz_size_t)Strs_len(strs);
+        sequence->get_start = Strs_get_start_;
+        sequence->get_length = Strs_get_length_;
         return sz_true_k;
     }
 

@@ -322,6 +322,7 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     if (PyType_Ready(&NeedlemanWunschType) < 0) return NULL;
     if (PyType_Ready(&SmithWatermanType) < 0) return NULL;
     if (PyType_Ready(&FingerprintsType) < 0) return NULL;
+    if (PyType_Ready(&SubstringsType) < 0) return NULL;
 
     m = PyModule_Create(&stringzillas_module);
     if (m == NULL) return NULL;
@@ -413,6 +414,19 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
 
     Py_INCREF(&FingerprintsType);
     if (PyModule_AddObject(m, "Fingerprints", (PyObject *)&FingerprintsType) < 0) {
+        Py_XDECREF(&FingerprintsType);
+        Py_XDECREF(&SmithWatermanType);
+        Py_XDECREF(&NeedlemanWunschType);
+        Py_XDECREF(&LevenshteinDistancesUTF8Type);
+        Py_XDECREF(&LevenshteinDistancesType);
+        Py_XDECREF(&DeviceScopeType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&SubstringsType);
+    if (PyModule_AddObject(m, "Substrings", (PyObject *)&SubstringsType) < 0) {
+        Py_XDECREF(&SubstringsType);
         Py_XDECREF(&FingerprintsType);
         Py_XDECREF(&SmithWatermanType);
         Py_XDECREF(&NeedlemanWunschType);
