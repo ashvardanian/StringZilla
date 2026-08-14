@@ -262,7 +262,7 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
         }
 
         // Until we reach the `window_width_`, we don't need to discard any symbols
-        size_t const prefix_length = (std::min)(text_chunk.size(), window_width_);
+        size_t const prefix_length = min_of_two(text_chunk.size(), window_width_);
         size_t new_char_offset = passed_progress;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             float64x2_t new_term_vec = vdupq_n_f64(static_cast<rolling_state_t>(text_chunk[new_char_offset]) + 1.0);
@@ -333,7 +333,7 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
         float64x2_t modulos_vec = vld1q_f64(&modulos_[first_dim]);
         float64x2_t inverse_modulos_vec = vld1q_f64(&inverse_modulos_[first_dim]);
 
-        size_t const prefix_length = (std::min)(text_chunk.size(), window_width_);
+        size_t const prefix_length = min_of_two(text_chunk.size(), window_width_);
         size_t new_char_offset = passed_progress;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             float64x2_t new_term_vec = vdupq_n_f64(static_cast<rolling_state_t>(text_chunk[new_char_offset]) + 1.0);

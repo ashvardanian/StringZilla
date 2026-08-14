@@ -7,6 +7,8 @@
 #ifndef STRINGZILLAS_SIMILARITIES_CUDA_CUH_
 #define STRINGZILLAS_SIMILARITIES_CUDA_CUH_
 
+#include <iterator> // `std::random_access_iterator_tag`
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda/atomic> // `cuda::atomic_ref`, `cuda::memory_order_acquire`
@@ -65,8 +67,8 @@ using affine_smith_waterman_hopper_t =
  */
 template <sz_similarity_objective_t objective_, typename scalar_type_>
 SZ_DEVICE_INLINE scalar_type_ pick_best_(scalar_type_ a, scalar_type_ b) noexcept {
-    if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
-    else { return std::max(a, b); }
+    if constexpr (objective_ == sz_minimize_distance_k) { return min_of_two(a, b); }
+    else { return max_of_two(a, b); }
 }
 
 template <sz_similarity_objective_t objective_, typename scalar_type_>
@@ -131,8 +133,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = remove_cvref<first_char_t>;
 
@@ -229,8 +231,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = remove_cvref<first_char_t>;
 
@@ -330,8 +332,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = remove_cvref<first_char_t>;
 
@@ -452,8 +454,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = remove_cvref<first_char_t>;
 
@@ -2997,8 +2999,8 @@ struct register_levenshtein_u16 {
                 u32_t const cell_score_vec = __vminu2(__vaddus2(diagonal_vec, cost_of_substitution_vec),
                                                       __vaddus2(top_vec, gap_cost_vec));
                 u16_t cell_low = cell_score_vec & 0xFFFF, cell_high = cell_score_vec >> 16;
-                cell_low = (u16_t)std::min<unsigned>((unsigned)left_cell + gap_cost, cell_low);
-                cell_high = (u16_t)std::min<unsigned>((unsigned)cell_low + gap_cost, cell_high);
+                cell_low = (u16_t)min_of_two<unsigned>((unsigned)left_cell + gap_cost, cell_low);
+                cell_high = (u16_t)min_of_two<unsigned>((unsigned)cell_low + gap_cost, cell_high);
                 row_cells_[pack_idx] = (u32_t)cell_low | ((u32_t)cell_high << 16);
                 left_cell = cell_high;
                 diagonal_carry = top_high;
@@ -3098,10 +3100,10 @@ struct register_levenshtein_u16_affine {
                 u16_t const match_or_insert_low = match_or_insert_vec & 0xFFFF;
                 u16_t const match_or_insert_high = match_or_insert_vec >> 16;
                 // Deletion D carries left across the row (sequential): cell 0 then cell 1.
-                u16_t const deletion_low = std::min<u16_t>(left_cell + open, left_deletion + extend);
-                u16_t const cell_low = std::min(match_or_insert_low, deletion_low);
-                u16_t const deletion_high = std::min<u16_t>(cell_low + open, deletion_low + extend);
-                u16_t const cell_high = std::min(match_or_insert_high, deletion_high);
+                u16_t const deletion_low = min_of_two<u16_t>(left_cell + open, left_deletion + extend);
+                u16_t const cell_low = min_of_two(match_or_insert_low, deletion_low);
+                u16_t const deletion_high = min_of_two<u16_t>(cell_low + open, deletion_low + extend);
+                u16_t const cell_high = min_of_two(match_or_insert_high, deletion_high);
                 row_cells_[pack_idx] = (u32_t)cell_low | ((u32_t)cell_high << 16);
                 insertion_cells_[pack_idx] = insertion_vec;
                 left_cell = cell_high;
@@ -3891,12 +3893,12 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
     using char_t = char;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
-    using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
+    using scores_allocator_t = rebound_allocator<allocator_t, size_t>;
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task<char_t>;
     using buffers_t = cuda_cross_buffers<task_t>;
-    using tier_values_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
+    using tier_values_allocator_t = rebound_allocator<allocator_t, u32_t>;
 
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -5276,9 +5278,9 @@ struct weighted_gap_fold {
     SZ_DEVICE_INLINE void operator()(i16_t &cell_low, i16_t &cell_high, i16_t left_cell,
                                      i16_t gap_cost) const noexcept {
         static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
-        cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
-        cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
-        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+        cell_low = max_of_two<i16_t>(cell_low, left_cell + gap_cost);
+        cell_high = max_of_two<i16_t>(cell_high, cell_low + gap_cost);
+        if constexpr (is_local_k) cell_low = max_of_two<i16_t>(cell_low, 0), cell_high = max_of_two<i16_t>(cell_high, 0);
     }
 };
 
@@ -5295,11 +5297,11 @@ struct weighted_affine_gap_fold {
         i16_t left_cell, i16_t left_deletion, i16_t open, i16_t extend, //
         i16_t &deletion_low, i16_t &cell_low, i16_t &deletion_high, i16_t &cell_high) const noexcept {
         static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
-        deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
-        cell_low = std::max(match_or_insert_low, deletion_low);
-        deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
-        cell_high = std::max(match_or_insert_high, deletion_high);
-        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+        deletion_low = max_of_two<i16_t>(left_cell + open, left_deletion + extend);
+        cell_low = max_of_two(match_or_insert_low, deletion_low);
+        deletion_high = max_of_two<i16_t>(cell_low + open, deletion_low + extend);
+        cell_high = max_of_two(match_or_insert_high, deletion_high);
+        if constexpr (is_local_k) cell_low = max_of_two<i16_t>(cell_low, 0), cell_high = max_of_two<i16_t>(cell_high, 0);
     }
 };
 
@@ -5358,8 +5360,8 @@ struct weighted_needleman_register_scorer {
                 weighted_gap_fold<locality_, capability_> {}(cell_low, cell_high, left_cell, gap_cost);
                 if constexpr (is_local_k) {
                     unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
-                    if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
-                    if (column_high <= longer_length) best_score = std::max(best_score, cell_high);
+                    if (column_low <= longer_length) best_score = max_of_two(best_score, cell_low);
+                    if (column_high <= longer_length) best_score = max_of_two(best_score, cell_high);
                 }
                 row_cells_[pack_idx] = (u16_t)cell_low | ((u32_t)(u16_t)cell_high << 16);
                 left_cell = cell_high;
@@ -5476,8 +5478,8 @@ struct weighted_gotoh_register_scorer {
                     deletion_low, cell_low, deletion_high, cell_high);
                 if constexpr (is_local_k) {
                     unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
-                    if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
-                    if (column_high <= longer_length) best_score = std::max(best_score, cell_high);
+                    if (column_low <= longer_length) best_score = max_of_two(best_score, cell_low);
+                    if (column_high <= longer_length) best_score = max_of_two(best_score, cell_high);
                 }
                 row_cells_[pack_idx] = (u16_t)cell_low | ((u32_t)(u16_t)cell_high << 16);
                 insertion_cells_[pack_idx] = insertion_vec;
@@ -5757,10 +5759,10 @@ template <typename gap_costs_type_, typename allocator_type_>
 cuda_status_t cuda_weighted_run_trampoline_(                                                                        //
     cuda_cross_buffers<cuda_similarity_task<char>> &buffers, error_costs_32x32_t const &substituter,                //
     gap_costs_type_ const &gap_costs, weighted_kernels_t const &kernel_table, cuda_timer_t &timer,                  //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,    //
-    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                 //
+    safe_vector<u32_t, rebound_allocator<allocator_type_, u32_t>> &tier_rle,                                        //
+    safe_vector<u8_t, rebound_allocator<allocator_type_, u8_t>>                                                     //
         &byte_to_class_buffer,                                                                                      //
-    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>> //
+    safe_vector<error_cost_t, rebound_allocator<allocator_type_, error_cost_t>>                                     //
         &class_substitution_costs_buffer,                                                                           //
     cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
@@ -5913,10 +5915,10 @@ template <typename gap_costs_type_, sz_similarity_locality_t locality_, sz_capab
 cuda_status_t cuda_weighted_cross_(                                                                                 //
     cuda_cross_buffers<cuda_similarity_task<char>> &buffers, error_costs_32x32_t const &substituter,                //
     gap_costs_type_ const &gap_costs, cuda_timer_t &timer,                                                          //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,    //
-    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                 //
+    safe_vector<u32_t, rebound_allocator<allocator_type_, u32_t>> &tier_rle,                                        //
+    safe_vector<u8_t, rebound_allocator<allocator_type_, u8_t>>                                                     //
         &byte_to_class_buffer,                                                                                      //
-    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>> //
+    safe_vector<error_cost_t, rebound_allocator<allocator_type_, error_cost_t>>                                     //
         &class_substitution_costs_buffer,                                                                           //
     queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,                      //
     cross_similarities_t cross_kind, cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
@@ -6043,9 +6045,9 @@ struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_t
     using substituter_t = error_costs_32x32_t;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
-    using byte_to_class_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u8_t>;
-    using class_costs_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<error_cost_t>;
-    using tier_values_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
+    using byte_to_class_allocator_t = rebound_allocator<allocator_t, u8_t>;
+    using class_costs_allocator_t = rebound_allocator<allocator_t, error_cost_t>;
+    using tier_values_allocator_t = rebound_allocator<allocator_t, u32_t>;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
@@ -6110,9 +6112,9 @@ struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_typ
     using substituter_t = error_costs_32x32_t;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
-    using byte_to_class_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u8_t>;
-    using class_costs_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<error_cost_t>;
-    using tier_values_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
+    using byte_to_class_allocator_t = rebound_allocator<allocator_t, u8_t>;
+    using class_costs_allocator_t = rebound_allocator<allocator_t, error_cost_t>;
+    using tier_values_allocator_t = rebound_allocator<allocator_t, u32_t>;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
     static constexpr sz_capability_t capability_k = capability_;
 

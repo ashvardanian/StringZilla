@@ -132,12 +132,14 @@
 #define SZ_HAS_CONCEPTS_ 0
 #endif
 
-#if !SZ_AVOID_STL
-#include <initializer_list> // `std::initializer_list` is only ~100 LOC
-#include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
+#include <initializer_list> // `std::initializer_list` is freestanding and only ~100 LOC
 #include <limits>           // `std::numeric_limits`
-#include <memory>           // `std::allocator_traits` for allocator rebinding
 #include <type_traits>      // `is_same_type`, `std::enable_if`, etc.
+#include <utility>          // `std::move`, `std::forward`
+
+#if !SZ_AVOID_STL
+#include <iterator> // `std::random_access_iterator_tag` pulls 20K LOC
+#include <memory>   // `std::allocator` behind `default_alloc`
 #endif
 
 namespace ashvardanian {
@@ -210,6 +212,8 @@ enum class status_t : int {
     missing_gpu_k = sz_missing_gpu_k,
     device_code_mismatch_k = sz_device_code_mismatch_k,
     device_memory_mismatch_k = sz_device_memory_mismatch_k,
+    out_of_range_k = sz_out_of_range_k,
+    length_error_k = sz_length_error_k,
     unknown_k = sz_status_unknown_k,
 };
 
@@ -379,6 +383,9 @@ struct dummy_alloc {
     using size_type = size_t;           // ? For STL compatibility
     using difference_type = sz_ssize_t; // ? For STL compatibility
 
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_copy_assignment = std::false_type;
+
     template <typename other_value_type_>
     struct rebind {
         using other = dummy_alloc<other_value_type_>;
@@ -405,6 +412,18 @@ struct dummy_alloc {
 };
 
 using dummy_alloc_t = dummy_alloc<char>;
+
+/**
+ *  @brief The allocator owning containers default to. Without STL there is no `std::allocator`,
+ *      so the default refuses every request and callers must supply an allocator of their own.
+ */
+#if SZ_AVOID_STL
+template <typename value_type_>
+using default_alloc = dummy_alloc<value_type_>;
+#else
+template <typename value_type_>
+using default_alloc = std::allocator<value_type_>;
+#endif
 
 /**
  *  @brief Random access iterator for any immutable container with indexed element lookup support.
@@ -520,6 +539,39 @@ struct indexed_container_iterator {
     }
 };
 
+/**
+ *  @brief Rebinds @p allocator_type_ to allocate @p other_type_ instead - analog to
+ *      `std::allocator_traits<allocator_type_>::rebind_alloc<other_type_>`, without `<memory>`.
+ *      Expects the allocator to be a class template taking its value type first.
+ */
+template <typename allocator_type_, typename other_type_>
+struct rebound_allocator_;
+
+template <template <typename...> class allocator_template_, typename old_type_, typename... tail_types_,
+          typename other_type_>
+struct rebound_allocator_<allocator_template_<old_type_, tail_types_...>, other_type_> {
+    using type = allocator_template_<other_type_, tail_types_...>;
+};
+
+template <typename allocator_type_, typename other_type_>
+using rebound_allocator = typename rebound_allocator_<allocator_type_, other_type_>::type;
+
+/**
+ *  @brief The element type an iterator yields - analog to `std::iterator_traits`, without `<iterator>`.
+ */
+template <typename iterator_type_>
+struct iterator_value_ {
+    using type = typename iterator_type_::value_type;
+};
+
+template <typename value_type_>
+struct iterator_value_<value_type_ *> {
+    using type = typename std::remove_cv<value_type_>::type;
+};
+
+template <typename iterator_type_>
+using iterator_value = typename iterator_value_<iterator_type_>::type;
+
 /** @brief  Length convention for @ref arrow_strings_view element spans. */
 enum class arrow_termination_t {
     /** Matches @ref arrow_strings_tape : a trailing @c '\0' is excluded, so elements read as C-strings. */
@@ -597,8 +649,8 @@ struct arrow_strings_tape {
     using iterator_t = indexed_container_iterator<self_t>;
     using iterator = iterator_t; // ? For STL compatibility
 
-    using char_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<char_t>;
-    using offset_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<offset_t>;
+    using char_alloc_t = rebound_allocator<allocator_t, char_t>;
+    using offset_alloc_t = rebound_allocator<allocator_t, offset_t>;
 
     /** @brief Largest byte offset the tape can address, past which an `offset_t` would wrap around. */
     static constexpr size_t max_offset_k = static_cast<size_t>((std::numeric_limits<offset_t>::max)());
@@ -651,10 +703,12 @@ struct arrow_strings_tape {
     status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
         // The range is walked twice - once to measure, once to copy - so single-pass "input"
         // iterators, like `std::istream_iterator`, would compile but silently copy nothing.
+#if !SZ_AVOID_STL
         static_assert(
             std::is_base_of<std::forward_iterator_tag,
                             typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
             "arrow_strings_tape::try_assign needs multi-pass (forward) iterators");
+#endif
 
         reset(); // ? Drops the old contents, so every failure below leaves an empty tape rather than a stale one
 
@@ -821,9 +875,9 @@ struct constant_iterator {
 template <typename begin_type_, typename end_type_>
 struct random_access_range {
 
-    using value_type = typename std::iterator_traits<begin_type_>::value_type;
-    using reference_type = typename std::iterator_traits<begin_type_>::reference;
-    using difference_type = typename std::iterator_traits<begin_type_>::difference_type;
+    using value_type = iterator_value<begin_type_>;
+    using reference_type = decltype(*std::declval<begin_type_ &>());
+    using difference_type = sz_ssize_t;
 
     begin_type_ begin_;
     end_type_ end_;
@@ -1056,6 +1110,22 @@ sz_constexpr_if_cpp14 value_type_ non_zero_if(value_type_ value, value_type_ con
     static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
     sz_assert_((condition == 0 || condition == 1) && "Condition must be either 0 or 1 unsigned integer");
     return value * condition;
+}
+
+/**
+ *  @brief Analog to `std::min` from `<algorithm>`, but generates also device code, unlike STL.
+ */
+template <typename value_type_>
+constexpr value_type_ min_of_two(value_type_ first, value_type_ second) noexcept {
+    return second < first ? second : first;
+}
+
+/**
+ *  @brief Analog to `std::max` from `<algorithm>`, but generates also device code, unlike STL.
+ */
+template <typename value_type_>
+constexpr value_type_ max_of_two(value_type_ first, value_type_ second) noexcept {
+    return first < second ? second : first;
 }
 
 /**
