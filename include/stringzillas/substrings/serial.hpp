@@ -2097,6 +2097,9 @@ struct substrings<allocator_type_, capability_,
      *  @sa `aho_corasick_dictionary::try_insert` for the status codes this forwards.
      */
     template <typename needles_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
     status_t try_index(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
         sz_unused_(executor);
@@ -2378,6 +2381,9 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
      *  @sa `aho_corasick_dictionary::try_insert` for the status codes this forwards.
      */
     template <typename needles_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
     status_t try_index(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
         sz_unused_(executor);

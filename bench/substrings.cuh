@@ -353,22 +353,27 @@ void bench_substrings_dictionary(                                        //
         return;
     }
 
+    // Owned rather than passed as temporaries: every timed callable below captures its executor by reference
+    // and outlives the expression that built it, so a temporary would leave the closure holding a dead object.
+    dummy_executor_t serial_executor;
+
     // Construction reports needle-bytes per second through the same callable as the searches below.
     substrings_serial_t rebuilt_engine;
     auto build_call = make_substrings_callable(needles.total_bytes, rebuilt_engine, [&] {
         rebuilt_engine.reset(); // ? Rebuilding from scratch on every call IS the measured operation
-        return rebuilt_engine.try_index(needles.terms, cell.sensitivity, cpu_specs);
+        return rebuilt_engine.try_index(needles.terms, cell.sensitivity, serial_executor, cpu_specs);
     });
     bench_nullary(env, "substrings_build_serial:" + dictionary_label, build_call).log();
 
     substrings_serial_t serial_engine;
-    status_t const serial_build_status = serial_engine.try_index(needles.terms, cell.sensitivity, cpu_specs);
+    status_t const serial_build_status =
+        serial_engine.try_index(needles.terms, cell.sensitivity, serial_executor, cpu_specs);
     if (serial_build_status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the serial dictionary: ") +
                                  status_name(serial_build_status));
 
     substrings_parallel_t parallel_engine;
-    status_t const parallel_build_status = parallel_engine.try_index(needles.terms, cell.sensitivity, cpu_specs);
+    status_t const parallel_build_status = parallel_engine.try_index(needles.terms, cell.sensitivity, pool, cpu_specs);
     if (parallel_build_status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the parallel dictionary: ") +
                                  status_name(parallel_build_status));
@@ -389,7 +394,7 @@ void bench_substrings_dictionary(                                        //
         });
     };
 
-    auto serial_call = count_with(serial_engine, dummy_executor_t {}, cpu_specs, serial_counts, serial_total);
+    auto serial_call = count_with(serial_engine, serial_executor, cpu_specs, serial_counts, serial_total);
     std::string const serial_name = "substrings_count_serial:" + dictionary_label;
     bench_result_t const serial_result = bench_nullary(env, serial_name, serial_call).log();
 
@@ -421,7 +426,7 @@ void bench_substrings_dictionary(                                        //
     };
 
     unified_vector<substrings_match_t> serial_matches(total_occurrences);
-    auto serial_find_call = find_with(serial_engine, dummy_executor_t {}, cpu_specs, serial_matches, serial_found);
+    auto serial_find_call = find_with(serial_engine, serial_executor, cpu_specs, serial_matches, serial_found);
     std::string const serial_find_name = "substrings_find_serial:" + dictionary_label;
     bench_result_t const serial_find_result = bench_nullary(env, serial_find_name, serial_find_call).log();
 
@@ -436,11 +441,16 @@ void bench_substrings_dictionary(                                        //
     gpu_specs_t gpu_specs;
     if (gpu_specs_fetch(gpu_specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 
+    // One executor for the whole cell, for the same reason the serial one is owned: the timed callables below
+    // capture it by reference and outlive the expressions that build them.
+    cuda_executor_t device_executor;
+
     // The tier split follows the device's own L2, so the fetched specs have to reach the build - a default
     // `gpu_specs_t` describes an A100 and would tier this dictionary against hardware that is not here,
     // beside CPU dictionaries tiered against the real machine.
     substrings_cuda_t device_engine;
-    cuda_status_t const device_build_status = device_engine.try_index(needles.terms, cell.sensitivity, gpu_specs);
+    cuda_status_t const device_build_status =
+        device_engine.try_index(needles.terms, cell.sensitivity, device_executor, gpu_specs);
     if (device_build_status.status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the device dictionary: ") +
                                  status_name(device_build_status.status));
@@ -450,7 +460,7 @@ void bench_substrings_dictionary(                                        //
     unified_vector<size_t> device_counts(env.tokens.size(), 0);
     size_t device_total = 0;
 
-    auto cuda_call = count_with(device_engine, cuda_executor_t {}, gpu_specs, device_counts, device_total);
+    auto cuda_call = count_with(device_engine, device_executor, gpu_specs, device_counts, device_total);
     std::string const cuda_name = "substrings_count_cuda:" + dictionary_label;
     bench_nullary(env, cuda_name, serial_call, cuda_call, callable_no_op_t {}, arrays_equality<size_t> {})
         .log(serial_result);
@@ -459,7 +469,7 @@ void bench_substrings_dictionary(                                        //
     // device memory mid-benchmark.
     size_t device_found = 0;
     unified_vector<substrings_match_t> device_matches(total_occurrences);
-    auto cuda_find_call = find_with(device_engine, cuda_executor_t {}, gpu_specs, device_matches, device_found);
+    auto cuda_find_call = find_with(device_engine, device_executor, gpu_specs, device_matches, device_found);
     std::string const cuda_find_name = "substrings_find_cuda:" + dictionary_label;
     bench_nullary(env, cuda_find_name, serial_find_call, cuda_find_call, callable_no_op_t {},
                   arrays_equality<substrings_match_t> {})
@@ -497,7 +507,7 @@ void bench_substrings_dictionary(                                        //
             });
         };
 
-        auto serial_replace_call = replace_with(serial_engine, dummy_executor_t {}, cpu_specs, serial_rewrote);
+        auto serial_replace_call = replace_with(serial_engine, serial_executor, cpu_specs, serial_rewrote);
         std::string const serial_replace_name = "substrings_replace_serial:" + dictionary_label;
         bench_result_t const serial_replace_result = bench_nullary(env, serial_replace_name, serial_replace_call).log();
 
@@ -520,7 +530,7 @@ void bench_substrings_dictionary(                                        //
             });
         };
 
-        auto serial_score_call = score_with(serial_engine, dummy_executor_t {}, cpu_specs);
+        auto serial_score_call = score_with(serial_engine, serial_executor, cpu_specs);
         std::string const serial_score_name = "substrings_score_bm25_serial:" + dictionary_label;
         bench_result_t const serial_score_result = bench_nullary(env, serial_score_name, serial_score_call).log();
 
@@ -533,12 +543,12 @@ void bench_substrings_dictionary(                                        //
 
 #if SZ_USE_CUDA
         size_t device_rewrote = 0;
-        auto cuda_replace_call = replace_with(device_engine, cuda_executor_t {}, gpu_specs, device_rewrote);
+        auto cuda_replace_call = replace_with(device_engine, device_executor, gpu_specs, device_rewrote);
         bench_nullary(env, "substrings_replace_cuda:" + dictionary_label, serial_replace_call, cuda_replace_call,
                       callable_no_op_t {}, arrays_equality<char> {})
             .log(serial_replace_result);
 
-        auto cuda_score_call = score_with(device_engine, cuda_executor_t {}, gpu_specs);
+        auto cuda_score_call = score_with(device_engine, device_executor, gpu_specs);
         bench_nullary(env, "substrings_score_bm25_cuda:" + dictionary_label, cuda_score_call).log(serial_score_result);
 #endif
     }

@@ -1573,7 +1573,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                     &chunk_count_argument,
                                     &chunk_match_slots_argument,
                                     &matches_out_argument};
-        kernels_t::by_width_t const &shapes =
+        auto const &shapes =
             pass_kind == substrings_pass_t::counting_k ? kernel_table.count_chunk : kernel_table.scatter_chunk;
         return cuda_launch_t {}
             .grid(blocks_per_grid)

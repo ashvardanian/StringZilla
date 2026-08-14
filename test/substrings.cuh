@@ -1393,7 +1393,7 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
     verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
     cuda_executor_t executor;
     substrings_cuda_t cuda_engine;
-    verify(cuda_engine.try_index(needles_view, sensitivity, gpu_specs) == status_t::success_k);
+    verify(cuda_engine.try_index(needles_view, sensitivity, executor, gpu_specs) == status_t::success_k);
 
     // One match type and one signature across backends: the device runs the very same collection body as
     // every CPU engine. The fixture tape is `unified_alloc`-backed under CUDA, so no copy exists anywhere.
@@ -1438,7 +1438,7 @@ void test_substrings_cuda_memory_contract() {
     substrings_serial_t serial_engine;
     verify(serial_engine.try_index(needles.view(), substrings_cased_k) == status_t::success_k);
     substrings_cuda_t cuda_engine;
-    verify(cuda_engine.try_index(needles.view(), substrings_cased_k, gpu_specs) == status_t::success_k);
+    verify(cuda_engine.try_index(needles.view(), substrings_cased_k, executor, gpu_specs) == status_t::success_k);
 
     // Three haystacks in three separate unified allocations: the descriptors point wherever the caller's
     // memory happens to live, which is the whole point of not assuming a tape.
@@ -2234,7 +2234,7 @@ void test_substrings_cuda_rewriting_and_scoring() {
         substrings_serial_t serial_engine;
         substrings_cuda_t cuda_engine;
         verify(serial_engine.try_index(needles.view(), sensitivity) == status_t::success_k);
-        verify(cuda_engine.try_index(needles.view(), sensitivity) == status_t::success_k);
+        verify(cuda_engine.try_index(needles.view(), sensitivity, executor, gpu_specs) == status_t::success_k);
 
         for (substrings_overlap_policy_t policy : {substrings_leftmost_longest_k, substrings_leftmost_first_k}) {
             substrings_rewrite_tape_t const on_host = rewrite_all_(serial_engine, reference_haystacks.view(), policy,
