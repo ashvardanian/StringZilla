@@ -484,6 +484,39 @@ impl LevenshteinDistances {
             };
         }
 
+        // The callback-addressed arm, walked in place with no tape to build. Both sides must name it:
+        // pairing borrowed slices with a tape would mean copying one of them behind the caller's back.
+        if let AnyBytesTape::Slices(queries_sequence) = &queries {
+            let candidates_sequence = match &candidates {
+                Some(AnyBytesTape::Slices(sequence)) => Some(sequence),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_sequence.map_or(queries_sequence.count(), |sequence| sequence.count());
+            if matrix.queries_count != queries_sequence.count() || matrix.candidates_count != candidates_count {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let candidates_ptr = match candidates_sequence {
+                Some(sequence) => sequence as *const _ as *const c_void,
+                None => ptr::null(),
+            };
+            let status = unsafe {
+                szs_levenshtein_distances(
+                    self.handle,
+                    device.handle,
+                    queries_sequence as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
         // Mixed widths are unsupported to avoid implicit widening and extra copies
         Err(Error::from(SzStatus::UnexpectedDimensions))
     }
@@ -790,6 +823,39 @@ impl LevenshteinDistancesUtf8 {
                     self.handle,
                     device.handle,
                     &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        // The callback-addressed arm, walked in place with no tape to build. Both sides must name it:
+        // pairing borrowed slices with a tape would mean copying one of them behind the caller's back.
+        if let AnyCharsTape::Slices(queries_sequence) = &queries {
+            let candidates_sequence = match &candidates {
+                Some(AnyCharsTape::Slices(sequence)) => Some(sequence),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_sequence.map_or(queries_sequence.count(), |sequence| sequence.count());
+            if matrix.queries_count != queries_sequence.count() || matrix.candidates_count != candidates_count {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let candidates_ptr = match candidates_sequence {
+                Some(sequence) => sequence as *const _ as *const c_void,
+                None => ptr::null(),
+            };
+            let status = unsafe {
+                szs_levenshtein_distances_utf8(
+                    self.handle,
+                    device.handle,
+                    queries_sequence as *const _ as *const c_void,
                     candidates_ptr,
                     matrix.data.as_mut_ptr(),
                     matrix.row_stride,
@@ -1118,6 +1184,39 @@ impl NeedlemanWunschScores {
                     self.handle,
                     device.handle,
                     &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        // The callback-addressed arm, walked in place with no tape to build. Both sides must name it:
+        // pairing borrowed slices with a tape would mean copying one of them behind the caller's back.
+        if let AnyBytesTape::Slices(queries_sequence) = &queries {
+            let candidates_sequence = match &candidates {
+                Some(AnyBytesTape::Slices(sequence)) => Some(sequence),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_sequence.map_or(queries_sequence.count(), |sequence| sequence.count());
+            if matrix.queries_count != queries_sequence.count() || matrix.candidates_count != candidates_count {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let candidates_ptr = match candidates_sequence {
+                Some(sequence) => sequence as *const _ as *const c_void,
+                None => ptr::null(),
+            };
+            let status = unsafe {
+                szs_needleman_wunsch_scores(
+                    self.handle,
+                    device.handle,
+                    queries_sequence as *const _ as *const c_void,
                     candidates_ptr,
                     matrix.data.as_mut_ptr(),
                     matrix.row_stride,
@@ -1524,6 +1623,39 @@ impl SmithWatermanScores {
                 err => Err(rust_error_from_c_message(err, error_msg)),
             };
         }
+
+        // The callback-addressed arm, walked in place with no tape to build. Both sides must name it:
+        // pairing borrowed slices with a tape would mean copying one of them behind the caller's back.
+        if let AnyBytesTape::Slices(queries_sequence) = &queries {
+            let candidates_sequence = match &candidates {
+                Some(AnyBytesTape::Slices(sequence)) => Some(sequence),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_sequence.map_or(queries_sequence.count(), |sequence| sequence.count());
+            if matrix.queries_count != queries_sequence.count() || matrix.candidates_count != candidates_count {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let candidates_ptr = match candidates_sequence {
+                Some(sequence) => sequence as *const _ as *const c_void,
+                None => ptr::null(),
+            };
+            let status = unsafe {
+                szs_smith_waterman_scores(
+                    self.handle,
+                    device.handle,
+                    queries_sequence as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
         Err(Error::from(SzStatus::UnexpectedDimensions))
     }
 }
@@ -1789,6 +1921,42 @@ mod tests {
         // Diagonal: kitten vs sitting = 3, saturday vs sunday = 3.
         assert_eq!(matrix[(0, 0)], 3);
         assert_eq!(matrix[(1, 1)], 3);
+    }
+
+    #[test]
+    fn levenshtein_compute_into_borrowed_slices() {
+        let Some(device) = device_or_skip("levenshtein_compute_into_borrowed_slices") else {
+            return;
+        };
+        let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).expect("Levenshtein engine should build on CPU");
+
+        let queries = [b"kitten".as_ref(), b"saturday".as_ref()];
+        let candidates = [b"sitting".as_ref(), b"sunday".as_ref()];
+
+        // The callback-addressed arm reaches `szs_levenshtein_distances` with no tape built, and must
+        // reach the same answer the tape arms do.
+        let mut matrix = UnifiedMat::<usize>::try_allocate(2, 2).expect("matrix allocation");
+        engine
+            .compute_into(
+                &device,
+                AnyBytesTape::from_slices(&queries),
+                Some(AnyBytesTape::from_slices(&candidates)),
+                &mut matrix,
+            )
+            .expect("Levenshtein compute_into should accept borrowed slices");
+        assert_eq!(matrix[(0, 0)], 3);
+        assert_eq!(matrix[(1, 1)], 3);
+
+        // Mixing a tape with borrowed slices would need one of them copied, so it is refused.
+        let mut candidates_tape = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        candidates_tape.extend(candidates).unwrap();
+        let mixed = engine.compute_into(
+            &device,
+            AnyBytesTape::from_slices(&queries),
+            Some(AnyBytesTape::Tape32(candidates_tape)),
+            &mut matrix,
+        );
+        assert_eq!(mixed.unwrap_err().status, SzStatus::UnexpectedDimensions);
     }
 
     #[test]
