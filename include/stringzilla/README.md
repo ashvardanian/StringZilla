@@ -1076,7 +1076,11 @@ __`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 __`SZ_AVOID_STL`__ and __`SZ_SAFETY_OVER_COMPATIBILITY`__:
 
 > When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string` and back.
-> If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
+> Setting `SZ_AVOID_STL=1` drops STL __interop__, not functionality.
+> The conversions to `std::string` and `std::string_view` disappear, along with the `iterator_category` typedefs that let our iterators satisfy `std::iterator_traits` and the `std::hash` specializations; `sz::string` then defaults to an allocator that refuses every request, so bring your own.
+> Every algorithm and every bounds check stays, including `substr`, `at`, `compare`, `insert`, and `replace`.
+> Failures that would throw `std::out_of_range`, `std::length_error`, or `std::bad_alloc` instead trip `sz_assert_`, which aborts in debug builds and — like the rest of the library's unchecked surface — continues in release builds.
+> The `<iterator>`, `<memory>`, `<string>`, and `<vector>` headers are excluded, which is most of the preprocessing cost: `stringzilla/types.hpp` drops from roughly 58K preprocessed lines to 13K.
 > Moreover, if STL compatibility is a low priority, one can make the API safer by disabling the overloads, which are subjectively error prone.
 
 __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:

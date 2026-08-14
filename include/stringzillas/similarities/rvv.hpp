@@ -2405,7 +2405,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
     using scoring_t = levenshtein_distance<char, gap_costs_t, capability_k>; // ? Per-pair DP fallback (= serial).
     using myers_t = levenshtein_distance_myers<char, capability_k>;          // ? RVV lockstep Myers.
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     uniform_substitution_costs_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -2662,7 +2662,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     using scoring_t = levenshtein_distance_utf8<gap_costs_t, sz_cap_serial_k>; // ? Per-pair UTF-8 serial fallback.
     using myers_t = levenshtein_distance_myers<rune_t, capability_k>;          // ? RVV rune Myers fast path.
     static constexpr index_t myers_lanes_k = myers_t::lanes_k;
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
     using bytes_fallback_t = levenshtein_distances<linear_gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
@@ -3024,7 +3024,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_global_k,
                               capability_k, 32, void>; // ? RVV shared-query `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -3128,7 +3128,7 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_local_k,
                               capability_k, 32, void>; // ? RVV shared-query local `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -3231,7 +3231,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_global_k,
                               capability_k, 32, void>; // ? RVV shared-query `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
@@ -3335,7 +3335,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_local_k,
                               capability_k, 32, void>; // ? RVV shared-query local `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};

@@ -16,10 +16,8 @@
 #include "stringzillas/types.hpp" // `sz::executor_like`
 
 #include <cstddef>
-#include <limits>   // `std::numeric_limits` for numeric types
-#include <iterator> // `std::iterator_traits` for iterators
-#include <cmath>    // `std::fabsf` for `f32_rolling_hasher`
-#include <numeric>  // `std::gcd` for `choose_coprime_modulo`
+#include <limits> // `std::numeric_limits` for numeric types
+#include <cmath> // `std::floor`, `std::fmod`, `std::fma`
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -241,6 +239,15 @@ struct buz_rolling_hasher {
     state_t table_[256];
 };
 
+inline u64_t greatest_common_divisor(u64_t first, u64_t second) noexcept {
+    while (second != 0) {
+        u64_t const rest = first % second;
+        first = second;
+        second = rest;
+    }
+    return first;
+}
+
 /**
  *  @brief Helper function to pick the second co-prime "modulo" base for the Karp-Rabin rolling hashes.
  *  @retval 0 on failure, or a valid prime number otherwise.
@@ -257,7 +264,7 @@ inline u64_t choose_coprime_modulo(u64_t multiplier, u64_t limit) noexcept {
     if (!(bound & 1u)) --bound; // Make odd
 
     for (u64_t p = bound; p >= 3; p -= 2)
-        if (std::gcd(p, multiplier) == 1) return p;
+        if (greatest_common_divisor(p, multiplier) == 1) return p;
 
     return 0;
 }
@@ -632,7 +639,7 @@ template <                                                           //
     typename hasher_type_ = rabin_karp_rolling_hasher<u32_t, u64_t>, //
     typename min_hash_type_ = u32_t,                                 //
     typename min_count_type_ = u32_t,                                //
-    typename allocator_type_ = std::allocator<hasher_type_>,         //
+    typename allocator_type_ = default_alloc<hasher_type_>,          //
     sz_capability_t capability_ = sz_cap_serial_k                    //
     >
 struct basic_rolling_hashers;
@@ -659,11 +666,10 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
     static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 
   private:
-    using allocator_traits_t = std::allocator_traits<allocator_t>;
-    using hasher_allocator_t = typename allocator_traits_t::template rebind_alloc<hasher_t>;
-    using rolling_states_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_state_t>;
-    using rolling_hashes_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_hash_t>;
-    using min_counts_allocator_t = typename allocator_traits_t::template rebind_alloc<min_count_t>;
+    using hasher_allocator_t = rebound_allocator<allocator_t, hasher_t>;
+    using rolling_states_allocator_t = rebound_allocator<allocator_t, rolling_state_t>;
+    using rolling_hashes_allocator_t = rebound_allocator<allocator_t, rolling_hash_t>;
+    using min_counts_allocator_t = rebound_allocator<allocator_t, min_count_t>;
 
     allocator_t allocator_;
     safe_vector<hasher_t, hasher_allocator_t> hashers_;
@@ -671,8 +677,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
 
   public:
     basic_rolling_hashers(allocator_t allocator = {}) noexcept
-        : allocator_(std::move(allocator)),
-          hashers_(allocator_traits_t::select_on_container_copy_construction(allocator)) {}
+        : allocator_(std::move(allocator)), hashers_(allocator) {}
 
     size_t dimensions() const noexcept { return hashers_.size(); }
     size_t max_window_width() const noexcept { return max_window_width_; }
@@ -721,7 +726,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         auto const new_window_width = hasher.window_width();
         if (hashers_.try_push_back(std::move(hasher)) != status_t::success_k) return status_t::bad_alloc_k;
 
-        max_window_width_ = (std::max)(new_window_width, max_window_width_);
+        max_window_width_ = max_of_two(new_window_width, max_window_width_);
         return status_t::success_k;
     }
 
@@ -743,10 +748,8 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         sz_assert_(dimensions() == min_counts.size() && "Dimensions number & hash-counts number mismatch");
 
         // Allocate temporary states
-        safe_vector<rolling_state_t, rolling_states_allocator_t> rolling_states_buffer(
-            allocator_traits_t::select_on_container_copy_construction(allocator_));
-        safe_vector<rolling_hash_t, rolling_hashes_allocator_t> rolling_minimums_buffer(
-            allocator_traits_t::select_on_container_copy_construction(allocator_));
+        safe_vector<rolling_state_t, rolling_states_allocator_t> rolling_states_buffer(allocator_);
+        safe_vector<rolling_hash_t, rolling_hashes_allocator_t> rolling_minimums_buffer(allocator_);
         if (rolling_states_buffer.try_resize(dimensions()) != status_t::success_k ||
             rolling_minimums_buffer.try_resize(dimensions()) != status_t::success_k)
             return status_t::bad_alloc_k;
@@ -793,7 +796,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         sz_assert_(dimensions() == min_counts.size() && "Dimensions number & hash-counts number mismatch");
 
         // Until we reach the maximum window length, use a branching code version
-        size_t const prefix_length = (std::min)(text_chunk.size(), max_window_width_);
+        size_t const prefix_length = min_of_two(text_chunk.size(), max_window_width_);
         size_t new_char_offset = passed_progress;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             byte_t const new_char = text_chunk[new_char_offset];
@@ -805,7 +808,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
                 if (new_char_offset < hasher.window_width()) {
                     last_state = hasher.push(last_state, new_char);
                     if (hasher.window_width() == (new_char_offset + 1)) {
-                        rolling_minimum = (std::min)(rolling_minimum, hasher.digest(last_state));
+                        rolling_minimum = min_of_two(rolling_minimum, hasher.digest(last_state));
                         min_count = 1; // First occurrence of this hash
                     }
                     continue;
@@ -815,7 +818,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
                 rolling_hash_t new_hash = hasher.digest(last_state);
                 min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
                 min_count += new_hash <= rolling_minimum; // ? Increments by 1 for new & old minimums
-                rolling_minimum = (std::min)(rolling_minimum, new_hash);
+                rolling_minimum = min_of_two(rolling_minimum, new_hash);
             }
         }
 
@@ -832,7 +835,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
                 rolling_hash_t new_hash = hasher.digest(last_state);
                 min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
                 min_count += new_hash <= rolling_minimum; // ? Increments by 1 for new & old minimums
-                rolling_minimum = (std::min)(rolling_minimum, new_hash);
+                rolling_minimum = min_of_two(rolling_minimum, new_hash);
             }
         }
 
@@ -885,12 +888,9 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         size_t const dims = dimensions();
 
         // Allocate enough temporary states for all cores to have individual states
-        safe_vector<rolling_state_t, rolling_states_allocator_t> rolling_states(
-            allocator_traits_t::select_on_container_copy_construction(allocator_));
-        safe_vector<rolling_hash_t, rolling_hashes_allocator_t> rolling_minimums(
-            allocator_traits_t::select_on_container_copy_construction(allocator_));
-        safe_vector<min_count_t, min_counts_allocator_t> rolling_counts(
-            allocator_traits_t::select_on_container_copy_construction(allocator_));
+        safe_vector<rolling_state_t, rolling_states_allocator_t> rolling_states(allocator_);
+        safe_vector<rolling_hash_t, rolling_hashes_allocator_t> rolling_minimums(allocator_);
+        safe_vector<min_count_t, min_counts_allocator_t> rolling_counts(allocator_);
         if (rolling_states.try_resize(executor.threads_count() * dims) != status_t::success_k ||
             rolling_minimums.try_resize(executor.threads_count() * dims) != status_t::success_k ||
             rolling_counts.try_resize(executor.threads_count() * dims) != status_t::success_k)
@@ -934,11 +934,11 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
 
             // Distribute overlapping chunks across threads
             executor.for_threads([&](size_t thread_index) noexcept {
-                auto text_start = text_view.data() + (std::min)(text_view.size(), thread_index * chunk_size);
+                auto text_start = text_view.data() + min_of_two(text_view.size(), thread_index * chunk_size);
                 // ? This overlap will be different for different window widths, but assuming we are
                 // ? computing the non-weighted Min-Hash, recomputing & comparing a few hashes for the
                 // ? same slices isn't a big deal.
-                auto overlapping_text_end = (std::min)(text_start + chunk_size + max_window_width_ - 1,
+                auto overlapping_text_end = min_of_two(text_start + chunk_size + max_window_width_ - 1,
                                                        text_view.end());
                 auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
                 auto thread_local_states = span<rolling_state_t> {rolling_states.data() + thread_index * dims, dims};
@@ -1048,11 +1048,11 @@ SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                     
         auto min_counts = to_span(min_counts_per_text[text_index]);
         auto gather_mutex = executor.make_mutex();
         executor.for_threads([&](size_t thread_index) noexcept {
-            auto text_start = text_view.data() + (std::min)(text_view.size(), thread_index * chunk_size);
+            auto text_start = text_view.data() + min_of_two(text_view.size(), thread_index * chunk_size);
             // ? This overlap will be different for different window widths, but assuming we are
             // ? computing the non-weighted Min-Hash, recomputing & comparing a few hashes for the
             // ? same slices isn't a big deal.
-            auto overlapping_text_end = (std::min)(text_start + chunk_size + window_width - 1, text_view.end());
+            auto overlapping_text_end = min_of_two(text_start + chunk_size + window_width - 1, text_view.end());
             auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
 
             rolling_state_t thread_local_states[dimensions_k];
@@ -1231,7 +1231,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_, void> {
         size_t const passed_progress = 0) const noexcept {
 
         // Until we reach the maximum window length, use a branching code version
-        size_t const prefix_length = (std::min)(text_chunk.size(), window_width_);
+        size_t const prefix_length = min_of_two(text_chunk.size(), window_width_);
         size_t new_char_offset = passed_progress;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             byte_t const new_char = text_chunk[new_char_offset];
@@ -1246,7 +1246,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_, void> {
         // We now have our first minimum hashes
         if (new_char_offset == window_width_)
             for (size_t dim = 0; dim < dimensions_k; ++dim)
-                rolling_minimums[dim] = (std::min)(rolling_minimums[dim], last_states[dim]),
+                rolling_minimums[dim] = min_of_two(rolling_minimums[dim], last_states[dim]),
                 min_counts[dim] = 1; // First occurrence of this hash
 
         // Now we can avoid a branch in the nested loop, as we are passed the longest window width
@@ -1274,7 +1274,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_, void> {
                 // There's a branchless approach to achieve the same outcome:
                 min_count *= last_state >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
                 min_count += last_state <= rolling_minimum; // ? Increments by 1 for new & old minimums
-                rolling_minimum = (std::min)(rolling_minimum, last_state);
+                rolling_minimum = min_of_two(rolling_minimum, last_state);
             }
         }
 

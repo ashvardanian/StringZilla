@@ -12,6 +12,7 @@
 
 #include <cstring> // For `std::memcpy`
 
+#include <memory>      // For `std::unique_ptr`
 #include <variant>     // For `std::variant`
 #include <string_view> // For `std::string_view`
 

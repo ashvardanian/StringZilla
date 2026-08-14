@@ -333,8 +333,8 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cud
                 // In the last iteration of the loop the second half-word contains noise,
                 // so we have to discard it from affecting the final score.
                 bool const is_tail = i + 1 == tasks_count;
-                final_score_vec.i16s[0] = (std::max)(cell_score_vec.i16s[0], final_score_vec.i16s[0]);
-                final_score_vec.i16s[1] = (std::max)(cell_score_vec.i16s[1 - is_tail], final_score_vec.i16s[1]);
+                final_score_vec.i16s[0] = max_of_two(cell_score_vec.i16s[0], final_score_vec.i16s[0]);
+                final_score_vec.i16s[1] = max_of_two(cell_score_vec.i16s[1 - is_tail], final_score_vec.i16s[1]);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -391,7 +391,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cud
             char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter(first_char, second_char);
-            i32_t if_deletion_or_insertion = (std::max)(pre_deletion, pre_insertion) + gap_costs;
+            i32_t if_deletion_or_insertion = max_of_two(pre_deletion, pre_insertion) + gap_costs;
             i32_t cell_score;
 
             // For local scoring we should use the ReLU variants of 3-way `max`.
@@ -401,7 +401,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cud
             }
             else {
                 cell_score = __viaddmax_s32_relu(pre_substitution, cost_of_substitution, if_deletion_or_insertion);
-                final_score = (std::max)(cell_score, final_score);
+                final_score = max_of_two(cell_score, final_score);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -413,7 +413,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cud
             if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->final_score_ = (std::max)(this->final_score_, final_score);
+            this->final_score_ = max_of_two(this->final_score_, final_score);
             // On Hopper we can use specialized warp reductions for up-to 32-bit values:
             // this->final_score_ = pick_best_in_warp_<sz_maximize_score_k>(this->final_score_);
             this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
@@ -511,8 +511,8 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cud
                 // In the last iteration of the loop the second half-word contains noise,
                 // so we have to discard it from affecting the final score.
                 bool const is_tail = i + 1 == tasks_count;
-                final_score_vec.i16s[0] = (std::max)(cell_score_vec.i16s[0], final_score_vec.i16s[0]);
-                final_score_vec.i16s[1] = (std::max)(cell_score_vec.i16s[1 - is_tail], final_score_vec.i16s[1]);
+                final_score_vec.i16s[0] = max_of_two(cell_score_vec.i16s[0], final_score_vec.i16s[0]);
+                final_score_vec.i16s[1] = max_of_two(cell_score_vec.i16s[1 - is_tail], final_score_vec.i16s[1]);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -594,7 +594,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cud
             }
             else {
                 cell_score = __vimax3_s32_relu(if_substitution, if_insertion, if_deletion);
-                final_score = (std::max)(cell_score, final_score);
+                final_score = max_of_two(cell_score, final_score);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -608,7 +608,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cud
             if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->final_score_ = (std::max)(this->final_score_, final_score);
+            this->final_score_ = max_of_two(this->final_score_, final_score);
             // On Hopper we can use specialized warp reductions for up-to 32-bit values:
             // this->final_score_ = pick_best_in_warp_<sz_maximize_score_k>(this->final_score_);
             this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
@@ -742,10 +742,10 @@ struct weighted_gap_fold<locality_, capability_, std::enable_if_t<(capability_ &
         cell_low = static_cast<i16_t>(__viaddmax_s32(static_cast<int>(left_cell), gap, static_cast<int>(cell_low)));
         cell_high = static_cast<i16_t>(__viaddmax_s32(static_cast<int>(cell_low), gap, static_cast<int>(cell_high)));
 #else
-        cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
-        cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
+        cell_low = max_of_two<i16_t>(cell_low, left_cell + gap_cost);
+        cell_high = max_of_two<i16_t>(cell_high, cell_low + gap_cost);
 #endif
-        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+        if constexpr (is_local_k) cell_low = max_of_two<i16_t>(cell_low, 0), cell_high = max_of_two<i16_t>(cell_high, 0);
     }
 };
 
@@ -767,17 +767,17 @@ struct weighted_affine_gap_fold<locality_, capability_, std::enable_if_t<(capabi
         int const open_cost = static_cast<int>(open), extend_cost = static_cast<int>(extend);
         deletion_low = static_cast<i16_t>(
             __viaddmax_s32(static_cast<int>(left_cell), open_cost, static_cast<int>(left_deletion) + extend_cost));
-        cell_low = std::max(match_or_insert_low, deletion_low);
+        cell_low = max_of_two(match_or_insert_low, deletion_low);
         deletion_high = static_cast<i16_t>(
             __viaddmax_s32(static_cast<int>(cell_low), open_cost, static_cast<int>(deletion_low) + extend_cost));
-        cell_high = std::max(match_or_insert_high, deletion_high);
+        cell_high = max_of_two(match_or_insert_high, deletion_high);
 #else
-        deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
-        cell_low = std::max(match_or_insert_low, deletion_low);
-        deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
-        cell_high = std::max(match_or_insert_high, deletion_high);
+        deletion_low = max_of_two<i16_t>(left_cell + open, left_deletion + extend);
+        cell_low = max_of_two(match_or_insert_low, deletion_low);
+        deletion_high = max_of_two<i16_t>(cell_low + open, deletion_low + extend);
+        cell_high = max_of_two(match_or_insert_high, deletion_high);
 #endif
-        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+        if constexpr (is_local_k) cell_low = max_of_two<i16_t>(cell_low, 0), cell_high = max_of_two<i16_t>(cell_high, 0);
     }
 };
 
