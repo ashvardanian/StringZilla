@@ -45,7 +45,7 @@ int main(int argc, char const **argv) {
     if (auto code = log_environment(); code != 0) return code;
     print_test_environment();
 
-    int failures = 0;
+    std::size_t failures = 0;
 
     std::printf("\n=== Fingerprints ===\n");
     failures += run_test("test_fingerprints_unit", test_fingerprints_unit);
@@ -59,18 +59,23 @@ int main(int argc, char const **argv) {
     failures += run_test("test_similarities_safety", test_similarities_safety);
     failures += run_test("test_similarities_memory_usage", test_similarities_memory_usage);
 
+    std::printf("\n=== Substrings ===\n");
     failures += run_test("test_substrings_unit", test_substrings_unit);
     failures += run_test("test_substrings_uncased", test_substrings_uncased);
     failures += run_test("test_substrings_agreement", test_substrings_agreement);
     failures += run_test("test_substrings_construction", test_substrings_construction);
     failures += run_test("test_substrings_adversarial", test_substrings_adversarial);
     failures += run_test("test_substrings_large_haystacks", test_substrings_large_haystacks);
+    failures += run_test("test_substrings_cover", test_substrings_cover);
+    failures += run_test("test_substrings_rewriting", test_substrings_rewriting);
+    failures += run_test("test_substrings_scoring", test_substrings_scoring);
     failures += run_test("test_substrings_cuda_memory_contract", test_substrings_cuda_memory_contract);
+    failures += run_test("test_substrings_cuda_rewriting_and_scoring", test_substrings_cuda_rewriting_and_scoring);
     failures += run_test("test_substrings_safety", test_substrings_safety);
     failures += run_test("test_substrings_buffer_contracts", test_substrings_buffer_contracts);
 
     if (failures != 0) {
-        std::fprintf(stderr, "\n%d test(s) failed.\n", failures);
+        std::fprintf(stderr, "\n%zu test(s) failed.\n", failures);
         return 1;
     }
     std::printf("All tests passed... Unbelievable!\n");

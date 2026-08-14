@@ -666,9 +666,12 @@ typedef struct szs_substrings_match_t {
 typedef struct szs_substrings_bm25_t {
     /** The literature's `k1`: how slowly repeated occurrences stop adding score; 1.2 is customary. */
     sz_f32_t term_frequency_saturation;
-    /** The literature's `b`, in [0, 1]: 0 ignores document length, 1 normalizes fully; 0.75 is customary. */
+    /** The literature's `b`, in [0, 1]: 0 ignores document length and every length input with it, 1
+     *  normalizes fully; 0.75 is customary. */
     sz_f32_t length_normalization;
-    /** Corpus-wide mean of `document_lengths`, in the same unit; never derived from the batch. */
+    /** Corpus-wide mean of `document_lengths`, in the same unit; never derived from the batch, and read
+     *  only when `length_normalization` is positive. A non-positive mean is then refused rather than
+     *  silently discarding both it and `document_lengths`. */
     sz_f32_t average_document_length;
 } szs_substrings_bm25_t;
 
@@ -766,6 +769,8 @@ SZ_API_RUNTIME sz_status_t szs_substrings_find(                                 
  *  @param[in] parameters BM25's continuous parameters.
  *  @param[in] needle_weights One IDF or boost per needle; as many entries as the dictionary has needles.
  *  @param[out] scores One per haystack.
+ *  @retval `sz_unexpected_dimensions_k` @p needle_weights is NULL, or `length_normalization` is positive
+ *          while `average_document_length` is not - there would be no mean to divide by.
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
 SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25(   //

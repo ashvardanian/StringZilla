@@ -170,7 +170,8 @@ struct substrings_bm25_t {
     f32_t term_frequency_saturation = 1.2f;
     /** @brief The literature's `b`, in [0, 1]: 0 ignores document length, 1 normalizes fully. */
     f32_t length_normalization = 0.75f;
-    /** @brief Corpus-wide mean document length; zero disables length normalization. */
+    /** @brief Corpus-wide mean document length, read only when `length_normalization` is positive. The C
+     *         SDK refuses a non-positive mean beside a positive `b`; this floor is the kernel's own. */
     f32_t average_document_length = 0.0f;
 };
 

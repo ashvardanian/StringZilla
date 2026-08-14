@@ -207,6 +207,13 @@ inline sz_status_t szs_substrings_score_bm25_(szs_substrings_t engine_punned, sz
         return propagate_error(sz::status_t::unexpected_dimensions_k, error_message,
                                "One weight per needle, no more and no fewer");
 
+    // Normalizing divides by the corpus mean, so without one there is nothing to divide by. Letting that
+    // through would drop `length_normalization` and every entry of `document_lengths` without a word.
+    if (parameters.length_normalization > 0.0f && !(parameters.average_document_length > 0.0f))
+        return propagate_error(sz::status_t::unexpected_dimensions_k, error_message,
+                               "BM25 length normalization needs a positive `average_document_length`: "
+                               "pass the corpus mean, or set `length_normalization` to zero");
+
     auto const needles_count = szs_substrings_needles_count_(*reinterpret_cast<substrings_backends_t *>(engine_punned));
     szs::substrings_bm25_t const engine_parameters {
         parameters.term_frequency_saturation, parameters.length_normalization, parameters.average_document_length};

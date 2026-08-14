@@ -13,13 +13,15 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 - `cipher.cpp` — AES-256 counter mode and Galois/counter mode throughput.
 - `container.cpp` — STL associative containers with string keys.
 - `similarities.cpp` — Levenshtein, Needleman-Wunsch, and Smith-Waterman scoring.
-- `fingerprints.cpp` — MinHash rolling fingerprints and multi-pattern search.
+- `fingerprints.cpp` — MinHash rolling fingerprints.
+- `substrings.cpp` — multi-pattern Aho-Corasick counting, locating, rewriting, and BM25 scoring.
 - `utf8_iterate.cpp` and `utf8_uncased.cpp` — UTF-8 iteration, segmentation, and case-folding throughput.
 
 ## CUDA
 
 - `similarities.cu` — similarity scoring on CUDA GPUs.
 - `fingerprints.cu` — fingerprinting on CUDA GPUs.
+- `substrings.cu` — multi-pattern search on CUDA GPUs.
 
 ## Other Bindings
 

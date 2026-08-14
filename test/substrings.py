@@ -257,6 +257,23 @@ def test_substrings_score_bm25_checks_the_weight_count(device_name: str):
         engine.score_bm25(Strs(CLASSIC_HAYSTACKS), np.ones(2, dtype=np.float32), 6.0, device=device)
 
 
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_substrings_score_bm25_refuses_a_missing_mean(device_name: str):
+    """Normalizing divides by the corpus mean, so a positive `length_normalization` without one is
+    refused rather than silently dropping both it and `document_lengths`."""
+    device, capabilities = device_scope_and_capabilities(device_name)
+    engine = szs.Substrings(Strs(CLASSIC_NEEDLES), device=device, capabilities=capabilities)
+    haystacks = Strs(CLASSIC_HAYSTACKS)
+    uniform = np.ones(len(CLASSIC_NEEDLES), dtype=np.float32)
+
+    with pytest.raises(Exception):
+        engine.score_bm25(haystacks, uniform, 0.0, device=device)
+
+    # Opting out of normalization is how a caller works without a mean, and then zero is accepted.
+    unnormalized = engine.score_bm25(haystacks, uniform, 0.0, device=device, length_normalization=0.0)
+    assert unnormalized[1] == 0.0 and unnormalized[0] > 0.0
+
+
 # endregion Scoring
 
 

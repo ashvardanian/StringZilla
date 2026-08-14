@@ -607,7 +607,7 @@ Each yields `Str` views into the original buffer, so segmentation stays allocati
 | `utf8_split_delimiters(string, skip_empty=False, with_separators=False)`  | punctuation/symbol/separator     | content BETWEEN any Unicode delimiter (superset of whitespace).                        |
 | `utf8_delimiters(string, skip_empty=False)`                               | punctuation/symbol/separator     | the delimiter runs themselves (the separators).                                        |
 
-Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators**, while `split_*` yields the content **between** them.
+Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the __separators__, while `split_*` yields the content __between__ them.
 `skip_empty` drops empty segments; `with_separators=True` interleaves both losslessly (concatenation reproduces the input), replacing the old `keepends`.
 
 ```python
