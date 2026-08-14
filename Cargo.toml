@@ -56,6 +56,13 @@ stringtape = {version = "2.4.2", optional = true}
 [build-dependencies]
 cc = "1.2.47"
 
+# Third-party oracles the `#[cfg(test)]` suites differential against. Dev-dependencies rather than an
+# optional feature, so they never reach a consumer's build graph, never appear on docs.rs, and never
+# become public surface this crate has to keep. `aho-corasick` is the reference multi-pattern
+# automaton, whose three `MatchKind`s are our three overlap policies under different names.
+[dev-dependencies]
+aho-corasick = "1.1"
+
 [lints.clippy]
 # Catch platform-specific type issues like `c_char` differences
 cast-sign-loss = "warn"
