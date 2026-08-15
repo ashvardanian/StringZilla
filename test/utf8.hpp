@@ -7,7 +7,7 @@
  *  from here. The three layers are:
  *    - known-answer goldens (`check_utf8_segment_unit_`), compared lazily against expected literals;
  *    - the malformed-input safety sweep (`check_utf8_segment_safety_`);
- *    - the serial-vs-ISA differential (`test_utf8_segment_equivalence_`), a short orchestrator over named
+ *    - the serial-vs-ISA differential (`check_utf8_segment_equivalence_`), a short orchestrator over named
  *      deterministic and randomized stressors.
  *
  *  Two segmentation backends are compared by STREAMING them in lockstep through @ref utf8_segment_cursor_t (a
@@ -1169,10 +1169,10 @@ inline void utf8_differential_byte_edge_exhaustive_(utf8_differential_context_t 
  *         `utf8_differential_input_` for all @p candidates, asserting serial≡ISA, capacity-independence, and the
  *         reference's own tiling/alignment invariants, and aborts with a full repro record at the first divergence.
  */
-inline void test_utf8_segment_equivalence_(sz_utf8_segmenter_t reference,
-                                           sz::span<utf8_segment_backend_t const> candidates,
-                                           utf8_segment_corpora_t const &corpora,
-                                           std::size_t iterations = scale_iterations(5000)) {
+inline void check_utf8_segment_equivalence_(sz_utf8_segmenter_t reference,
+                                            sz::span<utf8_segment_backend_t const> candidates,
+                                            utf8_segment_corpora_t const &corpora,
+                                            std::size_t iterations = scale_iterations(5000)) {
     std::printf("  - testing %s serial-vs-ISA differential...\n", corpora.family_name);
     utf8_differential_context_t context;
     context.reference = reference, context.candidates = candidates, context.corpora = &corpora,

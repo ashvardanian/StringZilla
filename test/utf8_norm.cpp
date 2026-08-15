@@ -168,7 +168,7 @@ struct utf8_norm_backend_t {
  *  astral planes stay reachable on a cheap run.
  */
 template <typename reference_, typename candidate_>
-void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size_t iterations) {
+void test_utf8_norm_equivalence(reference_ reference, candidate_ candidate, std::size_t iterations) {
     std::size_t const codepoint_stride = sweep_stride(0x110000);
     std::vector<sz_rune_t> all_runes;
     all_runes.reserve(0x110000 / codepoint_stride);
@@ -233,7 +233,7 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
 static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormalized_t violation,
                                     std::size_t random_inputs = scale_iterations(10000)) {
 
-    std::size_t const max_input_length = 70;
+    std::size_t const max_input_length = utf8_unit_capacity_k;
     // The normalizer's documented worst case is 18x the input for a single-codepoint compatibility
     // decomposition (see `utf8_norm.h`); a truncated trailing sequence may mis-decode one extra rune.
     std::size_t const norm_bound = max_input_length * 18 + 18;
@@ -271,40 +271,7 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
         }
     };
 
-    char input[max_input_length];
-
-    // The named adversarial shapes, exercised directly.
-    check("\x80", 1);              // Lone continuation byte
-    check("\xC0\x80", 2);          // Overlong encoding of NUL
-    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
-    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
-
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF.
-    for (std::size_t byte = 0; byte < 256; byte += sweep_stride(256)) {
-        input[0] = (char)byte;
-        check(input, 1);
-    }
-
-    // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
-    // The pair index is walked flat, so a strided run samples both bytes rather than a prefix of the leads.
-    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
-        input[0] = (char)(pair >> 8);
-        input[1] = (char)(pair & 0xFF);
-        check(input, 2);
-    }
-
-    // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
-    auto &generator = global_random_generator();
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(generator);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
-        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, input, input_length);
-            check(buffer, input_length);
-        });
-    }
+    for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
 }
 
 /** @brief Drive the malformed-input normalization safety probe through serial, dispatched, and every backend. */
@@ -403,7 +370,7 @@ void test_utf8_norm_all() {
     // One iteration pushes every assigned codepoint through 4 forms x 4 kernel calls, once per compiled backend.
     // Three passes - one in codepoint order plus two shuffles - is this family's share of the suite budget.
     for (utf8_norm_backend_t const &backend : utf8_norm_backends)
-        test_norm_equivalence(serial, backend, scale_iterations(3));
+        test_utf8_norm_equivalence(serial, backend, scale_iterations(3));
 }
 
 #pragma endregion // Drivers

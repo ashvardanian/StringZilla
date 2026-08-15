@@ -259,8 +259,8 @@ void test_utf8_sentences_safety() {
 /** @brief Serial-vs-ISA sentence differential over the hardened corpora (high-density + long-range). */
 void test_utf8_sentences_all() {
     utf8_segment_corpora_t const corpora = utf8_sentences_corpora_();
-    test_utf8_segment_equivalence_(sz_utf8_sentences_serial, span_over(utf8_sentences_backends), corpora,
-                                   scale_iterations(90)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(sz_utf8_sentences_serial, span_over(utf8_sentences_backends), corpora,
+                                    scale_iterations(90)); // This family's share of the suite budget
 }
 
 #pragma endregion // Drivers

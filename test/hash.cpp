@@ -49,19 +49,11 @@
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm>     // `std::transform`
-#include <iterator>      // `std::distance`
-#include <map>           // `std::map`
-#include <memory>        // `std::allocator`
-#include <numeric>       // `std::accumulate`
-#include <random>        // `std::random_device`
-#include <set>           // `std::set`
-#include <sstream>       // `std::ostringstream`
-#include <string>        // `std::string` baseline
-#include <string_view>   // `std::string_view` baseline
-#include <unordered_map> // `std::unordered_map`
-#include <unordered_set> // `std::unordered_set`
-#include <vector>        // `std::vector`
+#include <limits>      // `std::numeric_limits`
+#include <random>      // `std::uniform_int_distribution`
+#include <string>      // `std::string` baseline
+#include <string_view> // `std::string_view` baseline
+#include <vector>      // `std::vector`
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."

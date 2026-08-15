@@ -1594,11 +1594,12 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
 void test_string_updates_unit(std::size_t repetitions) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
+    auto &generator = global_random_generator();
     for (std::size_t repetition = 0; repetition != repetitions; ++repetition) {
         std::string stl_string;
         sz::string sz_string;
         for (std::size_t length = 1; length != 200; ++length) {
-            char c = alphabet_chars[std::rand() % 26];
+            char c = alphabet_chars[generator() % 26];
             stl_string.push_back(c);
             sz_string.push_back(c);
             verify(sz::string_view(stl_string) == sz::string_view(sz_string));
@@ -1606,8 +1607,8 @@ void test_string_updates_unit(std::size_t repetitions) {
 
         // Compare STL and StringZilla strings erase functionality.
         while (stl_string.length()) {
-            std::size_t offset_to_erase = std::rand() % stl_string.length();
-            std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase) + 1;
+            std::size_t offset_to_erase = generator() % stl_string.length();
+            std::size_t chars_to_erase = generator() % (stl_string.length() - offset_to_erase) + 1;
             stl_string.erase(offset_to_erase, chars_to_erase);
             sz_string.erase(offset_to_erase, chars_to_erase);
             verify(sz::string_view(stl_string) == sz::string_view(sz_string));

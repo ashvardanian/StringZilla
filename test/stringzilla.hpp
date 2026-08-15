@@ -122,6 +122,25 @@ using unified_vector = std::vector<value_type_, stringzillas::unified_alloc<valu
 #endif
 
 /**
+ *  @brief Copies @p texts into unified memory a CUDA kernel can reach, as one span per string.
+ *
+ *  Owns the bytes the spans point into, so it has to outlive every call that reads `view()`.
+ */
+struct unified_texts_t {
+    std::vector<unified_vector<char>> storage;
+    unified_vector<span<char const>> spans;
+
+    explicit unified_texts_t(std::vector<std::string> const &texts) : storage(texts.size()), spans(texts.size()) {
+        for (std::size_t index = 0; index != texts.size(); ++index) {
+            storage[index].assign(texts[index].begin(), texts[index].end());
+            spans[index] = {storage[index].data(), storage[index].size()};
+        }
+    }
+
+    span<span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
+};
+
+/**
  *  @brief Reads a file into a string via LibC `<cstdio>`. A non-zero @p max_bytes stops the read after
  *         that many bytes, so the file tail is never touched.
  */
@@ -140,13 +159,6 @@ inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexce
     std::fclose(file);
     content.resize(read_bytes);
     return content;
-}
-
-inline void write_file(std::string path, std::string content) noexcept(false) {
-    std::FILE *file = std::fopen(path.c_str(), "wb");
-    if (!file) throw std::runtime_error("Failed to open file: " + path);
-    std::fwrite(content.data(), 1, content.size(), file);
-    std::fclose(file);
 }
 
 /**

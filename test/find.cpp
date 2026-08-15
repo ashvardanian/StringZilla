@@ -49,19 +49,12 @@
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm>     // `std::transform`
-#include <iterator>      // `std::distance`
-#include <map>           // `std::map`
-#include <memory>        // `std::allocator`
-#include <numeric>       // `std::accumulate`
-#include <random>        // `std::random_device`
-#include <set>           // `std::set`
-#include <sstream>       // `std::ostringstream`
-#include <string>        // Baseline
-#include <string_view>   // Baseline
-#include <unordered_map> // `std::unordered_map`
-#include <unordered_set> // `std::unordered_set`
-#include <vector>        // `std::vector`
+#include <algorithm>   // `std::transform`
+#include <iterator>    // `std::distance`
+#include <random>      // `std::uniform_int_distribution`
+#include <string>      // Baseline
+#include <string_view> // Baseline
+#include <vector>      // `std::vector`
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
@@ -450,7 +443,7 @@ struct byteset_backend_t {
  *  `for_each_cacheline_offset_`, so a needle straddling a 64-byte boundary is always exercised.
  */
 template <typename reference_, typename candidate_>
-void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void test_find_search_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     // Replays one haystack/needle pair at every intra-cacheline alignment and compares the backends.
     auto compare_on = [&](std::string const &haystack_pattern, std::string const &needle) {
@@ -924,10 +917,10 @@ static byteset_backend_t const rfind_byteset_backends[] = {
  */
 void test_find_all() {
     search_backend_t const find_serial {"serial", sz_find_serial};
-    for (search_backend_t const &backend : find_backends) test_search_equivalence(find_serial, backend, 200);
+    for (search_backend_t const &backend : find_backends) test_find_search_equivalence(find_serial, backend, 200);
 
     search_backend_t const rfind_serial {"serial", sz_rfind_serial};
-    for (search_backend_t const &backend : rfind_backends) test_search_equivalence(rfind_serial, backend, 200);
+    for (search_backend_t const &backend : rfind_backends) test_find_search_equivalence(rfind_serial, backend, 200);
 
     byteset_backend_t const find_byteset_serial {"serial", sz_find_byteset_serial};
     for (byteset_backend_t const &backend : find_byteset_backends)

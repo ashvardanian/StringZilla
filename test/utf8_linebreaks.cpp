@@ -273,8 +273,8 @@ void test_utf8_linebreaks_safety() {
 /** @brief Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
 void test_utf8_linebreaks_all() {
     utf8_segment_corpora_t const corpora = utf8_linebreaks_corpora_();
-    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
-                                   scale_iterations(25)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
+                                    scale_iterations(25)); // This family's share of the suite budget
 }
 
 #pragma endregion // Drivers

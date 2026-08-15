@@ -41,7 +41,7 @@ static utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
 };
 
 /** @brief Known-answer property table for `sz_rune_is_word_char` (UAX-29 word-character classification). */
-static void test_utf8_wordbreaks_classification_() {
+static void check_utf8_wordbreaks_classification_() {
     // ASCII letters, digits, underscore, and the mid-word apostrophe are word characters.
     verify(sz_rune_is_word_char('A') == sz_true_k);
     verify(sz_rune_is_word_char('z') == sz_true_k);
@@ -134,7 +134,7 @@ static void check_utf8_wordbreaks_lengths_(char const *label, sz_utf8_segmenter_
  *         Regression corpus for the cross-window bridge-shadow carry: a failed bridge must still emit the break
  *         at the mid, keep WB7a's Hebrew x Single_Quote join, and leave the mid as the effective left context.
  */
-static void test_utf8_wordbreaks_deferred_mid_() {
+static void check_utf8_wordbreaks_deferred_mid_() {
     static sz_size_t const run_lengths[] = {3, 8, 15, 31, 32, 33, 100};
     static char const combining_grave[] = "\xCC\x80";   // U+0300, Word_Break=Extend
     static char const hebrew_he[] = "\xD7\x94";         // U+05D4, Hebrew_Letter
@@ -179,8 +179,8 @@ static void test_utf8_wordbreaks_deferred_mid_() {
 void test_utf8_wordbreaks_unit() {
     std::printf("  - testing UTF-8 word-break known-answer vectors...\n");
 
-    test_utf8_wordbreaks_classification_();
-    test_utf8_wordbreaks_deferred_mid_();
+    check_utf8_wordbreaks_classification_();
+    check_utf8_wordbreaks_deferred_mid_();
 
     check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
@@ -422,8 +422,8 @@ void test_utf8_wordbreaks_safety() {
 /** @brief Serial-vs-ISA word differential over the hardened corpora (high-density + long-range + seam regressions). */
 void test_utf8_wordbreaks_all() {
     // The iteration count is this family's share of the suite budget, sized against its siblings.
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
-                                   utf8_wordbreaks_corpora_(), scale_iterations(20));
+    check_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
+                                    utf8_wordbreaks_corpora_(), scale_iterations(20));
 }
 
 #pragma endregion // Drivers

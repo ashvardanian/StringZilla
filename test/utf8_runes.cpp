@@ -607,7 +607,7 @@ static void test_utf8_runes_large_count() {
 static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unpack,
                                      std::size_t random_inputs = scale_iterations(4000)) {
 
-    std::size_t const max_input_length = 70;
+    std::size_t const max_input_length = utf8_unit_capacity_k;
     std::vector<sz_rune_t> rune_destination;
 
     auto check = [&](char const *input, std::size_t input_length) {
@@ -646,36 +646,13 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
         }
     };
 
-    char input[max_input_length];
-
-    // The named adversarial shapes, exercised directly.
-    check("\x80", 1);              // Lone continuation byte
-    check("\xC0\x80", 2);          // Overlong encoding of NUL
-    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
-    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
-
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF. Strided so a low multiplier
-    // samples the whole byte space instead of truncating to a prefix of it.
-    std::size_t const byte_stride = sweep_stride(256);
-    for (std::size_t byte = 0; byte < 256; byte += byte_stride) {
-        input[0] = (char)byte;
-        check(input, 1);
-    }
-
-    // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
-    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
-    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
-        input[0] = (char)(pair >> 8);
-        input[1] = (char)(pair & 0xFF);
-        check(input, 2);
-    }
-
     auto &generator = global_random_generator();
+    for_each_adversarial_utf8_input_(generator, random_inputs, check);
+
+    // Valid text with a few bytes overwritten: damage surrounded by long well-formed runs, which neither the
+    // battery's uniform garbage nor the well-formed equivalence corpus produces.
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
-
-    // Valid text with a few bytes overwritten: damage surrounded by long well-formed runs, which uniform
-    // garbage never produces and the equivalence pass - fed only well-formed text - never reaches.
     std::uniform_int_distribution<std::size_t> codepoint_distribution(1, max_input_length / 4);
     for (std::size_t iteration = 0; iteration != random_inputs / 8 + 1; ++iteration) {
         std::string text = random_valid_utf8_(codepoint_distribution(generator), generator);
@@ -683,16 +660,6 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
         for (std::size_t corruption = 0; corruption != 3; ++corruption)
             text[length_distribution(generator) % text.size()] = (char)byte_distribution(generator);
         check(text.data(), text.size());
-    }
-
-    // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
-    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(generator);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
-        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, input, input_length);
-            check(buffer, input_length);
-        });
     }
 }
 

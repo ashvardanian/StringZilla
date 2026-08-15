@@ -689,7 +689,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
 void test_utf8_tokens_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 newline/whitespace kernels...\n");
 
-    static constexpr std::size_t max_input_length = 70;
+    static constexpr std::size_t max_input_length = utf8_unit_capacity_k;
 
     // Drive every newline/whitespace boundary finder shipped on this target over one malformed input.
     auto check = [&](char const *input, std::size_t input_length) {
@@ -747,43 +747,7 @@ void test_utf8_tokens_safety() {
 #endif
     };
 
-    char input[max_input_length];
-
-    // The named adversarial shapes the task calls out, exercised directly.
-    check("\x80", 1);              // Lone continuation byte
-    check("\xC0\x80", 2);          // Overlong encoding of NUL
-    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
-    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
-
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF. Both the single-byte sweep and the
-    // pair sweep below stride each dimension, so a low multiplier samples the whole space instead of a prefix.
-    std::size_t const byte_step = sweep_stride(256);
-    for (std::size_t byte = 0; byte < 256; byte += byte_step) {
-        input[0] = (char)byte;
-        check(input, 1);
-    }
-
-    // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
-    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
-    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
-        input[0] = (char)(pair >> 8);
-        input[1] = (char)(pair & 0xFF);
-        check(input, 2);
-    }
-
-    // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
-    std::size_t const random_inputs = scale_iterations(10000);
-    auto &generator = global_random_generator();
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(generator);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
-        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, input, input_length);
-            check(buffer, input_length);
-        });
-    }
+    for_each_adversarial_utf8_input_(global_random_generator(), scale_iterations(10000), check);
 
     std::printf("    malformed-input safety passed!\n");
 }
@@ -1050,7 +1014,6 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 /** @brief Feeds malformed / invalid UTF-8 through one backend, asserting in-bounds, ascending, well-formed output. */
 static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
                                           std::size_t random_inputs = scale_iterations(2500)) {
-    static constexpr std::size_t max_input_length = 70;
     std::vector<sz_size_t> offsets, lengths;
 
     // Malformed bytes meet a capacity too small to hold the batch, so the resume path - not just the one-shot
@@ -1069,32 +1032,7 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
         }
     };
 
-    char input[max_input_length];
-    check("\x80", 1);              // Lone continuation byte
-    check("\xC0\x80", 2);          // Overlong encoding of NUL
-    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
-    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
-
-    // Both sweeps stride every dimension, so a low multiplier samples the whole space instead of a prefix.
-    std::size_t const byte_step = sweep_stride(256);
-    for (std::size_t byte = 0; byte < 256; byte += byte_step) { input[0] = (char)byte, check(input, 1); }
-    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
-    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
-        input[0] = (char)(pair >> 8), input[1] = (char)(pair & 0xFF);
-        check(input, 2);
-    }
-
-    auto &generator = global_random_generator();
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(generator);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
-        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, input, input_length);
-            check(buffer, input_length);
-        });
-    }
+    for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
 }
 
 #pragma endregion // Safety

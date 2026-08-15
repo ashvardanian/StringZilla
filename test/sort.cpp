@@ -470,11 +470,12 @@ void test_intersect_unit() {
         {15, 15, 1000},
         {5, 30, 2000},
     };
+    auto &generator = global_random_generator();
     for (auto experiment : experiments) {
         std::unordered_set<std::string> random_strings;
         while (random_strings.size() < experiment.count_strings)
             random_strings.insert(sz::scripts::random_string(
-                experiment.min_length + std::rand() % (experiment.max_length - experiment.min_length + 1), //
+                experiment.min_length + generator() % (experiment.max_length - experiment.min_length + 1), //
                 "ab", 2));
 
         strs_t all_strings(random_strings.begin(), random_strings.end());

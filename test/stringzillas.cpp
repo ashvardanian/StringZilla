@@ -66,6 +66,9 @@ int main(int argc, char const **argv) {
     failures += run_test("test_substrings_cover", test_substrings_cover);
     failures += run_test("test_substrings_rewriting", test_substrings_rewriting);
     failures += run_test("test_substrings_scoring", test_substrings_scoring);
+    failures += run_test("test_substrings_scoring_wide_dictionary", test_substrings_scoring_wide_dictionary);
+    failures += run_test("test_substrings_cuda_memory_contract", test_substrings_cuda_memory_contract);
+    failures += run_test("test_substrings_cuda_rewriting_and_scoring", test_substrings_cuda_rewriting_and_scoring);
     failures += run_test("test_substrings_safety", test_substrings_safety);
     failures += run_test("test_substrings_buffer_contracts", test_substrings_buffer_contracts);
 

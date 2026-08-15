@@ -2158,7 +2158,10 @@ void test_similarities_memory_usage() {
         {"ABC", /* batch_size */ 4, /* min_string_length */ 4096, /* max_string_length */ 4096},
         {"ABC", /* batch_size */ 1, /* min_string_length */ 8192, /* max_string_length */ 8192},
     };
-    correctness_experiments.resize(scale_iterations(correctness_experiments.size()));
+    // Clamped to the table: resizing past it appends default-constructed experiments, not harder ones.
+    static constexpr std::size_t default_experiments_k = 7;
+    correctness_experiments.resize(
+        sz_min_of_two(scale_iterations(default_experiments_k), correctness_experiments.size()));
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;

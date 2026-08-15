@@ -1419,6 +1419,8 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
     }
 }
 
+#endif // SZ_USE_CUDA
+
 /**
  *  @brief Pins the two sides of the device memory contract: scattered device-resident haystacks - several
  *         separate unified allocations rather than one packed tape - are searched correctly, and host-backed
@@ -1426,6 +1428,7 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
  */
 void test_substrings_cuda_memory_contract() {
     std::printf("  - testing scattered unified haystacks and the host-memory refusal...\n");
+#if SZ_USE_CUDA
 
     gpu_specs_t gpu_specs;
     verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
@@ -1443,13 +1446,8 @@ void test_substrings_cuda_memory_contract() {
     // Three haystacks in three separate unified allocations: the descriptors point wherever the caller's
     // memory happens to live, which is the whole point of not assuming a tape.
     std::vector<std::string> const texts {"ushers", "hishers", "she"};
-    std::vector<unified_vector<char>> scattered_storage(texts.size());
-    unified_vector<span<char const>> scattered_spans(texts.size());
-    for (std::size_t index = 0; index < texts.size(); ++index) {
-        scattered_storage[index].assign(texts[index].begin(), texts[index].end());
-        scattered_spans[index] = {scattered_storage[index].data(), scattered_storage[index].size()};
-    }
-    span<span<char const> const> const scattered_view {scattered_spans.data(), scattered_spans.size()};
+    unified_texts_t const scattered {texts};
+    span<span<char const> const> const scattered_view = scattered.view();
 
     arrow_strings_tape_t reference_haystacks;
     verify(reference_haystacks.try_assign(texts.data(), texts.data() + texts.size()) == status_t::success_k);
@@ -1469,8 +1467,8 @@ void test_substrings_cuda_memory_contract() {
                                                    span<std::size_t>(counts.data(), counts.size()), matches_total,
                                                    executor, gpu_specs);
     verify(host_status == status_t::device_memory_mismatch_k && "Host input must be refused, not copied");
+#endif // SZ_USE_CUDA
 }
-#endif
 
 /**
  *  @brief Crosses every needle vocabulary with every placement skeleton and every needle transform.
@@ -2190,16 +2188,208 @@ void test_substrings_scoring() {
     }
 }
 
+/**
+ *  @brief BM25 over dictionaries wide enough to change how both backends hold their counters.
+ *
+ *  The CPU orders the needles a document hit in passes covering the widest needle index, so a two-needle
+ *  fixture drives only one pass. The GPU indexes its table straight by needle while the dictionary fits it,
+ *  hashes once it does not, and spills to a per-block row beyond that. All three fail silently, since a
+ *  needle counted twice scores as two small counts and `substrings_bm25_term` is concave.
+ *
+ *  Frequencies are known by construction: the needles are fixed width and space separated, so a match can
+ *  only begin where a token does, and the text's own recipe is the oracle.
+ */
+void test_substrings_scoring_wide_dictionary() {
+    std::printf("  - testing BM25 across the direct, hashed and overflow regimes...\n");
+
+    // Fixed-width needles, so none is a substring of another and a haystack's distinct count is exactly the
+    // number of tokens it was built from - which is what lets the regime be chosen rather than hoped for.
+    auto const needle_at = [](std::size_t index) {
+        std::string text = "w00000";
+        for (std::size_t digit = 0, value = index; digit < 5; ++digit, value /= 10)
+            text[5 - digit] = (char)('0' + (value % 10));
+        return text;
+    };
+
+    // Below one slot per needle the GPU indexes its table directly; above it, hashed. The widths also carry
+    // the CPU ordering past one radix pass, which a needle index under 256 would never reach.
+    for (std::size_t needle_count : {std::size_t {4000}, std::size_t {20000}}) {
+        std::vector<std::string> needle_strings;
+        for (std::size_t index = 0; index < needle_count; ++index) needle_strings.push_back(needle_at(index));
+        arrow_strings_tape_t needles;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+
+        // One haystack per distinct-count, the widest touching every needle, so a 20,000-needle dictionary
+        // overruns an 8,192-slot table while a 4,000-needle one never can. The recipe is kept as the oracle.
+        std::vector<std::string> texts;
+        std::vector<std::vector<std::uint32_t>> expected_frequencies;
+        for (std::size_t distinct : {needle_count, needle_count / 2, std::size_t {17}, std::size_t {0}}) {
+            std::string text;
+            std::vector<std::uint32_t> frequencies(needle_count, 0u);
+            for (std::size_t index = 0; index < distinct; ++index) {
+                text += needle_at(index), text += ' ', ++frequencies[index];
+                if (index % 3 == 0) text += needle_at(index), text += ' ', ++frequencies[index];
+            }
+            texts.push_back(std::move(text));
+            expected_frequencies.push_back(std::move(frequencies));
+        }
+
+        arrow_strings_tape_t host_haystacks;
+        verify(host_haystacks.try_assign(texts.data(), texts.data() + texts.size()) == status_t::success_k);
+
+        substrings_serial_t serial_engine;
+        verify(serial_engine.try_index(needles.view(), substrings_cased_k) == status_t::success_k);
+
+        substrings_bm25_t const parameters {.term_frequency_saturation = 1.2f,
+                                            .length_normalization = 0.75f,
+                                            .average_document_length = 4096.0f};
+        std::vector<float> weights(needle_count);
+        for (std::size_t index = 0; index < needle_count; ++index) weights[index] = 1.0f + (float)(index % 7);
+        span<float const> const weights_view {weights.data(), weights.size()};
+
+        std::vector<float> host_scores(texts.size(), 0.0f);
+        verify(serial_engine.try_score_bm25(host_haystacks.view(), span<float const>(), parameters, weights_view,
+                                            span<float>(host_scores.data(), host_scores.size())) ==
+               status_t::success_k);
+
+        // The oracle sums the recipe's own frequencies ascending by needle, in `f32`, which is the order the
+        // header publishes - so this is an equality rather than a tolerance, and it is what pins the ordering
+        // the engine reaches by a different route.
+        for (std::size_t index = 0; index < texts.size(); ++index) {
+            float const document_length = (float)texts[index].size();
+            float expected = 0;
+            for (std::size_t needle = 0; needle < needle_count; ++needle) {
+                std::uint32_t const frequency = expected_frequencies[index][needle];
+                if (frequency == 0u) continue;
+                expected += weights[needle] * substrings_bm25_term(parameters, (float)frequency, document_length);
+            }
+            verify(host_scores[index] == expected && "Serial scores must match an ascending-order oracle exactly");
+        }
+
 #if SZ_USE_CUDA
+        gpu_specs_t gpu_specs;
+        verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
+        cuda_executor_t executor;
+
+        // A kernel cannot reach the caller's host memory, so the same texts are staged unified for the device.
+        unified_texts_t const staged {texts};
+        span<span<char const> const> const haystacks_view = staged.view();
+
+        substrings_cuda_t cuda_engine;
+        verify(cuda_engine.try_index(needles.view(), substrings_cased_k, executor, gpu_specs) == status_t::success_k);
+
+        unified_vector<float> device_scores(texts.size(), 0.0f);
+        verify(cuda_engine.try_score_bm25(haystacks_view, span<float const>(), parameters, weights_view,
+                                          span<float>(device_scores.data(), device_scores.size()), executor,
+                                          gpu_specs)
+                   .status == status_t::success_k);
+
+        for (std::size_t index = 0; index < texts.size(); ++index) {
+            verify(std::isfinite(device_scores[index]) && "A score must be a number in every regime");
+            verify(std::fabs(device_scores[index] - host_scores[index]) <=
+                       1e-4f * std::fabs(host_scores[index]) + 1e-6f &&
+                   "Device scores must agree with the serial engine at every dictionary width");
+        }
+
+        // One needle weighted alone, so a count split between the table and the overflow row reads as
+        // `5 * term(1)` against `term(5)` - which the relative comparison above would hide at this width.
+        {
+            std::size_t const watched = needle_count - 1;
+            std::string text;
+            for (std::size_t index = 0; index < needle_count; ++index) text += needle_at(index) + " ";
+            for (std::size_t repeat = 0; repeat < 4; ++repeat) text += needle_at(watched) + " ";
+
+            unified_texts_t const watched_staged {{text}};
+
+            std::vector<float> lone_weights(needle_count, 0.0f);
+            lone_weights[watched] = 1.0f;
+            unified_vector<float> lone_score(1, 0.0f);
+            verify(cuda_engine
+                       .try_score_bm25(watched_staged.view(),
+                                       span<float const>(), parameters,
+                                       span<float const>(lone_weights.data(), lone_weights.size()),
+                                       span<float>(lone_score.data(), lone_score.size()), executor, gpu_specs)
+                       .status == status_t::success_k);
+
+            float const normalized = 1.0f - parameters.length_normalization +
+                                     parameters.length_normalization * (float)text.size() /
+                                         parameters.average_document_length;
+            float const expected = 5.0f * (parameters.term_frequency_saturation + 1.0f) /
+                                   (5.0f + parameters.term_frequency_saturation * normalized);
+            verify(std::fabs(lone_score[0] - expected) <= 1e-5f * expected &&
+                   "Five occurrences of one needle must sum into one slot, not split across two");
+        }
+
+        // A hashed table is filled by racing lanes, so the seating order differs run to run; fixed-point
+        // accumulation is what makes the total independent of it.
+        for (std::size_t repeat = 0; repeat < 3; ++repeat) {
+            unified_vector<float> repeated(texts.size(), 0.0f);
+            verify(cuda_engine.try_score_bm25(haystacks_view, span<float const>(), parameters, weights_view,
+                                              span<float>(repeated.data(), repeated.size()), executor, gpu_specs)
+                       .status == status_t::success_k);
+            for (std::size_t index = 0; index < texts.size(); ++index)
+                verify(repeated[index] == device_scores[index] && "Device scores must repeat bit for bit");
+        }
+#endif // SZ_USE_CUDA
+    }
+
+    // Full length normalization against an empty haystack leaves the closed form at `0/0`. Nothing is counted,
+    // so no term is ever evaluated, and the score is a plain zero rather than a NaN that would poison a rank.
+    {
+        std::vector<std::string> const needle_strings {"cat", "dog"};
+        std::vector<std::string> const haystack_strings {""};
+        arrow_strings_tape_t needles, haystacks;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+               status_t::success_k);
+
+        substrings_bm25_t const degenerate {.term_frequency_saturation = 1.2f,
+                                            .length_normalization = 1.0f,
+                                            .average_document_length = 6.0f};
+        std::vector<float> const weights {1.0f, 1.0f};
+        span<float const> const weights_view {weights.data(), weights.size()};
+
+        substrings_serial_t serial_engine;
+        verify(serial_engine.try_index(needles.view(), substrings_cased_k) == status_t::success_k);
+        std::vector<float> host_scores(1, 1.0f);
+        verify(serial_engine.try_score_bm25(haystacks.view(), span<float const>(), degenerate, weights_view,
+                                            span<float>(host_scores.data(), host_scores.size())) ==
+               status_t::success_k);
+        verify(host_scores[0] == 0.0f && "An empty haystack scores zero, not a NaN");
+
+#if SZ_USE_CUDA
+        gpu_specs_t gpu_specs;
+        verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
+        cuda_executor_t executor;
+
+        unified_texts_t const empty_staged {{std::string {}}};
+
+        substrings_cuda_t cuda_engine;
+        verify(cuda_engine.try_index(needles.view(), substrings_cased_k, executor, gpu_specs) == status_t::success_k);
+        unified_vector<float> device_scores(1, 1.0f);
+        verify(cuda_engine
+                   .try_score_bm25(empty_staged.view(), span<float const>(),
+                                   degenerate, weights_view,
+                                   span<float>(device_scores.data(), device_scores.size()), executor, gpu_specs)
+                   .status == status_t::success_k);
+        verify(device_scores[0] == 0.0f && "An empty haystack scores zero on the device too");
+#endif // SZ_USE_CUDA
+    }
+}
+
 /**
  *  @brief Rewriting and scoring on the GPU, against the serial engine and against the identity oracle.
  *
  *  The oracle carries the rewrite's own proof - replacing every needle with itself must reproduce the input
  *  byte for byte - so a device kernel is checked without a second device implementation to check it against.
- *  Scores are compared bit for bit, not within a tolerance: both backends reduce in ascending needle order.
+ *  Scores are compared within a tolerance across backends and bit for bit against the device itself, which is
+ *  the pair of promises the header makes - see the reduction note beside the comparison below.
  */
 void test_substrings_cuda_rewriting_and_scoring() {
     std::printf("  - testing CUDA rewriting and BM25 against the serial engine...\n");
+#if SZ_USE_CUDA
 
     gpu_specs_t gpu_specs;
     verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
@@ -2220,13 +2410,8 @@ void test_substrings_cuda_rewriting_and_scoring() {
         texts.push_back("the cat sat on a mat, concatenating cats at the dog " + std::to_string(index));
 
     // Unified, because a kernel cannot reach the caller's host memory - the contract every CUDA entry keeps.
-    std::vector<unified_vector<char>> storage(texts.size());
-    unified_vector<span<char const>> spans(texts.size());
-    for (std::size_t index = 0; index < texts.size(); ++index) {
-        storage[index].assign(texts[index].begin(), texts[index].end());
-        spans[index] = {storage[index].data(), storage[index].size()};
-    }
-    span<span<char const> const> const haystacks_view {spans.data(), spans.size()};
+    unified_texts_t const staged {texts};
+    span<span<char const> const> const haystacks_view = staged.view();
     arrow_strings_tape_t reference_haystacks;
     verify(reference_haystacks.try_assign(texts.data(), texts.data() + texts.size()) == status_t::success_k);
 
@@ -2285,8 +2470,8 @@ void test_substrings_cuda_rewriting_and_scoring() {
                        "Scores must be bit-identical across runs of one backend");
         }
     }
-}
 #endif // SZ_USE_CUDA
+}
 
 #pragma endregion // Scoring
 

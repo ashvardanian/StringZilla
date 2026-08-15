@@ -323,8 +323,8 @@ void test_utf8_graphemes_safety() {
 /** @brief Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
 void test_utf8_graphemes_all() {
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
-    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
-                                   scale_iterations(8)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
+                                    scale_iterations(8)); // This family's share of the suite budget
 }
 
 #pragma endregion // Drivers

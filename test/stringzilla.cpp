@@ -104,24 +104,7 @@ int main(int argc, char const **argv) {
     sz_unused_(argc && argv);
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Hi, dear tester! You look nice today!\n");
-    std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
-    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
-    std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
-    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
-    std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
-    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICELAKE ? "yes" : "no");
-    std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
-    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEONAES ? "yes" : "no");
-    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEONSHA ? "yes" : "no");
-    std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
-    std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2AES ? "yes" : "no");
-    std::printf("- Uses WASM SIMD128: %s \n", SZ_USE_V128 ? "yes" : "no");
-    std::printf("- Uses WASM relaxed SIMD: %s \n", SZ_USE_V128RELAXED ? "yes" : "no");
-    std::printf("- Uses RISC-V RVV: %s \n", SZ_USE_RVV ? "yes" : "no");
-    std::printf("- Uses LoongArch LASX: %s \n", SZ_USE_LASX ? "yes" : "no");
-    std::printf("- Uses Power VSX: %s \n", SZ_USE_POWERVSX ? "yes" : "no");
-    std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
+    log_environment();
     print_test_environment();
 
     std::size_t failures = 0;

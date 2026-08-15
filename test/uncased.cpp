@@ -49,20 +49,11 @@
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm>     // `std::transform`
-#include <array>         // `std::array`
-#include <iterator>      // `std::distance`
-#include <map>           // `std::map`
-#include <memory>        // `std::allocator`
-#include <numeric>       // `std::accumulate`
-#include <random>        // `std::random_device`
-#include <set>           // `std::set`
-#include <sstream>       // `std::ostringstream`
-#include <string>        // Baseline
-#include <string_view>   // Baseline
-#include <unordered_map> // `std::unordered_map`
-#include <unordered_set> // `std::unordered_set`
-#include <vector>        // `std::vector`
+#include <array>       // `std::array`
+#include <random>      // `std::uniform_int_distribution`
+#include <string>      // Baseline
+#include <string_view> // Baseline
+#include <vector>      // `std::vector`
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
@@ -1990,8 +1981,8 @@ void test_uncased_unit() {
  *         sweep of every valid Unicode codepoint, both in order and shuffled.
  */
 template <typename reference_, typename candidate_>
-void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t min_text_length,
-                           sz_size_t min_iterations) {
+void test_uncased_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t min_text_length,
+                                   sz_size_t min_iterations) {
 
     // Output buffers (3x input for worst-case expansion)
     std::vector<char> output_base(min_text_length * 3 + 256);
@@ -2201,7 +2192,6 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
 
     std::printf("  - testing invalid-input safety of case kernels (%zu random buffers)...\n", random_inputs);
 
-    std::size_t const max_input_length = 70;
     char const *needle = "st"; // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
 
     auto check = [&](char const *input, std::size_t input_length) {
@@ -2227,34 +2217,9 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
         }
     };
 
-    char input[max_input_length];
+    for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
 
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF
-    for (std::size_t byte = 0; byte < 256; ++byte) {
-        input[0] = (char)byte;
-        check(input, 1);
-    }
-
-    // All 65,536 byte pairs: every lead × continuation interaction, including overlong shapes
-    for (std::size_t first_byte = 0; first_byte < 256; ++first_byte)
-        for (std::size_t second_byte = 0; second_byte < 256; ++second_byte) {
-            input[0] = (char)first_byte;
-            input[1] = (char)second_byte;
-            check(input, 2);
-        }
-
-    // Random garbage buffers spanning whole SIMD chunks
-    auto &generator = global_random_generator();
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    for (std::size_t iteration = 0; iteration < random_inputs; ++iteration) {
-        std::size_t input_length = length_distribution(generator);
-        for (std::size_t index = 0; index < input_length; ++index) input[index] = (char)byte_distribution(generator);
-        check(input, input_length);
-    }
-
-    std::printf("    passed %zu cases (256 singles + 65536 pairs + %zu random)\n", //
-                256 + 65536 + random_inputs, random_inputs);
+    std::printf("    invalid-input safety passed!\n");
 }
 
 /**
@@ -2288,8 +2253,8 @@ void test_uncased_safety() { check_uncased_safety_(span_over(uncased_safety_back
 
 /**
  *  @brief One UTF-8 case-folding + case-insensitive search backend compiled on this target. The struct doubles as
- *         the fold functor for `test_fold_equivalence` (via `operator()`), so the differential and the find battery
- *         iterate one table; the always-present `dispatched` entry keeps it non-empty on a baseline build.
+ *         the fold functor for `test_uncased_fold_equivalence` (via `operator()`), so the differential and the find
+ *         battery iterate one table; the always-present `dispatched` entry keeps it non-empty on a baseline build.
  */
 struct uncased_backend_t {
     char const *name;
@@ -2345,7 +2310,7 @@ void test_uncased_all() {
     // Serial reference vs every compiled backend (dispatched first): the case-fold differential and the full find
     // battery, paired per backend so their ISA coverage stays in lockstep.
     for (uncased_backend_t const &backend : uncased_backends) {
-        test_fold_equivalence(serial, backend, 4000, scale_iterations(1200));
+        test_uncased_fold_equivalence(serial, backend, 4000, scale_iterations(1200));
         run_uncased_find_battery_(backend.search);
     }
 }
