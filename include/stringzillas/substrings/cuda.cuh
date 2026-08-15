@@ -52,6 +52,22 @@ static constexpr size_t substrings_cover_segment_limit_k = 4096;
 /** @brief Output bytes one block of a rewrite's copy owns, so no block's work scales with a run's width. */
 static constexpr size_t substrings_rewrite_tile_bytes_k = 4096;
 
+/** @brief Counter slots a scoring block keeps in shared memory, sized by the document rather than by the
+ *         dictionary. 64 KiB is the largest power of two that still leaves two blocks resident per
+ *         multiprocessor, and it seats the distinct needles of a 40 KiB document below half load. */
+static constexpr size_t substrings_bm25_slots_k = 8192;
+
+/** @brief Probe distance a scoring insert gives up at, spilling to the overflow row. */
+static constexpr size_t substrings_bm25_probes_k = 16;
+
+/** @brief Fractional bits a block's running score carries, leaving three orders of headroom over the largest
+ *         score a unit-weighted full vocabulary reaches. */
+static constexpr int substrings_bm25_scale_k = 32;
+
+/** @brief A counter slot no needle has claimed. Needle indices are dense from zero, so the top value is
+ *         never one of them. */
+static constexpr u32_t substrings_bm25_empty_slot_k = 0xFFFFFFFFu;
+
 /**
  *  @brief Selects what a chunk walk does at each match: size the output, write it, or count per needle.
  *
@@ -67,12 +83,69 @@ enum class substrings_pass_t : u8_t { sizing_k = 0, writing_k = 1, counting_k = 
  *  @brief Adds to a counter without reading it back - a reduction, not an atomic exchange.
  *
  *  `red` is issued to the L2 slice and retires without a round-trip, so the warp never stalls on it, which
- *  is what a frequency tally wants: the old count is never the question. `atomicAdd` lowers to the same
+ *  is what counting wants: the old count is never the question. `atomicAdd` lowers to the same
  *  instruction only when the compiler proves the returned value is dead, which is a property of the
  *  optimizer rather than of the source; spelling the reduction out states the intent and cannot regress.
  */
-SZ_DEVICE_INLINE void substrings_tally_(u32_t *counter, u32_t addend) noexcept {
+SZ_DEVICE_INLINE void cuda_increment_global_(u32_t *counter, u32_t addend) noexcept {
     asm volatile("red.global.add.u32 [%0], %1;" ::"l"(__cvta_generic_to_global(counter)), "r"(addend) : "memory");
+}
+
+/** @brief The same reduction against a block's own shared memory, for counters that never leave it. */
+SZ_DEVICE_INLINE void cuda_increment_shared_(u32_t *counter, u32_t addend) noexcept {
+    asm volatile("red.shared.add.u32 [%0], %1;" ::"r"((u32_t)__cvta_generic_to_shared(counter)),
+                 "r"(addend) : "memory");
+}
+
+SZ_DEVICE_INLINE void cuda_increment_shared_(u64_t *counter, u64_t addend) noexcept {
+    asm volatile("red.shared.add.u64 [%0], %1;" ::"r"((u32_t)__cvta_generic_to_shared(counter)),
+                 "l"(addend) : "memory");
+}
+
+/** @brief Where a counting walk puts its counts: the block's own table first, the overflow row when full.
+ *         An empty @p overflow means the dictionary fits the table, which is what lifts the probe bound. */
+struct substrings_bm25_counters_t {
+    substrings_bm25_counter_t *slots = nullptr;
+    span<u32_t> overflow {};
+    int *overflowed = nullptr;
+};
+
+/**
+ *  @brief Counts one occurrence of @p needle_index into the block's table, or into the overflow row.
+ *
+ *  Every lane of the block counts into one table, so every write here races and every write here is atomic.
+ *  The probe re-reads its slot rather than hoisting it: a cached read would make a full table look like one
+ *  slot reused forever, which scores wrong rather than hanging.
+ */
+SZ_DEVICE_INLINE void substrings_bm25_count_(substrings_bm25_counters_t const &counters,
+                                             u32_t needle_index) noexcept {
+    // A dictionary that fits the table gets a slot per needle, so the index @b is the slot - no hash, no probe.
+    if (counters.overflow.empty()) return cuda_increment_shared_(&counters.slots[needle_index].frequency, 1u);
+
+    substrings_bm25_counter_t volatile *const slots = counters.slots; // ? Volatile: re-read on every probe
+    size_t slot = substrings_bm25_probe_of_(needle_index) & (substrings_bm25_slots_k - 1u);
+    for (size_t probe = 0; probe != substrings_bm25_probes_k;
+         ++probe, slot = (slot + 1u) & (substrings_bm25_slots_k - 1u)) {
+        // Whoever the exchange hands the slot to owns it; a rival wanting the same needle joins them.
+        u32_t seated = slots[slot].needle_index;
+        if (seated == substrings_bm25_empty_slot_k)
+            seated = atomicCAS(&counters.slots[slot].needle_index, substrings_bm25_empty_slot_k, needle_index);
+        if (seated != substrings_bm25_empty_slot_k && seated != needle_index) continue;
+        return cuda_increment_shared_(&counters.slots[slot].frequency, 1u);
+    }
+    cuda_increment_global_(counters.overflow.data() + needle_index, 1u);
+    *counters.overflowed = 1;
+}
+
+/** @brief One contribution as a fixed-point integer. The scaling runs in double so the `f32` contribution
+ *         survives it exactly; scaling in `f32` would quantize back to 24 significant bits and waste it. */
+SZ_DEVICE_INLINE i64_t substrings_bm25_to_fixed_(f32_t contribution) noexcept {
+    return (i64_t)__double2ll_rn((double)contribution * (double)(1ull << (unsigned)substrings_bm25_scale_k));
+}
+
+/** @brief The block's fixed-point total, back as the score the caller reads. */
+SZ_DEVICE_INLINE f32_t substrings_bm25_from_fixed_(i64_t total) noexcept {
+    return (f32_t)((double)total / (double)(1ull << (unsigned)substrings_bm25_scale_k));
 }
 
 /**
@@ -139,7 +212,7 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_( //
     aho_corasick_view<state_id_type_> const &view, span<state_id_type_ const> shared_hot_rows,
     span<u32_t const> accepts_words, span<byte_t const> haystack, size_t chunk_begin, size_t chunk_end,
     size_t haystack_index, size_t output_base_offset, span<substrings_match_t> matches_out,
-    span<u32_t> frequencies = {}) noexcept {
+    substrings_bm25_counters_t counters = {}) noexcept {
 
     // Offsets are relative to this haystack, so the warm-up clamps against its own start at zero. Sized in
     // source bytes, the unit a haystack window is measured in, not in the folded bytes a needle is.
@@ -179,7 +252,7 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_( //
                                                                       (size_t)output.folded_match_bytes};
             }
             else if constexpr (pass_ == substrings_pass_t::counting_k)
-                substrings_tally_(frequencies.data() + output.needle_index, 1u);
+                substrings_bm25_count_(counters, (u32_t)output.needle_index);
             ++matches_found;
         }
     };
@@ -225,7 +298,7 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_uncased_( //
     aho_corasick_view<state_id_type_> const &view, span<state_id_type_ const> shared_hot_rows,
     span<u32_t const> accepts_words, span<byte_t const> haystack, size_t chunk_begin, size_t chunk_end,
     size_t haystack_index, size_t output_base_offset, span<substrings_match_t> matches_out,
-    span<u32_t> frequencies = {}) noexcept {
+    substrings_bm25_counters_t counters = {}) noexcept {
 
     size_t const warm_up_bytes = view.max_source_match_bytes > 0 ? (size_t)view.max_source_match_bytes - 1 : 0;
     size_t walk_begin = chunk_begin >= warm_up_bytes ? chunk_begin - warm_up_bytes : 0;
@@ -275,7 +348,7 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_uncased_( //
                                                                       walk_begin + match_offset,
                                                                       step.codepoint_end - match_offset};
             else if constexpr (pass_ == substrings_pass_t::counting_k)
-                substrings_tally_(frequencies.data() + output.needle_index, 1u);
+                substrings_bm25_count_(counters, (u32_t)output.needle_index);
             ++matches_found;
         }
     }
@@ -623,24 +696,20 @@ static __global__ void substrings_rewrite_copy_( //
  *  @brief One BM25 score per haystack: a block tallies its haystack's needle frequencies, then reduces them.
  *
  *  A block owns a haystack and its threads stride that haystack's chunks, so one long document still spreads
- *  across 256 lanes while the frequency row stays private to the block and needs no cross-block traffic.
+ *  across 256 lanes while the counter table stays private to the block and needs no cross-block traffic.
  *  Term frequencies are raw overlapping counts, which is what classic BM25 asks for - a cover would suppress
  *  genuine occurrences of a needle nested inside another - so no policy reaches here.
  *
- *  The reduction runs over the whole row, not over the needles this document happened to touch: a zero
- *  frequency scores exactly `+0.0f`, so a dense pass costs only bandwidth and needs no record of what was
- *  hit. It is spread across the block through one `cub::BlockReduce`, whose combining order is fixed by the
- *  block shape - which is the property the C header publishes, per backend rather than across backends.
+ *  The counters are the block's own shared table, sized by the document rather than by the dictionary, so
+ *  scoring reads back what this haystack hit. Contributions accumulate as fixed-point integers into one
+ *  shared total, whose addition is associative, so the total does not depend on the order lanes finish in.
  */
 template <typename state_id_type_>
 __global__ void substrings_score_bm25_per_haystack_(
     aho_corasick_view<state_id_type_> view, state_id_type_ staged_rows_count, span<u32_t const> accepts_words,
     u32_t staged_accepts_words, span<span<byte_t const> const> haystacks, span<f32_t const> document_lengths,
-    substrings_bm25_t parameters, span<f32_t const> needle_weights, span<u32_t> frequencies_per_block,
+    substrings_bm25_t parameters, span<f32_t const> needle_weights, span<u32_t> overflow_per_block,
     span<f32_t> scores) {
-
-    using block_reduce_t = cub::BlockReduce<f32_t, substrings_threads_per_block_k>;
-    __shared__ typename block_reduce_t::TempStorage reduce_storage;
 
     extern __shared__ unsigned char substrings_shared_bytes_[];
     span<state_id_type_> const shared_hot_rows {reinterpret_cast<state_id_type_ *>(substrings_shared_bytes_),
@@ -654,16 +723,37 @@ __global__ void substrings_score_bm25_per_haystack_(
                                           : accepts_words;
 
     size_t const needle_count = needle_weights.size();
-    span<u32_t> const frequencies {frequencies_per_block.data() + (size_t)blockIdx.x * needle_count, needle_count};
+    size_t const table_slots = sz_min_of_two(needle_count, substrings_bm25_slots_k);
     span<substrings_match_t> const no_matches;
 
-    // Cleared once for the block; from here on the reduction leaves each row clean for the document after it.
-    for (size_t needle_index = threadIdx.x; needle_index < needle_count; needle_index += blockDim.x)
-        frequencies[needle_index] = 0;
+    // The table sits after the staged automaton, in the same dynamic allocation the host sized for both.
+    substrings_bm25_counter_t *const slots = reinterpret_cast<substrings_bm25_counter_t *>(
+        substrings_shared_bytes_ + shared_hot_rows.size() * sizeof(state_id_type_) +
+        (size_t)staged_accepts_words * sizeof(u32_t));
+    __shared__ u64_t block_score_fixed;
+    __shared__ int block_overflowed;
+
+    // Allocated only for a dictionary wider than the table; empty otherwise, draining this clear to nothing.
+    span<u32_t> const overflow =
+        overflow_per_block.size()
+            ? span<u32_t> {overflow_per_block.data() + (size_t)blockIdx.x * needle_count, needle_count}
+            : span<u32_t> {};
+    for (size_t needle_index = threadIdx.x; needle_index < overflow.size(); needle_index += blockDim.x)
+        overflow[needle_index] = 0;
     __syncthreads();
 
     for (size_t haystack_index = blockIdx.x; haystack_index < haystacks.size(); haystack_index += gridDim.x) {
         span<byte_t const> const haystack = haystacks[haystack_index];
+
+        for (size_t slot = threadIdx.x; slot < table_slots; slot += blockDim.x)
+            slots[slot] = substrings_bm25_counter_t {substrings_bm25_empty_slot_k, 0u};
+        if (threadIdx.x == 0) {
+            block_score_fixed = 0ull;
+            block_overflowed = 0;
+        }
+        __syncthreads();
+
+        substrings_bm25_counters_t const counters {slots, overflow, &block_overflowed};
 
         // One chunk per lane where the haystack allows it, floored at one match width so no chunk re-walks
         // more warm-up than it covers. A width derived from the corpus cannot answer this: sized from the
@@ -677,30 +767,47 @@ __global__ void substrings_score_bm25_per_haystack_(
             if (view.case_sensitivity == substrings_uncased_k)
                 substrings_walk_chunk_uncased_<state_id_type_, substrings_pass_t::counting_k>(
                     view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index, 0, no_matches,
-                    frequencies);
+                    counters);
             else
                 substrings_walk_chunk_<state_id_type_, substrings_pass_t::counting_k>(
                     view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index, 0, no_matches,
-                    frequencies);
+                    counters);
         }
         __syncthreads();
 
-        // Every needle contributes, since a zero frequency scores exactly `+0.0f`, so the reduction is a fixed
-        // pass over the whole row rather than over the ones this document touched. That makes it the dominant
-        // cost for a large dictionary - a document is walked once per byte but scored once per needle - which
-        // is why it is spread across the block instead of summed on one lane, and why it clears each counter
-        // where it reads it rather than letting the next document pay a pass of its own.
+        // A needle this document never hit scores `+0`, so skipping free slots is exact, and it keeps
+        // `substrings_bm25_term` away from a zero frequency under a zero normalized length, where it is `0/0`.
         f32_t const document_length = document_lengths.size() ? document_lengths[haystack_index]
                                                               : (f32_t)haystack.size();
-        f32_t partial_score = 0;
-        for (size_t needle_index = threadIdx.x; needle_index < needle_count; needle_index += blockDim.x) {
-            partial_score += needle_weights[needle_index] *
-                             substrings_bm25_term(parameters, (f32_t)frequencies[needle_index], document_length);
-            frequencies[needle_index] = 0;
+        auto contribution_of = [&](u32_t needle_index, u32_t frequency) noexcept {
+            return substrings_bm25_to_fixed_(needle_weights[needle_index] *
+                                             substrings_bm25_term(parameters, (f32_t)frequency, document_length));
+        };
+
+        // A seated slot is always incremented before this sync, so a zero frequency means untouched in both
+        // layouts - and a slot's needle is its own index when the dictionary got one slot each.
+        i64_t partial_fixed = 0;
+        for (size_t slot = threadIdx.x; slot < table_slots; slot += blockDim.x) {
+            u32_t const frequency = slots[slot].frequency;
+            if (frequency == 0u) continue;
+            partial_fixed += contribution_of(
+                overflow.empty() ? (u32_t)slot : slots[slot].needle_index, frequency);
         }
-        f32_t const score = block_reduce_t(reduce_storage).Sum(partial_score);
-        if (threadIdx.x == 0) scores[haystack_index] = score;
-        __syncthreads(); // ! The next haystack tallies into this row, and reuses this reduction's storage.
+
+        // Only a document that outgrew the table ever dirties the overflow row, so only that document pays a
+        // pass over the vocabulary - and a document that large already amortizes it over its own bytes.
+        if (block_overflowed)
+            for (size_t needle_index = threadIdx.x; needle_index < overflow.size(); needle_index += blockDim.x) {
+                u32_t const frequency = overflow[needle_index];
+                if (frequency == 0u) continue;
+                partial_fixed += contribution_of((u32_t)needle_index, frequency);
+                overflow[needle_index] = 0u;
+            }
+
+        cuda_increment_shared_(&block_score_fixed, (u64_t)partial_fixed);
+        __syncthreads();
+        if (threadIdx.x == 0) scores[haystack_index] = substrings_bm25_from_fixed_((i64_t)block_score_fixed);
+        __syncthreads(); // ! The next haystack clears this table and reuses this total.
     }
 }
 
@@ -814,9 +921,9 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     /** @brief Staging the rewrite copies into when the caller's output span is host memory. */
     safe_vector<byte_t, device_byte_allocator_t> output_bytes_staging_ {};
 
-    /** @brief One `needle_count`-wide frequency row per resident block, so a tally needs no cross-block
-     *         traffic and no dictionary size is ever refused. */
-    safe_vector<u32_t, device_word_allocator_t> bm25_frequencies_ {};
+    /** @brief One `needle_count`-wide row per resident block, catching what will not seat in that block's
+     *         table. Empty for any dictionary the table can hold, which is most of them. */
+    safe_vector<u32_t, device_word_allocator_t> bm25_overflow_ {};
     /** @brief Staging for the three BM25 spans, used only when the caller's own are host memory. The two
      *         inputs are host-written and so unified; the scores are drained by a copy and so device-side. */
     safe_vector<f32_t, typename allocator_traits_t::template rebind_alloc<f32_t>> bm25_weights_staging_ {};
@@ -868,7 +975,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         replacement_bytes_.reset();
         replacement_offsets_.reset();
         output_bytes_staging_.reset();
-        bm25_frequencies_.reset();
+        bm25_overflow_.reset();
         bm25_weights_staging_.reset();
         bm25_lengths_staging_.reset();
         bm25_scores_staging_.reset();
@@ -1093,6 +1200,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return state_width() == substrings_state_width_t::u16_k ? sizeof(u16_t) : sizeof(u32_t);
     }
 
+    /** @brief Shared bytes a scoring block's counter table costs, read by the occupancy query and by the
+     *         launch alike so the two cannot disagree about the footprint they are sizing. A dictionary
+     *         narrower than the table gets a slot per needle and pays for no more than that. */
+    size_t substrings_bm25_counters_bytes_() const noexcept {
+        return sz_min_of_two(count_needles(), substrings_bm25_slots_k) * sizeof(substrings_bm25_counter_t);
+    }
+
     /** @brief The settled automaton at @p state_id_type_, which `try_build` has already pinned. */
     template <typename state_id_type_>
     aho_corasick_dictionary<state_id_type_, allocator_t> const &settled_dictionary_() const noexcept {
@@ -1158,7 +1272,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         size_t const accepts_bytes = accepts_words_.size() * sizeof(u32_t);
         size_t const whole_automaton_bytes = hot_rows * substrings_alphabet_size_k * bytes_per_state_id +
                                              accepts_bytes;
-        bool const stages_whole_automaton = whole_automaton_bytes <= shared_memory_budget;
+        // Scoring carries its counter table in the same allocation, so staging must fit beside it or the two
+        // would compete for one budget. They do not today - staging is refused for every real dictionary -
+        // but that is luck rather than design, and this keeps it true by construction.
+        size_t const staging_budget = shared_memory_budget > substrings_bm25_counters_bytes_()
+                                          ? shared_memory_budget - substrings_bm25_counters_bytes_()
+                                          : 0;
+        bool const stages_whole_automaton = whole_automaton_bytes <= staging_budget;
         staged_rows_ = stages_whole_automaton ? static_cast<u32_t>(hot_rows) : u32_t {0};
         staged_accepts_words_ = stages_whole_automaton ? static_cast<u32_t>(accepts_words_.size()) : u32_t {0};
 
@@ -1316,7 +1436,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     /**
      *  @brief Refuses a chunk width whose warm-up prefix or worst-case match count outgrows @ref small_size_t.
      *
-     *  The walkers carry a chunk's reach and its match tally in that narrow type, so both bounds belong to the
+     *  The walkers carry a chunk's reach and its match count in that narrow type, so both bounds belong to the
      *  chunk width rather than to the input: haystack offsets themselves stay 64-bit. Shared by the chunked
      *  plan and by the scoring pass, which sizes its own chunks and never builds a chunk-offsets map.
      */
@@ -1406,7 +1526,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (chunk_match_offsets_.try_resize_uninitialized(chunk_count + 1) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
-        // Counting hands the walk no output span: the pass writes each chunk's tally into its slot instead.
+        // Sizing hands the walk no output span: the pass writes each chunk's count into its slot instead.
         CUresult const count_error =
             launch_walk_(substrings_pass_t::sizing_k, kernel_table, blocks_per_grid, shared_memory_bytes,
                          chunk_bytes, chunk_count, span<match_t> {}, executor);
@@ -1920,8 +2040,9 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
      *  @param[out] scores One per haystack.
      *
      *  One launch and one synchronize: nothing here is sized by a device result, so unlike `try_find` and
-     *  `try_replace` this never stalls mid-call. Scores are bit-stable run to run because the block's
-     *  reduction combines in an order fixed by its shape, which no grid size or scheduling order perturbs.
+     *  `try_replace` this never stalls mid-call. Scores are bit-stable run to run because the block sums
+     *  fixed-point integers, and integer addition is associative - no grid size, lane order or scheduling
+     *  order can perturb the total.
      */
     template <typename haystacks_type_>
     cuda_status_t try_score_bm25(haystacks_type_ const &haystacks, span<f32_t const> document_lengths,
@@ -1949,15 +2070,20 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         cuda_status_t const describe_status = describe_haystacks_(haystacks, total_bytes, longest_bytes);
         if (describe_status.status != status_t::success_k) return describe_status;
 
+        // The counter table shares the dynamic allocation with the staged automaton, so it must be counted
+        // before the occupancy query - that query settles `blocks_per_grid`, which sizes the overflow rows.
         size_t const staged_bytes = (size_t)staged_rows_ * substrings_alphabet_size_k * bytes_per_state_id_() +
-                                    (size_t)staged_accepts_words_ * sizeof(u32_t); // ? Settled per call
+                                    (size_t)staged_accepts_words_ * sizeof(u32_t) +
+                                    substrings_bm25_counters_bytes_(); // ? Settled per call
+        sz_assert_(staged_bytes <= std::numeric_limits<unsigned>::max() &&
+                   "A block's shared footprint must fit the launch parameter");
         unsigned const shared_memory_bytes = static_cast<unsigned>(staged_bytes);
         unsigned blocks_per_grid = 0;
         cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, kernel_table.score_bm25.for_width(state_width()).function,
                                                                   substrings_threads_per_block_k, shared_memory_bytes,
                                                                   specs);
         if (occupancy_status.status != status_t::success_k) return occupancy_status;
-        // One block owns one haystack, and each block owns a frequency row, so a grid wider than the corpus
+        // One block owns one haystack, and each block owns an overflow row, so a grid wider than the corpus
         // buys nothing and costs `needle_count` counters per surplus block.
         blocks_per_grid = (unsigned)sz_min_of_two((size_t)blocks_per_grid, sz_max_of_two(haystack_count, (size_t)1));
 
@@ -1970,7 +2096,10 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (cuda_status_t const fits = check_chunk_bytes_fit_(widest_chunk_bytes); fits.status != status_t::success_k)
             return fits;
 
-        if (bm25_frequencies_.try_resize_uninitialized((size_t)blocks_per_grid * needle_count) != status_t::success_k)
+        // A dictionary the table can hold never overflows, so most calls allocate nothing at all here.
+        size_t const overflow_total =
+            needle_count > substrings_bm25_slots_k ? (size_t)blocks_per_grid * needle_count : 0;
+        if (bm25_overflow_.try_resize_uninitialized(overflow_total) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
         // The three caller spans are host pointers whenever the C shim passed them straight through, so each
@@ -2039,7 +2168,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         u32_t staged_accepts_words_argument = staged_accepts_words_;
         span<span<byte_t const> const> haystacks_argument {haystack_descriptors_.data(), haystack_descriptors_.size()};
         substrings_bm25_t parameters_argument = parameters;
-        span<u32_t> frequencies_argument {bm25_frequencies_.data(), bm25_frequencies_.size()};
+        span<u32_t> overflow_argument {bm25_overflow_.data(), bm25_overflow_.size()};
         void *score_arguments[10] = {&view_argument,
                                      &staged_rows_argument,
                                      &accepts_words_argument,
@@ -2048,7 +2177,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                      &lengths_argument,
                                      &parameters_argument,
                                      &weights_argument,
-                                     &frequencies_argument,
+                                     &overflow_argument,
                                      &scores_argument};
         return cuda_launch_t {}
             .grid(blocks_per_grid)

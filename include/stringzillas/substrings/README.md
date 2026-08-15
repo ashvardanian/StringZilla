@@ -17,8 +17,9 @@ Slices are taken by term count, so the frequent and the rare slice of the same p
 Cells carry the benchmark's `Throughput` line for each of the four capabilities — counting, which only tallies matches; finding, which materializes each one; replacing, which rewrites every haystack; and scoring, which reduces each haystack to one BM25 float — with the fastest backend of each column in bold.
 A `-` cell is a measurement not yet taken.
 The replace columns resolve a __leftmost__ cover, since a rewrite must, while counting and finding are __overlapping__ passes; the two are not the same walk and should not be differenced.
-The score columns weight every needle uniformly, so each slice heading doubles as a query size — scoring carries a cost proportional to the dictionary that counting does not, since a document is walked once per byte but scored once per needle.
-One run produced every cell: 64 MiB of the corpus, `STRINGWARS_DATASET_LIMIT=64mb` with `STRINGWARS_TOKENS=lines`, on one H100 80GB HBM3 and one Xeon Platinum 8468, built through the `cuda_clang` preset.
+The score columns weight every needle uniformly, so each slice heading doubles as a query size — scoring counts into a table sized by the document rather than by the dictionary, so its cost tracks the walk, and the widest slice no longer collapses the way a counter per needle made it.
+One run produced every cell: 64 MiB of the corpus, `STRINGWARS_DATASET_LIMIT=64mb` with `STRINGWARS_TOKENS=lines`, on one idle H100 80GB HBM3 and one Xeon Platinum 8468, built through the `cuda_clang` preset.
+The box is shared, so the run waits for it to go quiet; the counting columns are the control, and they reproduce the previous table's within 1.6x end to end, which is what makes the score columns comparable against it.
 That preset is not a preference — GCC miscompiles the engines' return-by-value in these translation units, handing the caller the kernel timing where the status belongs, so a GCC-hosted benchmark aborts on its first CUDA cell.
 
 The tier split dominates these numbers more than the backend does, so `bench/substrings.cpp` prints the automaton's state count, how many of those states fit the hot tier, and the double array's byte size beside every result.
@@ -31,40 +32,40 @@ Uncased needles must be well-formed UTF-8, and needles of either mode must be no
 
 ## Most Frequent 1% of the Vocabulary
 
-| Backend          |      Cased Count |       Cased Find |    Cased Replace |      Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
-| :--------------- | ---------------: | ---------------: | ---------------: | ---------------: | --------------: | --------------: | --------------: | --------------: |
-| Serial @ Xeon4   |       186.4 MB/s |        89.4 MB/s |        58.8 MB/s |       168.7 MB/s |       86.6 MB/s |       42.9 MB/s |       34.2 MB/s |       85.3 MB/s |
-| Parallel @ Xeon4 |      2555.5 MB/s |      1224.1 MB/s |       524.2 MB/s |      2265.6 MB/s |     1031.6 MB/s |      502.9 MB/s |      374.9 MB/s |      995.6 MB/s |
-| CUDA @ H100      | __18371.7 MB/s__ | __21732.5 MB/s__ | __12401.7 MB/s__ | __23837.1 MB/s__ | __8568.5 MB/s__ | __4992.9 MB/s__ | __3962.1 MB/s__ | __5476.1 MB/s__ |
+| Backend          |      Cased Count |       Cased Find |   Cased Replace |      Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
+| :--------------- | ---------------: | ---------------: | --------------: | ---------------: | --------------: | --------------: | --------------: | --------------: |
+| Serial @ Xeon4   |       210.2 MB/s |       100.1 MB/s |       55.1 MB/s |       184.0 MB/s |       90.2 MB/s |       44.7 MB/s |       36.2 MB/s |       91.9 MB/s |
+| Parallel @ Xeon4 |      2974.3 MB/s |      1256.3 MB/s |      467.8 MB/s |      2448.1 MB/s |     1065.9 MB/s |      512.9 MB/s |      390.7 MB/s |     1038.7 MB/s |
+| CUDA @ H100      | __19198.5 MB/s__ | __17995.9 MB/s__ | __8504.0 MB/s__ | __15461.9 MB/s__ | __7688.0 MB/s__ | __4949.9 MB/s__ | __4359.4 MB/s__ | __4273.5 MB/s__ |
 
 ## Most Frequent 10% of the Vocabulary
 
-| Backend          |      Cased Count |      Cased Find |   Cased Replace |     Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
-| :--------------- | ---------------: | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: |
-| Serial @ Xeon4   |        66.2 MB/s |       31.1 MB/s |       21.8 MB/s |       52.1 MB/s |       43.1 MB/s |       20.5 MB/s |       16.6 MB/s |       37.0 MB/s |
-| Parallel @ Xeon4 |       958.0 MB/s |      447.4 MB/s |      245.3 MB/s |      744.3 MB/s |      612.8 MB/s |      285.2 MB/s |      221.1 MB/s |      513.2 MB/s |
-| CUDA @ H100      | __12809.7 MB/s__ | __8826.2 MB/s__ | __5647.9 MB/s__ | __6141.8 MB/s__ | __6646.5 MB/s__ | __3833.3 MB/s__ | __2834.7 MB/s__ | __2555.5 MB/s__ |
+| Backend          |     Cased Count |      Cased Find |   Cased Replace |     Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
+| :--------------- | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: |
+| Serial @ Xeon4   |       63.1 MB/s |       29.3 MB/s |       20.7 MB/s |       55.8 MB/s |       45.3 MB/s |       20.6 MB/s |       17.1 MB/s |       41.9 MB/s |
+| Parallel @ Xeon4 |      901.4 MB/s |      423.4 MB/s |      248.4 MB/s |      796.7 MB/s |      610.5 MB/s |      292.2 MB/s |      226.9 MB/s |      568.4 MB/s |
+| CUDA @ H100      | __9051.6 MB/s__ | __8654.4 MB/s__ | __5798.2 MB/s__ | __7913.5 MB/s__ | __7108.2 MB/s__ | __3908.4 MB/s__ | __2856.2 MB/s__ | __2652.1 MB/s__ |
 
 ## Least Frequent 1% of the Vocabulary
 
 | Backend          |      Cased Count |       Cased Find |    Cased Replace |      Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
 | :--------------- | ---------------: | ---------------: | ---------------: | ---------------: | --------------: | --------------: | --------------: | --------------: |
-| Serial @ Xeon4   |       411.3 MB/s |       206.1 MB/s |       173.1 MB/s |       410.0 MB/s |      106.3 MB/s |       53.0 MB/s |       50.0 MB/s |      105.9 MB/s |
-| Parallel @ Xeon4 |      6399.5 MB/s |      2802.5 MB/s |      2018.6 MB/s |      4584.9 MB/s |     1116.7 MB/s |      561.1 MB/s |      524.0 MB/s |     1127.4 MB/s |
-| CUDA @ H100      | __25555.1 MB/s__ | __29442.0 MB/s__ | __15096.8 MB/s__ | __36335.4 MB/s__ | __8922.8 MB/s__ | __5562.0 MB/s__ | __4649.3 MB/s__ | __6249.2 MB/s__ |
+| Serial @ Xeon4   |       353.3 MB/s |       177.9 MB/s |       146.3 MB/s |       356.7 MB/s |      107.6 MB/s |       53.9 MB/s |       50.7 MB/s |      107.2 MB/s |
+| Parallel @ Xeon4 |      5486.8 MB/s |      2491.1 MB/s |      1975.7 MB/s |      4541.9 MB/s |     1127.4 MB/s |      560.7 MB/s |      524.2 MB/s |     1116.7 MB/s |
+| CUDA @ H100      | __26274.5 MB/s__ | __29893.0 MB/s__ | __16256.5 MB/s__ | __34971.8 MB/s__ | __8300.0 MB/s__ | __5379.4 MB/s__ | __4617.1 MB/s__ | __5991.5 MB/s__ |
 
 ## Least Frequent 10% of the Vocabulary
 
-| Backend          |      Cased Count |       Cased Find |   Cased Replace |     Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
-| :--------------- | ---------------: | ---------------: | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: |
-| Serial @ Xeon4   |       142.4 MB/s |        68.2 MB/s |       53.5 MB/s |      132.0 MB/s |       74.7 MB/s |       36.7 MB/s |       32.3 MB/s |       71.5 MB/s |
-| Parallel @ Xeon4 |      2040.1 MB/s |       972.8 MB/s |      627.9 MB/s |     1868.3 MB/s |      955.2 MB/s |      476.0 MB/s |      409.2 MB/s |      942.6 MB/s |
-| CUDA @ H100      | __16503.4 MB/s__ | __11081.0 MB/s__ | __7258.5 MB/s__ | __8160.4 MB/s__ | __7795.4 MB/s__ | __4434.6 MB/s__ | __3575.6 MB/s__ | __3865.5 MB/s__ |
+| Backend          |      Cased Count |       Cased Find |   Cased Replace |      Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
+| :--------------- | ---------------: | ---------------: | --------------: | ---------------: | --------------: | --------------: | --------------: | --------------: |
+| Serial @ Xeon4   |       140.3 MB/s |        71.2 MB/s |       54.4 MB/s |       122.8 MB/s |       76.5 MB/s |       38.0 MB/s |       32.5 MB/s |       75.5 MB/s |
+| Parallel @ Xeon4 |      2083.1 MB/s |       991.4 MB/s |      589.9 MB/s |      1675.0 MB/s |      958.7 MB/s |      476.3 MB/s |      405.9 MB/s |      941.3 MB/s |
+| CUDA @ H100      | __11220.6 MB/s__ | __10930.7 MB/s__ | __7065.2 MB/s__ | __13636.5 MB/s__ | __7086.7 MB/s__ | __4348.7 MB/s__ | __3425.2 MB/s__ | __4380.9 MB/s__ |
 
 ## Entire Vocabulary
 
-| Backend          |     Cased Count |      Cased Find |   Cased Replace |    Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |  Uncased Score |
-| :--------------- | --------------: | --------------: | --------------: | -------------: | --------------: | --------------: | --------------: | -------------: |
-| Serial @ Xeon4   |       40.0 MB/s |       18.6 MB/s |       11.8 MB/s |      24.8 MB/s |       25.9 MB/s |       12.2 MB/s |        8.8 MB/s |      15.0 MB/s |
-| Parallel @ Xeon4 |      596.2 MB/s |      271.9 MB/s |      155.5 MB/s |     340.1 MB/s |      394.2 MB/s |      179.2 MB/s |      132.0 MB/s |     207.9 MB/s |
-| CUDA @ H100      | __8289.3 MB/s__ | __4703.0 MB/s__ | __2577.0 MB/s__ | __944.9 MB/s__ | __5046.6 MB/s__ | __2587.7 MB/s__ | __1385.1 MB/s__ | __703.6 MB/s__ |
+| Backend          |     Cased Count |      Cased Find |   Cased Replace |     Cased Score |   Uncased Count |    Uncased Find | Uncased Replace |   Uncased Score |
+| :--------------- | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: | --------------: |
+| Serial @ Xeon4   |       34.7 MB/s |       17.5 MB/s |       12.0 MB/s |       31.9 MB/s |       27.2 MB/s |       12.0 MB/s |        9.7 MB/s |       23.6 MB/s |
+| Parallel @ Xeon4 |      563.7 MB/s |      269.3 MB/s |      150.4 MB/s |      442.9 MB/s |      396.5 MB/s |      166.3 MB/s |      133.6 MB/s |      324.7 MB/s |
+| CUDA @ H100      | __7698.7 MB/s__ | __4649.3 MB/s__ | __2652.1 MB/s__ | __3972.8 MB/s__ | __4831.8 MB/s__ | __2566.2 MB/s__ | __1395.9 MB/s__ | __1567.7 MB/s__ |

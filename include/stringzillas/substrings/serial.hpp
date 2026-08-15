@@ -188,6 +188,23 @@ constexpr f32_t substrings_bm25_term(substrings_bm25_t const &parameters, f32_t 
            (term_frequency + parameters.term_frequency_saturation * normalized_length);
 }
 
+/**
+ *  @brief One slot of a document-sized counter table: which needle, and how often this document hit it.
+ *
+ *  A row with a counter per needle carries no key, since a needle's index is its position. A table sized by
+ *  the document has to, and that key is the one field this adds over the bare count.
+ */
+struct substrings_bm25_counter_t {
+    u32_t needle_index {};
+    u32_t frequency {};
+};
+
+/** @brief Scrambles a needle index into a starting probe, as `probe_of_` does for a `(parent, byte)` pair.
+ *         The caller masks with `capacity - 1`, so a capacity of one needs no `>> 64` special case. */
+constexpr size_t substrings_bm25_probe_of_(u32_t needle_index) noexcept {
+    return (size_t)((((u64_t)needle_index + 1) * 0x9E3779B97F4A7C15ull) >> 32);
+}
+
 #pragma endregion Vocabulary
 
 #pragma region Published View
@@ -1765,7 +1782,7 @@ struct aho_corasick_dictionary {
      */
     size_t count(span<byte_t const> haystack) const noexcept {
         // The folded walk reports at folded-rune ends rather than at every byte, and collapses spans that
-        // resolve to one, so a byte-per-step tally would not agree with what `find` emits. Counting through
+        // resolve to one, so a byte-per-step count would not agree with what `find` emits. Counting through
         // the same walk is what keeps `try_find`'s count-then-write pass consistent.
         if (case_sensitivity_ == substrings_uncased_k) {
             size_t total = 0;
@@ -1872,7 +1889,7 @@ struct aho_corasick_dictionary {
      */
     size_t count(span<byte_t const> haystack, substrings_overlap_policy_t policy,
                  span<pending_start_t> pending_starts) const noexcept {
-        // The overlapping tally has a dedicated four-byte-load walk that never enumerates an output run.
+        // The overlapping count has a dedicated four-byte-load walk that never enumerates an output run.
         if (policy == substrings_overlapping_k) return count(haystack);
         size_t total = 0;
         find_leftmost(haystack, pending_starts, policy, [&](size_t, size_t, size_t) noexcept {
@@ -1960,11 +1977,11 @@ enum class substrings_document_length_t : bool {
  *  @brief Counts every occurrence of every needle in @p haystack into @p frequencies.
  *  @param[in,out] touched_count Grows by the needles this call hits for the first time.
  *
- *  Split from the scoring below so several cores can tally slices of one haystack into their own rows and
+ *  Split from the scoring below so several cores can count slices of one haystack into their own rows and
  *  merge afterwards, which is the only way a single long document reaches more than one core.
  */
 template <typename dictionary_type_>
-void substrings_bm25_tally(dictionary_type_ const &dictionary, span<byte_t const> haystack, span<u32_t> frequencies,
+void substrings_bm25_count(dictionary_type_ const &dictionary, span<byte_t const> haystack, span<u32_t> frequencies,
                            span<u32_t> touched, size_t &touched_count) noexcept {
     dictionary.find(haystack, [&](size_t needle_index, size_t, size_t) noexcept {
         if (frequencies[needle_index]++ == 0) touched[touched_count++] = (u32_t)needle_index;
@@ -1973,27 +1990,54 @@ void substrings_bm25_tally(dictionary_type_ const &dictionary, span<byte_t const
 }
 
 /**
- *  @brief Scores one tallied document, leaving @p frequencies zeroed again for whoever runs next.
+ *  @brief Scores one counted document, leaving @p frequencies zeroed again for whoever runs next.
  *  @param[in] touched The needles the document hit, so the reset skips the rest of the vocabulary.
  */
-inline f32_t substrings_bm25_reduce(span<f32_t const> needle_weights, substrings_bm25_t parameters,
-                                    f32_t document_length, span<u32_t> frequencies, span<u32_t> touched,
-                                    size_t touched_count) noexcept {
+inline f32_t substrings_bm25_total(span<f32_t const> needle_weights, substrings_bm25_t parameters,
+                                   f32_t document_length, span<u32_t> frequencies, span<u32_t> touched,
+                                   size_t touched_count) noexcept {
 
     // Float addition is not associative, so the summation order is part of the answer, and the order this
     // engine publishes is ascending by needle. A walk touches needles in whatever order the haystack spells
-    // them, so they are ordered here rather than summed as they arrived - an insertion sort, because this
-    // runs over the needles one document hit, not over the whole vocabulary.
-    for (size_t slot = 1; slot < touched_count; ++slot) {
-        u32_t const needle_index = touched[slot];
-        size_t earlier = slot;
-        for (; earlier > 0 && touched[earlier - 1] > needle_index; --earlier) touched[earlier] = touched[earlier - 1];
-        touched[earlier] = needle_index;
+    // them, so they are ordered here before anything is added.
+    u32_t const *ordered = touched.data();
+    if (touched_count * 2 <= touched.size()) {
+        // A least-significant-byte radix sort, with the list's own unused tail as the second buffer - which
+        // the half-full test above is what guarantees. Passes cover the widest needle index and no more, so
+        // a dictionary under 65,536 needles is two passes rather than four.
+        size_t const highest_index = frequencies.size() ? frequencies.size() - 1 : 0;
+        size_t key_bytes = 1;
+        while (key_bytes < sizeof(u32_t) && (highest_index >> (key_bytes * 8)) != 0) ++key_bytes;
+
+        u32_t *source = touched.data();
+        u32_t *target = touched.data() + touched_count;
+        for (size_t byte = 0; byte != key_bytes; ++byte) {
+            u32_t histogram[256] {};
+            size_t const shift = byte * 8;
+            for (size_t slot = 0; slot != touched_count; ++slot) ++histogram[(source[slot] >> shift) & 0xFFu];
+            for (size_t bucket = 0, offset = 0; bucket != 256; ++bucket) {
+                u32_t const count = histogram[bucket];
+                histogram[bucket] = (u32_t)offset;
+                offset += count;
+            }
+            for (size_t slot = 0; slot != touched_count; ++slot)
+                target[histogram[(source[slot] >> shift) & 0xFFu]++] = source[slot];
+            u32_t *const previous = source;
+            source = target, target = previous;
+        }
+        ordered = source;
+    }
+    else {
+        // Past half the vocabulary the row is the cheaper index: walking it ascending costs about what
+        // ordering the list would, and arrives already sorted.
+        size_t written = 0;
+        for (size_t needle_index = 0; needle_index != frequencies.size(); ++needle_index)
+            if (frequencies[needle_index]) touched[written++] = (u32_t)needle_index;
     }
 
     f32_t score = 0;
     for (size_t slot = 0; slot < touched_count; ++slot) {
-        size_t const needle_index = touched[slot];
+        size_t const needle_index = ordered[slot];
         score += needle_weights[needle_index] *
                  substrings_bm25_term(parameters, (f32_t)frequencies[needle_index], document_length);
         frequencies[needle_index] = 0;
@@ -2013,9 +2057,9 @@ f32_t substrings_bm25_score(dictionary_type_ const &dictionary, span<byte_t cons
                             substrings_bm25_t parameters, span<f32_t const> needle_weights, span<u32_t> frequencies,
                             span<u32_t> touched) noexcept {
     size_t touched_count = 0;
-    substrings_bm25_tally(dictionary, haystack, frequencies, touched, touched_count);
+    substrings_bm25_count(dictionary, haystack, frequencies, touched, touched_count);
     if (length_source == substrings_document_length_t::haystack_bytes_k) document_length = (f32_t)haystack.size();
-    return substrings_bm25_reduce(needle_weights, parameters, document_length, frequencies, touched, touched_count);
+    return substrings_bm25_total(needle_weights, parameters, document_length, frequencies, touched, touched_count);
 }
 
 #pragma endregion Scoring
@@ -2818,7 +2862,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         return {spanned_.data() + core_index * spanned_width_, spanned_width_};
     }
 
-    /** @brief One core's tally row, indexed by @b needle index; row zero doubles as the merge target. */
+    /** @brief One core's counter row, indexed by @b needle index; row zero doubles as the merge target. */
     span<u32_t> frequencies_of_(size_t core_index) noexcept {
         return {frequencies_.data() + core_index * frequencies_width_, frequencies_width_};
     }
@@ -3050,12 +3094,12 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
     }
 
     /**
-     *  @brief Scores one haystack too long for a single core, tallying its slices in parallel.
+     *  @brief Scores one haystack too long for a single core, counting its slices in parallel.
      *
      *  Each core walks its own slice preceded by a warm-up of the longest match, so a match straddling a cut
      *  is still spelled, and claims it only when it @b ends inside the slice - the same one-owner rule
      *  `count_matches_per_core_` uses. Frequencies are integers, so the rows merge by plain addition and the
-     *  merged row scores exactly as a single-core tally would.
+     *  merged row scores exactly as a single-core count would.
      */
     template <typename executor_type_>
     f32_t score_one_large_(span<byte_t const> haystack, substrings_document_length_t length_source,
@@ -3103,7 +3147,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         }
 
         if (length_source == substrings_document_length_t::haystack_bytes_k) document_length = (f32_t)haystack.size();
-        return substrings_bm25_reduce(needle_weights, parameters, document_length, merged, merged_touched,
+        return substrings_bm25_total(needle_weights, parameters, document_length, merged, merged_touched,
                                       merged_count);
     }
 

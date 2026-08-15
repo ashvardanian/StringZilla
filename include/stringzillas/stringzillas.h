@@ -757,9 +757,9 @@ SZ_API_RUNTIME sz_status_t szs_substrings_find(                                 
  *  The dictionary @b is the query: `needle_weights[needle_index]` is that needle's IDF or boost, and one
  *  score comes back per haystack. Term frequencies are raw overlapping counts, which is classic BM25 - a
  *  leftmost cover would suppress genuine occurrences of any needle nested in another, so no overlap policy
- *  applies here. Frequencies are integers and each backend combines the terms in an order fixed by its own
- *  shape - ascending needle order on the CPU, a block-wide tree on the GPU - so scores are bit-stable across
- *  runs of one backend, and agree numerically rather than bitwise between two.
+ *  applies here. Frequencies are integers, and each backend reaches a total no run of it can perturb - the
+ *  CPU sums in ascending needle order, the GPU sums fixed-point integers, whose addition is associative - so
+ *  scores are bit-stable across runs of one backend, and agree numerically rather than bitwise between two.
  *
  *  @param[in] engine Initialized search engine.
  *  @param[in] device Device scope for execution.
