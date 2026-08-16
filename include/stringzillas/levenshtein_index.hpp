@@ -35,6 +35,7 @@ class basic_levenshtein_index {
     using symbol_t = symbol_type_;
     using allocator_t = allocator_type_;
     using match_t = levenshtein_index_match_t;
+    static constexpr size_t automatic_deletion_max_word_length_k = std::numeric_limits<size_t>::max();
 
     static_assert(std::is_integral<symbol_t>::value &&
                       !std::is_same<typename std::remove_cv<symbol_t>::type, bool>::value &&
@@ -803,6 +804,26 @@ class basic_levenshtein_index {
         if (max_distance == std::numeric_limits<u8_t>::max()) return status_t::unexpected_dimensions_k;
         if (dictionary.size() > std::numeric_limits<u32_t>::max()) return status_t::overflow_risk_k;
         u8_t const indexed_distance = sz_min_of_two(max_distance, u8_t(2));
+        if (deletion_max_word_length == automatic_deletion_max_word_length_k) {
+            static constexpr size_t residuals_per_word_budget = 80;
+            size_t residuals_budget = std::numeric_limits<size_t>::max();
+            if (dictionary.size() <= residuals_budget / residuals_per_word_budget)
+                residuals_budget = dictionary.size() * residuals_per_word_budget;
+            size_t residuals_upper_bound = 0;
+            bool residuals_budget_exceeded = false;
+            for (size_t id = 0; id != dictionary.size(); ++id) {
+                size_t word_records = 0;
+                if (!residuals_upper_bound_(dictionary[id].size(), indexed_distance, word_records) ||
+                    word_records > residuals_budget - residuals_upper_bound) {
+                    residuals_budget_exceeded = true;
+                    break;
+                }
+                residuals_upper_bound += word_records;
+            }
+            deletion_max_word_length = !residuals_budget_exceeded
+                                           ? automatic_deletion_max_word_length_k
+                                           : size_t(0);
+        }
         deletion_max_word_length_ = deletion_max_word_length;
         fallback_words_count_ = 0;
         size_t tape_symbols = 0, records_upper_bound = 0;
@@ -912,10 +933,10 @@ class basic_levenshtein_index {
         : alloc_(alloc), tape_(alloc), offsets_(alloc), directory_(alloc), directory_words_(alloc),
           packed_records_(alloc), wide_records_(alloc), trie_nodes_(alloc), trie_edges_(alloc), trie_terminals_(alloc) {}
 
-    /** @brief Copies and indexes a dictionary. Words longer than the cutoff use the prefix tree. */
+    /** @brief Copies and indexes a dictionary, choosing the deletion table or prefix tree from its expected size. */
     template <typename sequences_type_>
     status_t try_build(sequences_type_ const &dictionary, u8_t max_distance,
-                       size_t deletion_max_word_length = 64) noexcept {
+                       size_t deletion_max_word_length = automatic_deletion_max_word_length_k) noexcept {
         basic_levenshtein_index candidate {alloc_};
         scratch_t scratch {alloc_};
         if (status_t status = candidate.build_(dictionary, max_distance, deletion_max_word_length, scratch);

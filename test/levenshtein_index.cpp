@@ -74,28 +74,37 @@ int main() {
     // Bounds above two search the complete prefix tree.
     szs::levenshtein_index<> index;
     if (index.try_build(dictionary, 4) != sz::status_t::success_k ||
+        index.deletion_max_word_length() != szs::levenshtein_index<>::automatic_deletion_max_word_length_k ||
         !check_matches(index, dictionary, queries, 4))
         return 1;
+
+    // Long dictionaries exceed the deletion-record budget and select the tree automatically.
+    std::vector<std::string> long_dictionary = {
+        std::string(96, 'a'), std::string(96, 'b'), std::string(96, 'c'), std::string(96, 'd')};
+    szs::levenshtein_index<> long_index;
+    if (long_index.try_build(long_dictionary, 2) != sz::status_t::success_k ||
+        long_index.deletion_max_word_length() != 0 || long_index.trie_bytes() == 0)
+        return 2;
 
     // A lower cutoff mixes deletion lookup for short strings with the tree for long strings.
     szs::levenshtein_index<> mixed_index;
     if (mixed_index.try_build(dictionary, 2, 4) != sz::status_t::success_k ||
         !check_matches(mixed_index, dictionary, queries, 2))
-        return 2;
+        return 3;
 
     szs::levenshtein_index<>::scratch_t scratch;
     szs::levenshtein_index<>::matches_t matches;
     std::string const query = "book";
     if (index.find({query.data(), query.size()}, 5, scratch, matches) != sz::status_t::unexpected_dimensions_k)
-        return 3;
+        return 4;
 
     // Failed rebuilds leave the previous immutable index intact.
     if (index.try_build(dictionary, std::numeric_limits<std::uint8_t>::max()) !=
             sz::status_t::unexpected_dimensions_k ||
         index.size() != dictionary.size())
-        return 4;
+        return 5;
     if (index.find({query.data(), query.size()}, 0, scratch, matches) != sz::status_t::success_k ||
         matches.size() != 2)
-        return 5;
+        return 6;
     return 0;
 }
