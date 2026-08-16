@@ -106,5 +106,27 @@ int main() {
     if (index.find({query.data(), query.size()}, 0, scratch, matches) != sz::status_t::success_k ||
         matches.size() != 2)
         return 6;
+
+    std::vector<std::string> utf8_dictionary = {"caf\xC3\xA9", "cafe", "\xE5\x92\x96\xE5\x95\xA1",
+                                                "\xE5\x92\x96\xE9\x9D\x9E", "\xF0\x9F\xA6\x96zilla",
+                                                "caf\xC3\xA9"};
+    szs::levenshtein_index_utf8<> utf8_index;
+    if (utf8_index.try_build(utf8_dictionary, 4) != sz::status_t::success_k) return 7;
+    szs::levenshtein_index_utf8<>::scratch_t utf8_scratch;
+    szs::levenshtein_index_utf8<>::matches_t utf8_matches;
+    std::string const coffee_query = "\xE5\x92\x96\xE5\x95\xA1";
+    if (utf8_index.find({coffee_query.data(), coffee_query.size()}, 1, utf8_scratch, utf8_matches) !=
+            sz::status_t::success_k ||
+        utf8_matches.size() != 2)
+        return 8;
+
+    std::string const malformed = "\xF0\x9F";
+    if (utf8_index.find({malformed.data(), malformed.size()}, 1, utf8_scratch, utf8_matches) !=
+            sz::status_t::invalid_utf8_k ||
+        utf8_matches.size() != 0)
+        return 9;
+    std::vector<std::string> malformed_dictionary = {"valid", malformed};
+    if (utf8_index.try_build(malformed_dictionary, 2) != sz::status_t::invalid_utf8_k || utf8_index.size() != 6)
+        return 10;
     return 0;
 }

@@ -11,6 +11,7 @@
 
 #include "stringzillas/types.hpp"
 #include "stringzillas/levenshtein_index.h"
+#include "stringzilla/utf8_runes/serial.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -1029,6 +1030,121 @@ class basic_levenshtein_index {
 
 template <typename allocator_type_ = std::allocator<char>>
 using levenshtein_index = basic_levenshtein_index<char, allocator_type_>;
+
+/** @brief Exact immutable Levenshtein retrieval over validated UTF-8 codepoints rather than encoded bytes. */
+template <typename allocator_type_ = std::allocator<char>>
+class levenshtein_index_utf8 {
+  public:
+    using allocator_t = allocator_type_;
+    using rune_t = sz_rune_t;
+    using index_t = basic_levenshtein_index<rune_t, allocator_t>;
+    using match_t = typename index_t::match_t;
+    using matches_t = typename index_t::matches_t;
+    static constexpr size_t automatic_deletion_max_word_length_k = index_t::automatic_deletion_max_word_length_k;
+
+  private:
+    template <typename value_type_>
+    using rebound_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<value_type_>;
+    template <typename value_type_>
+    using vector_t = safe_vector<value_type_, rebound_allocator_t<value_type_>>;
+
+    struct decoded_dictionary_t {
+        struct word_t {
+            rune_t const *data_ = nullptr;
+            size_t size_ = 0;
+            rune_t const *data() const noexcept { return data_; }
+            size_t size() const noexcept { return size_; }
+        };
+
+        vector_t<rune_t> tape;
+        vector_t<u64_t> offsets;
+
+        explicit decoded_dictionary_t(allocator_t alloc) noexcept : tape(alloc), offsets(alloc) {}
+        size_t size() const noexcept { return offsets.size() ? offsets.size() - 1 : 0; }
+        word_t operator[](size_t id) const noexcept {
+            size_t const begin = static_cast<size_t>(offsets[id]);
+            size_t const end = static_cast<size_t>(offsets[id + 1]);
+            return {tape.data() + begin, end - begin};
+        }
+    };
+
+    allocator_t alloc_ {};
+    index_t index_ {alloc_};
+
+    static status_t decode_(span<char const> source, vector_t<rune_t> &destination) noexcept {
+        if (status_t status = destination.try_resize(0); status != status_t::success_k) return status;
+        if (status_t status = destination.try_reserve(source.size()); status != status_t::success_k) return status;
+        if (source.empty()) return status_t::success_k;
+        char const *cursor = source.data();
+        char const *const end = cursor + source.size();
+        while (cursor != end) {
+            rune_t rune = 0;
+            rune_length_t const length = sz_rune_decode(cursor, end, &rune);
+            if (length == sz_rune_invalid_k) return status_t::invalid_utf8_k;
+            if (status_t status = destination.try_push_back(rune); status != status_t::success_k) return status;
+            cursor += length;
+        }
+        return status_t::success_k;
+    }
+
+  public:
+    /** @brief Reusable query memory owned by one UTF-8 reader. */
+    class scratch_t {
+        friend class levenshtein_index_utf8;
+        typename index_t::scratch_t index_scratch_;
+        vector_t<rune_t> query_runes_;
+
+      public:
+        explicit scratch_t(allocator_t alloc = {}) noexcept : index_scratch_(alloc), query_runes_(alloc) {}
+    };
+
+    explicit levenshtein_index_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc), index_(alloc) {}
+
+    /** @brief Builds from validated UTF-8 strings and measures edits in Unicode codepoints. */
+    template <typename sequences_type_>
+    status_t try_build(sequences_type_ const &dictionary, u8_t max_distance,
+                       size_t deletion_max_word_length = automatic_deletion_max_word_length_k) noexcept {
+        if (dictionary.size() > std::numeric_limits<u32_t>::max()) return status_t::overflow_risk_k;
+        decoded_dictionary_t decoded {alloc_};
+        if (status_t status = decoded.offsets.try_resize(dictionary.size() + 1); status != status_t::success_k)
+            return status;
+        for (size_t id = 0; id != dictionary.size(); ++id) {
+            auto const item = dictionary[id];
+            if (decoded.tape.size() > std::numeric_limits<u64_t>::max()) return status_t::overflow_risk_k;
+            decoded.offsets[id] = static_cast<u64_t>(decoded.tape.size());
+            if (!item.size()) continue;
+            char const *cursor = item.data();
+            char const *const end = cursor + item.size();
+            while (cursor != end) {
+                rune_t rune = 0;
+                rune_length_t const length = sz_rune_decode(cursor, end, &rune);
+                if (length == sz_rune_invalid_k) return status_t::invalid_utf8_k;
+                if (status_t status = decoded.tape.try_push_back(rune); status != status_t::success_k) return status;
+                cursor += length;
+            }
+        }
+        decoded.offsets[dictionary.size()] = static_cast<u64_t>(decoded.tape.size());
+        return index_.try_build(decoded, max_distance, deletion_max_word_length);
+    }
+
+    /** @brief Finds all matches for a validated UTF-8 query and returns exact codepoint distances. */
+    status_t find(span<char const> query, u8_t bound, scratch_t &scratch, matches_t &matches) const noexcept {
+        if (status_t status = matches.try_resize(0); status != status_t::success_k) return status;
+        if (status_t status = decode_(query, scratch.query_runes_); status != status_t::success_k) return status;
+        return index_.find({scratch.query_runes_.data(), scratch.query_runes_.size()}, bound, scratch.index_scratch_,
+                           matches);
+    }
+
+    size_t size() const noexcept { return index_.size(); }
+    u8_t max_distance() const noexcept { return index_.max_distance(); }
+    size_t max_word_length() const noexcept { return index_.max_word_length(); }
+    size_t deletion_max_word_length() const noexcept { return index_.deletion_max_word_length(); }
+    bool uses_packed_records() const noexcept { return index_.uses_packed_records(); }
+    size_t records_count() const noexcept { return index_.records_count(); }
+    size_t index_bytes() const noexcept { return index_.index_bytes(); }
+    size_t dictionary_bytes() const noexcept { return index_.dictionary_bytes(); }
+    size_t trie_bytes() const noexcept { return index_.trie_bytes(); }
+};
 
 } // namespace stringzillas
 } // namespace ashvardanian
