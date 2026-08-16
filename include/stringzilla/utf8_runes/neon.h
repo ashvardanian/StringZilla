@@ -381,7 +381,7 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
     return vceqq_u8(vandq_u8(per_half_u8x16, bit_position_u8x16), bit_position_u8x16);
 }
 
-SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
     static sz_u8_t const leftpack8[256 * 8] = {
         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x00
         0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x01
@@ -881,8 +881,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_neon_(                              
  *
  *  @return Number of runes emitted (0 => tile declined); sets @p consumed_bytes to `clean * 3` when it emits.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_tile3_neon_( //
-    sz_u8_t const *text, sz_size_t length,         //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_tile3_neon_( //
+    sz_u8_t const *text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     if (length < 48 || capacity == 0 || (text[0] & 0xF0) != 0xE0) return 0;
@@ -948,9 +948,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_tile3_neon_( //
  *          surrogate / out-of-range / framing) or truncated-only window declines (`*runes_unpacked == 0`, cursor
  *          unchanged) and the public entry hands the remainder to the serial reference (the U+FFFD oracle).
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
-    sz_cptr_t text, sz_size_t length,               //
-    sz_rune_t *runes, sz_size_t runes_capacity,     //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_rune_t *runes, sz_size_t runes_capacity,       //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 64 ? length : 64;

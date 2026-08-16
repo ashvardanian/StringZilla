@@ -361,8 +361,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t sou
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                                   sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+                                                                     sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     uint8x16_t const offsets_lut_u8x16 = vld1q_u8(second_byte_offsets_lut_);
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);

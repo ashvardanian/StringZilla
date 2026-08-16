@@ -118,8 +118,8 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes_rot1_rvv_(void) {
 /*  General GF(2^4) multiply of two vector operands via log/antilog, with the discrete-log sum
  *  reduced modulo 15 so the antilog gather index stays inside the 16 active lanes, and a zero-select
  *  for the `0 * x` and `x * 0` cases. */
-SZ_HELPER_AUTO vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1, vuint8m1_t log_table_u8m1,
-                                           vuint8m1_t antilog_table_u8m1, sz_size_t vector_length) {
+SZ_HELPER_INLINE vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1, vuint8m1_t log_table_u8m1,
+                                             vuint8m1_t antilog_table_u8m1, sz_size_t vector_length) {
     vuint8m1_t log_a_u8m1 = __riscv_vrgather_vv_u8m1(log_table_u8m1, a_u8m1, vector_length);
     vuint8m1_t log_b_u8m1 = __riscv_vrgather_vv_u8m1(log_table_u8m1, b_u8m1, vector_length);
     vuint8m1_t log_sum_u8m1 = __riscv_vadd_vv_u8m1(log_a_u8m1, log_b_u8m1, vector_length);
@@ -138,7 +138,7 @@ SZ_HELPER_AUTO vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1,
  *          `sz_emulate_aesenc_si128_serial_`.
  *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions" (CHES 2009).
  */
-SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
+SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
     sz_u8_t const *tables = sz_aes_tables_rvv_();
 
@@ -236,15 +236,16 @@ SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_
  *  serial AES round. Every non-AES step (the additive `sum` shuffle, length folding, block layout)
  *  reuses the shared serial helpers, so the digests are guaranteed value-identical. */
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_rvv_(sz_hash_state_aligned_for_short_t *state, sz_u128_vec_t block_vec) {
+SZ_HELPER_INLINE void sz_hash_state_short_update_rvv_(sz_hash_state_aligned_for_short_t *state,
+                                                      sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_emulate_aesenc_rvv_(state->aes, block_vec);
     state->sum = sz_emulate_shuffle_epi8_serial_(state->sum, shuffle);
     state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_rvv_(sz_hash_state_aligned_for_short_t const *state,
-                                                          sz_size_t length) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_rvv_(sz_hash_state_aligned_for_short_t const *state,
+                                                            sz_size_t length) {
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
     sz_u128_vec_t mixed_vec = sz_emulate_aesenc_rvv_(state->sum, state->aes);
@@ -270,7 +271,7 @@ SZ_HELPER_INLINE void sz_hash_store_block_rvv_(sz_ptr_t target, sz_u128_vec_t so
 /**
  *  @brief Loads the packed public state into the aligned internal twin (one `vle8` block per 16-byte lane).
  */
-SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_rvv_(sz_hash_state_t const *packed) {
+SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvv_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -284,7 +285,7 @@ SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_rvv_(sz_hash_state_t c
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state (one `vse8` block per 16-byte lane). */
-SZ_HELPER_AUTO void sz_hash_state_store_rvv_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
+SZ_HELPER_INLINE void sz_hash_state_store_rvv_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         sz_hash_store_block_rvv_((sz_ptr_t)(packed->aes + offset), state->aes.u128s[lane_index]);
@@ -295,7 +296,7 @@ SZ_HELPER_AUTO void sz_hash_state_store_rvv_(sz_hash_state_t *packed, sz_hash_st
     packed->ins_length = state->ins_length;
 }
 
-SZ_HELPER_AUTO void sz_hash_state_update_rvv_(sz_hash_state_aligned_t *state) {
+SZ_HELPER_INLINE void sz_hash_state_update_rvv_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         state->aes.u128s[lane_index] = sz_emulate_aesenc_rvv_(state->aes.u128s[lane_index],
@@ -306,7 +307,7 @@ SZ_HELPER_AUTO void sz_hash_state_update_rvv_(sz_hash_state_aligned_t *state) {
     }
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_rvv_(sz_hash_state_aligned_t state) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_rvv_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length_vec;
     key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;

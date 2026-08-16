@@ -30,7 +30,7 @@ extern "C" {
  *  rides a biased iota) and one `svcompact_u32` packs the start indices while a lockstep `svcompact_u32` packs
  *  their byte lengths; the offsets turn absolute only after the 64-bit widening, so multi-gigabyte inputs never
  *  truncate. The caller's `while` loop resumes past the last emitted match when the capacity cuts the tile. */
-SZ_HELPER_AUTO void sz_utf8_token_drain_sve2_(                                      //
+SZ_HELPER_INLINE void sz_utf8_token_drain_sve2_(                                    //
     svbool_t starts_b8x, svuint8_t lengths_u8x, sz_size_t position, sz_size_t span, //
     sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 

@@ -29,8 +29,8 @@ extern "C" {
  *          (5-nibble cascade), the SVE2 twin of @ref sz_utf8_sentence_break_astral_class_neon_. Per-lane bytes:
  *          @p plane = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
  *          Bit-exact with `sz_rune_sentence_break_property` over all astral planes. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
-                                                                   svuint8_t low_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
+                                                                     svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
@@ -69,7 +69,7 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t pla
  *          (high, low) pair from the peeked neighbours; 4-byte leads split by their blind plane between the BMP
  *          cascade (plane 0, overlong encodings), the astral cascade (planes 1..16), and class Other (planes over
  *          16, e.g. `F5..F7` leads). The class on non-start lanes is irrelevant - only start lanes compact. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(                   //
+SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(                 //
     svuint8_t bytes_u8x, svuint8_t next1_u8x, svuint8_t next2_u8x, svuint8_t next3_u8x, //
     svbool_t two_b8x, svbool_t three_b8x, svbool_t four_b8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -124,8 +124,8 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(           
 /** @brief  Build the per-class membership frame from the dense class byte stream via its four bit-planes: each
  *          plane lowers to a u64 with the shared predicate bridge, and the fifteen class masks assemble from the
  *          planes with scalar mask algebra - 4 predicate compares per dense vector instead of 15. */
-SZ_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_sve2_(sz_u8_t const *dense_classes,
-                                                                                 sz_size_t count) {
+SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_sve2_(sz_u8_t const *dense_classes,
+                                                                                   sz_size_t count) {
     sz_size_t const vector_bytes = svcntb() < 64 ? svcntb() : 64;
     sz_u64_t planes[4] = {0, 0, 0, 0};
     for (sz_size_t base = 0; base < count; base += vector_bytes) {

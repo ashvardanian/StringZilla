@@ -61,16 +61,16 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_
  *  for the AES round. Every non-AES step reuses the shared serial helpers, so the digests are
  *  guaranteed value-identical to `sz_hash_serial`. */
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_for_short_t *state,
-                                                          sz_u128_vec_t block_vec) {
+SZ_HELPER_INLINE void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_for_short_t *state,
+                                                            sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_emulate_aesenc_rvvcrypto_(state->aes, block_vec);
     state->sum = sz_emulate_shuffle_epi8_serial_(state->sum, shuffle);
     state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(sz_hash_state_aligned_for_short_t const *state,
-                                                                sz_size_t length) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(sz_hash_state_aligned_for_short_t const *state,
+                                                                  sz_size_t length) {
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
     sz_u128_vec_t mixed_vec = sz_emulate_aesenc_rvvcrypto_(state->sum, state->aes);
@@ -79,7 +79,7 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(sz_hash_state_al
     return mixed_in_register_vec.u64s[0];
 }
 
-SZ_HELPER_AUTO void sz_hash_state_update_rvvcrypto_(sz_hash_state_aligned_t *state) {
+SZ_HELPER_INLINE void sz_hash_state_update_rvvcrypto_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         state->aes.u128s[lane_index] = sz_emulate_aesenc_rvvcrypto_(state->aes.u128s[lane_index],
@@ -90,7 +90,7 @@ SZ_HELPER_AUTO void sz_hash_state_update_rvvcrypto_(sz_hash_state_aligned_t *sta
     }
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_aligned_t state) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length_vec;
     key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
@@ -143,7 +143,7 @@ SZ_HELPER_INLINE void sz_hash_store_block_rvvcrypto_(sz_ptr_t target, sz_u128_ve
 /**
  *  @brief Loads the packed public state into the aligned internal twin (one `vle8` block per 16-byte lane).
  */
-SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_state_t const *packed) {
+SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -157,7 +157,7 @@ SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_sta
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state (one `vse8` block per 16-byte lane). */
-SZ_HELPER_AUTO void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
+SZ_HELPER_INLINE void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         sz_hash_store_block_rvvcrypto_((sz_ptr_t)(packed->aes + offset), state->aes.u128s[lane_index]);
@@ -352,8 +352,8 @@ SZ_API_COMPTIME void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t length, s
  *  SHA-256 words are big-endian; we load them with a scalar byte-swap so this path needs only the
  *  `Zvknhb` extension (no `Zvbb`/`Zvkb` `vrev8`).
  */
-SZ_HELPER_AUTO void sz_sha256_process_block_rvvcrypto_(sz_u32_t hash[sz_at_least_(8)],
-                                                       sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
+SZ_HELPER_INLINE void sz_sha256_process_block_rvvcrypto_(sz_u32_t hash[sz_at_least_(8)],
+                                                         sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
     sz_size_t const vector_length = __riscv_vsetvl_e32m1(4);
 

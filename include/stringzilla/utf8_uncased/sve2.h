@@ -211,10 +211,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_scripted_( //
 
 /** @brief 3-probe ASCII uncased search: probes at 0, mid, last cover ALL bytes of windows up to 3 bytes,
  *         so candidates skip window verification and go straight to head/tail validation. */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_sve2_ascii_3probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                  //
-    sz_cptr_t needle, sz_size_t needle_length,                      //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,       //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_ascii_3probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                    //
+    sz_cptr_t needle, sz_size_t needle_length,                        //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,         //
     sz_size_t *matched_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;

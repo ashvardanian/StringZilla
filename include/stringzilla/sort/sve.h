@@ -39,7 +39,7 @@ extern "C" {
  *  @param first_pivot_offset Receives the index of the first element equal to the pivot.
  *  @param last_pivot_offset Receives the index of the last element equal to the pivot.
  */
-SZ_HELPER_AUTO void sz_sequence_argsort_sve_3way_partition_(
+SZ_HELPER_INLINE void sz_sequence_argsort_sve_3way_partition_(
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order, sz_pgram_t *const partitioned_pgrams,
     sz_sorted_idx_t *const partitioned_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t *const first_pivot_offset, sz_size_t *const last_pivot_offset) {

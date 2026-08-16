@@ -70,7 +70,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_compact4_neon_(                  //
  *  @brief  Peel the tile's first @p emit_count matches by SIMD left-pack over four 4-lane sub-blocks into a
  *          fixed-width stack scratch, then copy the surviving prefix to the caller (no `ctz`, no per-match branch).
  */
-SZ_HELPER_AUTO void sz_utf8_iterate_peel_neon_(            //
+SZ_HELPER_INLINE void sz_utf8_iterate_peel_neon_(          //
     sz_u64_t start_bits, uint8x16_t length_per_lane_u8x16, //
     sz_size_t emit_count, sz_size_t position,              //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {

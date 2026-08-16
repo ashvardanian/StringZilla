@@ -27,8 +27,8 @@ extern "C" {
 
 /** @brief  Flat-palette index for one chunk of ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
  *          cascade), the SVE2 twin of @ref sz_line_break_classify_astral_neon_. Returns 62-entry palette indices. */
-SZ_HELPER_AUTO svuint8_t sz_line_break_classify_astral_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
-                                                             svuint8_t low_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_line_break_classify_astral_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
+                                                               svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
@@ -63,9 +63,9 @@ SZ_HELPER_AUTO svuint8_t sz_line_break_classify_astral_sve2_(svuint8_t plane_u8x
 /** @brief  Split one chunk of flat-palette indices into the low and high bytes of their 16-bit Line_Break
  *          descriptors, gathered straight from the 64-word palette by one `svld1uh_gather` per 32-bit quarter -
  *          the SVE2 stand-in for the NEON resident `vqtbl4q` pair and the AVX2 `vpgatherdd`. */
-SZ_HELPER_AUTO void sz_line_break_flat_descriptors_sve2_(svuint8_t palette_indices_u8x,
-                                                         svuint8_t *descriptor_low_u8x_out,
-                                                         svuint8_t *descriptor_high_u8x_out) {
+SZ_HELPER_INLINE void sz_line_break_flat_descriptors_sve2_(svuint8_t palette_indices_u8x,
+                                                           svuint8_t *descriptor_low_out_u8x,
+                                                           svuint8_t *descriptor_high_out_u8x) {
     svbool_t const all_b32x = svptrue_b32();
     sz_u16_t const *palette = sz_utf8_line_break_flat_palette_;
     svuint16_t const indices_lo_u16x = svunpklo_u16(palette_indices_u8x),
@@ -85,20 +85,20 @@ SZ_HELPER_AUTO void sz_line_break_flat_descriptors_sve2_(svuint8_t palette_indic
                                                  svreinterpret_u16_u32(svand_n_u32_x(all_b32x, second_u32x, 0xFF)));
     svuint16_t const low_second_u16x = svuzp1_u16(svreinterpret_u16_u32(svand_n_u32_x(all_b32x, third_u32x, 0xFF)),
                                                   svreinterpret_u16_u32(svand_n_u32_x(all_b32x, fourth_u32x, 0xFF)));
-    *descriptor_low_u8x_out = svuzp1_u8(svreinterpret_u8_u16(low_first_u16x), svreinterpret_u8_u16(low_second_u16x));
+    *descriptor_low_out_u8x = svuzp1_u8(svreinterpret_u8_u16(low_first_u16x), svreinterpret_u8_u16(low_second_u16x));
     svuint16_t const high_first_u16x = svuzp1_u16(svreinterpret_u16_u32(svlsr_n_u32_x(all_b32x, first_u32x, 8)),
                                                   svreinterpret_u16_u32(svlsr_n_u32_x(all_b32x, second_u32x, 8)));
     svuint16_t const high_second_u16x = svuzp1_u16(svreinterpret_u16_u32(svlsr_n_u32_x(all_b32x, third_u32x, 8)),
                                                    svreinterpret_u16_u32(svlsr_n_u32_x(all_b32x, fourth_u32x, 8)));
-    *descriptor_high_u8x_out = svuzp1_u8(svreinterpret_u8_u16(high_first_u16x), svreinterpret_u8_u16(high_second_u16x));
+    *descriptor_high_out_u8x = svuzp1_u8(svreinterpret_u8_u16(high_first_u16x), svreinterpret_u8_u16(high_second_u16x));
 }
 
 /** @brief  Expand one chunk of flat-palette indices to the LB1-resolved class byte, the engine side byte and the
  *          DottedCircle predicate - the SVE2 twin of @ref sz_line_break_flat_palette_unpack_neon_. Applies the
  *          serial resolution aliasing (SA -> AL/CM, AI/SG/XX -> AL, CJ -> NS); RI/ZWJ side bits come from the RAW
  *          class, the mark side bit from the resolved class. */
-SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_sve2_(svuint8_t palette_indices_u8x, svuint8_t *classes_u8x_out,
-                                                            svuint8_t *side_u8x_out, svbool_t *dotted_b8x_out) {
+SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_sve2_(svuint8_t palette_indices_u8x, svuint8_t *classes_out_u8x,
+                                                              svuint8_t *side_out_u8x, svbool_t *dotted_out_b8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t descriptor_low_u8x, descriptor_high_u8x;
     sz_line_break_flat_descriptors_sve2_(palette_indices_u8x, &descriptor_low_u8x, &descriptor_high_u8x);
@@ -135,9 +135,9 @@ SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_sve2_(svuint8_t palette_in
                                                  svcmpeq_n_u8(all_b8x, classes_u8x, (sz_u8_t)sz_line_break_zwj_k));
     side_u8x = svorr_u8_m(class_is_mark_b8x, side_u8x, svdup_n_u8((sz_u8_t)sz_line_break_side_mark_k));
 
-    *classes_u8x_out = classes_u8x;
-    *side_u8x_out = side_u8x;
-    *dotted_b8x_out = svcmpne_n_u8(all_b8x, svand_n_u8_x(all_b8x, descriptor_high_u8x, 1 << 5), 0);
+    *classes_out_u8x = classes_u8x;
+    *side_out_u8x = side_u8x;
+    *dotted_out_b8x = svcmpne_n_u8(all_b8x, svand_n_u8_x(all_b8x, descriptor_high_u8x, 1 << 5), 0);
 }
 
 /** @brief  Membership mask of class @p cls over the six class bit-planes (class ids are < 64). */

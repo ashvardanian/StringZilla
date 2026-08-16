@@ -685,8 +685,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const 
 /*  Loads up to `length` bytes from `source` into a zeroed 64-byte scratch buffer, returning a pointer into a
  *  caller-provided buffer whose first `length` bytes are the data and the rest zero. The padding lets the
  *  fold/alarm strips read `source_ptr[vector_length]` for their `next` carry and keeps range compares safe-negative. */
-SZ_HELPER_AUTO sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
-                                                               sz_size_t buffer_capacity) {
+SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
+                                                                 sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return buffer;
@@ -841,72 +841,72 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
 
 #pragma region Per Script Kernels
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
-    sz_cptr_t needle, sz_size_t needle_length,              //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
+    sz_cptr_t needle, sz_size_t needle_length,                //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
                                                 (sz_utf8_uncased_alarm_strip_rvv_t)SZ_NULL, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_western_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_western_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(
         sz_utf8_uncased_fold_western_europe_strip_rvv_, sz_utf8_uncased_alarm_western_europe_strip_rvv_, haystack,
         haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_central_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_central_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(
         sz_utf8_uncased_fold_central_europe_strip_rvv_, sz_utf8_uncased_alarm_central_europe_strip_rvv_, haystack,
         haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_cyrillic_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,             //
-    sz_cptr_t needle, sz_size_t needle_length,                 //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_cyrillic_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,               //
+    sz_cptr_t needle, sz_size_t needle_length,                   //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_cyrillic_strip_rvv_,
                                                 sz_utf8_uncased_alarm_cyrillic_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_greek_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
-    sz_cptr_t needle, sz_size_t needle_length,              //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_greek_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
+    sz_cptr_t needle, sz_size_t needle_length,                //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_greek_strip_rvv_,
                                                 sz_utf8_uncased_alarm_greek_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_armenian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,             //
-    sz_cptr_t needle, sz_size_t needle_length,                 //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_armenian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,               //
+    sz_cptr_t needle, sz_size_t needle_length,                   //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_armenian_strip_rvv_,
                                                 sz_utf8_uncased_alarm_armenian_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_vietnamese_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_vietnamese_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                 //
+    sz_cptr_t needle, sz_size_t needle_length,                     //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_vietnamese_strip_rvv_,
                                                 sz_utf8_uncased_alarm_vietnamese_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,             //
-    sz_cptr_t needle, sz_size_t needle_length,                 //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,               //
+    sz_cptr_t needle, sz_size_t needle_length,                   //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     // Mkhedruli is caseless, so the fold is the bare ASCII fold; the alarm watches the historical scripts.
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,

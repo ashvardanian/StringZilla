@@ -367,8 +367,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, s
  *         the `< 16` case, where a 16-byte NEON load could read past the input.
  *  @return The number of populated text-lanes (1..4).
  */
-SZ_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,
-                                                         sz_u512_vec_t *text_lanes_vec) {
+SZ_HELPER_INLINE sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,
+                                                           sz_u512_vec_t *text_lanes_vec) {
     if (length <= 16) {
         sz_u128_vec_t lane_vec;
         if (length == 16) { lane_vec.u8x16 = vld1q_u8((sz_u8_t const *)text); }
