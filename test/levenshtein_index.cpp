@@ -38,26 +38,14 @@ static std::vector<std::string> binary_strings(std::size_t max_length) {
     return strings;
 }
 
-int main() {
-    std::vector<std::string> dictionary = binary_strings(5);
-    dictionary.push_back("book");
-    dictionary.push_back("book");
-    dictionary.push_back(std::string("a\0b", 3));
-    dictionary.push_back(std::string(70, 'x'));
-    szs::levenshtein_index<> index;
-    if (index.try_build(dictionary, 2) != sz::status_t::success_k) return 1;
-
+static bool check_matches(szs::levenshtein_index<> const &index, std::vector<std::string> const &dictionary,
+                          std::vector<std::string> const &queries, std::uint8_t max_bound) {
     szs::levenshtein_index<>::scratch_t scratch;
     szs::levenshtein_index<>::matches_t matches;
-
-    std::vector<std::string> queries = binary_strings(5);
-    queries.push_back("cook");
-    queries.push_back(std::string("a\0c", 3));
-    queries.push_back(std::string(69, 'x') + "y");
     for (std::string const &query : queries)
-        for (std::uint8_t bound = 0; bound <= 2; ++bound) {
+        for (std::uint8_t bound = 0; bound <= max_bound; ++bound) {
             if (index.find({query.data(), query.size()}, bound, scratch, matches) != sz::status_t::success_k)
-                return 2;
+                return false;
             std::vector<std::pair<std::uint32_t, std::uint8_t>> actual;
             for (auto const &match : matches) actual.emplace_back(match.id, match.distance);
             std::sort(actual.begin(), actual.end());
@@ -67,18 +55,47 @@ int main() {
                 std::uint8_t const distance = reference_distance(dictionary[id], query);
                 if (distance <= bound) expected.emplace_back(id, distance);
             }
-            if (actual != expected) return 3;
+            if (actual != expected) return false;
         }
+    return true;
+}
 
+int main() {
+    std::vector<std::string> dictionary = binary_strings(5);
+    dictionary.push_back("book");
+    dictionary.push_back("book");
+    dictionary.push_back(std::string("a\0b", 3));
+    dictionary.push_back(std::string(70, 'x'));
+    std::vector<std::string> queries = binary_strings(5);
+    queries.push_back("cook");
+    queries.push_back(std::string("a\0c", 3));
+    queries.push_back(std::string(69, 'x') + "y");
+
+    // Bounds above two search the complete prefix tree.
+    szs::levenshtein_index<> index;
+    if (index.try_build(dictionary, 4) != sz::status_t::success_k ||
+        !check_matches(index, dictionary, queries, 4))
+        return 1;
+
+    // A lower cutoff mixes deletion lookup for short strings with the tree for long strings.
+    szs::levenshtein_index<> mixed_index;
+    if (mixed_index.try_build(dictionary, 2, 4) != sz::status_t::success_k ||
+        !check_matches(mixed_index, dictionary, queries, 2))
+        return 2;
+
+    szs::levenshtein_index<>::scratch_t scratch;
+    szs::levenshtein_index<>::matches_t matches;
     std::string const query = "book";
-    if (index.find({query.data(), query.size()}, 3, scratch, matches) != sz::status_t::unexpected_dimensions_k)
-        return 4;
+    if (index.find({query.data(), query.size()}, 5, scratch, matches) != sz::status_t::unexpected_dimensions_k)
+        return 3;
 
     // Failed rebuilds leave the previous immutable index intact.
-    if (index.try_build(dictionary, 3) != sz::status_t::unexpected_dimensions_k || index.size() != dictionary.size())
-        return 5;
+    if (index.try_build(dictionary, std::numeric_limits<std::uint8_t>::max()) !=
+            sz::status_t::unexpected_dimensions_k ||
+        index.size() != dictionary.size())
+        return 4;
     if (index.find({query.data(), query.size()}, 0, scratch, matches) != sz::status_t::success_k ||
         matches.size() != 2)
-        return 6;
+        return 5;
     return 0;
 }
