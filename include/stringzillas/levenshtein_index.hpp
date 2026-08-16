@@ -494,10 +494,149 @@ class basic_levenshtein_index {
     }
 
     template <typename scratch_type_>
+    status_t find_trie_banded_dfa_(span<symbol_t const> query, u8_t bound, bool fallback_only, scratch_type_ &scratch,
+                                   vector_t<match_t> &matches) const noexcept {
+        static constexpr size_t transitions_capacity = size_t(1) << 15;
+        static constexpr size_t transitions_mask = transitions_capacity - 1;
+        if (scratch.dfa_transitions.size() != transitions_capacity) {
+            if (scratch.dfa_transitions.try_resize(transitions_capacity) != status_t::success_k)
+                return status_t::bad_alloc_k;
+            for (auto &entry : scratch.dfa_transitions) entry.generation = 0;
+            scratch.dfa_generation = 0;
+        }
+        if (++scratch.dfa_generation == 0) {
+            for (auto &entry : scratch.dfa_transitions) entry.generation = 0;
+            scratch.dfa_generation = 1;
+        }
+        if (scratch.dfa_frames.try_resize(0) != status_t::success_k ||
+            scratch.dfa_frames.try_reserve(max_word_length_ + 1) != status_t::success_k)
+            return status_t::bad_alloc_k;
+        u8_t const cap = bound + 1;
+
+        auto const emit_terminals = [&](u32_t node_id, u8_t distance) noexcept -> status_t {
+            trie_node_t const &node = trie_nodes_[node_id];
+            for (size_t offset = node.first_terminal; offset != node.first_terminal + node.terminals_count; ++offset) {
+                u32_t const id = trie_terminals_[offset];
+                if (fallback_only && word_(id).size() <= deletion_max_word_length_) continue;
+                if (status_t status = matches.try_push_back(match_t {id, distance, {}});
+                    status != status_t::success_k)
+                    return status;
+            }
+            return status_t::success_k;
+        };
+        auto const compute_transition = [&](u64_t state, u32_t previous_depth, symbol_t symbol) noexcept {
+            size_t const current_depth = size_t(previous_depth) + 1;
+            size_t const previous_from = previous_depth > bound ? previous_depth - bound : 0;
+            size_t const previous_to = sz_min_of_two(query.size(), size_t(previous_depth) + bound);
+            size_t const current_from = current_depth > bound ? current_depth - bound : 0;
+            size_t const current_to = sz_min_of_two(query.size(), current_depth + bound);
+            auto const previous_at = [&](size_t column) noexcept -> u8_t {
+                return column >= previous_from && column <= previous_to
+                           ? static_cast<u8_t>((state >> ((column - previous_from) * 4)) & 0xF)
+                           : cap;
+            };
+            u64_t next = 0;
+            u8_t left = cap;
+            u8_t min_distance = cap;
+            u8_t terminal_distance = cap;
+            for (size_t column = current_from; column <= current_to; ++column) {
+                u8_t value;
+                if (column == 0) value = static_cast<u8_t>(sz_min_of_two(current_depth, size_t(cap)));
+                else {
+                    unsigned const deletion = unsigned(previous_at(column)) + 1;
+                    unsigned const insertion = column > current_from ? unsigned(left) + 1 : cap;
+                    unsigned const substitution = unsigned(previous_at(column - 1)) + (query[column - 1] != symbol);
+                    value = static_cast<u8_t>(
+                        sz_min_of_two(std::min({deletion, insertion, substitution}), unsigned(cap)));
+                }
+                next |= u64_t(value) << ((column - current_from) * 4);
+                left = value;
+                min_distance = sz_min_of_two(min_distance, value);
+                if (column == query.size()) terminal_distance = value;
+            }
+            return dfa_step_t {next, min_distance, terminal_distance};
+        };
+        auto const transition = [&](u64_t state, u32_t depth, symbol_t symbol) noexcept {
+            u64_t mixed = state ^ (u64_t(depth) * 0xD6E8FEB86659FD93ull) ^
+                          (static_cast<u64_t>(symbol) * 0x9E3779B185EBCA87ull);
+            mixed ^= mixed >> 33;
+            mixed *= 0xff51afd7ed558ccdull;
+            mixed ^= mixed >> 33;
+            size_t slot = static_cast<size_t>(mixed) & transitions_mask;
+            for (size_t probe = 0; probe != transitions_capacity; ++probe) {
+                dfa_transition_t &entry = scratch.dfa_transitions[slot];
+                if (entry.generation != scratch.dfa_generation) {
+                    entry.state = state;
+                    entry.depth = depth;
+                    entry.symbol = static_cast<u32_t>(symbol);
+                    dfa_step_t const step = compute_transition(state, depth, symbol);
+                    entry.next_state = step.state;
+                    entry.min_distance = step.min_distance;
+                    entry.terminal_distance = step.terminal_distance;
+                    entry.generation = scratch.dfa_generation;
+                    return step;
+                }
+                if (entry.state == state && entry.depth == depth && entry.symbol == static_cast<u32_t>(symbol))
+                    return dfa_step_t {entry.next_state, entry.min_distance, entry.terminal_distance};
+                slot = (slot + 1) & transitions_mask;
+            }
+            return compute_transition(state, depth, symbol);
+        };
+
+        size_t const root_to = sz_min_of_two(query.size(), size_t(bound));
+        u64_t initial_state = 0;
+        for (size_t column = 0; column <= root_to; ++column) initial_state |= u64_t(column) << (column * 4);
+        if (query.size() <= bound && trie_nodes_[0].terminals_count)
+            if (status_t status = emit_terminals(0, static_cast<u8_t>(query.size()));
+                status != status_t::success_k)
+                return status;
+
+        trie_node_t const &root = trie_nodes_[0];
+        if (scratch.dfa_frames.try_push_back(
+                dfa_frame_t {initial_state, 0, root.first_edge, root.first_edge + root.edges_count, 0}) !=
+            status_t::success_k)
+            return status_t::bad_alloc_k;
+        while (scratch.dfa_frames.size()) {
+            dfa_frame_t &frame = scratch.dfa_frames.back();
+            if (frame.next_edge == frame.end_edge) {
+                scratch.dfa_frames.try_resize(scratch.dfa_frames.size() - 1);
+                continue;
+            }
+            trie_edge_t const edge = trie_edges_[frame.next_edge++];
+            u64_t state = frame.state;
+            dfa_step_t step;
+            bool alive = true;
+            for (u32_t offset = 0; offset != edge.label_length; ++offset) {
+                step = transition(state, frame.depth + offset, tape_[edge.label_offset + offset]);
+                if (step.min_distance > bound) {
+                    alive = false;
+                    break;
+                }
+                state = step.state;
+            }
+            if (!alive) continue;
+            trie_node_t const &child = trie_nodes_[edge.child];
+            if (step.terminal_distance <= bound && child.terminals_count)
+                if (status_t status = emit_terminals(edge.child, step.terminal_distance);
+                    status != status_t::success_k)
+                    return status;
+            if (step.min_distance <= bound) {
+                if (scratch.dfa_frames.try_push_back(
+                        dfa_frame_t {state, edge.child, child.first_edge, child.first_edge + child.edges_count,
+                                     frame.depth + edge.label_length}) !=
+                    status_t::success_k)
+                    return status_t::bad_alloc_k;
+            }
+        }
+        return status_t::success_k;
+    }
+
+    template <typename scratch_type_>
     status_t find_trie_(span<symbol_t const> query, u8_t bound, bool fallback_only, scratch_type_ &scratch,
                         vector_t<match_t> &matches) const noexcept {
         if (!trie_nodes_.size()) return status_t::success_k;
         if (query.size() <= 15 && bound <= 14) return find_trie_dfa_(query, bound, fallback_only, scratch, matches);
+        if (bound <= 7) return find_trie_banded_dfa_(query, bound, fallback_only, scratch, matches);
         size_t const stride = size_t(2) * bound + 3;
         if (max_word_length_ + 1 > std::numeric_limits<size_t>::max() / stride)
             return status_t::overflow_risk_k;
