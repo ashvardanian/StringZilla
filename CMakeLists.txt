@@ -792,8 +792,6 @@ if (STRINGZILLA_BUILD_TEST)
     # MSVC and nvcc releases lack a C++23 dialect, and forcing it there silently decays to an earlier standard or hard
     # errors at configure time.
     define_launcher(stringzillas_test_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cpp)
-    define_launcher(stringzillas_test_levenshtein_index_cpp20 20 "${STRINGZILLA_TARGET_ARCH}"
-                    test/levenshtein_index.cpp)
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_test_cpp20 PRIVATE stringzillas_cpus_static)
         define_launcher(stringzillas_test_levenshtein_index_c 20 "${STRINGZILLA_TARGET_ARCH}"
