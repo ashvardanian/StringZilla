@@ -65,6 +65,13 @@ def test_levenshtein_index_keeps_dictionary_ids():
     parallel_matches = index(Strs([b"cook", b"book"]), bound=1, device=parallel)
     assert sorted(zip(*(array.tolist() for array in parallel_matches))) == matches
 
+    keyword_matches = index(queries=[b"cook", b"book"], bound=1)
+    assert sorted(zip(*(array.tolist() for array in keyword_matches))) == matches
+    with pytest.raises(TypeError):
+        index(bound=1)
+    with pytest.raises(TypeError):
+        index([b"book"], queries=[b"book"])
+
     # More than eight matches per query exercises the output-capacity retry.
     dense_index = szs.LevenshteinIndex([b"same"] * 20, max_distance=1)
     dense_results = dense_index([b"same"], bound=0)

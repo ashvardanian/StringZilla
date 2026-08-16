@@ -213,12 +213,12 @@ static int parse_levenshtein_index_call_args(                                  /
     char const *callable_name, PyObject *const *args, size_t nargsf,           //
     PyObject *kwnames, PyObject **queries_out, PyObject **bound_out, PyObject **device_out) {
     Py_ssize_t const positional_count = PyVectorcall_NARGS(nargsf);
-    if (positional_count < 1 || positional_count > 3) {
-        PyErr_Format(PyExc_TypeError, "%s() takes 1 to 3 positional arguments, got %zd", callable_name,
+    if (positional_count > 3) {
+        PyErr_Format(PyExc_TypeError, "%s() takes at most 3 positional arguments, got %zd", callable_name,
                      positional_count);
         return -1;
     }
-    PyObject *queries = args[0];
+    PyObject *queries = positional_count > 0 ? args[0] : NULL;
     PyObject *bound = positional_count > 1 ? args[1] : NULL;
     PyObject *device = positional_count > 2 ? args[2] : NULL;
     if (kwnames) {
@@ -227,18 +227,21 @@ static int parse_levenshtein_index_call_args(                                  /
             PyObject *key = PyTuple_GET_ITEM(kwnames, index);
             PyObject *value = args[positional_count + index];
             if (PyUnicode_CompareWithASCIIString(key, "queries") == 0) {
-                PyErr_Format(PyExc_TypeError, "%s() got multiple values for argument 'queries'", callable_name);
-                return -1;
+                if (queries) {
+                    PyErr_Format(PyExc_TypeError, "%s() got multiple values for argument 'queries'", callable_name);
+                    return -1;
+                }
+                queries = value;
             }
             else if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) {
-                if (positional_count > 1) {
+                if (bound) {
                     PyErr_Format(PyExc_TypeError, "%s() got multiple values for argument 'bound'", callable_name);
                     return -1;
                 }
                 bound = value;
             }
             else if (PyUnicode_CompareWithASCIIString(key, "device") == 0) {
-                if (positional_count > 2) {
+                if (device) {
                     PyErr_Format(PyExc_TypeError, "%s() got multiple values for argument 'device'", callable_name);
                     return -1;
                 }
@@ -249,6 +252,10 @@ static int parse_levenshtein_index_call_args(                                  /
                 return -1;
             }
         }
+    }
+    if (!queries) {
+        PyErr_Format(PyExc_TypeError, "%s() missing required argument 'queries'", callable_name);
+        return -1;
     }
     *queries_out = queries;
     *bound_out = bound;
