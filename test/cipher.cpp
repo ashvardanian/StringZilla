@@ -151,12 +151,12 @@ struct gcm_backend_t {
 };
 
 /**
- *  @brief Every counter-mode backend compiled into this translation unit, serial first.
+ *  @brief Every counter-mode backend compiled into this translation unit, dispatched first.
  *
  *  The dispatched entry points lead, because a published vector has to reach whatever the dispatcher
  *  picks as well as each kernel named outright.
  */
-static ctr_backend_t const ctr_backends_[] = {
+static ctr_backend_t const ctr_backends[] = {
     {"dispatched", sz_aes256_key_init, sz_aes256_ctr_xor},
     {"serial", sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial},
 #if SZ_USE_WESTMERE
@@ -185,8 +185,8 @@ static ctr_backend_t const ctr_backends_[] = {
 #endif
 };
 
-/** @brief Every authenticated backend compiled into this translation unit, serial first. */
-static gcm_backend_t const gcm_backends_[] = {
+/** @brief Every authenticated backend compiled into this translation unit, dispatched first. */
+static gcm_backend_t const gcm_backends[] = {
     {"dispatched", sz_aes256_gcm_key_init, sz_aes256_gcm_encrypt, sz_aes256_gcm_decrypt, sz_aes256_gcm_encryptor_init,
      sz_aes256_gcm_encryptor_associate, sz_aes256_gcm_encryptor_update, sz_aes256_gcm_encryptor_digest,
      sz_aes256_gcm_decryptor_init, sz_aes256_gcm_decryptor_associate, sz_aes256_gcm_decryptor_update_unverified,
@@ -335,10 +335,10 @@ static void check_gcm_unit_(gcm_backend_t const &backend, known_gcm_t const &vec
  */
 void test_cipher_unit() {
 
-    for (ctr_backend_t const &backend : ctr_backends_)
+    for (ctr_backend_t const &backend : ctr_backends)
         for (known_ctr_t const &vector : known_ctr_vectors_) check_ctr_unit_(backend, vector);
 
-    for (gcm_backend_t const &backend : gcm_backends_)
+    for (gcm_backend_t const &backend : gcm_backends)
         for (known_gcm_t const &vector : known_gcm_vectors_) check_gcm_unit_(backend, vector);
 }
 
@@ -352,7 +352,7 @@ void test_cipher_unit() {
  *  Seeking is the whole reason counter mode is exposed separately, so every offset is compared against
  *  the same bytes taken from a from-zero encryption rather than only against the reference backend.
  */
-void test_ctr_equivalence(ctr_backend_t const &reference, ctr_backend_t const &candidate, sz_size_t inputs) {
+void check_ctr_equivalence_(ctr_backend_t const &reference, ctr_backend_t const &candidate, sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 7 + 1);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index * 5 + 2);
@@ -402,7 +402,7 @@ void test_ctr_equivalence(ctr_backend_t const &reference, ctr_backend_t const &c
  *  passing one pointer for both sides reaches the bytes and the tag two pointers would, and a rejected
  *  tag still clears the buffer it was handed.
  */
-void test_gcm_equivalence(gcm_backend_t const &reference, gcm_backend_t const &candidate, sz_size_t inputs) {
+void check_gcm_equivalence_(gcm_backend_t const &reference, gcm_backend_t const &candidate, sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12], reference_tag[16], candidate_tag[16];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 3 + 5);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index + 9);
@@ -582,18 +582,27 @@ void test_cipher_safety() {
     }
 }
 
+/** @brief The row named @p name, so a reordering cannot silently hand the differential a new reference. */
+template <typename backend_type_, std::size_t count_>
+backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], char const *name) {
+    for (std::size_t index = 0; index != count_; ++index)
+        if (std::strcmp(backends[index].name, name) == 0) return backends[index];
+    verify(false && "The backend table must carry the named reference");
+    return backends[0];
+}
+
 /** @brief Drives the serial-versus-SIMD differential across every cipher backend compiled here. */
 void test_cipher_all() {
 
     // Each length sweeps a fresh buffer, so the work grows with the square of the count.
     sz_size_t const cipher_inputs = (sz_size_t)scale_iterations_quadratic(160);
 
-    // The serial backend leads the table and is the reference for everything after it. Running it
-    // against itself first catches a streaming path that disagrees with its own one-shot kernel.
-    ctr_backend_t const &ctr_reference = ctr_backends_[1];
-    gcm_backend_t const &gcm_reference = gcm_backends_[1];
-    for (ctr_backend_t const &candidate : ctr_backends_) test_ctr_equivalence(ctr_reference, candidate, cipher_inputs);
-    for (gcm_backend_t const &candidate : gcm_backends_) test_gcm_equivalence(gcm_reference, candidate, cipher_inputs);
+    // Serial is the reference for everything, itself included: running it against itself catches a streaming
+    // path that disagrees with its own one-shot kernel.
+    ctr_backend_t const &ctr_reference = backend_named_(ctr_backends, "serial");
+    gcm_backend_t const &gcm_reference = backend_named_(gcm_backends, "serial");
+    for (ctr_backend_t const &candidate : ctr_backends) check_ctr_equivalence_(ctr_reference, candidate, cipher_inputs);
+    for (gcm_backend_t const &candidate : gcm_backends) check_gcm_equivalence_(gcm_reference, candidate, cipher_inputs);
 }
 
 #pragma endregion // Drivers

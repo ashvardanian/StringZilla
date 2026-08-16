@@ -23,7 +23,7 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `test_stringzilla.hpp`)
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
 #pragma region Unit
 
@@ -234,8 +234,8 @@ static sz::string_view const utf8_wordbreaks_motifs[] = {
 };
 
 /**
- *  @brief Multi-window seam regressions (each > 64 bytes): WB15/16 Regional_Indicator parity and WB6/7/11/12
- *         Mid-bridge carry once miscounted across the 64-byte window boundary. Stored as raw bytes so the
+ *  @brief Multi-window seam regressions (each > 64 bytes): WB15/16 Regional_Indicator parity and the WB6/7/11/12
+ *         Mid-bridge carry state, each pinned across the 64-byte window boundary. Stored as raw bytes so the
  *         differential driver feeds them to serial-vs-ISA directly (no inline agreement asserts).
  */
 static sz::string_view const utf8_wordbreaks_seam_regressions[] = {
@@ -424,6 +424,11 @@ void test_utf8_wordbreaks_all() {
     // The iteration count is this family's share of the suite budget, sized against its siblings.
     check_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
                                     utf8_wordbreaks_corpora_(), scale_iterations(20));
+
+    // The streaming segmenter against the per-position WB1-WB16 transcription, which nothing else calls.
+    for (sz::string_view const motif : span_over(utf8_wordbreaks_motifs))
+        check_utf8_segment_against_oracle_("word", sz_utf8_wordbreaks_serial, sz_utf8_is_word_boundary_serial,
+                                           motif.data(), motif.size());
 }
 
 #pragma endregion // Drivers

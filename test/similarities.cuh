@@ -1,6 +1,7 @@
 /**
  *  @brief Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
- *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `bench/similarities.cpp` and
+ *       @b `bench/similarities.cu` benchmarks.
  *
  *  @file test/similarities.cuh
  *  @author Ash Vardanian
@@ -42,6 +43,12 @@ using ashvardanian::stringzillas::ualloc_t;
 #endif
 
 #pragma region Helpers
+
+/** @brief One input pair for a similarity scorer under test. */
+struct similarity_case_t {
+    std::string first;
+    std::string second;
+};
 
 /** @brief Dual-row O(n)-memory reference Levenshtein distance, keeping only the previous and current rows. */
 inline std::size_t levenshtein_baseline(                                //
@@ -424,9 +431,9 @@ template <typename score_type_, typename base_operator_, typename simd_operator_
 static void check_similarities_fixed_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
                                       std::string_view allowed_chars = {}, simd_extra_args_ &&...simd_extra_args) {
 
-    std::vector<std::pair<std::string, std::string>> test_cases;
+    std::vector<similarity_case_t> test_cases;
     auto append = [&test_cases](std::string const &first, std::string const &second) {
-        test_cases.emplace_back(first, second);
+        test_cases.push_back({first, second});
     };
 
     // Some vary basic variants:
@@ -528,8 +535,8 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
 
         // Reset the tapes and results
         results_base[0] = signaling_score, results_simd[0] = signaling_score;
-        first_tape.try_assign(&first, &first + 1);
-        second_tape.try_assign(&second, &second + 1);
+        verify(first_tape.try_assign(&first, &first + 1) == status_t::success_k);
+        verify(second_tape.try_assign(&second, &second + 1) == status_t::success_k);
 
         // Compute with both backends
         arrow_strings_view_t first_view = first_tape.view();
@@ -538,11 +545,11 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
         score_t *results_simd_ptr = results_simd.data();
         status_t status_base = base_operator(first_view, second_view, results_base_ptr);
         status_t status_simd = simd_operator(first_view, second_view, results_simd_ptr, simd_extra_args...);
-        verify(status_base == status_t::success_k);
-        verify(status_simd == status_t::success_k);
+        verify(status_base == status_t::success_k && "Base engine failed on a fixed single-pair batch");
+        verify(status_simd == status_t::success_k && "SIMD engine failed on a fixed single-pair batch");
         if (results_base[0] != results_simd[0])
             edit_distance_log_mismatch(first, second, results_base[0], results_simd[0]);
-        verify(results_base[0] == results_simd[0]);
+        verify(results_base[0] == results_simd[0] && "Base and SIMD engines disagree on this fixed test-case pair");
     }
 
     // Unzip the test cases into two separate tapes and perform batch processing
@@ -562,14 +569,15 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
         status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
                                              simd_extra_args...);
-        verify(status_base == status_t::success_k);
-        verify(status_simd == status_t::success_k);
+        verify(status_base == status_t::success_k && "Base engine failed on the batched fixed test cases");
+        verify(status_simd == status_t::success_k && "SIMD engine failed on the batched fixed test cases");
 
         // Individually log the failed results
         for (std::size_t i = 0; i != test_cases.size(); ++i) {
             if (results_base[i] == results_simd[i]) continue;
             edit_distance_log_mismatch(test_cases[i].first, test_cases[i].second, results_base[i], results_simd[i]);
-            verify(results_base[i] == results_simd[i]);
+            verify(results_base[i] == results_simd[i] &&
+                   "Base and SIMD engines disagree on a batched fixed test-case pair");
         }
     }
 }
@@ -673,14 +681,15 @@ static void check_similarities_fuzzy_(base_operator_ &&base_operator, simd_opera
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
         status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
                                              simd_extra_args...);
-        verify(status_base == status_t::success_k);
-        verify(status_simd == status_t::success_k);
+        verify(status_base == status_t::success_k && "Base engine failed on a fuzzy-generated batch");
+        verify(status_simd == status_t::success_k && "SIMD engine failed on a fuzzy-generated batch");
 
         // Individually log the failed results
         for (std::size_t i = 0; i != config.batch_size; ++i) {
             if (results_base[i] == results_simd[i]) continue;
             edit_distance_log_mismatch(first_array[i], second_array[i], results_base[i], results_simd[i]);
-            verify(results_base[i] == results_simd[i]);
+            verify(results_base[i] == results_simd[i] &&
+                   "Base and SIMD engines disagree on a fuzzy-generated pair");
         }
     }
 }
@@ -1014,7 +1023,7 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
 
     // The degenerate corpus: empty/empty, empty/non-empty, single-char, identical, and a near-identical
     // one-edit pair. They live in one batch so the engines also face a mixed-length, mostly-tiny input.
-    std::vector<std::pair<std::string, std::string>> degenerate_cases {
+    std::vector<similarity_case_t> degenerate_cases {
         {"", ""},             // both empty; distance 0
         {"", "ABC"},          // empty vs non-empty; pure insertion
         {"ABC", ""},          // non-empty vs empty; pure deletion
@@ -1038,13 +1047,14 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
     status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
     status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
                                          simd_extra_args...);
-    verify(status_base == status_t::success_k);
-    verify(status_simd == status_t::success_k);
+    verify(status_base == status_t::success_k && "Base engine failed on the degenerate-case batch");
+    verify(status_simd == status_t::success_k && "SIMD engine failed on the degenerate-case batch");
     for (std::size_t pair_index = 0; pair_index != degenerate_cases.size(); ++pair_index) {
         if (results_base[pair_index] == results_simd[pair_index]) continue;
         edit_distance_log_mismatch(degenerate_cases[pair_index].first, degenerate_cases[pair_index].second,
                                    results_base[pair_index], results_simd[pair_index]);
-        verify(results_base[pair_index] == results_simd[pair_index]);
+        verify(results_base[pair_index] == results_simd[pair_index] &&
+               "Base and SIMD engines disagree on a degenerate-case pair");
     }
 
     // Closed-form identities, independent of any O(n²) reference. With a single uniform-cost string the only
@@ -1233,7 +1243,7 @@ static void check_cross_product_cell_exact_(engine_type_ &&engine, baseline_oper
 
     strided_rows<score_type_> const results {engine_matrix.data(), queries_count, candidates_count, row_stride};
     status_t const status = engine(queries_view, candidates_view, results, trailing_args...);
-    verify(status == status_t::success_k);
+    verify(status == status_t::success_k && "Cross-product engine failed to fill the Q x C score matrix");
 
     // The empty shape is fully validated by the success status above - there are no cells to compare.
     if (queries_count == 0 || candidates_count == 0) return;
@@ -1245,7 +1255,8 @@ static void check_cross_product_cell_exact_(engine_type_ &&engine, baseline_oper
             if (engine_matrix[cell_offset] == reference_matrix[cell_offset]) continue;
             edit_distance_log_mismatch(queries_array[query_index], candidates_array[candidate_index],
                                        reference_matrix[cell_offset], engine_matrix[cell_offset]);
-            verify(engine_matrix[cell_offset] == reference_matrix[cell_offset]);
+            verify(engine_matrix[cell_offset] == reference_matrix[cell_offset] &&
+                   "Cross-product engine and dual-row baseline disagree on this Q x C cell");
         }
 }
 
@@ -1268,15 +1279,17 @@ static void check_symmetric_cell_exact_(engine_type_ &&engine, fuzzy_config_t se
     unified_vector<sz_size_t> symmetric_matrix(sequences_count * sequences_count);
     strided_rows<sz_size_t> const results {symmetric_matrix.data(), sequences_count, sequences_count, row_stride};
     status_t const status = engine(sequences_view, results, trailing_args...);
-    verify(status == status_t::success_k);
+    verify(status == status_t::success_k && "Symmetric engine failed to fill the self-similarity matrix");
 
     // The diagonal-is-zero identity holds only for a zero match cost (a string aligned to itself pays nothing).
     // The symmetry identity holds for any cost scheme, so it is always asserted.
     for (std::size_t row_index = 0; row_index != sequences_count; ++row_index) {
-        verify(symmetric_matrix[row_index * row_stride + row_index] == static_cast<sz_size_t>(0));
+        verify(symmetric_matrix[row_index * row_stride + row_index] == static_cast<sz_size_t>(0) &&
+               "Self-similarity matrix has a non-zero diagonal cell");
         for (std::size_t column_index = 0; column_index != sequences_count; ++column_index)
             verify(symmetric_matrix[row_index * row_stride + column_index] ==
-                   symmetric_matrix[column_index * row_stride + row_index]);
+                       symmetric_matrix[column_index * row_stride + row_index] &&
+                   "Self-similarity matrix is not symmetric at this cell");
     }
 }
 
@@ -1286,8 +1299,8 @@ static void check_symmetric_cell_exact_(engine_type_ &&engine, fuzzy_config_t se
  *  These carry no kernel geometry: a `1 x N` row, an `N x 1` column, a lone cell, a ragged square set containing
  *  empty strings, a rectangular set, the three degenerate matrices, and the symmetric one-set matrix with its zero
  *  diagonal. Every backend owes the same answers here regardless of its lane width, so wiring a backend in is one
- *  call rather than a dozen copied lines - which is how `empty_set` came to be tested on the serial engine alone
- *  while a CUDA defect in that exact shape went unnoticed.
+ *  call rather than a dozen copied lines - `empty_set` is exercised on every wired backend here, including CUDA,
+ *  pinning that exact shape against a CUDA-specific defect too.
  *
  *  Per-ISA tuning shapes deliberately stay in their own blocks: their batch sizes and lengths encode one kernel's
  *  lane count or tier edge, and generalizing them would erase the reason each number was chosen.
@@ -1348,7 +1361,7 @@ void check_cross_product_universals_(trailing_arguments_ &&...trailing_arguments
  *  `Q x C` matrix and the symmetric one-set matrix directly produced by the new API, asserting each cell against
  *  the dual-row baseline (cross) or the symmetry/zero-diagonal identities (symmetric).
  */
-void test_similarities_cross_product() {
+void test_similarities_cross_product_equivalence() {
     std::printf("  - testing cross-product and symmetric similarity matrices...\n");
 
     [[maybe_unused]] constexpr uniform_substitution_costs_t unit_uniform {0, 1}; // used only in SIMD #if blocks
@@ -1389,8 +1402,8 @@ void test_similarities_cross_product() {
             blosum62_matrix, blosum62_linear_cost},
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, many_queries, many_candidates);
 
-    // Straddle the per-pair `i16` → `i32` cell-width step, near a combined 327 at magnitude 100. Sizing the cell
-    // from `longer + 1` instead of the walkers' reach used to underflow the affine seed and flip the score's sign.
+    // Straddle the per-pair `i16` → `i32` cell-width step, near a combined 327 at magnitude 100. Pins the cell
+    // sized from `longer + 1`, wide enough that the affine seed cannot underflow and flip the score's sign.
     {
         error_costs_32x32_t wide_matrix {};
         for (std::size_t first = 0; first != 32; ++first)
@@ -1980,13 +1993,13 @@ void test_similarities_cross_product() {
                specs_status == status_t::success_k);
 
     // CUDA cross-product and symmetric matrices stay small so device memory remains bounded. The empty shapes here
-    // are the ones that used to reach `cuLaunchKernelEx` with a zero grid.
+    // pin that a zero-sized grid never reaches `cuLaunchKernelEx`.
     check_cross_product_universals_<sz_cap_cuda_k, ualloc_t>(cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
-    // Kepler had no cross-product coverage at all: its `tile_scorer` specializations were only ever driven through
-    // the pairwise suites, so the matrix overloads went unexercised on that capability.
+    // This pins Kepler's cross-product coverage: its `tile_scorer` specializations are otherwise driven only
+    // through the pairwise suites, leaving the matrix overloads untested on that capability without this block.
     check_cross_product_universals_<sz_caps_ck_k, ualloc_t>(cuda_executor_t {}, first_gpu_specs);
 #endif
 
@@ -2039,7 +2052,7 @@ void test_similarities_cross_product() {
 
     // High-cost Levenshtein at 700 chars: past the register tier, below the tiled promotion, and wide enough that
     // the reach needs 4-byte cells - the only shape that reaches the warp tier's `u32` kernel. Mirrors the CPU
-    // `wide_lev_*` checks above, which were the sole coverage of that band.
+    // `wide_lev_*` checks above, which are the only CPU-side coverage of that band.
     fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
     fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
     check_cross_product_cell_exact_<sz_size_t>(
@@ -2076,10 +2089,10 @@ void test_similarities_cross_product() {
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_200, empty_set,
         cuda_executor_t {}, first_gpu_specs);
 
-    // CUDA UTF-8 rune scoring. The CPU blocks above are the only UTF-8 coverage in this file, so the GPU engine's
-    // whole-batch tier routing - which, unlike the byte engine, never consults `task.density` - was unexercised.
-    // Linear costs only: `similarities.cuh` extern-templates just that one for the GPU, and affine UTF-8 is
-    // documented as staying on the CPU.
+    // CUDA UTF-8 rune scoring. This is the only GPU UTF-8 coverage in this file: it pins the GPU engine's
+    // whole-batch tier routing, which, unlike the byte engine, never consults `task.density`.
+    // Linear costs only: the library header `include/stringzillas/similarities.cuh` extern-templates just that
+    // one for the GPU, and affine UTF-8 is documented as staying on the CPU.
     {
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_cuda_oracle {};
         auto const utf8_cuda_baseline = [&utf8_cuda_oracle](arrow_strings_view_t queries,
@@ -2139,7 +2152,7 @@ void test_similarities_cross_product() {
  *  the whole sweep, so the experiment list is ordered cheapest-first and truncated by `SZ_TESTS_MULTIPLIER`,
  *  letting the emulated CI legs keep the cheap prefix without dropping the shape coverage entirely.
  */
-void test_similarities_memory_usage() {
+void test_similarities_memory_usage_equivalence() {
 
     // Cheapest-first, so a reduced `SZ_TESTS_MULTIPLIER` keeps the cheap prefix. Cost grows as `batch * length²`,
     // so the long rows dominate and stay few; repeating a length at several batch sizes buys nothing.

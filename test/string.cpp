@@ -129,7 +129,7 @@ struct accounting_allocator : public std::allocator<char> {
     }
 
     void deallocate(char *val, std::size_t n) {
-        verify(n <= counter_ref());
+        verify(n <= counter_ref() && "Deallocated more bytes than were tracked as allocated");
         counter_ref() -= n;
         print_if_verbose("dealloc: %zd -> %zd\n", n, counter_ref());
         std::allocator<char>::deallocate(val, n);
@@ -150,13 +150,13 @@ struct accounting_allocator : public std::allocator<char> {
 template <typename callback_type>
 void assert_balanced_memory(callback_type callback) {
     auto bytes = accounting_allocator::account_block(callback);
-    verify(bytes == 0);
+    verify(bytes == 0 && "Callback leaked or double-freed tracked allocator bytes");
 }
 
 /**
  *  @brief Runs one movement backend (copy/move/fill) through hand-verifiable known-answer vectors.
  *
- *  Mirrors the SHA256 known-answer helper in `test_hash.cpp`: each ISA tier feeds its kernel pointers here,
+ *  Mirrors the SHA256 known-answer helper in `hash.cpp`: each ISA tier feeds its kernel pointers here,
  *  so the dispatched C API and every natively-compiled backend share a single ground-truth check. Guard bytes
  *  past `length` catch stray writes.
  */
@@ -170,8 +170,8 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
         char target[sizeof(source) + 1];
         std::memset(target, '#', sizeof(target));
         copy(target, source, length);
-        verify(std::memcmp(target, source, length) == 0);
-        verify(target[length] == '#'); // No overwrite past `length`
+        verify(std::memcmp(target, source, length) == 0 && "Copy backend diverged from the known-answer source");
+        verify(target[length] == '#' && "Copy backend wrote past the requested length");
     }
 
     // `move` handles overlapping regions. Shifting "abcdef" left-into-itself by two yields "cdef" at the front.
@@ -179,7 +179,7 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
         char const expected[] = "cdef"; // After moving "cdef" (offset 2, 4 bytes) to offset 0
         char buffer[] = "abcdef";
         move(buffer, buffer + 2, 4);
-        verify(std::memcmp(buffer, expected, 4) == 0);
+        verify(std::memcmp(buffer, expected, 4) == 0 && "Move backend produced wrong bytes for overlapping shift");
     }
 
     // `fill` writes a known byte across a known span, leaving a guard byte untouched.
@@ -188,8 +188,8 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
         char target[5 + 1];
         std::memset(target, '#', sizeof(target));
         fill(target, 5, (sz_u8_t)'*');
-        verify(std::memcmp(target, expected, 5) == 0);
-        verify(target[5] == '#'); // No overwrite past `length`
+        verify(std::memcmp(target, expected, 5) == 0 && "Fill backend produced wrong bytes for the known pattern");
+        verify(target[5] == '#' && "Fill backend wrote past the requested length");
     }
 }
 
@@ -212,8 +212,8 @@ static void check_lookup_unit_(sz_lookup_t lookup) {
     char target[sizeof(source) + 1];
     std::memset(target, '#', sizeof(target));
     lookup(target, length, source, upper_table);
-    verify(std::memcmp(target, expected, length) == 0);
-    verify(target[length] == '#'); // No overwrite past `length`
+    verify(std::memcmp(target, expected, length) == 0 && "Lookup backend diverged from the known-answer upper-casing");
+    verify(target[length] == '#' && "Lookup backend wrote past the requested length");
 }
 
 #pragma endregion // Helpers
@@ -361,7 +361,7 @@ void test_allocator_unit() {
         sz_memory_allocator_t alloc;
         sz_memory_allocator_init_default(&alloc);
         void *byte = alloc.allocate(1, alloc.handle);
-        verify(byte != nullptr);
+        verify(byte != nullptr && "Default allocator returned NULL for a non-zero-length allocation");
         alloc.free(byte, 1, alloc.handle);
     }
 
@@ -371,7 +371,7 @@ void test_allocator_unit() {
         sz_memory_allocator_t alloc;
         sz_memory_allocator_init_fixed(&alloc, buffer, sizeof(buffer));
         void *byte = alloc.allocate(1, alloc.handle);
-        verify(byte != nullptr);
+        verify(byte != nullptr && "Fixed-buffer allocator returned NULL for an allocation that should fit");
         alloc.free(byte, 1, alloc.handle);
     }
 }
@@ -401,6 +401,7 @@ void test_byteset_unit() {
  *  @brief Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
  *         provided by `sz::string` and `sz::string_view`.
  */
+/** @brief Known-answer coverage for ASCII classification methods (`is_alpha`, `is_digit`, `contains_only`, ...). */
 template <typename string_type>
 void test_ascii_unit() {
 
@@ -472,8 +473,8 @@ void test_memory_unit(std::size_t max_l2_size) {
     std::printf("  - testing memory primitive known-answer vectors...\n");
 
     // Movement known-answers, through the dispatched C API and every natively-compiled backend.
-    check_memory_unit_(sz_copy, sz_move, sz_fill);                      // Dispatched (automatic kernel)
-    check_memory_unit_(sz_copy_serial, sz_move_serial, sz_fill_serial); // Manual: serial kernel
+    check_memory_unit_(sz_copy, sz_move, sz_fill);
+    check_memory_unit_(sz_copy_serial, sz_move_serial, sz_fill_serial);
 #if SZ_USE_HASWELL
     check_memory_unit_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell);
 #endif
@@ -503,8 +504,8 @@ void test_memory_unit(std::size_t max_l2_size) {
 #endif
 
     // Lookup known-answers, through the dispatched C API and every natively-compiled backend.
-    check_lookup_unit_(sz_lookup);        // Dispatched (automatic kernel)
-    check_lookup_unit_(sz_lookup_serial); // Manual: serial kernel
+    check_lookup_unit_(sz_lookup);
+    check_lookup_unit_(sz_lookup_serial);
 #if SZ_USE_HASWELL
     check_lookup_unit_(sz_lookup_haswell);
 #endif
@@ -817,15 +818,20 @@ void test_stl_reads_unit() {
     // Cover every SWAR case for unique string sequences.
     auto lowercase_alphabet = str("abcdefghijklmnopqrstuvwxyz");
     for (std::size_t one_byte_offset = 0; one_byte_offset + 1 <= lowercase_alphabet.size(); ++one_byte_offset)
-        verify(lowercase_alphabet.find(lowercase_alphabet.substr(one_byte_offset, 1)) == one_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(one_byte_offset, 1)) == one_byte_offset &&
+               "1-byte SWAR needle matched at the wrong offset");
     for (std::size_t two_byte_offset = 0; two_byte_offset + 2 <= lowercase_alphabet.size(); ++two_byte_offset)
-        verify(lowercase_alphabet.find(lowercase_alphabet.substr(two_byte_offset, 2)) == two_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(two_byte_offset, 2)) == two_byte_offset &&
+               "2-byte SWAR needle matched at the wrong offset");
     for (std::size_t four_byte_offset = 0; four_byte_offset + 4 <= lowercase_alphabet.size(); ++four_byte_offset)
-        verify(lowercase_alphabet.find(lowercase_alphabet.substr(four_byte_offset, 4)) == four_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(four_byte_offset, 4)) == four_byte_offset &&
+               "4-byte SWAR needle matched at the wrong offset");
     for (std::size_t three_byte_offset = 0; three_byte_offset + 3 <= lowercase_alphabet.size(); ++three_byte_offset)
-        verify(lowercase_alphabet.find(lowercase_alphabet.substr(three_byte_offset, 3)) == three_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(three_byte_offset, 3)) == three_byte_offset &&
+               "3-byte SWAR needle matched at the wrong offset");
     for (std::size_t five_byte_offset = 0; five_byte_offset + 5 <= lowercase_alphabet.size(); ++five_byte_offset)
-        verify(lowercase_alphabet.find(lowercase_alphabet.substr(five_byte_offset, 5)) == five_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(five_byte_offset, 5)) == five_byte_offset &&
+               "5-byte SWAR needle matched at the wrong offset");
 
     // Simple repeating patterns - with one "almost match" before an actual match in each direction.
     verify(str("_ab_abc_").find("abc") == 4);
@@ -1003,9 +1009,10 @@ void test_stl_reads_unit() {
             str first_copy = first;
             str second_copy = second;
             first_copy.swap(second_copy);
-            verify(first_copy == second && second_copy == first);
+            verify(first_copy == second && second_copy == first &&
+                   "swap(other) did not exchange contents for this first/second pair");
             first_copy.swap(first_copy);
-            verify(first_copy == second);
+            verify(first_copy == second && "Self-swap mutated the string for this first/second pair");
         }
     }
 
@@ -1111,8 +1118,6 @@ void test_stl_updates_unit() {
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
-    // scope_verify(str s = "!?", s.push_front('a'), s == "a!?");
-    // scope_verify(str s = "!?", s.pop_front(), s == "?");
     verify(str().append("test") == "test");
     verify(str("test") + "ing" == "testing");
     verify(str("test") + str("ing") == "testing");
@@ -1250,16 +1255,19 @@ void test_stl_containers_unit() {
 
     std::size_t rank_sz = 0;
     for (auto const &entry : sorted_words_sz) {
-        verify(entry.first == ascending_keys[rank_sz]);
-        verify(entry.second == static_cast<int>(rank_sz));
+        verify(entry.first == ascending_keys[rank_sz] && "sz::string map produced the wrong key at sorted rank_sz");
+        verify(entry.second == static_cast<int>(rank_sz) &&
+               "sz::string map produced the wrong value at sorted rank_sz");
         ++rank_sz;
     }
     verify(rank_sz == 5);
 
     std::size_t rank_stl = 0;
     for (auto const &entry : sorted_words_stl) {
-        verify(entry.first == ascending_keys[rank_stl]);
-        verify(entry.second == static_cast<int>(rank_stl));
+        verify(entry.first == ascending_keys[rank_stl] &&
+               "std::string map via sz::less produced the wrong key at sorted rank_stl");
+        verify(entry.second == static_cast<int>(rank_stl) &&
+               "std::string map via sz::less produced the wrong value at sorted rank_stl");
         ++rank_stl;
     }
     verify(rank_stl == 5);
@@ -1282,7 +1290,8 @@ void test_stl_containers_unit() {
     words_sz.emplace("banana", 7);
     sz::string grown_sz = "bana";
     grown_sz.append("na");
-    verify(std::hash<sz::string> {}(grown_sz) == std::hash<sz::string> {}(sz::string("banana")));
+    verify(std::hash<sz::string> {}(grown_sz) == std::hash<sz::string> {}(sz::string("banana")) &&
+           "std::hash disagreed for equal-content strings built via different construction paths");
     verify(words_sz.find(grown_sz) != words_sz.end());
     verify(words_sz.emplace(grown_sz, 9).second == false);
     verify(words_sz.at(grown_sz) == 7);
@@ -1295,7 +1304,8 @@ void test_stl_containers_unit() {
     std::string grown_stl;
     for (int repetition = 0; repetition < 200; ++repetition) grown_stl.push_back('x');
     words_stl.emplace(heap_key, 7);
-    verify(sz::hash {}(heap_key) == sz::hash {}(grown_stl));
+    verify(sz::hash {}(heap_key) == sz::hash {}(grown_stl) &&
+           "sz::hash disagreed for equal-content strings built via different construction paths");
     verify(sz::equal_to {}(heap_key, grown_stl));
     verify(sz::equal_to {}(heap_key, "x") == false);
     verify(words_stl.find(grown_stl) != words_stl.end());
@@ -1471,20 +1481,24 @@ void test_extensions_updates_unit() {
         str text = "hello brave new world";
         for (auto segment : text.utf8_wordbreaks()) {
             std::ptrdiff_t const offset = segment.data() - text.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()) &&
+                   "utf8_wordbreaks segment landed outside the caller's own buffer");
         }
         for (auto token : text.utf8_split_whitespaces()) {
             std::ptrdiff_t const offset = token.data() - text.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()) &&
+                   "utf8_split_whitespaces token landed outside the caller's own buffer");
         }
         for (auto field : text.utf8_split_delimiters()) {
             std::ptrdiff_t const offset = field.data() - text.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()) &&
+                   "utf8_split_delimiters field landed outside the caller's own buffer");
         }
         str sso = "a b c";
         for (auto token : sso.utf8_split_whitespaces()) {
             std::ptrdiff_t const offset = token.data() - sso.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(sso.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(sso.size()) &&
+                   "utf8_split_whitespaces token landed outside the small-string-optimized buffer");
         }
     }
 
@@ -1495,6 +1509,173 @@ void test_extensions_updates_unit() {
 }
 
 #pragma endregion // Extensions
+
+/**
+ *  @brief The lazy search ranges and their inverses - `find_all`, `rfind_all`, `split`, `rsplit`, `partition`.
+ *
+ *  Not a template over the string type, unlike its neighbours: these cases deliberately mix owning strings,
+ *  borrowed views and literals in one expression, because what they pin is how the range holds its operands.
+ *  A haystack passed as an lvalue is borrowed, so a match's `data()` must land inside the caller's own buffer
+ *  and not inside a private copy - which under the small-string optimization would still produce plausible
+ *  offsets. A needle, by contrast, is copied into the matcher, so a temporary one may outlive the expression.
+ */
+void test_extensions_ranges_unit() {
+    std::printf("  - testing lazy search ranges and splitting...\n");
+
+    // Searching for a set of characters
+    verify(sz::string_view("a").find_first_of("az") == 0);
+    verify(sz::string_view("a").find_last_of("az") == 0);
+    verify(sz::string_view("a").find_first_of("xz") == sz::string_view::npos);
+    verify(sz::string_view("a").find_last_of("xz") == sz::string_view::npos);
+
+    verify(sz::string_view("a").find_first_not_of("xz") == 0);
+    verify(sz::string_view("a").find_last_not_of("xz") == 0);
+    verify(sz::string_view("a").find_first_not_of("az") == sz::string_view::npos);
+    verify(sz::string_view("a").find_last_not_of("az") == sz::string_view::npos);
+
+    verify(sz::string_view("aXbYaXbY").find_first_of("XY") == 1);
+    verify(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
+    verify(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
+    verify(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
+    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("_") == sz::string_view::npos);
+    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("+") == 62);
+    verify(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
+           sz::string_view::npos);
+
+    verify("aabaa"_sv.remove_prefix("a") == "abaa");
+    verify("aabaa"_sv.remove_suffix("a") == "aaba");
+    verify("aabaa"_sv.lstrip("a"_bs) == "baa");
+    verify("aabaa"_sv.rstrip("a"_bs) == "aab");
+    verify("aabaa"_sv.strip("a"_bs) == "b");
+
+    // Check more advanced composite operations
+    verify("abbccc"_sv.partition('b').before.size() == 1);
+    verify("abbccc"_sv.partition("bb").before.size() == 1);
+    verify("abbccc"_sv.partition("bb").match.size() == 2);
+    verify("abbccc"_sv.partition("bb").after.size() == 3);
+    verify("abbccc"_sv.partition("bb").before == "a");
+    verify("abbccc"_sv.partition("bb").match == "bb");
+    verify("abbccc"_sv.partition("bb").after == "ccc");
+    verify("abb ccc"_sv.partition(sz::whitespaces_set()).after == "ccc");
+
+    // Check ranges of search matches
+    verify("hello"_sv.find_all("l").size() == 2);
+    verify("hello"_sv.rfind_all("l").size() == 2);
+
+    verify(""_sv.find_all(".", sz::include_overlaps_type {}).size() == 0);
+    verify(""_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    verify("."_sv.find_all(".", sz::include_overlaps_type {}).size() == 1);
+    verify("."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    verify(".."_sv.find_all(".", sz::include_overlaps_type {}).size() == 2);
+    verify(".."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
+    verify(""_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
+    verify(""_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    verify("."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
+    verify("."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    verify(".."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
+    verify(".."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
+
+    verify("a.b.c.d"_sv.find_all(".").size() == 3);
+    verify("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
+    verify("a.,b.,c.,d"_sv.rfind_all(".,").size() == 3);
+    verify("a.b,c.d"_sv.find_all(".,"_bs).size() == 3);
+    verify("a...b...c"_sv.rfind_all("..").size() == 4);
+    verify("a...b...c"_sv.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
+    verify("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
+
+    let_verify(auto finds = "a.b.c"_sv.find_all("abcd"_bs).template to<std::vector<std::string>>(),
+               finds.size() == 3 && finds[0] == "a");
+    let_verify(auto rfinds = "a.b.c"_sv.rfind_all("abcd"_bs).template to<std::vector<std::string>>(),
+               rfinds.size() == 3 && rfinds[0] == "c");
+
+    // Test propagating strings and their non-owning views into temporary ranges and iterators
+    verify(sz::find_all("abc"_sv, "b"_sv).size() == 1);
+    verify(sz::find_all("hello"_sv, "l"_sv).size() == 2);
+    verify(sz::rfind_all("abc"_sv, "b"_sv).size() == 1);
+
+    {
+        sz::string h("abc"), n("b");
+        verify(sz::find_all(h, n).size() == 1);
+    }
+    {
+        sz::string h("hello"), n("l");
+        verify(sz::find_all(h, n).size() == 2);
+    }
+    {
+        sz::string h("abc"), n("b");
+        verify(sz::rfind_all(h, n).size() == 1);
+    }
+
+    verify(sz::find_all(sz::string("abc"), sz::string("b")).size() == 1);
+    verify(sz::find_all(sz::string("hello"), sz::string("l")).size() == 2);
+    verify(sz::rfind_all(sz::string("abc"), sz::string("b")).size() == 1);
+
+    // Lvalue haystacks are borrowed, so slices land inside the caller's own buffer. A copied
+    // haystack would offset into a private copy - and under SSO those offsets look plausible.
+    {
+        sz::string haystack("hello world, hello cpp");
+        sz::string sso("a b a");
+        let_verify(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view>>(),
+                   matches.size() == 2 &&                          //
+                       matches[0].data() - haystack.data() == 0 && //
+                       matches[1].data() - haystack.data() == 13 &&
+                       "Match offsets did not land inside the borrowed lvalue haystack's own buffer");
+        let_verify(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view>>(),
+                   in_sso.size() == 2 &&                     //
+                       in_sso[0].data() - sso.data() == 0 && //
+                       in_sso[1].data() - sso.data() == 4 &&
+                       "Match offsets did not land inside the small-string-optimized haystack's own buffer");
+    }
+
+    // Needles are copied into the matcher, so a temporary one outlives the expression that built it.
+    verify(sz::find_all(sz::string("hello world, hello cpp"), sz::string("hello")).size() == 2);
+
+    // Haystack and needle need not share a type - literals, views, and owning strings mix.
+    {
+        sz::string owning("a-b-c");
+        sz::string_view view("a-b-c");
+        sz::string needle("-");
+        verify(sz::find_all(view, "-").size() == 2);
+        verify(sz::find_all(owning, "-").size() == 2);
+        verify(sz::find_all(owning, view.substr(1, 1)).size() == 2);
+        verify(sz::find_all(view, needle).size() == 2);
+        verify(sz::split(owning, "-").size() == 3);
+        verify(sz::rsplit(view, needle).size() == 3);
+        verify(sz::split_characters(owning, "-").size() == 3);
+    }
+
+    // Check splitting - the inverse of `find_all` ranges
+    let_verify(auto splits = ".a..c."_sv.split("."_bs).template to<std::vector<std::string>>(),
+               splits.size() == 5 && splits[0] == "" && splits[1] == "a" && splits[4] == "");
+    let_verify(auto line_splits = "line1\nline2\nline3"_sv.split("line3").template to<std::vector<std::string>>(),
+               line_splits.size() == 2 && line_splits[0] == "line1\nline2\n" && line_splits[1] == "");
+
+    verify(""_sv.split(".").size() == 1);
+    verify(""_sv.rsplit(".").size() == 1);
+
+    verify("hello"_sv.split("l").size() == 3);
+    verify("hello"_sv.rsplit("l").size() == 3);
+    verify(*advanced("hello"_sv.split("l").begin(), 0) == "he");
+    verify(*advanced("hello"_sv.rsplit("l").begin(), 0) == "o");
+    verify(*advanced("hello"_sv.split("l").begin(), 1) == "");
+    verify(*advanced("hello"_sv.rsplit("l").begin(), 1) == "");
+    verify(*advanced("hello"_sv.split("l").begin(), 2) == "o");
+    verify(*advanced("hello"_sv.rsplit("l").begin(), 2) == "he");
+
+    verify("a.b.c.d"_sv.split(".").size() == 4);
+    verify("a.b.c.d"_sv.rsplit(".").size() == 4);
+    verify(*("a.b.c.d"_sv.split(".").begin()) == "a");
+    verify(*("a.b.c.d"_sv.rsplit(".").begin()) == "d");
+    verify(*advanced("a.b.c.d"_sv.split(".").begin(), 1) == "b");
+    verify(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 1) == "c");
+    verify(*advanced("a.b.c.d"_sv.split(".").begin(), 3) == "d");
+    verify(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 3) == "a");
+    verify("a.b.,c,d"_sv.split(".,").size() == 2);
+    verify("a.b,c.d"_sv.split(".,"_bs).size() == 4);
+
+    let_verify(auto rsplits = ".a..c."_sv.rsplit("."_bs).template to<std::vector<std::string>>(),
+               rsplits.size() == 5 && rsplits[0] == "" && rsplits[1] == "c" && rsplits[4] == "");
+}
 
 #pragma region String Class
 
@@ -1507,36 +1688,38 @@ void test_string_constructors_unit() {
     std::vector<sz::string> copies {strings};
     verify(copies.size() == strings.size());
     for (size_t i = 0; i < copies.size(); ++i) {
-        verify(copies[i].size() == strings[i].size());
-        verify(copies[i] == strings[i]);
-        for (size_t j = 0; j < strings[i].size(); j++) { verify(copies[i][j] == strings[i][j]); }
+        verify(copies[i].size() == strings[i].size() && "Copy-constructed string has the wrong length at index i");
+        verify(copies[i] == strings[i] && "Copy-constructed string diverged from its source at index i");
+        for (size_t j = 0; j < strings[i].size(); j++)
+            verify(copies[i][j] == strings[i][j] && "Copy-constructed string mismatched a byte at index i, j");
     }
     std::vector<sz::string> assignments = strings;
     for (size_t i = 0; i < assignments.size(); ++i) {
-        verify(assignments[i].size() == strings[i].size());
-        verify(assignments[i] == strings[i]);
-        for (size_t j = 0; j < strings[i].size(); j++) { verify(assignments[i][j] == strings[i][j]); }
+        verify(assignments[i].size() == strings[i].size() && "Copy-assigned string has the wrong length at index i");
+        verify(assignments[i] == strings[i] && "Copy-assigned string diverged from its source at index i");
+        for (size_t j = 0; j < strings[i].size(); j++)
+            verify(assignments[i][j] == strings[i][j] && "Copy-assigned string mismatched a byte at index i, j");
     }
     verify(std::equal(strings.begin(), strings.end(), copies.begin()));
     verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
 /** @brief Checks for memory leaks in the string class using the `accounting_allocator`. */
-void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
+void test_memory_stability_equivalence(std::size_t length, std::size_t iterations) {
 
-    verify(accounting_allocator::counter_ref() == 0);
+    verify(accounting_allocator::counter_ref() == 0 && "Allocator counter was not zero before the stability run");
     using string = sz::basic_string<char, accounting_allocator>;
     string base;
 
     for (std::size_t i = 0; i < length; ++i) base.push_back('c');
-    verify(base.length() == length);
+    verify(base.length() == length && "Base string has the wrong length after `push_back` construction");
 
     // Do copies leak?
     assert_balanced_memory([&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
             string copy(base);
-            verify(copy.length() == length);
-            verify(copy == base);
+            verify(copy.length() == length && "Copy-constructed string has the wrong length at iteration i");
+            verify(copy == base && "Copy-constructed string diverged from `base` at iteration i");
         }
     });
 
@@ -1545,8 +1728,8 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
         for (std::size_t i = 0; i < iterations; ++i) {
             string copy;
             copy = base;
-            verify(copy.length() == length);
-            verify(copy == base);
+            verify(copy.length() == length && "Copy-assigned string has the wrong length at iteration i");
+            verify(copy == base && "Copy-assigned string diverged from `base` at iteration i");
         }
     });
 
@@ -1554,11 +1737,11 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
     assert_balanced_memory([&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
             string unique_item(base);
-            verify(unique_item.length() == length);
-            verify(unique_item == base);
+            verify(unique_item.length() == length && "Pre-move string has the wrong length at iteration i");
+            verify(unique_item == base && "Pre-move string diverged from `base` at iteration i");
             string copy(std::move(unique_item));
-            verify(copy.length() == length);
-            verify(copy == base);
+            verify(copy.length() == length && "Move-constructed string has the wrong length at iteration i");
+            verify(copy == base && "Move-constructed string diverged from `base` at iteration i");
         }
     });
 
@@ -1568,8 +1751,9 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
             string unique_item(base);
             string copy;
             copy = std::move(unique_item);
-            verify(copy.length() == length);
-            verify(copy == base);
+            verify(copy.length() == length &&
+                   "Move-assigned (empty target) string has the wrong length at iteration i");
+            verify(copy == base && "Move-assigned (empty target) string diverged from `base` at iteration i");
         }
     });
 
@@ -1580,18 +1764,19 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
             string copy;
             for (std::size_t j = 0; j < 317; j++) copy.push_back('q');
             copy = std::move(unique_item);
-            verify(copy.length() == length);
-            verify(copy == base);
+            verify(copy.length() == length &&
+                   "Move-assigned (occupied target) string has the wrong length at iteration i");
+            verify(copy == base && "Move-assigned (occupied target) string diverged from `base` at iteration i");
         }
     });
 
     // Now let's clear the base and check that we're back to zero
     base = string();
-    verify(accounting_allocator::counter_ref() == 0);
+    verify(accounting_allocator::counter_ref() == 0 && "Allocator counter did not return to zero after clearing");
 }
 
 /** @brief Tests the correctness of the string class update methods, such as `push_back` and `erase`. */
-void test_string_updates_unit(std::size_t repetitions) {
+void test_string_updates_equivalence(std::size_t repetitions) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
     auto &generator = global_random_generator();
@@ -1602,7 +1787,8 @@ void test_string_updates_unit(std::size_t repetitions) {
             char c = alphabet_chars[generator() % 26];
             stl_string.push_back(c);
             sz_string.push_back(c);
-            verify(sz::string_view(stl_string) == sz::string_view(sz_string));
+            verify(sz::string_view(stl_string) == sz::string_view(sz_string) &&
+                   "sz::string diverged from std::string after `push_back`");
         }
 
         // Compare STL and StringZilla strings erase functionality.
@@ -1611,7 +1797,8 @@ void test_string_updates_unit(std::size_t repetitions) {
             std::size_t chars_to_erase = generator() % (stl_string.length() - offset_to_erase) + 1;
             stl_string.erase(offset_to_erase, chars_to_erase);
             sz_string.erase(offset_to_erase, chars_to_erase);
-            verify(sz::string_view(stl_string) == sz::string_view(sz_string));
+            verify(sz::string_view(stl_string) == sz::string_view(sz_string) &&
+                   "sz::string diverged from std::string after `erase`");
         }
     }
 }
@@ -1655,7 +1842,7 @@ inline std::vector<sz_size_t> memory_equivalence_lengths() noexcept {
  *  `inputs` is the number of random source patterns fuzzed at each length.
  */
 template <typename reference_, typename candidate_>
-void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_memory_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     std::vector<sz_size_t> const lengths = memory_equivalence_lengths();
     sz_size_t const max_length = lengths.back();
@@ -1676,11 +1863,15 @@ void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size
                 std::vector<char> reference_output(length, '\0');
                 reference.copy(reference_output.data(), source, length);
                 candidate.copy(target, source, length);
-                if (length) verify(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length)
+                    verify(std::memcmp(reference_output.data(), target, length) == 0 &&
+                           "Candidate copy backend diverged from the serial reference");
 
                 reference.fill(reference_output.data(), length, fill_value);
                 candidate.fill(target, length, fill_value);
-                if (length) verify(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length)
+                    verify(std::memcmp(reference_output.data(), target, length) == 0 &&
+                           "Candidate fill backend diverged from the serial reference");
             });
 
             // `move` with overlapping regions: shift the source pattern within one buffer by a small offset,
@@ -1696,14 +1887,16 @@ void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size
                     std::memcpy(reference_buffer.data(), source, length);
                     candidate.move(buffer + shift, buffer, moved);
                     reference.move(reference_buffer.data() + shift, reference_buffer.data(), moved);
-                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0);
+                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0 &&
+                           "Candidate move backend diverged from reference on forward overlap");
 
                     // Backward overlap: destination behind the source.
                     std::memcpy(buffer, source, length);
                     std::memcpy(reference_buffer.data(), source, length);
                     candidate.move(buffer, buffer + shift, moved);
                     reference.move(reference_buffer.data(), reference_buffer.data() + shift, moved);
-                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0);
+                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0 &&
+                           "Candidate move backend diverged from reference on backward overlap");
                 });
             }
         }
@@ -1718,29 +1911,43 @@ void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size
  *  `inputs` is the number of random source patterns fuzzed at each length.
  */
 template <typename reference_, typename candidate_>
-void test_lookup_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_lookup_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
-    char lookup_table[256];
-    sz_lookup_init_upper(lookup_table);
+    char upper_table[256], lower_table[256], ascii_table[256];
+    sz_lookup_init_upper(upper_table);
+    sz_lookup_init_lower(lower_table);
+    sz_lookup_init_ascii(ascii_table);
+    struct named_table_t {
+        char const *name;
+        char const *table;
+    };
+    named_table_t const named_tables[] = {
+        {"upper", upper_table},
+        {"lower", lower_table},
+        {"ascii", ascii_table},
+    };
 
     std::vector<sz_size_t> const lengths = memory_equivalence_lengths();
     sz_size_t const max_length = lengths.back();
 
-    for (sz_size_t length : lengths) {
-        for (sz_size_t input = 0; input != inputs; ++input) {
+    for (named_table_t const &named_table : named_tables)
+        for (sz_size_t length : lengths) {
+            for (sz_size_t input = 0; input != inputs; ++input) {
 
-            std::vector<char> source_storage(length + SZ_CACHE_LINE_WIDTH, '\0');
-            sz_cptr_t const source = source_storage.data() + (input % SZ_CACHE_LINE_WIDTH);
-            if (length) randomize_string(const_cast<char *>(source), length);
+                std::vector<char> source_storage(length + SZ_CACHE_LINE_WIDTH, '\0');
+                sz_cptr_t const source = source_storage.data() + (input % SZ_CACHE_LINE_WIDTH);
+                if (length) randomize_string(const_cast<char *>(source), length);
 
-            for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {
-                std::vector<char> reference_output(length, '\0');
-                reference.lookup(reference_output.data(), length, source, lookup_table);
-                candidate.lookup(target, length, source, lookup_table);
-                if (length) verify(std::memcmp(reference_output.data(), target, length) == 0);
-            });
+                for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {
+                    std::vector<char> reference_output(length, '\0');
+                    reference.lookup(reference_output.data(), length, source, named_table.table);
+                    candidate.lookup(target, length, source, named_table.table);
+                    if (length)
+                        verify(std::memcmp(reference_output.data(), target, length) == 0 &&
+                               "Candidate lookup output diverged from reference for this lookup table");
+                });
+            }
         }
-    }
 }
 
 #pragma endregion // Equivalence
@@ -1786,18 +1993,23 @@ static void check_memory_safety_(sz_copy_t copy, sz_move_t move, sz_fill_t fill)
  */
 static void check_lookup_safety_(sz_lookup_t lookup) {
 
-    char lookup_table[256];
-    sz_lookup_init_upper(lookup_table);
+    char upper_table[256], lower_table[256], ascii_table[256];
+    sz_lookup_init_upper(upper_table);
+    sz_lookup_init_lower(lower_table);
+    sz_lookup_init_ascii(ascii_table);
+    char const *const lookup_tables[] = {upper_table, lower_table, ascii_table};
 
-    lookup(nullptr, 0, nullptr, lookup_table); // Zero-length must touch nothing
+    for (char const *lookup_table : lookup_tables) {
+        lookup(nullptr, 0, nullptr, lookup_table); // Zero-length must touch nothing
 
-    for (std::size_t length : {(std::size_t)1, (std::size_t)8, (std::size_t)64, (std::size_t)257})
-        with_guarded_buffer_(length, [&](sz_ptr_t destination, std::size_t usable_length) {
-            std::vector<char> source(usable_length, '\0');
-            for (std::size_t byte = 0; byte != usable_length; ++byte)
-                source[byte] = (char)((byte % 3) ? 'a' + (byte % 26) : 0);
-            lookup(destination, usable_length, source.data(), lookup_table);
-        });
+        for (std::size_t length : {(std::size_t)1, (std::size_t)8, (std::size_t)64, (std::size_t)257})
+            with_guarded_buffer_(length, [&](sz_ptr_t destination, std::size_t usable_length) {
+                std::vector<char> source(usable_length, '\0');
+                for (std::size_t byte = 0; byte != usable_length; ++byte)
+                    source[byte] = (char)((byte % 3) ? 'a' + (byte % 26) : 0);
+                lookup(destination, usable_length, source.data(), lookup_table);
+            });
+    }
 }
 
 /**
@@ -1807,8 +2019,11 @@ static void check_lookup_safety_(sz_lookup_t lookup) {
  */
 void test_memory_safety() {
 
-    check_memory_safety_(sz_copy, sz_move, sz_fill);                      // Dispatched (automatic kernel)
-    check_memory_safety_(sz_copy_serial, sz_move_serial, sz_fill_serial); // Manual: serial kernel
+    // Dispatched (automatic kernel resolution).
+    check_memory_safety_(sz_copy, sz_move, sz_fill);
+
+    // Manual propagation to each natively-compiled backend kernel.
+    check_memory_safety_(sz_copy_serial, sz_move_serial, sz_fill_serial);
 #if SZ_USE_HASWELL
     check_memory_safety_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell);
 #endif
@@ -1837,8 +2052,11 @@ void test_memory_safety() {
     check_memory_safety_(sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx);
 #endif
 
-    check_lookup_safety_(sz_lookup);        // Dispatched (automatic kernel)
-    check_lookup_safety_(sz_lookup_serial); // Manual: serial kernel
+    // Dispatched (automatic kernel resolution).
+    check_lookup_safety_(sz_lookup);
+
+    // Manual propagation to each natively-compiled backend kernel.
+    check_lookup_safety_(sz_lookup_serial);
 #if SZ_USE_HASWELL
     check_lookup_safety_(sz_lookup_haswell);
 #endif
@@ -1950,15 +2168,15 @@ void test_memory_all() {
     sz_size_t const inputs = (sz_size_t)scale_iterations(2);
 
     memory_backend_t const memory_serial {"serial", sz_copy_serial, sz_move_serial, sz_fill_serial};
-    for (memory_backend_t const &backend : memory_backends) test_memory_equivalence(memory_serial, backend, inputs);
+    for (memory_backend_t const &backend : memory_backends) check_memory_equivalence_(memory_serial, backend, inputs);
 
     lookup_backend_t const lookup_serial {"serial", sz_lookup_serial};
-    for (lookup_backend_t const &backend : lookup_backends) test_lookup_equivalence(lookup_serial, backend, inputs);
+    for (lookup_backend_t const &backend : lookup_backends) check_lookup_equivalence_(lookup_serial, backend, inputs);
 }
 
 #pragma endregion // Drivers
 
-// Explicit template instantiations for the entry points invoked from `main()` (see `test_stringzilla.cpp`).
+// Explicit template instantiations for the entry points invoked from `main()` (see `stringzilla.cpp`).
 template void test_ascii_unit<sz::string>();
 template void test_ascii_unit<sz::string_view>();
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)

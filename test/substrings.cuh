@@ -1,8 +1,9 @@
 /**
  *  @brief Extensive @b stress-testing suite for the StringZillas multi-pattern search engine (Aho-Corasick).
- *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `bench/substrings.cpp` and
+ *       @b `bench/substrings.cu` benchmarks.
  *
- *  @file scripts/test_substrings.cuh
+ *  @file test/substrings.cuh
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
@@ -177,6 +178,16 @@ inline std::vector<std::string> random_short_strings_(std::size_t count, std::si
     return result;
 }
 
+/** @brief One de-duplicated match span in `independent_uncased_matches_`, keyed by source byte offsets. */
+struct uncased_match_span_t {
+    std::size_t byte_begin = 0;
+    std::size_t byte_end = 0;
+
+    bool operator<(uncased_match_span_t const &other) const {
+        return byte_begin != other.byte_begin ? byte_begin < other.byte_begin : byte_end < other.byte_end;
+    }
+};
+
 /**
  *  @brief Independent case-folded substring oracle: folds haystack and needle codepoint by codepoint via
  *         `sz_unicode_fold_codepoint_`, then slides the folded needle over the folded haystack, reporting
@@ -219,7 +230,7 @@ inline std::vector<span<char const>> independent_uncased_matches_(span<char cons
     // through an expansion - "s" does match inside the sharp S. Neither end has a byte of its own there, so
     // both snap outward to the codepoint that produced them, and two runs that snap to one span are one
     // match. This is the same rule `sz_utf8_uncased_search` follows.
-    std::set<std::pair<std::size_t, std::size_t>> spans;
+    std::set<uncased_match_span_t> spans;
     std::vector<span<char const>> matches;
     std::size_t const needle_length = needle_folded.size();
     if (needle_length == 0) return matches;
@@ -232,7 +243,7 @@ inline std::vector<span<char const>> independent_uncased_matches_(span<char cons
             }
         if (!equal) continue;
         std::size_t const from = source_begin[start], to = source_end[start + needle_length - 1];
-        if (!spans.emplace(from, to).second) continue;
+        if (!spans.emplace(uncased_match_span_t {from, to}).second) continue;
         matches.emplace_back(haystack.data() + from, to - from);
     }
     return matches;
@@ -430,10 +441,10 @@ inline fold_preimage_index_t const &fold_preimage_index_() {
             if (runes == 1 && images[0] == rune) continue; // ? Folds to itself, so it is nobody's preimage
             built.sources_of_image[std::vector<sz_rune_t>(images, images + runes)].push_back(rune);
         }
-        for (auto const &entry : built.sources_of_image) {
-            if (entry.first.size() == 1) { built.narrow_images.push_back(entry.first[0]); continue; }
+        for (auto const &[image, sources] : built.sources_of_image) {
+            if (image.size() == 1) { built.narrow_images.push_back(image[0]); continue; }
             std::array<sz_rune_t, 3> padded {};
-            for (std::size_t index = 0; index < entry.first.size(); ++index) padded[index] = entry.first[index];
+            for (std::size_t index = 0; index < image.size(); ++index) padded[index] = image[index];
             built.wide_images.push_back(padded);
         }
         std::sort(built.narrow_images.begin(), built.narrow_images.end());
@@ -1020,7 +1031,7 @@ static void check_uncased_needle_matches_(char const *needle, std::vector<std::s
  *  character name - both have been silently re-encoded by tooling here before. A byte-level check against a
  *  numeric expected-bytes array guards the trickiest fixtures.
  */
-void test_substrings_uncased() {
+void test_substrings_uncased_unit() {
     std::printf("  - testing full Unicode case-folding conformance...\n");
 
     // Corruption guard: two load-bearing fixtures re-spelled as integer byte arrays, so a tool that silently
@@ -1043,50 +1054,6 @@ void test_substrings_uncased() {
     // A length-changing fold in the MIDDLE of a needle, not only at its end, so the byte-delta state keying
     // that reconverges variable-length preimages is actually exercised mid-walk, not just at acceptance.
     check_uncased_needle_matches_("wei\xC3\x9Frd", {"weissrd", "weiSSrd", "wei\xE1\xBA\x9Erd"}, {"weisrd", "weird"});
-
-    // Differential: for a spread of needles and randomized valid UTF-8 haystacks, the full match set found by
-    // `substrings` must equal the full match set found by the independent fold-and-scan oracle.
-    std::printf("    - differential against the independent fold-and-scan oracle...\n");
-    std::vector<std::string> const needle_pool {
-        "ss", "\xC3\x9F", "K", "\xC3\x85", "\xC4\xB0", "\xC3\xA9", "wei\xC3\x9Frd", "the",
-    };
-    span<string_view const> const empty_motifs;
-    auto &generator = global_random_generator();
-    for (std::size_t iteration = 0; iteration < scale_iterations(60); ++iteration) {
-        std::string const &needle = needle_pool[iteration % needle_pool.size()];
-        std::string haystack;
-        utf8_random_segmentation_corpus_(haystack, 96, utf8_corpus_flavor_t::valid_k, utf8_default_alphabet,
-                                         empty_motifs, generator);
-        haystack.append(needle); // ? Guarantees at least one hit most iterations, without excluding zero-hit ones.
-
-        std::vector<span<char const>> const needles {span<char const>(needle.data(), needle.size())};
-        substrings_serial_t engine;
-        verify(engine.try_index(needles, substrings_uncased_k) == status_t::success_k);
-        std::vector<std::string> const haystack_strings {haystack};
-        arrow_strings_tape_t haystacks;
-        verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
-               status_t::success_k);
-        substrings_match_set_t engine_matches;
-        collect_overlapping_matches_into_(engine, haystacks.view(), engine_matches);
-
-        span<char const> const haystack_view = haystacks[0];
-        auto const oracle_matches = independent_uncased_matches_(haystack_view, needles[0]);
-        substrings_match_set_t expected_matches;
-        for (auto const &oracle_match : oracle_matches)
-            expected_matches.append(
-                {0, 0, (std::size_t)(oracle_match.data() - haystack_view.data()), oracle_match.size()});
-        expected_matches.finalize();
-
-        if (engine_matches != expected_matches) {
-            std::fprintf(stderr, "Uncased differential mismatch for needle \"%s\": %zu vs %zu matches\n",
-                         needle.c_str(), engine_matches.size(), expected_matches.size());
-            for (substrings_match_t const &key : engine_matches)
-                std::fprintf(stderr, "  engine offset=%zu length=%zu\n", key.byte_offset, key.byte_length);
-            for (substrings_match_t const &key : expected_matches)
-                std::fprintf(stderr, "  oracle offset=%zu length=%zu\n", key.byte_offset, key.byte_length);
-            verify(false && "substrings disagrees with the independent fold-and-scan oracle");
-        }
-    }
 }
 
 #pragma endregion // Uncased Conformance
@@ -1100,8 +1067,54 @@ void test_substrings_uncased() {
  *  `substrings` reports every overlapping match, while `sz_utf8_uncased_search` reports only the first by
  *  start offset, so the comparison reduces `substrings`'s set to its own earliest-starting match.
  */
-void test_substrings_agreement() {
+void test_substrings_uncased_equivalence() {
     std::printf("  - testing one-needle agreement with sz_utf8_uncased_search...\n");
+
+    // Differential: for a spread of needles and randomized valid UTF-8 haystacks, the full match set found by
+    // `substrings` must equal the full match set found by the independent fold-and-scan oracle.
+    {
+        std::printf("    - differential against the independent fold-and-scan oracle...\n");
+        std::vector<std::string> const needle_pool {
+            "ss", "\xC3\x9F", "K", "\xC3\x85", "\xC4\xB0", "\xC3\xA9", "wei\xC3\x9Frd", "the",
+        };
+        span<string_view const> const empty_motifs;
+        auto &generator = global_random_generator();
+        for (std::size_t iteration = 0; iteration < scale_iterations(60); ++iteration) {
+            std::string const &needle = needle_pool[iteration % needle_pool.size()];
+            std::string haystack;
+            utf8_random_segmentation_corpus_(haystack, 96, utf8_corpus_flavor_t::valid_k, utf8_default_alphabet,
+                                             empty_motifs, generator);
+            haystack.append(needle); // ? Guarantees at least one hit most iterations, without excluding zero-hit ones.
+
+            std::vector<span<char const>> const needles {span<char const>(needle.data(), needle.size())};
+            substrings_serial_t engine;
+            verify(engine.try_index(needles, substrings_uncased_k) == status_t::success_k);
+            std::vector<std::string> const haystack_strings {haystack};
+            arrow_strings_tape_t haystacks;
+            verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
+                   status_t::success_k);
+            substrings_match_set_t engine_matches;
+            collect_overlapping_matches_into_(engine, haystacks.view(), engine_matches);
+
+            span<char const> const haystack_view = haystacks[0];
+            auto const oracle_matches = independent_uncased_matches_(haystack_view, needles[0]);
+            substrings_match_set_t expected_matches;
+            for (auto const &oracle_match : oracle_matches)
+                expected_matches.append(
+                    {0, 0, (std::size_t)(oracle_match.data() - haystack_view.data()), oracle_match.size()});
+            expected_matches.finalize();
+
+            if (engine_matches != expected_matches) {
+                std::fprintf(stderr, "Uncased differential mismatch for needle \"%s\": %zu vs %zu matches\n",
+                             needle.c_str(), engine_matches.size(), expected_matches.size());
+                for (substrings_match_t const &key : engine_matches)
+                    std::fprintf(stderr, "  engine offset=%zu length=%zu\n", key.byte_offset, key.byte_length);
+                for (substrings_match_t const &key : expected_matches)
+                    std::fprintf(stderr, "  oracle offset=%zu length=%zu\n", key.byte_offset, key.byte_length);
+                verify(false && "substrings disagrees with the independent fold-and-scan oracle");
+            }
+        }
+    }
 
     std::vector<std::string> needle_pool {
         "the",
@@ -1296,7 +1309,9 @@ bool check_substrings_narrow_width_(substrings_case_sensitivity_t sensitivity,
         if (status == status_t::overflow_risk_k) return false;
         verify(status == status_t::success_k);
     }
-    if (narrow.try_build() == status_t::overflow_risk_k) return false;
+    status_t const build_status = narrow.try_build();
+    if (build_status == status_t::overflow_risk_k) return false;
+    verify(build_status == status_t::success_k);
 
     scratch.variant_keys.clear();
     for (std::size_t haystack_index = 0; haystack_index < haystacks_view.size(); ++haystack_index)
@@ -1426,7 +1441,7 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
  *         separate unified allocations rather than one packed tape - are searched correctly, and host-backed
  *         haystacks are refused with `device_memory_mismatch_k` rather than silently copied.
  */
-void test_substrings_cuda_memory_contract() {
+void test_substrings_cuda_memory_safety() {
     std::printf("  - testing scattered unified haystacks and the host-memory refusal...\n");
 #if SZ_USE_CUDA
 
@@ -1479,7 +1494,7 @@ void test_substrings_cuda_memory_contract() {
  *  properties rotate, keeping the per-cell price flat while the sweep as a whole still exercises each of
  *  them against each axis triple.
  */
-void test_substrings_adversarial() {
+void test_substrings_adversarial_equivalence() {
     std::printf("  - testing adversarial needle x placement x transform cross-product...\n");
     std::size_t const needle_generators = (std::size_t)substrings_needle_generator_t::count_k;
     std::size_t const placements = (std::size_t)substrings_placement_t::count_k;
@@ -1538,7 +1553,7 @@ void test_substrings_adversarial() {
  *  The default `cpu_specs_t` L2 threshold keeps the adversarial fixtures above on the one-core-per-haystack
  *  path, so this one forces the slicing with a threshold far below its own size and a real pool.
  */
-void test_substrings_large_haystacks() {
+void test_substrings_large_haystacks_equivalence() {
     std::printf("  - testing the all-cores-on-one-large-haystack path...\n");
 
     forkunion_executor_t pool;
@@ -1613,7 +1628,7 @@ void test_substrings_large_haystacks() {
  *  @brief Structural invariants of the compiled automaton, checked directly against the published
  *         `aho_corasick_view` rather than against another backend's output.
  */
-void test_substrings_construction() {
+void test_substrings_construction_equivalence() {
     std::printf("  - testing structural invariants of the compiled automaton...\n");
 
     // Re-indexing replaces the needle set outright. An engine is tiered for the machine that indexed it, so
@@ -1839,7 +1854,7 @@ void test_substrings_construction() {
  *  Stated against the overlapping walk rather than a second implementation: every match a cover reports must
  *  be a match the exhaustive walk also found, and no two of them may touch.
  */
-void test_substrings_cover() {
+void test_substrings_cover_equivalence() {
     std::printf("  - testing that a leftmost cover is a non-overlapping subset of every match...\n");
 
     std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(150), 2, 5);
@@ -1936,7 +1951,7 @@ substrings_rewrite_tape_t rewrite_all_(engine_type_ &engine, haystacks_type_ con
  *  Replacing every needle with itself must reproduce the input byte for byte, whatever the vocabulary and
  *  whichever cover resolved it - a property that needs no second implementation to check against.
  */
-void test_substrings_rewriting() {
+void test_substrings_rewriting_equivalence() {
     std::printf("  - testing rewriting against the self-replacement oracle...\n");
 
     substrings_overlap_policy_t const leftmost_policies[2] = {substrings_leftmost_longest_k,
@@ -2093,7 +2108,7 @@ void test_substrings_rewriting() {
  *  Term frequencies are raw overlapping counts, so a needle nested in another still contributes every one of
  *  its own occurrences - which is what classic BM25 scores and what a leftmost cover would have suppressed.
  */
-void test_substrings_scoring() {
+void test_substrings_scoring_unit() {
     std::printf("  - testing BM25 scores against hand-computed values...\n");
 
     std::vector<std::string> const needle_strings {"cat", "dog"};
@@ -2199,7 +2214,7 @@ void test_substrings_scoring() {
  *  Frequencies are known by construction: the needles are fixed width and space separated, so a match can
  *  only begin where a token does, and the text's own recipe is the oracle.
  */
-void test_substrings_scoring_wide_dictionary() {
+void test_substrings_scoring_wide_equivalence() {
     std::printf("  - testing BM25 across the direct, hashed and overflow regimes...\n");
 
     // Fixed-width needles, so none is a substring of another and a haystack's distinct count is exactly the
@@ -2387,7 +2402,7 @@ void test_substrings_scoring_wide_dictionary() {
  *  Scores are compared within a tolerance across backends and bit for bit against the device itself, which is
  *  the pair of promises the header makes - see the reduction note beside the comparison below.
  */
-void test_substrings_cuda_rewriting_and_scoring() {
+void test_substrings_cuda_equivalence() {
     std::printf("  - testing CUDA rewriting and BM25 against the serial engine...\n");
 #if SZ_USE_CUDA
 
@@ -2481,7 +2496,7 @@ void test_substrings_cuda_rewriting_and_scoring() {
  *  @brief The three degenerate output-buffer shapes: an empty batch, an undersized buffer, and an oversized
  *         one. The cases above always size `matches` to exactly the count `try_count` produced.
  */
-void test_substrings_buffer_contracts() {
+void test_substrings_buffer_safety() {
     std::printf("  - testing empty, undersized and oversized output buffers...\n");
 
     std::vector<std::string> const needle_strings {"he", "she", "his", "hers"};
@@ -2555,6 +2570,12 @@ void test_substrings_buffer_contracts() {
     }
 }
 
+/**
+ *  @brief Malformed-needle rejection over every malformed-input class - exact mode accepts any byte sequence,
+ *         uncased mode accepts a needle exactly when it is structurally well-formed UTF-8 - then a sweep of
+ *         malformed, mutated haystacks against a well-formed dictionary, where `try_count` and `try_find`
+ *         must agree on the match count without crashing or hanging.
+ */
 void test_substrings_safety() {
     std::printf("  - testing malformed-needle rejection and malformed-haystack robustness...\n");
 

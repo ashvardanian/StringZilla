@@ -23,7 +23,7 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `test_stringzilla.hpp`)
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
 #pragma region Unit
 

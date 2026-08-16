@@ -23,7 +23,7 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `test_stringzilla.hpp`)
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
 #pragma region Unit
 
@@ -246,8 +246,8 @@ void test_utf8_sentences_rules() {
 /** @brief Malformed-input safety of the UTF-8 sentence kernels (serial / dispatched / icelake). */
 void test_utf8_sentences_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 sentence kernels...\n");
-    utf8_segment_backend_t const serial_reference[] = {{"serial", sz_utf8_sentences_serial}};
-    check_utf8_segment_safety_("sentence", span_over(serial_reference));
+    utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_sentences_serial}};
+    check_utf8_segment_safety_("sentence", span_over(serial_only));
     check_utf8_segment_safety_("sentence", span_over(utf8_sentences_backends));
     std::printf("    sentence safety passed!\n");
 }

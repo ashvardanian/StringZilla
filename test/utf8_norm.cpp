@@ -88,15 +88,11 @@ void test_utf8_norm_unit() {
            SZ_NULL_CHAR); // Dispatched: already NFC
     verify(sz_utf8_find_denormalized(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
            SZ_NULL_CHAR); // Dispatched: not NFD
-    verify(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
-           SZ_NULL_CHAR); // Manual: serial
-    verify(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
-           SZ_NULL_CHAR); // Manual: serial
+    verify(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) == SZ_NULL_CHAR);
+    verify(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) != SZ_NULL_CHAR);
 #if SZ_USE_ICELAKE
-    verify(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
-           SZ_NULL_CHAR); // Manual: icelake
-    verify(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
-           SZ_NULL_CHAR); // Manual: icelake
+    verify(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfc_k) == SZ_NULL_CHAR);
+    verify(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k) != SZ_NULL_CHAR);
 #endif
     {
         char norm_buffer[64];
@@ -105,11 +101,11 @@ void test_utf8_norm_unit() {
         sz_size_t const nfd_length = sz_utf8_norm(cafe_nfc, cafe_length, sz_normal_form_nfd_k, norm_buffer);
         verify(nfd_length == 6u); // "caf" + 'e' + U+0301 (2-byte combining acute)
         sz_size_t const nfd_length_serial = sz_utf8_norm_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k,
-                                                                norm_buffer); // Manual: serial
+                                                                norm_buffer);
         verify(nfd_length_serial == 6u);
 #if SZ_USE_ICELAKE
         sz_size_t const nfd_length_icelake = sz_utf8_norm_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k,
-                                                                  norm_buffer); // Manual: icelake
+                                                                  norm_buffer);
         verify(nfd_length_icelake == 6u);
 #endif
     }
@@ -168,7 +164,7 @@ struct utf8_norm_backend_t {
  *  astral planes stay reachable on a cheap run.
  */
 template <typename reference_, typename candidate_>
-void test_utf8_norm_equivalence(reference_ reference, candidate_ candidate, std::size_t iterations) {
+void check_utf8_norm_equivalence_(reference_ reference, candidate_ candidate, std::size_t iterations) {
     std::size_t const codepoint_stride = sweep_stride(0x110000);
     std::vector<sz_rune_t> all_runes;
     all_runes.reserve(0x110000 / codepoint_stride);
@@ -370,7 +366,7 @@ void test_utf8_norm_all() {
     // One iteration pushes every assigned codepoint through 4 forms x 4 kernel calls, once per compiled backend.
     // Three passes - one in codepoint order plus two shuffles - is this family's share of the suite budget.
     for (utf8_norm_backend_t const &backend : utf8_norm_backends)
-        test_utf8_norm_equivalence(serial, backend, scale_iterations(3));
+        check_utf8_norm_equivalence_(serial, backend, scale_iterations(3));
 }
 
 #pragma endregion // Drivers

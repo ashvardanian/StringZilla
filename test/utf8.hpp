@@ -3,12 +3,14 @@
  *  @file   test/utf8.hpp
  *  @author Ash Vardanian
  *
- *  Each segmentation family lives in its own translation unit (`test_utf8_<family>.cpp`) and pulls its substrate
- *  from here. The three layers are:
+ *  Each segmentation family lives in its own translation unit (`utf8_<family>.cpp`) and pulls its substrate
+ *  from here. The four layers are:
  *    - known-answer goldens (`check_utf8_segment_unit_`), compared lazily against expected literals;
  *    - the malformed-input safety sweep (`check_utf8_segment_safety_`);
  *    - the serial-vs-ISA differential (`check_utf8_segment_equivalence_`), a short orchestrator over named
- *      deterministic and randomized stressors.
+ *      deterministic and randomized stressors;
+ *    - the rule-coverage sweep (`check_utf8_rule_coverage_`), which the `_rules` tier drivers use to confirm
+ *      every named UAX boundary rule fires at least once.
  *
  *  Two segmentation backends are compared by STREAMING them in lockstep through @ref utf8_segment_cursor_t (a
  *  fixed-capacity batch pull with `bytes_consumed` resume) and asserting each emitted segment agrees — no
@@ -357,6 +359,10 @@ struct utf8_repro_t {
     utf8_corpus_flavor_t flavor;
 };
 
+/** @brief A per-position boundary rule, as `sz_utf8_is_word_boundary_serial` and its grapheme twin spell it.
+ *         Declared here rather than beside `sz_utf8_segmenter_t` because only the tests call one. */
+typedef sz_bool_t (*utf8_boundary_oracle_t)(sz_cptr_t, sz_size_t, sz_size_t);
+
 #pragma endregion // Shared constants and types
 
 #pragma region Shared helpers
@@ -535,7 +541,7 @@ static char const *const utf8_default_snippets[] = {
     "\xE2\x80\xA9",
 };
 
-/** @brief The shared default alphabet (weights mirror the legacy snippet/boundary/astral/motif/malformed mix). */
+/** @brief The shared default alphabet, weighting the snippet, boundary, astral, motif and malformed mix. */
 static utf8_corpus_alphabet_t const utf8_default_alphabet = {
     span_over(utf8_default_snippets),
     span_over(utf8_default_boundary_codepoints),
@@ -860,6 +866,38 @@ inline void check_utf8_segment_safety_(char const *family, sz::span<utf8_segment
         }
     };
     for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, probe);
+}
+
+/**
+ *  @brief Holds a streaming segmenter to the per-position rule oracle over one text.
+ *
+ *  The segmenters carry left context forward in a state machine; the oracles re-walk it at every position.
+ *  Both transcribe the same annex, and the headers only ever claimed they agree - this is where that is
+ *  checked. Inputs the segmenter could not drain in one call are skipped, since the oracle reads the whole
+ *  text and a truncated prefix would ask the two a different question.
+ */
+inline void check_utf8_segment_against_oracle_(char const *family, sz_utf8_segmenter_t segmenter,
+                                               utf8_boundary_oracle_t oracle, char const *text, std::size_t length) {
+    sz_size_t offsets[utf8_unit_capacity_k + 1], lengths[utf8_unit_capacity_k + 1];
+    sz_size_t bytes_consumed = 0;
+    sz_size_t const found = segmenter(text, (sz_size_t)length, offsets, lengths, (sz_size_t)(utf8_unit_capacity_k + 1),
+                                      &bytes_consumed);
+    if (bytes_consumed != (sz_size_t)length || found > utf8_unit_capacity_k) return;
+
+    // Segments tile the input, so a position is a boundary exactly when one starts there.
+    bool starts_a_segment[utf8_unit_capacity_k + 1] = {};
+    starts_a_segment[0] = true, starts_a_segment[length] = true;
+    for (sz_size_t index = 0; index != found; ++index) starts_a_segment[offsets[index]] = true;
+
+    for (sz_size_t position = 0; position <= (sz_size_t)length; ++position) {
+        bool const oracle_says = oracle(text, (sz_size_t)length, position) == sz_true_k;
+        if (oracle_says == starts_a_segment[position]) continue;
+        std::fprintf(stderr, "%s: segmenter and rule oracle disagree at position %zu of %zu (%s vs %s)\n", family,
+                     (std::size_t)position, length, starts_a_segment[position] ? "boundary" : "interior",
+                     oracle_says ? "boundary" : "interior");
+        print_utf8_test_bytes_("input", text, length);
+        verify(false && "The streaming segmenter must agree with the per-position rule oracle");
+    }
 }
 
 #pragma endregion // Safety sweep

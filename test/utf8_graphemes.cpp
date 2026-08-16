@@ -23,7 +23,7 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `test_stringzilla.hpp`)
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
 #pragma region Unit
 
@@ -325,6 +325,11 @@ void test_utf8_graphemes_all() {
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
     check_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
                                     scale_iterations(8)); // This family's share of the suite budget
+
+    // The streaming segmenter against the per-position GB1-GB999 transcription, which nothing else calls.
+    for (sz::string_view const motif : span_over(utf8_graphemes_motifs))
+        check_utf8_segment_against_oracle_("grapheme", sz_utf8_graphemes_serial, sz_utf8_is_grapheme_boundary_serial,
+                                           motif.data(), motif.size());
 }
 
 #pragma endregion // Drivers
