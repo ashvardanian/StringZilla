@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -9,36 +10,75 @@
 namespace szs = ashvardanian::stringzillas;
 namespace sz = ashvardanian::stringzilla;
 
+static std::uint8_t reference_distance(std::string const &first, std::string const &second) {
+    std::vector<std::uint16_t> previous(first.size() + 1), current(first.size() + 1);
+    for (std::size_t column = 0; column <= first.size(); ++column)
+        previous[column] = static_cast<std::uint16_t>(column);
+    for (std::size_t row = 1; row <= second.size(); ++row) {
+        current[0] = static_cast<std::uint16_t>(row);
+        for (std::size_t column = 1; column <= first.size(); ++column)
+            current[column] = std::min(
+                {static_cast<std::uint16_t>(previous[column] + 1),
+                 static_cast<std::uint16_t>(current[column - 1] + 1),
+                 static_cast<std::uint16_t>(previous[column - 1] + (first[column - 1] != second[row - 1]))});
+        previous.swap(current);
+    }
+    return static_cast<std::uint8_t>(previous[first.size()]);
+}
+
+static std::vector<std::string> binary_strings(std::size_t max_length) {
+    std::vector<std::string> strings = {""};
+    for (std::size_t length = 1; length <= max_length; ++length)
+        for (std::size_t bits = 0; bits != (std::size_t(1) << length); ++bits) {
+            std::string value(length, 'a');
+            for (std::size_t position = 0; position != length; ++position)
+                value[position] = ((bits >> position) & 1) ? 'b' : 'a';
+            strings.push_back(std::move(value));
+        }
+    return strings;
+}
+
 int main() {
-    std::vector<std::string> dictionary = {"book", "back", "book", "boon", "", std::string("a\0b", 3)};
+    std::vector<std::string> dictionary = binary_strings(5);
+    dictionary.push_back("book");
+    dictionary.push_back("book");
+    dictionary.push_back(std::string("a\0b", 3));
+    dictionary.push_back(std::string(70, 'x'));
     szs::levenshtein_index<> index;
-    if (index.try_build(dictionary) != sz::status_t::success_k) return 1;
+    if (index.try_build(dictionary, 2) != sz::status_t::success_k) return 1;
 
     szs::levenshtein_index<>::scratch_t scratch;
     szs::levenshtein_index<>::matches_t matches;
-    std::string const query = "book";
-    if (index.find({query.data(), query.size()}, 0, scratch, matches) != sz::status_t::success_k) return 2;
-    std::vector<std::uint32_t> ids;
-    for (auto const &match : matches) {
-        if (match.distance != 0) return 3;
-        ids.push_back(match.id);
-    }
-    std::sort(ids.begin(), ids.end());
-    if (ids != std::vector<std::uint32_t>({0, 2})) return 4;
 
-    std::string const missing = "cook";
-    if (index.find({missing.data(), missing.size()}, 0, scratch, matches) != sz::status_t::success_k ||
-        matches.size() != 0)
-        return 5;
-    if (index.find({query.data(), query.size()}, 1, scratch, matches) != sz::status_t::unexpected_dimensions_k ||
-        matches.size() != 0)
-        return 6;
+    std::vector<std::string> queries = binary_strings(5);
+    queries.push_back("cook");
+    queries.push_back(std::string("a\0c", 3));
+    queries.push_back(std::string(69, 'x') + "y");
+    for (std::string const &query : queries)
+        for (std::uint8_t bound = 0; bound <= 2; ++bound) {
+            if (index.find({query.data(), query.size()}, bound, scratch, matches) != sz::status_t::success_k)
+                return 2;
+            std::vector<std::pair<std::uint32_t, std::uint8_t>> actual;
+            for (auto const &match : matches) actual.emplace_back(match.id, match.distance);
+            std::sort(actual.begin(), actual.end());
+
+            std::vector<std::pair<std::uint32_t, std::uint8_t>> expected;
+            for (std::uint32_t id = 0; id != dictionary.size(); ++id) {
+                std::uint8_t const distance = reference_distance(dictionary[id], query);
+                if (distance <= bound) expected.emplace_back(id, distance);
+            }
+            if (actual != expected) return 3;
+        }
+
+    std::string const query = "book";
+    if (index.find({query.data(), query.size()}, 3, scratch, matches) != sz::status_t::unexpected_dimensions_k)
+        return 4;
 
     // Failed rebuilds leave the previous immutable index intact.
-    if (index.try_build(dictionary, 1) != sz::status_t::unexpected_dimensions_k || index.size() != dictionary.size())
-        return 7;
+    if (index.try_build(dictionary, 3) != sz::status_t::unexpected_dimensions_k || index.size() != dictionary.size())
+        return 5;
     if (index.find({query.data(), query.size()}, 0, scratch, matches) != sz::status_t::success_k ||
         matches.size() != 2)
-        return 8;
+        return 6;
     return 0;
 }
