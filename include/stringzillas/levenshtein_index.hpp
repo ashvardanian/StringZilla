@@ -223,13 +223,17 @@ class basic_levenshtein_index {
     }
 
     template <typename scratch_type_>
-    static u8_t distance_within_two_(span<symbol_t const> first, span<symbol_t const> second,
-                                     scratch_type_ &scratch) noexcept {
+    static status_t distance_within_two_(span<symbol_t const> first, span<symbol_t const> second,
+                                         scratch_type_ &scratch, u8_t &distance) noexcept {
         // Myers fits byte patterns through 64 symbols in one machine word. Wider symbols and longer patterns use the
         // same narrow dynamic-programming band, clipped at three because callers only need 0, 1, 2, or rejected.
+        distance = rejected_distance_k;
         if (first.size() > second.size()) std::swap(first, second);
-        if (second.size() - first.size() > 2) return rejected_distance_k;
-        if (first.empty()) return second.size() <= 2 ? static_cast<u8_t>(second.size()) : rejected_distance_k;
+        if (second.size() - first.size() > 2) return status_t::success_k;
+        if (first.empty()) {
+            if (second.size() <= 2) distance = static_cast<u8_t>(second.size());
+            return status_t::success_k;
+        }
 
         if constexpr (sizeof(symbol_t) == 1) {
             if (first.size() <= 64) {
@@ -251,14 +255,15 @@ class basic_levenshtein_index {
                     u64_t const shifted_negative = horizontal_negative << 1;
                     positive = shifted_negative | ~(differences | shifted_positive);
                     negative = shifted_positive & differences;
-                    if (score > 2 + second.size() - index - 1) return rejected_distance_k;
+                    if (score > 2 + second.size() - index - 1) return status_t::success_k;
                 }
-                return score <= 2 ? static_cast<u8_t>(score) : rejected_distance_k;
+                if (score <= 2) distance = static_cast<u8_t>(score);
+                return status_t::success_k;
             }
         }
 
         size_t const width = first.size() + 1;
-        if (scratch.dp_rows.try_resize(width * 2) != status_t::success_k) return rejected_distance_k;
+        if (status_t status = scratch.dp_rows.try_resize(width * 2); status != status_t::success_k) return status;
         u8_t *previous = scratch.dp_rows.data();
         u8_t *current = previous + width;
         std::fill(previous, previous + width, rejected_distance_k);
@@ -277,20 +282,27 @@ class basic_levenshtein_index {
             }
             std::swap(previous, current);
         }
-        return previous[first.size()] <= 2 ? previous[first.size()] : rejected_distance_k;
+        if (previous[first.size()] <= 2) distance = previous[first.size()];
+        return status_t::success_k;
     }
 
     template <typename scratch_type_>
-    u8_t verify_(u32_t id, span<symbol_t const> query, u8_t bound, scratch_type_ &scratch) const noexcept {
+    status_t verify_(u32_t id, span<symbol_t const> query, u8_t bound, scratch_type_ &scratch,
+                     u8_t &distance) const noexcept {
         span<symbol_t const> const candidate = word_(id);
-        if (bound == 0)
-            return candidate.size() == query.size() &&
-                           (candidate.empty() ||
-                            std::memcmp(candidate.data(), query.data(), query.size() * sizeof(symbol_t)) == 0)
-                       ? 0
-                       : rejected_distance_k;
-        if (bound == 1) return distance_within_one_(candidate, query);
-        return distance_within_two_(candidate, query, scratch);
+        if (bound == 0) {
+            distance = candidate.size() == query.size() &&
+                               (candidate.empty() ||
+                                std::memcmp(candidate.data(), query.data(), query.size() * sizeof(symbol_t)) == 0)
+                           ? 0
+                           : rejected_distance_k;
+            return status_t::success_k;
+        }
+        if (bound == 1) {
+            distance = distance_within_one_(candidate, query);
+            return status_t::success_k;
+        }
+        return distance_within_two_(candidate, query, scratch, distance);
     }
 
     status_t build_trie_(bool fallback_only) noexcept {
@@ -997,7 +1009,9 @@ class basic_levenshtein_index {
                     u32_t const id = static_cast<u32_t>(*record);
                     if (scratch.generations[id] == scratch.generation) continue;
                     scratch.generations[id] = scratch.generation;
-                    u8_t const distance = verify_(id, query, bound, scratch);
+                    u8_t distance = rejected_distance_k;
+                    if (status_t status = verify_(id, query, bound, scratch, distance); status != status_t::success_k)
+                        return status;
                     if (distance <= bound)
                         if (status_t status = matches.try_push_back(match_t {id, distance});
                             status != status_t::success_k)
@@ -1014,7 +1028,9 @@ class basic_levenshtein_index {
                     u32_t const id = *record & packed_id_mask_k;
                     if (scratch.generations[id] == scratch.generation) continue;
                     scratch.generations[id] = scratch.generation;
-                    u8_t const distance = verify_(id, query, bound, scratch);
+                    u8_t distance = rejected_distance_k;
+                    if (status_t status = verify_(id, query, bound, scratch, distance); status != status_t::success_k)
+                        return status;
                     if (distance <= bound)
                         if (status_t status = matches.try_push_back(match_t {id, distance});
                             status != status_t::success_k)

@@ -1,6 +1,7 @@
 #include <stringzillas/levenshtein_index.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -10,6 +11,39 @@
 
 namespace szs = ashvardanian::stringzillas;
 namespace sz = ashvardanian::stringzilla;
+
+struct failing_allocator_state_t {
+    bool fail = false;
+};
+
+template <typename value_type_>
+struct failing_allocator_t {
+    using value_type = value_type_;
+    using propagate_on_container_move_assignment = std::true_type;
+
+    failing_allocator_state_t *state = nullptr;
+
+    failing_allocator_t() noexcept = default;
+    explicit failing_allocator_t(failing_allocator_state_t *state_arg) noexcept : state(state_arg) {}
+    template <typename other_type_>
+    failing_allocator_t(failing_allocator_t<other_type_> const &other) noexcept : state(other.state) {}
+
+    value_type *allocate(std::size_t count) const noexcept {
+        if (state && state->fail) return nullptr;
+        if (count > std::numeric_limits<std::size_t>::max() / sizeof(value_type)) return nullptr;
+        return static_cast<value_type *>(std::malloc(count * sizeof(value_type)));
+    }
+    void deallocate(value_type *address, std::size_t) const noexcept { std::free(address); }
+
+    template <typename other_type_>
+    bool operator==(failing_allocator_t<other_type_> const &other) const noexcept {
+        return state == other.state;
+    }
+    template <typename other_type_>
+    bool operator!=(failing_allocator_t<other_type_> const &other) const noexcept {
+        return !(*this == other);
+    }
+};
 
 template <typename string_type_>
 static std::size_t reference_distance(string_type_ const &first, string_type_ const &second) {
@@ -203,6 +237,31 @@ static int test_levenshtein_index_unit_impl_() {
             sz::status_t::success_k ||
         matches.size() != 1 || matches[0].id != 0)
         return 21;
+
+    // Search-time allocation failures must be reported, never translated into a missing match.
+    failing_allocator_state_t failing_state;
+    using failing_allocator_char_t = failing_allocator_t<char>;
+    using failing_index_t = szs::levenshtein_index<failing_allocator_char_t>;
+    failing_allocator_char_t failing_allocator {&failing_state};
+    std::vector<std::string> failing_dictionary = {std::string(65, 'a')};
+    failing_index_t failing_index {failing_allocator};
+    if (failing_index.try_build(failing_dictionary, 2, 65) != sz::status_t::success_k) return 22;
+    failing_index_t::scratch_t failing_scratch {failing_allocator};
+    failing_index_t::matches_t failing_matches {failing_allocator};
+    std::string non_candidate(65, 'b');
+    if (failing_index.find({non_candidate.data(), non_candidate.size()}, 2, failing_scratch, failing_matches) !=
+            sz::status_t::success_k ||
+        failing_matches.size() != 0)
+        return 23;
+    failing_state.fail = true;
+    if (failing_index.find({failing_dictionary[0].data(), failing_dictionary[0].size()}, 2, failing_scratch,
+                           failing_matches) != sz::status_t::bad_alloc_k)
+        return 24;
+    failing_state.fail = false;
+    if (failing_index.find({failing_dictionary[0].data(), failing_dictionary[0].size()}, 2, failing_scratch,
+                           failing_matches) != sz::status_t::success_k ||
+        failing_matches.size() != 1 || failing_matches[0].id != 0 || failing_matches[0].distance != 0)
+        return 25;
 
     std::cout << "OK: " << checks << " exhaustive memberships, records=" << index.records_count()
               << " index_bytes=" << index.index_bytes() << '\n';
