@@ -836,8 +836,9 @@ class basic_levenshtein_index {
         if (dictionary.size() > std::numeric_limits<u32_t>::max()) return status_t::overflow_risk_k;
         u8_t const indexed_distance = sz_min_of_two(max_distance, u8_t(2));
         if (deletion_max_word_length == automatic_deletion_max_word_length_k) {
-            // Deletion records grow quadratically with word length at k=2. Keep them only when the complete dictionary
-            // stays below a simple average budget. Otherwise the prefix tree becomes the main path.
+            // Deletion records grow quadratically with word length at k=2. Use them for the complete dictionary only
+            // when it stays below a simple average budget. Otherwise use the prefix tree for the complete dictionary.
+            // Callers may request a mixed index explicitly by passing a word-length cutoff.
             static constexpr size_t residuals_per_word_budget = 80;
             size_t residuals_budget = std::numeric_limits<size_t>::max();
             if (dictionary.size() <= residuals_budget / residuals_per_word_budget)
@@ -966,7 +967,12 @@ class basic_levenshtein_index {
         : alloc_(alloc), tape_(alloc), offsets_(alloc), directory_(alloc), directory_words_(alloc),
           packed_records_(alloc), wide_records_(alloc), trie_nodes_(alloc), trie_edges_(alloc), trie_terminals_(alloc) {}
 
-    /** @brief Copies and indexes a dictionary, choosing the deletion table or prefix tree from its expected size. */
+    /**
+     *  @brief Copies and indexes a dictionary, choosing one search path from its expected size.
+     *
+     *  Automatic mode uses either the deletion table or the prefix tree for the complete dictionary. Pass an explicit
+     *  @p deletion_max_word_length to use deletion lookup for shorter words and the tree for longer words.
+     */
     template <typename sequences_type_>
     status_t try_build(sequences_type_ const &dictionary, u8_t max_distance,
                        size_t deletion_max_word_length = automatic_deletion_max_word_length_k) noexcept {

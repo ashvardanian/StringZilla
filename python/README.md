@@ -523,12 +523,16 @@ assert sorted(zip(query_ids, dictionary_ids, distances)) == [
 ```
 
 `LevenshteinIndex` compares bytes. Use `LevenshteinIndexUTF8` to validate UTF-8 and count edits in Unicode codepoints.
+It does not normalize text, fold case, or combine codepoints into grapheme clusters.
 
 ```python
 index = szs.LevenshteinIndexUTF8(["café", "cafe", "咖啡", "咖非"], max_distance=2)
 query_ids, dictionary_ids, distances = index(["咖啡"], bound=1)
 assert sorted(zip(dictionary_ids, distances)) == [(2, 0), (3, 1)]
 ```
+
+Both indexes are CPU-only. One call uses a given Python index at a time, while a `DeviceScope` may distribute that call
+across several CPU cores.
 
 ### `NeedlemanWunschScores` and `SmithWatermanScores`
 

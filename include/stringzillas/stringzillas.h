@@ -318,7 +318,10 @@ SZ_API_RUNTIME sz_status_t szs_levenshtein_index_find_u64tape(                  
 /** @brief Free a byte-string dictionary index. */
 SZ_API_RUNTIME void szs_levenshtein_index_free(szs_levenshtein_index_t index);
 
-/** @brief UTF-8 counterpart. Inputs are validated and distance is measured in Unicode codepoints. */
+/**
+ *  @brief UTF-8 counterpart. Inputs are validated and distance is measured in Unicode codepoints.
+ *  @note Input is not normalized or case-folded, and codepoints are not combined into grapheme clusters.
+ */
 typedef void *szs_levenshtein_index_utf8_t;
 
 /** @brief Build an exact Unicode Levenshtein index over UTF-8 strings. */

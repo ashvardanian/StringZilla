@@ -224,9 +224,10 @@ szs_device_scope_free(device);
 ```
 
 The names above compare bytes. Use the `szs_levenshtein_index_utf8_*` names when edits should be counted as Unicode
-characters. Each match is written at the same position in the query ID, dictionary ID, and distance arrays. A CPU
-device scope can distribute a query batch across several cores. The engine reuses temporary memory between calls, so
-one caller uses a given index at a time.
+codepoints. This validates UTF-8, but does not normalize text, fold case, or combine codepoints into grapheme clusters.
+Each match is written at the same position in the query ID, dictionary ID, and distance arrays. The index is CPU-only,
+and a CPU device scope can distribute a query batch across several cores. The engine reuses temporary memory between
+calls, so one caller uses a given index at a time.
 
 ## Alignment Scores
 
