@@ -8,8 +8,11 @@
  *
  *  Benchmarks include:
  *  - Checksum calculation and hashing for each token - @b bytesum and @b hash.
- *  - Stream hashing of a token (file, lines, or words) - @b hash_init, @b hash_stream, @b hash_fold.
+ *  - Stream hashing of a token (file, lines, or words) - @b sz_hash_state_init, @b sz_hash_state_update,
+ *    @b sz_hash_state_digest.
  *  - Equality check between two tokens and their relative order - @b equal and @b ordering.
+ *  - Multi-seed hashing, and SHA-256 digest computation - @b bench_hashing_multiseed, @b bench_sha256,
+ *    @b bench_sha256_multistate.
  *
  *  For token operations, the number of operations per second are reported as the number of bytes processed
  *  or comparisons performed, depending on the specific operation being benchmarked.
@@ -47,7 +50,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `find.cpp`, `sequence.cpp`, and `memory.cpp`.
  */
 #include <numeric> // `std::accumulate`
 #include <array>   // `std::array`
@@ -89,62 +92,6 @@ struct bytesum_from_std_t {
             [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
         do_not_optimize(bytesum);
         return {buffer.size(), static_cast<check_value_t>(bytesum), 1};
-    }
-};
-
-/** @brief Wraps a hardware-specific UTF-8 character counting backend. */
-template <sz_utf8_count_t func_>
-struct utf8_count_from_sz {
-
-    environment_t const &env;
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view buffer) const noexcept {
-        sz_size_t char_count = func_(buffer.data(), buffer.size());
-        do_not_optimize(char_count);
-        return {buffer.size(), static_cast<check_value_t>(char_count)};
-    }
-};
-
-/** @brief Wraps a hardware-specific UTF-8 to UTF-32 unpacking backend. */
-template <sz_utf8_decode_t func_>
-struct utf8_unpack_from_sz {
-
-    environment_t const &env;
-    mutable sz_rune_t runes[64]; // Reusable buffer to avoid repeated stack allocation
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view buffer) const noexcept {
-        check_value_t checksum = 0;
-        sz_size_t total_bytes = 0;
-        sz_cptr_t text = buffer.data();
-        sz_size_t remaining = buffer.size();
-
-        // Process entire token, letting the function decode as much as it can each iteration
-        while (remaining > 0) {
-            sz_size_t unpacked_count = 0;
-            sz_cptr_t next = func_(text, remaining, runes, 64, &unpacked_count);
-
-            // Compute checksum of decoded runes
-            for (sz_size_t i = 0; i < unpacked_count; i++) checksum += static_cast<check_value_t>(runes[i]);
-
-            sz_size_t bytes_consumed = next - text;
-            total_bytes += bytes_consumed;
-            text = next;
-            remaining -= bytes_consumed;
-
-            // Safety check: if no progress, break to avoid infinite loop
-            if (bytes_consumed == 0) break;
-        }
-
-        do_not_optimize(runes);
-        do_not_optimize(checksum);
-        return {total_bytes, checksum};
     }
 };
 
@@ -280,68 +227,6 @@ void bench_checksums(environment_t const &env) {
 #endif
 }
 
-void bench_utf8_count(environment_t const &env) {
-
-    auto validator = utf8_count_from_sz<sz_utf8_count_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_count_serial", validator).log();
-
-#if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_count_haswell", validator, utf8_count_from_sz<sz_utf8_count_haswell> {env}).log(base);
-#endif
-#if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_count_icelake", validator, utf8_count_from_sz<sz_utf8_count_icelake> {env}).log(base);
-#endif
-#if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_count_neon", validator, utf8_count_from_sz<sz_utf8_count_neon> {env}).log(base);
-#endif
-#if SZ_USE_SVE2
-    bench_unary(env, "sz_utf8_count_sve2", validator, utf8_count_from_sz<sz_utf8_count_sve2> {env}).log(base);
-#endif
-#if SZ_USE_V128
-    bench_unary(env, "sz_utf8_count_v128", validator, utf8_count_from_sz<sz_utf8_count_v128> {env}).log(base);
-#endif
-#if SZ_USE_V128RELAXED
-    bench_unary(env, "sz_utf8_count_v128relaxed", validator, utf8_count_from_sz<sz_utf8_count_v128relaxed> {env})
-        .log(base);
-#endif
-#if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_count_rvv", validator, utf8_count_from_sz<sz_utf8_count_rvv> {env}).log(base);
-#endif
-#if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_count_lasx", validator, utf8_count_from_sz<sz_utf8_count_lasx> {env}).log(base);
-#endif
-#if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_count_powervsx", validator, utf8_count_from_sz<sz_utf8_count_powervsx> {env}).log(base);
-#endif
-}
-
-void bench_utf8_unpack(environment_t const &env) {
-
-    auto validator = utf8_unpack_from_sz<sz_utf8_decode_serial> {env, {}};
-    bench_result_t base = bench_unary(env, "sz_utf8_decode_serial", validator).log();
-
-#if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_decode_icelake", validator, utf8_unpack_from_sz<sz_utf8_decode_icelake> {env, {}})
-        .log(base);
-#endif
-#if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_decode_neon", validator, utf8_unpack_from_sz<sz_utf8_decode_neon> {env, {}}).log(base);
-#endif
-#if SZ_USE_V128
-    bench_unary(env, "sz_utf8_decode_v128", validator, utf8_unpack_from_sz<sz_utf8_decode_v128> {env, {}}).log(base);
-#endif
-#if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_decode_rvv", validator, utf8_unpack_from_sz<sz_utf8_decode_rvv> {env, {}}).log(base);
-#endif
-#if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_decode_lasx", validator, utf8_unpack_from_sz<sz_utf8_decode_lasx> {env, {}}).log(base);
-#endif
-#if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_decode_powervsx", validator, utf8_unpack_from_sz<sz_utf8_decode_powervsx> {env, {}})
-        .log(base);
-#endif
-}
-
 void bench_hashing(environment_t const &env) {
 
     auto validator = hash_from_sz<sz_hash_serial> {env};
@@ -401,6 +286,15 @@ void bench_hashing_multiseed(environment_t const &env) {
     bench_unary(env, "sz_hash_multiseed_neonaes", validator, hash_multiseed_from_sz<sz_hash_multiseed_neonaes> {env})
         .log(base);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_hash_multiseed_v128", validator, hash_multiseed_from_sz<sz_hash_multiseed_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_hash_multiseed_v128relaxed", validator,
+                hash_multiseed_from_sz<sz_hash_multiseed_v128relaxed> {env})
+        .log(base);
+#endif
 }
 
 void bench_stream_hashing(environment_t const &env) {
@@ -433,8 +327,15 @@ void bench_stream_hashing(environment_t const &env) {
 #endif
 #if SZ_USE_NEONAES
     bench_unary(
-        env, "sz_hash_stream_neon", validator,
+        env, "sz_hash_stream_neonaes", validator,
         hash_stream_from_sz<sz_hash_state_init_neonaes, sz_hash_state_update_neonaes, sz_hash_state_digest_neonaes> {
+            env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_SVE2AES
+    bench_unary(
+        env, "sz_hash_stream_sve2aes", validator,
+        hash_stream_from_sz<sz_hash_state_init_sve2aes, sz_hash_state_update_sve2aes, sz_hash_state_digest_sve2aes> {
             env})
         .log(base, base_stl);
 #endif
@@ -508,7 +409,7 @@ struct sha256_lanes_uniform_t {
     static inline std::size_t length(std::size_t, std::size_t token_length) noexcept { return token_length; }
 };
 
-/** @brief One lane far shorter than the rest, which used to drop its whole group to the scalar kernel. */
+/** @brief One lane far shorter than the rest, which drops its whole group to the scalar kernel. */
 struct sha256_lanes_one_short_t {
     static constexpr char const *name_k = "_one_short";
     static inline std::size_t length(std::size_t lane_index, std::size_t token_length) noexcept {
@@ -658,7 +559,7 @@ void bench_sha256(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_NEONSHA
-    bench_unary(env, "sz_sha256_neon", validator,
+    bench_unary(env, "sz_sha256_neonsha", validator,
                 sha256_stream_from_sz<sz_sha256_state_init_neonsha, sz_sha256_state_update_neonsha,
                                       sz_sha256_state_digest_neonsha> {env})
         .log(base);
@@ -748,7 +649,7 @@ struct equality_from_memcmp_t {
 };
 
 /**
- *  @brief Wraps a hardware-specific order-checking backend into something similar to @b `std::equal_to`.
+ *  @brief Wraps a hardware-specific order-checking backend into something similar to @b `std::less`.
  *         Assuming that almost any random pair of strings would differ in the very first byte, to make benchmarks
  *         more similar to mixed cases, like Hash Table lookups, where during probing we meet both differing
  *         and equivalent strings.
@@ -812,6 +713,9 @@ void bench_comparing_equality(environment_t const &env) {
     bench_result_t base = bench_unary(env, "sz_equal_serial", validator, equality_from_sz<sz_equal_serial> {env}).log();
     bench_result_t base_stl = bench_unary(env, "equal<std::memcmp>", validator).log(base);
 
+#if SZ_USE_WESTMERE
+    bench_unary(env, "sz_equal_westmere", validator, equality_from_sz<sz_equal_westmere> {env}).log(base, base_stl);
+#endif
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_equal_haswell", validator, equality_from_sz<sz_equal_haswell> {env}).log(base, base_stl);
 #endif
@@ -848,6 +752,9 @@ void bench_comparing_order(environment_t const &env) {
     bench_result_t base = bench_unary(env, "sz_order_serial", validator, ordering_from_sz<sz_order_serial> {env}).log();
     bench_result_t base_stl = bench_unary(env, "order<std::memcmp>", validator).log(base);
 
+#if SZ_USE_WESTMERE
+    bench_unary(env, "sz_order_westmere", validator, ordering_from_sz<sz_order_westmere> {env}).log(base, base_stl);
+#endif
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_order_haswell", validator, ordering_from_sz<sz_order_haswell> {env}).log(base, base_stl);
 #endif
@@ -856,6 +763,9 @@ void bench_comparing_order(environment_t const &env) {
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_order_neon", validator, ordering_from_sz<sz_order_neon> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_SVE
+    bench_unary(env, "sz_order_sve", validator, ordering_from_sz<sz_order_sve> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_V128
     bench_unary(env, "sz_order_v128", validator, ordering_from_sz<sz_order_v128> {env}).log(base, base_stl);
@@ -892,8 +802,6 @@ int main(int argc, char const **argv) {
 
     // Unary operations
     bench_checksums(env);
-    bench_utf8_count(env);
-    bench_utf8_unpack(env);
     bench_hashing(env);
     bench_hashing_multiseed(env);
     bench_stream_hashing(env);

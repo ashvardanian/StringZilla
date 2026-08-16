@@ -48,7 +48,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is a sibling of `bench_fingerprints.cpp`.
+ *  This file is a sibling of `fingerprints.cpp`.
  */
 #include "similarities.cuh"
 #include "stringzilla.hpp" // `log_environment`

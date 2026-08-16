@@ -1,13 +1,12 @@
 /**
  *  @file bench/similarities.cpp
  *  @brief Benchmarks string similarity computations.
- *         It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
- *         alignment scores, and fingerprinting techniques combined with the Hamming distance.
+ *         It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations
+ *         and alignment scores.
  *
  *  Compute-bound: the O(N*M) alignment is arithmetic-limited, so a 64 MiB slice exercises every path while the batch samples only what it needs.
  *
  *  Benchmarks include:
- *  - Linear-complexity basic & bounded Hamming distance computations.
  *  - Quadratic-complexity basic & bounded Levenshtein edit-distance computations.
  *  - Quadratic-complexity Needleman-Wunsch alignment scores for bioinformatics.
  *
@@ -18,11 +17,12 @@
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
  *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *  - `STRINGWARS_BATCH_PER_CORE=256` : Pairs scored per core; a CPU core and a GPU streaming-multiprocessor each
  *      count as one core, so the per-device pair budget is `STRINGWARS_BATCH_PER_CORE * cores` and each
  *      cross-product axis (queries, candidates) is its square root.
+ *  - `STRINGWARS_BATCH` : Explicit per-query pair count that overrides the derived batch sizing above, when set.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
@@ -51,7 +51,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is a sibling of `bench_fingerprints.cpp`.
+ *  This file is a sibling of `fingerprints.cpp`.
  */
 #include "similarities.cuh"
 #include "stringzilla.hpp" // `log_environment`

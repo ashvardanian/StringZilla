@@ -1,6 +1,6 @@
 /**
  *  @file bench/fingerprints.cuh
- *  @brief Shared code for CPU and GPU batched parallel exact substring search.
+ *  @brief Shared code for CPU and GPU batched rolling min-hash fingerprinting / sketching.
  */
 #include <tuple> // `std::tuple`
 #include <span>  // `std::span`
@@ -43,7 +43,7 @@ using fingerprint_min_counts_t = std::array<u32_t, default_embedding_dims_k>;
 using fingerprints_min_hashes_t = unified_vector<fingerprint_min_hashes_t>;
 using fingerprints_min_counts_t = unified_vector<fingerprint_min_counts_t>;
 
-#pragma region Multi-Pattern Search
+#pragma region Rolling Fingerprinting
 
 /** @brief Wraps a hardware-specific fingerprinting backend into something @b `bench_nullary`-compatible. */
 template <typename engine_type_, typename... extra_args_>
@@ -309,7 +309,7 @@ void bench_fingerprints(environment_t const &env) {
 #endif // SZ_USE_CUDA
 }
 
-#pragma endregion
+#pragma endregion // Rolling Fingerprinting
 
 } // namespace scripts
 } // namespace stringzilla

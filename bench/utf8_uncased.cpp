@@ -10,14 +10,14 @@
  *  - Case folding for Unicode text - @b utf8_uncased_fold.
  *  - Uncased substring search for Unicode text - @b utf8_uncased_search.
  *
- *  Its sibling @b `bench_utf8_iterate.cpp` covers the @b `sz_utf8_*` iteration/segmentation family
- *  (codepoint counting, Nth-codepoint, newline/whitespace scanning, UAX-29 word/grapheme/sentence boundaries,
- *  UAX-14 line breaking, transcoding).
+ *  Its siblings @b `utf8_traverse.cpp`, @b `utf8_scan.cpp`, and @b `utf8_segment.cpp` cover the
+ *  @b `sz_utf8_*` iteration/segmentation family (codepoint counting, Nth-codepoint, newline/whitespace
+ *  scanning, UAX-29 word/grapheme/sentence boundaries, UAX-14 line breaking, transcoding).
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
  *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=line` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -27,6 +27,7 @@
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
  *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_UNIQUE=1` : Deduplicates tokens, sorting the set and dropping duplicates before benchmarking.
  *
  *  Here are a few build & run commands:
  *
@@ -37,8 +38,8 @@
  *      build_release/stringzilla_bench_utf8_uncased_cpp20
  *  @endcode
  *
- *  This file is the sibling of `bench_utf8_iterate.cpp`, `bench_token.cpp`, `bench_find.cpp`,
- *  `bench_sequence.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `utf8_traverse.cpp`, `utf8_scan.cpp`, `utf8_segment.cpp`, `token.cpp`,
+ *  `find.cpp`, `sequence.cpp`, and `memory.cpp`.
  */
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`

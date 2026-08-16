@@ -32,7 +32,7 @@
  *      build_release/stringzilla_bench_utf8_scan_cpp20
  *  @endcode
  *
- *  This file is the sibling of `bench_utf8_traverse.cpp`, `bench_utf8_segment.cpp`, and `bench_utf8_uncased.cpp`.
+ *  This file is the sibling of `utf8_traverse.cpp`, `utf8_segment.cpp`, and `utf8_uncased.cpp`.
  */
 #include <vector>
 

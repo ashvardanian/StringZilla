@@ -90,7 +90,7 @@ using similarities_t = unified_vector<sz_ssize_t>;
  *
  *  @b all_pairs : score every query against every candidate, a full `queries x candidates` cross-product tile.
  *  This is the path that exercises the inter-/intra-sequence tiling and lane packing of the SIMD/GPU backends,
- *  so the two dimensions are scaled @b independently (the candidate axis is no longer capped at a constant).
+ *  so the two dimensions are scaled @b independently.
  *
  *  @b pairwise : score only the `min(queries, candidates)` diagonal pairs `(query_i, candidate_i)`, one engine
  *  call per pair. This mirrors how a per-pair library is driven, making the GCUPS directly comparable.

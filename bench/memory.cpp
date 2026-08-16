@@ -9,7 +9,7 @@
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
  *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -39,7 +39,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_find.cpp`, `bench_token.cpp`, and `bench_sequence.cpp`.
+ *  This file is the sibling of `find.cpp`, `token.cpp`, and `sequence.cpp`.
  */
 #include <memory>  // `std::unique_ptr`
 #include <numeric> // `std::iota`
@@ -302,10 +302,14 @@ struct fill_random_from_sz {
 
 void memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value) { std::memset(output, value, length); }
 
-void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
+/**
+ *  @brief The `std::` baseline for `sz_generate`, measuring generator throughput alone.
+ *  Reseeding per call would put a Mersenne-Twister state fill inside the measured loop, so the nonce
+ *  is dropped and this baseline is not byte-reproducible the way the `sz_generate` kernels are.
+ */
+void generate_like_sz(sz_ptr_t output, sz_size_t length, [[maybe_unused]] sz_u64_t nonce) {
     uniform_u8_distribution_t distribution;
     std::generate(output, output + length, [&]() -> char { return distribution(global_random_generator()); });
-    sz_unused_(nonce);
 }
 
 /**
@@ -358,6 +362,10 @@ void bench_fill(environment_t const &env) {
 #if SZ_USE_SVE
     bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve> {env, o}).log(zeros);
 #endif
+#if SZ_USE_SVE2AES
+    bench_unary(env, "sz_fill_random_sve2aes", random_call, fill_random_from_sz<sz_fill_random_sve2aes> {env, o})
+        .log(zeros, random);
+#endif
 #if SZ_USE_V128
     bench_unary(env, "sz_fill_v128", fill_from_sz<sz_fill_v128> {env, o}).log(zeros);
     bench_unary(env, "sz_fill_random_v128", random_call, fill_random_from_sz<sz_fill_random_v128> {env, o})
@@ -392,7 +400,7 @@ void bench_fill(environment_t const &env) {
 
 #pragma region Lookup Transformations
 
-/** @brief Wraps a hardware-specific @b `memset`-like backend into something compatible with @b `bench_unary`. */
+/** @brief Wraps a hardware-specific lookup-table backend into something similar to @b `std::transform`. */
 template <sz_lookup_t lookup_func_>
 struct lookup_from_sz {
 

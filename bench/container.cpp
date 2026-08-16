@@ -5,11 +5,6 @@
  *
  *  Memory-bound: associative build and probe are latency-limited over the whole key set, so it reads the whole file by default.
  *
- *  This file is the sibling of `bench_sequence.cpp`, `bench_find.cpp` and `bench_token.cpp`.
- *  It accepts a file with a list of words, constructs associative containers with string keys,
- *  using `std::string`, `std::string_view`, `sz::string_view`, and `sz::string`, and then
- *  evaluates the latency of lookups.
- *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
  *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
@@ -38,7 +33,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_sequence.cpp`, `bench_token.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `sequence.cpp`, `find.cpp`, `token.cpp`, and `memory.cpp`.
  */
 #include <map>           // `std::map`
 #include <unordered_map> // `std::unordered_map`
@@ -145,6 +140,12 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_haswell>>>(env);
         bench_unary(env, "map<sz_order_haswell>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
             .log(base_map);
+    }
+#endif
+    // There is no AVX2 hasher, so the fastest x86 pairing mixes a Westmere hash with a Haswell comparator -
+    // and needs both guards, as either family can be compiled out on its own.
+#if SZ_USE_WESTMERE && SZ_USE_HASWELL
+    {
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<
             std::string_view, unsigned, hash_from_sz<sz_hash_westmere>, equal_to_from_sz<sz_equal_haswell>>>(env);
         bench_unary(env, "unordered_map<sz_hash_westmere, sz_equal_haswell>::find", callable_no_op_t(), callable_umap,
@@ -152,12 +153,18 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             .log(base_umap);
     }
 #endif
-#if SZ_USE_NEONAES
+    // The comparator and the hasher come from different families, so they carry different guards - one block
+    // under `SZ_USE_NEONAES` would drop the ordered map on a NEON target that ships no crypto extension.
+#if SZ_USE_NEON
     {
         auto callable_map =
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_neon>>>(env);
         bench_unary(env, "map<sz_order_neon>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
             .log(base_map);
+    }
+#endif
+#if SZ_USE_NEONAES
+    {
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<
             std::string_view, unsigned, hash_from_sz<sz_hash_neonaes>, equal_to_from_sz<sz_equal_neon>>>(env);
         bench_unary(env, "unordered_map<sz_hash_neonaes, sz_equal_neon>::find", callable_no_op_t(), callable_umap,

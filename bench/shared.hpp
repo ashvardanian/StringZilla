@@ -138,14 +138,6 @@ inline std::uint64_t cpu_cycle_counter() {
 #endif
 }
 
-/** @brief Measures the approximate number of CPU cycles per second. */
-inline std::uint64_t cpu_cycles_per_second() {
-    std::uint64_t start = cpu_cycle_counter();
-    std::this_thread::sleep_for(stdc::seconds(1));
-    std::uint64_t end = cpu_cycle_counter();
-    return end - start;
-}
-
 /** @brief Measures the duration of a single call to the given function. */
 template <typename function_type_>
 double seconds_per_call(function_type_ &&function) {
@@ -417,6 +409,9 @@ struct environment_t {
     }
 };
 
+/** @brief Whether `build_environment` stress-tests the backends absent `STRINGWARS_STRESS`. */
+enum class stress_default_t : bool { quick_k, stress_k };
+
 /**
  *  @brief Prepares the environment for benchmarking based on environment variables and default settings.
  *         It's expected that different workloads may use different default datasets and tokenization modes,
@@ -442,7 +437,7 @@ inline environment_t build_environment(                                        /
     std::string default_dataset, environment_t::tokenization_t default_tokens, //< Mandatory
     std::size_t default_dataset_limit_bytes = 0,                               //< Optional, 0 = whole file
     std::size_t default_duration = SZ_DEBUG ? 1 : 10,                          //< Optional
-    bool default_stress = true,                                                //
+    stress_default_t default_stress = stress_default_t::stress_k,              //
     std::string default_stress_dir = ".tmp",                                   //
     std::size_t default_stress_limit = 1,                                      //
     std::size_t default_stress_duration = SZ_DEBUG ? 1 : 10,                   //
@@ -487,7 +482,7 @@ inline environment_t build_environment(                                        /
             env.tokenization = static_cast<environment_t::tokenization_t>(std::stoul(token_arg));
             if (env.tokenization == 0)
                 throw std::invalid_argument(
-                    "The tokenization mode must be 'file', 'line', 'word', or a positive integer.");
+                    "The tokenization mode must be 'file', 'lines', 'words', or a positive integer.");
         }
     }
     else { env.tokenization = default_tokens; }
@@ -499,7 +494,7 @@ inline environment_t build_environment(                                        /
         env.stress = is_one;
         if (!is_zero && !is_one) throw std::invalid_argument("The stress-testing flag must be '0' or '1'.");
     }
-    else { env.stress = default_stress; }
+    else { env.stress = default_stress == stress_default_t::stress_k; }
     if (char const *env_var = std::getenv("STRINGWARS_STRESS_DURATION")) {
         env.stress_seconds = std::stoul(env_var);
         if (env.stress_seconds == 0)
@@ -514,7 +509,8 @@ inline environment_t build_environment(                                        /
     }
     else { env.stress_limit = default_stress_limit; }
 
-    // Use `STRINGWARS_UNIQUE` to deduplicate tokens
+    // Use `STRINGWARS_UNIQUE` to deduplicate tokens.
+    // @sa `STRINGWARS_UNIQUE=1` sorts the tokenized set and drops duplicates before benchmarking.
     if (char const *env_var = std::getenv("STRINGWARS_UNIQUE")) {
         bool is_one = std::strcmp(env_var, "1") == 0 || std::strcmp(env_var, "true") == 0;
         env.unique = is_one;
@@ -525,6 +521,7 @@ inline environment_t build_environment(                                        /
 
     // Use `STRINGWARS_BATCH` to override the per-benchmark batch sizes with a comma-separated list,
     // e.g. `STRINGWARS_BATCH=1024` to run a single batch and skip the slow/largest default sweep entries.
+    // @sa `STRINGWARS_BATCH=1024,4096` replaces the default batch-size sweep with exactly these sizes.
     if (char const *env_var = std::getenv("STRINGWARS_BATCH")) {
         std::string const batch_argument = env_var;
         for (std::size_t start = 0; start < batch_argument.size();) {
@@ -824,7 +821,7 @@ struct bench_result_t {
         };
 
         // Expand over all provided baselines.
-        (void)std::initializer_list<int> {(log_relative(bases), 0)...};
+        [[maybe_unused]] std::initializer_list<int> const expanded {(log_relative(bases), 0)...};
         sz_unused_(log_relative); // In case no `bases` were provided
 
         return *this;

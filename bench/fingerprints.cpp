@@ -1,8 +1,8 @@
 /**
  *  @file bench/fingerprints.cpp
- *  @brief Benchmarks for exact multi-pattern substring search algorithms.
- *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *         validating the SIMD-accelerated backends against the serial baselines.
+ *  @brief Benchmarks for rolling min-hash fingerprinting / sketching algorithms.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the fingerprinting
+ *         engines, validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Compute-bound: min-hash sketching does many hashes per window, so a 64 MiB slice exercises every path.
  *
@@ -39,7 +39,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is a sibling of `bench_similarities.cpp`.
+ *  This file is a sibling of `similarities.cpp`.
  */
 #include "fingerprints.cuh"
 #include "stringzilla.hpp" // `log_environment`

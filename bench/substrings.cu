@@ -38,7 +38,7 @@
  *  kernel here; the command above compiles directly with `-O3` for numbers worth trusting.
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is a sibling of `bench_substrings.cpp` and of `bench_similarities.cu`.
+ *  This file is a sibling of `substrings.cpp` and of `similarities.cu`.
  */
 #include "substrings.cuh"
 #include "stringzilla.hpp" // `log_environment`

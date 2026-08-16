@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_substrings.cuh
+ *  @file bench/substrings.cuh
  *  @brief Shared code for CPU and GPU multi-pattern search (Aho-Corasick) benchmarks.
  */
 #include <cstring> // `std::memcpy`, `std::memcmp`
@@ -109,8 +109,8 @@ bool spans_less(span<char const> left, span<char const> right) noexcept {
  *  @param[in] minimum_occurrences Terms appearing fewer times than this are discarded outright.
  *
  *  One hashed counting pass over the corpus, then a sort over only the distinct survivors - the corpus has
- *  hundreds of millions of words but only a few million distinct ones, so sorting every occurrence instead
- *  used to dominate the whole suite's start-up.
+ *  hundreds of millions of words but only a few million distinct ones, so sorting only the survivors keeps
+ *  the whole suite's start-up cheap, where sorting every occurrence would dominate it.
  */
 vocabulary_t build_vocabulary(environment_t const &env, double frequent_cutoff = 0.01, size_t minimum_occurrences = 2) {
     // No UTF-8 validation: words split on ASCII whitespace, so a malformed word means a malformed corpus,
