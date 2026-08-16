@@ -23,16 +23,20 @@ The project is split into the following parts:
 - `include/stringzillas/*` - parallel CPU/GPU header-only backends.
 - `c/*` - [C, C++, and CUDA](#c-and-c) sources for dynamic dispatch and parallel backends.
 - `rust/*` - [Rust](#rust) crate sources; `rust/stringzilla/*` and `rust/stringzillas/*` hold one module per kernel domain, re-exported through `rust/stringzilla.rs` and `rust/stringzillas.rs`.
-- `python/*` - [Python](#python) bindings; one translation unit per kernel domain, with `python/stringzilla.h` and `python/stringzillas.h` as the two extensions' private headers.
+- `python/*` - [Python](#python) bindings; one translation unit per kernel domain, with `python/stringzilla/stringzilla.h` and `python/stringzillas/stringzillas.h` as the two extensions' private headers.
 - `swift/*` - [Swift](#swift) package sources and tests.
 - `javascript/*` - [JavaScript](#javascript) bindings.
 - `golang/*` - [Go](#golang) bindings.
+- `java/*` - Java bindings.
+- `csharp/*` - C# bindings.
+- `probes/*` - single-TU ISA probes used by CMake to detect compiler and platform support.
+- `cmake/*` - CMake toolchain files and package config templates.
 - `test/*` and `bench/*` - per-kernel test and benchmark sources.
 
 For minimal test coverage, check the following scripts:
 
 - `test/stringzilla.cpp` - drives every per-ISA C kernel directly, spot-checking the C++ wrappers in the `_unit` tier.
-- `test/*.py` - tests the Python API against native strings, split per kernel family (`string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `similarities.py`, `fingerprints.py`, `utf8_*.py`), with shared helpers in `sz_helpers.py`, `szs_helpers.py`, and `utf8_helpers.py`.
+- `test/*.py` - tests the Python API against native strings, split per kernel family (`string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `similarities.py`, `fingerprints.py`, `substrings.py`, `utf8_*.py`), with shared helpers in `sz_helpers.py`, `szs_helpers.py`, and `utf8_helpers.py`.
 - `test/stringzilla.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
@@ -171,9 +175,10 @@ Using modern syntax, this is how you build and run the test suite:
 cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_USE_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug --parallel   # Which will produce the following targets:
 build_debug/stringzilla_test_cpp20            # Unit test for the entire library compiled for current hardware
-build_debug/stringzilla_test_cpp20_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
-build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neon
 ```
+
+There is no separate SIMD-disabled target.
+To get a build with SIMD dispatch narrowed, pass `-D STRINGZILLA_TARGET_ARCH=<name>` at configure time, for example `ivybridge` for x86 without AVX2, or set the Arm equivalent through the same variable, then rebuild `stringzilla_test_cpp20` against that configuration.
 
 Note, that Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
 
@@ -294,20 +299,28 @@ For benchmarks, you can use the following commands:
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
 cmake --build build_release --config Release --parallel    # Produces the following targets:
-build_release/stringzilla_bench_memory_cpp20    # - for string copies and fills
-build_release/stringzilla_bench_find_cpp20      # - for substring search
-build_release/stringzilla_bench_token_cpp20     # - for hashing, equality comparisons, etc.
-build_release/stringzilla_bench_sequence_cpp20  # - for sorting arrays of strings
-build_release/stringzilla_bench_container_cpp20 # - for STL containers with string keys
+build_release/stringzilla_bench_find_cpp20          # - for substring search
+build_release/stringzilla_bench_sequence_cpp20      # - for sorting arrays of strings
+build_release/stringzilla_bench_token_cpp20         # - for hashing, equality comparisons, etc.
+build_release/stringzilla_bench_utf8_uncased_cpp20  # - for UTF-8 case-folding and case-insensitive comparisons
+build_release/stringzilla_bench_utf8_traverse_cpp20 # - for UTF-8 codepoint iteration
+build_release/stringzilla_bench_utf8_scan_cpp20     # - for UTF-8 validation and scanning
+build_release/stringzilla_bench_utf8_segment_cpp20  # - for UTF-8 grapheme, word, sentence, and linewrap segmentation
+build_release/stringzilla_bench_utf8_norm_cpp20     # - for UTF-8 normalization
+build_release/stringzilla_bench_container_cpp20     # - for STL containers with string keys
+build_release/stringzilla_bench_memory_cpp20        # - for string copies and fills
+build_release/stringzilla_bench_cipher_cpp20        # - for AES encryption and decryption
 ```
 
 There are also parallel algorithms that need a very different benchmarking setup:
 
 ```sh
-build_release/stringzillas_bench_fingerprints_cpp20     # - for parallel multi-pattern search on CPU
-build_release/stringzillas_bench_fingerprints_cu20      # - for parallel multi-pattern search on GPU
 build_release/stringzillas_bench_similarities_cpp20     # - for parallel edit distances and alignment scores on CPU
 build_release/stringzillas_bench_similarities_cu20      # - for parallel edit distances and alignment scores on GPU
+build_release/stringzillas_bench_fingerprints_cpp20     # - for parallel Min-Hash sketching on CPU
+build_release/stringzillas_bench_fingerprints_cu20      # - for parallel Min-Hash sketching on GPU
+build_release/stringzillas_bench_substrings_cpp20       # - for parallel multi-pattern search on CPU
+build_release/stringzillas_bench_substrings_cu20        # - for parallel multi-pattern search on GPU
 ```
 
 All of them support customization via environment variables.
@@ -326,21 +339,27 @@ STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS
 
 The benchmark harness reads these environment variables:
 
-| Variable                | Description                                                   |              Default |
-| :---------------------- | :------------------------------------------------------------ | -------------------: |
-| `STRINGWARS_DATASET`    | Path to the input corpus                                      |             required |
-| `STRINGWARS_FILTER`     | Regex over benchmark names; only matching backends run        |                (all) |
-| `STRINGWARS_DURATION`   | Seconds per benchmark (longer = steadier numbers)             | 1 debug / 10 release |
-| `STRINGWARS_MAX_TOKENS` | Cap on tokens kept, for faster, smaller runs                  |            unlimited |
-| `STRINGWARS_BATCH`      | Comma-separated batch-size override (skips the largest sweep) |      backend default |
-| `STRINGWARS_STRESS`     | Run the correctness stress phase (`0` to skip while timing)   |                   on |
-| `STRINGWARS_SEED`       | Non-zero shuffles tokens; `0` keeps deterministic order       |                    0 |
+| Variable                      | Description                                                                          |              Default |
+| :----------------------------- | :------------------------------------------------------------------------------------ | -------------------: |
+| `STRINGWARS_DATASET`           | Path to the input corpus                                                              |             required |
+| `STRINGWARS_DATASET_LIMIT`     | Byte cap on the dataset read, e.g. `64mb`; `0` reads the whole file                    |          0 (whole file) |
+| `STRINGWARS_TOKENS`            | Tokenization mode: `file`, `lines`, `words`, or a positive integer for N-grams        |    per-benchmark |
+| `STRINGWARS_UNIQUE`            | `1` sorts the tokenized set and drops duplicates before benchmarking                  |                   off |
+| `STRINGWARS_FILTER`            | Regex over benchmark names; only matching backends run                                |                (all) |
+| `STRINGWARS_DURATION`          | Seconds per benchmark (longer = steadier numbers)                                     | 1 debug / 10 release |
+| `STRINGWARS_SEED`              | Non-zero shuffles tokens; `0` keeps deterministic order                               |                    0 |
+| `STRINGWARS_BATCH`             | Comma-separated batch-size override (skips the largest sweep)                         |      backend default |
+| `STRINGWARS_BATCH_PER_CORE`    | Pairs scored per core for the parallel similarity benchmarks; scales with device parallelism | 16 debug / 256 release |
+| `STRINGWARS_STRESS`            | Run the correctness stress phase (`0` to skip while timing)                           |                   on |
+| `STRINGWARS_STRESS_DURATION`   | Seconds per stress-test                                                               | 1 debug / 10 release |
+| `STRINGWARS_STRESS_DIR`        | Directory for stress-test failure logs                                                |                 .tmp |
+| `STRINGWARS_STRESS_LIMIT`      | Number of stress-test failures tolerated before aborting                              |                     1 |
 
-For a fast inner loop, scope to one backend on a small dataset, cap tokens, skip the stress phase, and use short runs:
+For a fast inner loop, scope to one backend on a small dataset, cap the dataset size, skip the stress phase, and use short runs:
 
 ```bash
 STRINGWARS_FILTER='sz_find' STRINGWARS_DATASET=leipzig1M.txt \
-    STRINGWARS_MAX_TOKENS=65536 STRINGWARS_BATCH=1024 \
+    STRINGWARS_DATASET_LIMIT=65536 STRINGWARS_BATCH=1024 \
     STRINGWARS_STRESS=0 STRINGWARS_DURATION=1 \
     build_release/stringzilla_bench_find_cpp20
 ```
@@ -408,7 +427,7 @@ readelf --sections build_profile/stringzilla_bench_token_cpp20 | grep debug
 objdump -h build_profile/stringzilla_bench_token_cpp20 | grep debug
 
 # Profile
-sudo perf record -g build_profile/stringzilla_bench_token_cpp20 ./leipzig1M.txt
+sudo env STRINGWARS_DATASET=./leipzig1M.txt perf record -g build_profile/stringzilla_bench_token_cpp20
 sudo perf report
 ```
 

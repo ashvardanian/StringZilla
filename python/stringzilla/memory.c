@@ -12,13 +12,14 @@ char const doc_translate[] =                                                    
     "\n"                                                                                          //
     "Args:\n"                                                                                     //
     "  text (Str or str or bytes): The string object.\n"                                          //
-    "  table (str or dict): A 256-character string or a dictionary mapping bytes to bytes.\n"     //
+    "  table (str or dict): A 256-character string or a dict mapping single characters to single characters.\n" //
     "  inplace (bool, optional): If True, the string is modified in place (default is False).\n"  //
     "\n"                                                                                          //
     "  start (int, optional): The starting index for translation (default is 0).\n"               //
     "  end (int, optional): The ending index for translation (default is the string length).\n"   //
     "Returns:\n"                                                                                  //
-    "  Union[None, str, bytes]: If inplace is False, a new string is returned, otherwise None.\n" //
+    "  Union[None, str, bytes]: If inplace is False, a translated copy of the [start, end) slice is returned, "
+    "otherwise None.\n" //
     "Raises:\n"                                                                                   //
     "  ValueError: If the table is not 256 bytes long.\n"                                         //
     "  TypeError: If the table is not a string or dictionary.\n"                                  //

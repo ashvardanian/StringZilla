@@ -28,7 +28,7 @@ PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t posit
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 1 || args_names_tuple) {
-        PyErr_SetString(PyExc_TypeError, "equals() expects exactly two positional arguments");
+        PyErr_SetString(PyExc_TypeError, "equal() expects exactly two positional arguments");
         return NULL;
     }
 

@@ -50,7 +50,6 @@ from test.sz_helpers import (
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_hash_basic_equivalence(body: str, seed_value: int):
     """The standalone `sz.hash` and the `Str.hash` method return the same seeded digest for the same body."""
-    # TODO: Add streaming hashers and compare slices vs overall
     hash_seeded = sz.hash(body, seed=seed_value)
     hash_member = sz.Str(body).hash(seed=seed_value)
     assert hash_seeded == hash_member

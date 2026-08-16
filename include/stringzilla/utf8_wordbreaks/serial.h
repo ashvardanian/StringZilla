@@ -238,8 +238,11 @@ SZ_HELPER_AUTO sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t 
 
 /**
  *  @brief Whether @p position is a UAX-29 word boundary. Direct, branch-per-rule transcription of WB1-WB16 over
- *         the WB4 element model; used unchanged by the forward and reverse drivers (and every backend that
- *         delegates here), so segmentation is identical in either direction.
+ *         the WB4 element model, re-walking left context per position.
+ *
+ *  Nothing in the library calls this: the segmenters run a streaming state machine instead, which carries that
+ *  context forward. It is the independent second opinion the tests measure that machine against, which is what
+ *  turns `sz_word_serial_boundary_`'s byte-identity claim into something checked rather than asserted.
  */
 SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // WB1

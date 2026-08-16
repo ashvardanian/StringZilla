@@ -2454,7 +2454,6 @@ static PyMethodDef Strs_methods[] = {
     {"argsort", Strs_argsort, SZ_METHOD_FLAGS, doc_argsort},            //
     {"sample", Strs_sample, SZ_METHOD_FLAGS, doc_Strs_sample},          //
     {"intersect", Strs_intersect, SZ_METHOD_FLAGS, doc_Strs_intersect}, //
-    // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL} // Sentinel
 };
 

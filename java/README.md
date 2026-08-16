@@ -9,7 +9,7 @@ SIMD-accelerated search, comparison, hashing, UTF-8 segmentation, case-folding, 
 <dependency>
   <groupId>com.github.ashvardanian</groupId>
   <artifactId>stringzilla</artifactId>
-  <version>4.6.2</version>
+  <version>5.1.1</version>
 </dependency>
 ```
 

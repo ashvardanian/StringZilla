@@ -103,6 +103,9 @@ SZ_HELPER_INLINE sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_t descrip
 
 /**
  *  @brief Check if `position` is a grapheme cluster boundary per Unicode TR29 (GB1-GB999, incl. GB9c and GB11).
+ *
+ *  Nothing in the library calls this: the segmenters run a streaming state machine instead. It is the
+ *  independent second opinion the tests measure that machine against.
  */
 SZ_API_COMPTIME sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // GB1

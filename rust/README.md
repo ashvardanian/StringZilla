@@ -21,7 +21,7 @@ Or declare it in `Cargo.toml`:
 
 ```toml
 [dependencies]
-stringzilla = "4"
+stringzilla = "5"
 ```
 
 The crate ships the C/C++ sources and compiles them through a `build.rs` via `cc`, so no system StringZilla install is required.
@@ -42,8 +42,8 @@ The entire `stringzillas` module is compiled only when at least one of `cpus`, `
 
 ```toml
 [dependencies]
-stringzilla = { version = "4", features = ["cpus"] }   # CPU batch engines
-# stringzilla = { version = "4", features = ["cuda"] } # CUDA-accelerated batch engines
+stringzilla = { version = "5", features = ["cpus"] }   # CPU batch engines
+# stringzilla = { version = "5", features = ["cuda"] } # CUDA-accelerated batch engines
 ```
 
 Import either by full module name or by alias:
@@ -82,7 +82,7 @@ Disable it by opting out of default features (re-adding the ones you still want)
 ```toml
 [dependencies]
 # Compile-time dispatch: smaller, faster, but pinned to the build machine's best ISA.
-stringzilla = { version = "4", default-features = false, features = ["std"] }
+stringzilla = { version = "5", default-features = false, features = ["std"] }
 ```
 
 Every tier can be forced on or off with its `SZ_USE_*` environment variable (`SZ_USE_SVE2=0 cargo build`), overriding the run gate but never the compile gate; the CMake build honors the same names as cache options (`-D SZ_USE_SVE2=0`).

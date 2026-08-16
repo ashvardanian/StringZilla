@@ -1,6 +1,6 @@
 # Hash: Byte Sum, AES Hash, and SHA-256
 
-This directory holds the digest kernels behind `sz_bytesum`, `sz_hash`, the multi-seed `sz_hash` fan-out, `sz_sha256`, and the batched `sz_sha256_multistate`.
+This directory holds the digest kernels behind `sz_bytesum`, `sz_hash`, the multi-seed `sz_hash` fan-out, the streaming `sz_sha256_state_init` / `sz_sha256_state_update` / `sz_sha256_state_digest` trio, and the batched `sz_sha256_multistate_update` / `sz_sha256_multistate_digest` pair.
 Each operation has a serial baseline plus per-ISA SIMD backends — `westmere`, `haswell`, `skylake`, `icelake` on x86, with a dedicated `goldmont` SHA-NI path for SHA-256.
 SHA-256 has no Ice Lake form: SHA-NI is 128-bit only and has no VEX or EVEX encoding, so `goldmont` is the widest single-message kernel there will be.
 The dispatcher picks the fastest one available on the running CPU.
@@ -23,7 +23,7 @@ At line length the sixteen-wide kernel is about half again as fast as the single
 
 ## Methodology
 
-Cells are dual: throughput in GB/s and hash rate in millions of hashes per second, measured with `bench/token.cpp` over the `leipzig1M_en.txt` corpus, reporting the median of repeated runs.
+Cells are dual: throughput in GB/s and hash rate in millions of hashes per second, measured with `bench/token.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
 Every backend registers its own row in a single binary, so a row is one kernel rather than one build, and each column is one operation — coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `std::accumulate` for Byte Sum and `std::hash` for the hashing columns.
 Token length matters, so results are split into a Short Words table (tokens averaging 5 bytes) and a Long Lines table (tokens averaging 130 bytes).

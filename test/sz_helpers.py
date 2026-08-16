@@ -1299,7 +1299,7 @@ def representatives_by_class(
 # region General test scaffolding
 
 # General fixtures and seeded-RNG helpers shared by every per-family test module (the Python analog of the
-# C++ `test_stringzilla.hpp` harness). Kept here so a split test file imports one place for both the Unicode
+# C++ `test/stringzilla.hpp` harness). Kept here so a split test file imports one place for both the Unicode
 # data loaders above and the seeding / random-string utilities below. The NumPy / PyArrow availability flags
 # and their defensive imports live in the top import block.
 
@@ -1307,7 +1307,7 @@ def representatives_by_class(
 # `SystemRandom` gives true randomness independent of the seeded RNG state.
 _random_seed_for_run = int.from_bytes(os.urandom(4), "little")
 
-# Reproducible test seeds for consistent CI runs (kept in sync with test_stringzillas.py).
+# Reproducible test seeds for consistent CI runs (kept in sync with test/stringzillas.py).
 SEED_VALUES = [
     42,  # Classic test seed
     0,  # Edge case: zero seed

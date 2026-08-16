@@ -6,7 +6,7 @@ The dispatcher picks the fastest one available on the running CPU.
 
 ## Methodology
 
-Numbers are sorting throughput in comparisons/s, rendered as Mcmp/s, measured with `bench/sequence.cpp` over the `leipzig1M_en.txt` corpus, reporting the median of repeated runs.
+Numbers are sorting throughput in comparisons/s, rendered as Mcmp/s, measured with `bench/sequence.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
 Sorting throughput is reported as comparisons/s, with the operation count modeled as N·log2 N, matching StringWars.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `std::sort` for Argsort and Pgram Sort, `std::stable_sort` for Uncased Argsort.

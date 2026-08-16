@@ -1,4 +1,4 @@
-// StringZilla is a SIMD-accelerated string library modern CPUs, written in C 99,
+// StringZilla is a SIMD-accelerated string library for modern CPUs, written in C 99,
 // and using AVX2, AVX512, Arm NEON, and SVE intrinsics to accelerate processing.
 //
 // The GoLang binding is intended to provide a simple interface to a precompiled
@@ -97,7 +97,7 @@ func Index(str string, substr string) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// Index returns the index of the last instance of `substr` in `str`, or -1 if `substr` is not present.
+// LastIndex returns the index of the last instance of `substr` in `str`, or -1 if `substr` is not present.
 // https://pkg.go.dev/strings#LastIndex
 func LastIndex(str string, substr string) int64 {
 	substrLen := len(substr)
@@ -114,7 +114,7 @@ func LastIndex(str string, substr string) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// Index returns the index of the first instance of a byte in `str`, or -1 if a byte is not present.
+// IndexByte returns the index of the first instance of a byte in `str`, or -1 if a byte is not present.
 // https://pkg.go.dev/strings#IndexByte
 func IndexByte(str string, c byte) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
@@ -127,7 +127,7 @@ func IndexByte(str string, c byte) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// Index returns the index of the last instance of a byte in `str`, or -1 if a byte is not present.
+// LastIndexByte returns the index of the last instance of a byte in `str`, or -1 if a byte is not present.
 // https://pkg.go.dev/strings#LastIndexByte
 func LastIndexByte(str string, c byte) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
@@ -140,7 +140,7 @@ func LastIndexByte(str string, c byte) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// Index returns the index of the first instance of any byte from `substr` in `str`, or -1 if none are present.
+// IndexAny returns the index of the first instance of any byte from `substr` in `str`, or -1 if none are present.
 // Note: This is byte-set based (ASCII/bytes), not Unicode rune semantics like strings.IndexAny.
 // https://pkg.go.dev/strings#IndexAny
 func IndexAny(str string, substr string) int64 {
@@ -155,7 +155,7 @@ func IndexAny(str string, substr string) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// Index returns the index of the last instance of any byte from `substr` in `str`, or -1 if none are present.
+// LastIndexAny returns the index of the last instance of any byte from `substr` in `str`, or -1 if none are present.
 // Note: This is byte-set based (ASCII/bytes), not Unicode rune semantics like strings.LastIndexAny.
 // https://pkg.go.dev/strings#LastIndexAny
 func LastIndexAny(str string, substr string) int64 {
@@ -211,7 +211,9 @@ func Utf8CaseFold(str string, validate bool) (string, error) {
 }
 
 // Utf8Count returns the number of Unicode codepoints in a UTF-8 string, SIMD-accelerated.
-// Malformed bytes are each counted as a single codepoint, matching utf8.RuneCount semantics.
+// It counts non-continuation bytes (bytes not matching the 10xxxxxx pattern), which agrees with
+// utf8.RuneCount on well-formed UTF-8 but can differ on malformed input: for example, a run of
+// lone continuation bytes counts as zero here, while utf8.RuneCount counts one per byte.
 func Utf8Count(str string) int {
 	if len(str) == 0 {
 		return 0
