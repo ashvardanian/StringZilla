@@ -49,6 +49,47 @@ def test_library_properties():
     sz.reset_capabilities(szs.__capabilities__)  # Should not raise
 
 
+def test_levenshtein_index_keeps_dictionary_ids():
+    words = [b"book", b"back", b"book", b"boon"]
+    index = szs.LevenshteinIndex(words, max_distance=2)
+
+    assert repr(index) == "LevenshteinIndex(max_distance=2)"
+    query_ids, dictionary_ids, distances = index([b"cook", b"book"], bound=1)
+    matches = sorted(zip(query_ids.tolist(), dictionary_ids.tolist(), distances.tolist()))
+    assert matches == [(0, 0, 1), (0, 2, 1), (1, 0, 0), (1, 2, 0), (1, 3, 1)]
+    assert query_ids.dtype.name == "uint64"
+    assert dictionary_ids.dtype.name == "uint32"
+    assert distances.dtype.name == "uint8"
+
+    parallel = szs.DeviceScope(cpu_cores=2)
+    parallel_matches = index(Strs([b"cook", b"book"]), bound=1, device=parallel)
+    assert sorted(zip(*(array.tolist() for array in parallel_matches))) == matches
+
+    with pytest.raises(ValueError):
+        index([b"book"], bound=3)
+    with pytest.raises(TypeError):
+        szs.LevenshteinIndex([b"valid", object()])
+    with pytest.raises(TypeError):
+        index([b"valid", object()])
+
+
+def test_levenshtein_index_separates_byte_and_unicode_distance():
+    words = ["café", "cafe", "咖啡", "咖非", "café"]
+    byte_index = szs.LevenshteinIndex(words, max_distance=2)
+    unicode_index = szs.LevenshteinIndexUTF8(Strs(words), max_distance=2)
+
+    byte_results = byte_index(["cafe"], bound=1)
+    assert sorted(zip(byte_results[1].tolist(), byte_results[2].tolist())) == [(1, 0)]
+    unicode_results = unicode_index(Strs(["cafe", "咖啡"]), bound=1)
+    unicode_matches = sorted(zip(*(array.tolist() for array in unicode_results)))
+    assert unicode_matches == [(0, 0, 1), (0, 1, 0), (0, 4, 1), (1, 2, 0), (1, 3, 1)]
+
+    with pytest.raises(ValueError):
+        unicode_index([b"\xf0\x9f"], bound=1)
+    with pytest.raises(ValueError):
+        szs.LevenshteinIndexUTF8([b"valid", b"\xf0\x9f"])
+
+
 def test_device_scope():
     """`DeviceScope` accepts a default scope, `cpu_cores` in {0, 1, N}, and `gpu_device` where CUDA
     is available, and rejects non-numeric arguments and specifying both at once."""
