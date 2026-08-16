@@ -100,6 +100,8 @@ class basic_levenshtein_index {
     template <typename value_type_>
     using vector_t = safe_vector<value_type_, rebound_allocator_t<value_type_>>;
 
+    // Persistent state has two indexes over one owned dictionary. Short words contribute deletion records, while the
+    // prefix tree covers long words and every word needed for bounds above two. Only scratch_t changes during search.
     allocator_t alloc_ {};
     vector_t<symbol_t> tape_ {alloc_};
     vector_t<u64_t> offsets_ {alloc_};
@@ -143,6 +145,8 @@ class basic_levenshtein_index {
 
     template <typename scratch_type_>
     static status_t generate_residuals_(span<symbol_t const> word, u8_t distance, scratch_type_ &scratch) noexcept {
+        // Hash the original word and every distinct result of removing one or two symbols. Equal residuals are only a
+        // candidate filter. verify_ checks the owned word before any match is returned.
         size_t upper_bound = 0;
         if (!residuals_upper_bound_(word.size(), distance, upper_bound)) return status_t::overflow_risk_k;
         if (status_t status = scratch.residuals.try_resize(0); status != status_t::success_k) return status;
@@ -219,6 +223,8 @@ class basic_levenshtein_index {
     template <typename scratch_type_>
     static u8_t distance_within_two_(span<symbol_t const> first, span<symbol_t const> second,
                                      scratch_type_ &scratch) noexcept {
+        // Myers fits byte patterns through 64 symbols in one machine word. Wider symbols and longer patterns use the
+        // same narrow dynamic-programming band, clipped at three because callers only need 0, 1, 2, or rejected.
         if (first.size() > second.size()) std::swap(first, second);
         if (second.size() - first.size() > 2) return rejected_distance_k;
         if (first.empty()) return second.size() <= 2 ? static_cast<u8_t>(second.size()) : rejected_distance_k;
@@ -286,6 +292,8 @@ class basic_levenshtein_index {
     }
 
     status_t build_trie_(bool fallback_only) noexcept {
+        // Sort IDs, form a prefix tree from adjacent common prefixes, then compress every run without a branch into
+        // one edge that points back into the owned dictionary tape.
         size_t const words_count = fallback_only ? fallback_words_count_ : size();
         vector_t<u32_t> order {alloc_}, parents {alloc_}, depths {alloc_}, representatives {alloc_},
             word_nodes {alloc_}, child_cursors {alloc_}, terminal_cursors {alloc_}, stack {alloc_};
@@ -377,6 +385,8 @@ class basic_levenshtein_index {
     template <typename scratch_type_>
     status_t find_trie_dfa_(span<symbol_t const> query, u8_t bound, bool fallback_only, scratch_type_ &scratch,
                             vector_t<match_t> &matches) const noexcept {
+        // Queries through 15 symbols fit a complete clipped distance row into one 64-bit value. Cache each row and
+        // next-symbol transition reached while walking the tree. Cache exhaustion only recomputes a transition.
         static constexpr size_t transitions_capacity = size_t(1) << 15;
         static constexpr size_t transitions_mask = transitions_capacity - 1;
         if (scratch.dfa_transitions.size() != transitions_capacity) {
@@ -498,6 +508,8 @@ class basic_levenshtein_index {
     template <typename scratch_type_>
     status_t find_trie_banded_dfa_(span<symbol_t const> query, u8_t bound, bool fallback_only, scratch_type_ &scratch,
                                    vector_t<match_t> &matches) const noexcept {
+        // Longer queries cannot pack the complete row. For bounds through seven, pack only the moving window that can
+        // still reach an accepted answer. Tree depth is part of the key because it positions that window.
         static constexpr size_t transitions_capacity = size_t(1) << 15;
         static constexpr size_t transitions_mask = transitions_capacity - 1;
         if (scratch.dfa_transitions.size() != transitions_capacity) {
@@ -639,6 +651,8 @@ class basic_levenshtein_index {
         if (!trie_nodes_.size()) return status_t::success_k;
         if (query.size() <= 15 && bound <= 14) return find_trie_dfa_(query, bound, fallback_only, scratch, matches);
         if (bound <= 7) return find_trie_banded_dfa_(query, bound, fallback_only, scratch, matches);
+        // General fallback for larger bounds. Keep one narrow row per tree depth so siblings can reuse their parent's
+        // row. Values are clipped at bound + 1 and a branch stops when its complete live window is rejected.
         size_t const stride = size_t(2) * bound + 3;
         if (max_word_length_ + 1 > std::numeric_limits<size_t>::max() / stride)
             return status_t::overflow_risk_k;
@@ -735,6 +749,8 @@ class basic_levenshtein_index {
     }
 
     status_t build_directory_() noexcept {
+        // The high hash bits select one sorted record range. Choose a dense offset array or a ranked bitmap from their
+        // actual byte sizes. Small dictionaries then pack the remaining hash bits and ID into four-byte records.
         prefix_bits_ = min_prefix_bits_k;
         while (prefix_bits_ != max_prefix_bits_k && wide_records_.size() > (size_t(1) << (prefix_bits_ - 3)))
             ++prefix_bits_;
@@ -806,6 +822,8 @@ class basic_levenshtein_index {
         if (dictionary.size() > std::numeric_limits<u32_t>::max()) return status_t::overflow_risk_k;
         u8_t const indexed_distance = sz_min_of_two(max_distance, u8_t(2));
         if (deletion_max_word_length == automatic_deletion_max_word_length_k) {
+            // Deletion records grow quadratically with word length at k=2. Keep them only when the complete dictionary
+            // stays below a simple average budget. Otherwise the prefix tree becomes the main path.
             static constexpr size_t residuals_per_word_budget = 80;
             size_t residuals_budget = std::numeric_limits<size_t>::max();
             if (dictionary.size() <= residuals_budget / residuals_per_word_budget)
