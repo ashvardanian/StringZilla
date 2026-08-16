@@ -322,9 +322,9 @@ static PyObject *LevenshteinIndex_vectorcall(PyObject *callable, PyObject *const
     if (device_scope) SZS_UNLOCK_(&device_scope->lock);
 
     if (status == sz_unexpected_dimensions_k && matches_found > capacity) {
-        Py_DECREF(query_indices);
-        Py_DECREF(dictionary_indices);
-        Py_DECREF(distances);
+        Py_CLEAR(query_indices);
+        Py_CLEAR(dictionary_indices);
+        Py_CLEAR(distances);
         if (matches_found > (sz_size_t)NPY_MAX_INTP) {
             PyErr_SetString(PyExc_OverflowError, "too many matches for a NumPy result");
             goto cleanup;
