@@ -146,9 +146,11 @@ class basic_levenshtein_index {
     }
 
     template <typename scratch_type_>
-    static status_t generate_residuals_(span<symbol_t const> word, u8_t distance, scratch_type_ &scratch) noexcept {
-        // Hash the original word and every distinct result of removing one or two symbols. Equal residuals are only a
-        // candidate filter. verify_ checks the owned word before any match is returned.
+    static status_t generate_residuals_(span<symbol_t const> word, u8_t distance, bool deduplicate,
+                                        scratch_type_ &scratch) noexcept {
+        // Hash the original word and every result of removing one or two symbols. Persistent dictionary records must
+        // be unique. Queries can keep repeated hashes because the generation counter already verifies each candidate
+        // at most once, avoiding a sort on every search without changing the returned matches.
         size_t upper_bound = 0;
         if (!residuals_upper_bound_(word.size(), distance, upper_bound)) return status_t::overflow_risk_k;
         if (status_t status = scratch.residuals.try_resize(0); status != status_t::success_k) return status;
@@ -190,9 +192,12 @@ class basic_levenshtein_index {
                             return status;
                     }
             }
-        std::sort(scratch.residuals.begin(), scratch.residuals.end());
-        auto const unique_end = std::unique(scratch.residuals.begin(), scratch.residuals.end());
-        return scratch.residuals.try_resize(static_cast<size_t>(unique_end - scratch.residuals.begin()));
+        if (deduplicate) {
+            std::sort(scratch.residuals.begin(), scratch.residuals.end());
+            auto const unique_end = std::unique(scratch.residuals.begin(), scratch.residuals.end());
+            return scratch.residuals.try_resize(static_cast<size_t>(unique_end - scratch.residuals.begin()));
+        }
+        return status_t::success_k;
     }
 
     span<symbol_t const> word_(u32_t id) const noexcept {
@@ -889,7 +894,7 @@ class basic_levenshtein_index {
                 std::memcpy(tape_.data() + tape_offset, word.data(), word.size() * sizeof(symbol_t));
             tape_offset += word.size();
             if (word.size() <= deletion_max_word_length_) {
-                if (status_t status = generate_residuals_(word, indexed_distance, scratch);
+                if (status_t status = generate_residuals_(word, indexed_distance, true, scratch);
                     status != status_t::success_k)
                     return status;
                 for (u32_t hash : scratch.residuals)
@@ -1001,7 +1006,8 @@ class basic_levenshtein_index {
             std::fill(scratch.generations.begin(), scratch.generations.end(), u32_t(0));
             scratch.generation = 1;
         }
-        if (status_t status = generate_residuals_(query, bound, scratch); status != status_t::success_k) return status;
+        if (status_t status = generate_residuals_(query, bound, false, scratch); status != status_t::success_k)
+            return status;
 
         for (u32_t hash : scratch.residuals) {
             size_t begin_offset = 0, end_offset = 0;
