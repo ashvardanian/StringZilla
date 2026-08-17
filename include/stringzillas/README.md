@@ -192,6 +192,43 @@ void run(void) {
 }
 ```
 
+### Reusing a dictionary for fuzzy search
+
+When the same dictionary is searched many times, build the index once and reuse it. Each result contains the original
+dictionary ID and its exact Levenshtein distance. Duplicate strings keep separate IDs.
+
+```c
+char const tape[] = "bookbackbookboon";
+sz_u32_t const offsets[] = {0, 4, 8, 12, 16};
+sz_sequence_u32tape_t dictionary = {tape, offsets, 4};
+char const queries_tape[] = "cook";
+sz_u32_t const queries_offsets[] = {0, 4};
+sz_sequence_u32tape_t queries = {queries_tape, queries_offsets, 1};
+char const *error = NULL;
+szs_levenshtein_index_t index = NULL;
+szs_device_scope_t device = NULL;
+
+assert(szs_device_scope_init_default(&device, &error) == sz_success_k);
+assert(szs_levenshtein_index_init_u32tape(&dictionary, 2, NULL, sz_caps_sp_k, &index, &error) == sz_success_k);
+
+sz_u64_t query_ids[2];
+sz_u32_t dictionary_ids[2];
+sz_u8_t distances[2];
+sz_size_t count = 0;
+assert(szs_levenshtein_index_find_u32tape(index, device, &queries, 1, query_ids, dictionary_ids, distances, 2,
+                                          &count, &error) == sz_success_k);
+assert(count == 2);
+
+szs_levenshtein_index_free(index);
+szs_device_scope_free(device);
+```
+
+The names above compare bytes. Use the `szs_levenshtein_index_utf8_*` names when edits should be counted as Unicode
+codepoints. This validates UTF-8, but does not normalize text, fold case, or combine codepoints into grapheme clusters.
+Each match is written at the same position in the query ID, dictionary ID, and distance arrays. The index is CPU-only,
+and a CPU device scope can distribute a query batch across several cores. The engine reuses temporary memory between
+calls, so one caller uses a given index at a time.
+
 ## Alignment Scores
 
 For sequence alignment the engines maximize a __signed__ similarity score, written into an `sz_ssize_t` matrix.

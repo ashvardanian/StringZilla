@@ -603,12 +603,12 @@ endfunction ()
 
 # StringZillas C-API entry units, compiled once per library - as C++ into the CPU one, as CUDA into the GPU one.
 set(STRINGZILLAS_API_CPP_SOURCES
-    c/stringzillas/runtime.cpp c/stringzillas/levenshtein.cpp c/stringzillas/needleman_wunsch.cpp
-    c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp
+    c/stringzillas/runtime.cpp c/stringzillas/levenshtein.cpp c/stringzillas/levenshtein_index.cpp
+    c/stringzillas/needleman_wunsch.cpp c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp
 )
 set(STRINGZILLAS_API_CU_SOURCES
-    c/stringzillas/runtime.cu c/stringzillas/levenshtein.cu c/stringzillas/needleman_wunsch.cu
-    c/stringzillas/smith_waterman.cu c/stringzillas/fingerprints.cu
+    c/stringzillas/runtime.cu c/stringzillas/levenshtein.cu c/stringzillas/levenshtein_index.cu
+    c/stringzillas/needleman_wunsch.cu c/stringzillas/smith_waterman.cu c/stringzillas/fingerprints.cu
 )
 # Per-ISA CPU instantiation units, host C++ in every library; off-platform files compile to empty objects.
 set(STRINGZILLAS_CPUS_SOURCES
@@ -794,6 +794,10 @@ if (STRINGZILLA_BUILD_TEST)
     define_launcher(stringzillas_test_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cpp)
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_test_cpp20 PRIVATE stringzillas_cpus_static)
+        define_launcher(stringzillas_test_levenshtein_index_c 20 "${STRINGZILLA_TARGET_ARCH}"
+                        test/levenshtein_index_c.c)
+        set_target_properties(stringzillas_test_levenshtein_index_c PROPERTIES LINKER_LANGUAGE CXX)
+        target_link_libraries(stringzillas_test_levenshtein_index_c PRIVATE stringzillas_cpus_static)
     endif ()
     if ("cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
         define_launcher(stringzillas_test_cpp23 23 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cpp)

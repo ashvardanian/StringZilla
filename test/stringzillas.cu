@@ -32,6 +32,7 @@
 #include "stringzilla.hpp"
 
 #include "fingerprints.cuh"
+#include "levenshtein_index.cuh"
 #include "similarities.cuh"
 
 namespace sz = ashvardanian::stringzilla;
@@ -45,6 +46,9 @@ int main(int argc, char const **argv) {
     print_test_environment();
 
     int failures = 0;
+
+    std::printf("\n=== Levenshtein index ===\n");
+    failures += run_test("test_levenshtein_index_unit", test_levenshtein_index_unit);
 
     std::printf("\n=== Fingerprints ===\n");
     failures += run_test("test_fingerprints_unit", test_fingerprints_unit);

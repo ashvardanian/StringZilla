@@ -317,6 +317,8 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     if (PyType_Ready(&DeviceScopeType) < 0) return NULL;
     if (PyType_Ready(&LevenshteinDistancesType) < 0) return NULL;
     if (PyType_Ready(&LevenshteinDistancesUTF8Type) < 0) return NULL;
+    if (PyType_Ready(&LevenshteinIndexType) < 0) return NULL;
+    if (PyType_Ready(&LevenshteinIndexUTF8Type) < 0) return NULL;
     if (PyType_Ready(&NeedlemanWunschType) < 0) return NULL;
     if (PyType_Ready(&SmithWatermanType) < 0) return NULL;
     if (PyType_Ready(&FingerprintsType) < 0) return NULL;
@@ -387,9 +389,32 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
         return NULL;
     }
 
+    Py_INCREF(&LevenshteinIndexType);
+    if (PyModule_AddObject(m, "LevenshteinIndex", (PyObject *)&LevenshteinIndexType) < 0) {
+        Py_XDECREF(&LevenshteinIndexType);
+        Py_XDECREF(&LevenshteinDistancesUTF8Type);
+        Py_XDECREF(&LevenshteinDistancesType);
+        Py_XDECREF(&DeviceScopeType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&LevenshteinIndexUTF8Type);
+    if (PyModule_AddObject(m, "LevenshteinIndexUTF8", (PyObject *)&LevenshteinIndexUTF8Type) < 0) {
+        Py_XDECREF(&LevenshteinIndexUTF8Type);
+        Py_XDECREF(&LevenshteinIndexType);
+        Py_XDECREF(&LevenshteinDistancesUTF8Type);
+        Py_XDECREF(&LevenshteinDistancesType);
+        Py_XDECREF(&DeviceScopeType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
     Py_INCREF(&NeedlemanWunschType);
     if (PyModule_AddObject(m, "NeedlemanWunschScores", (PyObject *)&NeedlemanWunschType) < 0) {
         Py_XDECREF(&NeedlemanWunschType);
+        Py_XDECREF(&LevenshteinIndexUTF8Type);
+        Py_XDECREF(&LevenshteinIndexType);
         Py_XDECREF(&LevenshteinDistancesUTF8Type);
         Py_XDECREF(&LevenshteinDistancesType);
         Py_XDECREF(&DeviceScopeType);
@@ -401,6 +426,8 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     if (PyModule_AddObject(m, "SmithWatermanScores", (PyObject *)&SmithWatermanType) < 0) {
         Py_XDECREF(&SmithWatermanType);
         Py_XDECREF(&NeedlemanWunschType);
+        Py_XDECREF(&LevenshteinIndexUTF8Type);
+        Py_XDECREF(&LevenshteinIndexType);
         Py_XDECREF(&LevenshteinDistancesUTF8Type);
         Py_XDECREF(&LevenshteinDistancesType);
         Py_XDECREF(&DeviceScopeType);
@@ -413,6 +440,8 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
         Py_XDECREF(&FingerprintsType);
         Py_XDECREF(&SmithWatermanType);
         Py_XDECREF(&NeedlemanWunschType);
+        Py_XDECREF(&LevenshteinIndexUTF8Type);
+        Py_XDECREF(&LevenshteinIndexType);
         Py_XDECREF(&LevenshteinDistancesUTF8Type);
         Py_XDECREF(&LevenshteinDistancesType);
         Py_XDECREF(&DeviceScopeType);

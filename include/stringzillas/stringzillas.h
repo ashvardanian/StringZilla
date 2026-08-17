@@ -253,6 +253,120 @@ SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_u64tape(                   
  */
 SZ_API_RUNTIME void szs_levenshtein_distances_free(szs_levenshtein_distances_t engine);
 
+/** @brief Exact bounded Levenshtein search over an immutable byte-string dictionary. */
+typedef void *szs_levenshtein_index_t;
+
+/**
+ *  @brief Copy and index a byte-string dictionary for repeated bounded searches.
+ *  @param[in] dictionary String collection to copy. Input order becomes the stable dictionary ID.
+ *  @param[in] max_distance Largest bound accepted by later searches. Must be below 255.
+ *  @param[in] alloc Memory allocator for the owned dictionary, index, and reusable search memory. NULL uses the default.
+ *  @param[in] capabilities Allowed CPU execution modes, normally @ref sz_caps_sp_k.
+ *  @param[out] index Initialized index handle.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_init(               //
+    sz_sequence_t const *dictionary, sz_size_t max_distance,         //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    szs_levenshtein_index_t *index, char const **error_message);
+
+/** @copydoc szs_levenshtein_index_init */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_init_u32tape(       //
+    sz_sequence_u32tape_t const *dictionary, sz_size_t max_distance, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    szs_levenshtein_index_t *index, char const **error_message);
+
+/** @copydoc szs_levenshtein_index_init */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_init_u64tape(       //
+    sz_sequence_u64tape_t const *dictionary, sz_size_t max_distance, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    szs_levenshtein_index_t *index, char const **error_message);
+
+/**
+ *  @brief Find every query and dictionary pair within an inclusive byte edit-distance bound.
+ *  @param[out] query_indices Query ID for each match.
+ *  @param[out] dictionary_indices Original dictionary ID for each match.
+ *  @param[out] distances Exact distance for each match.
+ *  @param[in] matches_capacity Capacity shared by the three output arrays.
+ *  @param[out] matches_found Required output length, including when capacity is insufficient.
+ *  @note Pass NULL outputs and zero capacity to measure the required output length. Result order is unspecified.
+ *        When capacity is insufficient, ignore the partially written arrays and resize them to @p matches_found.
+ *  @note One caller may use an index at a time. A call may use several threads through @p device.
+ *  @retval sz_unexpected_dimensions_k The bound is too large or the output arrays are too small.
+ */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_find(                              //
+    szs_levenshtein_index_t index, szs_device_scope_t device,                       //
+    sz_sequence_t const *queries, sz_size_t bound,                                  //
+    sz_u64_t *query_indices, sz_u32_t *dictionary_indices, sz_u8_t *distances,       //
+    sz_size_t matches_capacity, sz_size_t *matches_found,                            //
+    char const **error_message);
+
+/** @copydoc szs_levenshtein_index_find */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_find_u32tape(                         //
+    szs_levenshtein_index_t index, szs_device_scope_t device,                          //
+    sz_sequence_u32tape_t const *queries, sz_size_t bound,                             //
+    sz_u64_t *query_indices, sz_u32_t *dictionary_indices, sz_u8_t *distances,          //
+    sz_size_t matches_capacity, sz_size_t *matches_found, char const **error_message);
+
+/** @copydoc szs_levenshtein_index_find */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_find_u64tape(                         //
+    szs_levenshtein_index_t index, szs_device_scope_t device,                          //
+    sz_sequence_u64tape_t const *queries, sz_size_t bound,                             //
+    sz_u64_t *query_indices, sz_u32_t *dictionary_indices, sz_u8_t *distances,          //
+    sz_size_t matches_capacity, sz_size_t *matches_found, char const **error_message);
+
+/** @brief Free a byte-string dictionary index. */
+SZ_API_RUNTIME void szs_levenshtein_index_free(szs_levenshtein_index_t index);
+
+/**
+ *  @brief UTF-8 counterpart. Inputs are validated and distance is measured in Unicode codepoints.
+ *  @note Input is not normalized or case-folded, and codepoints are not combined into grapheme clusters.
+ */
+typedef void *szs_levenshtein_index_utf8_t;
+
+/** @brief Build an exact Unicode Levenshtein index over UTF-8 strings. */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_utf8_init(           //
+    sz_sequence_t const *dictionary, sz_size_t max_distance,          //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    szs_levenshtein_index_utf8_t *index, char const **error_message);
+
+/** @copydoc szs_levenshtein_index_utf8_init */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_utf8_init_u32tape(  //
+    sz_sequence_u32tape_t const *dictionary, sz_size_t max_distance, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    szs_levenshtein_index_utf8_t *index, char const **error_message);
+
+/** @copydoc szs_levenshtein_index_utf8_init */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_utf8_init_u64tape(  //
+    sz_sequence_u64tape_t const *dictionary, sz_size_t max_distance, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    szs_levenshtein_index_utf8_t *index, char const **error_message);
+
+/** @brief Find every query and dictionary pair within an inclusive codepoint-distance bound. */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_utf8_find(                       //
+    szs_levenshtein_index_utf8_t index, szs_device_scope_t device,                //
+    sz_sequence_t const *queries, sz_size_t bound,                                //
+    sz_u64_t *query_indices, sz_u32_t *dictionary_indices, sz_u8_t *distances,     //
+    sz_size_t matches_capacity, sz_size_t *matches_found,                          //
+    char const **error_message);
+
+/** @copydoc szs_levenshtein_index_utf8_find */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_utf8_find_u32tape(                    //
+    szs_levenshtein_index_utf8_t index, szs_device_scope_t device,                     //
+    sz_sequence_u32tape_t const *queries, sz_size_t bound,                             //
+    sz_u64_t *query_indices, sz_u32_t *dictionary_indices, sz_u8_t *distances,          //
+    sz_size_t matches_capacity, sz_size_t *matches_found, char const **error_message);
+
+/** @copydoc szs_levenshtein_index_utf8_find */
+SZ_API_RUNTIME sz_status_t szs_levenshtein_index_utf8_find_u64tape(                    //
+    szs_levenshtein_index_utf8_t index, szs_device_scope_t device,                     //
+    sz_sequence_u64tape_t const *queries, sz_size_t bound,                             //
+    sz_u64_t *query_indices, sz_u32_t *dictionary_indices, sz_u8_t *distances,          //
+    sz_size_t matches_capacity, sz_size_t *matches_found, char const **error_message);
+
+/** @brief Free a UTF-8 dictionary index. */
+SZ_API_RUNTIME void szs_levenshtein_index_utf8_free(szs_levenshtein_index_utf8_t index);
+
 /**
  *  @brief Initialize UTF-8 aware Levenshtein distance engine.
  *
