@@ -153,11 +153,11 @@ static int test_levenshtein_index_unit_impl_() {
         }
     unicode_dictionary.push_back(unicode_dictionary[42]);
     szs::basic_levenshtein_index<char32_t> unicode_index;
-    if (unicode_index.try_build(unicode_dictionary, 4) != sz::status_t::success_k) return 10;
+    if (unicode_index.try_build(unicode_dictionary, 8) != sz::status_t::success_k) return 10;
     szs::basic_levenshtein_index<char32_t>::scratch_t unicode_scratch;
     szs::basic_levenshtein_index<char32_t>::matches_t unicode_matches;
     for (auto const &query : unicode_dictionary)
-        for (std::uint8_t bound = 0; bound <= 4; ++bound) {
+        for (std::uint8_t bound = 0; bound <= 8; ++bound) {
             if (unicode_index.find({query.data(), query.size()}, bound, unicode_scratch, unicode_matches) !=
                 sz::status_t::success_k)
                 return 11;
@@ -197,7 +197,7 @@ static int test_levenshtein_index_unit_impl_() {
     // Exercise every trie path, including bounds above the small packed-state cases.
     std::vector<std::string> trie_dictionary;
     for (std::size_t id = 0; id != 32; ++id) {
-        std::string word(18 + id % 9, 'a');
+        std::string word(68 + id % 9, 'a');
         for (std::size_t position = 0; position != word.size(); ++position)
             word[position] = "abcd"[(id * 7 + position * 3 + position / 5) % 4];
         trie_dictionary.push_back(std::move(word));
@@ -262,6 +262,97 @@ static int test_levenshtein_index_unit_impl_() {
                            failing_matches) != sz::status_t::success_k ||
         failing_matches.size() != 1 || failing_matches[0].id != 0 || failing_matches[0].distance != 0)
         return 25;
+
+    // Large relative bounds switch long queries from tree traversal to a direct bounded scan.
+    szs::levenshtein_index<> wide_bound_index;
+    if (wide_bound_index.try_build(trie_dictionary, 24, 0) != sz::status_t::success_k) return 26;
+    auto const &wide_query = trie_queries.back();
+    if (wide_bound_index.find({wide_query.data(), wide_query.size()}, 24, scratch, matches) !=
+        sz::status_t::success_k)
+        return 27;
+    std::vector<std::pair<std::uint32_t, std::uint8_t>> actual_wide, expected_wide;
+    for (auto const &match : matches) actual_wide.emplace_back(match.id, match.distance);
+    for (std::uint32_t id = 0; id != trie_dictionary.size(); ++id) {
+        std::size_t const score = reference_distance(trie_dictionary[id], wide_query);
+        if (score <= 24) expected_wide.emplace_back(id, static_cast<std::uint8_t>(score));
+    }
+    std::sort(actual_wide.begin(), actual_wide.end());
+    if (actual_wide != expected_wide) return 28;
+
+    // Scratch allocation failure in that dense fallback must still reach the caller.
+    failing_index_t wide_failing_index {failing_allocator};
+    if (wide_failing_index.try_build(failing_dictionary, 24, 0) != sz::status_t::success_k) return 29;
+    failing_index_t::scratch_t wide_failing_scratch {failing_allocator};
+    failing_index_t::matches_t wide_failing_matches {failing_allocator};
+    failing_state.fail = true;
+    if (wide_failing_index.find({failing_dictionary[0].data(), failing_dictionary[0].size()}, 24,
+                                wide_failing_scratch, wide_failing_matches) != sz::status_t::bad_alloc_k)
+        return 30;
+    failing_state.fail = false;
+
+    // Multiword dense scans stay exact on both sides of every 64-symbol boundary.
+    std::size_t const boundary_lengths[] = {65, 127, 128, 129, 511, 512, 513};
+    for (std::size_t length : boundary_lengths) {
+        std::vector<std::string> boundary_dictionary;
+        for (std::size_t id = 0; id != 6; ++id) {
+            std::string word(length, 'a');
+            for (std::size_t position = 0; position != length; ++position)
+                word[position] = "abcd"[(id * 11 + position * 7 + position / 3) % 4];
+            boundary_dictionary.push_back(std::move(word));
+        }
+        szs::levenshtein_index<> boundary_index;
+        if (boundary_index.try_build(boundary_dictionary, 40, 0) != sz::status_t::success_k) return 31;
+        for (std::size_t query_id = 0; query_id != boundary_dictionary.size(); ++query_id) {
+            std::string query = boundary_dictionary[query_id];
+            query[(query_id * 13 + 1) % length] = 'x';
+            query[(query_id * 17 + 5) % length] = 'y';
+            std::uint8_t const bounds[] = {6, 8, 16, 24, 40};
+            for (std::uint8_t bound : bounds) {
+                if (boundary_index.find({query.data(), query.size()}, bound, scratch, matches) !=
+                    sz::status_t::success_k)
+                    return 32;
+                std::vector<std::pair<std::uint32_t, std::uint8_t>> actual, expected;
+                for (auto const &match : matches) actual.emplace_back(match.id, match.distance);
+                for (std::uint32_t id = 0; id != boundary_dictionary.size(); ++id) {
+                    std::size_t const score = reference_distance(boundary_dictionary[id], query);
+                    if (score <= bound) expected.emplace_back(id, static_cast<std::uint8_t>(score));
+                }
+                std::sort(actual.begin(), actual.end());
+                if (actual != expected) return 33;
+            }
+        }
+    }
+    std::size_t const unicode_boundary_lengths[] = {65, 128, 129};
+    for (std::size_t length : unicode_boundary_lengths) {
+        std::vector<std::u32string> boundary_dictionary;
+        for (std::size_t id = 0; id != 6; ++id) {
+            std::u32string word(length, U'a');
+            for (std::size_t position = 0; position != length; ++position)
+                word[position] = unicode_alphabet[(id * 5 + position * 3 + position / 7) % 3];
+            boundary_dictionary.push_back(std::move(word));
+        }
+        szs::basic_levenshtein_index<char32_t> boundary_index;
+        if (boundary_index.try_build(boundary_dictionary, 24, 0) != sz::status_t::success_k) return 34;
+        for (std::size_t query_id = 0; query_id != boundary_dictionary.size(); ++query_id) {
+            std::u32string query = boundary_dictionary[query_id];
+            query[(query_id * 13 + 1) % length] = U'雪';
+            query[(query_id * 17 + 5) % length] = U'龍';
+            std::uint8_t const bounds[] = {8, 16, 24};
+            for (std::uint8_t bound : bounds) {
+                if (boundary_index.find({query.data(), query.size()}, bound, unicode_scratch, unicode_matches) !=
+                    sz::status_t::success_k)
+                    return 35;
+                std::vector<std::pair<std::uint32_t, std::uint8_t>> actual, expected;
+                for (auto const &match : unicode_matches) actual.emplace_back(match.id, match.distance);
+                for (std::uint32_t id = 0; id != boundary_dictionary.size(); ++id) {
+                    std::size_t const score = reference_distance(boundary_dictionary[id], query);
+                    if (score <= bound) expected.emplace_back(id, static_cast<std::uint8_t>(score));
+                }
+                std::sort(actual.begin(), actual.end());
+                if (actual != expected) return 36;
+            }
+        }
+    }
 
     std::cout << "OK: " << checks << " exhaustive memberships, records=" << index.records_count()
               << " index_bytes=" << index.index_bytes() << '\n';
