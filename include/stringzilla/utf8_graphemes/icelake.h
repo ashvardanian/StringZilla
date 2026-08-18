@@ -62,7 +62,7 @@ enum {
 };
 
 /** @brief  Descriptor of a codepoint < 0x80 by a `vpermb` over the two aligned `ascii_desc` `.rodata` tiles. */
-SZ_HELPER_AUTO __m512i sz_grapheme_ascii_descriptor_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_grapheme_ascii_descriptor_icelake_(__m512i codepoints_u32x16) {
     __m512i const low_six_u32x16 = _mm512_and_si512(codepoints_u32x16, _mm512_set1_epi32(0x3F));
     __mmask16 const high_half_m16 = _mm512_test_epi32_mask(codepoints_u32x16, _mm512_set1_epi32(0x40));
     __m512i const tile_low_u8x64 = _mm512_load_si512((void const *)(sz_utf8_grapheme_break_ascii_desc_ + 0));
@@ -83,7 +83,7 @@ SZ_HELPER_INLINE __m512i sz_grapheme_small_page_icelake_(__m512i codepoints_u32x
 /** @brief  Descriptor of a BMP codepoint: the `bmp_page_lut_` page LUT (one `vpermb`) selects one of the 54 distinct
  *          256-byte pages, then `flat_bmp_` is fetched by one `vpgatherdd` for all sixteen lanes. The leaf carries
  *          the packed descriptor directly, so no `id_to_desc` permute follows. */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify_bmp_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_grapheme_classify_bmp_icelake_(__m512i codepoints_u32x16) {
     return _mm512_and_si512(sz_utf8_rune_flat_lookup_icelake_(sz_utf8_grapheme_break_bmp_page_lut_,
                                                               sz_utf8_grapheme_break_flat_bmp_, codepoints_u32x16),
                             _mm512_set1_epi32(0xFF));
@@ -92,7 +92,7 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_bmp_icelake_(__m512i codepoints_u32x
 /** @brief  Descriptor of an astral codepoint (>= 0x10000) via the 4-stage trie over offset = codepoint - 0x10000
  *          (an 8/4/4/4 split), every tile read straight from aligned `.rodata`. Byte-identical to the serial
  *          sorted-range scan, replacing the per-window linear fold. */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints_u32x16) {
     __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
     __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
         sz_utf8_grapheme_break_astral_s0_,
@@ -119,7 +119,7 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints
  *          (Extend voicing marks `302A-3030` / `3099-309A`, `303D`, enclosed `3297` / `3299`). Mirrors the word
  *          kernel's `cjk_combined` carve. Six `vpcmp`; called only when a cold lane is present.
  */
-SZ_HELPER_AUTO __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints_u32x16) {
     __mmask16 const run_a_m16 = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x3000)),
                                              _mm512_cmple_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0xA66E)));
     __mmask16 const run_b_m16 = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0xD7FC)),
@@ -145,7 +145,7 @@ SZ_HELPER_AUTO __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints_u32x1
  *  table (one `vpgatherdd`); and codepoint >= 0x10000 by the 4-stage astral trie. No linear range scan and no
  *  scalar loop.
  */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_grapheme_classify16_icelake_(__m512i codepoints_u32x16) {
     __m512i const hangul_base_u32x16 = _mm512_set1_epi32(0xAC00);
     __mmask16 const is_hangul_m16 = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, hangul_base_u32x16),
                                                  _mm512_cmple_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0xD7A3)));
@@ -203,7 +203,7 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints_u32x16
  *          (4-byte) lanes in the quarter take the reconstructed plane/mid/low codepoint; all others take the BMP
  *          `(high << 8) | low`. Returns 16 descriptors in the low byte of each 32-bit lane.
  */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify_quarter_icelake_( //
+SZ_HELPER_INLINE __m512i sz_grapheme_classify_quarter_icelake_( //
     __m128i high_slice_u8x16, __m128i low_slice_u8x16, __m128i plane_slice_u8x16, __m128i mid_slice_u8x16,
     __m128i lo_slice_u8x16, __mmask16 astral_quarter_m16) {
     __m512i const codepoint_bmp_u32x16 = _mm512_or_si512(_mm512_slli_epi32(_mm512_cvtepu8_epi32(high_slice_u8x16), 8),
@@ -225,7 +225,7 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_quarter_icelake_( //
  *  reassemble plane/mid/low from the four UTF-8 bytes) and classified; the four descriptor quarters are written back
  *  as one byte per lane. No scalar per-lane loop and no spill round-trip.
  */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify_window_icelake_( //
+SZ_HELPER_INLINE __m512i sz_grapheme_classify_window_icelake_( //
     sz_utf8_rune_window_t const *decoded, __m512i next1_u8x64, __m512i next2_u8x64, __m512i next3_u8x64) {
     // Astral (4-byte) lead reconstruction: plane = ((b0 & 7) << 2) | ((b1 >> 4) & 3); mid = ((b1 & F) << 4) |
     // ((b2 >> 2) & F); low = ((b2 & 3) << 6) | (b3 & 3F); codepoint = (plane << 16) | (mid << 8) | low.
@@ -340,8 +340,8 @@ SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_icelake_(__m
  *          i. Builds the per-class masks in-register (the only `__m512i`->`sz_u64_t` contact), then delegates every
  *          GB1-GB13 decision to the shared portable @ref sz_grapheme_window_boundaries_ engine.
  */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_window_boundaries_icelake_(__m512i descriptors_u8x64, int codepoint_count,
-                                                               sz_grapheme_carry_t *carry) {
+SZ_HELPER_INLINE sz_u64_t sz_grapheme_window_boundaries_icelake_(__m512i descriptors_u8x64, int codepoint_count,
+                                                                 sz_grapheme_carry_t *carry) {
     sz_u64_t const valid = (codepoint_count >= 64) ? ~0ull : ((1ull << codepoint_count) - 1);
     sz_grapheme_window_masks_t const window = sz_grapheme_build_masks_icelake_(descriptors_u8x64, valid);
     return sz_grapheme_window_boundaries_(&window, codepoint_count, valid, carry);
@@ -370,7 +370,7 @@ typedef struct sz_grapheme_window_t {
  *          trailing partial codepoint (whose continuation bytes fall outside the window) is left for the next
  *          window so cross-window runs stay exact. Pure register dataflow: one decode, one classify, one compress.
  */
-SZ_HELPER_AUTO sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( //
+SZ_HELPER_INLINE sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( //
     sz_u8_t const *text, sz_size_t length, sz_size_t base, __m512i lane_identity_u8x64, sz_grapheme_carry_t *carry) {
 
     sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text + base, length - base,

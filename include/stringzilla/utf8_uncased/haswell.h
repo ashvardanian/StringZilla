@@ -77,7 +77,7 @@ SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_haswell_mask_until_(sz_size_t n) {
  *      no probe inside a valid window and trip no alarm, so tail chunks reuse the main-loop
  *      logic unchanged instead of branching into a separate epilogue.
  */
-SZ_HELPER_AUTO __m256i sz_utf8_uncased_haswell_load_padded_ymm_(sz_cptr_t source, sz_size_t length) {
+SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_load_padded_ymm_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t buffer[32] = {0};
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return _mm256_lddqu_si256((__m256i const *)buffer);
@@ -88,7 +88,7 @@ SZ_HELPER_AUTO __m256i sz_utf8_uncased_haswell_load_padded_ymm_(sz_cptr_t source
  *      haystack: the fast full load is taken whenever 16 bytes remain, and only the last few
  *      candidates near the haystack end pay for the zero-padded stack copy.
  */
-SZ_HELPER_AUTO __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t source, sz_size_t available) {
+SZ_HELPER_INLINE __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t source, sz_size_t available) {
     if (available >= 16) return _mm_lddqu_si128((__m128i const *)source);
     sz_u8_t buffer[16] = {0};
     for (sz_size_t byte_index = 0; byte_index < available; ++byte_index)
@@ -104,7 +104,7 @@ SZ_HELPER_AUTO __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t source
  *  @brief Fold a YMM register using ASCII case folding rules.
  *  @sa sz_utf8_uncased_rune_ascii_invariant_k
  */
-SZ_HELPER_AUTO __m256i sz_utf8_uncased_search_haswell_ascii_fold_ymm_(__m256i text_u8x32) {
+SZ_HELPER_INLINE __m256i sz_utf8_uncased_search_haswell_ascii_fold_ymm_(__m256i text_u8x32) {
     // Only fold bytes in range A-Z; the masked add avoids `VPBLENDVB` (2 uops on Haswell)
     __m256i is_ascii_upper_u8x32 = sz_utf8_uncased_haswell_in_byte_range_(text_u8x32, 'A', 26);
     return _mm256_add_epi8(text_u8x32, _mm256_and_si256(is_ascii_upper_u8x32, _mm256_set1_epi8(0x20)));
@@ -119,10 +119,10 @@ SZ_HELPER_AUTO __m256i sz_utf8_uncased_search_haswell_ascii_fold_ymm_(__m256i te
  *  and the probe equality masks are shifted as 32-bit `VPMOVMSKB` integers: with windows ≤ 16
  *  bytes every chunk still exposes ≥ 17 valid start positions per iteration.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                     //
-    sz_cptr_t needle, sz_size_t needle_length,                         //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                       //
+    sz_cptr_t needle, sz_size_t needle_length,                           //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,            //
     sz_size_t *matched_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
@@ -343,10 +343,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
  *      and no alarm - ASCII never changes byte width when folded, so the danger machinery
  *      compiles away entirely and the step covers every valid start position.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                     //
-    sz_cptr_t needle, sz_size_t needle_length,                         //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                       //
+    sz_cptr_t needle, sz_size_t needle_length,                           //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,            //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_ascii_fold_ymm_,
@@ -451,10 +451,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_western_europe_alarm_
  *  @brief Western European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_western_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                       //
-    sz_cptr_t needle, sz_size_t needle_length,                           //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,            //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_western_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                         //
+    sz_cptr_t needle, sz_size_t needle_length,                             //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_western_europe_fold_ymm_,
@@ -557,10 +557,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_central_europe_alarm_
  *  @brief Central European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_central_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                       //
-    sz_cptr_t needle, sz_size_t needle_length,                           //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,            //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_central_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                         //
+    sz_cptr_t needle, sz_size_t needle_length,                             //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_central_europe_fold_ymm_,
@@ -635,10 +635,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_cyrillic_alarm_ymm_(_
  *  @brief Cyrillic uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_cyrillic_k
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_cyrillic_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                 //
-    sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,      //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_cyrillic_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_cptr_t needle, sz_size_t needle_length,                       //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_,
@@ -720,10 +720,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_armenian_alarm_ymm_(_
  *  @brief Armenian uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_armenian_k
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                 //
-    sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,      //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_cptr_t needle, sz_size_t needle_length,                       //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_armenian_fold_ymm_,
@@ -853,10 +853,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_greek_alarm_ymm_(__m2
  *  @brief Greek uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_greek_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,              //
-    sz_cptr_t needle, sz_size_t needle_length,                  //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,   //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_greek_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                //
+    sz_cptr_t needle, sz_size_t needle_length,                    //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,     //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_greek_fold_ymm_,
@@ -993,10 +993,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_vietnamese_alarm_ymm_
  *  @brief Vietnamese uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_vietnamese_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_vietnamese_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_,
@@ -1053,10 +1053,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_georgian_alarm_ymm_(_
  *  The fastest non-ASCII kernel: Mkhedruli is caseless, so the fold callback is just the
  *  ASCII fold for mixed Latin text and the alarm only watches for the historical scripts.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_georgian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                 //
-    sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,      //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_georgian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_cptr_t needle, sz_size_t needle_length,                       //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_ascii_fold_ymm_,

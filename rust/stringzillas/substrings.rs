@@ -227,7 +227,7 @@ extern "C" {
         replacements: *const c_void, // SzSequence
         output_data: *mut u8,
         output_data_capacity: usize,
-        output_offsets: *mut u64,
+        output_offsets: *mut usize,
         output_bytes_written: *mut usize,
         error_message: *mut *const c_char,
     ) -> Status;
@@ -240,7 +240,7 @@ extern "C" {
         replacements: *const c_void, // SzSequence
         output_data: *mut u8,
         output_data_capacity: usize,
-        output_offsets: *mut u64,
+        output_offsets: *mut usize,
         output_bytes_written: *mut usize,
         error_message: *mut *const c_char,
     ) -> Status;
@@ -656,7 +656,7 @@ impl Substrings {
     ///
     /// Tape in, tape out: `overlap_policy` must name a non-overlapping cover, replacements are indexed
     /// by needle and inserted verbatim, and an empty replacement deletes. `output_offsets` takes
-    /// `haystacks.len() + 1` entries and is 64-bit so the pair reads directly as a `BytesTapeView<u64>`.
+    /// `haystacks.len() + 1` entries, in the width the engines address the output tape with.
     /// Returns the bytes written; size `output_data` with [`Substrings::replace_bound`] to be sure the
     /// call cannot be refused.
     pub fn replace_into<Replacement>(
@@ -666,7 +666,7 @@ impl Substrings {
         overlap_policy: OverlapPolicy,
         replacements: &[Replacement],
         output_data: &mut [u8],
-        output_offsets: &mut [u64],
+        output_offsets: &mut [usize],
     ) -> Result<usize, Error>
     where
         Replacement: AsRef<[u8]>,
@@ -972,7 +972,7 @@ mod tests {
         let bound = engine.replace_bound(replacements, input_bytes).unwrap();
 
         let mut output_data = vec![0u8; bound];
-        let mut output_offsets = vec![0u64; haystacks.len() + 1];
+        let mut output_offsets = vec![0usize; haystacks.len() + 1];
         let tape = AnyBytesTape::from_sequences(haystacks).unwrap();
         engine
             .replace_into(
@@ -987,8 +987,8 @@ mod tests {
 
         (0..haystacks.len())
             .map(|index| {
-                let start = output_offsets[index] as usize;
-                let end = output_offsets[index + 1] as usize;
+                let start = output_offsets[index];
+                let end = output_offsets[index + 1];
                 output_data[start..end].to_vec()
             })
             .collect()
@@ -1115,7 +1115,7 @@ mod tests {
         // Tape in, tape out: a rewrite has nowhere to put its product when the input is addressed by
         // callback, and the C API gives `replace` no sequence overload to try.
         let mut output_data = vec![0u8; 256];
-        let mut output_offsets = vec![0u64; corpus.len() + 1];
+        let mut output_offsets = vec![0usize; corpus.len() + 1];
         let refused = engine.replace_into(
             &device,
             &AnyBytesTape::from_slices(&corpus),

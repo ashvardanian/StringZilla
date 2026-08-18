@@ -108,7 +108,6 @@ inline sz_status_t szs_substrings_dispatch_(szs_substrings_t engine_punned, szs_
     return propagate_error(status, error_message);
 }
 
-
 /**
  *  @brief Counts every needle's occurrences in every haystack, on whichever scope @p device_punned names.
  *  @sa `szs_levenshtein_cross_` for the same dispatch skeleton.
@@ -211,7 +210,7 @@ inline sz_status_t szs_substrings_score_bm25_(szs_substrings_t engine_punned, sz
     // through would drop `length_normalization` and every entry of `document_lengths` without a word.
     if (parameters.length_normalization > 0.0f && !(parameters.average_document_length > 0.0f))
         return propagate_error(sz::status_t::unexpected_dimensions_k, error_message,
-                               "BM25 length normalization needs a positive `average_document_length`: "
+                               "BM25 length normalization needs a positive `average_document_length`: " //
                                "pass the corpus mean, or set `length_normalization` to zero");
 
     auto const needles_count = szs_substrings_needles_count_(*reinterpret_cast<substrings_backends_t *>(engine_punned));
@@ -240,7 +239,7 @@ inline sz_status_t szs_substrings_replace_(szs_substrings_t engine_punned, szs_d
                                            haystacks_type_ const &haystacks,
                                            szs_substrings_overlap_policy_t overlap_policy,
                                            sz_sequence_t const *replacements, sz_ptr_t output_data,
-                                           sz_size_t output_data_capacity, sz_u64_t *output_offsets,
+                                           sz_size_t output_data_capacity, sz_size_t *output_offsets,
                                            sz_size_t *output_bytes_written, char const **error_message) noexcept {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(replacements != nullptr && "Replacement collection cannot be null");
@@ -300,8 +299,8 @@ SZ_API_RUNTIME sz_status_t szs_substrings_init(                       //
     return emplace_empty_substrings_engine<szs::substrings_serial_t>(engine_punned, error_message);
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_index(                                      //
-    szs_substrings_t engine_punned, sz_sequence_t const *needles,                     //
+SZ_API_RUNTIME sz_status_t szs_substrings_index(                                          //
+    szs_substrings_t engine_punned, sz_sequence_t const *needles,                         //
     szs_substrings_case_sensitivity_t case_sensitivity, szs_device_scope_t device_punned, //
     char const **error_message) {
 
@@ -466,13 +465,13 @@ SZ_API_RUNTIME sz_status_t szs_substrings_replace_bound(  //
     return result;
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_replace_u32tape(                          //
-    szs_substrings_t engine_punned, szs_device_scope_t device_punned,               //
-    sz_sequence_u32tape_t const *haystacks,                                         //
-    szs_substrings_overlap_policy_t overlap_policy,                                 //
-    sz_sequence_t const *replacements,                                              //
-    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_u64_t *output_offsets, //
-    sz_size_t *output_bytes_written,                                                //
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u32tape(                           //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                //
+    sz_sequence_u32tape_t const *haystacks,                                          //
+    szs_substrings_overlap_policy_t overlap_policy,                                  //
+    sz_sequence_t const *replacements,                                               //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_size_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                 //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");
@@ -481,13 +480,13 @@ SZ_API_RUNTIME sz_status_t szs_substrings_replace_u32tape(                      
                                    output_bytes_written, error_message);
 }
 
-SZ_API_RUNTIME sz_status_t szs_substrings_replace_u64tape(                          //
-    szs_substrings_t engine_punned, szs_device_scope_t device_punned,               //
-    sz_sequence_u64tape_t const *haystacks,                                         //
-    szs_substrings_overlap_policy_t overlap_policy,                                 //
-    sz_sequence_t const *replacements,                                              //
-    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_u64_t *output_offsets, //
-    sz_size_t *output_bytes_written,                                                //
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u64tape(                           //
+    szs_substrings_t engine_punned, szs_device_scope_t device_punned,                //
+    sz_sequence_u64tape_t const *haystacks,                                          //
+    szs_substrings_overlap_policy_t overlap_policy,                                  //
+    sz_sequence_t const *replacements,                                               //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_size_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                 //
     char const **error_message) {
 
     sz_assert_(haystacks != nullptr && "Haystack collection cannot be null");

@@ -273,7 +273,7 @@ SZ_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char co
  *  @sa sz_capabilities_to_string, sz_capabilities
  */
 SZ_HELPER_AUTO sz_size_t sz_capabilities_to_string_implementation_(sz_capability_t caps, char *buffer,
-                                                                  sz_size_t capacity) {
+                                                                   sz_size_t capacity) {
 
     if (capacity == 0) return 0;
     char *p = buffer;
@@ -569,7 +569,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
  *  @brief Function to determine the SIMD capabilities of the current 64-bit RISC-V machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
 
     // The base "V" extension is reported through the auxiliary vector, but the individual
@@ -627,7 +627,7 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
  *  @brief Function to determine the SIMD capabilities of the current LoongArch machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_loongarch_(void) {
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_loongarch_(void) {
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
 
     // The SIMD extensions are reported through the auxiliary vector, matching `asm/hwcap.h`:
@@ -650,7 +650,7 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_loongarch_(void) {
  *  @brief Function to determine the SIMD capabilities of the current IBM POWER machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_power_(void) {
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
 #if (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && !SZ_AVOID_LIBC
 
     // The `powervsx` kernels target POWER9 (`-mcpu=power9 -mvsx`), so both facts are required,

@@ -69,8 +69,8 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i
  *  @brief Shared AVX-512 scan skeleton: 64-byte all-ASCII gate, lead-classify via @p classify, then the
  *         shared scalar verify on any block that survives the gate. Ice Lake reuses this verbatim.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form,
-                                                       sz_utf8_norm_lead_classify_avx512_t classify) {
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form,
+                                                         sz_utf8_norm_lead_classify_avx512_t classify) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);

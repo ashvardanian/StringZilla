@@ -23,7 +23,7 @@ extern "C" {
  *  @param offset Byte offset into `lut` at which to start the 16-byte slice.
  *  @return A 256-bit LASX register with the 16-byte slice duplicated into both 128-bit lanes.
  */
-SZ_HELPER_AUTO __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
+SZ_HELPER_INLINE __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
     sz_u8_t lut_pairs[32];
     for (sz_size_t lane_index = 0; lane_index < 16; ++lane_index)
         lut_pairs[lane_index] = lut_pairs[lane_index + 16] = (sz_u8_t)lut[offset + lane_index];

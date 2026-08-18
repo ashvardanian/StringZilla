@@ -44,9 +44,9 @@ enum {
 SZ_HELPER_AUTO sz_bool_t sz_utf8_lead_may_fold_(sz_u8_t lead) {
     sz_u64_t word;
     switch (lead >> 6) {
-    case 1: word = 0x0000000007FFFFFEull; break;  // 0x40-0x7F: 'A'-'Z'
-    case 3: word = 0x00018406007FE3FCull; break;  // 0xC0-0xFF: C2-D6 Latin through Cyrillic, E1 E2 EA EF, F0
-    default: return sz_false_k;                   // 0x00-0x3F punctuation, 0x80-0xBF continuation bytes
+    case 1: word = 0x0000000007FFFFFEull; break; // 0x40-0x7F: 'A'-'Z'
+    case 3: word = 0x00018406007FE3FCull; break; // 0xC0-0xFF: C2-D6 Latin through Cyrillic, E1 E2 EA EF, F0
+    default: return sz_false_k;                  // 0x00-0x3F punctuation, 0x80-0xBF continuation bytes
     }
     return (sz_bool_t)((word >> (lead & 63)) & 1u);
 }
@@ -1417,7 +1417,7 @@ SZ_HELPER_AUTO sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *f
  *  @param bytes_consumed Number of bytes read from source.
  *  @param bytes_exported Number of bytes written to destination.
  */
-SZ_HELPER_AUTO void sz_utf8_uncased_fold_upto_(                     //
+SZ_HELPER_INLINE void sz_utf8_uncased_fold_upto_(                   //
     sz_cptr_t source, sz_size_t source_length,                      //
     sz_ptr_t destination, sz_size_t destination_length,             //
     sz_size_t *codepoints_consumed, sz_size_t *codepoints_exported, //

@@ -36,7 +36,7 @@ extern "C" {
  *          `bmp_page_lut_` page LUT selects one of the 54 distinct 256-byte pages, then `flat_bmp_` is fetched by
  *          `vpgatherdd`. The leaf carries the descriptor directly (the serial `id_to_desc` permute is folded in).
  *          Bit-exact with `sz_rune_grapheme_break_property` over the whole BMP (Hangul included, no separate formula). */
-SZ_HELPER_AUTO __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+SZ_HELPER_INLINE __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_grapheme_break_bmp_page_lut_, sz_utf8_grapheme_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
@@ -44,8 +44,8 @@ SZ_HELPER_AUTO __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_u8
 /** @brief  Packed descriptor byte for thirty-two ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade), the
  *          AVX2 twin of the icelake astral trie. Per-lane bytes: @p plane = (offset>>16)&0xFF (low nibble meaningful),
  *          @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Gather-free; bit-exact. */
-SZ_HELPER_AUTO __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
-                                                              __m256i low_u8x32) {
+SZ_HELPER_INLINE __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
+                                                                __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const n4_u8x32 = _mm256_and_si256(plane_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
@@ -89,9 +89,9 @@ SZ_HELPER_INLINE __m256i sz_grapheme_cmpge_epu8_haswell_(__m256i value_u8x32, __
 /** @brief  64-bit unsigned `low <= cp <= high` mask over reconstructed BMP codepoints carried in @p high_byte /
  *          @p low_byte halves. cp = (high<<8)|low, so the inclusive 16-bit range test is: high in (lo_hi,hi_hi)
  *          unconditionally, or on the boundary high bytes the low byte within bound. Two halves, branchless. */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
-                                                         __m256i high_hi_u8x32, __m256i low_hi_u8x32, sz_u16_t lo,
-                                                         sz_u16_t hi) {
+SZ_HELPER_INLINE sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
+                                                           __m256i high_hi_u8x32, __m256i low_hi_u8x32, sz_u16_t lo,
+                                                           sz_u16_t hi) {
     sz_u8_t const lo_h = (sz_u8_t)(lo >> 8), lo_l = (sz_u8_t)(lo & 0xFF);
     sz_u8_t const hi_h = (sz_u8_t)(hi >> 8), hi_l = (sz_u8_t)(hi & 0xFF);
     __m256i const lo_h_v_u8x32 = _mm256_set1_epi8((char)lo_h), lo_l_v_u8x32 = _mm256_set1_epi8((char)lo_l);
@@ -124,8 +124,8 @@ SZ_HELPER_AUTO sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32, 
 /** @brief  Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK / Kana arithmetic ranges (the AVX2
  *          twin of `sz_grapheme_cjk_other_icelake_`): `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the interior Extend /
  *          enclosed exceptions. Such lanes need no cold cascade (their descriptor is 0). */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
-                                                       __m256i high_hi_u8x32, __m256i low_hi_u8x32) {
+SZ_HELPER_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
+                                                         __m256i high_hi_u8x32, __m256i low_hi_u8x32) {
     sz_u64_t const run_a = sz_grapheme_cp_in_range_haswell_(high_lo_u8x32, low_lo_u8x32, high_hi_u8x32, low_hi_u8x32,
                                                             0x3000, 0xA66E);
     sz_u64_t const run_b = sz_grapheme_cp_in_range_haswell_(high_lo_u8x32, low_lo_u8x32, high_hi_u8x32, low_hi_u8x32,
@@ -168,7 +168,7 @@ typedef struct sz_grapheme_classified_haswell_t {
  *          descriptor halves with the trimmed codepoint-start geometry. Mirrors the icelake decode/classify path
  *          (value-based blind reconstruction so malformed input agrees byte-for-byte) without `vpermb`/`vpgather`.
  */
-SZ_HELPER_AUTO sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell_( //
+SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell_( //
     sz_u8_t const *text, sz_size_t length, sz_size_t base) {
 
     sz_utf8_rune_window_haswell_t const decoded = sz_utf8_rune_decode_window_haswell_(text + base, length - base);

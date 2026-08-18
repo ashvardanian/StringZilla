@@ -95,7 +95,7 @@ SZ_HELPER_INLINE v128_t sz_aes_linear_v128relaxed_(v128_t low_table_u8x16, v128_
 }
 
 /** @brief `relaxed_swizzle` counterpart of `sz_aes_gf4_mul_v128_`. */
-SZ_HELPER_AUTO v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a_u8x16, v128_t b_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a_u8x16, v128_t b_u8x16) {
     static sz_align_(16) sz_u8_t const log_table[16] = {0x00, 0x00, 0x01, 0x04, 0x02, 0x08, 0x05, 0x0a,
                                                         0x03, 0x0e, 0x09, 0x07, 0x06, 0x0d, 0x0b, 0x0c};
     static sz_align_(16) sz_u8_t const exp_lo_table[16] = {0x01, 0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b,
@@ -120,7 +120,7 @@ SZ_HELPER_AUTO v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a_u8x16, v128_t b_u8x16
 }
 
 /** @brief `relaxed_swizzle` counterpart of `sz_emulate_aesenc_v128_` (bit-exact with the serial round). */
-SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
+SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     static sz_align_(16) sz_u8_t const fwd_lo[16] = {0x00, 0x01, 0x20, 0x21, 0x46, 0x47, 0x66, 0x67,
                                                      0x4c, 0x4d, 0x6c, 0x6d, 0x0a, 0x0b, 0x2a, 0x2b};
     static sz_align_(16) sz_u8_t const fwd_hi[16] = {0x00, 0x3c, 0xd5, 0xe9, 0x34, 0x08, 0xe1, 0xdd,
@@ -193,16 +193,16 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_shuffle_epi8_v128relaxed_(sz_u128_vec_
     return result_vec;
 }
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_v128relaxed_(sz_hash_state_aligned_for_short_t *state,
-                                                            sz_u128_vec_t block_vec) {
+SZ_HELPER_INLINE void sz_hash_state_short_update_v128relaxed_(sz_hash_state_aligned_for_short_t *state,
+                                                              sz_u128_vec_t block_vec) {
     v128_t shuffle_u8x16 = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     state->aes = sz_emulate_aesenc_v128relaxed_(state->aes, block_vec);
     state->sum = sz_emulate_shuffle_epi8_v128relaxed_(state->sum, shuffle_u8x16);
     state->sum.v128 = wasm_i64x2_add(state->sum.v128, block_vec.v128);
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_v128relaxed_(sz_hash_state_aligned_for_short_t const *state,
-                                                                  sz_size_t length) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_v128relaxed_(sz_hash_state_aligned_for_short_t const *state,
+                                                                    sz_size_t length) {
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
     sz_u128_vec_t mixed_vec = sz_emulate_aesenc_v128relaxed_(state->sum, state->aes);
@@ -212,7 +212,7 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_v128relaxed_(sz_hash_state_
 }
 
 /** @brief Loads the packed public state into the aligned internal twin (4x `wasm_v128_load` per 64-byte field). */
-SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_v128relaxed_(sz_hash_state_t const *packed) {
+SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_v128relaxed_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -226,7 +226,7 @@ SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_v128relaxed_(sz_hash_s
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state. */
-SZ_HELPER_AUTO void sz_hash_state_store_v128relaxed_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
+SZ_HELPER_INLINE void sz_hash_state_store_v128relaxed_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         wasm_v128_store(packed->aes + offset, state->aes.u128s[lane_index].v128);
@@ -237,7 +237,7 @@ SZ_HELPER_AUTO void sz_hash_state_store_v128relaxed_(sz_hash_state_t *packed, sz
     packed->ins_length = state->ins_length;
 }
 
-SZ_HELPER_AUTO void sz_hash_state_update_v128relaxed_(sz_hash_state_aligned_t *state) {
+SZ_HELPER_INLINE void sz_hash_state_update_v128relaxed_(sz_hash_state_aligned_t *state) {
     v128_t shuffle_u8x16 = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_u128_vec_t ins_vec = state->ins.u128s[lane_index];
@@ -248,7 +248,7 @@ SZ_HELPER_AUTO void sz_hash_state_update_v128relaxed_(sz_hash_state_aligned_t *s
     }
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_v128relaxed_(sz_hash_state_aligned_t state) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_v128relaxed_(sz_hash_state_aligned_t state) {
     v128_t shuffle_u8x16 = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     sz_u128_vec_t key_with_length_vec;
     key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
@@ -442,9 +442,9 @@ SZ_API_COMPTIME void sz_fill_random_v128relaxed(sz_ptr_t text, sz_size_t length,
  *  @brief Replays prepared text-lanes through the relaxed-SIMD minimal AES state for a single seed.
  *  @return 64-bit hash, bit-identical to `sz_hash_v128relaxed(text, length, seed)` (hence to serial).
  */
-SZ_HELPER_AUTO sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *text_lanes_vec,
-                                                              sz_size_t text_lanes_count, sz_size_t length,
-                                                              sz_u64_t seed) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *text_lanes_vec,
+                                                                sz_size_t text_lanes_count, sz_size_t length,
+                                                                sz_u64_t seed) {
     sz_align_(16) sz_hash_state_aligned_for_short_t state;
     sz_hash_state_short_init_serial_(&state, seed);
     for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)

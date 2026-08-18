@@ -301,8 +301,8 @@ SZ_HELPER_AUTO void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_com
 }
 
 /** @brief Core normalization engine, shared by the write and compare entry points. */
-SZ_HELPER_AUTO void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                      sz_utf8_norm_out_t *out) {
+SZ_HELPER_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                        sz_utf8_norm_out_t *out) {
     sz_bool_t compat = (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
     sz_bool_t compose = (form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
 
@@ -526,7 +526,7 @@ SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz
  *  well-formed lead (or that would cross @p begin) is treated as single literal bytes, so the cursor
  *  retreats exactly one byte rather than over-reading.
  */
-SZ_HELPER_AUTO sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
+SZ_HELPER_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
     sz_u8_t const *probe = position - 1;
     while (probe > begin && (*probe & 0xC0u) == 0x80u && (position - probe) < 4) --probe;
     sz_rune_t rune;
@@ -541,8 +541,8 @@ SZ_HELPER_AUTO sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, s
  *  @p scan primitive) and run the decompose/reorder/compose engine only on the short dirty regions,
  *  each delimited by safe boundaries so composition never crosses a split. Shared across ISAs.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                              sz_ptr_t destination, sz_utf8_norm_scan_t scan) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                                sz_ptr_t destination, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const begin = (sz_u8_t const *)source;
     sz_u8_t const *const end = begin + source_length;
     sz_u8_t *out = (sz_u8_t *)destination;
@@ -607,8 +607,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source
  *  benign segments and back up to the same boundary), and it carries the clean guarantee that every
  *  byte before the returned pointer is provably in @p form.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
-                                                           sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
+                                                             sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const end = (sz_u8_t const *)source + source_length;
     sz_u8_t const *cur = (sz_u8_t const *)source;
 

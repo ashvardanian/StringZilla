@@ -89,7 +89,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powervsx_(void)
  *  @brief Bit-exact VSX equivalent of `sz_emulate_aesenc_si128_serial_` using hardware AES.
  *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to the serial reference.
  */
-SZ_HELPER_AUTO sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
+SZ_HELPER_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     __vector unsigned char const rev_u8x16 = sz_aes_byte_reverse_mask_powervsx_();
     __vector unsigned char state_u8x16 = state_vec.vsx_u8;
     __vector unsigned char reversed_u8x16 = vec_perm(state_u8x16, state_u8x16, rev_u8x16);
@@ -123,16 +123,16 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_shuffle_epi8_powervsx_(sz_u128_vec_t state_vec
 
 #pragma region Minimal state for short inputs
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_powervsx_(sz_hash_state_aligned_for_short_t *state,
-                                                         sz_u128_vec_t block_vec) {
+SZ_HELPER_INLINE void sz_hash_state_short_update_powervsx_(sz_hash_state_aligned_for_short_t *state,
+                                                           sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_aesenc_powervsx_(state->aes, block_vec);
     state->sum = sz_shuffle_epi8_powervsx_(state->sum, shuffle);
     state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_powervsx_(sz_hash_state_aligned_for_short_t const *state,
-                                                               sz_size_t length) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_powervsx_(sz_hash_state_aligned_for_short_t const *state,
+                                                                 sz_size_t length) {
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
     sz_u128_vec_t mixed_vec = sz_aesenc_powervsx_(state->sum, state->aes);
@@ -164,7 +164,7 @@ SZ_API_COMPTIME void sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_
 /**
  *  @brief Loads the packed public state into the aligned internal twin (4x `vec_xl` per 64-byte field).
  */
-SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_powervsx_(sz_hash_state_t const *packed) {
+SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_powervsx_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -178,7 +178,7 @@ SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_powervsx_(sz_hash_stat
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state (4x `vec_xst` per 64-byte field). */
-SZ_HELPER_AUTO void sz_hash_state_store_powervsx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
+SZ_HELPER_INLINE void sz_hash_state_store_powervsx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         vec_xst(state->aes.u128s[lane_index].vsx_u8, 0, (unsigned char *)(packed->aes + offset));
@@ -189,7 +189,7 @@ SZ_HELPER_AUTO void sz_hash_state_store_powervsx_(sz_hash_state_t *packed, sz_ha
     packed->ins_length = state->ins_length;
 }
 
-SZ_HELPER_AUTO void sz_hash_state_update_powervsx_(sz_hash_state_aligned_t *state) {
+SZ_HELPER_INLINE void sz_hash_state_update_powervsx_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         state->aes.u128s[lane_index] = sz_aesenc_powervsx_(state->aes.u128s[lane_index], state->ins.u128s[lane_index]);
@@ -199,7 +199,7 @@ SZ_HELPER_AUTO void sz_hash_state_update_powervsx_(sz_hash_state_aligned_t *stat
     }
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_aligned_t state) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length_vec;
     key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;

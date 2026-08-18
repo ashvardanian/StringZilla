@@ -56,7 +56,7 @@ SZ_HELPER_INLINE uint8x16_t sz_line_break_byte_mask_from_bits_neon_(sz_u64_t bit
  *         page-compressed flat leaf via @ref sz_utf8_rune_flat_lookup_neon_, the NEON twin of
  *         @ref sz_line_break_bmp_index_haswell_. Bit-exact with `sz_rune_line_break_property` over the whole BMP
  *         once `flat_palette_` expands the index. Operates on one quarter; the caller iterates the four. */
-SZ_HELPER_AUTO uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high_bytes_u8x16, uint8x16_t low_bytes_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high_bytes_u8x16, uint8x16_t low_bytes_u8x16) {
     return sz_utf8_rune_flat_lookup_neon_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
                                           (int)sz_utf8_line_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
@@ -65,8 +65,8 @@ SZ_HELPER_AUTO uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high_bytes_u8
  *         the NEON twin of @ref sz_line_break_classify_astral_haswell_. Per-lane bytes: @p plane_u8x16 =
  *         (offset>>16)&0xFF (low nibble meaningful), @p high_u8x16 = (offset>>8)&0xFF, @p low_u8x16 = offset&0xFF.
  *         Bit-exact. */
-SZ_HELPER_AUTO uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane_u8x16, uint8x16_t high_u8x16,
-                                                              uint8x16_t low_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane_u8x16, uint8x16_t high_u8x16,
+                                                                uint8x16_t low_u8x16) {
     uint8x16_t const low_nibble_mask_u8x16 = vdupq_n_u8(0x0F);
     uint8x16_t const n4_u8x16 = vandq_u8(plane_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const n3_u8x16 = vandq_u8(vshrq_n_u8(high_u8x16, 4), low_nibble_mask_u8x16);
@@ -127,9 +127,9 @@ SZ_HELPER_INLINE void sz_line_break_flat_palette_descriptors_neon_(uint8x16_t pa
  *         in 8/9, SA-is-mark in 12, DottedCircle in 13 -- so the whole unpack stays in the byte domain. Applies the
  *         serial resolution aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); RI/ZWJ side bits come from the RAW
  *         class, the mark side bit from the resolved class. */
-SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_neon_(uint8x16_t palette_indices_u8x16,
-                                                            uint8x16_t *classes_u8x16_out, uint8x16_t *side_u8x16_out,
-                                                            uint8x16_t *dotted_select_u8x16_out) {
+SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_neon_(uint8x16_t palette_indices_u8x16,
+                                                              uint8x16_t *classes_u8x16_out, uint8x16_t *side_u8x16_out,
+                                                              uint8x16_t *dotted_select_u8x16_out) {
     uint8x16_t descriptor_low_bytes_u8x16, descriptor_high_bytes_u8x16;
     sz_line_break_flat_palette_descriptors_neon_(palette_indices_u8x16, &descriptor_low_bytes_u8x16,
                                                  &descriptor_high_bytes_u8x16);
@@ -232,7 +232,8 @@ SZ_HELPER_INLINE void sz_line_break_palette_unpack_neon_(uint8x16_t index_u8x16,
  *          "consume-1 U+FFFD" malformed policy: an invalid lead / short or stray continuation / overlong /
  *          surrogate / out-of-range lead each become one single-byte U+FFFD unit (class AL).
  */
-SZ_HELPER_AUTO sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(sz_utf8_rune_window_neon_t window) {
+SZ_HELPER_INLINE sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
+    sz_utf8_rune_window_neon_t window) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(window.loaded);
     sz_u64_t const continuation = window.continuation & loaded_mask;
     sz_u64_t const two_byte = window.two_byte_starts;
@@ -514,7 +515,7 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_neon_(sz_lin
  *  @brief  Largest byte prefix of the window whose codepoints are all fully loaded — the NEON twin of
  *          @ref sz_line_break_complete_limit_haswell_ over the NEON window struct. Never below 1.
  */
-SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window, sz_bool_t more_text) {
+SZ_HELPER_INLINE sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);

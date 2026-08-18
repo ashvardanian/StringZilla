@@ -20,7 +20,7 @@ extern "C" {
  *  A @c "\r\n" CRLF is one match of length 2 (its trailing LF is never emitted alone). `base` is added to every
  *  emitted offset and to `*bytes_consumed`, the resume offset, which is always a true delimiter boundary.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_newlines_serial_(      //
+SZ_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_(    //
     sz_cptr_t text, sz_size_t length, sz_size_t base,   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -61,7 +61,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_newlines_serial_(      //
  *  Same contract as `sz_utf8_newlines_serial_` but for the Unicode White_Space set. There is no CRLF
  *  merging here - CR and LF are independent length-1 matches.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_whitespaces_serial_(   //
+SZ_HELPER_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
     sz_cptr_t text, sz_size_t length, sz_size_t base,   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

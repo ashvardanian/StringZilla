@@ -35,7 +35,7 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_first_continuation_ok_(sz_u8_t lead, sz_u8_t se
  *         non-surrogate, in-range codepoint (a truncated trailing sequence before @p utf8_end included). The
  *         single authority for "is this a foldable/normalizable rune"; the decode-side mirror of `sz_rune_encode`.
  *         On failure use `sz_utf8_maximal_subpart_` for how many bytes the resulting U+FFFD consumes. */
-SZ_HELPER_AUTO sz_rune_length_t sz_rune_decode(sz_cptr_t utf8, sz_cptr_t utf8_end, sz_rune_t *rune) {
+SZ_HELPER_INLINE sz_rune_length_t sz_rune_decode(sz_cptr_t utf8, sz_cptr_t utf8_end, sz_rune_t *rune) {
     sz_u8_t const *u = (sz_u8_t const *)utf8;
     sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u);
     sz_u8_t const lead = u[0];
@@ -91,7 +91,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_serial_( //
     return produced;
 }
 
-SZ_HELPER_AUTO sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr_t utf8_end) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr_t utf8_end) {
     sz_u8_t const *u = (sz_u8_t const *)utf8;
     sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u);
     sz_u8_t const lead = u[0];
@@ -108,7 +108,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr_t utf8
  *         the byte length and stores the codepoint in @p rune.
  *  @warning Assumes valid, complete UTF-8 (a truncated trailing sequence over-reads). Use `sz_rune_decode` for the
  *           bounds-checked + validating variant, or `sz_utf8_find_malformed()` first. */
-SZ_HELPER_AUTO sz_rune_length_t sz_rune_decode_unchecked(sz_cptr_t utf8, sz_rune_t *rune) {
+SZ_HELPER_INLINE sz_rune_length_t sz_rune_decode_unchecked(sz_cptr_t utf8, sz_rune_t *rune) {
     sz_u8_t const *u8s = (sz_u8_t const *)utf8;
     sz_u8_t lead = *u8s++;
     sz_rune_length_t length = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
@@ -169,7 +169,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_malformed(sz_cptr_t text, sz_size_t lengt
  *         ill-formed - a streaming decoder stops on it and resumes once more bytes arrive, rather than substituting
  *         U+FFFD. Genuinely ill-formed bytes (a bad lead, a malformed present continuation, or an overlong/surrogate/
  *         out-of-range prefix) return false so the caller emits the replacement character. */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_incomplete_tail_(sz_cptr_t text, sz_cptr_t end) {
+SZ_HELPER_INLINE sz_bool_t sz_utf8_incomplete_tail_(sz_cptr_t text, sz_cptr_t end) {
     sz_u8_t const *u = (sz_u8_t const *)text;
     sz_size_t const available = (sz_size_t)((sz_u8_t const *)end - u);
     if (!available) return sz_false_k;

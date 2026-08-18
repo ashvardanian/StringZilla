@@ -140,9 +140,9 @@ struct substrings_pending_start {
  *  once per byte, so the policy stays an ordinary argument. Lengths compared here are source bytes, since
  *  a needle that folds shorter can still outspan a rival whose folded form is longer.
  */
-constexpr bool substrings_leftmost_wins(          //
-    substrings_pending_start const &challenger,   //
-    substrings_pending_start const &incumbent,    //
+constexpr bool substrings_leftmost_wins(        //
+    substrings_pending_start const &challenger, //
+    substrings_pending_start const &incumbent,  //
     substrings_overlap_policy_t policy) noexcept {
 
     if (incumbent.source_match_bytes == 0) return true;
@@ -412,9 +412,9 @@ struct substrings_folded_cursor_t {
 };
 
 SZ_HELPER_AUTO void substrings_folded_cursor_init(substrings_folded_cursor_t &cursor,
-                                                  span<byte_t const> haystack) noexcept {
-    sz_utf8_folded_iter_init_(&cursor.runes, (cptr_t)haystack.data(), haystack.size());
-    cursor.origin = (cptr_t)haystack.data();
+                                                  span<char const> haystack) noexcept {
+    sz_utf8_folded_iter_init_(&cursor.runes, haystack.data(), haystack.size());
+    cursor.origin = haystack.data();
     cursor.image_length = 0;
     cursor.image_index = 0;
 }
@@ -525,12 +525,12 @@ struct substrings_resolved_match_t {
  *  when the folded stream is periodic with that period, so the repeat test rides a `shift`-sized ring that
  *  one codepoint's image bounds, and shares the single backward walk with the start it recovers.
  */
-SZ_HELPER_AUTO substrings_resolved_match_t substrings_resolve_match(span<byte_t const> haystack, size_t source_end,
+SZ_HELPER_AUTO substrings_resolved_match_t substrings_resolve_match(span<char const> haystack, size_t source_end,
                                                                     size_t trailing, size_t folded_match_bytes,
                                                                     size_t shift) noexcept {
 
     sz_utf8_folded_reverse_iter_t iterator;
-    sz_utf8_folded_reverse_iter_init_(&iterator, (cptr_t)haystack.data(), (cptr_t)(haystack.data() + source_end));
+    sz_utf8_folded_reverse_iter_init_(&iterator, haystack.data(), haystack.data() + source_end);
 
     substrings_resolved_match_t resolved;
     resolved.source_offset = source_end;
@@ -538,7 +538,7 @@ SZ_HELPER_AUTO substrings_resolved_match_t substrings_resolve_match(span<byte_t 
 
     u8_t pending[4];
     size_t pending_count = 0;
-    cptr_t codepoint_begin = (cptr_t)(haystack.data() + source_end);
+    cptr_t codepoint_begin = haystack.data() + source_end;
     u8_t ring[substrings_folded_image_max_k] = {};
     cptr_t start_here = nullptr, start_earlier = nullptr;
     size_t const wanted = shift != 0 ? folded_match_bytes + shift : folded_match_bytes;
@@ -568,7 +568,7 @@ SZ_HELPER_AUTO substrings_resolved_match_t substrings_resolve_match(span<byte_t 
         if (!periodic && taken >= folded_match_bytes) break;
     }
 
-    if (start_here != nullptr) resolved.source_offset = (size_t)(start_here - (cptr_t)haystack.data());
+    if (start_here != nullptr) resolved.source_offset = (size_t)(start_here - haystack.data());
     resolved.repeats = periodic && start_here != nullptr && start_here == start_earlier;
     return resolved;
 }
@@ -582,7 +582,7 @@ SZ_HELPER_AUTO substrings_resolved_match_t substrings_resolve_match(span<byte_t 
  *  is one subtraction; anything earlier pays the backward walk. Every walk resolves matches this way, so the
  *  cheap test and the expensive fallback stay one decision rather than four copies of one.
  */
-SZ_HELPER_AUTO substrings_resolved_match_t substrings_folded_span(span<byte_t const> haystack,
+SZ_HELPER_AUTO substrings_resolved_match_t substrings_folded_span(span<char const> haystack,
                                                                   substrings_folded_byte_t const &step, size_t folded,
                                                                   size_t last_break_folded_end,
                                                                   size_t folded_match_bytes) noexcept {
@@ -1727,7 +1727,7 @@ struct aho_corasick_dictionary {
         state_id_t current_state = automaton.root;
 
         substrings_folded_cursor_t cursor;
-        substrings_folded_cursor_init(cursor, haystack);
+        substrings_folded_cursor_init(cursor, haystack.template cast<char const>());
 
         size_t folded = 0, last_break_folded_end = 0;
         substrings_folded_byte_t step;
@@ -1755,7 +1755,7 @@ struct aho_corasick_dictionary {
                 if (folded < folded_length) continue;
 
                 substrings_resolved_match_t const resolved = substrings_folded_span(
-                    haystack, step, folded, last_break_folded_end, folded_length);
+                    haystack.template cast<char const>(), step, folded, last_break_folded_end, folded_length);
                 if (resolved.repeats) continue;
                 size_t const match_offset = resolved.source_offset;
                 if (!callback((size_t)output.needle_index, match_offset, step.codepoint_end - match_offset)) return;
@@ -2187,8 +2187,8 @@ struct substrings<allocator_type_, capability_,
         std::visit(
             [&](auto const &dict) noexcept {
                 for (size_t index = 0; index < counts_per_haystack.size(); ++index)
-                    matches_total += counts_per_haystack[index] =
-                        dict.count(to_bytes_view(haystacks[index]), overlap_policy, pending_starts_span_());
+                    matches_total += counts_per_haystack[index] = dict.count(to_bytes_view(haystacks[index]),
+                                                                             overlap_policy, pending_starts_span_());
             },
             dict_);
         return status_t::success_k;
@@ -2258,9 +2258,8 @@ struct substrings<allocator_type_, capability_,
         std::visit(
             [&](auto const &dict) noexcept {
                 for (size_t index = 0; index < haystacks.size(); ++index)
-                    output_offsets[index] = substrings_rewritten_size(dict, to_bytes_view(haystacks[index]),
-                                                                      pending_starts_span_(), overlap_policy,
-                                                                      replacements);
+                    output_offsets[index] = substrings_rewritten_size(
+                        dict, to_bytes_view(haystacks[index]), pending_starts_span_(), overlap_policy, replacements);
             },
             dict_);
         substrings_sizes_into_offsets(output_offsets, output_bytes_written);
@@ -2532,8 +2531,8 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index) {
             span<byte_t const> const haystack = to_bytes_view(haystacks[haystack_index]);
             if (!is_large_(haystack.size(), specs)) continue; // ? Already sized above.
-            output_offsets[haystack_index] =
-                size_one_large_(haystack, overlap_policy, replacements, executor, shares_of_large_(large_index, cores));
+            output_offsets[haystack_index] = size_one_large_(haystack, overlap_policy, replacements, executor,
+                                                             shares_of_large_(large_index, cores));
             ++large_index;
         }
         substrings_sizes_into_offsets(output_offsets, output_bytes_written);
@@ -2972,16 +2971,15 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         // A position is spanned when it lies strictly inside a match, so each match marks `(start, end)` and
         // the running sum below reads zero exactly where nothing reaches across.
         visit_dictionary([&](auto const &dict) noexcept {
-            dict.find({haystack.data() + search_begin, window},
-                      [&](size_t needle_index, size_t match_offset, size_t match_length) noexcept {
-                          sz_unused_(needle_index);
-                          size_t const start = search_begin + match_offset + 1,
-                                       end = search_begin + match_offset + match_length;
-                          size_t const from = sz_max_of_two(start, search_begin);
-                          size_t const to = sz_min_of_two(end, walk_end);
-                          if (from < to) ++spanned[from - search_begin], --spanned[to - search_begin];
-                          return true;
-                      });
+            dict.find({haystack.data() + search_begin, window}, [&](size_t needle_index, size_t match_offset,
+                                                                    size_t match_length) noexcept {
+                sz_unused_(needle_index);
+                size_t const start = search_begin + match_offset + 1, end = search_begin + match_offset + match_length;
+                size_t const from = sz_max_of_two(start, search_begin);
+                size_t const to = sz_min_of_two(end, walk_end);
+                if (from < to) ++spanned[from - search_begin], --spanned[to - search_begin];
+                return true;
+            });
         });
 
         size_t restart = 0;
@@ -3147,8 +3145,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         }
 
         if (length_source == substrings_document_length_t::haystack_bytes_k) document_length = (f32_t)haystack.size();
-        return substrings_bm25_total(needle_weights, parameters, document_length, merged, merged_touched,
-                                      merged_count);
+        return substrings_bm25_total(needle_weights, parameters, document_length, merged, merged_touched, merged_count);
     }
 
     /** @brief Writes every small haystack's matches, one core per haystack into disjoint output ranges. */
@@ -3206,17 +3203,15 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
             size_t const owned_bytes = optimal_subrange.count;
             size_t count_matches_found_on_this_core = 0;
             visit_dictionary([&](auto const &dict) noexcept {
-                dict.find({optimal_begin, overlapping_end},
-                          [&](size_t needle_index, size_t match_offset, size_t match_length) noexcept {
-                              bool const belongs_to_this_core = match_offset < owned_bytes;
-                              if (!belongs_to_this_core) return true;
-                              matches[base_offset + count_matches_before_this_core +
-                                      count_matches_found_on_this_core] = {haystack_index, needle_index,
-                                                                           slice_offset_in_haystack + match_offset,
-                                                                           match_length};
-                              count_matches_found_on_this_core++;
-                              return true;
-                          });
+                dict.find({optimal_begin, overlapping_end}, [&](size_t needle_index, size_t match_offset,
+                                                                size_t match_length) noexcept {
+                    bool const belongs_to_this_core = match_offset < owned_bytes;
+                    if (!belongs_to_this_core) return true;
+                    matches[base_offset + count_matches_before_this_core + count_matches_found_on_this_core] = {
+                        haystack_index, needle_index, slice_offset_in_haystack + match_offset, match_length};
+                    count_matches_found_on_this_core++;
+                    return true;
+                });
             });
             sz_assert_(count_matches_found_on_this_core == count_matches_expected_on_this_core);
         });
@@ -3286,8 +3281,8 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         byte_t const *optimal_begin = haystack.begin() + optimal_subrange.first;
         byte_t const *const optimal_end = optimal_begin + optimal_subrange.count;
 
-        size_t const count_matches_non_overlapping =
-            visit_dictionary([&](auto const &dict) noexcept { return dict.count({optimal_begin, optimal_end}); });
+        size_t const count_matches_non_overlapping = visit_dictionary(
+            [&](auto const &dict) noexcept { return dict.count({optimal_begin, optimal_end}); });
 
         byte_t const *overlapping_start;
         byte_t const *overlapping_end;
@@ -3340,8 +3335,8 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
                 byte_t const *optimal_begin = haystack.begin() + optimal_subrange.first;
                 byte_t const *const optimal_end = optimal_begin + optimal_subrange.count;
                 byte_t const *const prefix_end = sz_min_of_two(optimal_begin + max_source_match_bytes, haystack.end());
-                byte_t const *const overlapping_end =
-                    sz_min_of_two(optimal_end + max_source_match_bytes, haystack.end());
+                byte_t const *const overlapping_end = sz_min_of_two(optimal_end + max_source_match_bytes,
+                                                                    haystack.end());
 
                 size_t matches_in_part = 0;
                 matches_in_prefix = 0;
@@ -3350,8 +3345,8 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
                 // per-byte attribution test, so it walks scalar; `prefix_end` never exceeds `overlapping_end`,
                 // both being clamped by the same haystack end.
                 for (; optimal_begin != prefix_end; ++optimal_begin) {
-                    walked_state_id_t const output_count =
-                        aho_corasick_step_counting(automaton, current_state, *optimal_begin);
+                    walked_state_id_t const output_count = aho_corasick_step_counting(automaton, current_state,
+                                                                                      *optimal_begin);
                     matches_in_part += output_count;
                     matches_in_prefix += output_count;
                 }

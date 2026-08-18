@@ -522,9 +522,9 @@ static PyObject *Substrings_score_bm25(Substrings *self, PyObject *args, PyObjec
 /** @brief What a rewrite of nothing returns: empty bytes beside the one boundary an empty tape carries. */
 static PyObject *empty_rewrite_result(void) {
     npy_intp dims[1] = {1};
-    PyArrayObject *offsets_array = (PyArrayObject *)PyArray_SimpleNew(1, dims, NPY_UINT64);
+    PyArrayObject *offsets_array = (PyArrayObject *)PyArray_SimpleNew(1, dims, NPY_UINTP);
     if (!offsets_array) return PyErr_NoMemory();
-    *(sz_u64_t *)PyArray_DATA(offsets_array) = 0;
+    *(sz_size_t *)PyArray_DATA(offsets_array) = 0;
 
     PyObject *rewritten = PyBytes_FromStringAndSize(NULL, 0);
     if (!rewritten) {
@@ -607,7 +607,7 @@ static PyObject *Substrings_replace(Substrings *self, PyObject *args, PyObject *
     }
 
     npy_intp offsets_dims[1] = {(npy_intp)(haystacks.count + 1)};
-    PyArrayObject *offsets_array = (PyArrayObject *)PyArray_SimpleNew(1, offsets_dims, NPY_UINT64);
+    PyArrayObject *offsets_array = (PyArrayObject *)PyArray_SimpleNew(1, offsets_dims, NPY_UINTP);
     if (!offsets_array) return PyErr_NoMemory();
 
     sz_memory_allocator_t *out_alloc = need_unified ? &unified_allocator : &default_allocator;
@@ -623,11 +623,11 @@ static PyObject *Substrings_replace(Substrings *self, PyObject *args, PyObject *
     status = haystacks.is_u32tape
                  ? szs_substrings_replace_u32tape(self->handle, device_handle, &haystacks.u32tape, policy,
                                                   &replacements_sequence, output_data, output_bound,
-                                                  (sz_u64_t *)PyArray_DATA(offsets_array), &output_bytes_written,
+                                                  (sz_size_t *)PyArray_DATA(offsets_array), &output_bytes_written,
                                                   &error_detail)
                  : szs_substrings_replace_u64tape(self->handle, device_handle, &haystacks.u64tape, policy,
                                                   &replacements_sequence, output_data, output_bound,
-                                                  (sz_u64_t *)PyArray_DATA(offsets_array), &output_bytes_written,
+                                                  (sz_size_t *)PyArray_DATA(offsets_array), &output_bytes_written,
                                                   &error_detail);
     SZS_UNLOCK_(&self->lock);
     if (device_scope) SZS_UNLOCK_(&device_scope->lock);
@@ -774,7 +774,7 @@ static char const doc_replace[] = //
     "  policy (str, optional): 'leftmost-longest' or 'leftmost-first'; overlapping is refused.\n"
     "\n"
     "Returns:\n"
-    "  tuple[bytes, numpy.ndarray]: The rewritten tape and its uint64 offsets, one per haystack plus one.";
+    "  tuple[bytes, numpy.ndarray]: The rewritten tape and its uintp offsets, one per haystack plus one.";
 
 static char const doc_replace_bound[] = //
     "replace_bound(replacements, input_bytes)\n"

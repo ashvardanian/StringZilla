@@ -67,8 +67,8 @@ SZ_HELPER_INLINE sz_bool_t sz_line_break_is_cm_or_zwj_(sz_u8_t line_break_class)
 }
 
 /** @brief One decoded codepoint's LB1-resolved Line_Break class; advances @p position and returns the descriptor. */
-SZ_HELPER_AUTO sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t length, sz_size_t *position,
-                                                 sz_u16_t *descriptor_out) {
+SZ_HELPER_INLINE sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t length, sz_size_t *position,
+                                                   sz_u16_t *descriptor_out) {
     sz_size_t decode = *position;
     sz_rune_t const rune = sz_utf8_next_rune_(text, length, &decode);
     sz_u16_t const descriptor = sz_rune_line_break_property(rune);
@@ -111,9 +111,9 @@ SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_(void) {
  *         A combining mark with no attachable base (start of text, or after BK/CR/LF/NL/SP/ZW) is LB10: kept as a
  *         lone AL cluster. @p last_codepoint_was_zwj carries the LB8a "preceded by ZWJ" bit across calls.
  */
-SZ_HELPER_AUTO sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t text, sz_size_t length,
-                                                                   sz_size_t *position,
-                                                                   sz_bool_t *last_codepoint_was_zwj) {
+SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t text, sz_size_t length,
+                                                                     sz_size_t *position,
+                                                                     sz_bool_t *last_codepoint_was_zwj) {
     sz_line_break_cluster_t cluster;
     if (*position >= length) return sz_line_break_cluster_invalid_();
     cluster.valid = sz_true_k;

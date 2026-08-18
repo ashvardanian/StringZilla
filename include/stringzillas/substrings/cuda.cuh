@@ -93,13 +93,13 @@ SZ_DEVICE_INLINE void cuda_increment_global_(u32_t *counter, u32_t addend) noexc
 
 /** @brief The same reduction against a block's own shared memory, for counters that never leave it. */
 SZ_DEVICE_INLINE void cuda_increment_shared_(u32_t *counter, u32_t addend) noexcept {
-    asm volatile("red.shared.add.u32 [%0], %1;" ::"r"((u32_t)__cvta_generic_to_shared(counter)),
-                 "r"(addend) : "memory");
+    asm volatile("red.shared.add.u32 [%0], %1;" ::"r"((u32_t)__cvta_generic_to_shared(counter)), "r"(addend)
+                 : "memory");
 }
 
 SZ_DEVICE_INLINE void cuda_increment_shared_(u64_t *counter, u64_t addend) noexcept {
-    asm volatile("red.shared.add.u64 [%0], %1;" ::"r"((u32_t)__cvta_generic_to_shared(counter)),
-                 "l"(addend) : "memory");
+    asm volatile("red.shared.add.u64 [%0], %1;" ::"r"((u32_t)__cvta_generic_to_shared(counter)), "l"(addend)
+                 : "memory");
 }
 
 /** @brief Where a counting walk puts its counts: the block's own table first, the overflow row when full.
@@ -117,8 +117,7 @@ struct substrings_bm25_counters_t {
  *  The probe re-reads its slot rather than hoisting it: a cached read would make a full table look like one
  *  slot reused forever, which scores wrong rather than hanging.
  */
-SZ_DEVICE_INLINE void substrings_bm25_count_(substrings_bm25_counters_t const &counters,
-                                             u32_t needle_index) noexcept {
+SZ_DEVICE_INLINE void substrings_bm25_count_(substrings_bm25_counters_t const &counters, u32_t needle_index) noexcept {
     // A dictionary that fits the table gets a slot per needle, so the index @b is the slot - no hash, no probe.
     if (counters.overflow.empty()) return cuda_increment_shared_(&counters.slots[needle_index].frequency, 1u);
 
@@ -155,8 +154,7 @@ SZ_DEVICE_INLINE f32_t substrings_bm25_from_fixed_(i64_t total) noexcept {
  */
 template <typename state_id_type_>
 SZ_DEVICE_INLINE void substrings_stage_automaton_(aho_corasick_view<state_id_type_> const &view,
-                                                  span<state_id_type_> shared_hot_rows,
-                                                  span<u32_t const> accepts_words,
+                                                  span<state_id_type_> shared_hot_rows, span<u32_t const> accepts_words,
                                                   span<u32_t> shared_accepts_words) noexcept {
     for (size_t cell = threadIdx.x; cell < shared_hot_rows.size(); cell += blockDim.x)
         shared_hot_rows[cell] = view.hot_rows[cell];
@@ -312,7 +310,7 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_uncased_( //
 
     span<byte_t const> const walked {haystack.data() + walk_begin, haystack.size() - walk_begin};
     substrings_folded_cursor_t cursor;
-    substrings_folded_cursor_init(cursor, walked);
+    substrings_folded_cursor_init(cursor, walked.cast<char const>());
 
     size_t folded = 0, last_break_folded_end = 0;
     substrings_folded_byte_t step;
@@ -339,8 +337,8 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_uncased_( //
             size_t const folded_length = output.folded_match_bytes;
             if (folded < folded_length) continue;
 
-            substrings_resolved_match_t const resolved =
-                substrings_folded_span(walked, step, folded, last_break_folded_end, folded_length);
+            substrings_resolved_match_t const resolved = substrings_folded_span(walked.cast<char const>(), step, folded,
+                                                                                last_break_folded_end, folded_length);
             if (resolved.repeats) continue;
             size_t const match_offset = resolved.source_offset;
             if constexpr (pass_ == substrings_pass_t::writing_k)
@@ -385,11 +383,12 @@ static __global__ void substrings_count_chunks_per_haystack_(span<span<byte_t co
  *  non-overlapping output range, so placing a write needs no atomics.
  */
 template <typename state_id_type_, substrings_pass_t pass_>
-__global__ void substrings_walk_per_cuda_chunk_(
-    aho_corasick_view<state_id_type_> view, state_id_type_ staged_rows_count, span<u32_t const> accepts_words,
-    u32_t staged_accepts_words, span<span<byte_t const> const> haystacks, span<size_t const> haystack_chunk_offsets,
-    size_t chunk_bytes, size_t chunk_count, span<size_t> chunk_match_slots,
-    span<substrings_match_t> matches_out) {
+__global__ void substrings_walk_per_cuda_chunk_(aho_corasick_view<state_id_type_> view,
+                                                state_id_type_ staged_rows_count, span<u32_t const> accepts_words,
+                                                u32_t staged_accepts_words, span<span<byte_t const> const> haystacks,
+                                                span<size_t const> haystack_chunk_offsets, size_t chunk_bytes,
+                                                size_t chunk_count, span<size_t> chunk_match_slots,
+                                                span<substrings_match_t> matches_out) {
     extern __shared__ unsigned char substrings_shared_bytes_[];
     span<state_id_type_> const shared_hot_rows {reinterpret_cast<state_id_type_ *>(substrings_shared_bytes_),
                                                 (size_t)staged_rows_count * substrings_alphabet_size_k};
@@ -412,18 +411,17 @@ __global__ void substrings_walk_per_cuda_chunk_(
         size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, haystack.size());
 
         size_t const output_base_offset = pass_ == substrings_pass_t::writing_k ? chunk_match_slots[chunk_index]
-                                                                                   : (size_t)0;
+                                                                                : (size_t)0;
         // One dictionary is byte-exact or folded for its whole lifetime, so every thread takes the same
         // side and the branch costs no divergence. Policy no longer reaches here: the walk emits every
         // match, and a cover - when one is asked for - is resolved afterwards over what it emitted.
-        size_t const matches_in_chunk =
-            view.case_sensitivity == substrings_uncased_k
-                ? substrings_walk_chunk_uncased_<state_id_type_, pass_>( //
-                      view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index,
-                      output_base_offset, matches_out)
-                : substrings_walk_chunk_<state_id_type_, pass_>( //
-                      view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end, haystack_index,
-                      output_base_offset, matches_out);
+        size_t const matches_in_chunk = view.case_sensitivity == substrings_uncased_k
+                                            ? substrings_walk_chunk_uncased_<state_id_type_, pass_>( //
+                                                  view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end,
+                                                  haystack_index, output_base_offset, matches_out)
+                                            : substrings_walk_chunk_<state_id_type_, pass_>( //
+                                                  view, shared_hot_rows, accepts, haystack, chunk_begin, chunk_end,
+                                                  haystack_index, output_base_offset, matches_out);
         if constexpr (pass_ == substrings_pass_t::sizing_k) chunk_match_slots[chunk_index] = matches_in_chunk;
         else sz_unused_(matches_in_chunk);
     }
@@ -502,7 +500,10 @@ static __global__ void substrings_cover_resolve_(span<substrings_match_t const> 
             for (size_t slot = index; slot < segment_end; ++slot) {
                 substrings_match_t const &candidate = matches[slot];
                 if (candidate.byte_offset < cursor) continue;
-                if (chosen == segment_end) { chosen = slot; continue; }
+                if (chosen == segment_end) {
+                    chosen = slot;
+                    continue;
+                }
                 substrings_match_t const &incumbent = matches[chosen];
                 if (candidate.byte_offset != incumbent.byte_offset) {
                     if (candidate.byte_offset < incumbent.byte_offset) chosen = slot;
@@ -529,8 +530,7 @@ static __global__ void substrings_cover_resolve_(span<substrings_match_t const> 
  *  the scan steps across it.
  */
 static __global__ void substrings_cover_compact_(span<substrings_match_t const> matches,
-                                                 span<size_t const> keep_offsets,
-                                                 span<substrings_match_t> survivors) {
+                                                 span<size_t const> keep_offsets, span<substrings_match_t> survivors) {
     for (size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x; index < matches.size();
          index += (size_t)gridDim.x * blockDim.x)
         if (keep_offsets[index + 1] > keep_offsets[index]) survivors[keep_offsets[index]] = matches[index];
@@ -543,8 +543,7 @@ static __global__ void substrings_cover_haystack_offsets_(span<size_t const> hay
                                                           span<size_t> cover_offsets) {
     for (size_t haystack_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x; haystack_index <= haystack_count;
          haystack_index += (size_t)gridDim.x * blockDim.x)
-        cover_offsets[haystack_index] =
-            keep_offsets[chunk_match_offsets[haystack_chunk_offsets[haystack_index]]];
+        cover_offsets[haystack_index] = keep_offsets[chunk_match_offsets[haystack_chunk_offsets[haystack_index]]];
 }
 
 /**
@@ -559,9 +558,8 @@ static __global__ void substrings_cover_haystack_offsets_(span<size_t const> hay
  *  haystacks that this kernel feeds. The copy kernel adds it, having looked the haystack up anyway.
  */
 static __global__ void substrings_rewrite_offsets_per_haystack_( //
-    span<span<byte_t const> const> haystacks, span<size_t const> match_offsets,
-    span<substrings_match_t const> matches, span<size_t const> replacement_offsets, span<size_t> match_gap_offsets,
-    span<size_t> output_sizes) {
+    span<span<byte_t const> const> haystacks, span<size_t const> match_offsets, span<substrings_match_t const> matches,
+    span<size_t const> replacement_offsets, span<size_t> match_gap_offsets, span<size_t> output_sizes) {
     using scan_t = cub::BlockScan<size_t, substrings_threads_per_block_k>;
     __shared__ typename scan_t::TempStorage scan_storage;
     __shared__ size_t drift_carry;
@@ -579,8 +577,8 @@ static __global__ void substrings_rewrite_offsets_per_haystack_( //
                 substrings_match_t const &match = matches[match_index];
                 // Shrinking matches make this wrap, which is exactly right: only the prefix sums are ever
                 // read, every one of them names a real offset, and modular arithmetic reproduces each.
-                drift_here = replacement_offsets[match.needle_index + 1] -
-                             replacement_offsets[match.needle_index] - match.byte_length;
+                drift_here = replacement_offsets[match.needle_index + 1] - replacement_offsets[match.needle_index] -
+                             match.byte_length;
                 previous_end = match_index == first
                                    ? 0
                                    : matches[match_index - 1].byte_offset + matches[match_index - 1].byte_length;
@@ -606,9 +604,8 @@ static __global__ void substrings_rewrite_offsets_per_haystack_( //
  *  A stretch that misses the tile entirely costs the clip and nothing else, which is what lets the caller
  *  hand every warp a stretch without first working out which ones land inside.
  */
-SZ_DEVICE_INLINE void substrings_copy_clipped_(char *output, size_t tile_begin, size_t tile_end,
-                                               size_t output_offset, byte_t const *source, size_t bytes,
-                                               unsigned lane) noexcept {
+SZ_DEVICE_INLINE void substrings_copy_clipped_(char *output, size_t tile_begin, size_t tile_end, size_t output_offset,
+                                               byte_t const *source, size_t bytes, unsigned lane) noexcept {
     size_t const copy_begin = sz_max_of_two(output_offset, tile_begin);
     size_t const copy_end = sz_min_of_two(output_offset + bytes, tile_end);
     for (size_t position = copy_begin + lane; position < copy_end; position += 32)
@@ -635,9 +632,9 @@ SZ_DEVICE_INLINE size_t substrings_last_not_above_(span<size_t const> ascending,
  *  and striding a whole block across one of them would leave most lanes idle.
  */
 static __global__ void substrings_rewrite_copy_( //
-    span<span<byte_t const> const> haystacks, span<size_t const> match_offsets,
-    span<substrings_match_t const> matches, span<size_t const> match_gap_offsets, byte_t const *replacement_bytes,
-    span<size_t const> replacement_offsets, span<size_t const> output_offsets, size_t tile_bytes, char *output) {
+    span<span<byte_t const> const> haystacks, span<size_t const> match_offsets, span<substrings_match_t const> matches,
+    span<size_t const> match_gap_offsets, byte_t const *replacement_bytes, span<size_t const> replacement_offsets,
+    span<size_t const> output_offsets, size_t tile_bytes, char *output) {
 
     // Read on the device, so nothing about the tape's size has to reach the host before this launch.
     size_t const output_bytes_total = output_offsets[output_offsets.size() - 1];
@@ -659,8 +656,8 @@ static __global__ void substrings_rewrite_copy_( //
             size_t const stretches = last - first + 1;
             size_t const wanted = tile_begin > base ? tile_begin - base : 0;
             size_t const skip = first == last ? 0
-                                              : substrings_last_not_above_({match_gap_offsets.data() + first,
-                                                                            last - first}, wanted);
+                                              : substrings_last_not_above_(
+                                                    {match_gap_offsets.data() + first, last - first}, wanted);
 
             // Past the last match the drift is whatever the whole haystack accumulated, which its rewritten
             // length already names - so the closing stretch needs no offset of its own.
@@ -669,13 +666,12 @@ static __global__ void substrings_rewrite_copy_( //
             for (size_t stretch = skip + warp_index; stretch < stretches; stretch += warps_per_block) {
                 size_t const match_index = first + stretch;
                 bool const closes_haystack = match_index == last;
-                size_t const previous_end = match_index == first
-                                                ? 0
-                                                : matches[match_index - 1].byte_offset +
-                                                      matches[match_index - 1].byte_length;
+                size_t const previous_end = match_index == first ? 0
+                                                                 : matches[match_index - 1].byte_offset +
+                                                                       matches[match_index - 1].byte_length;
                 size_t const gap_source_end = closes_haystack ? haystack.size() : matches[match_index].byte_offset;
-                size_t const gap_begin =
-                    base + (closes_haystack ? previous_end + total_drift : match_gap_offsets[match_index]);
+                size_t const gap_begin = base + (closes_haystack ? previous_end + total_drift
+                                                                 : match_gap_offsets[match_index]);
 
                 substrings_copy_clipped_(output, tile_begin, tile_end, gap_begin, haystack.data() + previous_end,
                                          gap_source_end - previous_end, lane);
@@ -691,7 +687,6 @@ static __global__ void substrings_rewrite_copy_( //
     }
 }
 
-
 /**
  *  @brief One BM25 score per haystack: a block tallies its haystack's needle frequencies, then reduces them.
  *
@@ -705,11 +700,13 @@ static __global__ void substrings_rewrite_copy_( //
  *  shared total, whose addition is associative, so the total does not depend on the order lanes finish in.
  */
 template <typename state_id_type_>
-__global__ void substrings_score_bm25_per_haystack_(
-    aho_corasick_view<state_id_type_> view, state_id_type_ staged_rows_count, span<u32_t const> accepts_words,
-    u32_t staged_accepts_words, span<span<byte_t const> const> haystacks, span<f32_t const> document_lengths,
-    substrings_bm25_t parameters, span<f32_t const> needle_weights, span<u32_t> overflow_per_block,
-    span<f32_t> scores) {
+__global__ void substrings_score_bm25_per_haystack_(aho_corasick_view<state_id_type_> view,
+                                                    state_id_type_ staged_rows_count, span<u32_t const> accepts_words,
+                                                    u32_t staged_accepts_words,
+                                                    span<span<byte_t const> const> haystacks,
+                                                    span<f32_t const> document_lengths, substrings_bm25_t parameters,
+                                                    span<f32_t const> needle_weights, span<u32_t> overflow_per_block,
+                                                    span<f32_t> scores) {
 
     extern __shared__ unsigned char substrings_shared_bytes_[];
     span<state_id_type_> const shared_hot_rows {reinterpret_cast<state_id_type_ *>(substrings_shared_bytes_),
@@ -734,10 +731,10 @@ __global__ void substrings_score_bm25_per_haystack_(
     __shared__ int block_overflowed;
 
     // Allocated only for a dictionary wider than the table; empty otherwise, draining this clear to nothing.
-    span<u32_t> const overflow =
-        overflow_per_block.size()
-            ? span<u32_t> {overflow_per_block.data() + (size_t)blockIdx.x * needle_count, needle_count}
-            : span<u32_t> {};
+    span<u32_t> const overflow = overflow_per_block.size()
+                                     ? span<u32_t> {overflow_per_block.data() + (size_t)blockIdx.x * needle_count,
+                                                    needle_count}
+                                     : span<u32_t> {};
     for (size_t needle_index = threadIdx.x; needle_index < overflow.size(); needle_index += blockDim.x)
         overflow[needle_index] = 0;
     __syncthreads();
@@ -790,8 +787,7 @@ __global__ void substrings_score_bm25_per_haystack_(
         for (size_t slot = threadIdx.x; slot < table_slots; slot += blockDim.x) {
             u32_t const frequency = slots[slot].frequency;
             if (frequency == 0u) continue;
-            partial_fixed += contribution_of(
-                overflow.empty() ? (u32_t)slot : slots[slot].needle_index, frequency);
+            partial_fixed += contribution_of(overflow.empty() ? (u32_t)slot : slots[slot].needle_index, frequency);
         }
 
         // Only a document that outgrew the table ever dirties the overflow row, so only that document pays a
@@ -1000,12 +996,12 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return std::visit([](auto const &dictionary) noexcept { return dictionary.count_states(); }, dictionary_);
     }
     size_t max_source_match_bytes() const noexcept {
-        return std::visit(
-            [](auto const &dictionary) noexcept { return (size_t)dictionary.max_source_match_bytes(); }, dictionary_);
+        return std::visit([](auto const &dictionary) noexcept { return (size_t)dictionary.max_source_match_bytes(); },
+                          dictionary_);
     }
     size_t min_source_match_bytes() const noexcept {
-        return std::visit(
-            [](auto const &dictionary) noexcept { return (size_t)dictionary.min_source_match_bytes(); }, dictionary_);
+        return std::visit([](auto const &dictionary) noexcept { return (size_t)dictionary.min_source_match_bytes(); },
+                          dictionary_);
     }
     size_t hot_count() const noexcept {
         return std::visit([](auto const &dictionary) noexcept { return dictionary.hot_count(); }, dictionary_);
@@ -1057,8 +1053,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (status.status != status_t::success_k) return status;
 
         // One lambda per kernel family, invoked once per width, as `resolve_warp` does in `similarities/cuda.cuh`.
-        auto const resolve_walk = [&]<typename state_id_type_, substrings_pass_t pass_>(
-                                      kernel_shape_t &shape) noexcept -> cuda_status_t {
+        auto const resolve_walk =
+            [&]<typename state_id_type_, substrings_pass_t pass_>(kernel_shape_t &shape) noexcept -> cuda_status_t {
             return resolve_kernel_shape(
                 shape, reinterpret_cast<void const *>(&substrings_walk_per_cuda_chunk_<state_id_type_, pass_>), 0,
                 static_cast<unsigned>(shared_memory_ceiling), false);
@@ -1090,13 +1086,11 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
             cuda_device_collective_threads_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
-        status = resolve_kernel_shape(table.cover_resolve,
-                                      reinterpret_cast<void const *>(&substrings_cover_resolve_),
+        status = resolve_kernel_shape(table.cover_resolve, reinterpret_cast<void const *>(&substrings_cover_resolve_),
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
-        status = resolve_kernel_shape(table.cover_compact,
-                                      reinterpret_cast<void const *>(&substrings_cover_compact_),
+        status = resolve_kernel_shape(table.cover_compact, reinterpret_cast<void const *>(&substrings_cover_compact_),
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
@@ -1113,8 +1107,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
-        status = resolve_kernel_shape(table.rewrite_copy,
-                                      reinterpret_cast<void const *>(&substrings_rewrite_copy_),
+        status = resolve_kernel_shape(table.rewrite_copy, reinterpret_cast<void const *>(&substrings_rewrite_copy_),
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
@@ -1182,8 +1175,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         narrow_dictionary_t narrow(alloc_);
         status_t const narrowed = narrow.try_build(wide);
-        if (narrowed != status_t::success_k && narrowed != status_t::overflow_risk_k)
-            return {narrowed, cudaSuccess};
+        if (narrowed != status_t::success_k && narrowed != status_t::overflow_risk_k) return {narrowed, cudaSuccess};
         if (narrowed == status_t::success_k) dictionary_.template emplace<narrow_dictionary_t>(std::move(narrow));
         else dictionary_.template emplace<wide_dictionary_t>(std::move(wide));
 
@@ -1244,7 +1236,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     cuda_status_t try_budget_staging_(cuda_executor_t const &executor) noexcept {
         auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
-        CUfunction const walk_function = kernel_table.count_chunk.for_width(state_width()).function; // ? The scatter kernel shares its shape
+        CUfunction const walk_function =
+            kernel_table.count_chunk.for_width(state_width()).function; // ? The scatter kernel shares its shape
 
         // Occupancy first, staging only out of what is left over. The walk chases a data-dependent transition
         // load, so resident warps are the only thing hiding its latency, while the rows it would stage are
@@ -1260,8 +1253,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         size_t shared_memory_budget = 0;
         cuda_status_t const budget_status = shared_memory_budget_for_resident_blocks(
-            shared_memory_budget, walk_function, substrings_threads_per_block_k, target_blocks,
-            executor.device_id());
+            shared_memory_budget, walk_function, substrings_threads_per_block_k, target_blocks, executor.device_id());
         if (budget_status.status != status_t::success_k) return budget_status;
 
         // Staging is all-or-nothing: a partial prefix still pays the copy per block and the bounds test per
@@ -1270,8 +1262,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                                                                            : sizeof(u32_t);
         size_t const hot_rows = hot_count();
         size_t const accepts_bytes = accepts_words_.size() * sizeof(u32_t);
-        size_t const whole_automaton_bytes = hot_rows * substrings_alphabet_size_k * bytes_per_state_id +
-                                             accepts_bytes;
+        size_t const whole_automaton_bytes = hot_rows * substrings_alphabet_size_k * bytes_per_state_id + accepts_bytes;
         // Scoring carries its counter table in the same allocation, so staging must fit beside it or the two
         // would compete for one budget. They do not today - staging is refused for every real dictionary -
         // but that is luck rather than design, and this keeps it true by construction.
@@ -1313,8 +1304,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
             total_bytes += to_bytes_view(replacements[needle_index]).size();
 
         if (replacement_offsets_.try_resize_uninitialized(needle_count + 1) != status_t::success_k ||
-            replacement_bytes_.try_resize_uninitialized(sz_max_of_two(total_bytes, (size_t)1)) !=
-                status_t::success_k)
+            replacement_bytes_.try_resize_uninitialized(sz_max_of_two(total_bytes, (size_t)1)) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
         size_t written = 0;
@@ -1389,9 +1379,9 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                                                 pass.chunk_bytes, pass.chunk_count);
         if (plan_status.status != status_t::success_k) return plan_status;
 
-        cuda_status_t const count_status =
-            count_into_offsets_(executor, specs, pass.kernel_table, pass.shared_memory_bytes, pass.blocks_per_grid,
-                                pass.chunk_bytes, pass.chunk_count);
+        cuda_status_t const count_status = count_into_offsets_(executor, specs, pass.kernel_table,
+                                                               pass.shared_memory_bytes, pass.blocks_per_grid,
+                                                               pass.chunk_bytes, pass.chunk_count);
         if (count_status.status != status_t::success_k) return count_status;
 
         pass.has_work = true;
@@ -1448,14 +1438,12 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         // Worst case is a repeated byte against a nested-suffix dictionary, where every position emits
         // `max_outputs_per_state` merged outputs.
-        size_t const outputs_per_state =
-            visit_dictionary([](auto const &dictionary) noexcept { //
-                return (size_t)dictionary.view().max_outputs_per_state;
-            });
+        size_t const outputs_per_state = visit_dictionary([](auto const &dictionary) noexcept { //
+            return (size_t)dictionary.view().max_outputs_per_state;
+        });
         size_t const worst_case_matches_per_chunk = chunk_bytes * outputs_per_state;
-        if (outputs_per_state != 0 &&
-            (worst_case_matches_per_chunk / outputs_per_state != chunk_bytes ||
-             worst_case_matches_per_chunk > (size_t)std::numeric_limits<small_size_t>::max()))
+        if (outputs_per_state != 0 && (worst_case_matches_per_chunk / outputs_per_state != chunk_bytes ||
+                                       worst_case_matches_per_chunk > (size_t)std::numeric_limits<small_size_t>::max()))
             return {status_t::overflow_risk_k, cudaSuccess};
         return {status_t::success_k, cudaSuccess};
     }
@@ -1477,9 +1465,9 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         sz_assert_(staged_bytes <= std::numeric_limits<unsigned>::max() &&
                    "The staged prefix is budgeted against one multiprocessor's shared memory in `try_build`");
         shared_memory_bytes = static_cast<unsigned>(staged_bytes);
-        cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, kernel_table.count_chunk.for_width(state_width()).function,
-                                                                  substrings_threads_per_block_k, shared_memory_bytes,
-                                                                  specs);
+        cuda_status_t const occupancy_status = occupancy_grid_for(
+            blocks_per_grid, kernel_table.count_chunk.for_width(state_width()).function, substrings_threads_per_block_k,
+            shared_memory_bytes, specs);
         if (occupancy_status.status != status_t::success_k) return occupancy_status;
 
         size_t const target_threads = sz_max_of_two((size_t)blocks_per_grid * substrings_threads_per_block_k,
@@ -1507,8 +1495,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (chunks_error != CUDA_SUCCESS) return make_cuda_status(chunks_error);
 
         cuda_status_t const scan_status = cuda_launch_exclusive_sum_(
-            kernel_table.exclusive_sum, haystack_chunk_offsets_.data(), haystack_count,
-            haystack_chunk_offsets_.data(), {scan_partials_.data(), scan_partials_.size()}, specs, executor.stream());
+            kernel_table.exclusive_sum, haystack_chunk_offsets_.data(), haystack_count, haystack_chunk_offsets_.data(),
+            {scan_partials_.data(), scan_partials_.size()}, specs, executor.stream());
         if (scan_status.status != status_t::success_k) return scan_status;
 
         CUresult const sync_error = timer_.synchronize(executor.stream());
@@ -1527,17 +1515,17 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
             return {status_t::bad_alloc_k, cudaSuccess};
 
         // Sizing hands the walk no output span: the pass writes each chunk's count into its slot instead.
-        CUresult const count_error =
-            launch_walk_(substrings_pass_t::sizing_k, kernel_table, blocks_per_grid, shared_memory_bytes,
-                         chunk_bytes, chunk_count, span<match_t> {}, executor);
+        CUresult const count_error = launch_walk_(substrings_pass_t::sizing_k, kernel_table, blocks_per_grid,
+                                                  shared_memory_bytes, chunk_bytes, chunk_count, span<match_t> {},
+                                                  executor);
         if (count_error != CUDA_SUCCESS) return make_cuda_status(count_error);
 
         // In place: each chunk's slot holds its raw count going in and its exclusive offset coming out - the
         // scan kernel reads `input[i]` into a register before any thread writes `output[i]`, so reusing one
         // buffer for both is safe and skips a second chunk_count-sized allocation.
         return cuda_launch_exclusive_sum_(kernel_table.exclusive_sum, chunk_match_offsets_.data(), chunk_count,
-                                          chunk_match_offsets_.data(),
-                                          {scan_partials_.data(), scan_partials_.size()}, specs, executor.stream());
+                                          chunk_match_offsets_.data(), {scan_partials_.data(), scan_partials_.size()},
+                                          specs, executor.stream());
     }
 
     /**
@@ -1598,8 +1586,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         span<size_t> cover_offsets_argument {cover_haystack_offsets_.data(), haystack_count + 1};
         void *boundary_arguments[5] = {&haystack_chunk_offsets_argument, &chunk_match_offsets_argument,
                                        &cover_scan_argument, &haystack_count_argument, &cover_offsets_argument};
-        unsigned const boundary_grid = grid_for_items_(pass.kernel_table.cover_haystack_offsets,
-                                                       haystack_count + 1, specs);
+        unsigned const boundary_grid = grid_for_items_(pass.kernel_table.cover_haystack_offsets, haystack_count + 1,
+                                                       specs);
         CUresult const boundary_error = cuda_launch_t {}
                                             .grid(boundary_grid)
                                             .block(substrings_threads_per_block_k)
@@ -1659,8 +1647,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
      *  empty and tallies into the chunk slots - so the argument block is written here once.
      */
     CUresult launch_walk_(substrings_pass_t pass_kind, kernels_t const &kernel_table, unsigned blocks_per_grid,
-                          unsigned shared_memory_bytes, size_t chunk_bytes, size_t chunk_count,
-                          span<match_t> target, cuda_executor_t const &executor) noexcept {
+                          unsigned shared_memory_bytes, size_t chunk_bytes, size_t chunk_count, span<match_t> target,
+                          cuda_executor_t const &executor) noexcept {
         return state_width() == substrings_state_width_t::u16_k
                    ? launch_walk_at_<u16_t>(pass_kind, kernel_table, blocks_per_grid, shared_memory_bytes, chunk_bytes,
                                             chunk_count, target, executor)
@@ -1670,8 +1658,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
     template <typename state_id_type_>
     CUresult launch_walk_at_(substrings_pass_t pass_kind, kernels_t const &kernel_table, unsigned blocks_per_grid,
-                             unsigned shared_memory_bytes, size_t chunk_bytes, size_t chunk_count,
-                             span<match_t> target, cuda_executor_t const &executor) noexcept {
+                             unsigned shared_memory_bytes, size_t chunk_bytes, size_t chunk_count, span<match_t> target,
+                             cuda_executor_t const &executor) noexcept {
         aho_corasick_view<state_id_type_> view_argument = settled_dictionary_<state_id_type_>().view();
         state_id_type_ staged_rows_argument = static_cast<state_id_type_>(staged_rows_);
         span<u32_t const> accepts_words_argument {accepts_words_.data(), accepts_words_.size()};
@@ -1693,8 +1681,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                     &chunk_count_argument,
                                     &chunk_match_slots_argument,
                                     &matches_out_argument};
-        auto const &shapes =
-            pass_kind == substrings_pass_t::sizing_k ? kernel_table.count_chunk : kernel_table.scatter_chunk;
+        auto const &shapes = pass_kind == substrings_pass_t::sizing_k ? kernel_table.count_chunk
+                                                                      : kernel_table.scatter_chunk;
         return cuda_launch_t {}
             .grid(blocks_per_grid)
             .block(substrings_threads_per_block_k)
@@ -1748,15 +1736,14 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         // A cover is decided between matches, so counting one means emitting them first - the walk cannot
         // know which survive. That makes a counted cover cost what a found one does.
-        if (emitted_matches_.try_resize_uninitialized(sz_max_of_two(matches_total, (size_t)1)) !=
-            status_t::success_k)
+        if (emitted_matches_.try_resize_uninitialized(sz_max_of_two(matches_total, (size_t)1)) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
         CUresult const scatter_error = launch_scatter_(pass, {emitted_matches_.data(), matches_total}, executor);
         if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
 
         cuda_status_t const cover_status = resolve_cover_(pass, {emitted_matches_.data(), matches_total},
-                                                           overlap_policy, haystacks.size(), executor, specs,
-                                                           matches_total);
+                                                          overlap_policy, haystacks.size(), executor, specs,
+                                                          matches_total);
         if (cover_status.status != status_t::success_k) return cover_status;
         // No gather: a count wants the boundaries, and those the resolve already wrote.
         for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index)
@@ -1807,8 +1794,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         else {
             if (emitted > matches_capacity)
                 return matches_found = emitted, cuda_status_t {status_t::unexpected_dimensions_k, cudaSuccess};
-            output_is_device_accessible = emitted == 0 ||
-                                          is_device_accessible_memory((void const *)matches_out.data());
+            output_is_device_accessible = emitted == 0 || is_device_accessible_memory((void const *)matches_out.data());
             scatter_target = {matches_out.data(), emitted};
             if (!output_is_device_accessible) {
                 if (matches_staging_.try_resize_uninitialized(emitted) != status_t::success_k)
@@ -1821,13 +1807,12 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
 
         if (covering) {
-            cuda_status_t const cover_status = resolve_cover_(pass, scatter_target, overlap_policy,
-                                                               haystacks.size(), executor, specs, matches_in_batch);
+            cuda_status_t const cover_status = resolve_cover_(pass, scatter_target, overlap_policy, haystacks.size(),
+                                                              executor, specs, matches_in_batch);
             if (cover_status.status != status_t::success_k) return cover_status;
             // The survivors' count survives the refusal, so a caller that brought no buffer learns its size.
             if (matches_in_batch > matches_capacity)
-                return matches_found = matches_in_batch,
-                       cuda_status_t {status_t::unexpected_dimensions_k, cudaSuccess};
+                return matches_found = matches_in_batch, cuda_status_t {status_t::unexpected_dimensions_k, cudaSuccess};
 
             // The count is known before the gather runs, so the gather can write where the caller wants it
             // rather than into scratch that would then need copying out.
@@ -1923,8 +1908,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         size_t surviving = 0;
         cuda_status_t const cover_status = resolve_cover_(pass, {emitted_matches_.data(), matches_in_batch},
-                                                           overlap_policy, haystack_count, executor, specs,
-                                                           surviving);
+                                                          overlap_policy, haystack_count, executor, specs, surviving);
         if (cover_status.status != status_t::success_k) return cover_status;
         if (cover_survivors_.try_resize_uninitialized(sz_max_of_two(surviving, (size_t)1)) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
@@ -1940,9 +1924,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         span<size_t const> replacement_offsets_argument {replacement_offsets_.data(), replacement_offsets_.size()};
         span<size_t> gap_offsets_argument {rewrite_gap_offsets_.data(), surviving};
         span<size_t> output_sizes_argument {rewrite_output_offsets_.data(), haystack_count};
-        void *offsets_arguments[6] = {&haystacks_argument,  &match_offsets_argument,       &matches_argument,
-                                      &replacement_offsets_argument, &gap_offsets_argument,
-                                      &output_sizes_argument};
+        void *offsets_arguments[6] = {&haystacks_argument,           &match_offsets_argument, &matches_argument,
+                                      &replacement_offsets_argument, &gap_offsets_argument,   &output_sizes_argument};
         unsigned const offsets_grid = grid_for_items_(pass.kernel_table.rewrite_offsets, haystack_count, specs);
         CUresult const offsets_error = cuda_launch_t {}
                                            .grid(offsets_grid)
@@ -1987,19 +1970,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         byte_t const *replacement_bytes_argument = replacement_bytes_.data();
         span<size_t const> output_offsets_argument {rewrite_output_offsets_.data(), haystack_count + 1};
         size_t tile_bytes_argument = substrings_rewrite_tile_bytes_k;
-        void *copy_arguments[9] = {&haystacks_argument,
-                                    &match_offsets_argument,
-                                    &matches_argument,
-                                    &gap_offsets_const_argument,
-                                    &replacement_bytes_argument,
-                                    &replacement_offsets_argument,
-                                    &output_offsets_argument,
-                                    &tile_bytes_argument,
-                                    &copy_target};
-        unsigned const copy_grid = grid_for_items_(pass.kernel_table.rewrite_copy,
-                                                   divide_round_up(sz_max_of_two(staging_bytes, (size_t)1),
-                                                                   substrings_rewrite_tile_bytes_k),
-                                                   specs);
+        void *copy_arguments[9] = {
+            &haystacks_argument,         &match_offsets_argument,     &matches_argument,
+            &gap_offsets_const_argument, &replacement_bytes_argument, &replacement_offsets_argument,
+            &output_offsets_argument,    &tile_bytes_argument,        &copy_target};
+        unsigned const copy_grid = grid_for_items_(
+            pass.kernel_table.rewrite_copy,
+            divide_round_up(sz_max_of_two(staging_bytes, (size_t)1), substrings_rewrite_tile_bytes_k), specs);
 
         CUresult const copy_error = cuda_launch_t {}
                                         .grid(copy_grid)
@@ -2017,8 +1994,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         CUresult const sync_error = timer_.synchronize(executor.stream());
         if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
         rewritten_bytes = rewrite_output_offsets_[haystack_count];
-        for (size_t index = 0; index <= haystack_count; ++index)
-            output_offsets[index] = rewrite_output_offsets_[index];
+        for (size_t index = 0; index <= haystack_count; ++index) output_offsets[index] = rewrite_output_offsets_[index];
 
         if (!output_is_device_accessible && rewritten_bytes) {
             CUresult const drain_error = cuMemcpyAsync((CUdeviceptr)output_bytes.data(),
@@ -2079,9 +2055,9 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                    "A block's shared footprint must fit the launch parameter");
         unsigned const shared_memory_bytes = static_cast<unsigned>(staged_bytes);
         unsigned blocks_per_grid = 0;
-        cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, kernel_table.score_bm25.for_width(state_width()).function,
-                                                                  substrings_threads_per_block_k, shared_memory_bytes,
-                                                                  specs);
+        cuda_status_t const occupancy_status = occupancy_grid_for(
+            blocks_per_grid, kernel_table.score_bm25.for_width(state_width()).function, substrings_threads_per_block_k,
+            shared_memory_bytes, specs);
         if (occupancy_status.status != status_t::success_k) return occupancy_status;
         // One block owns one haystack, and each block owns an overflow row, so a grid wider than the corpus
         // buys nothing and costs `needle_count` counters per surplus block.
@@ -2090,15 +2066,15 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         // Each block splits the one haystack it owns, so the chunk width is derived per haystack in the kernel.
         // Only the widest one any haystack can ask for has to clear the fit test, and that is the longest
         // haystack's share of a block.
-        size_t const widest_chunk_bytes =
-            sz_max_of_two(divide_round_up(longest_bytes, (size_t)substrings_threads_per_block_k),
-                          sz_max_of_two(max_source_match_bytes(), (size_t)1));
+        size_t const widest_chunk_bytes = sz_max_of_two(
+            divide_round_up(longest_bytes, (size_t)substrings_threads_per_block_k),
+            sz_max_of_two(max_source_match_bytes(), (size_t)1));
         if (cuda_status_t const fits = check_chunk_bytes_fit_(widest_chunk_bytes); fits.status != status_t::success_k)
             return fits;
 
         // A dictionary the table can hold never overflows, so most calls allocate nothing at all here.
-        size_t const overflow_total =
-            needle_count > substrings_bm25_slots_k ? (size_t)blocks_per_grid * needle_count : 0;
+        size_t const overflow_total = needle_count > substrings_bm25_slots_k ? (size_t)blocks_per_grid * needle_count
+                                                                             : 0;
         if (bm25_overflow_.try_resize_uninitialized(overflow_total) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
@@ -2169,16 +2145,10 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         span<span<byte_t const> const> haystacks_argument {haystack_descriptors_.data(), haystack_descriptors_.size()};
         substrings_bm25_t parameters_argument = parameters;
         span<u32_t> overflow_argument {bm25_overflow_.data(), bm25_overflow_.size()};
-        void *score_arguments[10] = {&view_argument,
-                                     &staged_rows_argument,
-                                     &accepts_words_argument,
-                                     &staged_accepts_words_argument,
-                                     &haystacks_argument,
-                                     &lengths_argument,
-                                     &parameters_argument,
-                                     &weights_argument,
-                                     &overflow_argument,
-                                     &scores_argument};
+        void *score_arguments[10] = {
+            &view_argument,      &staged_rows_argument, &accepts_words_argument, &staged_accepts_words_argument,
+            &haystacks_argument, &lengths_argument,     &parameters_argument,    &weights_argument,
+            &overflow_argument,  &scores_argument};
         return cuda_launch_t {}
             .grid(blocks_per_grid)
             .block(substrings_threads_per_block_k)

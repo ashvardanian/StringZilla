@@ -75,7 +75,7 @@ SZ_HELPER_INLINE sz_u32_t sz_haswell_mask_until_(sz_size_t n) { return (sz_u32_t
  *      word still copies its longest caseless prefix vectorized.
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
     __m256i source_u8x32, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
     sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
@@ -119,7 +119,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
  *      vectorized instead of degrading to one-rune serial steps per chunk.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
     __m256i source_u8x32, sz_u32_t is_continuation_mask, sz_u32_t is_three_byte_lead_mask,
     sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
@@ -297,7 +297,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
     __m256i source_u8x32, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -367,7 +367,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
     __m256i source_u8x32, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -454,7 +454,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
     __m256i source_u8x32, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -531,7 +531,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
     __m256i source_u8x32, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
     sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
@@ -590,7 +590,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
     __m256i source_u8x32, sz_u32_t is_lead_mask, sz_u32_t malformed_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -662,7 +662,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
     __m256i source_u8x32, sz_u32_t is_complex_lead_mask, sz_u32_t is_four_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
     sz_ptr_t target) {
 
@@ -717,7 +717,7 @@ typedef struct sz_utf8_uncased_fold_haswell_leads_t {
  *      flag byte the Ice Lake `VPERMB` LUT produces. The caseless family merges D7-DF and E0 into
  *      one contiguous D7-E0 span.
  */
-SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell_classify_leads_(
+SZ_HELPER_INLINE sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell_classify_leads_(
     __m256i source_u8x32, sz_u32_t is_non_ascii_mask) {
     sz_utf8_uncased_fold_haswell_leads_t leads;
 
@@ -804,9 +804,8 @@ SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell
  *      next family.
  *  @return Bytes consumed and written, or zero if every handler declined the chunk.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i source_u8x32,
-                                                                      sz_utf8_uncased_fold_haswell_leads_t const *leads,
-                                                                      sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
+    __m256i source_u8x32, sz_utf8_uncased_fold_haswell_leads_t const *leads, sz_ptr_t target) {
 
     // Malformed leads (overlong, surrogate, truncated, out-of-range, C0/C1, F5..FF) are foreign to
     // every family: ORing them into each handler's foreign/stop mask truncates the fold before them
@@ -871,8 +870,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i so
  *  @param rune_length Receives the number of source bytes consumed.
  *  @return Bytes written to @p target (Unicode case folding produces at most 3 runes).
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cptr_t source, sz_cptr_t source_end, sz_ptr_t target,
-                                                                sz_rune_length_t *rune_length) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cptr_t source, sz_cptr_t source_end,
+                                                                  sz_ptr_t target, sz_rune_length_t *rune_length) {
     sz_rune_t rune;
     sz_rune_length_t const parsed_length = sz_rune_decode(source, source_end, &rune);
     if (parsed_length == sz_rune_invalid_k) {

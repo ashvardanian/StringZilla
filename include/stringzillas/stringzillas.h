@@ -711,9 +711,9 @@ SZ_API_RUNTIME sz_status_t szs_substrings_init(                       //
  *  @retval `sz_unexpected_dimensions_k` A needle is empty.
  *  @retval `sz_device_code_mismatch_k` @p device names a backend the engine was not created for.
  */
-SZ_API_RUNTIME sz_status_t szs_substrings_index(                                          //
-    szs_substrings_t engine, sz_sequence_t const *needles,                                //
-    szs_substrings_case_sensitivity_t case_sensitivity, szs_device_scope_t device,        //
+SZ_API_RUNTIME sz_status_t szs_substrings_index(                                   //
+    szs_substrings_t engine, sz_sequence_t const *needles,                         //
+    szs_substrings_case_sensitivity_t case_sensitivity, szs_device_scope_t device, //
     char const **error_message);
 
 /**
@@ -822,30 +822,30 @@ SZ_API_RUNTIME sz_status_t szs_substrings_replace_bound(  //
  *  @param[in] replacements One replacement per needle; count must equal the dictionary's needle count.
  *  @param[out] output_data Byte buffer receiving every rewritten haystack back to back.
  *  @param[in] output_data_capacity Bytes @p output_data can hold; a short buffer is refused, never overrun.
- *  @param[out] output_offsets Receives `haystacks->count + 1` ascending boundaries. 64-bit rather than
- *              `sz_size_t` because a rewrite can outgrow the input it was sized against, and because that
- *              is the width tape containers spell.
+ *  @param[out] output_offsets Receives `haystacks->count + 1` ascending boundaries, in the same width the
+ *              engines address the output tape with - a rewrite that outgrows `sz_size_t` has no buffer to
+ *              land in either.
  *  @param[out] output_bytes_written Bytes written, or - when the buffer is short - the bytes needed.
  *  @retval `sz_unexpected_dimensions_k` @p output_data_capacity is too small and nothing was written.
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_API_RUNTIME sz_status_t szs_substrings_replace_u32tape(                          //
-    szs_substrings_t engine, szs_device_scope_t device,                             //
-    sz_sequence_u32tape_t const *haystacks,                                         //
-    szs_substrings_overlap_policy_t overlap_policy,                                 //
-    sz_sequence_t const *replacements,                                              //
-    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_u64_t *output_offsets, //
-    sz_size_t *output_bytes_written,                                                //
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u32tape(                           //
+    szs_substrings_t engine, szs_device_scope_t device,                              //
+    sz_sequence_u32tape_t const *haystacks,                                          //
+    szs_substrings_overlap_policy_t overlap_policy,                                  //
+    sz_sequence_t const *replacements,                                               //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_size_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                 //
     char const **error_message);
 
 /** @copydoc szs_substrings_replace_u32tape */
-SZ_API_RUNTIME sz_status_t szs_substrings_replace_u64tape(                          //
-    szs_substrings_t engine, szs_device_scope_t device,                             //
-    sz_sequence_u64tape_t const *haystacks,                                         //
-    szs_substrings_overlap_policy_t overlap_policy,                                 //
-    sz_sequence_t const *replacements,                                              //
-    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_u64_t *output_offsets, //
-    sz_size_t *output_bytes_written,                                                //
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u64tape(                           //
+    szs_substrings_t engine, szs_device_scope_t device,                              //
+    sz_sequence_u64tape_t const *haystacks,                                          //
+    szs_substrings_overlap_policy_t overlap_policy,                                  //
+    sz_sequence_t const *replacements,                                               //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_size_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                 //
     char const **error_message);
 
 /** @copydoc szs_substrings_count */

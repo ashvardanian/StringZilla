@@ -55,7 +55,7 @@ extern "C" {
  *         offset = codepoint - 0x10000 (s0 -> s1 -> s2 -> leaf). Re-init-free: every tile is read straight from
  *         aligned .rodata through the substrate permute256_/lut_cascade_ helpers. Bit-exact with
  *         `sz_rune_line_break_property` over the astral planes. */
-SZ_HELPER_AUTO __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
     __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
     __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
         sz_utf8_line_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 12), _mm512_set1_epi32(0xFF)));
@@ -80,7 +80,7 @@ SZ_HELPER_AUTO __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoin
  *         `flat_bmp_[page * 256 + (cp & 0xFF)]`. The leaf byte is an index into
  *         `sz_utf8_line_break_flat_palette_`, NOT the 62-entry cascade palette. Only the low byte of each u32 lane
  *         is the index; the caller truncates with `vpmovdb`. */
-SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
     return sz_utf8_rune_flat_lookup_icelake_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
                                              codepoints_u32x16);
 }
@@ -90,7 +90,7 @@ SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoint
  *         the decode. Lanes whose codepoint is >= 0x10000 are
  *         undefined (the caller blends the astral path over them). The sixteen-lane groups are unrolled because
  *         `vextracti32x4` / `vinserti32x4` take an immediate lane selector. */
-SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64, __m512i low_bytes_u8x64) {
+SZ_HELPER_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64, __m512i low_bytes_u8x64) {
     __m512i palette_indices_u8x64 = _mm512_setzero_si512();
     __m512i high_u32x16, low_u32x16, codepoints_u32x16, group_indices_u32x16;
 #define SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_(group)                                            \
@@ -167,9 +167,9 @@ SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i desc
  *         @ref sz_line_break_descriptor_unpack_half_icelake_ and narrow back to bytes with `vpmovwb`. Bit-identical
  *         to the cascade's `palette_class_` / `_side_` / `_dotted_` byte-table permutes, which carry the same
  *         resolution baked in. */
-SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
-                                                               __m512i *classes_u8x64_out, __m512i *side_u8x64_out,
-                                                               sz_u64_t *dotted_out) {
+SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
+                                                                 __m512i *classes_u8x64_out, __m512i *side_u8x64_out,
+                                                                 sz_u64_t *dotted_out) {
     __m512i const palette_low_tile_u16x32 = _mm512_load_si512((void const *)sz_utf8_line_break_flat_palette_);
     __m512i const palette_high_tile_u16x32 = _mm512_load_si512((void const *)(sz_utf8_line_break_flat_palette_ + 32));
     __m512i const indices_low_u16x32 = _mm512_cvtepu8_epi16(_mm512_castsi512_si256(palette_indices_u8x64));
@@ -210,8 +210,8 @@ typedef struct sz_line_break_classified_t {
  *          icelake agree on malformed input. Valid leads classify by decoded VALUE (page / trie / big / astral),
  *          matching the serial resolution precedence. The BMP trie uses the shared substrate `trie_walk_icelake_`.
  */
-SZ_HELPER_AUTO sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
-                                                                                 __m512i lane_identity_u8x64) {
+SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
+                                                                                   __m512i lane_identity_u8x64) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_(window.loaded);
     sz_u64_t const continuation = _cvtmask64_u64(window.continuation) & loaded_mask;
     sz_u64_t const two_byte = _cvtmask64_u64(window.two_byte_starts);
@@ -535,7 +535,7 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_
  *          64-byte edge). Mirrors the word kernel's complete-limit: a declared-length lead whose span exceeds `loaded`
  *          ends the trusted region just before it; with no more text the whole window is complete. Never below 1.
  */
-SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
+SZ_HELPER_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_(loaded);

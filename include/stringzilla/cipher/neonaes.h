@@ -415,8 +415,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_halves_neonaes_(poly64x1_t multipli
 #if defined(_MSC_VER) && !defined(__clang__)
     return vreinterpretq_u8_p128(vmull_p64(multiplicand_p64x1, multiplier_p64x1));
 #else
-    return vreinterpretq_u8_p128(
-        vmull_p64(vget_lane_p64(multiplicand_p64x1, 0), vget_lane_p64(multiplier_p64x1, 0)));
+    return vreinterpretq_u8_p128(vmull_p64(vget_lane_p64(multiplicand_p64x1, 0), vget_lane_p64(multiplier_p64x1, 0)));
 #endif
 }
 
@@ -650,7 +649,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_neonaes_(sz_aes256_gcm_state_t *state,
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
     uint8x16_t powers_u8x16[8];

@@ -28,7 +28,7 @@ extern "C" {
  *         `vec_perm` and full-stores to an 18-wide scratch (absorbing the last sub-block's 2-lane spill, since
  *         VSX has no masked store); the low `emit_count` entries copy out in ascending lane order, byte-exact.
  */
-SZ_HELPER_AUTO void sz_utf8_iterate_peel_powervsx_(                            //
+SZ_HELPER_INLINE void sz_utf8_iterate_peel_powervsx_(                          //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {

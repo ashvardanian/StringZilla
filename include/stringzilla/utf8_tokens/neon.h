@@ -325,8 +325,8 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte_u
  *  three highs per quarter, and each round loads that block's 32-byte row into a `vqtbl2q_u8` pair and settles
  *  every lane carrying it - no per-lane scalar walk.
  */
-SZ_HELPER_AUTO uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_u8x16, uint8x16_t high_in_u8x16,
-                                                            uint8x16_t low_in_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_u8x16, uint8x16_t high_in_u8x16,
+                                                              uint8x16_t low_in_u8x16) {
     uint8x16_t const is_ascii_u8x16 = vcltq_u8(window_u8x16, vdupq_n_u8(0x80));
     uint8x16_t const high_u8x16 = vbicq_u8(high_in_u8x16, is_ascii_u8x16);             // high = is_ascii ? 0 : high_in
     uint8x16_t const low_u8x16 = vbslq_u8(is_ascii_u8x16, window_u8x16, low_in_u8x16); // low = is_ascii ? byte : low_in
@@ -365,8 +365,8 @@ SZ_HELPER_AUTO uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_u8
  *  `low8 = cp & 0xFF`. The `super` (0..15) selects an L1 group; `group*256 + sub` selects a bitmap row id (group < 2,
  *  so the two 256-entry halves of the L2 table are read and blended by the group bit); the bit `(low8 & 7)` is tested.
  */
-SZ_HELPER_AUTO uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window_u8x16, uint8x16_t next1_u8x16,
-                                                               uint8x16_t next2_u8x16, uint8x16_t next3_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window_u8x16, uint8x16_t next1_u8x16,
+                                                                 uint8x16_t next2_u8x16, uint8x16_t next3_u8x16) {
     uint8x16_t const b0_u8x16 = vandq_u8(window_u8x16, vdupq_n_u8(0x07));
     uint8x16_t const b1_u8x16 = vandq_u8(next1_u8x16, vdupq_n_u8(0x3F));
     uint8x16_t const b2_u8x16 = vandq_u8(next2_u8x16, vdupq_n_u8(0x3F));
@@ -412,9 +412,9 @@ SZ_HELPER_AUTO uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window
  *          continuation bytes wrap is rejected) is applied by the caller via `byte_span`; here the substrate masks are
  *          already loaded-clamped. An invalid lead is never reported (serial advances one byte and re-syncs).
  */
-SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded,
-                                                        uint8x16_t const *next1_u8x16, uint8x16_t const *next2_u8x16,
-                                                        uint8x16_t const *next3_u8x16) {
+SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded,
+                                                          uint8x16_t const *next1_u8x16, uint8x16_t const *next2_u8x16,
+                                                          uint8x16_t const *next3_u8x16) {
     uint8x16_t const continuation_mask_u8x16 = vdupq_n_u8(0xC0), continuation_pattern_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t valid_bool_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter) {

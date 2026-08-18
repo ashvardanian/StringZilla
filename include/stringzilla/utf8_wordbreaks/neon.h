@@ -58,7 +58,8 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_word_break_byte_mask_from_bits_neon_(sz_u64_
  *          page-compressed table via @ref sz_utf8_rune_flat_lookup_neon_, the NEON twin of
  *          @ref sz_utf8_word_break_bmp_class_haswell_. Bit-exact with `sz_rune_word_break_property` over the whole
  *          BMP. Addresses ONE quarter; the caller iterates the four quarters. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_word_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16, uint8x16_t low_bytes_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_word_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16,
+                                                               uint8x16_t low_bytes_u8x16) {
     return sz_utf8_rune_flat_lookup_neon_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
                                           (int)sz_utf8_word_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
@@ -68,8 +69,8 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_word_break_bmp_class_neon_(uint8x16_t high_byt
  *          @p plane_off_u8x16 = (offset>>16)&0xFF (low nibble meaningful), @p high_u8x16 = (offset>>8)&0xFF,
  *          @p low_u8x16 = offset&0xFF. Bit-exact with `sz_rune_word_break_property` over the Supplementary Planes.
  *          Addresses ONE quarter; the caller iterates the four quarters. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_word_break_astral_class_neon_(uint8x16_t plane_off_u8x16, uint8x16_t high_u8x16,
-                                                                uint8x16_t low_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_word_break_astral_class_neon_(uint8x16_t plane_off_u8x16, uint8x16_t high_u8x16,
+                                                                  uint8x16_t low_u8x16) {
     uint8x16_t const low_nibble_mask_u8x16 = vdupq_n_u8(0x0F);
     uint8x16_t const n4_u8x16 = vandq_u8(plane_off_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const n3_u8x16 = vandq_u8(vshrq_n_u8(high_u8x16, 4), low_nibble_mask_u8x16);
@@ -126,8 +127,8 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_word_break_ascii_class_neon_(uint8x16_t byte
  *          dense class bytes back to their original byte lanes in @p bmp_out_u8x16 (zeroed elsewhere). Bit-identical
  *          to four full @ref sz_utf8_word_break_bmp_class_neon_ quarters on every BMP-start lane; every other lane is
  *          a don't-care left at zero. */
-SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_neon_(sz_u64_t bmp_starts, uint8x16_t const *high_u8x16,
-                                                         uint8x16_t const *low_u8x16, uint8x16_t *bmp_out_u8x16) {
+SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_neon_(sz_u64_t bmp_starts, uint8x16_t const *high_u8x16,
+                                                           uint8x16_t const *low_u8x16, uint8x16_t *bmp_out_u8x16) {
     sz_u8_t high_bytes[64], low_bytes[64];
     for (int quarter = 0; quarter < 4; ++quarter) {
         vst1q_u8(high_bytes + quarter * 16, high_u8x16[quarter]);
@@ -169,7 +170,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_neon_(sz_u64_t bmp_starts, ui
  *          @ref sz_utf8_word_break_classify_window_haswell_, bit-identical on every start lane. ASCII through the
  *          property table, BMP through the nibble cascade, 4-byte leads through the astral cascade with the codepoint
  *          high/low/plane reconstructed from the forward neighbours. */
-SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_neon_( //
+SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_neon_( //
     sz_utf8_rune_window_neon_t window, uint8x16_t *classes_u8x16) {
     uint8x16_t const *raw_u8x16 = window.window;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
@@ -267,7 +268,7 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_word_break_range16_one_neon_(uint8x16_t high
 
 /** @brief  A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window quarters,
  *          the NEON twin of @ref sz_utf8_word_break_range16_mask_haswell_ (WSegSpace / Extended_Pictographic). */
-SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_neon_( //
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_neon_( //
     uint8x16_t const *high_u8x16, uint8x16_t const *low_u8x16, sz_u16_t const *lo_table, sz_u16_t const *hi_table,
     int count) {
     uint8x16_t hit_u8x16[4] = {vdupq_n_u8(0), vdupq_n_u8(0), vdupq_n_u8(0), vdupq_n_u8(0)};
@@ -388,8 +389,8 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_neon_
 /** @brief  Resolve one window into the maximal-subpart partition - the NEON twin of
  *          @ref sz_utf8_word_break_partition_haswell_: compute the per-ISA `sz_u64_t` masks and delegate to the
  *          portable @ref sz_utf8_word_break_partition_from_masks_. */
-SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_neon_(sz_utf8_rune_window_neon_t window,
-                                                                                 sz_u64_t valid, int at_end_of_text) {
+SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_neon_(sz_utf8_rune_window_neon_t window,
+                                                                                   sz_u64_t valid, int at_end_of_text) {
     uint8x16_t const *raw_u8x16 = window.window;
     sz_u64_t const real_continuation = window.continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD → 2, 0xE → 3, 0xF → 4. The strict

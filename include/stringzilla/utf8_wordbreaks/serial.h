@@ -199,7 +199,7 @@ SZ_HELPER_AUTO sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_si
 }
 
 /** @brief The element following the one whose base is at @p position (eot sentinel at end of text). */
-SZ_HELPER_AUTO sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_HELPER_INLINE sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
     sz_size_t cursor = position;
@@ -375,7 +375,7 @@ typedef struct sz_word_serial_state_t {
 
 /** @brief Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new element base,
  *         maintaining the two-back base chain, the Regional_Indicator parity, and the raw-previous fields. */
-SZ_HELPER_AUTO void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_INLINE void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
     sz_bool_t const after_newline = (sz_bool_t)(state->has_previous &&
                                                 sz_word_is_newline_(state->previous_raw_property));
     sz_bool_t const is_ignorable = sz_utf8_word_break_is_ignorable_(property);

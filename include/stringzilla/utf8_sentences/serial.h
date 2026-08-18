@@ -82,7 +82,7 @@ SZ_HELPER_AUTO sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t
  *         folded in with no continuation/overlong/surrogate validation, missing trailing bytes read as zero.
  *         Valid UTF-8 decodes identically to the checked path; only ill-formed input differs, by design.
  */
-SZ_HELPER_AUTO sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
+SZ_HELPER_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
     int const lead_length = ((lead & 0xE0u) == 0xC0u)   ? 2
                             : ((lead & 0xF0u) == 0xE0u) ? 3
@@ -129,7 +129,7 @@ typedef struct sz_sentence_serial_state_t {
 
 /** @brief Advance @p state by the @p current codepoint property: update the significant chain and the
  *         `SATerm Close* Sp*` terminator context (Extend / Format are transparent and leave both unchanged). */
-SZ_HELPER_AUTO void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
+SZ_HELPER_INLINE void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
     if (!sz_sentence_break_is_transparent_(current)) {
         state->before_significant = state->previous_significant;
         state->previous_significant = current;
