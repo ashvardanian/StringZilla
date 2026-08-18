@@ -110,9 +110,9 @@ SZ_HELPER_INLINE __m512i sz_utf8_srl8_icelake_(__m512i value_u8x64, int shift, s
  *  `high`/`low` holding the low 16 bits, which the caller resolves through arithmetic ranges.
  */
 typedef struct sz_utf8_rune_window_t {
-    __m512i window;              /**< The raw 64 input bytes (continuation bytes included). */
-    __m512i high;                /**< Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
-    __m512i low;                 /**< Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
+    __m512i window_u8x64;        /**< The raw 64 input bytes (continuation bytes included). */
+    __m512i high_byte_u8x64;     /**< Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
+    __m512i low_byte_u8x64;      /**< Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
     __mmask64 continuation;      /**< Bit `i` set => lane `i` is a UTF-8 continuation byte `10xxxxxx`. */
     __mmask64 codepoint_starts;  /**< Bit `i` set => lane `i` begins a codepoint (loaded, non-continuation). */
     __mmask64 two_byte_starts;   /**< Bit `i` set => lane `i` is a 2-byte lead `110xxxxx`. */
@@ -128,7 +128,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
     result.loaded = available < 64 ? available : 64;
     __mmask64 const load_mask_m64 = sz_u64_clamp_mask_until_(result.loaded);
     __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask_m64, text);
-    result.window = window_u8x64;
+    result.window_u8x64 = window_u8x64;
 
     // The three forward neighbours of each lane, gathered via in-register permutes (never `vpgather`).
     __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
@@ -162,8 +162,10 @@ SZ_HELPER_INLINE sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
         _mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x03)), 6),
         _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F)));
 
-    result.high = _mm512_mask_blend_epi8(result.three_byte_starts, high_two_byte_u8x64, high_three_byte_u16x32);
-    result.low = _mm512_mask_blend_epi8(result.three_byte_starts, low_two_byte_u16x32, low_three_byte_u16x32);
+    result.high_byte_u8x64 = _mm512_mask_blend_epi8(result.three_byte_starts, high_two_byte_u8x64,
+                                                    high_three_byte_u16x32);
+    result.low_byte_u8x64 = _mm512_mask_blend_epi8(result.three_byte_starts, low_two_byte_u16x32,
+                                                   low_three_byte_u16x32);
     return result;
 }
 

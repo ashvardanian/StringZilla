@@ -156,11 +156,11 @@ SZ_HELPER_INLINE void sz_grapheme_next3_haswell_(__m256i window_lo_u8x32, __m256
 /** @brief  Per-window per-lane descriptors as two `__m256i` halves, plus the codepoint-start lane mask and geometry.
  *          The AVX2 twin of the icelake `sz_grapheme_classify_window_full_icelake_` outputs. */
 typedef struct sz_grapheme_classified_haswell_t {
-    __m256i descriptors_lo;    /**< Packed descriptor per byte-lane, lanes [0,32) (valid only on start lanes). */
-    __m256i descriptors_hi;    /**< Packed descriptor per byte-lane, lanes [32,64). */
-    sz_u64_t start_lanes;      /**< Codepoint-start lanes within the effective span (trimmed to `byte_span`). */
-    sz_size_t codepoint_count; /**< Number of codepoint starts resolved (<= 64). */
-    sz_size_t byte_span;       /**< Bytes consumed by the resolved codepoints (offset of the next start). */
+    __m256i descriptors_low_u8x32;  /**< Packed descriptor per byte-lane, lanes [0,32) (valid only on start lanes). */
+    __m256i descriptors_high_u8x32; /**< Packed descriptor per byte-lane, lanes [32,64). */
+    sz_u64_t start_lanes;           /**< Codepoint-start lanes within the effective span (trimmed to `byte_span`). */
+    sz_size_t codepoint_count;      /**< Number of codepoint starts resolved (<= 64). */
+    sz_size_t byte_span;            /**< Bytes consumed by the resolved codepoints (offset of the next start). */
 } sz_grapheme_classified_haswell_t;
 
 /**
@@ -190,7 +190,7 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
         start_lanes &= sz_u64_mask_until_serial_(byte_span);
     }
 
-    __m256i const raw_lo_u8x32 = decoded.window_lo, raw_hi_u8x32 = decoded.window_hi;
+    __m256i const raw_lo_u8x32 = decoded.window_low_u8x32, raw_hi_u8x32 = decoded.window_high_u8x32;
     __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32, next3_lo_u8x32, next3_hi_u8x32;
     sz_utf8_forward_neighbours_haswell_(raw_lo_u8x32, raw_hi_u8x32, &next1_lo_u8x32, &next1_hi_u8x32, &next2_lo_u8x32,
                                         &next2_hi_u8x32);
@@ -376,8 +376,8 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
     desc_hi_u8x32 = _mm256_and_si256(desc_hi_u8x32, valid_sel_hi_u8x32);
 
     sz_grapheme_classified_haswell_t result;
-    result.descriptors_lo = desc_lo_u8x32;
-    result.descriptors_hi = desc_hi_u8x32;
+    result.descriptors_low_u8x32 = desc_lo_u8x32;
+    result.descriptors_high_u8x32 = desc_hi_u8x32;
     result.start_lanes = start_lanes;
     result.codepoint_count = (sz_size_t)_mm_popcnt_u64(start_lanes);
     result.byte_span = byte_span;
@@ -398,7 +398,7 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
 SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_haswell_(
     sz_grapheme_classified_haswell_t classified, sz_u64_t valid) {
     sz_u64_t const starts = classified.start_lanes;
-    __m256i const desc_lo_u8x32 = classified.descriptors_lo, desc_hi_u8x32 = classified.descriptors_hi;
+    __m256i const desc_lo_u8x32 = classified.descriptors_low_u8x32, desc_hi_u8x32 = classified.descriptors_high_u8x32;
     __m256i const class_lo_u8x32 = _mm256_and_si256(desc_lo_u8x32, _mm256_set1_epi8(0x0F));
     __m256i const class_hi_u8x32 = _mm256_and_si256(desc_hi_u8x32, _mm256_set1_epi8(0x0F));
 

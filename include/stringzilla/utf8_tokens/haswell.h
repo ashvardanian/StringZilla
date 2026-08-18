@@ -370,16 +370,16 @@ SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_haswell_( //
 
     // 2-byte: lead >= 0xC2 (reject C0/C1 overlong).
     sz_u64_t const lead_ge_c2 = sz_utf8_mask_combine_haswell_(
-        sz_delimiter_cmpge_epu8_haswell_(decoded->window_lo, _mm256_set1_epi8((char)0xC2)),
-        sz_delimiter_cmpge_epu8_haswell_(decoded->window_hi, _mm256_set1_epi8((char)0xC2)));
+        sz_delimiter_cmpge_epu8_haswell_(decoded->window_low_u8x32, _mm256_set1_epi8((char)0xC2)),
+        sz_delimiter_cmpge_epu8_haswell_(decoded->window_high_u8x32, _mm256_set1_epi8((char)0xC2)));
 
     // 3-byte: not overlong (E0 with next1 < 0xA0), not surrogate (ED with next1 >= 0xA0).
     sz_u64_t const lead_e0 = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xE0)),
-        _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xE0)));
+        _mm256_cmpeq_epi8(decoded->window_low_u8x32, _mm256_set1_epi8((char)0xE0)),
+        _mm256_cmpeq_epi8(decoded->window_high_u8x32, _mm256_set1_epi8((char)0xE0)));
     sz_u64_t const lead_ed = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xED)),
-        _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xED)));
+        _mm256_cmpeq_epi8(decoded->window_low_u8x32, _mm256_set1_epi8((char)0xED)),
+        _mm256_cmpeq_epi8(decoded->window_high_u8x32, _mm256_set1_epi8((char)0xED)));
     __m256i const n1_lo_ge_a0_u8x32 = sz_delimiter_cmpge_epu8_haswell_(next1_lo_u8x32, _mm256_set1_epi8((char)0xA0));
     __m256i const n1_hi_ge_a0_u8x32 = sz_delimiter_cmpge_epu8_haswell_(next1_hi_u8x32, _mm256_set1_epi8((char)0xA0));
     sz_u64_t const n1_ge_a0 = sz_utf8_mask_combine_haswell_(n1_lo_ge_a0_u8x32, n1_hi_ge_a0_u8x32);
@@ -387,27 +387,27 @@ SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_haswell_( //
 
     // 4-byte: lead <= 0xF4, not overlong (F0 with next1 < 0x90), not > U+10FFFF (F4 with next1 >= 0x90).
     sz_u64_t const lead_le_f4 = sz_utf8_mask_combine_haswell_(
-        _mm256_andnot_si256(sz_delimiter_cmpge_epu8_haswell_(decoded->window_lo, _mm256_set1_epi8((char)0xF5)),
+        _mm256_andnot_si256(sz_delimiter_cmpge_epu8_haswell_(decoded->window_low_u8x32, _mm256_set1_epi8((char)0xF5)),
                             _mm256_set1_epi8((char)0xFF)),
-        _mm256_andnot_si256(sz_delimiter_cmpge_epu8_haswell_(decoded->window_hi, _mm256_set1_epi8((char)0xF5)),
+        _mm256_andnot_si256(sz_delimiter_cmpge_epu8_haswell_(decoded->window_high_u8x32, _mm256_set1_epi8((char)0xF5)),
                             _mm256_set1_epi8((char)0xFF)));
     sz_u64_t const lead_f0 = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xF0)),
-        _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xF0)));
+        _mm256_cmpeq_epi8(decoded->window_low_u8x32, _mm256_set1_epi8((char)0xF0)),
+        _mm256_cmpeq_epi8(decoded->window_high_u8x32, _mm256_set1_epi8((char)0xF0)));
     sz_u64_t const lead_f4 = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xF4)),
-        _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xF4)));
+        _mm256_cmpeq_epi8(decoded->window_low_u8x32, _mm256_set1_epi8((char)0xF4)),
+        _mm256_cmpeq_epi8(decoded->window_high_u8x32, _mm256_set1_epi8((char)0xF4)));
     sz_u64_t const n1_ge_90 = sz_utf8_mask_combine_haswell_(
         sz_delimiter_cmpge_epu8_haswell_(next1_lo_u8x32, _mm256_set1_epi8((char)0x90)),
         sz_delimiter_cmpge_epu8_haswell_(next1_hi_u8x32, _mm256_set1_epi8((char)0x90)));
     sz_u64_t const n1_lt_90 = ~n1_ge_90;
 
-    sz_u64_t const ascii = loaded_mask &
-                           ~sz_utf8_mask_combine_haswell_(
-                               _mm256_cmpeq_epi8(_mm256_and_si256(decoded->window_lo, _mm256_set1_epi8((char)0x80)),
-                                                 _mm256_set1_epi8((char)0x80)),
-                               _mm256_cmpeq_epi8(_mm256_and_si256(decoded->window_hi, _mm256_set1_epi8((char)0x80)),
-                                                 _mm256_set1_epi8((char)0x80)));
+    sz_u64_t const ascii =
+        loaded_mask & ~sz_utf8_mask_combine_haswell_(
+                          _mm256_cmpeq_epi8(_mm256_and_si256(decoded->window_low_u8x32, _mm256_set1_epi8((char)0x80)),
+                                            _mm256_set1_epi8((char)0x80)),
+                          _mm256_cmpeq_epi8(_mm256_and_si256(decoded->window_high_u8x32, _mm256_set1_epi8((char)0x80)),
+                                            _mm256_set1_epi8((char)0x80)));
 
     // Spans must lie within the loaded window (so we never validate against a wrapped neighbour or read past loaded).
     sz_u64_t const span2 = loaded >= 1 ? sz_u64_mask_until_serial_(loaded - 1) : 0;
@@ -440,10 +440,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
         sz_size_t const loaded = decoded.loaded;
 
         __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32;
-        sz_utf8_forward_neighbours_haswell_(decoded.window_lo, decoded.window_hi, &next1_lo_u8x32, &next1_hi_u8x32,
-                                            &next2_lo_u8x32, &next2_hi_u8x32);
+        sz_utf8_forward_neighbours_haswell_(decoded.window_low_u8x32, decoded.window_high_u8x32, &next1_lo_u8x32,
+                                            &next1_hi_u8x32, &next2_lo_u8x32, &next2_hi_u8x32);
         __m256i next3_lo_u8x32, next3_hi_u8x32;
-        sz_delimiter_forward_neighbour3_haswell_(decoded.window_lo, decoded.window_hi, &next3_lo_u8x32,
+        sz_delimiter_forward_neighbour3_haswell_(decoded.window_low_u8x32, decoded.window_high_u8x32, &next3_lo_u8x32,
                                                  &next3_hi_u8x32);
 
         // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past `loaded` would decode
@@ -464,14 +464,16 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
 
         // BMP membership for every lane; astral membership blended onto the four-byte lanes (gated on presence).
         sz_u64_t member = sz_utf8_mask_combine_haswell_(
-            sz_delimiter_bmp_membership_haswell_(decoded.window_lo, decoded.high_lo, decoded.low_lo),
-            sz_delimiter_bmp_membership_haswell_(decoded.window_hi, decoded.high_hi, decoded.low_hi));
+            sz_delimiter_bmp_membership_haswell_(decoded.window_low_u8x32, decoded.high_byte_low_u8x32,
+                                                 decoded.low_byte_low_u8x32),
+            sz_delimiter_bmp_membership_haswell_(decoded.window_high_u8x32, decoded.high_byte_high_u8x32,
+                                                 decoded.low_byte_high_u8x32));
         sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
         if (four_byte) {
             sz_u64_t const astral_member = sz_utf8_mask_combine_haswell_(
-                sz_delimiter_astral_membership_haswell_(decoded.window_lo, next1_lo_u8x32, next2_lo_u8x32,
+                sz_delimiter_astral_membership_haswell_(decoded.window_low_u8x32, next1_lo_u8x32, next2_lo_u8x32,
                                                         next3_lo_u8x32),
-                sz_delimiter_astral_membership_haswell_(decoded.window_hi, next1_hi_u8x32, next2_hi_u8x32,
+                sz_delimiter_astral_membership_haswell_(decoded.window_high_u8x32, next1_hi_u8x32, next2_hi_u8x32,
                                                         next3_hi_u8x32));
             member = (member & ~four_byte) | (astral_member & four_byte);
         }

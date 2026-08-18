@@ -402,7 +402,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(   //
         sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + base, length - base,
                                                                                   lane_identity_u8x64);
         sz_size_t const loaded = decoded.loaded;
-        __m512i const window_u8x64 = decoded.window;
+        __m512i const window_u8x64 = decoded.window_u8x64;
         __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
                                                             window_u8x64);
         __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)),
@@ -427,7 +427,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(   //
                                            decoded.codepoint_starts & span_mask_m64;
 
         // BMP membership for every lane; astral membership blended onto the four-byte lanes (gated on presence).
-        __mmask64 member_m64 = sz_delimiter_bmp_membership_icelake_(window_u8x64, decoded.high, decoded.low);
+        __mmask64 member_m64 = sz_delimiter_bmp_membership_icelake_(window_u8x64, decoded.high_byte_u8x64,
+                                                                    decoded.low_byte_u8x64);
         __mmask64 const four_byte_m64 = decoded.four_byte_starts & span_mask_m64;
         if (four_byte_m64) {
             __mmask64 const astral_member_m64 = sz_delimiter_astral_membership_icelake_(window_u8x64, next1_u8x64,

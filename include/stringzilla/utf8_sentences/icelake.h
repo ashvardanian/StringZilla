@@ -286,7 +286,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
         __mmask64 const codepoint_starts_m64 = decoded.codepoint_starts | lead_continuation_m64;
         sz_u64_t const start_bytes = _cvtmask64_u64(codepoint_starts_m64);
 
-        __m512i const window_u8x64 = decoded.window;
+        __m512i const window_u8x64 = decoded.window_u8x64;
         __mmask64 const keep1_m64 = sz_u64_mask_until_(loaded >= 1 ? loaded - 1 : 0);
         __mmask64 const keep2_m64 = sz_u64_mask_until_(loaded >= 2 ? loaded - 2 : 0);
         __mmask64 const keep3_m64 = sz_u64_mask_until_(loaded >= 3 ? loaded - 3 : 0);

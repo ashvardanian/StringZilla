@@ -103,15 +103,15 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz
  *          `__mmask64`. Field names and semantics match @ref sz_utf8_rune_window_t so the portable rule
  *          algebra is unchanged. */
 typedef struct sz_utf8_rune_window_neon_t {
-    uint8x16_t window[4];       /**< Raw input bytes for lanes [16*q, 16*q+16). */
-    uint8x16_t high[4];         /**< Per-lane `codepoint >> 8`. */
-    uint8x16_t low[4];          /**< Per-lane `codepoint & 0xFF`. */
-    sz_u64_t continuation;      /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
-    sz_u64_t codepoint_starts;  /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
-    sz_u64_t two_byte_starts;   /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
-    sz_u64_t three_byte_starts; /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
-    sz_u64_t four_byte_starts;  /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;           /**< Number of bytes actually loaded (<= 64). */
+    uint8x16_t window_u8x16s[4];    /**< Raw input bytes for lanes [16*q, 16*q+16). */
+    uint8x16_t high_byte_u8x16s[4]; /**< Per-lane `codepoint >> 8`. */
+    uint8x16_t low_byte_u8x16s[4];  /**< Per-lane `codepoint & 0xFF`. */
+    sz_u64_t continuation;          /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
+    sz_u64_t codepoint_starts;      /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
+    sz_u64_t two_byte_starts;       /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
+    sz_u64_t three_byte_starts;     /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
+    sz_u64_t four_byte_starts;      /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
+    sz_size_t loaded;               /**< Number of bytes actually loaded (<= 64). */
 } sz_utf8_rune_window_neon_t;
 
 /** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the NEON twin of `srl8_`.
@@ -204,7 +204,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
 
     uint8x16_t window_u8x16[4];
     sz_utf8_load_window_neon_(text, result.loaded, window_u8x16);
-    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
+    for (int quarter = 0; quarter < 4; ++quarter) result.window_u8x16s[quarter] = window_u8x16[quarter];
 
     uint8x16_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
     sz_utf8_forward_neighbours_neon_(window_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
@@ -262,8 +262,8 @@ SZ_HELPER_INLINE sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
 
         // Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
         uint8x16_t const three_select_u8x16 = three_byte_bool_u8x16[quarter];
-        result.high[quarter] = vbslq_u8(three_select_u8x16, high_three_u8x16, high_two_u8x16);
-        result.low[quarter] = vbslq_u8(three_select_u8x16, low_three_u8x16, low_two_u8x16);
+        result.high_byte_u8x16s[quarter] = vbslq_u8(three_select_u8x16, high_three_u8x16, high_two_u8x16);
+        result.low_byte_u8x16s[quarter] = vbslq_u8(three_select_u8x16, low_three_u8x16, low_two_u8x16);
     }
     return result;
 }

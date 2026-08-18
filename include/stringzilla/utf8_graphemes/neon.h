@@ -165,10 +165,10 @@ SZ_HELPER_INLINE uint8x16_t sz_grapheme_byte_mask_from_bits_neon_(sz_u64_t bits,
 /** @brief  Per-window per-lane descriptors as four `uint8x16_t` quarters, plus the codepoint-start lane mask and
  *          geometry. The NEON twin of the AVX2 `sz_grapheme_classified_haswell_t` outputs. */
 typedef struct sz_grapheme_classified_neon_t {
-    uint8x16_t descriptors[4]; /**< Packed descriptor per byte-lane (valid only on start lanes). */
-    sz_u64_t start_lanes;      /**< Codepoint-start lanes within the effective span (trimmed to `byte_span`). */
-    sz_size_t codepoint_count; /**< Number of codepoint starts resolved (<= 64). */
-    sz_size_t byte_span;       /**< Bytes consumed by the resolved codepoints (offset of the next start). */
+    uint8x16_t descriptors_u8x16s[4]; /**< Packed descriptor per byte-lane (valid only on start lanes). */
+    sz_u64_t start_lanes;             /**< Codepoint-start lanes within the effective span (trimmed to `byte_span`). */
+    sz_size_t codepoint_count;        /**< Number of codepoint starts resolved (<= 64). */
+    sz_size_t byte_span;              /**< Bytes consumed by the resolved codepoints (offset of the next start). */
 } sz_grapheme_classified_neon_t;
 
 /**
@@ -200,7 +200,7 @@ SZ_HELPER_INLINE sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_
 
     int const quarters_used = (int)((loaded + 15) >> 4); // classify work proportional to the loaded span
     uint8x16_t raw_u8x16[4];
-    for (int quarter = 0; quarter < 4; ++quarter) raw_u8x16[quarter] = decoded.window[quarter];
+    for (int quarter = 0; quarter < 4; ++quarter) raw_u8x16[quarter] = decoded.window_u8x16s[quarter];
     uint8x16_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
     sz_utf8_forward_neighbours_neon_(raw_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
 
@@ -351,7 +351,7 @@ SZ_HELPER_INLINE sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_
                                        sz_grapheme_byte_mask_from_bits_neon_(invalid_lead, quarter * 16));
 
     sz_grapheme_classified_neon_t result;
-    for (int quarter = 0; quarter < 4; ++quarter) result.descriptors[quarter] = desc_u8x16[quarter];
+    for (int quarter = 0; quarter < 4; ++quarter) result.descriptors_u8x16s[quarter] = desc_u8x16[quarter];
     result.start_lanes = start_lanes;
     result.codepoint_count = (sz_size_t)sz_u64_popcount_neon_(start_lanes);
     result.byte_span = byte_span;
@@ -378,7 +378,7 @@ SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_gra
     uint8x16_t const nibble_mask_u8x16 = vdupq_n_u8(0x0F);
     uint8x16_t class_q_u8x16[4], desc_q_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter) {
-        desc_q_u8x16[quarter] = classified.descriptors[quarter];
+        desc_q_u8x16[quarter] = classified.descriptors_u8x16s[quarter];
         class_q_u8x16[quarter] = vandq_u8(desc_q_u8x16[quarter], nibble_mask_u8x16);
     }
 

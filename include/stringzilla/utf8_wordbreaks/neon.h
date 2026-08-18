@@ -172,7 +172,7 @@ SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_neon_(sz_u64_t bmp_starts, 
  *          high/low/plane reconstructed from the forward neighbours. */
 SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_neon_( //
     sz_utf8_rune_window_neon_t window, uint8x16_t *classes_u8x16) {
-    uint8x16_t const *raw_u8x16 = window.window;
+    uint8x16_t const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
                                   ~window.four_byte_starts;
 
@@ -187,7 +187,9 @@ SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_neon_( //
     // don't-cares (overwritten or unread below), so the dense walk leaves them at zero.
     uint8x16_t bmp_out_u8x16[4] = {vdupq_n_u8(0), vdupq_n_u8(0), vdupq_n_u8(0), vdupq_n_u8(0)};
     sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
-    if (bmp_starts) sz_utf8_word_break_bmp_compact_neon_(bmp_starts, window.high, window.low, bmp_out_u8x16);
+    if (bmp_starts)
+        sz_utf8_word_break_bmp_compact_neon_(bmp_starts, window.high_byte_u8x16s, window.low_byte_u8x16s,
+                                             bmp_out_u8x16);
 
     for (int quarter = 0; quarter < 4; ++quarter) {
         uint8x16_t const raw_q_u8x16 = raw_u8x16[quarter];
@@ -293,7 +295,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_neon_
     sz_size_t const loaded = window.loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
-    uint8x16_t const *raw_u8x16 = window.window;
+    uint8x16_t const *raw_u8x16 = window.window_u8x16s;
 
     // Truncated-edge U+FFFD reclassify (force the class to Other on a lead whose declared span runs past `loaded`).
     sz_u64_t const lead_two = length_two & start_bytes;
@@ -336,8 +338,8 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_neon_
     // WB3d WSegSpace raw membership: the ASCII U+0020 byte compare OR the multibyte (high,low) range scan.
     sz_u64_t wseg_multibyte = 0ull;
     if (non_ascii_lanes)
-        wseg_multibyte = sz_utf8_word_break_range16_mask_neon_(window.high, window.low, sz_utf8_word_break_wseg_lo_,
-                                                               sz_utf8_word_break_wseg_hi_,
+        wseg_multibyte = sz_utf8_word_break_range16_mask_neon_(window.high_byte_u8x16s, window.low_byte_u8x16s,
+                                                               sz_utf8_word_break_wseg_lo_, sz_utf8_word_break_wseg_hi_,
                                                                sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
     frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_neon_(raw_u8x16, 0x20) & valid));
@@ -369,8 +371,8 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_neon_
             vceqq_u8(plane_q_u8x16[0], one_u8x16), vceqq_u8(plane_q_u8x16[1], one_u8x16),
             vceqq_u8(plane_q_u8x16[2], one_u8x16), vceqq_u8(plane_q_u8x16[3], one_u8x16));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_neon_(
-            window.high, window.low, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
-            sz_utf8_word_break_pict_bmp_count_k);
+            window.high_byte_u8x16s, window.low_byte_u8x16s, sz_utf8_word_break_pict_bmp_lo_,
+            sz_utf8_word_break_pict_bmp_hi_, sz_utf8_word_break_pict_bmp_count_k);
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_neon_(
             smp_high_u8x16, smp_low_u8x16, sz_utf8_word_break_pict_smp_lo_, sz_utf8_word_break_pict_smp_hi_,
             sz_utf8_word_break_pict_smp_count_k);
@@ -391,7 +393,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_neon_
  *          portable @ref sz_utf8_word_break_partition_from_masks_. */
 SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_neon_(sz_utf8_rune_window_neon_t window,
                                                                                    sz_u64_t valid, int at_end_of_text) {
-    uint8x16_t const *raw_u8x16 = window.window;
+    uint8x16_t const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const real_continuation = window.continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD → 2, 0xE → 3, 0xF → 4. The strict
     // `two`/`three_byte_starts` masks already match 0xC0-0xDF and 0xE0-0xEF; only `length_four` needs widening to fold

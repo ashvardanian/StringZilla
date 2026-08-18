@@ -229,9 +229,9 @@ SZ_HELPER_INLINE __m512i sz_grapheme_classify_window_icelake_( //
     sz_utf8_rune_window_t const *decoded, __m512i next1_u8x64, __m512i next2_u8x64, __m512i next3_u8x64) {
     // Astral (4-byte) lead reconstruction: plane = ((b0 & 7) << 2) | ((b1 >> 4) & 3); mid = ((b1 & F) << 4) |
     // ((b2 >> 2) & F); low = ((b2 & 3) << 6) | (b3 & 3F); codepoint = (plane << 16) | (mid << 8) | low.
-    __m512i const window_u8x64 = decoded->window;
+    __m512i const window_u8x64 = decoded->window_u8x64;
     // The BMP `high`/`low` are reconstructed HERE from the raw lead and the (already edge-zeroed) neighbour bytes
-    // `next1`/`next2`, not read from `decoded->high`/`decoded->low`. The substrate's neighbour fetch is an in-register
+    // `next1`/`next2`, not read from `decoded->high_byte_u8x64`/`decoded->low_byte_u8x64`. The substrate's neighbour fetch is an in-register
     // rotate that wraps the window head into a truncated trailing lead's missing continuation byte; recomputing from
     // the zeroed neighbours pads out-of-window bytes with 0, matching the serial blind decode byte-for-byte so a
     // 2-/3-byte lead at the loaded edge classifies neighbour-independently. ASCII (1-byte) lanes take the identity
@@ -395,7 +395,7 @@ SZ_HELPER_INLINE sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_(
         start_lanes &= sz_u64_mask_until_(byte_span);
     }
 
-    // The neighbour fetches `next{1,2,3}` are an in-register byte rotate of `decoded.window`, so a lane near the loaded
+    // The neighbour fetches `next{1,2,3}` are an in-register byte rotate of `decoded.window_u8x64`, so a lane near the loaded
     // end reads a WRAPPED lane-0 byte for any continuation that falls at or beyond `loaded`. On a short final window
     // (`loaded < 64`) those continuation bytes are genuinely absent (the input ended mid-sequence), so a truncated
     // trailing lead would otherwise decode against the wrapped window head and classify neighbour-dependently. Zero
@@ -408,11 +408,11 @@ SZ_HELPER_INLINE sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_(
     __mmask64 const next2_present_m64 = _cvtu64_mask64(in_window >> 2);
     __mmask64 const next3_present_m64 = _cvtu64_mask64(in_window >> 3);
     __m512i const next1_u8x64 = _mm512_maskz_permutexvar_epi8(
-        next1_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)), decoded.window);
+        next1_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)), decoded.window_u8x64);
     __m512i const next2_u8x64 = _mm512_maskz_permutexvar_epi8(
-        next2_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)), decoded.window);
+        next2_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)), decoded.window_u8x64);
     __m512i const next3_u8x64 = _mm512_maskz_permutexvar_epi8(
-        next3_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(3)), decoded.window);
+        next3_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(3)), decoded.window_u8x64);
     __m512i const descriptors_per_lane_u8x64 = sz_grapheme_classify_window_icelake_(&decoded, next1_u8x64, next2_u8x64,
                                                                                     next3_u8x64);
 

@@ -516,10 +516,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
         sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + position, length - position,
                                                                                   lane_identity_u8x64);
         sz_size_t const loaded = decoded.loaded;
-        __m512i const window_u8x64 = decoded.window;
+        __m512i const window_u8x64 = decoded.window_u8x64;
         sz_u64_t const valid = sz_u64_mask_until_(loaded);
-        __m512i const high_u8x64 = decoded.high;
-        __m512i const low_u8x64 = decoded.low;
+        __m512i const high_u8x64 = decoded.high_byte_u8x64;
+        __m512i const low_u8x64 = decoded.low_byte_u8x64;
         __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
                                                             window_u8x64);
         __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)),

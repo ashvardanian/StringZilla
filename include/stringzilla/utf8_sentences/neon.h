@@ -337,7 +337,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(            //
         //  `loaded - k`, matching haswell's `keep1`/`keep2`/`keep3` and icelake's `maskz_permutexvar`, so the missing
         //  continuations read as zero exactly like serial's blind decode (`text[start+k]` past the input reads 0).
         uint8x16_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
-        sz_utf8_forward_neighbours_neon_(window.window, next1_u8x16, next2_u8x16, next3_u8x16);
+        sz_utf8_forward_neighbours_neon_(window.window_u8x16s, next1_u8x16, next2_u8x16, next3_u8x16);
         sz_u64_t const keep1 = sz_u64_mask_until_serial_(loaded >= 1 ? loaded - 1 : 0);
         sz_u64_t const keep2 = sz_u64_mask_until_serial_(loaded >= 2 ? loaded - 2 : 0);
         sz_u64_t const keep3 = sz_u64_mask_until_serial_(loaded >= 3 ? loaded - 3 : 0);
@@ -360,11 +360,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(            //
         for (int quarter = 0; quarter < 4; ++quarter) {
             int const lane_base = quarter * 16;
             uint8x16_t high_q_u8x16, low_q_u8x16;
-            sz_utf8_sentence_break_bmp_highlow_neon_(
-                window.window[quarter], next1_u8x16[quarter], next2_u8x16[quarter], window.two_byte_starts >> lane_base,
-                window.three_byte_starts >> lane_base, &high_q_u8x16, &low_q_u8x16);
+            sz_utf8_sentence_break_bmp_highlow_neon_(window.window_u8x16s[quarter], next1_u8x16[quarter],
+                                                     next2_u8x16[quarter], window.two_byte_starts >> lane_base,
+                                                     window.three_byte_starts >> lane_base, &high_q_u8x16,
+                                                     &low_q_u8x16);
             uint8x16_t const classes_q_u8x16 = sz_utf8_sentence_break_classify_quarter_neon_(
-                high_q_u8x16, low_q_u8x16, window.window[quarter], next1_u8x16[quarter], next2_u8x16[quarter],
+                high_q_u8x16, low_q_u8x16, window.window_u8x16s[quarter], next1_u8x16[quarter], next2_u8x16[quarter],
                 next3_u8x16[quarter], window.four_byte_starts >> lane_base);
             vst1q_u8(class_bytes + lane_base, classes_q_u8x16);
         }

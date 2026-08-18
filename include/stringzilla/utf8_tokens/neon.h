@@ -418,7 +418,7 @@ SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_ne
     uint8x16_t const continuation_mask_u8x16 = vdupq_n_u8(0xC0), continuation_pattern_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t valid_bool_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter) {
-        uint8x16_t const here_u8x16 = decoded->window[quarter];
+        uint8x16_t const here_u8x16 = decoded->window_u8x16s[quarter];
         uint8x16_t const n1_u8x16 = next1_u8x16[quarter];
         uint8x16_t const c1_ok_u8x16 = vceqq_u8(vandq_u8(n1_u8x16, continuation_mask_u8x16),
                                                 continuation_pattern_u8x16);
@@ -501,14 +501,15 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(      //
             uint8x16_t member_bool_u8x16[4];
             for (int quarter = 0; quarter < 4; ++quarter)
                 member_bool_u8x16[quarter] = sz_delimiter_test_bit_neon_(
-                    vqtbl1q_u8(row0_u8x16, vshrq_n_u8(decoded.window[quarter], 3)), decoded.window[quarter]);
+                    vqtbl1q_u8(row0_u8x16, vshrq_n_u8(decoded.window_u8x16s[quarter], 3)),
+                    decoded.window_u8x16s[quarter]);
             hits = sz_utf8_mask_combine_neon_(member_bool_u8x16[0], member_bool_u8x16[1], member_bool_u8x16[2],
                                               member_bool_u8x16[3]) &
                    loaded_mask;
         }
         else {
             uint8x16_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
-            sz_utf8_forward_neighbours_neon_(decoded.window, next1_u8x16, next2_u8x16, next3_u8x16);
+            sz_utf8_forward_neighbours_neon_(decoded.window_u8x16s, next1_u8x16, next2_u8x16, next3_u8x16);
 
             // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past `loaded` would
             // decode against a wrapped neighbour; defer it to the next window.
@@ -525,8 +526,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(      //
             sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
             sz_u64_t member = 0;
             for (int quarter = 0; quarter < 4; ++quarter) {
-                uint8x16_t const bmp_u8x16 = sz_delimiter_bmp_membership_neon_(
-                    decoded.window[quarter], decoded.high[quarter], decoded.low[quarter]);
+                uint8x16_t const bmp_u8x16 = sz_delimiter_bmp_membership_neon_(decoded.window_u8x16s[quarter],
+                                                                               decoded.high_byte_u8x16s[quarter],
+                                                                               decoded.low_byte_u8x16s[quarter]);
                 member |= sz_utf8_movemask16_neon_(bmp_u8x16) << (16 * quarter);
             }
             // Blend astral over the four-byte lanes; the per-lane BMP/astral decision stays exact on the bit masks.
@@ -534,7 +536,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(      //
                 sz_u64_t astral_member = 0;
                 for (int quarter = 0; quarter < 4; ++quarter) {
                     uint8x16_t const astral_u8x16 = sz_delimiter_astral_membership_neon_(
-                        decoded.window[quarter], next1_u8x16[quarter], next2_u8x16[quarter], next3_u8x16[quarter]);
+                        decoded.window_u8x16s[quarter], next1_u8x16[quarter], next2_u8x16[quarter],
+                        next3_u8x16[quarter]);
                     astral_member |= sz_utf8_movemask16_neon_(astral_u8x16) << (16 * quarter);
                 }
                 member = (member & ~four_byte) | (astral_member & four_byte);

@@ -163,7 +163,7 @@ SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_haswell_( //
  *          high/low/plane reconstructed from the forward neighbours. */
 SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_haswell_( //
     sz_utf8_rune_window_haswell_t window, __m256i *classes_lo_u8x32, __m256i *classes_hi_u8x32) {
-    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
                                   ~window.four_byte_starts;
     __m256i const four_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)window.four_byte_starts);
@@ -178,8 +178,9 @@ SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_haswell_( //
     __m256i out_hi_u8x32 = _mm256_setzero_si256();
     sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
     if (bmp_starts)
-        sz_utf8_word_break_bmp_compact_haswell_(bmp_starts, window.high_lo, window.high_hi, window.low_lo,
-                                                window.low_hi, &out_lo_u8x32, &out_hi_u8x32);
+        sz_utf8_word_break_bmp_compact_haswell_(bmp_starts, window.high_byte_low_u8x32, window.high_byte_high_u8x32,
+                                                window.low_byte_low_u8x32, window.low_byte_high_u8x32, &out_lo_u8x32,
+                                                &out_hi_u8x32);
 
     // ASCII lanes: read the 128-entry property table directly off the raw byte.
     out_lo_u8x32 = _mm256_blendv_epi8(out_lo_u8x32, sz_utf8_word_break_ascii_class_haswell_(raw_lo_u8x32),
@@ -309,7 +310,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
     sz_size_t const loaded = window.loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
-    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
 
     // Truncated-edge U+FFFD reclassify (force the class to Other on a lead whose declared span runs past `loaded`).
     sz_u64_t const lead_two = length_two & start_bytes;
@@ -368,8 +369,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
     sz_u64_t wseg_multibyte = 0ull;
     if (non_ascii_lanes)
         wseg_multibyte = sz_utf8_word_break_range16_mask_haswell_(
-                             window.high_lo, window.high_hi, window.low_lo, window.low_hi, sz_utf8_word_break_wseg_lo_,
-                             sz_utf8_word_break_wseg_hi_, sz_utf8_word_break_wseg_count_k) &
+                             window.high_byte_low_u8x32, window.high_byte_high_u8x32, window.low_byte_low_u8x32,
+                             window.low_byte_high_u8x32, sz_utf8_word_break_wseg_lo_, sz_utf8_word_break_wseg_hi_,
+                             sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
     frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0x20) & valid));
 
@@ -414,8 +416,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
                              _mm256_set1_epi8((char)0xC0)),
             _mm256_and_si256(next3_hi_u8x32, _mm256_set1_epi8(0x3F)));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_haswell_(
-            window.high_lo, window.high_hi, window.low_lo, window.low_hi, sz_utf8_word_break_pict_bmp_lo_,
-            sz_utf8_word_break_pict_bmp_hi_, sz_utf8_word_break_pict_bmp_count_k);
+            window.high_byte_low_u8x32, window.high_byte_high_u8x32, window.low_byte_low_u8x32,
+            window.low_byte_high_u8x32, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
+            sz_utf8_word_break_pict_bmp_count_k);
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_haswell_(
             smp_high_lo_u8x32, smp_high_hi_u8x32, smp_low_lo_u8x32, smp_low_hi_u8x32, sz_utf8_word_break_pict_smp_lo_,
             sz_utf8_word_break_pict_smp_hi_, sz_utf8_word_break_pict_smp_count_k);
@@ -437,7 +440,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
  *          portable @ref sz_utf8_word_break_partition_from_masks_. */
 SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(
     sz_utf8_rune_window_haswell_t window, sz_u64_t valid, int at_end_of_text) {
-    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
     sz_u64_t const real_continuation = window.continuation & valid;
     __m256i const high_nibble_lo_u8x32 = sz_utf8_srl8_haswell_(raw_lo_u8x32, 4, 0x0F);
     __m256i const high_nibble_hi_u8x32 = sz_utf8_srl8_haswell_(raw_hi_u8x32, 4, 0x0F);

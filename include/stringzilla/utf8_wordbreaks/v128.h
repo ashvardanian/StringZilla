@@ -120,7 +120,7 @@ SZ_HELPER_INLINE v128_t sz_utf8_word_break_astral_class_v128_(v128_t plane_off_u
  *          bit-exact at every start lane (every other lane is a don't-care left at zero, exactly as NEON leaves it). */
 SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_v128_( //
     sz_utf8_rune_window_v128_t window, v128_t *classes_u8x16) {
-    v128_t const *raw_u8x16 = window.window;
+    v128_t const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
                                   ~window.four_byte_starts;
     sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
@@ -147,8 +147,8 @@ SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_v128_( //
         if (bmp_starts) {
             v128_t const bmp_select_u8x16 = sz_utf8_word_break_byte_mask_from_bits_v128_(bmp_starts, lane_base);
             class_bytes_u8x16 = wasm_v128_bitselect(
-                sz_utf8_word_break_bmp_class_v128_(window.high[quarter], window.low[quarter]), class_bytes_u8x16,
-                bmp_select_u8x16);
+                sz_utf8_word_break_bmp_class_v128_(window.high_byte_u8x16s[quarter], window.low_byte_u8x16s[quarter]),
+                class_bytes_u8x16, bmp_select_u8x16);
         }
 
         // 4-byte (astral) lanes: reconstruct the codepoint from the lead + three forward neighbours, then the astral
@@ -255,7 +255,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
     sz_size_t const loaded = window.loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
-    v128_t const *raw_u8x16 = window.window;
+    v128_t const *raw_u8x16 = window.window_u8x16s;
 
     // Truncated-edge U+FFFD reclassify (force the class to Other on a lead whose declared span runs past `loaded`).
     sz_u64_t const lead_two = length_two & start_bytes;
@@ -298,8 +298,8 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
     // WB3d WSegSpace raw membership: the ASCII U+0020 byte compare OR the multibyte (high,low) range scan.
     sz_u64_t wseg_multibyte = 0ull;
     if (non_ascii_lanes)
-        wseg_multibyte = sz_utf8_word_break_range16_mask_v128_(window.high, window.low, sz_utf8_word_break_wseg_lo_,
-                                                               sz_utf8_word_break_wseg_hi_,
+        wseg_multibyte = sz_utf8_word_break_range16_mask_v128_(window.high_byte_u8x16s, window.low_byte_u8x16s,
+                                                               sz_utf8_word_break_wseg_lo_, sz_utf8_word_break_wseg_hi_,
                                                                sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
     frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0x20) & valid));
@@ -336,8 +336,8 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
             wasm_i8x16_eq(plane_q_u8x16[0], one_u8x16), wasm_i8x16_eq(plane_q_u8x16[1], one_u8x16),
             wasm_i8x16_eq(plane_q_u8x16[2], one_u8x16), wasm_i8x16_eq(plane_q_u8x16[3], one_u8x16));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_v128_(
-            window.high, window.low, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
-            sz_utf8_word_break_pict_bmp_count_k);
+            window.high_byte_u8x16s, window.low_byte_u8x16s, sz_utf8_word_break_pict_bmp_lo_,
+            sz_utf8_word_break_pict_bmp_hi_, sz_utf8_word_break_pict_bmp_count_k);
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_v128_(
             smp_high_u8x16, smp_low_u8x16, sz_utf8_word_break_pict_smp_lo_, sz_utf8_word_break_pict_smp_hi_,
             sz_utf8_word_break_pict_smp_count_k);
@@ -359,7 +359,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
  *          @ref sz_utf8_word_break_partition_from_masks_. */
 SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_v128_(sz_utf8_rune_window_v128_t window,
                                                                                    sz_u64_t valid, int at_end_of_text) {
-    v128_t const *raw_u8x16 = window.window;
+    v128_t const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const real_continuation = window.continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD → 2, 0xE → 3, 0xF → 4. The strict
     // `two`/`three_byte_starts` masks already match 0xC0-0xDF and 0xE0-0xEF; only `length_four` needs widening to fold

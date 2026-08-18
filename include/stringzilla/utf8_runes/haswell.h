@@ -93,18 +93,18 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length,
  *          shape. Masks are `sz_u64_t` (`vpmovmskb` per half, OR-combined) rather than the Ice Lake `__mmask64`. Field
  *          names and semantics match @ref sz_utf8_rune_window_t so the portable rule algebra is unchanged. */
 typedef struct sz_utf8_rune_window_haswell_t {
-    __m256i window_lo;          /**< Raw input bytes for lanes [0, 32). */
-    __m256i window_hi;          /**< Raw input bytes for lanes [32, 64). */
-    __m256i high_lo;            /**< Per-lane `codepoint >> 8` for lanes [0, 32). */
-    __m256i high_hi;            /**< Per-lane `codepoint >> 8` for lanes [32, 64). */
-    __m256i low_lo;             /**< Per-lane `codepoint & 0xFF` for lanes [0, 32). */
-    __m256i low_hi;             /**< Per-lane `codepoint & 0xFF` for lanes [32, 64). */
-    sz_u64_t continuation;      /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
-    sz_u64_t codepoint_starts;  /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
-    sz_u64_t two_byte_starts;   /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
-    sz_u64_t three_byte_starts; /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
-    sz_u64_t four_byte_starts;  /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;           /**< Number of bytes actually loaded (<= 64). */
+    __m256i window_low_u8x32;     /**< Raw input bytes for lanes [0, 32). */
+    __m256i window_high_u8x32;    /**< Raw input bytes for lanes [32, 64). */
+    __m256i high_byte_low_u8x32;  /**< Per-lane `codepoint >> 8` for lanes [0, 32). */
+    __m256i high_byte_high_u8x32; /**< Per-lane `codepoint >> 8` for lanes [32, 64). */
+    __m256i low_byte_low_u8x32;   /**< Per-lane `codepoint & 0xFF` for lanes [0, 32). */
+    __m256i low_byte_high_u8x32;  /**< Per-lane `codepoint & 0xFF` for lanes [32, 64). */
+    sz_u64_t continuation;        /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
+    sz_u64_t codepoint_starts;    /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
+    sz_u64_t two_byte_starts;     /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
+    sz_u64_t three_byte_starts;   /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
+    sz_u64_t four_byte_starts;    /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
+    sz_size_t loaded;             /**< Number of bytes actually loaded (<= 64). */
 } sz_utf8_rune_window_haswell_t;
 
 /** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the AVX2 twin of `srl8_`. */
@@ -183,7 +183,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswel
 
     __m256i window_bytes_low_u8x32, window_bytes_high_u8x32;
     sz_utf8_load_window_haswell_(text, result.loaded, &window_bytes_low_u8x32, &window_bytes_high_u8x32);
-    result.window_lo = window_bytes_low_u8x32, result.window_hi = window_bytes_high_u8x32;
+    result.window_low_u8x32 = window_bytes_low_u8x32, result.window_high_u8x32 = window_bytes_high_u8x32;
 
     __m256i next_byte_1_low_u8x32, next_byte_1_high_u8x32, next_byte_2_low_u8x32, next_byte_2_high_u8x32;
     sz_utf8_forward_neighbours_haswell_(window_bytes_low_u8x32, window_bytes_high_u8x32, &next_byte_1_low_u8x32,
@@ -261,14 +261,14 @@ SZ_HELPER_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswel
         (sz_u32_t)(result.three_byte_starts & 0xFFFFFFFFu));
     __m256i const is_three_byte_high_select_u8x32 = sz_utf8_byte_mask_from_bits_haswell_(
         (sz_u32_t)((result.three_byte_starts >> 32) & 0xFFFFFFFFu));
-    result.high_lo = _mm256_blendv_epi8(high_two_byte_low_u8x32, high_three_byte_low_u8x32,
-                                        is_three_byte_low_select_u8x32);
-    result.high_hi = _mm256_blendv_epi8(high_two_byte_high_u8x32, high_three_byte_high_u8x32,
-                                        is_three_byte_high_select_u8x32);
-    result.low_lo = _mm256_blendv_epi8(low_two_byte_low_u8x32, low_three_byte_low_u8x32,
-                                       is_three_byte_low_select_u8x32);
-    result.low_hi = _mm256_blendv_epi8(low_two_byte_high_u8x32, low_three_byte_high_u8x32,
-                                       is_three_byte_high_select_u8x32);
+    result.high_byte_low_u8x32 = _mm256_blendv_epi8(high_two_byte_low_u8x32, high_three_byte_low_u8x32,
+                                                    is_three_byte_low_select_u8x32);
+    result.high_byte_high_u8x32 = _mm256_blendv_epi8(high_two_byte_high_u8x32, high_three_byte_high_u8x32,
+                                                     is_three_byte_high_select_u8x32);
+    result.low_byte_low_u8x32 = _mm256_blendv_epi8(low_two_byte_low_u8x32, low_three_byte_low_u8x32,
+                                                   is_three_byte_low_select_u8x32);
+    result.low_byte_high_u8x32 = _mm256_blendv_epi8(low_two_byte_high_u8x32, low_three_byte_high_u8x32,
+                                                    is_three_byte_high_select_u8x32);
     return result;
 }
 

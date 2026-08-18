@@ -891,10 +891,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_powervsx_( //
  *          per-lane byte-domain codepoint halves `high`/`low` share that shape. Masks are `sz_u64_t` (one bit per
  *          byte-lane, quarter `q` at bit positions [16*q, 16*q+16)). */
 typedef struct sz_utf8_rune_window_powervsx_t {
-    __vector unsigned char window[4]; /**< Raw input bytes for lanes [16*q, 16*q+16). */
-    __vector unsigned char high[4];   /**< Per-lane `codepoint >> 8`. */
-    __vector unsigned char low[4];    /**< Per-lane `codepoint & 0xFF`. */
-    sz_u64_t continuation;            /**< Bit `i` is set when lane `i` is a continuation byte `10xxxxxx`. */
+    __vector unsigned char window_u8x16s[4];    /**< Raw input bytes for lanes [16*q, 16*q+16). */
+    __vector unsigned char high_byte_u8x16s[4]; /**< Per-lane `codepoint >> 8`. */
+    __vector unsigned char low_byte_u8x16s[4];  /**< Per-lane `codepoint & 0xFF`. */
+    sz_u64_t continuation;                      /**< Bit `i` is set when lane `i` is a continuation byte `10xxxxxx`. */
     sz_u64_t codepoint_starts;  /**< Bit `i` is set when lane `i` begins a codepoint (loaded, non-continuation). */
     sz_u64_t two_byte_starts;   /**< Bit `i` is set when lane `i` is a 2-byte lead `110xxxxx`. */
     sz_u64_t three_byte_starts; /**< Bit `i` is set when lane `i` is a 3-byte lead `1110xxxx`. */
@@ -959,7 +959,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_powervsx_t sz_utf8_rune_decode_window_power
 
     __vector unsigned char window_u8x16[4];
     sz_utf8_load_window_powervsx_(text, result.loaded, window_u8x16);
-    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
+    for (int quarter = 0; quarter < 4; ++quarter) result.window_u8x16s[quarter] = window_u8x16[quarter];
 
     __vector unsigned char next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
     sz_utf8_forward_neighbours_powervsx_(window_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
@@ -1022,8 +1022,8 @@ SZ_HELPER_INLINE sz_utf8_rune_window_powervsx_t sz_utf8_rune_decode_window_power
 
         // Blend 2-byte versus 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
         __vector bool char const three_select_u8x16 = (__vector bool char)three_byte_bool_u8x16[quarter];
-        result.high[quarter] = vec_sel(high_two_u8x16, high_three_u8x16, three_select_u8x16);
-        result.low[quarter] = vec_sel(low_two_u8x16, low_three_u8x16, three_select_u8x16);
+        result.high_byte_u8x16s[quarter] = vec_sel(high_two_u8x16, high_three_u8x16, three_select_u8x16);
+        result.low_byte_u8x16s[quarter] = vec_sel(low_two_u8x16, low_three_u8x16, three_select_u8x16);
     }
     return result;
 }

@@ -100,9 +100,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz
  *          each quarter placed at bit positions [0,16)/[16,32)/[32,48)/[48,64)). Field names and semantics match
  *          @ref sz_utf8_rune_window_neon_t so the portable rule algebra is unchanged. */
 typedef struct sz_utf8_rune_window_v128_t {
-    v128_t window[4];           /**< Raw input bytes for lanes [16*q, 16*q+16). */
-    v128_t high[4];             /**< Per-lane `codepoint >> 8`. */
-    v128_t low[4];              /**< Per-lane `codepoint & 0xFF`. */
+    v128_t window_u8x16s[4];    /**< Raw input bytes for lanes [16*q, 16*q+16). */
+    v128_t high_byte_u8x16s[4]; /**< Per-lane `codepoint >> 8`. */
+    v128_t low_byte_u8x16s[4];  /**< Per-lane `codepoint & 0xFF`. */
     sz_u64_t continuation;      /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
     sz_u64_t codepoint_starts;  /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
     sz_u64_t two_byte_starts;   /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
@@ -184,7 +184,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
 
     v128_t window_u8x16[4];
     sz_utf8_rune_load_window_v128_(text, result.loaded, window_u8x16);
-    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
+    for (int quarter = 0; quarter < 4; ++quarter) result.window_u8x16s[quarter] = window_u8x16[quarter];
 
     v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
     sz_utf8_forward_neighbours_v128_(window_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
@@ -247,8 +247,8 @@ SZ_HELPER_INLINE sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
 
         // Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
         v128_t const three_select_u8x16 = three_byte_bool_u8x16[quarter];
-        result.high[quarter] = wasm_v128_bitselect(high_three_u8x16, high_two_u8x16, three_select_u8x16);
-        result.low[quarter] = wasm_v128_bitselect(low_three_u8x16, low_two_u8x16, three_select_u8x16);
+        result.high_byte_u8x16s[quarter] = wasm_v128_bitselect(high_three_u8x16, high_two_u8x16, three_select_u8x16);
+        result.low_byte_u8x16s[quarter] = wasm_v128_bitselect(low_three_u8x16, low_two_u8x16, three_select_u8x16);
     }
     return result;
 }

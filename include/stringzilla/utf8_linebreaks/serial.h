@@ -647,10 +647,10 @@ SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_masks_(sz_size_t loaded, s
 /** @brief Per-lane class/side membership of one decoded 64-byte window, precomputed by a per-ISA extractor so the
  *         portable rule engine sources every mask from `sz_u64_t` words without touching the codepoint vectors. */
 typedef struct sz_line_break_frame_t {
-    sz_u64_t base, gate, attached, lone_mark;               /**< from the byte-level cluster frame */
-    sz_u64_t non_start, dotted, starts, replacement;        /**< from the classifier */
-    sz_u64_t effective_class[sz_line_break_class_count_k];  /**< membership per class, AFTER LB10 lone->AL; NOT &base */
-    sz_u64_t raw_zwj;                                       /**< class_mask(classified.classes, zwj_k), pre-effective */
+    sz_u64_t base, gate, attached, lone_mark;              /**< from the byte-level cluster frame */
+    sz_u64_t non_start, dotted, starts, replacement;       /**< from the classifier */
+    sz_u64_t effective_class[sz_line_break_class_count_k]; /**< membership per class, AFTER LB10 lone->AL; NOT &base */
+    sz_u64_t raw_zwj; /**< class_mask(classified.classes_*, zwj_k), pre-effective */
     sz_u64_t side_pi, side_pf, side_eaw, side_cn, side_ext; /**< side-bit membership masks (NOT yet &base) */
 } sz_line_break_frame_t;
 
