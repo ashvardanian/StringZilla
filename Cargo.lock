@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "stringzilla"
-version = "5.1.1"
+version = "5.1.2"
 dependencies = [
  "aho-corasick",
  "allocator-api2",

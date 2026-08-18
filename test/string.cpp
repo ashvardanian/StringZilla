@@ -50,6 +50,7 @@
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
+#include <forward_list>  // `std::forward_list`
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
 #include <memory>        // `std::allocator`
@@ -339,6 +340,54 @@ void test_sequence_unit() {
         verify("banana"_sv == sequence.get_start(sequence.handle, 0));
         verify("apple"_sv == sequence.get_start(sequence.handle, 1));
         verify("cherry"_sv == sequence.get_start(sequence.handle, 2));
+    }
+}
+
+/**
+ *  @brief Validates that `arrow_strings_tape::try_assign` works with multi-pass forward iterators.
+ *         It walks the range twice, once to measure and once to copy, so single-pass input
+ *         iterators like `std::istream_iterator` are rejected at compile time.
+ */
+void test_strings_tape_assign_unit() {
+    sz::arrow_strings_tape<char, std::uint32_t, std::allocator<char>> tape;
+
+    // A forward list can only be walked forward, but any number of times - exactly what `try_assign` needs.
+    std::forward_list<std::string> strings {"alpha", "", "gamma"};
+    verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::success_k);
+    verify(tape.size() == 3);
+    verify(sz::string_view(tape[0].data(), tape[0].size()) == "alpha"_sv);
+    verify(tape[1].size() == 0);
+    verify(sz::string_view(tape[2].data(), tape[2].size()) == "gamma"_sv);
+}
+
+/** @brief Validates that `arrow_strings_tape` refuses to grow past the range of its offset type. */
+void test_strings_tape_overflow_unit() {
+    // 8-bit offsets hit the same code path as 32-bit offsets past 4 GiB, but already at 256 bytes.
+    using tape_t = sz::arrow_strings_tape<char, std::uint8_t, std::allocator<char>>;
+
+    // Appending past the offset range must fail cleanly and leave the stored strings untouched.
+    {
+        tape_t tape;
+        std::string const oversized_string(200, 'x');
+        verify(tape.try_append(sz::to_view(oversized_string)) == sz::status_t::success_k);
+        // Two 200-byte strings need 402 bytes of buffer, past the 255 maximum of 8-bit offsets.
+        verify(tape.try_append(sz::to_view(oversized_string)) == sz::status_t::overflow_risk_k);
+        verify(tape.size() == 1);
+        // The first string must still sit at offset 0, ending at 201 with its NULL terminator.
+        verify(tape.offsets()[0] == 0);
+        verify(tape.offsets()[1] == 201);
+        verify(std::memcmp(tape.buffer().data(), oversized_string.data(), oversized_string.size()) == 0);
+    }
+
+    // Same for bulk assignment: the combined size must fit the offset range.
+    {
+        tape_t tape;
+        std::string const stored_string(10, 'z');
+        verify(tape.try_append(sz::to_view(stored_string)) == sz::status_t::success_k);
+        std::vector<std::string> strings {std::string(200, 'x'), std::string(200, 'y')};
+        verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
+        // A rejected assignment releases the old contents, so the tape must not keep reporting them.
+        verify(tape.size() == 0);
     }
 }
 
@@ -1702,6 +1751,44 @@ void test_string_constructors_unit() {
     }
     verify(std::equal(strings.begin(), strings.end(), copies.begin()));
     verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
+}
+
+/**
+ *  @brief Validates that shrinking `reserve` calls are harmless no-ops, just like in the STL.
+ *         Regression test: shrinking used to overflow the heap buffer in release builds.
+ */
+void test_string_reserve_unit() {
+    // C API: grow, then shrink - the buffer, length, and contents must stay intact.
+    {
+        sz_memory_allocator_t alloc;
+        sz_memory_allocator_init_default(&alloc);
+
+        sz_string_t str;
+        sz_ptr_t start = sz_string_init_length(&str, 100, &alloc);
+        verify(start != nullptr);
+        std::memset(start, 'a', 100);
+
+        sz_ptr_t grown = sz_string_reserve(&str, 200, &alloc);
+        verify(grown != nullptr);
+        verify(sz_string_length(&str) == 100);
+
+        // Shrinking must be a no-op: same buffer, same length, same contents.
+        sz_ptr_t shrunk = sz_string_reserve(&str, 50, &alloc);
+        verify(shrunk == grown);
+        verify(sz_string_length(&str) == 100);
+        for (sz_size_t i = 0; i != 100; ++i) verify(shrunk[i] == 'a');
+
+        sz_string_free(&str, &alloc);
+    }
+    // C++ API: `sz::string::reserve` shrinking must match `std::string` behavior - keep the contents.
+    {
+        sz::string str(100, 'a');
+        std::size_t const capacity_before = str.capacity();
+        str.reserve(50);
+        verify(str.size() == 100);
+        verify(str.capacity() == capacity_before);
+        verify(str == sz::string(100, 'a'));
+    }
 }
 
 /** @brief Checks for memory leaks in the string class using the `accounting_allocator`. */

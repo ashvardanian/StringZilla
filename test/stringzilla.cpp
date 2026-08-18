@@ -111,6 +111,8 @@ int main(int argc, char const **argv) {
 
     failures += run_test("test_arithmetic_unit", test_arithmetic_unit);
     failures += run_test("test_sequence_unit", test_sequence_unit);
+    failures += run_test("test_strings_tape_assign_unit", test_strings_tape_assign_unit);
+    failures += run_test("test_strings_tape_overflow_unit", test_strings_tape_overflow_unit);
     failures += run_test("test_allocator_unit", test_allocator_unit);
     failures += run_test("test_byteset_unit", test_byteset_unit);
 
@@ -154,6 +156,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_extensions_ranges_unit", test_extensions_ranges_unit);
 
     failures += run_test("test_string_constructors_unit", test_string_constructors_unit);
+    failures += run_test("test_string_reserve_unit", test_string_reserve_unit);
     failures += run_test("test_memory_stability_equivalence(1024)", [] { test_memory_stability_equivalence(1024); });
     failures += run_test("test_memory_stability_equivalence(14)", [] { test_memory_stability_equivalence(14); });
     failures += run_test("test_string_updates_equivalence", [] { test_string_updates_equivalence(); }); // ! Defaulted

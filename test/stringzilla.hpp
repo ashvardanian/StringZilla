@@ -686,6 +686,8 @@ using ashvardanian::stringzilla::scripts::scale_iterations;
 
 void test_arithmetic_unit();
 void test_sequence_unit();
+void test_strings_tape_assign_unit();
+void test_strings_tape_overflow_unit();
 void test_allocator_unit();
 void test_byteset_unit();
 
@@ -777,6 +779,7 @@ void test_extensions_reads_unit();
 
 void test_extensions_updates_unit();
 void test_string_constructors_unit();
+void test_string_reserve_unit();
 void test_memory_stability_equivalence(std::size_t length = 1ull << 10,
                                        std::size_t iterations = scale_iterations(100));
 void test_string_updates_equivalence(std::size_t repetitions = 1024);

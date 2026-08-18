@@ -135,6 +135,7 @@
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
+#include <limits>           // `std::numeric_limits`
 #include <memory>           // `std::allocator_traits` for allocator rebinding
 #include <type_traits>      // `is_same_type`, `std::enable_if`, etc.
 #endif
@@ -605,6 +606,9 @@ struct arrow_strings_tape {
     using char_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<char_t>;
     using offset_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<offset_t>;
 
+    /** @brief Largest byte offset the tape can address, past which an `offset_t` would wrap around. */
+    static constexpr size_t max_offset_k = static_cast<size_t>((std::numeric_limits<offset_t>::max)());
+
   private:
     span<char_t> buffer_;
     span<offset_t> offsets_;
@@ -651,18 +655,22 @@ struct arrow_strings_tape {
 
     template <typename strings_iterator_type_>
     status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
-        // Deallocate previous memory if allocated
-        if (buffer_.data_ && buffer_.size_)
-            char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_), buffer_ = {};
+        // The range is walked twice - once to measure, once to copy - so single-pass "input"
+        // iterators, like `std::istream_iterator`, would compile but silently copy nothing.
+        static_assert(
+            std::is_base_of<std::forward_iterator_tag,
+                            typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
+            "arrow_strings_tape::try_assign needs multi-pass (forward) iterators");
 
-        if (offsets_.data_ && offsets_.size_)
-            offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_), offsets_ = {};
+        reset(); // ? Drops the old contents, so every failure below leaves an empty tape rather than a stale one
 
         // Estimate required memory: total characters + one extra per string for the NULL.
         size_t count = 0;
         size_t combined_length = 0;
         for (auto it = first; it != last; ++it, ++count) combined_length += it->length();
         combined_length += count; // ? NULL-terminate every string
+
+        if (combined_length > max_offset_k) return status_t::overflow_risk_k;
 
         // Allocate exactly the required memory
         buffer_ = {char_alloc_.allocate(combined_length), combined_length};
@@ -696,6 +704,8 @@ struct arrow_strings_tape {
         size_t const string_length = string.length();
         size_t const required = string_length + 1; // Space needed for the new string and its NULL
         size_t current_used = count_ > 0 ? offsets_.data_[count_] : 0;
+
+        if (required > max_offset_k - current_used) return status_t::overflow_risk_k;
 
         // Reallocate the buffer if needed (oversubscribe in powers of two).
         if (current_used + required > buffer_.size_) {
