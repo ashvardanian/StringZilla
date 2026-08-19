@@ -1411,6 +1411,30 @@ void check_substrings_tier_invariant_(substrings_case_sensitivity_t sensitivity,
 }
 
 #if SZ_USE_CUDA
+/**
+ *  @brief Reaches the scalar rune helpers from device code, so a helper that stops being reachable stops
+ *         this file from compiling.
+ *
+ *  Uncased matching walks a folded cursor and that cursor decodes a rune per step. The helpers it calls
+ *  name no execution space of their own: `SZ_HELPER_AUTO` marks them `constexpr`, and
+ *  `--expt-relaxed-constexpr` is what lets a kernel reach a host `constexpr` function at all. Downgrade one
+ *  to `SZ_HELPER_INLINE` and it becomes host-only, yet `nvcc` still resolves the call from inside the
+ *  cursor without a diagnostic - every multi-byte codepoint then decodes as a run of malformed single
+ *  bytes, so an uncased search matches nothing outside ASCII on the device while every host backend agrees
+ *  with the oracle and the whole suite passes.
+ *
+ *  A direct call from a `__global__` function is what turns that silence into a build error, and a build
+ *  error is the only form this can be caught in without a GPU: the device backend is compiled on every
+ *  CUDA runner and executed on none of them, so `check_substrings_cuda_agrees_` below never gets to run.
+ */
+__global__ void reach_rune_helpers_on_device_(sz_cptr_t utf8, sz_size_t length, sz_rune_t *rune_out,
+                                              sz_rune_length_t *length_out, sz_u8_t *encoded_out) {
+    sz_rune_t rune = 0;
+    *length_out = sz_rune_decode(utf8, utf8 + length, &rune);
+    *rune_out = rune;
+    sz_rune_encode(rune, encoded_out);
+}
+
 /** @brief The device backend must report the identical set for the same cell, through the very same call
  *         shape every host backend takes - only the memory the haystacks live in differs. */
 void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,

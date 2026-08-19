@@ -45,21 +45,21 @@ SZ_API_COMPTIME sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
 }
 
 /** @brief True for a Sentence_Break ParaSep (Sep, CR, or LF). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_is_parasep_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_parasep_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sep_k || property == sz_sentence_break_cr_k ||
                        property == sz_sentence_break_lf_k);
 }
 /** @brief True for a Sentence_Break SATerm (STerm or ATerm). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sterm_k || property == sz_sentence_break_aterm_k);
 }
 /** @brief True for an SB5-transparent character (Extend or Format). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_extend_k || property == sz_sentence_break_format_k);
 }
 /** @brief SB8 stop set excluding Lower: OLetter, Upper, ParaSep, or SATerm — a significant class that ends the
  *         ATerm neutral run and confirms the deferred SB11 break (a Lower in the run suppresses it instead). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_oletter_k || property == sz_sentence_break_upper_k ||
                        sz_sentence_break_is_parasep_(property) || sz_sentence_break_is_saterm_(property));
 }
@@ -129,7 +129,7 @@ typedef struct sz_sentence_serial_state_t {
 
 /** @brief Advance @p state by the @p current codepoint property: update the significant chain and the
  *         `SATerm Close* Sp*` terminator context (Extend / Format are transparent and leave both unchanged). */
-SZ_HELPER_INLINE void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
+SZ_HELPER_AUTO void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
     if (!sz_sentence_break_is_transparent_(current)) {
         state->before_significant = state->previous_significant;
         state->previous_significant = current;

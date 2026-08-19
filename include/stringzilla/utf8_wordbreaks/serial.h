@@ -94,12 +94,12 @@ enum {
 };
 
 /** @brief Check if a property is WB4-ignorable (Extend, Format, ZWJ). */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_ignorable_set_k >> property) & 1u);
 }
 
 /** @brief Check if a property is AHLetter (ALetter or Hebrew_Letter). */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_aletter_or_hebrew_set_k >> property) & 1u);
 }
 
@@ -107,7 +107,7 @@ SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t prop
  *  @brief Check if a property is MidNumLetQ (MidNumLet or Single_Quote).
  *         In our encoding, MID_QUOTES (15) covers MidNumLet + quotes.
  */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_mid_quotes_set_k >> property) & 1u);
 }
 
@@ -133,7 +133,7 @@ typedef struct sz_word_element_t {
 } sz_word_element_t;
 
 /** @brief True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
-SZ_HELPER_INLINE sz_bool_t sz_word_is_newline_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_newline_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_utf8_word_break_cr_k || property == sz_utf8_word_break_lf_k ||
                        property == sz_utf8_word_break_newline_k);
 }
@@ -141,13 +141,13 @@ SZ_HELPER_INLINE sz_bool_t sz_word_is_newline_(sz_u8_t property) {
 /*  The 4-bit model lumps Single_Quote (U+0027), Double_Quote (U+0022), and MidNumLet into MID_QUOTES, so the
  *  WB6/WB7/WB7a-c/WB11/WB12 distinctions are recovered from the codepoint. MidNumLetQ = MidNumLet + Single_Quote,
  *  i.e. every MID_QUOTES codepoint that is NOT the Double_Quote. */
-SZ_HELPER_INLINE sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0027u);
 }
-SZ_HELPER_INLINE sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0022u);
 }
-SZ_HELPER_INLINE sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint != 0x0022u);
 }
 
@@ -375,7 +375,7 @@ typedef struct sz_word_serial_state_t {
 
 /** @brief Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new element base,
  *         maintaining the two-back base chain, the Regional_Indicator parity, and the raw-previous fields. */
-SZ_HELPER_INLINE void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
     sz_bool_t const after_newline = (sz_bool_t)(state->has_previous &&
                                                 sz_word_is_newline_(state->previous_raw_property));
     sz_bool_t const is_ignorable = sz_utf8_word_break_is_ignorable_(property);
