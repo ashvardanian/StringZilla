@@ -881,7 +881,8 @@ else:
 install_requires = []
 if sz_target != "stringzilla":
     # Keep versions in lockstep to ensure ABI compatibility
-    install_requires = [f"stringzilla=={__version__}"]
+    # The parallel modules call `import_array()`, so NumPy is a runtime dependency and not merely a build one.
+    install_requires = [f"stringzilla=={__version__}", "numpy"]
 
 setup(
     name=__lib_name__,

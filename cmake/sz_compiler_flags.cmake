@@ -78,6 +78,11 @@ function (set_optimization_flags target compiler_id target_type)
                 "-Xcompiler=/Ob0" # Prevent host inlining
                 "-maxrregcount=0" # No register count limits
             )
+            set(sz_nvcc_lineinfo_
+                "-lineinfo" # Source correlation through optimized device code
+                "-Xcompiler=/Zi" # Host debugging symbols
+                "-Xcompiler=/Oy-" # Frame pointers for stack traces
+            )
             set(sz_nvcc_release_
                 "-O2" # NVCC optimizations
                 "-Xptxas=-O2" # PTX assembler optimizations
@@ -92,14 +97,22 @@ function (set_optimization_flags target compiler_id target_type)
                 "-Xcompiler=-fno-inline" # Prevent host inlining
                 "-maxrregcount=0" # No register count limits
             )
+            set(sz_nvcc_lineinfo_
+                "-lineinfo" # Source correlation through optimized device code
+                "-Xcompiler=-g" # Host debugging symbols explicitly
+                "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
+            )
             set(sz_nvcc_release_
                 "-O2" # NVCC optimizations
                 "-Xptxas=-O2" # PTX assembler optimizations
                 "-Xcompiler=-O2" # Host optimizations
             )
         endif ()
+        # `RelWithDebInfo` matched both lists and asked `ptxas` for `-G` beside `-O2`, which it refuses.
+        # `-G` stays with `Debug`; `-lineinfo` carries the same source correlation through optimized code.
         target_compile_options(
-            ${target} PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:${sz_nvcc_debug_}>"
+            ${target} PRIVATE "$<$<CONFIG:Debug>:${sz_nvcc_debug_}>"
+                              "$<$<CONFIG:RelWithDebInfo>:${sz_nvcc_lineinfo_}>"
                               "$<$<CONFIG:Release,RelWithDebInfo>:${sz_nvcc_release_}>"
         )
     endif ()

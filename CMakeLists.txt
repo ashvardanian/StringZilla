@@ -736,7 +736,8 @@ function (
                          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
     target_compile_definitions(${target} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
-    target_link_libraries(${target} PUBLIC forkunion::static CUDA::cudart Threads::Threads)
+    # `cuGetErrorName` and `cuInit` resolve out of `cuda`, not `cudart`, and only a Windows DLL reports them.
+    target_link_libraries(${target} PUBLIC forkunion::static CUDA::cudart CUDA::cuda_driver Threads::Threads)
 endfunction ()
 
 if (STRINGZILLAS_BUILD_SHARED)
