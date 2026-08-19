@@ -470,9 +470,12 @@ endfunction ()
 
 if (STRINGZILLA_BUILD_SHARED)
 
+    # The shim units default `SZ_OVERRIDE_LIBC` to `SZ_AVOID_LIBC`, so this library exports no `memcpy` of its
+    # own and interposes nothing. That is what lets anything link it - StringZillas, the tests, a consumer's
+    # program - without ELF redirecting `libstdc++`'s internal calls into a dispatch table that is not up yet.
+    # `stringzilla_bare` is the artifact that replaces LibC, and it still does.
     define_stringzilla_library(stringzilla_shared shared SHARED)
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
-    target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
     target_include_directories(
         stringzilla_shared PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
