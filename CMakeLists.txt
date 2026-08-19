@@ -285,6 +285,14 @@ if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCHMARK)
     set(STRINGZILLA_NEEDS_FORKUNION ON)
 endif ()
 
+# A dynamic StringZillas externs the `sz_*` entry points through `SZ_DYNAMIC_DISPATCH=1` and links the core
+# library to resolve them, which a Mach-O build demands at link time rather than at load time. There is no core
+# to link when the dynamic one was never built.
+if (STRINGZILLAS_BUILD_SHARED AND NOT STRINGZILLA_BUILD_SHARED)
+    message(FATAL_ERROR "STRINGZILLAS_BUILD_SHARED needs STRINGZILLA_BUILD_SHARED - the parallel libraries "
+                        "resolve their `sz_*` calls against it. Enable it, or set STRINGZILLAS_BUILD_SHARED=0.")
+endif ()
+
 if (STRINGZILLA_NEEDS_FORKUNION AND NOT TARGET forkunion_header)
     if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/forkunion/CMakeLists.txt")
         message(FATAL_ERROR "The `forkunion` submodule is not populated - run: git submodule update --init --recursive")
@@ -518,10 +526,9 @@ if (STRINGZILLA_BUILD_SHARED)
     endif ()
 endif ()
 
-# The dispatch core as an archive, for in-tree consumers rather than for installation. StringZillas tests and
-# benchmarks inherit `SZ_DYNAMIC_DISPATCH=1` from the engines they link, which externs the `sz_*` entry points;
-# neither shipped library can resolve them, since both interpose LibC and fault the process before `main`.
-# The shim units default `SZ_OVERRIDE_LIBC` to `SZ_AVOID_LIBC`, so leaving both at zero is the whole difference.
+# The dispatch core as an archive. Tests and benchmarks link this rather than the shared library: the
+# cross-compiled runs are `-static` executables, which cannot take a `.so` at all, and the archive fixes the
+# capability set at build time instead of deferring it to a shared library's own runtime detection.
 if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCHMARK)
     define_stringzilla_library(stringzilla_static static STATIC)
     target_compile_definitions(stringzilla_static PRIVATE "SZ_AVOID_LIBC=0")
@@ -588,6 +595,13 @@ function (define_stringzillas_shared base public_base)
         target_link_libraries(${variant} PUBLIC forkunion::static)
         target_compile_definitions(${variant} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
     endforeach ()
+
+    # `SZ_DYNAMIC_DISPATCH=1` externs the `sz_*` entry points these engines call - `sz_copy` from the rewriting
+    # paths, among others - and the core library is what resolves them for the dynamic variant. A Mach-O dynamic
+    # library must have every symbol resolved at link time, where ELF defers to load time, so without this the
+    # macOS build fails on a dangling reference Linux silently accepts. The archive needs no such line: it
+    # resolves nothing itself, and whoever links it brings its own core.
+    target_link_libraries(${target} PUBLIC stringzilla_shared)
 
     find_package(Threads REQUIRED)
     target_link_libraries(${target} PUBLIC Threads::Threads)
