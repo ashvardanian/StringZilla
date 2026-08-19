@@ -463,9 +463,15 @@ SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                 
  *  Written as one straight-line turn of sixteen rounds, then three more turns of the same shape with the
  *  window extension folded in. Sixteen rounds return the eight working variables to their original names and
  *  advance the window exactly one full turn, so every index below is a compile-time constant.
+ *
+ *  Out-of-line rather than fused into its callers, for the same 4 KB frame budget the transpose above keeps.
+ *  The digest and update kernels each call this twice, and each already hold a 1 KB staging window and 512
+ *  bytes of hash state; forced inline, MSVC gives every call site its own copy of the schedule below and the
+ *  frame reaches 4640 bytes, past the page that makes it reach for the CRT's `__chkstk`. One turn of sixteen
+ *  rounds is far too much work for a call to show up against, and the window stays local either way.
  */
-SZ_HELPER_INLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
-                                                  __mmask16 active_m16) {
+SZ_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
+                                                    __mmask16 active_m16) {
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
     __m512i schedule_u32x16[16];
     sz_sha256_transpose_16x16_skylake_(lane_blocks, schedule_u32x16);

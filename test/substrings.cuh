@@ -25,6 +25,7 @@
 
 #include <algorithm> // `std::sort`, `std::unique`
 #include <limits>    // `std::numeric_limits`
+#include <map>       // `std::map`
 #include <random>    // `std::mt19937`, `std::uniform_int_distribution`
 #include <set>       // `std::set`
 #include <string>    // `std::string`
@@ -175,6 +176,23 @@ inline std::vector<std::string> random_short_strings_(std::size_t count, std::si
                                                       std::size_t maximum_length) {
     std::vector<std::string> result;
     randomize_strings({"abcdefghij", count, minimum_length, maximum_length}, result);
+    return result;
+}
+
+/** @brief Random haystacks that each carry one of @p needles, so the corpus still reaches the match paths
+ *         once `SZ_TESTS_MULTIPLIER` shrinks it - ten letters spell the whole vocabulary, which leaves a
+ *         chance hit vanishingly rare at small counts, and a fixture comparing engines over no matches at
+ *         all compares nothing. Both rotations advance a phase each turn, so the needles spread across the
+ *         haystacks and land inside them, where covers and neighbouring matches mean something, rather than
+ *         all at the tail. @p needles must not be empty. */
+inline std::vector<std::string> random_haystacks_with_needles_(std::vector<std::string> const &needles,
+                                                               std::size_t count, std::size_t minimum_length,
+                                                               std::size_t maximum_length) {
+    std::vector<std::string> result = random_short_strings_(count, minimum_length, maximum_length);
+    for (std::size_t index = 0; index < result.size(); ++index) {
+        std::string const &needle = needles[rotating_index(index, needles.size())];
+        result[index].insert(rotating_index(index, result[index].size() + 1), needle);
+    }
     return result;
 }
 
@@ -1728,7 +1746,8 @@ void test_substrings_construction_equivalence() {
     // identically to the wide ones is `check_substrings_narrow_width_`'s job, against the brute-force oracle.
     {
         std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(200), 3, 7);
-        std::vector<std::string> const haystack_strings = random_short_strings_(scale_iterations(64), 16, 96);
+        std::vector<std::string> const haystack_strings =
+            random_haystacks_with_needles_(needle_strings, scale_iterations(64), 16, 96);
         arrow_strings_tape_t needles, haystacks;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
@@ -1858,7 +1877,8 @@ void test_substrings_cover_equivalence() {
     std::printf("  - testing that a leftmost cover is a non-overlapping subset of every match...\n");
 
     std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(150), 2, 5);
-    std::vector<std::string> const haystack_strings = random_short_strings_(scale_iterations(40), 16, 64);
+    std::vector<std::string> const haystack_strings =
+        random_haystacks_with_needles_(needle_strings, scale_iterations(40), 16, 64);
     arrow_strings_tape_t needles, haystacks;
     verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
            status_t::success_k);
@@ -1960,7 +1980,8 @@ void test_substrings_rewriting_equivalence() {
     // Replacing each needle with itself is the identity, so any deviation is the rewrite's own bug.
     {
         std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(200), 2, 6);
-        std::vector<std::string> const haystack_strings = random_short_strings_(scale_iterations(50), 16, 64);
+        std::vector<std::string> const haystack_strings =
+            random_haystacks_with_needles_(needle_strings, scale_iterations(50), 16, 64);
         arrow_strings_tape_t needles, haystacks, replacements;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);

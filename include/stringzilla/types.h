@@ -190,7 +190,12 @@
 // C++20 is the floor rather than C++11 because these helpers declare their locals before filling them, and
 // only C++20 permits an uninitialized local in a `constexpr` function. An older dialect - the Python
 // extensions build at C++17 - gets the same plain inline function it had before the qualifier existed.
-#if defined(__cplusplus) && __cplusplus >= 202002L
+//
+// MSVC is the one front end that gets the plain helper: its bit-scan and byte-swap intrinsics are not
+// constant-evaluable, so `sz_u64_ctz` and every helper that reaches one - `sz_size_bit_ceil`, the folded
+// rune iterators, the uncased search - is rejected with C3615, an error no `/wd` can silence. The qualifier
+// buys compile-time folding and `nvcc` reach, and MSVC hosts neither, so nothing is lost by dropping it.
+#if defined(__cplusplus) && __cplusplus >= 202002L && !(defined(_MSC_VER) && !defined(__clang__))
 #define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE constexpr
 #else
 #define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE

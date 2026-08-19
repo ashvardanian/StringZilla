@@ -184,7 +184,7 @@ inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexce
         capacity = size > 0 ? static_cast<std::size_t>(size) : 0;
     }
     std::string content(capacity, '\0');
-    std::size_t const read_bytes = std::fread(content.data(), 1, capacity, file);
+    std::size_t const read_bytes = std::fread(&content[0], 1, capacity, file);
     std::fclose(file);
     content.resize(read_bytes);
     return content;
