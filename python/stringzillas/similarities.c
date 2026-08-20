@@ -265,7 +265,7 @@ static PyObject *LevenshteinDistances_vectorcall(PyObject *callable, PyObject *c
                                  sz_size_t, char const **) = NULL;
 
     // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
-    if (requires_unified_memory(self->capabilities)) {
+    if (requires_device_memory(self->capabilities)) {
         if (!try_swap_to_unified_allocator(queries_obj)) return NULL;
         if (candidates_obj && !try_swap_to_unified_allocator(candidates_obj)) return NULL;
     }
@@ -345,9 +345,31 @@ static PyObject *LevenshteinDistances_vectorcall(PyObject *callable, PyObject *c
         candidates_count = candidates_any_count;
     }
 
-    // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
+    // A GPU scope writes its results from the device, so it allocates and accepts device memory; a CPU scope
+    // keeps speaking NumPy. Either way the row stride below is in ELEMENTS.
     PyObject *results_array = NULL;
-    if (!out_obj || out_obj == Py_None) {
+    if (requires_device_memory(self->capabilities)) {
+        if (!out_obj || out_obj == Py_None) {
+            npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
+            results_array = new_unified_array(2, results_shape, NPY_UINT64, sizeof(sz_size_t));
+            if (!results_array) goto cleanup;
+            kernel_results = (sz_size_t *)PyArray_DATA((PyArrayObject *)results_array);
+            kernel_results_row_stride = candidates_count;
+        }
+        else {
+            device_buffer_t out_buffer;
+            if (parse_device_buffer(out_obj, sizeof(sz_size_t), &out_buffer) != 0) goto cleanup;
+            if (out_buffer.rows < queries_count || out_buffer.columns < candidates_count) {
+                PyErr_SetString(PyExc_ValueError, "out buffer is too small for results");
+                goto cleanup;
+            }
+            kernel_results = (sz_size_t *)out_buffer.data;
+            kernel_results_row_stride = out_buffer.row_stride;
+            results_array = out_obj;
+            Py_INCREF(results_array);
+        }
+    }
+    else if (!out_obj || out_obj == Py_None) {
         npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
         results_array = PyArray_SimpleNew(2, results_shape, NPY_UINT64);
         if (!results_array) {
@@ -430,6 +452,7 @@ static char const doc_LevenshteinDistances[] =                                  
     "                                   (or None), computes the symmetric self-similarity of queries.\n"     //
     "  device (DeviceScope, optional): Device execution context.\n"                                          //
     "  out (np.ndarray, optional): 2-D uint64 output buffer of shape (len(queries), len(candidates)).\n"     //
+    "    On a GPU scope this must be a CUDA buffer; a host array raises BufferError.\n"                      //
     "\n"                                                                                                     //
     "Returns:\n"                                                                                             //
     "  np.ndarray: 2-D uint64 matrix where result[query_index, candidate_index] is the distance\n"           //
@@ -651,7 +674,7 @@ static PyObject *LevenshteinDistancesUTF8_vectorcall(PyObject *callable, PyObjec
                                  sz_size_t, char const **) = NULL;
 
     // Swap allocators when engine supports CUDA
-    if (requires_unified_memory(self->capabilities)) {
+    if (requires_device_memory(self->capabilities)) {
         if (!try_swap_to_unified_allocator(queries_obj)) return NULL;
         if (candidates_obj && !try_swap_to_unified_allocator(candidates_obj)) return NULL;
     }
@@ -731,9 +754,31 @@ static PyObject *LevenshteinDistancesUTF8_vectorcall(PyObject *callable, PyObjec
         candidates_count = candidates_any_count;
     }
 
-    // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
+    // A GPU scope writes its results from the device, so it allocates and accepts device memory; a CPU scope
+    // keeps speaking NumPy. Either way the row stride below is in ELEMENTS.
     PyObject *results_array = NULL;
-    if (!out_obj || out_obj == Py_None) {
+    if (requires_device_memory(self->capabilities)) {
+        if (!out_obj || out_obj == Py_None) {
+            npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
+            results_array = new_unified_array(2, results_shape, NPY_UINT64, sizeof(sz_size_t));
+            if (!results_array) goto cleanup;
+            kernel_results = (sz_size_t *)PyArray_DATA((PyArrayObject *)results_array);
+            kernel_results_row_stride = candidates_count;
+        }
+        else {
+            device_buffer_t out_buffer;
+            if (parse_device_buffer(out_obj, sizeof(sz_size_t), &out_buffer) != 0) goto cleanup;
+            if (out_buffer.rows < queries_count || out_buffer.columns < candidates_count) {
+                PyErr_SetString(PyExc_ValueError, "out buffer is too small for results");
+                goto cleanup;
+            }
+            kernel_results = (sz_size_t *)out_buffer.data;
+            kernel_results_row_stride = out_buffer.row_stride;
+            results_array = out_obj;
+            Py_INCREF(results_array);
+        }
+    }
+    else if (!out_obj || out_obj == Py_None) {
         npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
         results_array = PyArray_SimpleNew(2, results_shape, NPY_UINT64);
         if (!results_array) {
@@ -816,6 +861,7 @@ static char const doc_LevenshteinDistancesUTF8[] =                              
     "                                   omitted (or None), computes symmetric self-similarity of queries.\n" //
     "  device (DeviceScope, optional): Device execution context.\n"                                          //
     "  out (np.ndarray, optional): 2-D uint64 output buffer of shape (len(queries), len(candidates)).\n"     //
+    "    On a GPU scope this must be a CUDA buffer; a host array raises BufferError.\n"                      //
     "\n"                                                                                                     //
     "Returns:\n"                                                                                             //
     "  np.ndarray: 2-D uint64 matrix where result[query_index, candidate_index] is the distance\n"           //
@@ -1074,7 +1120,7 @@ static PyObject *NeedlemanWunsch_vectorcall(PyObject *callable, PyObject *const 
                                  sz_ssize_t *, sz_size_t, char const **) = NULL;
 
     // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
-    if (requires_unified_memory(self->capabilities)) {
+    if (requires_device_memory(self->capabilities)) {
         if (!try_swap_to_unified_allocator(queries_obj)) return NULL;
         if (candidates_obj && !try_swap_to_unified_allocator(candidates_obj)) return NULL;
     }
@@ -1154,12 +1200,34 @@ static PyObject *NeedlemanWunsch_vectorcall(PyObject *callable, PyObject *const 
         candidates_count = candidates_any_count;
     }
 
-    // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
+    // A GPU scope writes its results from the device, so it allocates and accepts device memory; a CPU scope
+    // keeps speaking NumPy. Either way the row stride below is in ELEMENTS.
     PyObject *results_array = NULL;
     sz_ssize_t *kernel_results = NULL;
     sz_size_t kernel_results_row_stride = 0;
 
-    if (!out_obj || out_obj == Py_None) {
+    if (requires_device_memory(self->capabilities)) {
+        if (!out_obj || out_obj == Py_None) {
+            npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
+            results_array = new_unified_array(2, results_shape, NPY_INT64, sizeof(sz_ssize_t));
+            if (!results_array) goto cleanup;
+            kernel_results = (sz_ssize_t *)PyArray_DATA((PyArrayObject *)results_array);
+            kernel_results_row_stride = candidates_count;
+        }
+        else {
+            device_buffer_t out_buffer;
+            if (parse_device_buffer(out_obj, sizeof(sz_ssize_t), &out_buffer) != 0) goto cleanup;
+            if (out_buffer.rows < queries_count || out_buffer.columns < candidates_count) {
+                PyErr_SetString(PyExc_ValueError, "out buffer is too small for results");
+                goto cleanup;
+            }
+            kernel_results = (sz_ssize_t *)out_buffer.data;
+            kernel_results_row_stride = out_buffer.row_stride;
+            results_array = out_obj;
+            Py_INCREF(results_array);
+        }
+    }
+    else if (!out_obj || out_obj == Py_None) {
         npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
         results_array = PyArray_SimpleNew(2, results_shape, NPY_INT64);
         if (!results_array) {
@@ -1242,6 +1310,7 @@ static char const doc_NeedlemanWunsch[] =                                       
     "                                   (or None), computes the symmetric self-similarity of queries.\n"      //
     "  device (DeviceScope, optional): Device execution context.\n"                                           //
     "  out (np.ndarray, optional): 2-D int64 output buffer of shape (len(queries), len(candidates)).\n"       //
+    "    On a GPU scope this must be a CUDA buffer; a host array raises BufferError.\n"                       //
     "\n"                                                                                                      //
     "Returns:\n"                                                                                              //
     "  np.ndarray: 2-D int64 matrix where result[query_index, candidate_index] is the score\n"                //
@@ -1493,7 +1562,7 @@ static PyObject *SmithWaterman_vectorcall(PyObject *callable, PyObject *const *a
                                  sz_ssize_t *, sz_size_t, char const **) = NULL;
 
     // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
-    if (requires_unified_memory(self->capabilities)) {
+    if (requires_device_memory(self->capabilities)) {
         if (!try_swap_to_unified_allocator(queries_obj)) return NULL;
         if (candidates_obj && !try_swap_to_unified_allocator(candidates_obj)) return NULL;
     }
@@ -1573,12 +1642,34 @@ static PyObject *SmithWaterman_vectorcall(PyObject *callable, PyObject *const *a
         candidates_count = candidates_any_count;
     }
 
-    // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
+    // A GPU scope writes its results from the device, so it allocates and accepts device memory; a CPU scope
+    // keeps speaking NumPy. Either way the row stride below is in ELEMENTS.
     PyObject *results_array = NULL;
     sz_ssize_t *kernel_results = NULL;
     sz_size_t kernel_results_row_stride = 0;
 
-    if (!out_obj || out_obj == Py_None) {
+    if (requires_device_memory(self->capabilities)) {
+        if (!out_obj || out_obj == Py_None) {
+            npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
+            results_array = new_unified_array(2, results_shape, NPY_INT64, sizeof(sz_ssize_t));
+            if (!results_array) goto cleanup;
+            kernel_results = (sz_ssize_t *)PyArray_DATA((PyArrayObject *)results_array);
+            kernel_results_row_stride = candidates_count;
+        }
+        else {
+            device_buffer_t out_buffer;
+            if (parse_device_buffer(out_obj, sizeof(sz_ssize_t), &out_buffer) != 0) goto cleanup;
+            if (out_buffer.rows < queries_count || out_buffer.columns < candidates_count) {
+                PyErr_SetString(PyExc_ValueError, "out buffer is too small for results");
+                goto cleanup;
+            }
+            kernel_results = (sz_ssize_t *)out_buffer.data;
+            kernel_results_row_stride = out_buffer.row_stride;
+            results_array = out_obj;
+            Py_INCREF(results_array);
+        }
+    }
+    else if (!out_obj || out_obj == Py_None) {
         npy_intp results_shape[2] = {(npy_intp)queries_count, (npy_intp)candidates_count};
         results_array = PyArray_SimpleNew(2, results_shape, NPY_INT64);
         if (!results_array) {
@@ -1674,6 +1765,7 @@ static char const doc_SmithWaterman[] =                                         
     "                                   (or None), computes the symmetric self-similarity of queries.\n"     //
     "  device (DeviceScope, optional): Device execution context.\n"                                          //
     "  out (np.ndarray, optional): 2-D int64 output buffer of shape (len(queries), len(candidates)).\n"      //
+    "    On a GPU scope this must be a CUDA buffer; a host array raises BufferError.\n"                      //
     "\n"                                                                                                     //
     "Returns:\n"                                                                                             //
     "  np.ndarray: 2-D int64 matrix where result[query_index, candidate_index] is the score\n"               //

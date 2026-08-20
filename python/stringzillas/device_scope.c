@@ -88,9 +88,18 @@ static char const doc_DeviceScope[] =                                           
     "\n"                                                                                //
     "Note: Cannot specify both cpu_cores and gpu_device.\n"                             //
     "\n"                                                                                //
+    "Unified memory:\n"                                                                 //
+    "  On a GPU scope every array an engine reads or writes lives on the device -\n"    //
+    "  unified or plain CUDA memory, never page-locked host memory. `Strs` inputs\n"    //
+    "  and the arrays engines return are placed there for you, so the rule is only\n"   //
+    "  visible on arrays you supply: an `out=` matrix, or `score_bm25`'s weights and\n" //
+    "  lengths. A host array in those positions raises BufferError. A CPU scope\n"      //
+    "  imposes no requirement at all.\n"                                                //
+    "\n"                                                                                //
     "Examples:\n"                                                                       //
     "  >>> import stringzillas as szs\n"                                                //
-    "  >>> scope = szs.DeviceScope(cpu_cores=4)  # restrict engines to 4 CPU cores";
+    "  >>> scope = szs.DeviceScope(cpu_cores=4)  # restrict engines to 4 CPU cores\n"   //
+    "  >>> gpu = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else scope";
 
 PyTypeObject DeviceScopeType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.DeviceScope",

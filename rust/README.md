@@ -792,6 +792,7 @@ fn replace_into<R>(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, po
 ```
 
 Every verb writes into caller-owned buffers, so a pipeline allocates once and reuses those buffers across every batch.
+On a GPU scope those buffers must be device-accessible, which [Unified Memory](#unified-memory) spells out.
 Haystacks arrive as an `AnyBytesTape`, which spells all three shapes the C API accepts — a 32- or 64-bit tape built by `AnyBytesTape::from_sequences`, or borrowed slices addressed by callback through `AnyBytesTape::from_slices`, which copies nothing.
 Only `replace_into` narrows that to the tapes, since a rewrite's product is itself a tape and there is nowhere to put one otherwise.
 
@@ -1004,3 +1005,23 @@ match DeviceScope::gpu_device(0) {
 
 `DeviceScope` API: `default()`, `cpu_cores(usize)`, `gpu_device(usize)`, `get_capabilities() -> Result<Capability, Error>`, `get_cpu_cores() -> Result<usize, Error>`, `get_gpu_device() -> Result<usize, Error>`, `is_gpu() -> bool`.
 Batch-engine failures surface as `szs::Error`, a `status` plus an optional message, which converts from the shared `Status` enum.
+
+### Unified Memory
+
+On a GPU scope every buffer an engine reads or writes must live on the device — unified or plain CUDA memory, never page-locked host memory.
+A host buffer is refused with `Status::DeviceMemoryMismatch` rather than copied behind your back, so the cost of a stray `Vec` is a visible error instead of a hidden transfer.
+A CPU scope imposes no requirement at all.
+
+The allocating verbs already satisfy this, since `Fingerprints::compute` returns `UnifiedVec<u32>` and the similarity engines return a `UnifiedMat`.
+The `*_into` verbs take `&mut [T]`, which is what lets a caller write into a subrange of a larger buffer, so meeting the contract there means backing that slice with unified memory:
+
+```rust
+use stringzilla::szs::{DeviceScope, UnifiedVec, UnifiedAlloc};
+
+let gpu = DeviceScope::gpu_device(0).unwrap();
+let mut counts = UnifiedVec::with_capacity_in(haystacks_count, UnifiedAlloc);
+counts.resize(haystacks_count, 0usize);
+engine.count_into(&gpu, &haystacks, OverlapPolicy::Overlapping, &mut counts[..])?;
+```
+
+`&mut counts[..]` is the way in, and the same pattern covers `find_into`, `score_bm25_into` — whose `needle_weights` and `document_lengths` are read on the device too — and `replace_into`'s output data and offsets.

@@ -111,7 +111,7 @@ static int parse_haystacks(PyObject *texts_obj, sz_capability_t capabilities, ha
                      Py_TYPE(texts_obj)->tp_name);
         return -1;
     }
-    if (requires_unified_memory(capabilities))
+    if (requires_device_memory(capabilities))
         if (!try_swap_to_unified_allocator(texts_obj)) return -1;
 
     view->is_u32tape = sz_py_export_strings_as_u32tape( //
@@ -180,8 +180,8 @@ static int Substrings_init(Substrings *self, PyObject *args, PyObject *kwargs) {
     if (device_handle) {
         sz_capability_t scope_capabilities = 0;
         char const *scope_error = NULL;
-        sz_status_t const scope_status =
-            szs_device_scope_get_capabilities(device_handle, &scope_capabilities, &scope_error);
+        sz_status_t const scope_status = szs_device_scope_get_capabilities(device_handle, &scope_capabilities,
+                                                                           &scope_error);
         if (scope_status != sz_success_k) {
             set_stringzilla_error(scope_status, scope_error, "Device scope capabilities");
             return -1;
@@ -198,7 +198,7 @@ static int Substrings_init(Substrings *self, PyObject *args, PyObject *kwargs) {
                      Py_TYPE(needles_obj)->tp_name);
         return -1;
     }
-    if (requires_unified_memory(capabilities))
+    if (requires_device_memory(capabilities))
         if (!try_swap_to_unified_allocator(needles_obj)) return -1;
 
     char const *error_detail = NULL;
@@ -249,7 +249,7 @@ static PyObject *Substrings_count(Substrings *self, PyObject *args, PyObject *kw
     szs_device_scope_t device_handle = NULL;
     if (parse_device_scope(device_obj, &device_scope, &device_handle) != 0) return NULL;
 
-    sz_bool_t const need_unified = requires_unified_memory(self->capabilities);
+    sz_bool_t const need_unified = requires_device_memory(self->capabilities);
     haystacks_view_t haystacks;
     if (parse_haystacks(haystacks_obj, self->capabilities, &haystacks) != 0) return NULL;
 
@@ -270,15 +270,14 @@ static PyObject *Substrings_count(Substrings *self, PyObject *args, PyObject *kw
         char const *error_detail = NULL;
         if (device_scope) SZS_LOCK_(&device_scope->lock);
         SZS_LOCK_(&self->lock);
-        sz_status_t status =
-            haystacks.is_u32tape
-                ? szs_substrings_count_u32tape(self->handle, device_handle, &haystacks.u32tape, policy, counts,
-                                               &matches_total, &error_detail)
-                : (haystacks.is_u64tape
-                       ? szs_substrings_count_u64tape(self->handle, device_handle, &haystacks.u64tape, policy, counts,
-                                                      &matches_total, &error_detail)
-                       : szs_substrings_count(self->handle, device_handle, &haystacks.sequence, policy, counts,
-                                              &matches_total, &error_detail));
+        sz_status_t status = haystacks.is_u32tape
+                                 ? szs_substrings_count_u32tape(self->handle, device_handle, &haystacks.u32tape, policy,
+                                                                counts, &matches_total, &error_detail)
+                                 : (haystacks.is_u64tape
+                                        ? szs_substrings_count_u64tape(self->handle, device_handle, &haystacks.u64tape,
+                                                                       policy, counts, &matches_total, &error_detail)
+                                        : szs_substrings_count(self->handle, device_handle, &haystacks.sequence, policy,
+                                                               counts, &matches_total, &error_detail));
         SZS_UNLOCK_(&self->lock);
         if (device_scope) SZS_UNLOCK_(&device_scope->lock);
         if (status != sz_success_k) {
@@ -314,7 +313,7 @@ static PyObject *Substrings_find(Substrings *self, PyObject *args, PyObject *kwa
     szs_device_scope_t device_handle = NULL;
     if (parse_device_scope(device_obj, &device_scope, &device_handle) != 0) return NULL;
 
-    sz_bool_t const need_unified = requires_unified_memory(self->capabilities);
+    sz_bool_t const need_unified = requires_device_memory(self->capabilities);
     haystacks_view_t haystacks;
     if (parse_haystacks(haystacks_obj, self->capabilities, &haystacks) != 0) return NULL;
 
@@ -324,11 +323,11 @@ static PyObject *Substrings_find(Substrings *self, PyObject *args, PyObject *kwa
     sz_size_t matches_found = 0;
     if (device_scope) SZS_LOCK_(&device_scope->lock);
     SZS_LOCK_(&self->lock);
-    sz_status_t status =
-        haystacks.is_u32tape
-            ? szs_substrings_find_u32tape(self->handle, device_handle, &haystacks.u32tape, policy, NULL, 0,
-                                          &matches_found, &error_detail)
-            : (haystacks.is_u64tape ? szs_substrings_find_u64tape(self->handle, device_handle, &haystacks.u64tape,
+    sz_status_t status = haystacks.is_u32tape
+                             ? szs_substrings_find_u32tape(self->handle, device_handle, &haystacks.u32tape, policy,
+                                                           NULL, 0, &matches_found, &error_detail)
+                             : (haystacks.is_u64tape
+                                    ? szs_substrings_find_u64tape(self->handle, device_handle, &haystacks.u64tape,
                                                                   policy, NULL, 0, &matches_found, &error_detail)
                                     : szs_substrings_find(self->handle, device_handle, &haystacks.sequence, policy,
                                                           NULL, 0, &matches_found, &error_detail));
@@ -355,8 +354,8 @@ static PyObject *Substrings_find(Substrings *self, PyObject *args, PyObject *kwa
     sz_memory_allocator_t *out_alloc = need_unified ? &unified_allocator : &default_allocator;
     sz_size_t const matches_bytes = matches_found * sizeof(szs_substrings_match_t);
     if (matches_bytes > 0) {
-        szs_substrings_match_t *matches =
-            (szs_substrings_match_t *)out_alloc->allocate(matches_bytes, out_alloc->handle);
+        szs_substrings_match_t *matches = (szs_substrings_match_t *)out_alloc->allocate(matches_bytes,
+                                                                                        out_alloc->handle);
         if (!matches) {
             Py_DECREF(haystack_indices);
             Py_DECREF(needle_indices);
@@ -433,8 +432,8 @@ static PyObject *Substrings_score_bm25(Substrings *self, PyObject *args, PyObjec
                              "length_normalization",
                              NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOd|OOdd", kwlist, &haystacks_obj, &weights_obj,
-                                     &average_document_length, &device_obj, &lengths_obj,
-                                     &term_frequency_saturation, &length_normalization))
+                                     &average_document_length, &device_obj, &lengths_obj, &term_frequency_saturation,
+                                     &length_normalization))
         return NULL;
 
     DeviceScope *device_scope = NULL;
@@ -457,19 +456,26 @@ static PyObject *Substrings_score_bm25(Substrings *self, PyObject *args, PyObjec
         return NULL;
     }
 
+    sz_bool_t const need_unified = requires_device_memory(self->capabilities);
+    haystacks_view_t haystacks;
+    if (parse_haystacks(haystacks_obj, self->capabilities, &haystacks) != 0) return NULL;
+
+    // Validated after the haystacks, because one length per haystack is the shape the kernel reads and a
+    // shorter array would otherwise be read past its end.
     sz_f32_t const *document_lengths = NULL;
     if (lengths_obj != NULL && lengths_obj != Py_None) {
         if (!PyArray_Check(lengths_obj) || PyArray_TYPE((PyArrayObject *)lengths_obj) != NPY_FLOAT32 ||
-            !PyArray_ISCARRAY_RO((PyArrayObject *)lengths_obj)) {
+            PyArray_NDIM((PyArrayObject *)lengths_obj) != 1 || !PyArray_ISCARRAY_RO((PyArrayObject *)lengths_obj)) {
             PyErr_SetString(PyExc_TypeError, "document_lengths must be a contiguous 1-D float32 array");
+            return NULL;
+        }
+        if ((sz_size_t)PyArray_DIM((PyArrayObject *)lengths_obj, 0) != haystacks.count) {
+            PyErr_Format(PyExc_ValueError, "Expected one length per haystack: %zu given, %zu needed",
+                         (size_t)PyArray_DIM((PyArrayObject *)lengths_obj, 0), (size_t)haystacks.count);
             return NULL;
         }
         document_lengths = (sz_f32_t const *)PyArray_DATA((PyArrayObject *)lengths_obj);
     }
-
-    sz_bool_t const need_unified = requires_unified_memory(self->capabilities);
-    haystacks_view_t haystacks;
-    if (parse_haystacks(haystacks_obj, self->capabilities, &haystacks) != 0) return NULL;
 
     npy_intp dims[1] = {(npy_intp)haystacks.count};
     PyArrayObject *scores_array = (PyArrayObject *)PyArray_SimpleNew(1, dims, NPY_FLOAT32);
@@ -497,12 +503,11 @@ static PyObject *Substrings_score_bm25(Substrings *self, PyObject *args, PyObjec
             haystacks.is_u32tape
                 ? szs_substrings_score_bm25_u32tape(self->handle, device_handle, &haystacks.u32tape, document_lengths,
                                                     parameters, weights, scores, &error_detail)
-                : (haystacks.is_u64tape ? szs_substrings_score_bm25_u64tape(self->handle, device_handle,
-                                                                            &haystacks.u64tape, document_lengths,
-                                                                            parameters, weights, scores, &error_detail)
-                                        : szs_substrings_score_bm25(self->handle, device_handle, &haystacks.sequence,
-                                                                    document_lengths, parameters, weights, scores,
-                                                                    &error_detail));
+                : (haystacks.is_u64tape
+                       ? szs_substrings_score_bm25_u64tape(self->handle, device_handle, &haystacks.u64tape,
+                                                           document_lengths, parameters, weights, scores, &error_detail)
+                       : szs_substrings_score_bm25(self->handle, device_handle, &haystacks.sequence, document_lengths,
+                                                   parameters, weights, scores, &error_detail));
         SZS_UNLOCK_(&self->lock);
         if (device_scope) SZS_UNLOCK_(&device_scope->lock);
         if (status != sz_success_k) {
@@ -556,9 +561,8 @@ static PyObject *Substrings_replace(Substrings *self, PyObject *args, PyObject *
     if (policy_obj != NULL && policy_obj != Py_None)
         if (parse_overlap_policy(policy_obj, &policy) != 0) return NULL;
     if (policy == szs_substrings_overlapping_k) {
-        PyErr_SetString(PyExc_ValueError,
-                        "Rewriting needs a cover whose matches share no bytes: "
-                        "policy must be 'leftmost-longest' or 'leftmost-first'");
+        PyErr_SetString(PyExc_ValueError, "Rewriting needs a cover whose matches share no bytes: " //
+                                          "policy must be 'leftmost-longest' or 'leftmost-first'");
         return NULL;
     }
 
@@ -574,7 +578,7 @@ static PyObject *Substrings_replace(Substrings *self, PyObject *args, PyObject *
         return NULL;
     }
 
-    sz_bool_t const need_unified = requires_unified_memory(self->capabilities);
+    sz_bool_t const need_unified = requires_device_memory(self->capabilities);
     haystacks_view_t haystacks;
     if (parse_haystacks(haystacks_obj, self->capabilities, &haystacks) != 0) return NULL;
 
@@ -592,23 +596,35 @@ static PyObject *Substrings_replace(Substrings *self, PyObject *args, PyObject *
 
     // The bound is arithmetic over the needle set, so one call sizes the tape and the rewrite below cannot
     // then be refused for capacity.
-    sz_size_t input_bytes = haystacks.is_u32tape
-                                ? (sz_size_t)haystacks.u32tape.offsets[haystacks.u32tape.count]
-                                : (sz_size_t)haystacks.u64tape.offsets[haystacks.u64tape.count];
+    sz_size_t input_bytes = haystacks.is_u32tape ? (sz_size_t)haystacks.u32tape.offsets[haystacks.u32tape.count]
+                                                 : (sz_size_t)haystacks.u64tape.offsets[haystacks.u64tape.count];
     sz_size_t output_bound = 0;
     char const *error_detail = NULL;
     SZS_LOCK_(&self->lock);
-    sz_status_t status =
-        szs_substrings_replace_bound(self->handle, &replacements_sequence, input_bytes, &output_bound, &error_detail);
+    sz_status_t status = szs_substrings_replace_bound(self->handle, &replacements_sequence, input_bytes, &output_bound,
+                                                      &error_detail);
     SZS_UNLOCK_(&self->lock);
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Substrings rewrite bound");
         return NULL;
     }
 
-    npy_intp offsets_dims[1] = {(npy_intp)(haystacks.count + 1)};
-    PyArrayObject *offsets_array = (PyArrayObject *)PyArray_SimpleNew(1, offsets_dims, NPY_UINTP);
-    if (!offsets_array) return PyErr_NoMemory();
+    // The boundaries are written from the device on a GPU scope, so they come back as a device matrix the
+    // caller can hand onward; a CPU scope keeps returning NumPy.
+    PyObject *offsets_array = NULL;
+    sz_size_t *output_offsets = NULL;
+    if (need_unified) {
+        npy_intp offsets_dims[1] = {(npy_intp)(haystacks.count + 1)};
+        offsets_array = new_unified_array(1, offsets_dims, NPY_UINTP, sizeof(sz_size_t));
+        if (!offsets_array) return NULL;
+        output_offsets = (sz_size_t *)PyArray_DATA((PyArrayObject *)offsets_array);
+    }
+    else {
+        npy_intp offsets_dims[1] = {(npy_intp)(haystacks.count + 1)};
+        offsets_array = PyArray_SimpleNew(1, offsets_dims, NPY_UINTP);
+        if (!offsets_array) return PyErr_NoMemory();
+        output_offsets = (sz_size_t *)PyArray_DATA((PyArrayObject *)offsets_array);
+    }
 
     sz_memory_allocator_t *out_alloc = need_unified ? &unified_allocator : &default_allocator;
     sz_ptr_t output_data = (sz_ptr_t)out_alloc->allocate(output_bound ? output_bound : 1, out_alloc->handle);
@@ -622,13 +638,11 @@ static PyObject *Substrings_replace(Substrings *self, PyObject *args, PyObject *
     SZS_LOCK_(&self->lock);
     status = haystacks.is_u32tape
                  ? szs_substrings_replace_u32tape(self->handle, device_handle, &haystacks.u32tape, policy,
-                                                  &replacements_sequence, output_data, output_bound,
-                                                  (sz_size_t *)PyArray_DATA(offsets_array), &output_bytes_written,
-                                                  &error_detail)
+                                                  &replacements_sequence, output_data, output_bound, output_offsets,
+                                                  &output_bytes_written, &error_detail)
                  : szs_substrings_replace_u64tape(self->handle, device_handle, &haystacks.u64tape, policy,
-                                                  &replacements_sequence, output_data, output_bound,
-                                                  (sz_size_t *)PyArray_DATA(offsets_array), &output_bytes_written,
-                                                  &error_detail);
+                                                  &replacements_sequence, output_data, output_bound, output_offsets,
+                                                  &output_bytes_written, &error_detail);
     SZS_UNLOCK_(&self->lock);
     if (device_scope) SZS_UNLOCK_(&device_scope->lock);
     if (status != sz_success_k) {
@@ -673,8 +687,8 @@ static PyObject *Substrings_replace_bound(Substrings *self, PyObject *args, PyOb
     sz_size_t output_bound = 0;
     char const *error_detail = NULL;
     SZS_LOCK_(&self->lock);
-    sz_status_t status =
-        szs_substrings_replace_bound(self->handle, &replacements_sequence, input_bytes, &output_bound, &error_detail);
+    sz_status_t status = szs_substrings_replace_bound(self->handle, &replacements_sequence, input_bytes, &output_bound,
+                                                      &error_detail);
     SZS_UNLOCK_(&self->lock);
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Substrings rewrite bound");
@@ -688,102 +702,99 @@ static PyObject *Substrings_replace_bound(Substrings *self, PyObject *args, PyOb
 #pragma region Type Registration
 
 static char const doc_count[] = //
-    "count(haystacks, device=None, policy='overlapping')\n"
-    "\n"
-    "Count matches of every needle in every haystack.\n"
-    "\n"
-    "Args:\n"
-    "  haystacks (Strs): Haystack collection to scan.\n"
-    "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n"
-    "  policy (str, optional): 'overlapping', 'leftmost-longest', or 'leftmost-first'.\n"
-    "\n"
-    "Returns:\n"
-    "  tuple[numpy.ndarray, int]: Per-haystack counts as uint64, and the corpus-wide total.\n"
-    "\n"
-    "Examples:\n"
-    "  >>> import stringzilla as sz, stringzillas as szs\n"
-    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']))\n"
-    "  >>> counts, total = engine.count(sz.Strs(['hershey', 'nothing']))\n"
-    "  >>> total\n"
-    "  3";
+    "count(haystacks, device=None, policy='overlapping')\n" "\n" "Count matches of every needle in every haystack.\n" "\n" "Args:\n" "  haystacks (Strs): Haystack collection to scan.\n" "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n" "  policy (str, optional): 'overlapping', 'leftmost-longest', or 'leftmost-first'.\n" "\n" "Returns:\n" "  tuple[numpy.ndarray, int]: Per-haystack counts as uint64, and the corpus-wide total.\n" "\n" "Examples:\n" //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                                  //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']))\n"                                                //
+    "  >>> counts, total = engine.count(sz.Strs(['hershey', 'nothing']))\n"                                  //
+    "  >>> total\n"                                                                                          //
+    "  3\n"                                                                                                  //
+    "  >>> # GPU example; falls back to CPU when CUDA is unavailable\n"                                      //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n" //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']), device=scope)\n"                                  //
+    "  >>> counts, total = engine.count(sz.Strs(['hershey', 'nothing']), device=scope)";
 
 static char const doc_find[] = //
-    "find(haystacks, device=None, policy='overlapping')\n"
-    "\n"
-    "Locate every match, resolved under `policy`.\n"
-    "\n"
-    "Args:\n"
-    "  haystacks (Strs): Haystack collection to scan.\n"
-    "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n"
-    "  policy (str, optional): 'overlapping', 'leftmost-longest', or 'leftmost-first'.\n"
-    "\n"
-    "Returns:\n"
-    "  tuple: Four uint64 arrays - haystack indices, needle indices, byte offsets, byte lengths.\n"
-    "\n"
-    "Examples:\n"
-    "  >>> import stringzilla as sz, stringzillas as szs\n"
-    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']))\n"
-    "  >>> haystack_ix, needle_ix, offsets, lengths = engine.find(sz.Strs(['hershey']))\n"
-    "  >>> len(offsets)\n"
-    "  3";
+    "find(haystacks, device=None, policy='overlapping')\n" "\n" "Locate every match, resolved under `policy`.\n" "\n" "Args:\n" "  haystacks (Strs): Haystack collection to scan.\n" "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n" "  policy (str, optional): 'overlapping', 'leftmost-longest', or 'leftmost-first'.\n" "\n" "Returns:\n" "  tuple: Four uint64 arrays - haystack indices, needle indices, byte offsets, byte lengths.\n" "\n" "Examples:\n" //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                                  //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']))\n"                                                //
+    "  >>> haystack_ix, needle_ix, offsets, lengths = engine.find(sz.Strs(['hershey']))\n"                   //
+    "  >>> len(offsets)\n"                                                                                   //
+    "  3\n"                                                                                                  //
+    "  >>> # GPU example; falls back to CPU when CUDA is unavailable\n"                                      //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n" //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']), device=scope)\n"                                  //
+    "  >>> haystack_ix, needle_ix, offsets, lengths = engine.find(sz.Strs(['hershey']), device=scope)";
 
-static char const doc_score_bm25[] = //
-    "score_bm25(haystacks, needle_weights, average_document_length, device=None, document_lengths=None, "
-    "term_frequency_saturation=1.2, length_normalization=0.75)\n"
-    "\n"
-    "Score every haystack against the dictionary, which is the query.\n"
-    "\n"
-    "Term frequencies are raw overlapping counts, which is classic BM25, so no overlap policy applies.\n"
-    "\n"
-    "Args:\n"
-    "  haystacks (Strs): Documents to score.\n"
-    "  needle_weights (numpy.ndarray): One float32 IDF or boost per needle.\n"
-    "  average_document_length (float): Corpus-wide mean of the lengths below, in the same unit. A\n"
-    "    property of the corpus rather than a tunable, so it has no default; pass 0.0 only alongside\n"
-    "    length_normalization=0.0, since normalizing without a mean is refused.\n"
-    "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n"
-    "  document_lengths (numpy.ndarray, optional): One float32 length per haystack; byte lengths when None.\n"
-    "  term_frequency_saturation (float, optional): The literature's k1, how slowly repeated occurrences\n"
-    "    stop adding score.\n"
-    "  length_normalization (float, optional): The literature's b, in [0, 1]; 0 ignores document length\n"
-    "    and every length input with it, 1 normalizes fully.\n"
-    "\n"
-    "Returns:\n"
-    "  numpy.ndarray: One float32 score per haystack.\n"
-    "\n"
-    "Examples:\n"
-    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"
-    "  >>> engine = szs.Substrings(sz.Strs(['cat', 'dog']))\n"
-    "  >>> weights = np.ones(2, dtype=np.float32)\n"
-    "  >>> scores = engine.score_bm25(sz.Strs(['cat and dog', 'nothing here']), weights, 10.0)\n"
-    "  >>> float(scores[1])\n"
+static char const doc_score_bm25[] =                                                                        //
+    "score_bm25(haystacks, needle_weights, average_document_length, device=None,\n"                         //
+    "           document_lengths=None, term_frequency_saturation=1.2, length_normalization=0.75)\n"         //
+    "\n"                                                                                                    //
+    "Score every haystack against the dictionary, which is the query.\n"                                    //
+    "\n"                                                                                                    //
+    "Term frequencies are raw overlapping counts, which is classic BM25, so no overlap policy applies.\n"   //
+    "\n"                                                                                                    //
+    "Args:\n"                                                                                               //
+    "  haystacks (Strs): Documents to score.\n"                                                             //
+    "  needle_weights (numpy.ndarray): One float32 IDF or boost per needle. A GPU scope reads this on\n"    //
+    "    the device, so allocate it with stringzillas.unified_array; a host array raises BufferError.\n"    //
+    "  average_document_length (float): Corpus-wide mean of the lengths below, in the same unit. A\n"       //
+    "    property of the corpus rather than a tunable, so it has no default; pass 0.0 only alongside\n"     //
+    "    length_normalization=0.0, since normalizing without a mean is refused.\n"                          //
+    "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n"                    //
+    "  document_lengths (numpy.ndarray, optional): One float32 length per haystack; byte lengths when\n"    //
+    "    None. Held to the same device rule as needle_weights.\n"                                           //
+    "  term_frequency_saturation (float, optional): The literature's k1, how slowly repeated occurrences\n" //
+    "    stop adding score.\n"                                                                              //
+    "  length_normalization (float, optional): The literature's b, in [0, 1]; 0 ignores document length\n"  //
+    "    and every length input with it, 1 normalizes fully.\n"                                             //
+    "\n"                                                                                                    //
+    "Returns:\n"                                                                                            //
+    "  numpy.ndarray: One float32 score per haystack.\n"                                                    //
+    "\n"                                                                                                    //
+    "Examples:\n"                                                                                           //
+    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"                                    //
+    "  >>> engine = szs.Substrings(sz.Strs(['cat', 'dog']))\n"                                              //
+    "  >>> weights = np.ones(2, dtype=np.float32)\n"                                                        //
+    "  >>> scores = engine.score_bm25(sz.Strs(['cat and dog', 'nothing here']), weights, 10.0)\n"           //
+    "  >>> float(scores[1])\n"                                                                              //
     "  0.0";
 
-static char const doc_replace[] = //
-    "replace(haystacks, replacements, device=None, policy='leftmost-longest')\n"
-    "\n"
-    "Rewrite every haystack, substituting each match with its needle's replacement.\n"
-    "\n"
-    "Tape in, tape out: a rewrite's product is itself a tape, so a reordered `Strs` is refused. The output\n"
-    "buffer is sized from `replace_bound`, so the call cannot be refused for capacity.\n"
-    "\n"
-    "Args:\n"
-    "  haystacks (Strs): Haystacks to rewrite, in a tape layout.\n"
-    "  replacements (Strs): One replacement per needle.\n"
-    "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n"
-    "  policy (str, optional): 'leftmost-longest' or 'leftmost-first'; overlapping is refused.\n"
-    "\n"
-    "Returns:\n"
-    "  tuple[bytes, numpy.ndarray]: The rewritten tape and its uintp offsets, one per haystack plus one.";
+static char const doc_replace[] =                                                                             //
+    "replace(haystacks, replacements, device=None, policy='leftmost-longest')\n"                              //
+    "\n"                                                                                                      //
+    "Rewrite every haystack, substituting each match with its needle's replacement.\n"                        //
+    "\n"                                                                                                      //
+    "Tape in, tape out: a rewrite's product is itself a tape, so a reordered `Strs` is refused. The output\n" //
+    "buffer is sized from `replace_bound`, so the call cannot be refused for capacity.\n"                     //
+    "\n"                                                                                                      //
+    "Args:\n"                                                                                                 //
+    "  haystacks (Strs): Haystacks to rewrite, in a tape layout.\n"                                           //
+    "  replacements (Strs): One replacement per needle.\n"                                                    //
+    "  device (DeviceScope, optional): Execution scope. Defaults to the module scope.\n"                      //
+    "  policy (str, optional): 'leftmost-longest' or 'leftmost-first'; overlapping is refused.\n"             //
+    "\n"                                                                                                      //
+    "Returns:\n"                                                                                              //
+    "  tuple[bytes, numpy.ndarray]: The rewritten tape and its uintp offsets, one per haystack plus one.\n"   //
+    "\n"                                                                                                      //
+    "Examples:\n"                                                                                             //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                                   //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']))\n"                                                 //
+    "  >>> tape, offsets = engine.replace(sz.Strs(['hershey']), sz.Strs(['HE', 'SHE']))\n"                    //
+    "  >>> bytes(tape[offsets[0]:offsets[1]])\n"                                                              //
+    "  b'HErSHEy'\n"                                                                                          //
+    "  >>> # GPU example; falls back to CPU when CUDA is unavailable\n"                                       //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n"  //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she']), device=scope)\n"                                   //
+    "  >>> tape, offsets = engine.replace(sz.Strs(['hershey']), sz.Strs(['HE', 'SHE']), device=scope)";
 
-static char const doc_replace_bound[] = //
-    "replace_bound(replacements, input_bytes)\n"
-    "\n"
-    "Bound the bytes a rewrite can produce, from the dictionary and replacements alone.\n"
-    "\n"
-    "Needs no haystacks, no walk, and no device: the answer is arithmetic over the needle set.\n"
-    "\n"
-    "Returns:\n"
+static char const doc_replace_bound[] =                                                           //
+    "replace_bound(replacements, input_bytes)\n"                                                  //
+    "\n"                                                                                          //
+    "Bound the bytes a rewrite can produce, from the dictionary and replacements alone.\n"        //
+    "\n"                                                                                          //
+    "Needs no haystacks, no walk, and no device: the answer is arithmetic over the needle set.\n" //
+    "\n"                                                                                          //
+    "Returns:\n"                                                                                  //
     "  int: Bytes an output tape must hold to accept any such rewrite.";
 
 static PyMethodDef Substrings_methods[] = {
@@ -795,31 +806,41 @@ static PyMethodDef Substrings_methods[] = {
     {NULL, NULL, 0, NULL} /* Sentinel */
 };
 
-static char const doc_Substrings[] = //
-    "Substrings(needles, case_sensitivity='cased', device=None, capabilities=None)\n"
-    "\n"
-    "Match a whole dictionary of needles against a whole collection of haystacks in one pass.\n"
-    "\n"
-    "The needle set is compiled once into an Aho-Corasick automaton and reused across every later call, so\n"
-    "the dictionary is paid for once rather than per haystack. Matches are reported under a caller-chosen\n"
-    "overlap policy, and the same automaton also scores haystacks with BM25 and rewrites them.\n"
-    "\n"
-    "Construction is a device operation: the automaton's tier split is sized against the cache the walk\n"
-    "reads through, and a CUDA automaton is uploaded to a device, so `device` belongs here as well as on\n"
-    "each call.\n"
-    "\n"
-    "Args:\n"
-    "  needles (Strs): Needle collection to compile. Non-empty, and valid UTF-8 when folding.\n"
-    "  case_sensitivity (str, optional): 'cased' matches bytes, 'uncased' folds both sides.\n"
-    "  device (DeviceScope, optional): Scope the automaton is built for and uploaded to.\n"
-    "  capabilities (tuple, optional): Hardware capabilities to restrict the engine to.\n"
-    "\n"
-    "Examples:\n"
-    "  >>> import stringzilla as sz, stringzillas as szs\n"
-    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she', 'his', 'hers']))\n"
-    "  >>> counts, total = engine.count(sz.Strs(['ushers', 'nothing']))\n"
-    "  >>> total\n"
-    "  3";
+static char const doc_Substrings[] =                                                                         //
+    "Substrings(needles, case_sensitivity='cased', device=None, capabilities=None)\n"                        //
+    "\n"                                                                                                     //
+    "Match a whole dictionary of needles against a whole collection of haystacks in one pass.\n"             //
+    "\n"                                                                                                     //
+    "The needle set is compiled once into an Aho-Corasick automaton and reused across every later call,\n"   //
+    "so the dictionary is paid for once rather than per haystack. Matches are reported under a\n"            //
+    "caller-chosen overlap policy, and the same automaton also scores haystacks with BM25 and rewrites\n"    //
+    "them.\n"                                                                                                //
+    "\n"                                                                                                     //
+    "Construction is a device operation: the automaton's tier split is sized against the cache the walk\n"   //
+    "reads through, and a CUDA automaton is uploaded to a device, so `device` belongs here as well as on\n"  //
+    "each call.\n"                                                                                           //
+    "\n"                                                                                                     //
+    "Args:\n"                                                                                                //
+    "  needles (Strs): Needle collection to compile. Non-empty, and valid UTF-8 when folding.\n"             //
+    "  case_sensitivity (str, optional): 'cased' matches bytes, 'uncased' folds both sides.\n"               //
+    "  device (DeviceScope, optional): Scope the automaton is built for and uploaded to.\n"                  //
+    "  capabilities (tuple, optional): Hardware capabilities to restrict the engine to.\n"                   //
+    "\n"                                                                                                     //
+    "On a GPU scope every array an operation reads or writes lives on the device. `Strs` inputs and the\n"   //
+    "arrays these methods return are moved there for you; only `score_bm25`'s weights and lengths must\n"    //
+    "already be CUDA buffers - stringzillas.unified_array makes one - and a host array raises\n"             //
+    "BufferError.\n"                                                                                         //
+    "\n"                                                                                                     //
+    "Examples:\n"                                                                                            //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                                  //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she', 'his', 'hers']))\n"                                 //
+    "  >>> counts, total = engine.count(sz.Strs(['ushers', 'nothing']))\n"                                   //
+    "  >>> total\n"                                                                                          //
+    "  3\n"                                                                                                  //
+    "  >>> # GPU example; falls back to CPU when CUDA is unavailable\n"                                      //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n" //
+    "  >>> engine = szs.Substrings(sz.Strs(['he', 'she', 'his', 'hers']), device=scope)\n"                   //
+    "  >>> counts, total = engine.count(sz.Strs(['ushers', 'nothing']), device=scope)";
 
 static PyGetSetDef Substrings_getsetters[] = {
     {"__capabilities__", (getter)Substrings_get_capabilities, NULL, doc_capabilities, NULL}, //

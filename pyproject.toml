@@ -31,18 +31,18 @@ python_files = ["*.py"]
 testpaths = ["test"]
 xfail_strict = true
 
-# Third-party oracles the suite differentials against when they import and skips over when they do not.
-# A PEP 735 dependency group, so these are development tooling: never published in wheel metadata,
-# never installed by anyone consuming StringZilla, and reachable only through `pip install --group
-# differential`, which the CI jobs run rather than repeating the names. Rust spells the same idea as
-# `[dev-dependencies]` in `Cargo.toml`.
+# Packages the pytest suite validates against when they import and skips over when they do not. PEP 735
+# groups, so they are development tooling: never published in wheel metadata, never installed by anyone
+# consuming StringZilla, and reachable only through `pip install --group <name>`, which the CI jobs run
+# rather than repeating the names. Rust spells the same idea as `[dev-dependencies]` in `Cargo.toml`.
 # Deliberately kept out of `[tool.cibuildwheel] test-requires`, which installs on QEMU-emulated
 # aarch64, ppc64le and s390x, where a missing wheel means compiling the oracle's own C under emulation.
-# `pycryptodome` ships its own C implementation linking only libc, so it is an independent witness to
-# the OpenSSL the C++ suite already compares against. `pyahocorasick` is the same for multi-pattern
-# search: its own C automaton, whose `iter` is the overlapping walk under a different name.
+# `pycryptodome` and `pyahocorasick` each ship their own C, so they are independent witnesses to the
+# OpenSSL and the multi-pattern walk the C++ suite already compares against. `cupy` is not an oracle but
+# a producer, sourcing `__cuda_array_interface__` buffers that are not the module's own `unified_array`.
 [dependency-groups]
-differential = ["pycryptodome", "pyahocorasick"]
+tests-oracles = ["pycryptodome", "pyahocorasick"]
+tests-cuda = ["cupy-cuda12x"]
 
 [tool.black]
 line-length = 120

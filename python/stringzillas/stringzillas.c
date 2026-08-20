@@ -40,9 +40,11 @@ void set_stringzilla_error(sz_status_t status, char const *error_detail, char co
     case sz_invalid_utf8_k: PyErr_Format(PyExc_ValueError, "%s: %s", context, error_detail); break;
     case sz_overflow_risk_k: PyErr_Format(PyExc_OverflowError, "%s: %s", context, error_detail); break;
     case sz_unexpected_dimensions_k: PyErr_Format(PyExc_ValueError, "%s: %s", context, error_detail); break;
+    // A backstop: the binding stages every buffer it hands an engine under a CUDA capability, so a reachable
+    // one of these means the binding has a bug rather than the caller.
+    case sz_device_memory_mismatch_k: PyErr_Format(PyExc_BufferError, "%s: %s", context, error_detail); break;
     case sz_missing_gpu_k:
     case sz_device_code_mismatch_k:
-    case sz_device_memory_mismatch_k:
     default: PyErr_Format(PyExc_RuntimeError, "%s: %s", context, error_detail); break;
     }
 }
@@ -197,15 +199,17 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static char const doc_to_device[] =                                                  //
-    "to_device(strs: sz.Strs) -> sz.Strs\n\n"                                        //
-    "Converts a Strs object to use unified/device-accessible memory allocator.\n"    //
-    "This function forces the allocator swap that would normally happen during\n"    //
-    "GPU kernel execution. Useful for testing slice handling after re-allocation.\n" //
-    "\n"                                                                             //
-    "Examples:\n"                                                                    //
-    "  >>> import stringzilla as sz, stringzillas as szs\n"                          //
-    "  >>> strs = sz.Strs(['alpha', 'beta'])\n"                                      //
+static char const doc_to_device[] =                                                     //
+    "to_device(strs: sz.Strs) -> sz.Strs\n\n"                                           //
+    "Move a Strs onto device-accessible unified memory, in place.\n"                    //
+    "\n"                                                                                //
+    "Engines do this themselves for the inputs of a GPU-scoped call, so it is only\n"   //
+    "worth calling ahead of time to pay the swap once for a collection reused across\n" //
+    "many calls, or to hold a slice's identity across the swap.\n"                      //
+    "\n"                                                                                //
+    "Examples:\n"                                                                       //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                             //
+    "  >>> strs = sz.Strs(['alpha', 'beta'])\n"                                         //
     "  >>> device_strs = szs.to_device(strs) if 'cuda' in szs.__capabilities__ else strs";
 
 static PyObject *module_to_device(PyObject *self, PyObject *strs_obj) {
@@ -213,6 +217,87 @@ static PyObject *module_to_device(PyObject *self, PyObject *strs_obj) {
 
     Py_INCREF(strs_obj);
     return strs_obj;
+}
+
+static char const doc_unified_array[] =                                               //
+    "unified_array(shape, dtype=numpy.float32) -> numpy.ndarray\n\n"                  //
+    "Allocate a NumPy array backed by device-accessible unified memory.\n"            //
+    "\n"                                                                              //
+    "A GPU scope refuses host buffers, so the arrays a caller supplies there - an\n"  //
+    "engine's `out=`, or `Substrings.score_bm25`'s weights - come from here when\n"   //
+    "CuPy or Torch is not in play. A CPU scope needs none of this.\n"                 //
+    "\n"                                                                              //
+    "Args:\n"                                                                         //
+    "  shape (int or tuple): Length of a vector, or (rows, columns) of a matrix.\n"   //
+    "  dtype (numpy.dtype, optional): Element type; float32 by default.\n"            //
+    "\n"                                                                              //
+    "Returns:\n"                                                                      //
+    "  numpy.ndarray: Uninitialized, wrapping unified memory freed with the array.\n" //
+    "\n"                                                                              //
+    "Examples:\n"                                                                     //
+    "  >>> import numpy as np, stringzillas as szs\n"                                 //
+    "  >>> weights = szs.unified_array(2, dtype=np.float32)\n"                        //
+    "  >>> weights[:] = 1.0";
+
+static PyObject *module_unified_array(PyObject *self, PyObject *args, PyObject *kwargs) {
+    sz_unused_(self);
+    static char *kwlist[] = {"shape", "dtype", NULL};
+    PyObject *shape_obj = NULL;
+    PyObject *dtype_obj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|O", kwlist, &shape_obj, &dtype_obj)) return NULL;
+    if (!numpy_available) {
+        PyErr_SetString(PyExc_RuntimeError, "NumPy is required to allocate unified arrays");
+        return NULL;
+    }
+
+    // One length or a (rows, columns) pair, matching what the engines accept as a vector or a matrix.
+    npy_intp shape[2] = {0, 0};
+    int dimensions = 0;
+    if (PyIndex_Check(shape_obj)) {
+        Py_ssize_t const length = PyNumber_AsSsize_t(shape_obj, PyExc_OverflowError);
+        if (length == -1 && PyErr_Occurred()) return NULL;
+        if (length < 0) {
+            PyErr_SetString(PyExc_ValueError, "Negative dimensions are not allowed");
+            return NULL;
+        }
+        shape[0] = (npy_intp)length, dimensions = 1;
+    }
+    else if (PyTuple_Check(shape_obj)) {
+        dimensions = (int)PyTuple_GET_SIZE(shape_obj);
+        if (dimensions < 1 || dimensions > 2) {
+            PyErr_SetString(PyExc_ValueError, "Only 1-D and 2-D unified arrays are supported");
+            return NULL;
+        }
+        for (int axis = 0; axis < dimensions; ++axis) {
+            Py_ssize_t const length = PyNumber_AsSsize_t(PyTuple_GET_ITEM(shape_obj, axis), PyExc_OverflowError);
+            if (length == -1 && PyErr_Occurred()) return NULL;
+            if (length < 0) {
+                PyErr_SetString(PyExc_ValueError, "Negative dimensions are not allowed");
+                return NULL;
+            }
+            shape[axis] = (npy_intp)length;
+        }
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "shape must be an integer or a tuple of one or two integers");
+        return NULL;
+    }
+
+    // `PyArray_Descr::elsize` is private in NumPy 2, so the width comes from the accessor rather than the struct.
+    PyArray_Descr *descr = NULL;
+    if (dtype_obj == NULL || dtype_obj == Py_None) { descr = PyArray_DescrFromType(NPY_FLOAT32); }
+    else if (!PyArray_DescrConverter(dtype_obj, &descr)) { return NULL; }
+    if (!descr) return NULL;
+
+    int const type_number = descr->type_num;
+    sz_size_t const element_bytes = (sz_size_t)PyDataType_ELSIZE(descr);
+    Py_DECREF(descr);
+    if (element_bytes == 0) {
+        PyErr_SetString(PyExc_TypeError, "dtype must have a fixed, non-zero element width");
+        return NULL;
+    }
+
+    return new_unified_array(dimensions, shape, type_number, element_bytes);
 }
 
 static void stringzillas_cleanup(PyObject *m) {
@@ -226,6 +311,7 @@ static void stringzillas_cleanup(PyObject *m) {
 static PyMethodDef stringzillas_methods[] = {
     {"reset_capabilities", (PyCFunction)module_reset_capabilities, METH_VARARGS, doc_reset_capabilities},
     {"to_device", (PyCFunction)module_to_device, METH_O, doc_to_device},
+    {"unified_array", (PyCFunction)module_unified_array, METH_VARARGS | METH_KEYWORDS, doc_unified_array},
     {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzillas_module = {
