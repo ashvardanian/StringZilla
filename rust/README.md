@@ -21,7 +21,7 @@ Or declare it in `Cargo.toml`:
 
 ```toml
 [dependencies]
-stringzilla = "4"
+stringzilla = "5"
 ```
 
 The crate ships the C/C++ sources and compiles them through a `build.rs` via `cc`, so no system StringZilla install is required.
@@ -42,8 +42,8 @@ The entire `stringzillas` module is compiled only when at least one of `cpus`, `
 
 ```toml
 [dependencies]
-stringzilla = { version = "4", features = ["cpus"] }   # CPU batch engines
-# stringzilla = { version = "4", features = ["cuda"] } # CUDA-accelerated batch engines
+stringzilla = { version = "5", features = ["cpus"] }   # CPU batch engines
+# stringzilla = { version = "5", features = ["cuda"] } # CUDA-accelerated batch engines
 ```
 
 Import either by full module name or by alias:
@@ -82,7 +82,7 @@ Disable it by opting out of default features (re-adding the ones you still want)
 ```toml
 [dependencies]
 # Compile-time dispatch: smaller, faster, but pinned to the build machine's best ISA.
-stringzilla = { version = "4", default-features = false, features = ["std"] }
+stringzilla = { version = "5", default-features = false, features = ["std"] }
 ```
 
 Every tier can be forced on or off with its `SZ_USE_*` environment variable (`SZ_USE_SVE2=0 cargo build`), overriding the run gate but never the compile gate; the CMake build honors the same names as cache options (`-D SZ_USE_SVE2=0`).
@@ -772,6 +772,97 @@ println!("Estimated Jaccard similarity: {similarity:.3}");
 
 `Fingerprints` also exposes `compute_into` for writing into caller-provided buffers via an `AnyBytesTape`.
 
+## Multi-Pattern Search
+
+`Substrings` compiles a whole needle set into one Aho-Corasick automaton and walks every haystack against all of them at once, so a dictionary of thousands of terms costs one pass rather than thousands.
+Building it is the expensive half, and the engine is reusable, so a long-lived `Substrings` amortizes that across every later batch.
+
+```rust
+fn new<S>(device: &DeviceScope, needles: &[S], case_sensitivity: CaseSensitivity) -> Result<Substrings, Error>;
+
+fn count_into(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, policy: OverlapPolicy,
+    counts: &mut [usize]) -> Result<usize, Error>;
+fn find_into(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, policy: OverlapPolicy,
+    matches: &mut [SubstringsMatch]) -> Result<usize, Error>;
+fn score_bm25_into(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, needle_weights: &[f32],
+    document_lengths: Option<&[f32]>, parameters: Bm25Params, scores: &mut [f32]) -> Result<(), Error>;
+fn replace_bound<R>(&self, replacements: &[R], input_bytes: usize) -> Result<usize, Error>;
+fn replace_into<R>(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, policy: OverlapPolicy,
+    replacements: &[R], output_data: &mut [u8], output_offsets: &mut [u64]) -> Result<usize, Error>;
+```
+
+Every verb writes into caller-owned buffers, so a pipeline allocates once and reuses those buffers across every batch.
+On a GPU scope those buffers must be device-accessible, which [Unified Memory](#unified-memory) spells out.
+Haystacks arrive as an `AnyBytesTape`, which spells all three shapes the C API accepts — a 32- or 64-bit tape built by `AnyBytesTape::from_sequences`, or borrowed slices addressed by callback through `AnyBytesTape::from_slices`, which copies nothing.
+Only `replace_into` narrows that to the tapes, since a rewrite's product is itself a tape and there is nowhere to put one otherwise.
+
+`CaseSensitivity::Cased` matches bytes exactly and accepts arbitrary needles, while `CaseSensitivity::Uncased` folds both sides under full Unicode case folding and requires valid UTF-8.
+Folding is not a byte-length-preserving operation, so a 1-byte needle can match a 3-byte span — the Kelvin sign `U+212A` folds to `k` — which is why every `SubstringsMatch` carries its own `byte_length` rather than borrowing the needle's.
+
+`OverlapPolicy` decides what a walk reports, and travels per call rather than per engine, since one automaton serves all three:
+
+- `Overlapping` — every match of every needle, nested and overlapping ones included.
+- `LeftmostLongest` — a non-overlapping cover taking the widest match at the earliest start.
+- `LeftmostFirst` — a non-overlapping cover taking the lowest needle index at the earliest start.
+
+```rust
+use stringzilla::szs::{AnyBytesTape, CaseSensitivity, DeviceScope, OverlapPolicy, Substrings, SubstringsMatch};
+
+let device = DeviceScope::default().unwrap();
+let engine = Substrings::new(&device, &["cat", "catalog"], CaseSensitivity::Cased).unwrap();
+let documents = vec!["a catalog of cats", "nothing here"];
+let haystacks = AnyBytesTape::from_slices(&documents);
+
+let mut counts = vec![0usize; documents.len()];
+let total = engine.count_into(&device, &haystacks, OverlapPolicy::Overlapping, &mut counts).unwrap();
+assert_eq!(counts, vec![3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
+assert_eq!(total, 3);
+
+// A cover keeps no two matches sharing a byte, so the longer needle shadows the shorter one.
+let mut cover = vec![SubstringsMatch::default(); total];
+let found = engine.find_into(&device, &haystacks, OverlapPolicy::LeftmostLongest, &mut cover).unwrap();
+assert_eq!(found, 2);
+```
+
+### Scoring and Rewriting
+
+The same automaton scores documents with BM25 and rewrites them, both in a single walk.
+`score_bm25_into` treats the dictionary itself as the query — `needle_weights[i]` is needle `i`'s IDF or boost — and writes one score per haystack, so a many-term query over a large corpus never materializes per-term frequency rows.
+Term frequencies are raw overlapping counts, which is classic BM25, and `document_lengths` defaults to byte lengths when `None`.
+
+`Bm25Params` has no `Default`, because a corpus mean has no correct default value.
+Its two constructors name the two configurations that exist: `Bm25Params::normalized(mean)` is the literature's `k1 = 1.2` and `b = 0.75` against a corpus whose mean document length you know, and `Bm25Params::unnormalized()` switches length normalization off and leaves `document_lengths` unread.
+A positive `b` beside a non-positive mean is refused rather than quietly discarding both it and the lengths you computed.
+
+```rust
+use stringzilla::szs::{AnyBytesTape, Bm25Params, CaseSensitivity, DeviceScope, OverlapPolicy, Substrings};
+
+let device = DeviceScope::default().unwrap();
+let engine = Substrings::new(&device, &["cat", "dog"], CaseSensitivity::Cased).unwrap();
+let documents = vec!["cat and dog", "nothing here"];
+let haystacks = AnyBytesTape::from_slices(&documents);
+
+let mut scores = vec![0.0f32; documents.len()];
+let parameters = Bm25Params::normalized(10.0);
+engine.score_bm25_into(&device, &haystacks, &[1.0, 1.0], None, parameters, &mut scores).unwrap();
+assert_eq!(scores[1], 0.0);
+
+// One replacement per needle, inserted verbatim; an empty replacement deletes its match. Tape in,
+// tape out, so this arm takes a materialized tape rather than borrowed slices.
+let tape = AnyBytesTape::from_sequences(&documents).unwrap();
+let replacements = ["feline", "canine"];
+let input_bytes = documents.iter().map(|document| document.len()).sum();
+let mut data = vec![0u8; engine.replace_bound(&replacements, input_bytes).unwrap()];
+let mut offsets = vec![0u64; documents.len() + 1];
+engine
+    .replace_into(&device, &tape, OverlapPolicy::LeftmostLongest, &replacements, &mut data, &mut offsets)
+    .unwrap();
+assert_eq!(&data[offsets[0] as usize..offsets[1] as usize], b"feline and canine");
+```
+
+Rewriting is defined only under a cover, so `OverlapPolicy::Overlapping` is rejected there — an overlapping rewrite is not a function.
+`replace_bound` sizes an output tape from the needle set alone, without a walk, making the rewrite one call that cannot be refused for capacity.
+
 ## UTF-8 Segmentation
 
 A single emoji such as the flag `🇺🇸` is 8 bytes and 2 codepoints, yet a reader sees one character — one grapheme cluster.
@@ -786,13 +877,13 @@ fn sz_utf8_split_whitespaces(&self) -> Utf8SplitWhitespaces<'_>; // content BETW
 fn sz_utf8_whitespaces(&self) -> Utf8Whitespaces<'_>;            // the whitespace runs themselves
 fn sz_utf8_split_delimiters(&self) -> Utf8SplitDelimiters<'_>;   // content BETWEEN whitespace/punctuation
 fn sz_utf8_delimiters(&self) -> Utf8Delimiters<'_>;              // the delimiter runs themselves
-fn sz_utf8_wordbreaks(&self) -> Utf8Wordbreaks<'_>;             // all UAX-29 word segments (tiling)
-fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_>;              // UAX-29 grapheme clusters
-fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;             // UAX-29 sentences
-fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;          // UAX-14 line-break opportunities
+fn sz_utf8_wordbreaks(&self) -> Utf8Wordbreaks<'_>;              // all UAX-29 word segments (tiling)
+fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_>;                // UAX-29 grapheme clusters
+fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;                // UAX-29 sentences
+fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;              // UAX-14 line-break opportunities
 ```
 
-The naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them.
+The naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the __separators__ the kernel finds, while `split_*` yields the content __between__ them.
 Chain `.with_separators()` on a `split_*` iterator to interleave both losslessly.
 
 Every member of this family is lazy and zero-copy.
@@ -914,3 +1005,23 @@ match DeviceScope::gpu_device(0) {
 
 `DeviceScope` API: `default()`, `cpu_cores(usize)`, `gpu_device(usize)`, `get_capabilities() -> Result<Capability, Error>`, `get_cpu_cores() -> Result<usize, Error>`, `get_gpu_device() -> Result<usize, Error>`, `is_gpu() -> bool`.
 Batch-engine failures surface as `szs::Error`, a `status` plus an optional message, which converts from the shared `Status` enum.
+
+### Unified Memory
+
+On a GPU scope every buffer an engine reads or writes must live on the device — unified or plain CUDA memory, never page-locked host memory.
+A host buffer is refused with `Status::DeviceMemoryMismatch` rather than copied behind your back, so the cost of a stray `Vec` is a visible error instead of a hidden transfer.
+A CPU scope imposes no requirement at all.
+
+The allocating verbs already satisfy this, since `Fingerprints::compute` returns `UnifiedVec<u32>` and the similarity engines return a `UnifiedMat`.
+The `*_into` verbs take `&mut [T]`, which is what lets a caller write into a subrange of a larger buffer, so meeting the contract there means backing that slice with unified memory:
+
+```rust
+use stringzilla::szs::{DeviceScope, UnifiedVec, UnifiedAlloc};
+
+let gpu = DeviceScope::gpu_device(0).unwrap();
+let mut counts = UnifiedVec::with_capacity_in(haystacks_count, UnifiedAlloc);
+counts.resize(haystacks_count, 0usize);
+engine.count_into(&gpu, &haystacks, OverlapPolicy::Overlapping, &mut counts[..])?;
+```
+
+`&mut counts[..]` is the way in, and the same pattern covers `find_into`, `score_bm25_into` — whose `needle_weights` and `document_lengths` are read on the device too — and `replace_into`'s output data and offsets.

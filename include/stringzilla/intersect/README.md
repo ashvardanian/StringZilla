@@ -6,7 +6,7 @@ The dispatcher picks the fastest one available on the running CPU.
 
 ## Methodology
 
-Numbers are throughput in comparisons/s, rendered as Mcmp/s, measured with `bench/sequence.cpp` over the `leipzig1M_en.txt` corpus, reporting the median of repeated runs.
+Numbers are throughput in comparisons/s, rendered as Mcmp/s, measured with `bench/sequence.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
 Each row is the library compiled with that single backend forced on one fixed chip, and the single column is the operation, so coverage and cross-chip comparison read down the column.
 The Standard row is the platform's best stock equivalent, `std::unordered_map`.
 Token length affects per-element cost, so results are split into a Short Words table (tokens averaging 5 bytes) and a Long Lines table (tokens averaging 130 bytes).

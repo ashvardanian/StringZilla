@@ -16,7 +16,7 @@ Add StringZilla as a Swift Package Manager dependency in your `Package.swift`.
 let package = Package(
     name: "MyApp",
     dependencies: [
-        .package(url: "https://github.com/ashvardanian/StringZilla.git", from: "4.0.0")
+        .package(url: "https://github.com/ashvardanian/StringZilla.git", from: "5.0.0")
     ],
     targets: [
         .target(

@@ -15,17 +15,18 @@ extern "C" {
 
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(                                                                                              \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt,evex512"))), \
+#pragma clang attribute push(                                                                                    \
+    __attribute__((                                                                                              \
+        target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt,evex512"))), \
     apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(                                                                                      \
+#pragma clang attribute push(                                                                                       \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
-    "lzcnt", "popcnt")
+                   "lzcnt", "popcnt")
 #endif
 
 /**
@@ -89,8 +90,8 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x64)
  *      Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
  *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
-    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,    //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
+    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,      //
     __mmask64 is_two_byte_lead_m64, __mmask64 is_three_byte_lead_m64, __mmask64 malformed_lead_m64, sz_ptr_t target) {
 
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
@@ -125,8 +126,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
-    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size, //
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
+    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,   //
     __mmask64 is_continuation_m64, __mmask64 is_three_byte_lead_m64, __mmask64 malformed_lead_m64, sz_ptr_t target) {
 
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');

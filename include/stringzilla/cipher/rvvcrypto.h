@@ -485,7 +485,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *stat
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                         sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
@@ -526,9 +527,9 @@ SZ_HELPER_AUTO void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *st
  *  @param subkey_u32m1 The hash subkey `H`.
  *  @return The updated hash, unchanged when nothing was pending.
  */
-SZ_HELPER_AUTO vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
-                                                                  vuint32m1_t accumulator_u32m1,
-                                                                  vuint32m1_t subkey_u32m1) {
+SZ_HELPER_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
+                                                                    vuint32m1_t accumulator_u32m1,
+                                                                    vuint32m1_t subkey_u32m1) {
     vuint32m1_t padded_u32m1;
     if (state->buffered == 0) return accumulator_u32m1;
     padded_u32m1 = sz_aes256_block_load_padded_rvvcrypto_(state->partial, (sz_size_t)state->buffered);
@@ -643,7 +644,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
  *  @param state The finished state, left untouched.
  *  @param tag Receives the 16 authentication bytes.
  */
-SZ_HELPER_AUTO void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+SZ_HELPER_INLINE void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state,
+                                                      sz_u8_t tag[sz_at_least_(16)]) {
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
     sz_u128_vec_t staged_block_vec;

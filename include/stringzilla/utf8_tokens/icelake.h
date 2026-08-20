@@ -230,8 +230,8 @@ SZ_HELPER_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0_u
     return result_u8x64;
 }
 
-SZ_HELPER_AUTO __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u8x64, __m512i high_in_u8x64,
-                                                              __m512i low_in_u8x64) {
+SZ_HELPER_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u8x64, __m512i high_in_u8x64,
+                                                                __m512i low_in_u8x64) {
     // The decode window only reconstructs `high`/`low` for 2-/3-byte leads; ASCII lanes (top bit clear) carry their
     // codepoint in the raw byte itself, so override them with (high=0, low=byte) before addressing the BMP tables.
     __mmask64 const ascii_m64 = ~_mm512_movepi8_mask(window_u8x64);
@@ -276,8 +276,8 @@ SZ_HELPER_AUTO __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u8x
  *  network: `super = offset>>16` selects an L1 group, `group*256 + ((offset>>8)&0xFF)` selects a bitmap row id, and the
  *  bit `(offset & 7)` is tested. Resolved over all 64 lanes; the caller blends the result onto the four-byte lanes.
  */
-SZ_HELPER_AUTO __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
-                                                                 __m512i next2_u8x64, __m512i next3_u8x64) {
+SZ_HELPER_INLINE __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
+                                                                   __m512i next2_u8x64, __m512i next3_u8x64) {
     __m512i const byte0_u8x64 = _mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x07));
     __m512i const byte1_u8x64 = _mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x3F));
     __m512i const byte2_u8x64 = _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F));
@@ -340,7 +340,7 @@ SZ_HELPER_AUTO __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window_
  *          overlong, a surrogate, or beyond U+10FFFF. Invalid leads are never reported (serial advances one byte and
  *          re-syncs, which never matches the cleared lane).
  */
-SZ_HELPER_AUTO __mmask64 sz_delimiter_valid_starts_icelake_( //
+SZ_HELPER_INLINE __mmask64 sz_delimiter_valid_starts_icelake_( //
     __m512i window_u8x64, __m512i next1_u8x64, __m512i next2_u8x64, __m512i next3_u8x64,
     sz_utf8_rune_window_t const *decoded) {
     __mmask64 const loaded_m64 = sz_u64_clamp_mask_until_(decoded->loaded);
@@ -402,7 +402,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(   //
         sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + base, length - base,
                                                                                   lane_identity_u8x64);
         sz_size_t const loaded = decoded.loaded;
-        __m512i const window_u8x64 = decoded.window;
+        __m512i const window_u8x64 = decoded.window_u8x64;
         __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
                                                             window_u8x64);
         __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)),
@@ -427,7 +427,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(   //
                                            decoded.codepoint_starts & span_mask_m64;
 
         // BMP membership for every lane; astral membership blended onto the four-byte lanes (gated on presence).
-        __mmask64 member_m64 = sz_delimiter_bmp_membership_icelake_(window_u8x64, decoded.high, decoded.low);
+        __mmask64 member_m64 = sz_delimiter_bmp_membership_icelake_(window_u8x64, decoded.high_byte_u8x64,
+                                                                    decoded.low_byte_u8x64);
         __mmask64 const four_byte_m64 = decoded.four_byte_starts & span_mask_m64;
         if (four_byte_m64) {
             __mmask64 const astral_member_m64 = sz_delimiter_astral_membership_icelake_(window_u8x64, next1_u8x64,

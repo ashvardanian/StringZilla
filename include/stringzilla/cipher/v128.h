@@ -144,7 +144,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128_(v128_t low_table_u8x16, v128_
  *  swizzles cover between them: the low one answers exponents below sixteen and returns zero elsewhere, and
  *  the high one is fed the sum less sixteen so its own out-of-range indices fall away the same way.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128_(v128_t first_u8x16, v128_t second_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128_(v128_t first_u8x16, v128_t second_u8x16) {
     v128_t const logarithm_table_u8x16 = wasm_v128_load(sz_aes256_nibble_logarithm_v128_());
     v128_t const exponent_low_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_low_v128_());
     v128_t const exponent_high_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_high_v128_());
@@ -163,7 +163,7 @@ SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128_(v128_t first_u8x16, v128_t
  *  The byte is carried into `GF(2^4)^2`, where its inverse costs three four-bit multiplies, two squarings and
  *  one four-bit inversion, all of them sixteen-entry swizzles.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128_(v128_t bytes_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128_(v128_t bytes_u8x16) {
     v128_t const mapped_u8x16 = sz_aes256_nibble_map_v128_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
                                                            wasm_v128_load(sz_aes256_tower_forward_high_v128_()),
                                                            bytes_u8x16);
@@ -223,7 +223,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_key_fold_v128_(v128_t previous_u8x16, v128_t s
  *  @param round_constant The round constant for this step.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_key_turn_v128_(v128_t previous_u8x16, sz_u8_t round_constant) {
+SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128_(v128_t previous_u8x16, sz_u8_t round_constant) {
     v128_t const last_word_u8x16 = wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3);
     v128_t const rotated_u8x16 = wasm_i8x16_shuffle(last_word_u8x16, last_word_u8x16, 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11,
                                                     8, 13, 14, 15, 12);
@@ -235,7 +235,7 @@ SZ_HELPER_AUTO v128_t sz_aes256_key_turn_v128_(v128_t previous_u8x16, sz_u8_t ro
  *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_key_half_turn_v128_(v128_t previous_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_key_half_turn_v128_(v128_t previous_u8x16) {
     return sz_aes256_substitute_v128_(wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3));
 }
 
@@ -342,7 +342,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_mix_columns_v128_(v128_t bytes_u8x16) {
  *  @param block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_block_encrypt_v128_(sz_aes256_key_t const *key, v128_t block_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128_(sz_aes256_key_t const *key, v128_t block_u8x16) {
     sz_size_t round_index;
     block_u8x16 = wasm_v128_xor(block_u8x16, sz_aes256_round_key_v128_(key, 0));
     for (round_index = 1; round_index != 14; ++round_index)
@@ -458,7 +458,7 @@ SZ_HELPER_INLINE v128_t sz_ghash_double_v128_(v128_t value_u8x16) {
  *  Eight places is a whole byte, so the shift itself is one immediate shuffle and only the byte that leaves
  *  the block needs work.
  */
-SZ_HELPER_AUTO v128_t sz_ghash_double_byte_v128_(v128_t value_u8x16) {
+SZ_HELPER_INLINE v128_t sz_ghash_double_byte_v128_(v128_t value_u8x16) {
     v128_t const zeros_u8x16 = wasm_u64x2_splat(0);
     v128_t const shifted_u8x16 = wasm_i8x16_shuffle(value_u8x16, zeros_u8x16, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
                                                     12, 13, 14);
@@ -478,7 +478,7 @@ SZ_HELPER_AUTO v128_t sz_ghash_double_byte_v128_(v128_t value_u8x16) {
  *  table is derived from the subkey, and its cache footprint would leak the key on exactly the platforms with
  *  no cipher instructions to fall back on.
  */
-SZ_HELPER_AUTO v128_t sz_ghash_multiply_v128_(v128_t accumulator_u8x16, v128_t subkey_u8x16) {
+SZ_HELPER_INLINE v128_t sz_ghash_multiply_v128_(v128_t accumulator_u8x16, v128_t subkey_u8x16) {
     v128_t shifted_subkeys_u8x16[8];
     v128_t product_u8x16 = wasm_u64x2_splat(0);
     sz_size_t byte_index, bit_index;

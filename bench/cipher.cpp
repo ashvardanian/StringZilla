@@ -139,6 +139,28 @@ void bench_cipher_ctr(environment_t const &env) {
                     ctr_from_sz<sz_aes256_key_init_sve2aes, sz_aes256_ctr_xor_sve2aes> {message_bytes, pool, target})
             .log(base);
 #endif
+#if SZ_USE_V128
+        bench_unary(env, "sz_aes256_ctr_xor_v128" + suffix, validator,
+                    ctr_from_sz<sz_aes256_key_init_v128, sz_aes256_ctr_xor_v128> {message_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_V128RELAXED
+        bench_unary(
+            env, "sz_aes256_ctr_xor_v128relaxed" + suffix, validator,
+            ctr_from_sz<sz_aes256_key_init_v128relaxed, sz_aes256_ctr_xor_v128relaxed> {message_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_RVVCRYPTO
+        bench_unary(
+            env, "sz_aes256_ctr_xor_rvvcrypto" + suffix, validator,
+            ctr_from_sz<sz_aes256_key_init_rvvcrypto, sz_aes256_ctr_xor_rvvcrypto> {message_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_POWERVSX
+        bench_unary(env, "sz_aes256_ctr_xor_powervsx" + suffix, validator,
+                    ctr_from_sz<sz_aes256_key_init_powervsx, sz_aes256_ctr_xor_powervsx> {message_bytes, pool, target})
+            .log(base);
+#endif
     }
 }
 
@@ -180,6 +202,29 @@ void bench_cipher_gcm(environment_t const &env) {
         bench_unary(
             env, "sz_aes256_gcm_encrypt_sve2aes" + suffix, validator,
             gcm_from_sz<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encrypt_sve2aes> {message_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_V128
+        bench_unary(env, "sz_aes256_gcm_encrypt_v128" + suffix, validator,
+                    gcm_from_sz<sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encrypt_v128> {message_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_V128RELAXED
+        bench_unary(env, "sz_aes256_gcm_encrypt_v128relaxed" + suffix, validator,
+                    gcm_from_sz<sz_aes256_gcm_key_init_v128relaxed, sz_aes256_gcm_encrypt_v128relaxed> {message_bytes,
+                                                                                                        pool, target})
+            .log(base);
+#endif
+#if SZ_USE_RVVCRYPTO
+        bench_unary(env, "sz_aes256_gcm_encrypt_rvvcrypto" + suffix, validator,
+                    gcm_from_sz<sz_aes256_gcm_key_init_rvvcrypto, sz_aes256_gcm_encrypt_rvvcrypto> {message_bytes, pool,
+                                                                                                    target})
+            .log(base);
+#endif
+#if SZ_USE_POWERVSX
+        bench_unary(
+            env, "sz_aes256_gcm_encrypt_powervsx" + suffix, validator,
+            gcm_from_sz<sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encrypt_powervsx> {message_bytes, pool, target})
             .log(base);
 #endif
     }
@@ -284,6 +329,37 @@ void bench_cipher_stream(environment_t const &env) {
                     gcm_stream_from_sz<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encryptor_init_sve2aes,
                                        sz_aes256_gcm_encryptor_update_sve2aes, sz_aes256_gcm_encryptor_digest_sve2aes> {
                         message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_V128
+        bench_unary(env, "sz_aes256_gcm_stream_v128" + suffix, validator,
+                    gcm_stream_from_sz<sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encryptor_init_v128,
+                                       sz_aes256_gcm_encryptor_update_v128, sz_aes256_gcm_encryptor_digest_v128> {
+                        message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_V128RELAXED
+        bench_unary(
+            env, "sz_aes256_gcm_stream_v128relaxed" + suffix, validator,
+            gcm_stream_from_sz<sz_aes256_gcm_key_init_v128relaxed, sz_aes256_gcm_encryptor_init_v128relaxed,
+                               sz_aes256_gcm_encryptor_update_v128relaxed, sz_aes256_gcm_encryptor_digest_v128relaxed> {
+                message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_RVVCRYPTO
+        bench_unary(
+            env, "sz_aes256_gcm_stream_rvvcrypto" + suffix, validator,
+            gcm_stream_from_sz<sz_aes256_gcm_key_init_rvvcrypto, sz_aes256_gcm_encryptor_init_rvvcrypto,
+                               sz_aes256_gcm_encryptor_update_rvvcrypto, sz_aes256_gcm_encryptor_digest_rvvcrypto> {
+                message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_POWERVSX
+        bench_unary(
+            env, "sz_aes256_gcm_stream_powervsx" + suffix, validator,
+            gcm_stream_from_sz<sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encryptor_init_powervsx,
+                               sz_aes256_gcm_encryptor_update_powervsx, sz_aes256_gcm_encryptor_digest_powervsx> {
+                message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
     }

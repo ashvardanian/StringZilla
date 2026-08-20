@@ -1,6 +1,6 @@
 /**
- *  @file scripts/bench_fingerprints.cuh
- *  @brief Shared code for CPU and GPU batched parallel exact substring search.
+ *  @file bench/fingerprints.cuh
+ *  @brief Shared code for CPU and GPU batched rolling min-hash fingerprinting / sketching.
  */
 #include <tuple> // `std::tuple`
 #include <span>  // `std::span`
@@ -43,21 +43,7 @@ using fingerprint_min_counts_t = std::array<u32_t, default_embedding_dims_k>;
 using fingerprints_min_hashes_t = unified_vector<fingerprint_min_hashes_t>;
 using fingerprints_min_counts_t = unified_vector<fingerprint_min_counts_t>;
 
-/**
- *  @brief Reads the device-measured `elapsed_milliseconds` out of a fingerprinting engine's return value.
- *
- *  The CUDA fingerprinting backends return a `cuda_status_t` carrying CUDA-event timing of the launched
- *  kernels plus the drain; the CPU backends return a plain `sz::status_t` with no such field. The overloads
- *  below pick the right path at compile time and report a negative sentinel for engines that never measured
- *  the GPU, so the harness can contrast wall-clock against the kernel time only where it exists.
- */
-template <typename status_type_>
-float engine_gpu_milliseconds_(status_type_ const &engine_result) noexcept {
-    if constexpr (requires { engine_result.elapsed_milliseconds; }) return engine_result.elapsed_milliseconds;
-    else return -1.0f;
-}
-
-#pragma region Multi-Pattern Search
+#pragma region Rolling Fingerprinting
 
 /** @brief Wraps a hardware-specific fingerprinting backend into something @b `bench_nullary`-compatible. */
 template <typename engine_type_, typename... extra_args_>
@@ -125,6 +111,7 @@ void bench_fingerprints(environment_t const &env) {
     forkunion_executor_t pool;
     if (pool.try_spawn(std::thread::hardware_concurrency()) != status_t::success_k)
         throw std::runtime_error("Failed to spawn thread pool.");
+    cpu_specs_t const cpu_specs = pool.specs();
 
     auto scramble_accelerated_results = [&]() {
         std::shuffle(min_hashes_accelerated.begin(), min_hashes_accelerated.end(), global_random_generator());
@@ -204,8 +191,9 @@ void bench_fingerprints(environment_t const &env) {
 #endif // SZ_USE_CUDA
 
     // Perform the benchmarks, passing the dictionary to the engines
-    auto basic_rolling_f64_serial_call = fingerprint_callable<basic_rolling_f64_serial_t, forkunion_executor_t &>(
-        tape, min_hashes_baseline, min_counts_baseline, *basic_rolling_f64_serial, pool);
+    auto basic_rolling_f64_serial_call =
+        fingerprint_callable<basic_rolling_f64_serial_t, forkunion_executor_t &, cpu_specs_t>(
+            tape, min_hashes_baseline, min_counts_baseline, *basic_rolling_f64_serial, pool, cpu_specs);
     bench_result_t basic_rolling_f64_serial_result =
         bench_nullary(env, "basic_rolling_f64_serial", basic_rolling_f64_serial_call).log();
 
@@ -213,32 +201,34 @@ void bench_fingerprints(environment_t const &env) {
     // Only the CUDA backend consumes this as its equality reference, so guard it to keep CPU-only builds free
     // of an unused-but-set variable under `-Werror`.
 #if SZ_USE_CUDA
-    auto basic_rabin_u64_serial_call = fingerprint_callable<basic_rabin_u64_serial_t, forkunion_executor_t &>(
-        tape, min_hashes_baseline, min_counts_baseline, *basic_rabin_u64_serial, pool);
+    auto basic_rabin_u64_serial_call =
+        fingerprint_callable<basic_rabin_u64_serial_t, forkunion_executor_t &, cpu_specs_t>(
+            tape, min_hashes_baseline, min_counts_baseline, *basic_rabin_u64_serial, pool, cpu_specs);
 #endif // SZ_USE_CUDA
 
     // Semi-serial variants
     bench_nullary(env, "basic_rolling_f32_serial",
-                  fingerprint_callable<basic_rolling_f32_serial_t, forkunion_executor_t &>(
-                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_rolling_f32_serial, pool))
+                  fingerprint_callable<basic_rolling_f32_serial_t, forkunion_executor_t &, cpu_specs_t>(
+                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_rolling_f32_serial, pool, cpu_specs))
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
     bench_nullary(env, "basic_rabin_u64_serial",
-                  fingerprint_callable<basic_rabin_u64_serial_t, forkunion_executor_t &>(
-                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_rabin_u64_serial, pool))
+                  fingerprint_callable<basic_rabin_u64_serial_t, forkunion_executor_t &, cpu_specs_t>(
+                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_rabin_u64_serial, pool, cpu_specs))
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
     bench_nullary(env, "basic_buz_u32_serial",
-                  fingerprint_callable<basic_buz_u32_serial_t, forkunion_executor_t &>(
-                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_buz_u32_serial, pool)) //
+                  fingerprint_callable<basic_buz_u32_serial_t, forkunion_executor_t &, cpu_specs_t>(
+                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_buz_u32_serial, pool, cpu_specs)) //
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
-    bench_nullary(env, "basic_multiply_u32_serial",
-                  fingerprint_callable<basic_multiply_u32_serial_t, forkunion_executor_t &>(
-                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_multiply_u32_serial, pool))
+    bench_nullary(
+        env, "basic_multiply_u32_serial",
+        fingerprint_callable<basic_multiply_u32_serial_t, forkunion_executor_t &, cpu_specs_t>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *basic_multiply_u32_serial, pool, cpu_specs))
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
@@ -264,45 +254,45 @@ void bench_fingerprints(environment_t const &env) {
 #endif // SZ_USE_CUDA
 
     // Actually unrolled hard-coded variants, including SIMD ports
-    bench_result_t floating_serial_result =                                                    //
-        bench_nullary(                                                                         //
-            env, "floating_serial", basic_rolling_f64_serial_call,                             //
-            fingerprint_callable<floating_serial_t, forkunion_executor_t &>(                   //
-                tape, min_hashes_accelerated, min_counts_accelerated, *floating_serial, pool), //
-            callable_no_op_t {},                                                               // preprocessing
-            fingerprints_equality_t {})                                                        // equality check
+    bench_result_t floating_serial_result =                                                               //
+        bench_nullary(                                                                                    //
+            env, "floating_serial", basic_rolling_f64_serial_call,                                        //
+            fingerprint_callable<floating_serial_t, forkunion_executor_t &, cpu_specs_t>(                 //
+                tape, min_hashes_accelerated, min_counts_accelerated, *floating_serial, pool, cpu_specs), //
+            callable_no_op_t {},        // preprocessing
+            fingerprints_equality_t {}) // equality check
             .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
 #if SZ_USE_HASWELL
-    bench_nullary(                                                                          //
-        env, "floating_haswell", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_haswell_t, forkunion_executor_t &>(                   //
-            tape, min_hashes_accelerated, min_counts_accelerated, *floating_haswell, pool), //
-        callable_no_op_t {},                                                                // preprocessing
-        fingerprints_equality_t {})                                                         // equality check
+    bench_nullary(                                                                                     //
+        env, "floating_haswell", basic_rolling_f64_serial_call,                                        //
+        fingerprint_callable<floating_haswell_t, forkunion_executor_t &, cpu_specs_t>(                 //
+            tape, min_hashes_accelerated, min_counts_accelerated, *floating_haswell, pool, cpu_specs), //
+        callable_no_op_t {},                                                                           // preprocessing
+        fingerprints_equality_t {})                                                                    // equality check
         .log(basic_rolling_f64_serial_result, floating_serial_result);
     scramble_accelerated_results();
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_SKYLAKE
-    bench_nullary(                                                                          //
-        env, "floating_skylake", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_skylake_t, forkunion_executor_t &>(                   //
-            tape, min_hashes_accelerated, min_counts_accelerated, *floating_skylake, pool), //
-        callable_no_op_t {},                                                                // preprocessing
-        fingerprints_equality_t {})                                                         // equality check
+    bench_nullary(                                                                                     //
+        env, "floating_skylake", basic_rolling_f64_serial_call,                                        //
+        fingerprint_callable<floating_skylake_t, forkunion_executor_t &, cpu_specs_t>(                 //
+            tape, min_hashes_accelerated, min_counts_accelerated, *floating_skylake, pool, cpu_specs), //
+        callable_no_op_t {},                                                                           // preprocessing
+        fingerprints_equality_t {})                                                                    // equality check
         .log(basic_rolling_f64_serial_result, floating_serial_result);
     scramble_accelerated_results();
 #endif // SZ_USE_SKYLAKE
 
 #if SZ_USE_NEON
-    bench_nullary(                                                                       //
-        env, "floating_neon", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_neon_t, forkunion_executor_t &>(                   //
-            tape, min_hashes_accelerated, min_counts_accelerated, *floating_neon, pool), //
-        callable_no_op_t {},                                                             // preprocessing
-        fingerprints_equality_t {})                                                      // equality check
+    bench_nullary(                                                                                  //
+        env, "floating_neon", basic_rolling_f64_serial_call,                                        //
+        fingerprint_callable<floating_neon_t, forkunion_executor_t &, cpu_specs_t>(                 //
+            tape, min_hashes_accelerated, min_counts_accelerated, *floating_neon, pool, cpu_specs), //
+        callable_no_op_t {},                                                                        // preprocessing
+        fingerprints_equality_t {})                                                                 // equality check
         .log(basic_rolling_f64_serial_result, floating_serial_result);
     scramble_accelerated_results();
 #endif // SZ_USE_NEON
@@ -319,7 +309,7 @@ void bench_fingerprints(environment_t const &env) {
 #endif // SZ_USE_CUDA
 }
 
-#pragma endregion
+#pragma endregion // Rolling Fingerprinting
 
 } // namespace scripts
 } // namespace stringzilla

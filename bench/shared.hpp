@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench.hpp
+ *  @file bench/shared.hpp
  *  @brief Helper structures and functions for C++ benchmarks.
  *
  *  The StringZilla benchmarking suite doesn't use any external frameworks like Criterion or Google Benchmark.
@@ -37,17 +37,18 @@
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>
-#include <chrono>     // `std::chrono::high_resolution_clock`
-#include <exception>  // `std::invalid_argument`
-#include <functional> // `std::equal_to`
-#include <limits>     // `std::numeric_limits`
-#include <numeric>    // `std::accumulate`
-#include <random>     // `std::random_device`, `std::mt19937`
-#include <string>     // `std::hash`
-#include <vector>     // `std::vector`
-#include <regex>      // `std::regex`, `std::regex_search`
-#include <thread>     // `std::this_thread::sleep_for`
-#include <optional>   // `std::optional`
+#include <chrono>      // `std::chrono::high_resolution_clock`
+#include <exception>   // `std::invalid_argument`
+#include <functional>  // `std::equal_to`
+#include <limits>      // `std::numeric_limits`
+#include <numeric>     // `std::accumulate`
+#include <optional>    // `std::optional`
+#include <random>      // `std::random_device`, `std::mt19937`
+#include <regex>       // `std::regex`, `std::regex_search`
+#include <string>      // `std::hash`
+#include <thread>      // `std::this_thread::sleep_for`, `std::thread::hardware_concurrency`
+#include <type_traits> // `std::invoke_result_t`
+#include <vector>      // `std::vector`
 
 #include <string_view> // Requires C++17
 #include <span>        // Requires C++20, used to pass info to batch-capable parallel backends
@@ -137,14 +138,6 @@ inline std::uint64_t cpu_cycle_counter() {
 #endif
 }
 
-/** @brief Measures the approximate number of CPU cycles per second. */
-inline std::uint64_t cpu_cycles_per_second() {
-    std::uint64_t start = cpu_cycle_counter();
-    std::this_thread::sleep_for(stdc::seconds(1));
-    std::uint64_t end = cpu_cycle_counter();
-    return end - start;
-}
-
 /** @brief Measures the duration of a single call to the given function. */
 template <typename function_type_>
 double seconds_per_call(function_type_ &&function) {
@@ -212,6 +205,49 @@ static void do_not_optimize(argument_type_ &&value) noexcept {
 #endif
 }
 
+/** @brief The device-measured kernel time an engine reports, in milliseconds, or @b 0 for CPU engines, whose
+ *         plain `status_t` carries no such timer. */
+template <typename status_type_, typename = void>
+struct engine_elapsed_milliseconds_trait {
+    static float read(status_type_ const &) noexcept { return 0.0f; }
+};
+template <typename status_type_>
+struct engine_elapsed_milliseconds_trait<status_type_,
+                                         decltype((void)std::declval<status_type_ const &>().elapsed_milliseconds)> {
+    static float read(status_type_ const &materialized) noexcept { return materialized.elapsed_milliseconds; }
+};
+
+/** @brief A status paired with the device-measured kernel time, both read out of one materialized copy. */
+struct engine_timing_t {
+    sz::status_t status = sz::status_t::success_k;
+    float kernel_milliseconds = 0.0f;
+};
+
+/**
+ *  @brief Calls @p invocable and decomposes its returned status through opaque memory, in one non-inlined
+ *         frame. Every timed engine call in the suite goes through here.
+ *
+ *  Both halves must stay in this frame. Compilers miscompile the engines' return-by-value inside these
+ *  large translation units at @b -O2 : NVCC 12.x corrupts a `cuda_status_t`'s two leading enum fields
+ *  while its `float elapsed_milliseconds` survives, and g++ trunk corrupts the status when it folds the
+ *  return into an inlined caller. The libraries are correct - a separate-TU call returns `success_k`.
+ *  Sharing one `[[gnu::noinline]]` frame reproduces that separate-TU code path.
+ */
+template <typename invocable_type_>
+SZ_NOINLINE engine_timing_t invoke_engine_(invocable_type_ &&invocable) noexcept {
+    using status_t = std::invoke_result_t<invocable_type_>;
+    status_t engine_result = invocable();
+    do_not_optimize(engine_result);
+
+    status_t materialized;
+    std::memcpy((void *)&materialized, (void const *)&engine_result, sizeof(status_t));
+
+    engine_timing_t timing;
+    timing.status = static_cast<sz::status_t>(materialized);
+    timing.kernel_milliseconds = engine_elapsed_milliseconds_trait<status_t>::read(materialized);
+    return timing;
+}
+
 /**
  *  @brief Rounds the number @b down to the preceding power of two.
  *  @see Equivalent to `std::bit_floor`: https://en.cppreference.com/w/cpp/numeric/bit_floor
@@ -222,6 +258,32 @@ inline std::size_t bit_floor(std::size_t n) {
     while (n > 1) n >>= 1, most_significant_bit_position++;
     return static_cast<std::size_t>(1) << most_significant_bit_position;
 }
+
+/**
+ *  @brief Parses a human byte size like `64mb` or `1gb` into bytes; `kb`/`mb`/`gb` are powers of 1024,
+ *         matching StringWars' `parse_size`. A bare number is bytes, and an empty or zero value is the whole file.
+ */
+inline std::size_t parse_size(std::string const &text) {
+    std::size_t cursor = 0;
+    while (cursor < text.size() && (std::isdigit((unsigned char)text[cursor]) || text[cursor] == '.')) ++cursor;
+    double const number = cursor == 0 ? 0.0 : std::stod(text.substr(0, cursor));
+    std::string unit;
+    for (; cursor < text.size(); ++cursor)
+        if (!std::isspace((unsigned char)text[cursor])) unit.push_back((char)std::tolower((unsigned char)text[cursor]));
+    std::size_t multiplier = 1;
+    if (unit.empty() || unit == "b") multiplier = 1;
+    else if (unit == "kb") multiplier = 1024ull;
+    else if (unit == "mb") multiplier = 1024ull * 1024ull;
+    else if (unit == "gb") multiplier = 1024ull * 1024ull * 1024ull;
+    else throw std::invalid_argument("Invalid STRINGWARS_DATASET_LIMIT unit: " + unit);
+    return static_cast<std::size_t>(number * (double)multiplier);
+}
+
+/**
+ *  @brief The smallest read that still exercises a compute-bound bench's control-flow paths on the
+ *         multilingual corpus. Memory-bound benches ignore it and read the whole file.
+ */
+static constexpr std::size_t compute_bound_slice_bytes_k = 64ull * 1024ull * 1024ull;
 
 #if !SZ_USE_CUDA
 using dataset_t = std::string;
@@ -259,10 +321,23 @@ tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separat
     return tokens;
 }
 
-/** @brief Splits a string into words, using newlines, tabs, and whitespaces as delimiters using @b `std::isspace`. */
-inline tokens_t tokenize(std::string_view str) {
-    return tokenize(str, [](char c) { return std::isspace(c); });
+/**
+ *  @brief Tokenizes a string around the given separator @p byteset in one lazy SIMD pass.
+ *
+ *  Each step of the underlying `split` issues one `sz_find_byteset` scan. The whole corpus is already
+ *  bounded by the dataset read, so the walk runs to the end rather than carrying its own cap.
+ */
+inline tokens_t tokenize(std::string_view str, sz::byteset separators) {
+    tokens_t tokens;
+    for (auto token : sz::string_view {str.data(), str.size()}.split(separators)) {
+        if (token.size() == 0) continue; // ? Runs of separators yield empty segments
+        tokens.push_back({token.data(), token.size()});
+    }
+    return tokens;
 }
+
+/** @brief Splits a string into words around newlines, tabs, and other ASCII whitespaces. */
+inline tokens_t tokenize(std::string_view str) { return tokenize(str, sz::whitespaces_set()); }
 
 template <typename result_string_type_ = std::string_view, typename from_string_type_ = result_string_type_,
           typename comparator_type_ = std::equal_to<std::size_t>, typename allocator_type_ = std::allocator<char>>
@@ -315,11 +390,10 @@ struct environment_t {
     std::size_t stress_limit = 1;
     /** @brief Whether to deduplicate tokens before benchmarking. */
     bool unique = false;
-    /** @brief Optional cap on the number of tokens kept, 0 means unlimited; `STRINGWARS_MAX_TOKENS`. */
-    std::size_t max_tokens = 0;
+    /** @brief Read at most this many dataset bytes, 0 means the whole file; `STRINGWARS_DATASET_LIMIT`. */
+    std::size_t dataset_limit_bytes = 0;
     /** @brief Optional override for per-benchmark batch sizes, empty means the backend default; `STRINGWARS_BATCH`. */
     std::vector<std::size_t> batch_sizes_override;
-
     /** @brief Textual content of the dataset file, fully loaded into memory. */
     dataset_t dataset;
     /** @brief Array of tokens extracted from the @p dataset. */
@@ -334,6 +408,9 @@ struct environment_t {
         return {tokens[i].data(), tokens[i].size()};
     }
 };
+
+/** @brief Whether `build_environment` stress-tests the backends absent `STRINGWARS_STRESS`. */
+enum class stress_default_t : bool { quick_k, stress_k };
 
 /**
  *  @brief Prepares the environment for benchmarking based on environment variables and default settings.
@@ -358,8 +435,9 @@ struct environment_t {
 inline environment_t build_environment(                                        //
     int argc, char const *argv[],                                              //< Ignored
     std::string default_dataset, environment_t::tokenization_t default_tokens, //< Mandatory
+    std::size_t default_dataset_limit_bytes = 0,                               //< Optional, 0 = whole file
     std::size_t default_duration = SZ_DEBUG ? 1 : 10,                          //< Optional
-    bool default_stress = true,                                                //
+    stress_default_t default_stress = stress_default_t::stress_k,              //
     std::string default_stress_dir = ".tmp",                                   //
     std::size_t default_stress_limit = 1,                                      //
     std::size_t default_stress_duration = SZ_DEBUG ? 1 : 10,                   //
@@ -369,6 +447,7 @@ inline environment_t build_environment(                                        /
 
     sz_unused_(argc && argv); // Unused in this context
     environment_t env;
+    env.dataset_limit_bytes = default_dataset_limit_bytes;
 
     // Use `STRINGWARS_DATASET` if set, otherwise `default_dataset`
     if (char const *env_var = std::getenv("STRINGWARS_DATASET")) { env.path = env_var; }
@@ -403,7 +482,7 @@ inline environment_t build_environment(                                        /
             env.tokenization = static_cast<environment_t::tokenization_t>(std::stoul(token_arg));
             if (env.tokenization == 0)
                 throw std::invalid_argument(
-                    "The tokenization mode must be 'file', 'line', 'word', or a positive integer.");
+                    "The tokenization mode must be 'file', 'lines', 'words', or a positive integer.");
         }
     }
     else { env.tokenization = default_tokens; }
@@ -415,7 +494,7 @@ inline environment_t build_environment(                                        /
         env.stress = is_one;
         if (!is_zero && !is_one) throw std::invalid_argument("The stress-testing flag must be '0' or '1'.");
     }
-    else { env.stress = default_stress; }
+    else { env.stress = default_stress == stress_default_t::stress_k; }
     if (char const *env_var = std::getenv("STRINGWARS_STRESS_DURATION")) {
         env.stress_seconds = std::stoul(env_var);
         if (env.stress_seconds == 0)
@@ -430,17 +509,21 @@ inline environment_t build_environment(                                        /
     }
     else { env.stress_limit = default_stress_limit; }
 
-    // Use `STRINGWARS_UNIQUE` to deduplicate tokens
+    // Use `STRINGWARS_UNIQUE` to deduplicate tokens.
+    // @sa `STRINGWARS_UNIQUE=1` sorts the tokenized set and drops duplicates before benchmarking.
     if (char const *env_var = std::getenv("STRINGWARS_UNIQUE")) {
         bool is_one = std::strcmp(env_var, "1") == 0 || std::strcmp(env_var, "true") == 0;
         env.unique = is_one;
     }
 
-    // Use `STRINGWARS_MAX_TOKENS` to cap the number of tokens kept, for faster and more targeted runs.
-    if (char const *env_var = std::getenv("STRINGWARS_MAX_TOKENS")) { env.max_tokens = std::stoull(env_var); }
+    // Use `STRINGWARS_DATASET_LIMIT` to bound the dataset read, so the file tail is never touched.
+    if (char const *env_var = std::getenv("STRINGWARS_DATASET_LIMIT")) {
+        env.dataset_limit_bytes = parse_size(env_var);
+    }
 
     // Use `STRINGWARS_BATCH` to override the per-benchmark batch sizes with a comma-separated list,
     // e.g. `STRINGWARS_BATCH=1024` to run a single batch and skip the slow/largest default sweep entries.
+    // @sa `STRINGWARS_BATCH=1024,4096` replaces the default batch-size sweep with exactly these sizes.
     if (char const *env_var = std::getenv("STRINGWARS_BATCH")) {
         std::string const batch_argument = env_var;
         for (std::size_t start = 0; start < batch_argument.size();) {
@@ -451,14 +534,13 @@ inline environment_t build_environment(                                        /
         }
     }
 
-    env.dataset = read_file(env.path);
-    env.dataset.resize(bit_floor(env.dataset.size())); // Shrink to the nearest power of two
+    env.dataset = read_file(env.path, env.dataset_limit_bytes); // A non-zero limit stops the read early
+    env.dataset.resize(bit_floor(env.dataset.size()));          // Shrink to the nearest power of two
 
-    // Tokenize the dataset according to the tokenization mode
+    // Tokenize the dataset according to the tokenization mode. The corpus is already bounded by the read,
+    // so each mode walks it to the end.
     if (env.tokenization == environment_t::file_k) { env.tokens.push_back({env.dataset.data(), env.dataset.size()}); }
-    else if (env.tokenization == environment_t::lines_k) {
-        env.tokens = tokenize(env.dataset, [](char c) { return c == '\n'; });
-    }
+    else if (env.tokenization == environment_t::lines_k) { env.tokens = tokenize(env.dataset, sz::byteset {'\n'}); }
     else if (env.tokenization == environment_t::words_k) { env.tokens = tokenize(env.dataset); }
     else {
         std::size_t n = static_cast<std::size_t>(env.tokenization);
@@ -472,8 +554,6 @@ inline environment_t build_environment(                                        /
         env.tokens.erase(last, env.tokens.end());
     }
 
-    // Optionally cap the token count before the power-of-two shrink, for faster and more targeted runs.
-    if (env.max_tokens != 0 && env.tokens.size() > env.max_tokens) env.tokens.resize(env.max_tokens);
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
@@ -509,6 +589,8 @@ inline environment_t build_environment(                                        /
     std::printf(" - Stress-testing: %s\n", env.stress ? "yes" : "no");
     std::printf(" - Unique tokens: %s\n", env.unique ? "yes" : "no");
     std::printf(" - Loaded dataset size: %zu bytes\n", env.dataset.size());
+    if (env.dataset_limit_bytes == 0) std::printf(" - Dataset limit: whole file\n");
+    else std::printf(" - Dataset limit: %zu bytes\n", env.dataset_limit_bytes);
     std::printf(" - Number of tokens: %zu\n", env.tokens.size());
     std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
 
@@ -617,6 +699,9 @@ struct bench_result_t {
 
     duration_histogram_t cpu_cycles_histogram;
 
+    /** @brief Cheapest single call observed, in CPU cycles; a less noisy cost estimator than the mean. */
+    std::uint64_t profiled_cpu_cycles_min = std::numeric_limits<std::uint64_t>::max();
+
     std::size_t bytes_passed = 0; //< Pulled from the `call_result_t`
     std::size_t operations = 0;   //< Pulled from the `call_result_t`
     std::size_t errors = 0;       //< Pulled from the `call_result_t`
@@ -630,6 +715,7 @@ struct bench_result_t {
      *  @code{.unparsed}
      *  Benchmarking `sz_find_skylake`:
      *  > Throughput: 0.00 TB/s @ 0.00 ns/call
+     *  > Latency: min 0.00 ns/call, p99 0.00 ns/call
      *  > Efficiency: 0.00 TOps/s @ 0.00 ops/cycle
      *  > Errors: 0 in 10 calls
      *  > + 3.5 x against `sz_find_serial`
@@ -682,6 +768,29 @@ struct bench_result_t {
                     bytes_printable, bytes_printable_unit,    //
                     seconds_printable, seconds_printable_unit);
 
+        // Scheduler interference only slows a call down, so the minimum is a less noisy estimator than the
+        // mean above, and the 99th percentile shows whether outliers drag that mean up. Both come from the
+        // CPU-cycle histogram, rescaled by this run's average seconds-per-cycle ratio.
+        if (profiled_cpu_cycles > 0 && profiled_cpu_cycles_min != std::numeric_limits<std::uint64_t>::max()) {
+            double const seconds_per_cycle = profiled_seconds / profiled_cpu_cycles;
+
+            auto minimum_printable = profiled_cpu_cycles_min * seconds_per_cycle * 1e9;
+            char const *minimum_printable_unit = "ns";
+            if (minimum_printable > 1e3) minimum_printable /= 1e3, minimum_printable_unit = "us";
+            if (minimum_printable > 1e3) minimum_printable /= 1e3, minimum_printable_unit = "ms";
+            if (minimum_printable > 1e3) minimum_printable /= 1e3, minimum_printable_unit = "s";
+
+            auto p99_printable = cpu_cycles_histogram.percentile(0.99) * seconds_per_cycle * 1e9;
+            char const *p99_printable_unit = "ns";
+            if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "us";
+            if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "ms";
+            if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "s";
+
+            std::printf("> Latency: min %.2f %s/call, p99 %.2f %s/call\n", //
+                        minimum_printable, minimum_printable_unit,         //
+                        p99_printable, p99_printable_unit);
+        }
+
         // Print the number of operations, if there was a separate tracking mechanism for those.
         if (operations) {
             auto ops_printable = operations * 1.0 / profiled_seconds;
@@ -714,7 +823,7 @@ struct bench_result_t {
         };
 
         // Expand over all provided baselines.
-        (void)std::initializer_list<int> {(log_relative(bases), 0)...};
+        [[maybe_unused]] std::initializer_list<int> const expanded {(log_relative(bases), 0)...};
         sz_unused_(log_relative); // In case no `bases` were provided
 
         return *this;
@@ -784,13 +893,15 @@ bench_result_t bench_nullary(  //
         std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
         call_result_t call_result = callable();
         std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
+        std::uint64_t const cpu_cycles_spent = cpu_cycles_at_end - cpu_cycles_at_start;
 
         // Aggregate:
         result.operations += call_result.operations;
         result.bytes_passed += call_result.bytes_passed;
         result.profiled_inputs += call_result.inputs_processed;
-        result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
-        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
+        result.profiled_cpu_cycles += cpu_cycles_spent;
+        result.profiled_cpu_cycles_min = std::min(result.profiled_cpu_cycles_min, cpu_cycles_spent);
+        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_spent)] += 1;
     }
     result.profiled_calls += repeat.count();
     result.profiled_seconds = repeat.seconds();
@@ -854,22 +965,28 @@ bench_result_t bench_unary(    //
         }
     }
 
-    // For profiling, we will first run the benchmark just once to get a rough estimate of the time.
-    // But then we will repeat it in an unrolled fashion for a more accurate measurement.
+    // Run once to estimate the per-call duration and size the unrolled loop below. This call pays cold-cache
+    // and branch-predictor costs a steady-state call does not, so it stays out of the reported statistics.
+    call_result_t warm_up_result;
+    std::uint64_t warm_up_cpu_cycles = 0;
     auto const first_call_duration = seconds_per_call([&] {
         std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
-        call_result_t const call_result = callable((std::size_t)0); //? Use the first token
+        warm_up_result = callable((std::size_t)0); //? Use the first token
         std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
-
-        result.operations += call_result.operations;
-        result.bytes_passed += call_result.bytes_passed;
-        result.profiled_inputs += call_result.inputs_processed;
-        result.profiled_calls += 1;
-        result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
-        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
+        warm_up_cpu_cycles = cpu_cycles_at_end - cpu_cycles_at_start;
     });
-    result.profiled_seconds = first_call_duration;
-    if (first_call_duration >= env.benchmark_seconds) return result;
+    if (first_call_duration >= env.benchmark_seconds) {
+        // No budget remains for a second, uncontaminated sample, so the cold warm-up call is reported as-is.
+        result.operations += warm_up_result.operations;
+        result.bytes_passed += warm_up_result.bytes_passed;
+        result.profiled_inputs += warm_up_result.inputs_processed;
+        result.profiled_calls += 1;
+        result.profiled_cpu_cycles += warm_up_cpu_cycles;
+        result.profiled_cpu_cycles_min = warm_up_cpu_cycles;
+        result.cpu_cycles_histogram[static_cast<double>(warm_up_cpu_cycles)] += 1;
+        result.profiled_seconds = first_call_duration;
+        return result;
+    }
 
     // Repeat the benchmarks in unrolled batches of `unroll_factor` until the time limit is reached.
     constexpr std::size_t unroll_factor = 8;
@@ -901,11 +1018,13 @@ bench_result_t bench_unary(    //
             result.profiled_inputs += r4.inputs_processed, result.profiled_inputs += r5.inputs_processed, //
             result.profiled_inputs += r6.inputs_processed, result.profiled_inputs += r7.inputs_processed; //
 
-        result.profiled_cpu_cycles += t7 - t0;
-        result.cpu_cycles_histogram[static_cast<double>(t7 - t0)] += unroll_factor;
+        std::uint64_t const batch_cpu_cycles = t7 - t0;
+        result.profiled_cpu_cycles += batch_cpu_cycles;
+        result.profiled_cpu_cycles_min = std::min(result.profiled_cpu_cycles_min, batch_cpu_cycles / unroll_factor);
+        result.cpu_cycles_histogram[static_cast<double>(batch_cpu_cycles)] += unroll_factor;
     }
     result.profiled_calls += repeat.count() * unroll_factor;
-    result.profiled_seconds = repeat.seconds() + first_call_duration;
+    result.profiled_seconds = repeat.seconds();
     return result;
 }
 

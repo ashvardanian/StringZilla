@@ -9,9 +9,9 @@
  *
  *  Every backend specialization header (`icelake.hpp`, `cuda.cuh`, ...) must include this
  *  file first, so that the primary templates are visible before any specialization.
- * 
+ *
  *  This file is designed around several guiding principles:
- * 
+ *
  *  - Avoid larger integral types, where smaller ones are enough.
  *  - Larger kernels are assembled from smaller templates, so to keep binary size and compilation time
  *    sane, type-invariant pieces are shielded from generic interfaces via "trampolines".
@@ -424,32 +424,6 @@ struct diagonal_memory_requirements {
 using scratch_space_t = span<std::byte>;
 
 /**
- *  @brief A running, cache-line-padded scratch byte amount, used to lay out a walker's sub-buffers.
- *
- *  Each walker partitions its `scratch_space_t` into a handful of sub-buffers (score diagonals, a reversed
- *  copy of the shorter string, a Myers `match_masks` table, ...). Growing this amount once per sub-buffer keeps
- *  every offset cache-line aligned and yields the total scratch the walker needs - a single source of truth
- *  shared by the walker's `layout()` and its `operator()`. Cache-line width is `>=` any CPU register width, so
- *  the padding also keeps full-register SIMD over-reads near a buffer's end in bounds.
- */
-struct scratch_amount_t {
-    // ? Deliberately a poison default (not `SZ_CACHE_LINE_WIDTH`): an instance built without an explicit
-    // ? `cpu_specs_t::cache_line_width` should produce an obviously-broken `total` (huge → `bad_alloc`/ASan),
-    // ? surfacing any place that forgot to propagate the alignment rather than silently assuming 64 bytes.
-    size_t alignment = std::numeric_limits<size_t>::max();
-    size_t total = 0; // ? The accumulated, padded byte count == the next buffer's offset.
-
-    /** @brief Reads the current end of the scratch, i.e. the offset where the next sub-buffer would start. */
-    constexpr operator size_t() const noexcept { return total; }
-
-    /** @brief Reserves @p bytes for the next sub-buffer, padded so the following offset stays aligned. */
-    constexpr scratch_amount_t &operator+=(size_t bytes) noexcept {
-        total += round_up_to_multiple<size_t>(bytes, alignment);
-        return *this;
-    }
-};
-
-/**
  *  @brief Routes a runtime word-count @p bucket in `[current_k, high_k]` to the matching @b compile-time @p fixed
  *         callback (invoked with `std::integral_constant<size_t, bucket>` so it can pick the right
  *         `distances_*_multiword_<bucket>` instantiation); a bucket past @p high_k invokes @p overflow. One
@@ -477,12 +451,21 @@ SZ_INLINE bool text_is_ascii_(span<char const> text) noexcept {
     return find_byteset_(text.data(), text.size(), &non_ascii) == SZ_NULL_CHAR;
 }
 
-/** @brief Whether every string in @p corpus is ASCII, so rune distances equal byte distances. */
+/**
+ *  @brief Whether every string in @p corpus is ASCII, so rune distances equal byte distances.
+ *
+ *  A tape is one contiguous block, so it is scanned in a single pass rather than one byteset launch per
+ *  element. Any terminator bytes the block carries between elements are themselves ASCII, so the answer is
+ *  the same either way.
+ */
 template <sz_find_byteset_t find_byteset_, typename corpus_type_>
 SZ_INLINE bool corpus_is_ascii_(corpus_type_ const &corpus) noexcept {
-    for (size_t index = 0; index != corpus.size(); ++index)
-        if (!text_is_ascii_<find_byteset_>(to_view(corpus[index]))) return false;
-    return true;
+    if constexpr (is_tape_like<corpus_type_>::value) { return text_is_ascii_<find_byteset_>(corpus.tape_bytes()); }
+    else {
+        for (size_t index = 0; index != corpus.size(); ++index)
+            if (!text_is_ascii_<find_byteset_>(to_view(corpus[index]))) return false;
+        return true;
+    }
 }
 
 #pragma region Core Templates

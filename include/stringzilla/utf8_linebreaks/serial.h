@@ -67,8 +67,8 @@ SZ_HELPER_INLINE sz_bool_t sz_line_break_is_cm_or_zwj_(sz_u8_t line_break_class)
 }
 
 /** @brief One decoded codepoint's LB1-resolved Line_Break class; advances @p position and returns the descriptor. */
-SZ_HELPER_AUTO sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t length, sz_size_t *position,
-                                                 sz_u16_t *descriptor_out) {
+SZ_HELPER_INLINE sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t length, sz_size_t *position,
+                                                   sz_u16_t *descriptor_out) {
     sz_size_t decode = *position;
     sz_rune_t const rune = sz_utf8_next_rune_(text, length, &decode);
     sz_u16_t const descriptor = sz_rune_line_break_property(rune);
@@ -111,9 +111,9 @@ SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_(void) {
  *         A combining mark with no attachable base (start of text, or after BK/CR/LF/NL/SP/ZW) is LB10: kept as a
  *         lone AL cluster. @p last_codepoint_was_zwj carries the LB8a "preceded by ZWJ" bit across calls.
  */
-SZ_HELPER_AUTO sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t text, sz_size_t length,
-                                                                   sz_size_t *position,
-                                                                   sz_bool_t *last_codepoint_was_zwj) {
+SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t text, sz_size_t length,
+                                                                     sz_size_t *position,
+                                                                     sz_bool_t *last_codepoint_was_zwj) {
     sz_line_break_cluster_t cluster;
     if (*position >= length) return sz_line_break_cluster_invalid_();
     cluster.valid = sz_true_k;
@@ -647,10 +647,10 @@ SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_masks_(sz_size_t loaded, s
 /** @brief Per-lane class/side membership of one decoded 64-byte window, precomputed by a per-ISA extractor so the
  *         portable rule engine sources every mask from `sz_u64_t` words without touching the codepoint vectors. */
 typedef struct sz_line_break_frame_t {
-    sz_u64_t base, gate, attached, lone_mark;               /**< from the byte-level cluster frame */
-    sz_u64_t non_start, dotted, starts, replacement;        /**< from the classifier */
-    sz_u64_t effective_class[sz_line_break_class_count_k];  /**< membership per class, AFTER LB10 lone->AL; NOT &base */
-    sz_u64_t raw_zwj;                                       /**< class_mask(classified.classes, zwj_k), pre-effective */
+    sz_u64_t base, gate, attached, lone_mark;              /**< from the byte-level cluster frame */
+    sz_u64_t non_start, dotted, starts, replacement;       /**< from the classifier */
+    sz_u64_t effective_class[sz_line_break_class_count_k]; /**< membership per class, AFTER LB10 lone->AL; NOT &base */
+    sz_u64_t raw_zwj; /**< class_mask(classified.classes_*, zwj_k), pre-effective */
     sz_u64_t side_pi, side_pf, side_eaw, side_cn, side_ext; /**< side-bit membership masks (NOT yet &base) */
 } sz_line_break_frame_t;
 

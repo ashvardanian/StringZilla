@@ -50,17 +50,17 @@ SZ_HELPER_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes_u8x16, sz_u
 }
 
 /** @brief Zero a scratch buffer then copy `length` bytes, so strip kernels can read one byte past. */
-SZ_HELPER_AUTO sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
-                                                                sz_size_t buffer_capacity) {
+SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
+                                                                  sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return buffer;
 }
 
 /** @brief Gather the C4/C5/C6 +1 parity delta for the continuation byte's low 6 bits (irregular flag kept). */
-SZ_HELPER_AUTO v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v128_t after_c4_u8x16,
-                                                        v128_t after_c5_u8x16, v128_t after_c6_u8x16,
-                                                        v128_t is_continuation_u8x16) {
+SZ_HELPER_INLINE v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v128_t after_c4_u8x16,
+                                                          v128_t after_c5_u8x16, v128_t after_c6_u8x16,
+                                                          v128_t is_continuation_u8x16) {
     v128_t low6_u8x16 = wasm_v128_and(source_u8x16, wasm_i8x16_splat(0x3F));
     v128_t c4_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
                                              wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
@@ -83,17 +83,17 @@ SZ_HELPER_AUTO v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v12
 
 /** @brief A 16-byte fold window: the chunk at `src + pos` plus its cross-boundary neighbours. */
 typedef struct {
-    v128_t source;   // The 16 bytes at `src + pos`.
-    v128_t previous; // `source` slid up one lane, carrying the real predecessor byte (0 at `pos == 0`).
-    v128_t next;     // `source` slid down one lane, carrying the real successor byte.
+    v128_t source_u8x16;   // The 16 bytes at `src + pos`.
+    v128_t previous_u8x16; // `source_u8x16` slid up one lane, carrying the real predecessor byte (0 at `pos == 0`).
+    v128_t next_u8x16;     // `source_u8x16` slid down one lane, carrying the real successor byte.
 } sz_utf8_uncased_window_v128_t;
 
 /** @brief Loads the fold window at `src + pos`, reading one byte on each side for cross-window folds. */
 SZ_HELPER_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_window_v128_(sz_u8_t const *src, sz_size_t pos) {
     sz_utf8_uncased_window_v128_t window;
-    window.source = wasm_v128_load(src + pos);
-    window.previous = sz_utf8_uncased_slide1up_v128_(window.source, pos > 0 ? src[pos - 1] : 0);
-    window.next = sz_utf8_slide1down_v128_(window.source, src[pos + 16]);
+    window.source_u8x16 = wasm_v128_load(src + pos);
+    window.previous_u8x16 = sz_utf8_uncased_slide1up_v128_(window.source_u8x16, pos > 0 ? src[pos - 1] : 0);
+    window.next_u8x16 = sz_utf8_slide1down_v128_(window.source_u8x16, src[pos + 16]);
     return window;
 }
 
@@ -114,7 +114,7 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t 
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t after_c3_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3));
         v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
         v128_t latin1_range_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0x80, 0x1F);
@@ -136,7 +136,7 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t 
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         sz_unused_(next_u8x16);
         v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
                                                      wasm_i8x16_splat((sz_i8_t)0x80));
@@ -162,7 +162,7 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8_t const 
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t after_d0_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD0));
         v128_t is_d0_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD0));
         v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
@@ -194,7 +194,7 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t const *sr
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
                                                      wasm_i8x16_splat((sz_i8_t)0x80));
         v128_t after_ce_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xCE));
@@ -243,7 +243,7 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const 
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t is_d4_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD4));
         v128_t is_d5_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD5));
         v128_t after_d4_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD4));
@@ -299,8 +299,8 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t cons
 #pragma region Per script alarm strips
 
 /** @brief Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
-SZ_HELPER_AUTO void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos, sz_size_t window,
-                                                  long *best) {
+SZ_HELPER_INLINE void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos, sz_size_t window,
+                                                    long *best) {
     sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(wasm_i8x16_ne(danger_second_u8x16, wasm_i8x16_splat(0)));
     if (window < 16) bits &= ((sz_u32_t)1 << window) - 1;
     while (bits) {
@@ -319,7 +319,7 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t after_c3_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC3);
         v128_t after_c5_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC5);
         v128_t danger_u8x16 = wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBA),
@@ -378,7 +378,7 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u8_t const
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t danger_u8x16 = wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB2),
                                                           sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE1)),
                                             sz_utf8_uncased_inrange01_v128_(next_u8x16, 0x80, 0x09));
@@ -447,7 +447,7 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t con
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t danger_u8x16 = wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBA),
                                                           sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE1)),
                                             sz_utf8_uncased_inrange01_v128_(next_u8x16, 0x96, 0x0A));
@@ -480,7 +480,7 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t source_u8x16 = chunk.source_u8x16, previous_u8x16 = chunk.previous_u8x16, next_u8x16 = chunk.next_u8x16;
         v128_t after_e1_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE1);
         v128_t danger_u8x16 = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB2), after_e1_u8x16);
         danger_u8x16 = wasm_v128_or(

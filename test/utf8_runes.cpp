@@ -1,6 +1,6 @@
 /**
  *  @brief  UTF-8 codepoint counting, nth-character finding, and streaming rune-unpacking tests.
- *  @file scripts/test_utf8_runes.cpp
+ *  @file test/utf8_runes.cpp
  *  @author Ash Vardanian
  *  @date June 20, 2026
  */
@@ -60,61 +60,13 @@
 #error "This test requires C++11 or later."
 #endif
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using sz::literals::operator""_sv; // for `sz::string_view`
 
 #pragma region Helpers
-
-/** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_encode` (silently skips invalid runes). */
-static void append_codepoint_(std::string &text, sz_rune_t codepoint) {
-    sz_u8_t bytes[4];
-    sz_rune_length_t const length = sz_rune_encode(codepoint, bytes);
-    if (length == sz_rune_invalid_k) return;
-    text.append((char const *)bytes, (std::size_t)length);
-}
-
-/**
- *  @brief Builds a random, well-formed UTF-8 string whose codepoints span all four byte-widths and
- *         every 1->2->3->4 transition, so the count/find-nth/unpack kernels hit their mixed-width paths.
- */
-static std::string random_valid_utf8_(std::size_t target_codepoints, std::mt19937 &rng) {
-    // Disjoint ranges, one per byte-width, chosen to avoid surrogates and noncharacters.
-    static struct {
-        sz_rune_t low, high;
-    } const ranges[] = {
-        {0x000020u, 0x00007Eu}, // 1-byte ASCII printable
-        {0x0000A1u, 0x0007FFu}, // 2-byte
-        {0x000800u, 0x00CFFFu}, // 3-byte (stays below the U+D800 surrogate block)
-        {0x010000u, 0x0EFFFFu}, // 4-byte (avoids the U+FFFE/U+FFFF plane enders below 0x10000)
-    };
-    std::uniform_int_distribution<int> width_pick(0, 3);
-    std::string text;
-    text.reserve(target_codepoints * 4);
-    for (std::size_t index = 0; index != target_codepoints; ++index) {
-        int const width = width_pick(rng);
-        std::uniform_int_distribution<sz_rune_t> codepoint(ranges[width].low, ranges[width].high);
-        std::size_t const before = text.size();
-        // Retry until one valid codepoint is actually appended, so the emitted count is exact.
-        while (text.size() == before) append_codepoint_(text, codepoint(rng));
-    }
-    return text;
-}
-
-/** @brief Well-formed UTF-8 of exactly @p target_bytes bytes, ASCII-padded to land on the mark. */
-static std::string random_valid_utf8_bytes_(std::size_t target_bytes, std::mt19937 &rng) {
-    std::string text;
-    text.reserve(target_bytes);
-    while (text.size() != target_bytes) {
-        std::size_t const remaining = target_bytes - text.size();
-        std::string const one_rune = random_valid_utf8_(1, rng);
-        if (one_rune.size() <= remaining) text += one_rune;
-        else text.append(remaining, 'x');
-    }
-    return text;
-}
 
 /** @brief Repeats one UTF-8 encoded codepoint @p repeats times, giving a run of a single byte-width. */
 static std::string uniform_utf8_run_(char const *encoded_rune, std::size_t repeats) {
@@ -157,7 +109,7 @@ static void collect_unpacked_runes_(sz_utf8_decode_t unpack, sz_cptr_t text, sz_
  *  @brief Runs one UTF-8 codepoint backend (count + nth-finder + chunk-unpacker) over the known-answer
  *         anchor and asserts the produced count, byte offsets, and decoded runes match the expectations.
  *
- *  Mirrors `check_sha256_unit_` in `test_hash.cpp`: the caller drives it once per backend (dispatched,
+ *  Mirrors `check_sha256_unit_` in `hash.cpp`: the caller drives it once per backend (dispatched,
  *  serial, and each natively-compiled kernel), so a wrong constant shared by the serial-vs-SIMD agreement
  *  tests is still caught against an external ground truth.
  *
@@ -269,8 +221,7 @@ void test_utf8_runes_unit() {
     std::vector<sz_rune_t> const mixed_runes = {0x61u, 0xDFu, 0x4E2Du};
 
     // Drive the count + find-nth + unpack known-answer through the dispatched, serial, and native kernels.
-    check_utf8_runes_unit_(sz_utf8_count, sz_utf8_seek, sz_utf8_decode, // Dispatched
-                           mixed, mixed_length, 3u, mixed_runes);
+    check_utf8_runes_unit_(sz_utf8_count, sz_utf8_seek, sz_utf8_decode, mixed, mixed_length, 3u, mixed_runes);
     check_utf8_runes_unit_(sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial, // serial
                            mixed, mixed_length, 3u, mixed_runes);
 #if SZ_USE_HASWELL
@@ -353,6 +304,77 @@ void test_utf8_runes_unit() {
         verify(text.utf8_seek(2) == 8); // Third emoji at byte 8
         verify(text.utf8_seek(3) == sz::string_view::npos);
     }
+
+    // 64-byte chunk boundaries and batch limits, materialized via the vector wrapper.
+    {
+        // Critical 63, 64, 65 byte boundaries
+        let_verify(std::string s63(63, 'x'), sz::string_view(s63).utf8_runes().size() == 63);
+        let_verify(std::string s64(64, 'x'), sz::string_view(s64).utf8_runes().size() == 64);
+        let_verify(std::string s65(65, 'x'), sz::string_view(s65).utf8_runes().size() == 65);
+
+        // ASCII batch limit: 16 characters max per Ice Lake iteration
+        let_verify(std::string s17(17, 'x'), sz::string_view(s17).utf8_runes().size() == 17);
+        let_verify(std::string s20(20, 'x'), sz::string_view(s20).utf8_runes().size() == 20);
+
+        // 2-byte batch limit: 32 characters (64 bytes) max per iteration
+        scope_verify(std::string cyr32, for (int i = 0; i < 32; ++i) cyr32 += "\xD0\x9F",
+                     sz::string_view(cyr32).utf8_count() == 32);
+        scope_verify(std::string cyr33, for (int i = 0; i < 33; ++i) cyr33 += "\xD0\x9F",
+                     sz::string_view(cyr33).utf8_count() == 33);
+
+        // 3-byte batch limit: 16 characters (48 bytes) max per iteration
+        scope_verify(std::string cjk16, for (int i = 0; i < 16; ++i) cjk16 += "\xE4\xB8\x96",
+                     sz::string_view(cjk16).utf8_count() == 16);
+        scope_verify(std::string cjk17, for (int i = 0; i < 17; ++i) cjk17 += "\xE4\xB8\x96",
+                     sz::string_view(cjk17).utf8_count() == 17);
+
+        // 4-byte batch limit: 16 characters (64 bytes) max per iteration
+        scope_verify(std::string emoji16, for (int i = 0; i < 16; ++i) emoji16 += "\xF0\x9F\x98\x80",
+                     sz::string_view(emoji16).utf8_count() == 16);
+        scope_verify(std::string emoji17, for (int i = 0; i < 17; ++i) emoji17 += "\xF0\x9F\x98\x80",
+                     sz::string_view(emoji17).utf8_count() == 17);
+
+        // Asymmetric at chunk boundary: 60 ASCII + "ПП世" = 63 chars, 67 bytes
+        scope_verify(std::string boundary_asym(60, 'x'), boundary_asym += "\xD0\x9F\xD0\x9F\xE4\xB8\x96",
+                     sz::string_view(boundary_asym).utf8_count() == 63);
+
+        // Sequences exceeding batch limits
+        scope_verify(std::string cyr100, for (int i = 0; i < 100; ++i) cyr100 += "\xD0\x9F",
+                     sz::string_view(cyr100).utf8_runes().size() == 100);
+        scope_verify(std::string cjk50, for (int i = 0; i < 50; ++i) cjk50 += "\xE4\xB8\x96",
+                     sz::string_view(cjk50).utf8_runes().size() == 50);
+        scope_verify(std::string emoji50, for (int i = 0; i < 50; ++i) emoji50 += "\xF0\x9F\x98\x80",
+                     sz::string_view(emoji50).utf8_runes().size() == 50);
+
+        // Asymmetric overflow: 20x (2 ASCII + 3 Cyrillic) = 100 chars, 140 bytes
+        scope_verify(std::string overflow_asym,
+                     for (int i = 0; i < 20; ++i) overflow_asym += "aa\xD0\x9F\xD0\xA0\xD0\xA1",
+                     sz::string_view(overflow_asym).utf8_count() == 100);
+
+        // Transitions at chunk boundaries
+        scope_verify(std::string boundary_test(63, 'x'), boundary_test += "\xD0\x9F",
+                     sz::string_view(boundary_test).utf8_runes().size() == 64);
+        scope_verify(
+            std::string span_asym,
+            {
+                for (int i = 0; i < 30; ++i) span_asym += "aa";
+                for (int i = 0; i < 8; ++i) span_asym += "\xD0\x9F\xD0\xA0\xD0\xA1";
+            },
+            sz::string_view(span_asym).utf8_count() == 84);
+        scope_verify(std::string exact_boundary(64, 'x'), exact_boundary += "\xD0\x9F\xE4\xB8\x96\xF0\x9F\x98\x80",
+                     sz::string_view(exact_boundary).utf8_count() == 67);
+    }
+}
+
+/**
+ *  @brief Known-answer rune-iteration vectors spanning the Unicode script range and every byte-width transition.
+ *
+ *  Decodes hand-written samples of ASCII, CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, emoji, the maximum
+ *  codepoint U+10FFFF, Deseret, zero-width and combining marks through the C++ `utf8_runes` wrapper, then walks
+ *  every 1/2/3/4-byte neighbor pair, so a kernel that assumes a homogeneous byte-width run is caught here.
+ */
+void test_utf8_runes_scripts_unit() {
+    std::printf("  - testing UTF-8 codepoints across Unicode scripts...\n");
 
     // C++ API: codepoint (rune) iteration materialized as a vector - never a range-for over the view range,
     // whose sentinel comparison is a C++17 extension that errors at C++11.
@@ -475,66 +497,6 @@ void test_utf8_runes_unit() {
         scope_verify(std::string asym_long, for (int i = 0; i < 30; ++i) asym_long += "xx\xD0\x9F\xD0\x9F\xD0\x9F",
                      sz::string_view(asym_long).utf8_count() == 150);
     }
-
-    // 64-byte chunk boundaries and batch limits, materialized via the vector wrapper.
-    {
-        // Critical 63, 64, 65 byte boundaries
-        let_verify(std::string s63(63, 'x'), sz::string_view(s63).utf8_runes().size() == 63);
-        let_verify(std::string s64(64, 'x'), sz::string_view(s64).utf8_runes().size() == 64);
-        let_verify(std::string s65(65, 'x'), sz::string_view(s65).utf8_runes().size() == 65);
-
-        // ASCII batch limit: 16 characters max per Ice Lake iteration
-        let_verify(std::string s17(17, 'x'), sz::string_view(s17).utf8_runes().size() == 17);
-        let_verify(std::string s20(20, 'x'), sz::string_view(s20).utf8_runes().size() == 20);
-
-        // 2-byte batch limit: 32 characters (64 bytes) max per iteration
-        scope_verify(std::string cyr32, for (int i = 0; i < 32; ++i) cyr32 += "\xD0\x9F",
-                     sz::string_view(cyr32).utf8_count() == 32);
-        scope_verify(std::string cyr33, for (int i = 0; i < 33; ++i) cyr33 += "\xD0\x9F",
-                     sz::string_view(cyr33).utf8_count() == 33);
-
-        // 3-byte batch limit: 16 characters (48 bytes) max per iteration
-        scope_verify(std::string cjk16, for (int i = 0; i < 16; ++i) cjk16 += "\xE4\xB8\x96",
-                     sz::string_view(cjk16).utf8_count() == 16);
-        scope_verify(std::string cjk17, for (int i = 0; i < 17; ++i) cjk17 += "\xE4\xB8\x96",
-                     sz::string_view(cjk17).utf8_count() == 17);
-
-        // 4-byte batch limit: 16 characters (64 bytes) max per iteration
-        scope_verify(std::string emoji16, for (int i = 0; i < 16; ++i) emoji16 += "\xF0\x9F\x98\x80",
-                     sz::string_view(emoji16).utf8_count() == 16);
-        scope_verify(std::string emoji17, for (int i = 0; i < 17; ++i) emoji17 += "\xF0\x9F\x98\x80",
-                     sz::string_view(emoji17).utf8_count() == 17);
-
-        // Asymmetric at chunk boundary: 60 ASCII + "ПП世" = 63 chars, 67 bytes
-        scope_verify(std::string boundary_asym(60, 'x'), boundary_asym += "\xD0\x9F\xD0\x9F\xE4\xB8\x96",
-                     sz::string_view(boundary_asym).utf8_count() == 63);
-
-        // Sequences exceeding batch limits
-        scope_verify(std::string cyr100, for (int i = 0; i < 100; ++i) cyr100 += "\xD0\x9F",
-                     sz::string_view(cyr100).utf8_runes().size() == 100);
-        scope_verify(std::string cjk50, for (int i = 0; i < 50; ++i) cjk50 += "\xE4\xB8\x96",
-                     sz::string_view(cjk50).utf8_runes().size() == 50);
-        scope_verify(std::string emoji50, for (int i = 0; i < 50; ++i) emoji50 += "\xF0\x9F\x98\x80",
-                     sz::string_view(emoji50).utf8_runes().size() == 50);
-
-        // Asymmetric overflow: 20x (2 ASCII + 3 Cyrillic) = 100 chars, 140 bytes
-        scope_verify(std::string overflow_asym,
-                     for (int i = 0; i < 20; ++i) overflow_asym += "aa\xD0\x9F\xD0\xA0\xD0\xA1",
-                     sz::string_view(overflow_asym).utf8_count() == 100);
-
-        // Transitions at chunk boundaries
-        scope_verify(std::string boundary_test(63, 'x'), boundary_test += "\xD0\x9F",
-                     sz::string_view(boundary_test).utf8_runes().size() == 64);
-        scope_verify(
-            std::string span_asym,
-            {
-                for (int i = 0; i < 30; ++i) span_asym += "aa";
-                for (int i = 0; i < 8; ++i) span_asym += "\xD0\x9F\xD0\xA0\xD0\xA1";
-            },
-            sz::string_view(span_asym).utf8_count() == 84);
-        scope_verify(std::string exact_boundary(64, 'x'), exact_boundary += "\xD0\x9F\xE4\xB8\x96\xF0\x9F\x98\x80",
-                     sz::string_view(exact_boundary).utf8_count() == 67);
-    }
 }
 
 #pragma endregion // Unit
@@ -550,11 +512,11 @@ void test_utf8_runes_unit() {
  *  generated once and driven through all @p candidates, so every backend sees byte-identical bytes and a
  *  divergence reproduces on the next ladder entry.
  */
-static inline void test_utf8_runes_equivalence(                                                   //
+static inline void check_utf8_runes_equivalence_(                                                 //
     sz_utf8_count_t count_serial, sz_utf8_seek_t find_nth_serial, sz_utf8_decode_t unpack_serial, //
     sz::span<utf8_runes_backend_t const> candidates, sz_size_t inputs) {
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::vector<sz_rune_t> runes_serial, runes_candidate;
     std::vector<sz_cptr_t> offsets_serial;
 
@@ -584,29 +546,29 @@ static inline void test_utf8_runes_equivalence(                                 
             }
         }
     };
-    auto check_text = [&](std::string const &text) { check(text.data(), (sz_size_t)text.size()); };
+    auto check_text_ = [&](std::string const &text) { check(text.data(), (sz_size_t)text.size()); };
 
     // Structured length ladder around the SIMD window boundaries, every codepoint count exercised.
     sz_size_t const ladder[] = {0u, 1u, 2u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 100u, 200u};
-    for (sz_size_t codepoints : ladder) check_text(random_valid_utf8_(codepoints, rng));
+    for (sz_size_t codepoints : ladder) check_text_(random_valid_utf8_(codepoints, generator));
 
     // Byte-exact ladder: the codepoint ladder above lands on arbitrary byte lengths, so the 16/32/64-byte
     // vector widths and their neighbours are otherwise only hit by chance.
     sz_size_t const byte_ladder[] = {15u, 16u, 17u, 31u, 32u, 33u, 47u, 48u, 63u, 64u, 65u, 127u, 128u, 129u};
-    for (sz_size_t bytes : byte_ladder) check_text(random_valid_utf8_bytes_(bytes, rng));
+    for (sz_size_t bytes : byte_ladder) check_text_(random_valid_utf8_bytes_(bytes, generator));
 
     // Homogeneous runs spanning several windows: the mixed generator never emits a long single-width stretch,
     // where a width-specialized fast path runs unbroken.
     char const *const uniform_runes[] = {"x", "\xD0\x9F", "\xE4\xB8\x96", "\xF0\x9F\x98\x80"};
     sz_size_t const uniform_repeats[] = {17u, 65u, 200u};
     for (char const *encoded_rune : uniform_runes)
-        for (sz_size_t repeats : uniform_repeats) check_text(uniform_utf8_run_(encoded_rune, repeats));
+        for (sz_size_t repeats : uniform_repeats) check_text_(uniform_utf8_run_(encoded_rune, repeats));
 
     // Fuzzed inputs of random codepoint counts, each placed at every sub-cache-line offset so serial-vs-ISA
     // agreement is checked across all alignments the SIMD kernels may hit.
     std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 96);
     for (sz_size_t iteration = 0; iteration != inputs; ++iteration) {
-        std::string const text = random_valid_utf8_(codepoint_distribution(rng), rng);
+        std::string const text = random_valid_utf8_(codepoint_distribution(generator), generator);
         for_each_cacheline_offset_(text.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
             std::memcpy(buffer, text.data(), text.size());
             check(buffer, (sz_size_t)text.size());
@@ -618,7 +580,7 @@ static inline void test_utf8_runes_equivalence(                                 
  *  @brief Large-buffer count agreement: a few hundred KB of mixed-width codepoints where the dispatched
  *         and C++ counts must equal the serial reference and the exact known total.
  */
-static void test_utf8_runes_large_count() {
+static void check_utf8_runes_large_count_() {
     // Every repeat contributes one ASCII 'x', one 2-byte, one 3-byte, and one 4-byte codepoint - 4
     // codepoints in 10 bytes - so the total is exactly `repeats * 4`.
     char const unit[] = "x\xD0\x9F\xE4\xB8\xAD\xF0\x9F\x98\x80"; // 'x' + U+041F + U+4E2D + U+1F600, 10 bytes
@@ -630,8 +592,8 @@ static void test_utf8_runes_large_count() {
     sz_size_t const expected_codepoints = (sz_size_t)(repeats * 4);
     sz_size_t const count_serial = sz_utf8_count_serial(mixed.data(), mixed.size());
     verify(count_serial == expected_codepoints);
-    verify(sz_utf8_count(mixed.data(), mixed.size()) == count_serial); // Dispatched matches serial
-    verify(sz::string_view(mixed).utf8_count() == count_serial);       // C++ wrapper matches serial
+    verify(sz_utf8_count(mixed.data(), mixed.size()) == count_serial);
+    verify(sz::string_view(mixed).utf8_count() == count_serial); // C++ wrapper matches serial
 }
 
 #pragma endregion // Equivalence
@@ -655,13 +617,13 @@ static void test_utf8_runes_large_count() {
 static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unpack,
                                      std::size_t random_inputs = scale_iterations(4000)) {
 
-    std::size_t const max_input_length = 70;
+    std::size_t const max_input_length = utf8_unit_capacity_k;
     std::vector<sz_rune_t> rune_destination;
 
     auto check = [&](char const *input, std::size_t input_length) {
-        // Counting just has to survive and return some value on arbitrary bytes.
+        // Counting must survive arbitrary bytes and never report more runes than the input holds bytes.
         sz_size_t const counted = count(input, (sz_size_t)input_length);
-        sz_unused_(counted);
+        verify(counted <= input_length && "Count reported more runes than the input holds bytes");
 
         // Streaming unpack is total under the unified contract: it runs on arbitrary bytes, substituting U+FFFD
         // for ill-formed input. Each call must report no more runes than the destination holds, a cursor that
@@ -694,53 +656,20 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
         }
     };
 
-    char input[max_input_length];
+    auto &generator = global_random_generator();
+    for_each_adversarial_utf8_input_(generator, random_inputs, check);
 
-    // The named adversarial shapes, exercised directly.
-    check("\x80", 1);              // Lone continuation byte
-    check("\xC0\x80", 2);          // Overlong encoding of NUL
-    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
-    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
-
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF. Strided so a low multiplier
-    // samples the whole byte space instead of truncating to a prefix of it.
-    std::size_t const byte_stride = sweep_stride(256);
-    for (std::size_t byte = 0; byte < 256; byte += byte_stride) {
-        input[0] = (char)byte;
-        check(input, 1);
-    }
-
-    // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
-    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
-    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
-        input[0] = (char)(pair >> 8);
-        input[1] = (char)(pair & 0xFF);
-        check(input, 2);
-    }
-
-    auto &rng = global_random_generator();
+    // Valid text with a few bytes overwritten: damage surrounded by long well-formed runs, which neither the
+    // battery's uniform garbage nor the well-formed equivalence corpus produces.
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
-
-    // Valid text with a few bytes overwritten: damage surrounded by long well-formed runs, which uniform
-    // garbage never produces and the equivalence pass - fed only well-formed text - never reaches.
     std::uniform_int_distribution<std::size_t> codepoint_distribution(1, max_input_length / 4);
     for (std::size_t iteration = 0; iteration != random_inputs / 8 + 1; ++iteration) {
-        std::string text = random_valid_utf8_(codepoint_distribution(rng), rng);
+        std::string text = random_valid_utf8_(codepoint_distribution(generator), generator);
         if (text.size() > max_input_length) text.resize(max_input_length);
         for (std::size_t corruption = 0; corruption != 3; ++corruption)
-            text[length_distribution(rng) % text.size()] = (char)byte_distribution(rng);
+            text[length_distribution(generator) % text.size()] = (char)byte_distribution(generator);
         check(text.data(), text.size());
-    }
-
-    // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
-    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(rng);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
-        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, input, input_length);
-            check(buffer, input_length);
-        });
     }
 }
 
@@ -771,11 +700,11 @@ void test_utf8_runes_all() {
 
     // Serial is the reference; the dispatched entry and every native backend are differenced against it. A
     // `SZ_NULL` decoder (e.g. `v128relaxed`) simply skips the streaming-decode leg inside the helper.
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial, //
-                                span_over(utf8_runes_backends), inputs);
+    check_utf8_runes_equivalence_(sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial, //
+                                  span_over(utf8_runes_backends), inputs);
 
     // Large-buffer count agreement: serial == dispatched == C++ wrapper == known total.
-    test_utf8_runes_large_count();
+    check_utf8_runes_large_count_();
 }
 
 #pragma endregion // Drivers

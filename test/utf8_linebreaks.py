@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """UAX-14 line-break-opportunity segmentation: sz.utf8_linebreaks and the Str.utf8_linebreaks method.
 
-Mirrors the C++ scripts/test_utf8_linebreaks.cpp translation unit.
+Mirrors the C++ test/utf8_linebreaks.cpp translation unit.
 
 Covers: basic and Unicode line iteration including CRLF as a single break opportunity, the tiling
 invariant across empty, single-line, and blank-line inputs, and Str-method parity with the module

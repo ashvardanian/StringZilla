@@ -1,6 +1,6 @@
 /**
  *  @brief Hardware-accelerated UTF-8 codepoint mechanics: count, find-nth, and chunk unpacking.
- *  @file utf8_runes.h
+ *  @file include/stringzilla/utf8_runes.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_RUNES_H_

@@ -61,6 +61,24 @@ using affine_smith_waterman_hopper_t =
 #pragma region Common Helpers
 
 /**
+ *  @brief Refuses a cross-product whose inputs or result matrix no kernel can reach.
+ *
+ *  One probe per allocation rather than per cell: both sides come from contiguous tapes, and the matrix is
+ *  one region `rows * row_stride` wide - the widest a cell offset can name, since a caller may embed a
+ *  narrower matrix in a wider allocation.
+ */
+template <typename queries_type_, typename candidates_type_, typename results_type_>
+inline status_t check_similarities_memory(queries_type_ const &queries, candidates_type_ const &candidates,
+                                          results_type_ const &results) noexcept {
+    using results_value_t = typename std::remove_reference<results_type_>::type::value_type;
+    if (status_t const reachable = check_device_accessible_sequence(queries); reachable != status_t::success_k)
+        return reachable;
+    if (status_t const reachable = check_device_accessible_sequence(candidates); reachable != status_t::success_k)
+        return reachable;
+    return check_device_accessible_memory(span<results_value_t> {results.data, results.rows * results.row_stride});
+}
+
+/**
  *  @brief Dispatches min or max operation based on the compile-time objective.
  */
 template <sz_similarity_objective_t objective_, typename scalar_type_>
@@ -1762,10 +1780,6 @@ struct cuda_cross_buffers {
      */
     safe_vector<u32_t, device_alloc<u32_t>> rune_offsets_ {};
 
-    /** @brief Dense results staging for the host-output scatter fallback: the kernel writes the row-major matrix here
-     *         and one `cuMemcpy2DAsync` strides it out. Byte-typed since the element width varies per call. */
-    safe_vector<std::byte, device_alloc<std::byte>> results_staging_ {};
-
     cuda_cross_buffers() noexcept = default;
 
     cuda_cross_buffers(cuda_cross_buffers const &) = delete;
@@ -1939,7 +1953,8 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, rle_scratch_t
                                                                    executor.stream());
     if (hist_status.status != status_t::success_k) return hist_status;
     cuda_status_t const scan_status = cuda_launch_exclusive_sum_(
-        scan_u32_shape, dense_tier_counts, static_cast<size_t>(tier_count), bucket_cursors, executor.stream());
+        exclusive_sum_shapes_t {scan_u32_shape}, dense_tier_counts, static_cast<size_t>(tier_count), bucket_cursors,
+        span<u32_t> {}, gpu_specs_t {}, executor.stream());
     if (scan_status.status != status_t::success_k) return scan_status;
     cuda_status_t const scatter_status = cuda_launch_scatter_tasks_by_bucket_(
         router_scatter_shape, buffers.tasks_.data(), count, dense_tier_functor, bucket_cursors,
@@ -2150,74 +2165,6 @@ __global__ void similarity_scatter_results_(task_type_ const *tasks, size_t task
     value_type_ const value = static_cast<value_type_>(task.result);
     results[task.result_offset] = value;
     if (task.mirror_offset != task.result_offset) results[task.mirror_offset] = value;
-}
-
-/**
- *  @brief Host-output (non-device-accessible) scatter fallback shared by every CUDA cross-product engine: instead of a
- *         per-cell host loop, the device @ref similarity_scatter_results_ kernel writes the full row-major matrix into a
- *         hoisted device-resident staging buffer (laid out at the caller's `row_stride`, so each task's precomputed
- *         `result_offset` / `mirror_offset` stays valid), then a single strided `cudaMemcpy2DAsync` copies the valid
- *         `rows x columns` region into the caller's host `strided_rows`. Fully stream-async; staging grows-and-reuses.
- *
- *  @param buffers Engine buffer bundle holding the grow-only `results_staging_` device buffer (passed by reference).
- *  @param tasks Device-resident task array (already scored); read-only.
- *  @param tasks_count Number of live tasks.
- *  @param results The caller's host-side strided output matrix.
- */
-template <typename task_type_, typename value_type_, typename buffers_task_type_>
-cuda_status_t cuda_scatter_results_to_host_strided_(cuda_cross_buffers<buffers_task_type_> &buffers,
-                                                    task_type_ const *tasks, size_t tasks_count,
-                                                    strided_rows<value_type_> const &results,
-                                                    cuda_executor_t const &executor, unsigned block) noexcept {
-
-    if (!tasks_count) return {status_t::success_k, cudaSuccess};
-
-    // Size the dense staging matrix at the caller's `row_stride` (not the tighter `columns`) so the device kernel's
-    // precomputed `result_offset = query_index * row_stride + candidate_index` indexes it without any remapping.
-    size_t const staging_elements = results.rows * results.row_stride;
-    if (buffers.results_staging_.try_resize_uninitialized(staging_elements * sizeof(value_type_)) ==
-        status_t::bad_alloc_k)
-        return {status_t::bad_alloc_k};
-    value_type_ *const staging_ptr = static_cast<value_type_ *>(static_cast<void *>(buffers.results_staging_.data()));
-
-    kernel_shape_t scatter_shape;
-    cuda_status_t const scatter_resolve = resolve_kernel_shape(
-        scatter_shape, (void const *)&similarity_scatter_results_<task_type_, value_type_>, 256, 0, false);
-    if (scatter_resolve.status != status_t::success_k) return scatter_resolve;
-
-    task_type_ const *tasks_ptr = tasks;
-    value_type_ *results_ptr = staging_ptr;
-    size_t tasks_size = tasks_count;
-    void *scatter_args[3] = {(void *)&tasks_ptr, (void *)&tasks_size, (void *)&results_ptr};
-    unsigned const scatter_grid = static_cast<unsigned>((tasks_size + block - 1) / block);
-    CUresult const scatter_error = cuda_launch_t {}
-                                       .grid(scatter_grid)
-                                       .block(block)
-                                       .shared(0)
-                                       .stream(executor.stream())
-                                       .launch(scatter_shape.function, scatter_args);
-    if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
-
-    // Strided copy: only the valid `columns`-wide prefix of each of the `rows` rows is transferred; the padding
-    // between `columns` and `row_stride` is skipped on both sides (matching the per-cell host loop's behavior).
-    size_t const valid_row_bytes = results.columns * sizeof(value_type_);
-    size_t const stride_bytes = results.row_stride * sizeof(value_type_);
-    CUDA_MEMCPY2D copy_descriptor {};
-    copy_descriptor.srcMemoryType = CU_MEMORYTYPE_DEVICE;
-    copy_descriptor.srcDevice = (CUdeviceptr)staging_ptr;
-    copy_descriptor.srcPitch = stride_bytes;
-    copy_descriptor.dstMemoryType = CU_MEMORYTYPE_HOST;
-    copy_descriptor.dstHost = results.data;
-    copy_descriptor.dstPitch = stride_bytes;
-    copy_descriptor.WidthInBytes = valid_row_bytes;
-    copy_descriptor.Height = results.rows;
-    CUresult copy_error = cuMemcpy2DAsync(&copy_descriptor, executor.stream());
-    if (copy_error != CUDA_SUCCESS) return make_cuda_status(copy_error);
-    {
-        CUresult sync_error = cuStreamSynchronize(executor.stream());
-        if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
-    }
-    return {status_t::success_k, cudaSuccess};
 }
 
 /**
@@ -4262,14 +4209,12 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         auto &tasks = buffers_.tasks_;
         if (tasks.try_resize_uninitialized(live_cells) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
-        // Ensure inputs are device-accessible (Unified/Device memory). Both sides come from contiguous
-        // tapes/arrays, so we validate the base pointers of the first element once (covers the whole tape)
-        // instead of a per-cell `cudaPointerGetAttributes` driver round-trip.
-        if (queries_count != 0 && candidates_count != 0) {
-            if (!is_device_accessible_memory((void const *)queries[0].data()) ||
-                !is_device_accessible_memory((void const *)candidates[0].data()))
-                return {status_t::device_memory_mismatch_k, cudaSuccess};
-        }
+        // Inputs and outputs alike must be reachable from a kernel: materializing them is the caller's explicit
+        // choice, as in every other CUDA engine here. One probe per allocation, since both sides come from
+        // contiguous tapes and the matrix is one region.
+        if (status_t const reachable = check_similarities_memory(queries, candidates, results);
+            reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
 
         // Export one task per live cell; the per-cell sizing/tiering is unchanged from the pairwise design.
         using diagonal_memory_requirements_t = diagonal_memory_requirements<size_t>;
@@ -4282,8 +4227,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         // descriptors on the host and let one thread per live cell fill the O(queries*candidates) task array on
         // the GPU (the symmetric path maps the flat cell index into the lower triangle). The descriptor buffers
         // are unified, so the host writes them and the kernel reads them with no extra copy.
-        if (buffers_.query_descriptors_.try_resize(queries_count) == status_t::bad_alloc_k ||
-            buffers_.candidate_descriptors_.try_resize(candidates_count) == status_t::bad_alloc_k)
+        if (buffers_.query_descriptors_.try_resize_uninitialized(queries_count) == status_t::bad_alloc_k ||
+            buffers_.candidate_descriptors_.try_resize_uninitialized(candidates_count) == status_t::bad_alloc_k)
             return {status_t::bad_alloc_k};
         for (size_t query_index = 0; query_index < queries_count; ++query_index)
             buffers_.query_descriptors_[query_index] = {queries[query_index].data(), queries[query_index].length()};
@@ -4294,18 +4239,34 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
             if (candidate_length > max_candidate_length) max_candidate_length = candidate_length;
         }
 
-        // WORDS direct-score fast path: when every live cell is single-word Myers (unit-cost, both sides <= 64) and the
-        // result matrix is device-accessible, skip the task array, the tier sort/gather/RLE, and the result scatter
-        // entirely - one thread per cell reads the two strings from the descriptors, runs single-word Myers, and writes
-        // straight into the matrix. This removes the host-orchestration overhead that leaves the GPU >60% idle on
-        // tiny-token cross-products. Bit-identical to the tiered path (same Levenshtein recurrence, unique distance).
+        return cross_described_(queries_count, candidates_count, live_cells, max_candidate_length, row_stride,
+                                is_symmetric, cross_kind, results, executor, specs);
+    }
+
+    /**
+     *  @brief Everything `cross_` does once the descriptors are built, with the input containers behind it.
+     *
+     *  The descriptors are the type-erasure boundary, so this compiles once per result type rather than once
+     *  per result type and input shape.
+     */
+    template <typename results_type_>
+    cuda_status_t cross_described_(size_t queries_count, size_t candidates_count, size_t live_cells,
+                                   size_t max_candidate_length, size_t row_stride, bool is_symmetric,
+                                   cross_similarities_t cross_kind, results_type_ &&results,
+                                   cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
+        auto &tasks = buffers_.tasks_;
+
+        // WORDS direct-score fast path: when every live cell is single-word Myers (unit-cost, both sides <= 64), skip
+        // the task array, the tier sort/gather/RLE, and the result scatter entirely - one thread per cell reads the
+        // two strings from the descriptors, runs single-word Myers, and writes straight into the matrix. This removes
+        // the host-orchestration overhead that leaves the GPU >60% idle on tiny-token cross-products. Bit-identical to
+        // the tiered path (same Levenshtein recurrence, unique distance).
         constexpr bool is_affine_cross_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
         if constexpr (!is_affine_cross_k) {
             bool const is_unit_cost = substituter_.match == 0 && substituter_.mismatch == 1 &&
                                       gap_costs_.open_or_extend == 1;
             if (is_unit_cost && live_cells && cross_max_query_length_ <= levenshtein_myers_word1_cap_k &&
-                max_candidate_length <= levenshtein_myers_word1_cap_k &&
-                is_device_accessible_memory((void const *)results.data)) {
+                max_candidate_length <= levenshtein_myers_word1_cap_k) {
                 using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
                 kernel_shape_t direct_shape;
                 cuda_status_t const direct_resolve = resolve_kernel_shape(
@@ -4378,10 +4339,10 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         cuda_status_t status = run_trampoline_(executor, specs);
         if (status.status != status_t::success_k) return status;
 
-        // Scatter on the device when the output is device-accessible (the common unified-memory case): the host
-        // then never reads the large GPU-resident task array, avoiding a full unified-memory page migration. The
-        // scatter kernel depends on `value_type_`, so it is resolved at the call site rather than the cached table.
-        if (tasks.size() && is_device_accessible_memory((void const *)results.data)) {
+        // Scatter on the device: the host never reads the large GPU-resident task array, avoiding a full
+        // unified-memory page migration. The scatter kernel depends on `value_type_`, so it is resolved at the call
+        // site rather than the cached table.
+        if (tasks.size()) {
             using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
             kernel_shape_t scatter_shape;
             cuda_status_t scatter_resolve = resolve_kernel_shape(
@@ -4404,14 +4365,6 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 CUresult sync_error = cuStreamSynchronize(executor.stream());
                 if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
             }
-        }
-        else if (tasks.size()) {
-            // Host-only output: device-scatter into a dense staging matrix, then one strided `cudaMemcpy2DAsync`
-            // into the caller's host matrix - stream-async, no hot-path alloc.
-            using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
-            cuda_status_t const fallback_status = cuda_scatter_results_to_host_strided_<task_t, results_value_t>(
-                buffers_, tasks.data(), tasks.size(), results, executor, 256u);
-            if (fallback_status.status != status_t::success_k) return fallback_status;
         }
         return status;
     }
@@ -4916,18 +4869,15 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
         auto &tasks = buffers_.tasks_;
         if (tasks.try_resize_uninitialized(live_cells) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
-        // Ensure inputs are device-accessible (Unified/Device memory); the base pointer of the first element of each
-        // contiguous tape covers the whole tape.
-        if (queries_count != 0 && candidates_count != 0) {
-            if (!is_device_accessible_memory((void const *)queries[0].data()) ||
-                !is_device_accessible_memory((void const *)candidates[0].data()))
-                return {status_t::device_memory_mismatch_k, cudaSuccess};
-        }
+        // Inputs and outputs alike must be reachable from a kernel; one probe per allocation covers each.
+        if (status_t const reachable = check_similarities_memory(queries, candidates, results);
+            reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
 
         // Device-side materialization (all-pairs or symmetric): build the O(queries+candidates) descriptors on the
         // host, let one thread per live cell fill the O(queries*candidates) task array on the GPU.
-        if (buffers_.query_descriptors_.try_resize(queries_count) == status_t::bad_alloc_k ||
-            buffers_.candidate_descriptors_.try_resize(candidates_count) == status_t::bad_alloc_k)
+        if (buffers_.query_descriptors_.try_resize_uninitialized(queries_count) == status_t::bad_alloc_k ||
+            buffers_.candidate_descriptors_.try_resize_uninitialized(candidates_count) == status_t::bad_alloc_k)
             return {status_t::bad_alloc_k};
         cross_max_query_length_ = 0;
         cross_max_candidate_length_ = 0;
@@ -5142,9 +5092,8 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
         if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
         status.elapsed_milliseconds = timer_.elapsed_milliseconds();
 
-        // Scatter on the device when the output is device-accessible (the common unified-memory case); otherwise scatter
-        // into a hoisted staging matrix and stream-copy it into the caller's host matrix.
-        if (tasks.size() && is_device_accessible_memory((void const *)results.data)) {
+        // Scatter on the device, so the host never reads the GPU-resident task array back.
+        if (tasks.size()) {
             using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
             kernel_shape_t scatter_shape;
             cuda_status_t scatter_resolve = resolve_kernel_shape(
@@ -5167,12 +5116,6 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
                 CUresult sync_error = cuStreamSynchronize(executor.stream());
                 if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
             }
-        }
-        else if (tasks.size()) {
-            using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
-            cuda_status_t const fallback_status = cuda_scatter_results_to_host_strided_<task_t, results_value_t>(
-                buffers_, tasks.data(), tasks.size(), results, executor, 256u);
-            if (fallback_status.status != status_t::success_k) return fallback_status;
         }
         return status;
     }
@@ -5937,19 +5880,16 @@ cuda_status_t cuda_weighted_cross_(                                             
     auto &tasks = buffers.tasks_;
     if (tasks.try_resize_uninitialized(live_cells) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
-    // Ensure inputs are device-accessible (Unified/Device memory). Both sides come from contiguous
-    // tapes/arrays, so we validate the base pointers of the first element once (covers the whole tape).
-    if (queries_count != 0 && candidates_count != 0) {
-        if (!is_device_accessible_memory((void const *)queries[0].data()) ||
-            !is_device_accessible_memory((void const *)candidates[0].data()))
-            return {status_t::device_memory_mismatch_k, cudaSuccess};
-    }
+    // Inputs and outputs alike must be reachable from a kernel; one probe per allocation covers each.
+    if (status_t const reachable = check_similarities_memory(queries, candidates, results);
+        reachable != status_t::success_k)
+        return {reachable, cudaSuccess};
 
     // Device-side materialization for BOTH all-pairs and symmetric (one thread per live cell; the symmetric
     // path maps the flat cell index into the lower triangle). Build the O(queries+candidates) descriptors on
     // the host; the kernel reads them from unified memory. Weighted cells start at 2 bytes (signed scores).
-    if (buffers.query_descriptors_.try_resize(queries_count) == status_t::bad_alloc_k ||
-        buffers.candidate_descriptors_.try_resize(candidates_count) == status_t::bad_alloc_k)
+    if (buffers.query_descriptors_.try_resize_uninitialized(queries_count) == status_t::bad_alloc_k ||
+        buffers.candidate_descriptors_.try_resize_uninitialized(candidates_count) == status_t::bad_alloc_k)
         return {status_t::bad_alloc_k};
     for (size_t query_index = 0; query_index < queries_count; ++query_index)
         buffers.query_descriptors_[query_index] = {queries[query_index].data(), queries[query_index].length()};
@@ -5997,13 +5937,10 @@ cuda_status_t cuda_weighted_cross_(                                             
         class_substitution_costs_buffer, executor, specs);
     if (status.status != status_t::success_k) return status;
 
-    // Scatter on the device when the output is device-accessible (the common unified-memory case): the device
-    // scatter kernel writes each result by its `result_offset` so the host never reads the large task array back.
-    // When the output is host-only, the same kernel scatters into a device-resident dense staging matrix (laid out
-    // at the caller's `row_stride` so the precomputed offsets stay valid), then a single strided `cudaMemcpy2DAsync`
-    // strides the valid `rows x columns` region into the host matrix - no per-cell host loop, fully stream-async.
+    // Scatter on the device: the kernel writes each result by its `result_offset`, so the host never reads the
+    // large task array back.
     using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
-    if (tasks.size() && is_device_accessible_memory((void const *)results.data)) {
+    if (tasks.size()) {
         results_value_t *results_ptr = results.data;
         task_t const *tasks_const_ptr = tasks.data();
         size_t tasks_size = tasks.size();
@@ -6022,11 +5959,6 @@ cuda_status_t cuda_weighted_cross_(                                             
             CUresult sync_error = cuStreamSynchronize(executor.stream());
             if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
         }
-    }
-    else if (tasks.size()) {
-        cuda_status_t const fallback_status = cuda_scatter_results_to_host_strided_<task_t, results_value_t>(
-            buffers, tasks.data(), tasks.size(), results, executor, block);
-        if (fallback_status.status != status_t::success_k) return fallback_status;
     }
     return status;
 }

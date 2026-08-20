@@ -42,7 +42,7 @@ extern "C" {
 /** @brief  Sentence_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the
  *          `bmp_page_lut_` page LUT selects one of the 57 distinct 256-byte pages, then `flat_bmp_` is fetched by
  *          `vpgatherdd`. Bit-exact with `sz_rune_sentence_break_property` over the whole BMP. */
-SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
@@ -51,8 +51,8 @@ SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high_by
  *          cascade). Per-lane bytes: @p plane_u8x32 = (offset>>16)&0xFF (low nibble meaningful), @p high_u8x32 =
  *          (offset>>8)&0xFF, @p low_u8x32 = offset&0xFF. Bit-exact with `sz_rune_sentence_break_property` over all
  *          astral. */
-SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
-                                                                    __m256i low_u8x32) {
+SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
+                                                                      __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const n4_u8x32 = _mm256_and_si256(plane_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
@@ -93,7 +93,7 @@ SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plan
  *          the cascade, exactly as the icelake driver reconstructs them. BMP lanes go through the BMP cascade;
  *          4-byte lanes are routed by reconstructed plane through the astral cascade. The class on non-codepoint-start
  *          lanes is irrelevant (the dense compaction only reads start lanes), so those lanes are never selected. */
-SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_classify_half_haswell_( //
+SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
     __m256i window_high_u8x32, __m256i window_low_u8x32, __m256i raw_u8x32, __m256i next1_u8x32, __m256i next2_u8x32,
     __m256i next3_u8x32, sz_u32_t four_byte_bits) {
     __m256i const low_two_bits_u8x32 = _mm256_set1_epi8(0x03);
@@ -167,7 +167,7 @@ SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_classify_half_haswell_( //
  *          `high_u8x32 = 0` (the classifier re-seats raw / 4-byte lanes anyway). Used by the sentence driver so a
  *          truncated trailing multi-byte lead reads its missing continuations as zero, exactly like serial / icelake
  *          (no mod-64 wrap aliasing). */
-SZ_HELPER_AUTO void sz_utf8_sentence_break_bmp_highlow_haswell_( //
+SZ_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_haswell_( //
     __m256i raw_u8x32, __m256i next1_u8x32, __m256i next2_u8x32, sz_u32_t two_byte_bits, sz_u32_t three_byte_bits,
     __m256i *out_high_u8x32, __m256i *out_low_u8x32) {
     __m256i const low_two_bits_u8x32 = _mm256_set1_epi8(0x03);
@@ -213,8 +213,8 @@ SZ_HELPER_INLINE void sz_utf8_sentence_break_next3_haswell_(__m256i window_lo_u8
 /** @brief  Build the per-class membership frame from the dense class byte stream with AVX2 compares: each class is one
  *          `vpcmpeqb` per 32-lane half OR-combined to a u64, the AVX2 twin of the icelake fifteen-`vpcmpeqb` build (no
  *          scalar pass). The dense stream is at most 64 lanes, held as two `__m256i`. */
-SZ_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_haswell_(sz_u8_t const *dense_classes,
-                                                                                    sz_u64_t valid) {
+SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_haswell_(sz_u8_t const *dense_classes,
+                                                                                      sz_u64_t valid) {
     __m256i const dense_lo_u8x32 = _mm256_loadu_si256((__m256i const *)(dense_classes + 0));
     __m256i const dense_hi_u8x32 = _mm256_loadu_si256((__m256i const *)(dense_classes + 32));
     sz_utf8_sentence_break_frame_t frame;
@@ -237,9 +237,9 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_d
 
 /** @brief  Largest byte prefix of the window whose codepoints are all fully loaded — the AVX2 twin of the icelake
  *          driver's effective-window<64 trim. Never below 1 when the window is non-empty. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
-                                                                        sz_u8_t const *bytes_after,
-                                                                        sz_bool_t more_text) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
+                                                                          sz_u8_t const *bytes_after,
+                                                                          sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
@@ -308,9 +308,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(         //
         //  `loaded - k`, matching icelake's `maskz_permutexvar` `keep1`/`keep2`/`keep3`, so the missing continuations
         //  read as zero exactly like serial's blind decode (`text[start+k]` past the input reads 0).
         __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32, next3_lo_u8x32, next3_hi_u8x32;
-        sz_utf8_forward_neighbours_haswell_(window.window_lo, window.window_hi, &next1_lo_u8x32, &next1_hi_u8x32,
-                                            &next2_lo_u8x32, &next2_hi_u8x32);
-        sz_utf8_sentence_break_next3_haswell_(window.window_lo, window.window_hi, &next3_lo_u8x32, &next3_hi_u8x32);
+        sz_utf8_forward_neighbours_haswell_(window.window_low_u8x32, window.window_high_u8x32, &next1_lo_u8x32,
+                                            &next1_hi_u8x32, &next2_lo_u8x32, &next2_hi_u8x32);
+        sz_utf8_sentence_break_next3_haswell_(window.window_low_u8x32, window.window_high_u8x32, &next3_lo_u8x32,
+                                              &next3_hi_u8x32);
         sz_u64_t const keep1 = sz_u64_mask_until_serial_(loaded >= 1 ? loaded - 1 : 0);
         sz_u64_t const keep2 = sz_u64_mask_until_serial_(loaded >= 2 ? loaded - 2 : 0);
         sz_u64_t const keep3 = sz_u64_mask_until_serial_(loaded >= 3 ? loaded - 3 : 0);
@@ -329,20 +330,20 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(         //
         //  the loaded edge would read a wrapped byte as its missing continuation (icelake recomputes high/low from
         //  its `keep*`-masked neighbours for exactly this reason; here we patch the decoded pair to match).
         __m256i high_lo_u8x32, high_hi_u8x32, low_lo_u8x32, low_hi_u8x32;
-        sz_utf8_sentence_break_bmp_highlow_haswell_(window.window_lo, next1_lo_u8x32, next2_lo_u8x32,
+        sz_utf8_sentence_break_bmp_highlow_haswell_(window.window_low_u8x32, next1_lo_u8x32, next2_lo_u8x32,
                                                     (sz_u32_t)window.two_byte_starts,
                                                     (sz_u32_t)window.three_byte_starts, &high_lo_u8x32, &low_lo_u8x32);
         sz_utf8_sentence_break_bmp_highlow_haswell_(
-            window.window_hi, next1_hi_u8x32, next2_hi_u8x32, (sz_u32_t)(window.two_byte_starts >> 32),
+            window.window_high_u8x32, next1_hi_u8x32, next2_hi_u8x32, (sz_u32_t)(window.two_byte_starts >> 32),
             (sz_u32_t)(window.three_byte_starts >> 32), &high_hi_u8x32, &low_hi_u8x32);
 
         //  The classifier reconstructs the raw-byte (ASCII / continuation / `>= 0xF8`) and 4-byte codepoints from
         //  the raw window bytes itself, so no per-half ASCII mask needs to be threaded in.
         __m256i const classes_lo_u8x32 = sz_utf8_sentence_break_classify_half_haswell_(
-            high_lo_u8x32, low_lo_u8x32, window.window_lo, next1_lo_u8x32, next2_lo_u8x32, next3_lo_u8x32,
+            high_lo_u8x32, low_lo_u8x32, window.window_low_u8x32, next1_lo_u8x32, next2_lo_u8x32, next3_lo_u8x32,
             (sz_u32_t)window.four_byte_starts);
         __m256i const classes_hi_u8x32 = sz_utf8_sentence_break_classify_half_haswell_(
-            high_hi_u8x32, low_hi_u8x32, window.window_hi, next1_hi_u8x32, next2_hi_u8x32, next3_hi_u8x32,
+            high_hi_u8x32, low_hi_u8x32, window.window_high_u8x32, next1_hi_u8x32, next2_hi_u8x32, next3_hi_u8x32,
             (sz_u32_t)(window.four_byte_starts >> 32));
 
         sz_size_t const complete_limit = sz_utf8_sentence_break_complete_limit_haswell_(

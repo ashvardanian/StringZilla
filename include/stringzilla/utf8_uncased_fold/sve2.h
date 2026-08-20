@@ -38,7 +38,7 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_fold_sve2_ascii_(svuint8_t source_u8x) {
 /** @brief  Per-lead well-formedness mirror of `sz_rune_decode` - the SVE2 twin of
  *          @ref sz_utf8_fold_neon_malformed_lead_ over one (chunk, peek) pair.
  *  @return Predicate set on every lead byte that does NOT begin a well-formed rune. */
-SZ_HELPER_AUTO svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x, svuint8_t peek_u8x) {
+SZ_HELPER_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x, svuint8_t peek_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const next1_u8x = svext_u8(source_u8x, peek_u8x, 1);
     svuint8_t const next2_u8x = svext_u8(source_u8x, peek_u8x, 2);
@@ -81,7 +81,7 @@ SZ_HELPER_AUTO svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x, 
 /** @brief  Folds a 64-byte superchunk containing only caseless multi-byte scripts mixed with ASCII - the SVE2
  *          twin of @ref sz_utf8_uncased_fold_neon_caseless_chunk_.
  *  @return Bytes consumed; always 62..64, never zero. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t source, sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t source, sz_ptr_t target) {
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     for (sz_size_t chunk_base = 0; chunk_base < 64; chunk_base += chunk_bytes) {
         svbool_t const loaded_b8x = svwhilelt_b8_u64((sz_u64_t)chunk_base, 64);
@@ -99,7 +99,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t sou
  *          @ref sz_utf8_uncased_fold_neon_latin_chunk_, with the same C4/C5/C6 delta tables read through
  *          chunked `svtbl` walks and the same stop policy.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t source, sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -240,7 +240,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t source
 /** @brief  Folds a 64-byte superchunk of basic Cyrillic mixed with ASCII - the SVE2 twin of
  *          @ref sz_utf8_uncased_fold_neon_cyrillic_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t source, sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t source, sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -301,7 +301,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t sou
 /** @brief  Folds a 64-byte superchunk of basic Greek mixed with ASCII - the SVE2 twin of
  *          @ref sz_utf8_uncased_fold_neon_greek_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t source, sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -377,7 +377,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t source
 /** @brief  Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII - the SVE2 twin of
  *          @ref sz_utf8_uncased_fold_neon_armenian_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t source, sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -450,7 +450,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t sou
 /** @brief  Folds a 64-byte superchunk of Georgian (E1 82/83 content) mixed with ASCII - the SVE2 twin of
  *          @ref sz_utf8_uncased_fold_neon_georgian_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t source, sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -530,7 +530,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t sou
 /** @brief  Folds a 64-byte superchunk of caseless scripts mixed with SAFE guarded punctuation - the SVE2 twin
  *          of @ref sz_utf8_uncased_fold_neon_guarded_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_cptr_t source, sz_ptr_t target) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     sz_u64_t stop_lanes = 0;

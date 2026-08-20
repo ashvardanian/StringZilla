@@ -48,7 +48,7 @@ extern "C" {
  *  @param values_u64x4 A 256-bit vector holding four 64-bit values [a, b, c, d].
  *  @return Non-zero if at least two of the four values are identical, zero otherwise.
  */
-SZ_HELPER_AUTO int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4) {
+SZ_HELPER_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4) {
     // Assume `values_u64x4` stores: [a, b, c, d].
     // 0xB1 produces [b, a, d, c], 0x4E produces [c, d, a, b], 0x1B produces [d, c, b, a].
     __m256i cmp1_u64x4 = _mm256_cmpeq_epi64(values_u64x4, _mm256_permute4x64_epi64(values_u64x4, 0xB1));

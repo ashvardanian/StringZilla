@@ -24,8 +24,26 @@ namespace stringzillas {
 #pragma region CUDA Device Helpers
 
 /**
+ *  @brief Refuses a batch whose tape or output rows no kernel can reach, before any task is described.
+ *
+ *  One probe per allocation rather than per text: the tape is contiguous and both output arrays are, so the
+ *  first element of each decides for the batch. An empty batch reads and writes nothing and is accepted.
+ */
+template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_>
+inline status_t check_fingerprints_memory(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text,
+                                          min_counts_per_text_type_ &&min_counts_per_text) noexcept {
+    if (texts.size() == 0) return status_t::success_k;
+    if (status_t const reachable = check_device_accessible_sequence(texts); reachable != status_t::success_k)
+        return reachable;
+    if (status_t const reachable = check_device_accessible_memory(to_span(min_hashes_per_text[0]));
+        reachable != status_t::success_k)
+        return reachable;
+    return check_device_accessible_memory(to_span(min_counts_per_text[0]));
+}
+
+/**
  *  @brief Wraps a single task for the CUDA-based @b byte-level "fingerprint" kernels.
- *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
+ *  @note Tasks are consumed in the order they were built, so nothing here records where a text came from.
  */
 template <typename char_type_, typename min_hash_type_ = u32_t, typename min_count_type_ = u32_t>
 struct cuda_fingerprint_task {
@@ -35,7 +53,6 @@ struct cuda_fingerprint_task {
 
     char_t const *text_ptr = nullptr;
     size_t text_length = 0;
-    size_t original_index = 0;
     min_hash_t *min_hashes = nullptr;
     min_count_t *min_counts = nullptr;
     warp_tasks_density_t density = warps_working_together_k; // ? Worst case, we have to sync final writes
@@ -602,21 +619,12 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
         // container-dependent step; the device kernels and timing then run from the container-independent `run()`.
         tasks_.clear();
         auto &tasks = tasks_;
-        if (tasks.try_resize(texts.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+        // Every task is fully overwritten below, so constructing them first would write the array twice.
+        if (tasks.try_resize_uninitialized(texts.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
-        // Ensure device-accessible buffers (Unified/Device memory) for inputs and outputs. Both the input
-        // texts (one contiguous tape) and the output fingerprints (contiguous arrays) live in single
-        // allocations, so probing every element with `cudaPointerGetAttributes` - a per-pointer driver
-        // round-trip - would cost three driver calls per text. We validate the base pointers of the first
-        // element once, which covers the whole tape and both output arrays.
-        if (texts.size()) {
-            auto first_min_hashes = to_span(min_hashes_per_text[0]);
-            auto first_min_counts = to_span(min_counts_per_text[0]);
-            if (!is_device_accessible_memory((void const *)texts[0].data()) ||
-                !is_device_accessible_memory((void const *)first_min_hashes.data()) ||
-                !is_device_accessible_memory((void const *)first_min_counts.data()))
-                return {status_t::device_memory_mismatch_k, cudaSuccess};
-        }
+        if (status_t const reachable = check_fingerprints_memory(texts, min_hashes_per_text, min_counts_per_text);
+            reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
 
         for (size_t task_index = 0; task_index < texts.size(); ++task_index) {
             auto const &text = texts[task_index];
@@ -625,7 +633,6 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
             tasks[task_index] = device_task_t {
                 .text_ptr = reinterpret_cast<byte_t const *>(text.data()),
                 .text_length = text.size(),
-                .original_index = task_index,
                 .min_hashes = min_hashes.data(),
                 .min_counts = min_counts.data(),
                 .density = four_warps_per_multiprocessor_k,
@@ -837,6 +844,13 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
 
         sz_unused_(specs);
 
+        if (status_t const reachable = check_device_accessible_memory(text); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(min_hashes); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(min_counts); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
+
         // Create the engine-owned timing events on first use; the kernel table resolves itself on first access.
         CUresult timer_error = timer_.ensure_created(executor.device_id());
         if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
@@ -844,12 +858,11 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         // Populate the tasks array with a single task for the entire device, reusing the hoisted buffer.
         tasks_.clear();
         auto &tasks = tasks_;
-        if (tasks.try_resize(1) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+        if (tasks.try_resize_uninitialized(1) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
         tasks[0] = device_task_t {
             .text_ptr = text.data(),
             .text_length = text.size(),
-            .original_index = 0,
             .min_hashes = min_hashes.data(),
             .min_counts = min_counts.data(),
             .density = one_warp_per_multiprocessor_k,
@@ -920,7 +933,13 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         // container-dependent step; the device kernel and timing then run from the container-independent `run()`.
         tasks_.clear();
         auto &tasks = tasks_;
-        if (tasks.try_resize(texts.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+        // Every task is fully overwritten below, so constructing them first would write the array twice.
+        if (tasks.try_resize_uninitialized(texts.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+
+        if (status_t const reachable = check_fingerprints_memory(texts, min_hashes_per_text, min_counts_per_text);
+            reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
+
         for (size_t task_index = 0; task_index < texts.size(); ++task_index) {
             auto const &text = texts[task_index];
             auto min_hashes = to_span(min_hashes_per_text[task_index]);
@@ -928,7 +947,6 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
             tasks[task_index] = device_task_t {
                 .text_ptr = reinterpret_cast<byte_t const *>(text.data()),
                 .text_length = text.size(),
-                .original_index = task_index,
                 .min_hashes = min_hashes.data(),
                 .min_counts = min_counts.data(),
                 .density = four_warps_per_multiprocessor_k,

@@ -124,7 +124,8 @@ SZ_HELPER_INLINE sz_u8_t sz_aes256_gf_double_serial_(sz_u8_t value) {
  *  @param block The 16 plaintext bytes.
  *  @param output Receives the 16 ciphertext bytes; may alias @p block.
  */
-SZ_HELPER_AUTO void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key, sz_u8_t const *block, sz_u8_t *output) {
+SZ_HELPER_INLINE void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key, sz_u8_t const *block,
+                                                      sz_u8_t *output) {
     sz_u8_t state[16], shifted[16];
     sz_size_t round_index, byte_index, column_index;
 

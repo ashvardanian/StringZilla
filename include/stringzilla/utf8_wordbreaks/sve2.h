@@ -48,14 +48,14 @@ extern "C" {
  *  predicate/lane-mask bridge. The substrate LUT readers live in `utf8_runes/sve2.h`. */
 
 /** @brief  Word_Break class byte for sixteen-bit-wide BMP codepoints (per-lane high = cp>>8, low = cp&0xFF). */
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_bmp_class_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_bmp_class_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
     return sz_utf8_rune_flat_lookup_sve2_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_, high_u8x,
                                           low_u8x);
 }
 
 /** @brief  Word_Break class byte for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t plane_off_u8x, svuint8_t high_u8x,
-                                                               svuint8_t low_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t plane_off_u8x, svuint8_t high_u8x,
+                                                                 svuint8_t low_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(pg_b8x, plane_off_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(pg_b8x, svlsr_n_u8_x(pg_b8x, high_u8x, 4), 0x0F);
@@ -89,7 +89,7 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t plane_o
 /** @brief  Predicate -> 64-bit lane mask bridge: each active lane raises bit `lane & 7` inside its byte, the byte
  *          groups OR-fold within every 64-bit element (bit sets are disjoint, so shifts never carry), and the
  *          per-element mask bytes recombine through one shifted `svaddv` — no stack round-trip, no lane loop. */
-SZ_HELPER_AUTO sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t loaded) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t loaded) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t const pg_b64x = svptrue_b64();
     svbool_t const loaded_b8x = svwhilelt_b8_u64(0, (sz_u64_t)loaded);
@@ -106,7 +106,7 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t load
 
 /** @brief  64-bit lane mask -> predicate bridge, the inverse of @ref sz_utf8_pred_to_u64_sve2_: each lane reads its
  *          mask byte via `svtbl` over the broadcast mask and tests bit `lane & 7` — no stack round-trip. */
-SZ_HELPER_AUTO svbool_t sz_utf8_u64_to_pred_sve2_(sz_u64_t mask, sz_size_t loaded) {
+SZ_HELPER_INLINE svbool_t sz_utf8_u64_to_pred_sve2_(sz_u64_t mask, sz_size_t loaded) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t const iota_u8x = svindex_u8(0, 1);
     svuint8_t const mask_bytes_u8x = svtbl_u8(svreinterpret_u8_u64(svdup_n_u64(mask)),
@@ -123,8 +123,8 @@ typedef struct sz_utf8_word_window_sve2_t {
 } sz_utf8_word_window_sve2_t;
 
 /** @brief  Decode one window into per-lane (high, low, plane_off) substrate bytes + the codepoint partition. */
-SZ_HELPER_AUTO sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_sve2_( //
-    sz_u8_t const *text, sz_size_t available, int at_end_of_text,           //
+SZ_HELPER_INLINE sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_sve2_( //
+    sz_u8_t const *text, sz_size_t available, int at_end_of_text,             //
     sz_u8_t *high_out, sz_u8_t *low_out, sz_u8_t *plane_off_out) {
 
     svbool_t const pg_b8x = svptrue_b8();
@@ -204,7 +204,7 @@ SZ_HELPER_AUTO sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_sve2_( //
 }
 
 /** @brief  Classify each lane of one window into its Word_Break class byte (ASCII/BMP/astral, forced-Other). */
-SZ_HELPER_AUTO void sz_utf8_word_classify_window_sve2_(                //
+SZ_HELPER_INLINE void sz_utf8_word_classify_window_sve2_(              //
     sz_u8_t const *high, sz_u8_t const *low, sz_u8_t const *plane_off, //
     sz_u64_t four_byte_starts, sz_u64_t forced_other, sz_size_t loaded, sz_u8_t *out) {
     svbool_t const loaded_b8x = svwhilelt_b8_u64(0, (sz_u64_t)loaded);
@@ -238,7 +238,7 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a_u8x) {
 #define sz_utf8_word_break_lane_up_sve2_(v, k) svrev_u8(svext_u8(svrev_u8((v)), svdup_n_u8(0), (k)))
 #define sz_utf8_word_break_lane_dn_sve2_(v, k) svext_u8((v), svdup_n_u8(0), (k))
 
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = seed_u8x, reach_u8x = gate_u8x;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
@@ -260,7 +260,7 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed_u8x,
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = seed_u8x, reach_u8x = gate_u8x;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
@@ -282,15 +282,15 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed_u8x, 
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_smear_right_sve2_(svuint8_t bits_u8x, svuint8_t reach_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_smear_right_sve2_(svuint8_t bits_u8x, svuint8_t reach_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     for (int s = 0; s < sz_utf8_word_break_smear_steps_k; ++s)
         bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
                               svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up1_sve2_(bits_u8x), reach_u8x));
     return bits_u8x;
 }
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri_u8x, svuint8_t run_gate_u8x, int inbound_parity,
-                                                          svuint8_t *inclusive_out_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri_u8x, svuint8_t run_gate_u8x,
+                                                            int inbound_parity, svuint8_t *inclusive_out_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = ri_u8x, reach_u8x = run_gate_u8x;
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
@@ -331,7 +331,7 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_last_sve2_(svuint8_t m_u8x, svuin
 }
 SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_lane0_sve2_(svuint8_t v_u8x) { return svlasta_u8(svpfalse_b(), v_u8x); }
 
-SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                                            //
+SZ_HELPER_INLINE sz_size_t sz_utf8_word_break_decide_window_sve2_(                                          //
     svuint8_t class_aletter_in_u8x, svuint8_t class_hebrew_in_u8x, svuint8_t class_numeric_in_u8x,          //
     svuint8_t class_katakana_in_u8x, svuint8_t class_extendnumlet_in_u8x, svuint8_t class_extend_in_u8x,    //
     svuint8_t class_zwj_in_u8x, svuint8_t class_format_in_u8x, svuint8_t class_midletter_in_u8x,            //
@@ -689,8 +689,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                
  *          `sz_utf8_word_break_range16_one_neon_` (not-below: high greater, or equal-high with low at least lo;
  *          symmetric for not-above). Used by the WSegSpace / Extended_Pictographic scans inside @ref
  *          sz_utf8_word_break_resolve_window_sve2_. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t const *lo_t,
-                                                          sz_u16_t const *hi_t, int count) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t const *lo_t,
+                                                            sz_u16_t const *hi_t, int count) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t acc_b8x = svpfalse_b();
     for (int i = 0; i < count; ++i) {
@@ -711,7 +711,7 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, sv
  *          engine. Builds the 15 Word_Break class masks + WSegSpace / Extended_Pictographic / quote bytes +
  *          partition masks, then decides for @p complete_limit and re-resolves the carry to @p adv when an open
  *          bridge is still undecided at the edge -- the two-edge carry logic that mirrors the NEON driver. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_resolve_window_sve2_(                                                  //
+SZ_HELPER_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(                                                //
     sz_u8_t const *raw, sz_u8_t const *high_a, sz_u8_t const *low_a, sz_u8_t const *plane_a, sz_u8_t const *cls_a, //
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,                    //
     sz_u64_t continuation_all, sz_u64_t forced_other, sz_u64_t four_byte_starts,                                   //
@@ -858,9 +858,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_resolve_window_sve2_(               
 /** @brief In-register boundary drain over a full byte-vector of lanes: each 32-bit quarter of @p boundary_b8x is
  *         compacted, widened to absolute 64-bit positions, and chained through the carried open `word_start` with an
  *         `svinsr` shift-in, so consecutive boundaries become (start, length) pairs without a stack round-trip. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *starts,
-                                                  sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
-                                                  sz_size_t *word_start_io) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *starts,
+                                                    sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+                                                    sz_size_t *word_start_io) {
     svbool_t const pg_b32x = svptrue_b32();
     svbool_t const pg_b64x = svptrue_b64();
     sz_size_t const quarter_lanes = svcntw();

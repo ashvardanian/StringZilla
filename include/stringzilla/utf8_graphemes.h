@@ -1,6 +1,6 @@
 /**
  *  @brief Hardware-accelerated UAX-29 grapheme cluster segmentation.
- *  @file utf8_graphemes.h
+ *  @file include/stringzilla/utf8_graphemes.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_H_

@@ -1,8 +1,9 @@
 /**
  *  @brief Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
- *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `bench/similarities.cpp` and
+ *       @b `bench/similarities.cu` benchmarks.
  *
- *  @file scripts/test_similarities.cuh
+ *  @file test/similarities.cuh
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
@@ -42,6 +43,12 @@ using ashvardanian::stringzillas::ualloc_t;
 #endif
 
 #pragma region Helpers
+
+/** @brief One input pair for a similarity scorer under test. */
+struct similarity_case_t {
+    std::string first;
+    std::string second;
+};
 
 /** @brief Dual-row O(n)-memory reference Levenshtein distance, keeping only the previous and current rows. */
 inline std::size_t levenshtein_baseline(                                //
@@ -293,7 +300,7 @@ struct levenshtein_baselines_t {
 
     template <typename results_type_>
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, results_type_ *results) const {
-        sz_assert_(first.size() == second.size());
+        verify(first.size() == second.size());
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
             results[i] = gap_opening_cost == gap_extension_cost
@@ -322,7 +329,7 @@ struct needleman_wunsch_baselines_t {
         : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
-        sz_assert_(first.size() == second.size());
+        verify(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
@@ -351,7 +358,7 @@ struct smith_waterman_baselines_t {
         : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
-        sz_assert_(first.size() == second.size());
+        verify(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
@@ -396,7 +403,7 @@ struct pairwise_via_cross_t {
     template <typename score_type_, typename... extra_args_>
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, score_type_ *results,
                         extra_args_ &&...extra_args) {
-        sz_assert_(first.size() == second.size());
+        verify(first.size() == second.size());
         std::size_t const pairs_count = first.size();
         for (std::size_t pair_index = 0; pair_index != pairs_count; ++pair_index) {
             arrow_strings_view_t const first_cell {first.buffer_, first.offsets_.subspan(pair_index, 2)};
@@ -424,9 +431,9 @@ template <typename score_type_, typename base_operator_, typename simd_operator_
 static void check_similarities_fixed_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
                                       std::string_view allowed_chars = {}, simd_extra_args_ &&...simd_extra_args) {
 
-    std::vector<std::pair<std::string, std::string>> test_cases;
+    std::vector<similarity_case_t> test_cases;
     auto append = [&test_cases](std::string const &first, std::string const &second) {
-        test_cases.emplace_back(first, second);
+        test_cases.push_back({first, second});
     };
 
     // Some vary basic variants:
@@ -528,8 +535,8 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
 
         // Reset the tapes and results
         results_base[0] = signaling_score, results_simd[0] = signaling_score;
-        first_tape.try_assign(&first, &first + 1);
-        second_tape.try_assign(&second, &second + 1);
+        verify(first_tape.try_assign(&first, &first + 1) == status_t::success_k);
+        verify(second_tape.try_assign(&second, &second + 1) == status_t::success_k);
 
         // Compute with both backends
         arrow_strings_view_t first_view = first_tape.view();
@@ -538,11 +545,11 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
         score_t *results_simd_ptr = results_simd.data();
         status_t status_base = base_operator(first_view, second_view, results_base_ptr);
         status_t status_simd = simd_operator(first_view, second_view, results_simd_ptr, simd_extra_args...);
-        sz_assert_(status_base == status_t::success_k);
-        sz_assert_(status_simd == status_t::success_k);
+        verify(status_base == status_t::success_k && "Base engine failed on a fixed single-pair batch");
+        verify(status_simd == status_t::success_k && "SIMD engine failed on a fixed single-pair batch");
         if (results_base[0] != results_simd[0])
             edit_distance_log_mismatch(first, second, results_base[0], results_simd[0]);
-        sz_assert_(results_base[0] == results_simd[0]);
+        verify(results_base[0] == results_simd[0] && "Base and SIMD engines disagree on this fixed test-case pair");
     }
 
     // Unzip the test cases into two separate tapes and perform batch processing
@@ -552,22 +559,25 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
         first_tape.reset();
         second_tape.reset();
         for (auto [first, second] : test_cases) {
-            sz_assert_(first_tape.try_append({first.data(), first.size()}) == status_t::success_k);
-            sz_assert_(second_tape.try_append({second.data(), second.size()}) == status_t::success_k);
+            let_verify(status_t const first_append_status = first_tape.try_append({first.data(), first.size()}),
+                       first_append_status == status_t::success_k);
+            let_verify(status_t const second_append_status = second_tape.try_append({second.data(), second.size()}),
+                       second_append_status == status_t::success_k);
         }
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
         status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
                                              simd_extra_args...);
-        sz_assert_(status_base == status_t::success_k);
-        sz_assert_(status_simd == status_t::success_k);
+        verify(status_base == status_t::success_k && "Base engine failed on the batched fixed test cases");
+        verify(status_simd == status_t::success_k && "SIMD engine failed on the batched fixed test cases");
 
         // Individually log the failed results
         for (std::size_t i = 0; i != test_cases.size(); ++i) {
             if (results_base[i] == results_simd[i]) continue;
             edit_distance_log_mismatch(test_cases[i].first, test_cases[i].second, results_base[i], results_simd[i]);
-            sz_assert_(results_base[i] == results_simd[i]);
+            verify(results_base[i] == results_simd[i] &&
+                   "Base and SIMD engines disagree on a batched fixed test-case pair");
         }
     }
 }
@@ -578,15 +588,17 @@ static void check_similarities_known_(operator_type_ &&similarity_operator, std:
                                       std::string const &second, score_type_ expected, extra_args_ &&...extra_args) {
 
     arrow_strings_tape_t first_tape, second_tape;
-    sz_assert_(first_tape.try_append({first.data(), first.size()}) == status_t::success_k);
-    sz_assert_(second_tape.try_append({second.data(), second.size()}) == status_t::success_k);
+    let_verify(status_t const first_append_status = first_tape.try_append({first.data(), first.size()}),
+               first_append_status == status_t::success_k);
+    let_verify(status_t const second_append_status = second_tape.try_append({second.data(), second.size()}),
+               second_append_status == status_t::success_k);
 
     unified_vector<score_type_> result(1);
     result[0] = std::numeric_limits<score_type_>::max();
     status_t status = similarity_operator(first_tape.view(), second_tape.view(), result.data(), extra_args...);
-    sz_assert_(status == status_t::success_k);
+    verify(status == status_t::success_k);
     if (result[0] != expected) edit_distance_log_mismatch(first, second, expected, result[0]);
-    sz_assert_(result[0] == expected);
+    verify(result[0] == expected);
 }
 
 /**
@@ -669,14 +681,14 @@ static void check_similarities_fuzzy_(base_operator_ &&base_operator, simd_opera
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
         status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
                                              simd_extra_args...);
-        sz_assert_(status_base == status_t::success_k);
-        sz_assert_(status_simd == status_t::success_k);
+        verify(status_base == status_t::success_k && "Base engine failed on a fuzzy-generated batch");
+        verify(status_simd == status_t::success_k && "SIMD engine failed on a fuzzy-generated batch");
 
         // Individually log the failed results
         for (std::size_t i = 0; i != config.batch_size; ++i) {
             if (results_base[i] == results_simd[i]) continue;
             edit_distance_log_mismatch(first_array[i], second_array[i], results_base[i], results_simd[i]);
-            sz_assert_(results_base[i] == results_simd[i]);
+            verify(results_base[i] == results_simd[i] && "Base and SIMD engines disagree on a fuzzy-generated pair");
         }
     }
 }
@@ -713,9 +725,9 @@ void test_similarities_equivalence() {
         // Distance can be computed from the similarity, by inverting the sign around the length of the longest string:
         auto distance_nw = std::max(7, 7) - similarity_nw;
         auto distance_sw = std::max(7, 7) - similarity_sw;
-        sz_assert_(distance_l == 1);
-        sz_assert_(distance_nw == 1);
-        sz_assert_(distance_sw == 1);
+        verify(distance_l == 1);
+        verify(distance_nw == 1);
+        verify(distance_sw == 1);
     }
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
@@ -897,7 +909,7 @@ void test_similarities_equivalence() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 #endif
 
 #if SZ_USE_CUDA
@@ -1009,7 +1021,7 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
 
     // The degenerate corpus: empty/empty, empty/non-empty, single-char, identical, and a near-identical
     // one-edit pair. They live in one batch so the engines also face a mixed-length, mostly-tiny input.
-    std::vector<std::pair<std::string, std::string>> degenerate_cases {
+    std::vector<similarity_case_t> degenerate_cases {
         {"", ""},             // both empty; distance 0
         {"", "ABC"},          // empty vs non-empty; pure insertion
         {"ABC", ""},          // non-empty vs empty; pure deletion
@@ -1023,20 +1035,24 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
     unified_vector<score_type_> results_simd(degenerate_cases.size());
     arrow_strings_tape_t first_tape, second_tape;
     for (auto const &pair : degenerate_cases) {
-        sz_assert_(first_tape.try_append({pair.first.data(), pair.first.size()}) == status_t::success_k);
-        sz_assert_(second_tape.try_append({pair.second.data(), pair.second.size()}) == status_t::success_k);
+        let_verify(status_t const first_append_status = first_tape.try_append({pair.first.data(), pair.first.size()}),
+                   first_append_status == status_t::success_k);
+        let_verify(
+            status_t const second_append_status = second_tape.try_append({pair.second.data(), pair.second.size()}),
+            second_append_status == status_t::success_k);
     }
 
     status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
     status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
                                          simd_extra_args...);
-    sz_assert_(status_base == status_t::success_k);
-    sz_assert_(status_simd == status_t::success_k);
+    verify(status_base == status_t::success_k && "Base engine failed on the degenerate-case batch");
+    verify(status_simd == status_t::success_k && "SIMD engine failed on the degenerate-case batch");
     for (std::size_t pair_index = 0; pair_index != degenerate_cases.size(); ++pair_index) {
         if (results_base[pair_index] == results_simd[pair_index]) continue;
         edit_distance_log_mismatch(degenerate_cases[pair_index].first, degenerate_cases[pair_index].second,
                                    results_base[pair_index], results_simd[pair_index]);
-        sz_assert_(results_base[pair_index] == results_simd[pair_index]);
+        verify(results_base[pair_index] == results_simd[pair_index] &&
+               "Base and SIMD engines disagree on a degenerate-case pair");
     }
 
     // Closed-form identities, independent of any O(n²) reference. With a single uniform-cost string the only
@@ -1044,18 +1060,23 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
     std::string const sample = "ADVERSARIAL";
     std::string const empty;
     arrow_strings_tape_t sample_tape, empty_tape, copy_tape;
-    sz_assert_(sample_tape.try_append({sample.data(), sample.size()}) == status_t::success_k);
-    sz_assert_(empty_tape.try_append({empty.data(), empty.size()}) == status_t::success_k);
-    sz_assert_(copy_tape.try_append({sample.data(), sample.size()}) == status_t::success_k);
+    let_verify(status_t const sample_append_status = sample_tape.try_append({sample.data(), sample.size()}),
+               sample_append_status == status_t::success_k);
+    let_verify(status_t const empty_append_status = empty_tape.try_append({empty.data(), empty.size()}),
+               empty_append_status == status_t::success_k);
+    let_verify(status_t const copy_append_status = copy_tape.try_append({sample.data(), sample.size()}),
+               copy_append_status == status_t::success_k);
 
     unified_vector<score_type_> closed_form(1);
     score_type_ const expected_all_gaps = static_cast<score_type_>(sample.size() * static_cast<std::size_t>(gap_cost));
-    sz_assert_(simd_operator(sample_tape.view(), empty_tape.view(), closed_form.data(), simd_extra_args...) ==
-               status_t::success_k);
-    sz_assert_(closed_form[0] == expected_all_gaps);
-    sz_assert_(simd_operator(sample_tape.view(), copy_tape.view(), closed_form.data(), simd_extra_args...) ==
-               status_t::success_k);
-    sz_assert_(closed_form[0] == static_cast<score_type_>(0));
+    let_verify(status_t const against_empty_status = simd_operator(sample_tape.view(), empty_tape.view(),
+                                                                   closed_form.data(), simd_extra_args...),
+               against_empty_status == status_t::success_k);
+    verify(closed_form[0] == expected_all_gaps);
+    let_verify(status_t const against_copy_status = simd_operator(sample_tape.view(), copy_tape.view(),
+                                                                  closed_form.data(), simd_extra_args...),
+               against_copy_status == status_t::success_k);
+    verify(closed_form[0] == static_cast<score_type_>(0));
 }
 
 /**
@@ -1082,7 +1103,7 @@ void test_similarities_safety() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 #endif
 
     // Serial Levenshtein distance against the dual-row baseline on degenerate inputs.
@@ -1174,7 +1195,8 @@ static void fill_reference_matrix_(baseline_operator_ const &baseline, arrow_str
             arrow_strings_view_t const candidate_cell {candidates_view.buffer_,
                                                        candidates_view.offsets_.subspan(candidate_index, 2)};
             score_type_ cell_score = 0;
-            sz_assert_(baseline(query_cell, candidate_cell, &cell_score) == status_t::success_k);
+            let_verify(status_t const cell_status = baseline(query_cell, candidate_cell, &cell_score),
+                       cell_status == status_t::success_k);
             reference_matrix[query_index * row_stride + candidate_index] = cell_score;
         }
 }
@@ -1193,8 +1215,9 @@ static void check_cross_product_cell_exact_(engine_type_ &&engine, baseline_oper
     // empty sub-view sliced (one offset, zero strings) off a one-string fallback tape.
     std::string const empty_fallback_string;
     arrow_strings_tape_t empty_fallback_tape;
-    sz_assert_(empty_fallback_tape.try_append({empty_fallback_string.data(), empty_fallback_string.size()}) ==
-               status_t::success_k);
+    let_verify(status_t const fallback_append_status = empty_fallback_tape.try_append(
+                   {empty_fallback_string.data(), empty_fallback_string.size()}),
+               fallback_append_status == status_t::success_k);
     auto build_view = [&](fuzzy_config_t config, std::vector<std::string> &array,
                           arrow_strings_tape_t &tape) -> arrow_strings_view_t {
         if (config.batch_size == 0)
@@ -1217,7 +1240,7 @@ static void check_cross_product_cell_exact_(engine_type_ &&engine, baseline_oper
 
     strided_rows<score_type_> const results {engine_matrix.data(), queries_count, candidates_count, row_stride};
     status_t const status = engine(queries_view, candidates_view, results, trailing_args...);
-    sz_assert_(status == status_t::success_k);
+    verify(status == status_t::success_k && "Cross-product engine failed to fill the Q x C score matrix");
 
     // The empty shape is fully validated by the success status above - there are no cells to compare.
     if (queries_count == 0 || candidates_count == 0) return;
@@ -1229,7 +1252,8 @@ static void check_cross_product_cell_exact_(engine_type_ &&engine, baseline_oper
             if (engine_matrix[cell_offset] == reference_matrix[cell_offset]) continue;
             edit_distance_log_mismatch(queries_array[query_index], candidates_array[candidate_index],
                                        reference_matrix[cell_offset], engine_matrix[cell_offset]);
-            sz_assert_(engine_matrix[cell_offset] == reference_matrix[cell_offset]);
+            verify(engine_matrix[cell_offset] == reference_matrix[cell_offset] &&
+                   "Cross-product engine and dual-row baseline disagree on this Q x C cell");
         }
 }
 
@@ -1252,15 +1276,17 @@ static void check_symmetric_cell_exact_(engine_type_ &&engine, fuzzy_config_t se
     unified_vector<sz_size_t> symmetric_matrix(sequences_count * sequences_count);
     strided_rows<sz_size_t> const results {symmetric_matrix.data(), sequences_count, sequences_count, row_stride};
     status_t const status = engine(sequences_view, results, trailing_args...);
-    sz_assert_(status == status_t::success_k);
+    verify(status == status_t::success_k && "Symmetric engine failed to fill the self-similarity matrix");
 
     // The diagonal-is-zero identity holds only for a zero match cost (a string aligned to itself pays nothing).
     // The symmetry identity holds for any cost scheme, so it is always asserted.
     for (std::size_t row_index = 0; row_index != sequences_count; ++row_index) {
-        sz_assert_(symmetric_matrix[row_index * row_stride + row_index] == static_cast<sz_size_t>(0));
+        verify(symmetric_matrix[row_index * row_stride + row_index] == static_cast<sz_size_t>(0) &&
+               "Self-similarity matrix has a non-zero diagonal cell");
         for (std::size_t column_index = 0; column_index != sequences_count; ++column_index)
-            sz_assert_(symmetric_matrix[row_index * row_stride + column_index] ==
-                       symmetric_matrix[column_index * row_stride + row_index]);
+            verify(symmetric_matrix[row_index * row_stride + column_index] ==
+                       symmetric_matrix[column_index * row_stride + row_index] &&
+                   "Self-similarity matrix is not symmetric at this cell");
     }
 }
 
@@ -1270,8 +1296,8 @@ static void check_symmetric_cell_exact_(engine_type_ &&engine, fuzzy_config_t se
  *  These carry no kernel geometry: a `1 x N` row, an `N x 1` column, a lone cell, a ragged square set containing
  *  empty strings, a rectangular set, the three degenerate matrices, and the symmetric one-set matrix with its zero
  *  diagonal. Every backend owes the same answers here regardless of its lane width, so wiring a backend in is one
- *  call rather than a dozen copied lines - which is how `empty_set` came to be tested on the serial engine alone
- *  while a CUDA defect in that exact shape went unnoticed.
+ *  call rather than a dozen copied lines - `empty_set` is exercised on every wired backend here, including CUDA,
+ *  pinning that exact shape against a CUDA-specific defect too.
  *
  *  Per-ISA tuning shapes deliberately stay in their own blocks: their batch sizes and lengths encode one kernel's
  *  lane count or tier edge, and generalizing them would erase the reason each number was chosen.
@@ -1332,7 +1358,7 @@ void check_cross_product_universals_(trailing_arguments_ &&...trailing_arguments
  *  `Q x C` matrix and the symmetric one-set matrix directly produced by the new API, asserting each cell against
  *  the dual-row baseline (cross) or the symmetry/zero-diagonal identities (symmetric).
  */
-void test_similarities_cross_product() {
+void test_similarities_cross_product_equivalence() {
     std::printf("  - testing cross-product and symmetric similarity matrices...\n");
 
     [[maybe_unused]] constexpr uniform_substitution_costs_t unit_uniform {0, 1}; // used only in SIMD #if blocks
@@ -1373,8 +1399,8 @@ void test_similarities_cross_product() {
             blosum62_matrix, blosum62_linear_cost},
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, many_queries, many_candidates);
 
-    // Straddle the per-pair `i16` → `i32` cell-width step, near a combined 327 at magnitude 100. Sizing the cell
-    // from `longer + 1` instead of the walkers' reach used to underflow the affine seed and flip the score's sign.
+    // Straddle the per-pair `i16` → `i32` cell-width step, near a combined 327 at magnitude 100. Pins the cell
+    // sized from `longer + 1`, wide enough that the affine seed cannot underflow and flip the score's sign.
     {
         error_costs_32x32_t wide_matrix {};
         for (std::size_t first = 0; first != 32; ++first)
@@ -1960,16 +1986,16 @@ void test_similarities_cross_product() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 
     // CUDA cross-product and symmetric matrices stay small so device memory remains bounded. The empty shapes here
-    // are the ones that used to reach `cuLaunchKernelEx` with a zero grid.
+    // pin that a zero-sized grid never reaches `cuLaunchKernelEx`.
     check_cross_product_universals_<sz_cap_cuda_k, ualloc_t>(cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
-    // Kepler had no cross-product coverage at all: its `tile_scorer` specializations were only ever driven through
-    // the pairwise suites, so the matrix overloads went unexercised on that capability.
+    // This pins Kepler's cross-product coverage: its `tile_scorer` specializations are otherwise driven only
+    // through the pairwise suites, leaving the matrix overloads untested on that capability without this block.
     check_cross_product_universals_<sz_caps_ck_k, ualloc_t>(cuda_executor_t {}, first_gpu_specs);
 #endif
 
@@ -2022,7 +2048,7 @@ void test_similarities_cross_product() {
 
     // High-cost Levenshtein at 700 chars: past the register tier, below the tiled promotion, and wide enough that
     // the reach needs 4-byte cells - the only shape that reaches the warp tier's `u32` kernel. Mirrors the CPU
-    // `wide_lev_*` checks above, which were the sole coverage of that band.
+    // `wide_lev_*` checks above, which are the only CPU-side coverage of that band.
     fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
     fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
     check_cross_product_cell_exact_<sz_size_t>(
@@ -2059,10 +2085,10 @@ void test_similarities_cross_product() {
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_200, empty_set,
         cuda_executor_t {}, first_gpu_specs);
 
-    // CUDA UTF-8 rune scoring. The CPU blocks above are the only UTF-8 coverage in this file, so the GPU engine's
-    // whole-batch tier routing - which, unlike the byte engine, never consults `task.density` - was unexercised.
-    // Linear costs only: `similarities.cuh` extern-templates just that one for the GPU, and affine UTF-8 is
-    // documented as staying on the CPU.
+    // CUDA UTF-8 rune scoring. This is the only GPU UTF-8 coverage in this file: it pins the GPU engine's
+    // whole-batch tier routing, which, unlike the byte engine, never consults `task.density`.
+    // Linear costs only: the library header `include/stringzillas/similarities.cuh` extern-templates just that
+    // one for the GPU, and affine UTF-8 is documented as staying on the CPU.
     {
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_cuda_oracle {};
         auto const utf8_cuda_baseline = [&utf8_cuda_oracle](arrow_strings_view_t queries,
@@ -2122,7 +2148,7 @@ void test_similarities_cross_product() {
  *  the whole sweep, so the experiment list is ordered cheapest-first and truncated by `SZ_TESTS_MULTIPLIER`,
  *  letting the emulated CI legs keep the cheap prefix without dropping the shape coverage entirely.
  */
-void test_similarities_memory_usage() {
+void test_similarities_memory_usage_equivalence() {
 
     // Cheapest-first, so a reduced `SZ_TESTS_MULTIPLIER` keeps the cheap prefix. Cost grows as `batch * length²`,
     // so the long rows dominate and stay few; repeating a length at several batch sizes buys nothing.
@@ -2141,11 +2167,14 @@ void test_similarities_memory_usage() {
         {"ABC", /* batch_size */ 4, /* min_string_length */ 4096, /* max_string_length */ 4096},
         {"ABC", /* batch_size */ 1, /* min_string_length */ 8192, /* max_string_length */ 8192},
     };
-    correctness_experiments.resize(scale_iterations(correctness_experiments.size()));
+    // Clamped to the table: resizing past it appends default-constructed experiments, not harder ones.
+    static constexpr std::size_t default_experiments_k = 7;
+    correctness_experiments.resize(
+        sz_min_of_two(scale_iterations(default_experiments_k), correctness_experiments.size()));
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 #endif
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
@@ -2216,6 +2245,63 @@ void test_similarities_memory_usage() {
             cuda_executor_t {}, first_gpu_specs);
 #endif
     }
+}
+
+/**
+ *  @brief Pins the device-memory contract for the CUDA cross-product engines: a result matrix must be
+ *         reachable from the device, whether it is unified or plain device memory.
+ *
+ *  Host inputs were already refused; this covers the results, which used to be staged and copied back.
+ */
+void test_similarities_cuda_memory_safety() {
+    std::printf("  - testing unified, host, pinned and device result matrices against the contract...\n");
+#if SZ_USE_CUDA
+
+    gpu_specs_t gpu_specs;
+    verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
+    cuda_executor_t executor;
+
+    std::vector<std::string> const texts {"kitten", "sitting", "flaw"};
+    arrow_strings_tape_t tape;
+    verify(tape.try_assign(texts.begin(), texts.end()) == status_t::success_k);
+    arrow_strings_view_t const view = tape.view();
+    std::size_t const count = view.size();
+
+    constexpr uniform_substitution_costs_t unit_uniform {0, 1};
+    constexpr linear_gap_costs_t unit_linear {1};
+    levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> engine {unit_uniform, unit_linear};
+
+    // Unified results are the baseline, and give the answers the other rows are compared against.
+    unified_vector<sz_size_t> unified_matrix(count * count);
+    strided_rows<sz_size_t> const unified_results {unified_matrix.data(), count, count, count};
+    verify(engine(view, view, unified_results, executor, gpu_specs) == status_t::success_k &&
+           "A unified result matrix must be accepted");
+
+    // Host results are refused rather than staged and drained, which is what this contract removed.
+    std::vector<sz_size_t> host_matrix(count * count);
+    strided_rows<sz_size_t> const host_results {host_matrix.data(), count, count, count};
+    verify(engine(view, view, host_results, executor, gpu_specs) == status_t::device_memory_mismatch_k &&
+           "A host result matrix must be refused");
+
+    // Page-locked host memory is host memory to the driver, and refused with it.
+    pinned_vector<sz_size_t> pinned_matrix(count * count);
+    strided_rows<sz_size_t> const pinned_results {pinned_matrix.data(), count, count, count};
+    verify(engine(view, view, pinned_results, executor, gpu_specs) == status_t::device_memory_mismatch_k &&
+           "A page-locked result matrix must be refused");
+
+    // Plain device memory is accepted, and agrees with the unified answers once drained.
+    device_vector<sz_size_t> device_matrix;
+    verify(device_matrix.try_resize_uninitialized(count * count) == status_t::success_k);
+    strided_rows<sz_size_t> const device_results {device_matrix.data(), count, count, count};
+    verify(engine(view, view, device_results, executor, gpu_specs) == status_t::success_k &&
+           "A plain device result matrix must be accepted");
+
+    std::vector<sz_size_t> drained(count * count);
+    verify(copy_device_to_host(device_matrix, span<sz_size_t>(drained.data(), drained.size())) == CUDA_SUCCESS &&
+           "Draining the device matrix must succeed");
+    for (std::size_t cell = 0; cell < count * count; ++cell)
+        verify(drained[cell] == unified_matrix[cell] && "Device and unified matrices must agree cell for cell");
+#endif // SZ_USE_CUDA
 }
 
 #pragma endregion // Drivers

@@ -262,12 +262,14 @@ SZ_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_
  *  families need is the parity truth table. */
 
 /** @brief Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16, __m512i state_g_u32x16) {
+SZ_HELPER_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16,
+                                                   __m512i state_g_u32x16) {
     return _mm512_ternarylogic_epi32(state_e_u32x16, state_f_u32x16, state_g_u32x16, 0xCA);
 }
 
 /** @brief Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16, __m512i state_c_u32x16) {
+SZ_HELPER_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16,
+                                                     __m512i state_c_u32x16) {
     return _mm512_ternarylogic_epi32(state_a_u32x16, state_b_u32x16, state_c_u32x16, 0xE8);
 }
 
@@ -285,13 +287,15 @@ SZ_HELPER_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_u32x16) {
 
 /** @brief Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_u32x16) {
-    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 7), _mm512_ror_epi32(message_word_u32x16, 18),
+    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 7),
+                                     _mm512_ror_epi32(message_word_u32x16, 18),
                                      _mm512_srli_epi32(message_word_u32x16, 3), 0x96);
 }
 
 /** @brief Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u32x16) {
-    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 17), _mm512_ror_epi32(message_word_u32x16, 19),
+    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 17),
+                                     _mm512_ror_epi32(message_word_u32x16, 19),
                                      _mm512_srli_epi32(message_word_u32x16, 10), 0x96);
 }
 
@@ -357,7 +361,8 @@ SZ_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8])
  *  with intermediate buffers instead, the four live arrays push this kernel's frame past 4 KB, and MSVC then
  *  reaches for the CRT's `__chkstk` to probe it, which the `SZ_AVOID_LIBC` build has no way to resolve.
  */
-SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks, __m512i schedule_u32x16[16]) {
+SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks,
+                                                         __m512i schedule_u32x16[16]) {
     __m512i const byte_swap_u8x64 = _mm512_set_epi8(                    //
         60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
         44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
@@ -365,8 +370,7 @@ SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *l
         12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
 
     for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
-        schedule_u32x16[lane_index] =
-            _mm512_shuffle_epi8(_mm512_loadu_si512(lane_blocks[lane_index]), byte_swap_u8x64);
+        schedule_u32x16[lane_index] = _mm512_shuffle_epi8(_mm512_loadu_si512(lane_blocks[lane_index]), byte_swap_u8x64);
 
     for (sz_size_t butterfly_index = 0; butterfly_index != 8; ++butterfly_index) {
         __m512i const even_u32x16 = schedule_u32x16[butterfly_index * 2 + 0];
@@ -411,8 +415,9 @@ SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *l
  */
 SZ_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, __m512i next_word_u32x16,
                                                    __m512i ninth_word_u32x16, __m512i fourteenth_word_u32x16) {
-    return _mm512_add_epi32(_mm512_add_epi32(oldest_word_u32x16, sz_sha256_small_sigma0_skylake_(next_word_u32x16)),
-                            _mm512_add_epi32(ninth_word_u32x16, sz_sha256_small_sigma1_skylake_(fourteenth_word_u32x16)));
+    return _mm512_add_epi32(
+        _mm512_add_epi32(oldest_word_u32x16, sz_sha256_small_sigma0_skylake_(next_word_u32x16)),
+        _mm512_add_epi32(ninth_word_u32x16, sz_sha256_small_sigma1_skylake_(fourteenth_word_u32x16)));
 }
 
 /**
@@ -423,17 +428,18 @@ SZ_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, _
  *  `state_d` becomes the next round's `state_e`, and `state_h` is dead on entry so it receives the next
  *  round's `state_a`.
  */
-SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                          //
+SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                                      //
     __m512i state_a_u32x16, __m512i state_b_u32x16, __m512i state_c_u32x16, __m512i *state_d_u32x16, //
     __m512i state_e_u32x16, __m512i state_f_u32x16, __m512i state_g_u32x16, __m512i *state_h_u32x16, //
     __m512i message_word_u32x16, sz_u32_t round_constant) {
     __m512i const temporary_first_u32x16 = _mm512_add_epi32( //
-        _mm512_add_epi32(
-            _mm512_add_epi32(*state_h_u32x16, sz_sha256_big_sigma1_skylake_(state_e_u32x16)),
-            _mm512_add_epi32(sz_sha256_choice_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16), message_word_u32x16)),
+        _mm512_add_epi32(_mm512_add_epi32(*state_h_u32x16, sz_sha256_big_sigma1_skylake_(state_e_u32x16)),
+                         _mm512_add_epi32(sz_sha256_choice_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16),
+                                          message_word_u32x16)),
         _mm512_set1_epi32((int)round_constant));
     __m512i const temporary_second_u32x16 = _mm512_add_epi32(
-        sz_sha256_big_sigma0_skylake_(state_a_u32x16), sz_sha256_majority_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16));
+        sz_sha256_big_sigma0_skylake_(state_a_u32x16),
+        sz_sha256_majority_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16));
     *state_d_u32x16 = _mm512_add_epi32(*state_d_u32x16, temporary_first_u32x16);
     *state_h_u32x16 = _mm512_add_epi32(temporary_first_u32x16, temporary_second_u32x16);
 }
@@ -457,9 +463,15 @@ SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                 
  *  Written as one straight-line turn of sixteen rounds, then three more turns of the same shape with the
  *  window extension folded in. Sixteen rounds return the eight working variables to their original names and
  *  advance the window exactly one full turn, so every index below is a compile-time constant.
+ *
+ *  Out-of-line rather than fused into its callers, for the same 4 KB frame budget the transpose above keeps.
+ *  The digest and update kernels each call this twice, and each already hold a 1 KB staging window and 512
+ *  bytes of hash state; forced inline, MSVC gives every call site its own copy of the schedule below and the
+ *  frame reaches 4640 bytes, past the page that makes it reach for the CRT's `__chkstk`. One turn of sixteen
+ *  rounds is far too much work for a call to show up against, and the window stays local either way.
  */
-SZ_HELPER_INLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
-                                                  __mmask16 active_m16) {
+SZ_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
+                                                    __mmask16 active_m16) {
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
     __m512i schedule_u32x16[16];
     sz_sha256_transpose_16x16_skylake_(lane_blocks, schedule_u32x16);
@@ -469,103 +481,121 @@ SZ_HELPER_INLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u
     __m512i state_e_u32x16 = hashes_u32x16[4], state_f_u32x16 = hashes_u32x16[5];
     __m512i state_g_u32x16 = hashes_u32x16[6], state_h_u32x16 = hashes_u32x16[7];
 
-    sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16, state_f_u32x16, state_g_u32x16,
-                             &state_h_u32x16, schedule_u32x16[0], round_constants[0]);
-    sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16, state_e_u32x16, state_f_u32x16,
-                             &state_g_u32x16, schedule_u32x16[1], round_constants[1]);
-    sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16, state_d_u32x16, state_e_u32x16,
-                             &state_f_u32x16, schedule_u32x16[2], round_constants[2]);
-    sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16, state_c_u32x16, state_d_u32x16,
-                             &state_e_u32x16, schedule_u32x16[3], round_constants[3]);
-    sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16, state_b_u32x16, state_c_u32x16,
-                             &state_d_u32x16, schedule_u32x16[4], round_constants[4]);
-    sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16, state_a_u32x16, state_b_u32x16,
-                             &state_c_u32x16, schedule_u32x16[5], round_constants[5]);
-    sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16, state_h_u32x16, state_a_u32x16,
-                             &state_b_u32x16, schedule_u32x16[6], round_constants[6]);
-    sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16, state_g_u32x16, state_h_u32x16,
-                             &state_a_u32x16, schedule_u32x16[7], round_constants[7]);
-    sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16, state_f_u32x16, state_g_u32x16,
-                             &state_h_u32x16, schedule_u32x16[8], round_constants[8]);
-    sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16, state_e_u32x16, state_f_u32x16,
-                             &state_g_u32x16, schedule_u32x16[9], round_constants[9]);
-    sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16, state_d_u32x16, state_e_u32x16,
-                             &state_f_u32x16, schedule_u32x16[10], round_constants[10]);
-    sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16, state_c_u32x16, state_d_u32x16,
-                             &state_e_u32x16, schedule_u32x16[11], round_constants[11]);
-    sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16, state_b_u32x16, state_c_u32x16,
-                             &state_d_u32x16, schedule_u32x16[12], round_constants[12]);
-    sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16, state_a_u32x16, state_b_u32x16,
-                             &state_c_u32x16, schedule_u32x16[13], round_constants[13]);
-    sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16, state_h_u32x16, state_a_u32x16,
-                             &state_b_u32x16, schedule_u32x16[14], round_constants[14]);
-    sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16, state_g_u32x16, state_h_u32x16,
-                             &state_a_u32x16, schedule_u32x16[15], round_constants[15]);
+    sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16,
+                             state_f_u32x16, state_g_u32x16, &state_h_u32x16, schedule_u32x16[0], round_constants[0]);
+    sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16,
+                             state_e_u32x16, state_f_u32x16, &state_g_u32x16, schedule_u32x16[1], round_constants[1]);
+    sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16,
+                             state_d_u32x16, state_e_u32x16, &state_f_u32x16, schedule_u32x16[2], round_constants[2]);
+    sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16,
+                             state_c_u32x16, state_d_u32x16, &state_e_u32x16, schedule_u32x16[3], round_constants[3]);
+    sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16,
+                             state_b_u32x16, state_c_u32x16, &state_d_u32x16, schedule_u32x16[4], round_constants[4]);
+    sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16,
+                             state_a_u32x16, state_b_u32x16, &state_c_u32x16, schedule_u32x16[5], round_constants[5]);
+    sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16,
+                             state_h_u32x16, state_a_u32x16, &state_b_u32x16, schedule_u32x16[6], round_constants[6]);
+    sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16,
+                             state_g_u32x16, state_h_u32x16, &state_a_u32x16, schedule_u32x16[7], round_constants[7]);
+    sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16,
+                             state_f_u32x16, state_g_u32x16, &state_h_u32x16, schedule_u32x16[8], round_constants[8]);
+    sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16,
+                             state_e_u32x16, state_f_u32x16, &state_g_u32x16, schedule_u32x16[9], round_constants[9]);
+    sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16,
+                             state_d_u32x16, state_e_u32x16, &state_f_u32x16, schedule_u32x16[10], round_constants[10]);
+    sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16,
+                             state_c_u32x16, state_d_u32x16, &state_e_u32x16, schedule_u32x16[11], round_constants[11]);
+    sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16,
+                             state_b_u32x16, state_c_u32x16, &state_d_u32x16, schedule_u32x16[12], round_constants[12]);
+    sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16,
+                             state_a_u32x16, state_b_u32x16, &state_c_u32x16, schedule_u32x16[13], round_constants[13]);
+    sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16,
+                             state_h_u32x16, state_a_u32x16, &state_b_u32x16, schedule_u32x16[14], round_constants[14]);
+    sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16,
+                             state_g_u32x16, state_h_u32x16, &state_a_u32x16, schedule_u32x16[15], round_constants[15]);
 
     for (sz_size_t turn_index = 1; turn_index != 4; ++turn_index) {
         sz_u32_t const *turn_constants = round_constants + turn_index * 16;
         schedule_u32x16[0] = sz_sha256_extend_skylake_(schedule_u32x16[0], schedule_u32x16[1], schedule_u32x16[9],
-                                                    schedule_u32x16[14]);
-        sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16, state_f_u32x16,
-                                 state_g_u32x16, &state_h_u32x16, schedule_u32x16[0], turn_constants[0]);
+                                                       schedule_u32x16[14]);
+        sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16,
+                                 state_f_u32x16, state_g_u32x16, &state_h_u32x16, schedule_u32x16[0],
+                                 turn_constants[0]);
         schedule_u32x16[1] = sz_sha256_extend_skylake_(schedule_u32x16[1], schedule_u32x16[2], schedule_u32x16[10],
-                                                    schedule_u32x16[15]);
-        sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16, state_e_u32x16,
-                                 state_f_u32x16, &state_g_u32x16, schedule_u32x16[1], turn_constants[1]);
+                                                       schedule_u32x16[15]);
+        sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16,
+                                 state_e_u32x16, state_f_u32x16, &state_g_u32x16, schedule_u32x16[1],
+                                 turn_constants[1]);
         schedule_u32x16[2] = sz_sha256_extend_skylake_(schedule_u32x16[2], schedule_u32x16[3], schedule_u32x16[11],
-                                                    schedule_u32x16[0]);
-        sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16, state_d_u32x16,
-                                 state_e_u32x16, &state_f_u32x16, schedule_u32x16[2], turn_constants[2]);
+                                                       schedule_u32x16[0]);
+        sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16,
+                                 state_d_u32x16, state_e_u32x16, &state_f_u32x16, schedule_u32x16[2],
+                                 turn_constants[2]);
         schedule_u32x16[3] = sz_sha256_extend_skylake_(schedule_u32x16[3], schedule_u32x16[4], schedule_u32x16[12],
-                                                    schedule_u32x16[1]);
-        sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16, state_c_u32x16,
-                                 state_d_u32x16, &state_e_u32x16, schedule_u32x16[3], turn_constants[3]);
+                                                       schedule_u32x16[1]);
+        sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16,
+                                 state_c_u32x16, state_d_u32x16, &state_e_u32x16, schedule_u32x16[3],
+                                 turn_constants[3]);
         schedule_u32x16[4] = sz_sha256_extend_skylake_(schedule_u32x16[4], schedule_u32x16[5], schedule_u32x16[13],
-                                                    schedule_u32x16[2]);
-        sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16, state_b_u32x16,
-                                 state_c_u32x16, &state_d_u32x16, schedule_u32x16[4], turn_constants[4]);
+                                                       schedule_u32x16[2]);
+        sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16,
+                                 state_b_u32x16, state_c_u32x16, &state_d_u32x16, schedule_u32x16[4],
+                                 turn_constants[4]);
         schedule_u32x16[5] = sz_sha256_extend_skylake_(schedule_u32x16[5], schedule_u32x16[6], schedule_u32x16[14],
-                                                    schedule_u32x16[3]);
-        sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16, state_a_u32x16,
-                                 state_b_u32x16, &state_c_u32x16, schedule_u32x16[5], turn_constants[5]);
+                                                       schedule_u32x16[3]);
+        sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16,
+                                 state_a_u32x16, state_b_u32x16, &state_c_u32x16, schedule_u32x16[5],
+                                 turn_constants[5]);
         schedule_u32x16[6] = sz_sha256_extend_skylake_(schedule_u32x16[6], schedule_u32x16[7], schedule_u32x16[15],
-                                                    schedule_u32x16[4]);
-        sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16, state_h_u32x16,
-                                 state_a_u32x16, &state_b_u32x16, schedule_u32x16[6], turn_constants[6]);
-        schedule_u32x16[7] = sz_sha256_extend_skylake_(schedule_u32x16[7], schedule_u32x16[8], schedule_u32x16[0], schedule_u32x16[5]);
-        sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16, state_g_u32x16,
-                                 state_h_u32x16, &state_a_u32x16, schedule_u32x16[7], turn_constants[7]);
-        schedule_u32x16[8] = sz_sha256_extend_skylake_(schedule_u32x16[8], schedule_u32x16[9], schedule_u32x16[1], schedule_u32x16[6]);
-        sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16, state_f_u32x16,
-                                 state_g_u32x16, &state_h_u32x16, schedule_u32x16[8], turn_constants[8]);
+                                                       schedule_u32x16[4]);
+        sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16,
+                                 state_h_u32x16, state_a_u32x16, &state_b_u32x16, schedule_u32x16[6],
+                                 turn_constants[6]);
+        schedule_u32x16[7] = sz_sha256_extend_skylake_(schedule_u32x16[7], schedule_u32x16[8], schedule_u32x16[0],
+                                                       schedule_u32x16[5]);
+        sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16,
+                                 state_g_u32x16, state_h_u32x16, &state_a_u32x16, schedule_u32x16[7],
+                                 turn_constants[7]);
+        schedule_u32x16[8] = sz_sha256_extend_skylake_(schedule_u32x16[8], schedule_u32x16[9], schedule_u32x16[1],
+                                                       schedule_u32x16[6]);
+        sz_sha256_round_skylake_(state_a_u32x16, state_b_u32x16, state_c_u32x16, &state_d_u32x16, state_e_u32x16,
+                                 state_f_u32x16, state_g_u32x16, &state_h_u32x16, schedule_u32x16[8],
+                                 turn_constants[8]);
         schedule_u32x16[9] = sz_sha256_extend_skylake_(schedule_u32x16[9], schedule_u32x16[10], schedule_u32x16[2],
-                                                    schedule_u32x16[7]);
-        sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16, state_e_u32x16,
-                                 state_f_u32x16, &state_g_u32x16, schedule_u32x16[9], turn_constants[9]);
+                                                       schedule_u32x16[7]);
+        sz_sha256_round_skylake_(state_h_u32x16, state_a_u32x16, state_b_u32x16, &state_c_u32x16, state_d_u32x16,
+                                 state_e_u32x16, state_f_u32x16, &state_g_u32x16, schedule_u32x16[9],
+                                 turn_constants[9]);
         schedule_u32x16[10] = sz_sha256_extend_skylake_(schedule_u32x16[10], schedule_u32x16[11], schedule_u32x16[3],
-                                                     schedule_u32x16[8]);
-        sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16, state_d_u32x16,
-                                 state_e_u32x16, &state_f_u32x16, schedule_u32x16[10], turn_constants[10]);
+                                                        schedule_u32x16[8]);
+        sz_sha256_round_skylake_(state_g_u32x16, state_h_u32x16, state_a_u32x16, &state_b_u32x16, state_c_u32x16,
+                                 state_d_u32x16, state_e_u32x16, &state_f_u32x16, schedule_u32x16[10],
+                                 turn_constants[10]);
         schedule_u32x16[11] = sz_sha256_extend_skylake_(schedule_u32x16[11], schedule_u32x16[12], schedule_u32x16[4],
-                                                     schedule_u32x16[9]);
-        sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16, state_c_u32x16,
-                                 state_d_u32x16, &state_e_u32x16, schedule_u32x16[11], turn_constants[11]);
+                                                        schedule_u32x16[9]);
+        sz_sha256_round_skylake_(state_f_u32x16, state_g_u32x16, state_h_u32x16, &state_a_u32x16, state_b_u32x16,
+                                 state_c_u32x16, state_d_u32x16, &state_e_u32x16, schedule_u32x16[11],
+                                 turn_constants[11]);
         schedule_u32x16[12] = sz_sha256_extend_skylake_(schedule_u32x16[12], schedule_u32x16[13], schedule_u32x16[5],
-                                                     schedule_u32x16[10]);
-        sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16, state_b_u32x16,
-                                 state_c_u32x16, &state_d_u32x16, schedule_u32x16[12], turn_constants[12]);
+                                                        schedule_u32x16[10]);
+        sz_sha256_round_skylake_(state_e_u32x16, state_f_u32x16, state_g_u32x16, &state_h_u32x16, state_a_u32x16,
+                                 state_b_u32x16, state_c_u32x16, &state_d_u32x16, schedule_u32x16[12],
+                                 turn_constants[12]);
         schedule_u32x16[13] = sz_sha256_extend_skylake_(schedule_u32x16[13], schedule_u32x16[14], schedule_u32x16[6],
-                                                     schedule_u32x16[11]);
-        sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16, state_a_u32x16,
-                                 state_b_u32x16, &state_c_u32x16, schedule_u32x16[13], turn_constants[13]);
+                                                        schedule_u32x16[11]);
+        sz_sha256_round_skylake_(state_d_u32x16, state_e_u32x16, state_f_u32x16, &state_g_u32x16, state_h_u32x16,
+                                 state_a_u32x16, state_b_u32x16, &state_c_u32x16, schedule_u32x16[13],
+                                 turn_constants[13]);
         schedule_u32x16[14] = sz_sha256_extend_skylake_(schedule_u32x16[14], schedule_u32x16[15], schedule_u32x16[7],
-                                                     schedule_u32x16[12]);
-        sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16, state_h_u32x16,
-                                 state_a_u32x16, &state_b_u32x16, schedule_u32x16[14], turn_constants[14]);
+                                                        schedule_u32x16[12]);
+        sz_sha256_round_skylake_(state_c_u32x16, state_d_u32x16, state_e_u32x16, &state_f_u32x16, state_g_u32x16,
+                                 state_h_u32x16, state_a_u32x16, &state_b_u32x16, schedule_u32x16[14],
+                                 turn_constants[14]);
         schedule_u32x16[15] = sz_sha256_extend_skylake_(schedule_u32x16[15], schedule_u32x16[0], schedule_u32x16[8],
-                                                     schedule_u32x16[13]);
-        sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16, state_g_u32x16,
-                                 state_h_u32x16, &state_a_u32x16, schedule_u32x16[15], turn_constants[15]);
+                                                        schedule_u32x16[13]);
+        sz_sha256_round_skylake_(state_b_u32x16, state_c_u32x16, state_d_u32x16, &state_e_u32x16, state_f_u32x16,
+                                 state_g_u32x16, state_h_u32x16, &state_a_u32x16, schedule_u32x16[15],
+                                 turn_constants[15]);
     }
 
     hashes_u32x16[0] = _mm512_mask_add_epi32(hashes_u32x16[0], active_m16, hashes_u32x16[0], state_a_u32x16);
@@ -596,14 +626,13 @@ SZ_HELPER_INLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u
  *  words move by real gather and scatter rather than by 128 scalar loads through a stack union, whose
  *  store-to-load forwarding was the largest fixed cost of a call and the one short messages cannot amortize.
  */
-SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
-                                                         sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
-                                                         sz_size_t const *blocks_per_lane) {
+SZ_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
+                                                           sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
+                                                           sz_size_t const *blocks_per_lane) {
     __m512i hashes_u32x16[8];
     sz_u512_vec_t counts_vec;
     sz_u8_t const *sources[16];
     sz_size_t largest_blocks_count = 0;
-
 
     // The topped-up block and the fallback for a lane with nothing whole left are the same buffer, so one
     // source array serves both phases and the head costs no extra stack. An absent lane, or one with
@@ -650,8 +679,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *stat
     sz_sha256_transpose_8x16_skylake_(hashes_u32x16);
     for (sz_size_t pair_index = 0; pair_index != 8; ++pair_index) {
         if (pair_index < active_lanes_count)
-            _mm256_storeu_si256((__m256i *)states[pair_index].hash,
-                                _mm512_castsi512_si256(hashes_u32x16[pair_index]));
+            _mm256_storeu_si256((__m256i *)states[pair_index].hash, _mm512_castsi512_si256(hashes_u32x16[pair_index]));
         if (pair_index + 8 < active_lanes_count)
             _mm256_storeu_si256((__m256i *)states[pair_index + 8].hash,
                                 _mm512_extracti64x4_epi64(hashes_u32x16[pair_index], 1));
@@ -724,8 +752,8 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
  *  decides which lanes actually consumed the carrier block, so a lane that needed only one block keeps its
  *  state bit-for-bit. Inactive lanes borrow lane zero's hash so the gather stays in bounds.
  */
-SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
-                                                               sz_size_t active_lanes_count, sz_u8_t *digests) {
+SZ_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
+                                                                 sz_size_t active_lanes_count, sz_u8_t *digests) {
     sz_u512_vec_t staged_vec[16];
     sz_u8_t const *staged_blocks[16];
     __m512i hashes_u32x16[8];
@@ -757,8 +785,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t
             sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
             sz_size_t const buffered = states[source_lane].block_length;
             __mmask64 const buffered_m64 = sz_u64_clamp_mask_until_(buffered);
-            staged_vec[lane_index].zmm =
-                _mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block);
+            staged_vec[lane_index].zmm = _mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block);
             staged_vec[lane_index].u8s[buffered] = 0x80;
         }
         sz_sha256_compress_skylake_(hashes_u32x16, staged_blocks, overflow_m16);
@@ -780,10 +807,10 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t
 
     // Big-endian output is a byte reverse inside each word, and the same butterfly that gathered the state
     // scatters it back to one 32-byte digest per lane.
-    __m512i const byte_swap_u8x64 = _mm512_set_epi8(                     //
-        60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51,  //
-        44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35,  //
-        28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19,  //
+    __m512i const byte_swap_u8x64 = _mm512_set_epi8(                    //
+        60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
+        44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
+        28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, //
         12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
     for (sz_size_t word_index = 0; word_index != 8; ++word_index)
         hashes_u32x16[word_index] = _mm512_shuffle_epi8(hashes_u32x16[word_index], byte_swap_u8x64);

@@ -6,7 +6,7 @@ The dispatcher picks the fastest one available on the running CPU.
 
 ## Methodology
 
-Numbers are throughput in GB/s, measured with `bench/memory.cpp` over the `leipzig1M_en.txt` corpus, reporting the median of repeated runs.
+Numbers are throughput in GB/s, measured with `bench/memory.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
 Memory operations are bandwidth-bound and measured solo, so they are not tokenized and appear in a single table.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `std::memcpy`, `std::memmove`, `std::memset`, and `std::transform`.

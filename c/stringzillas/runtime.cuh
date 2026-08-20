@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_RUNTIME_CUH_
-#define STRINGZILLAS_RUNTIME_CUH_
+#ifndef SZS_RUNTIME_CUH_
+#define SZS_RUNTIME_CUH_
 #include "stringzillas.cuh"
 
 extern "C" {
@@ -91,13 +91,12 @@ SZ_API_RUNTIME sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, 
     // If `cpu_cores` is 1, redirect to default scope
     if (cpu_cores == 1) return szs_device_scope_init_default(scope_punned, error_message);
 
-    sz::cpu_specs_t specs;
     auto executor = std::make_unique<szs::forkunion_executor_t>();
     if (executor->try_spawn(cpu_cores) != sz::status_t::success_k)
         return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to spawn thread pool");
+    sz::cpu_specs_t const specs = executor->specs();
 
-    auto *scope = new (std::nothrow)
-        device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), std::move(specs));
+    auto *scope = new (std::nothrow) device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), specs);
     if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate CPU device scope");
 
     *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
@@ -223,4 +222,4 @@ SZ_API_RUNTIME void szs_unified_free(void *ptr, sz_size_t size_bytes) {
 #pragma endregion Unified Allocator
 }
 
-#endif // STRINGZILLAS_RUNTIME_CUH_
+#endif // SZS_RUNTIME_CUH_

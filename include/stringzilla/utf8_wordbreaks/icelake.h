@@ -74,8 +74,9 @@ extern "C" {
 
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(                                                                                               \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512,popcnt"))), \
+#pragma clang attribute push(                                                                                    \
+    __attribute__((                                                                                              \
+        target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512,popcnt"))), \
     apply_to = function)
 #elif defined(__clang__)
 #pragma clang attribute push(                                                                                       \
@@ -84,8 +85,7 @@ extern "C" {
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
-    "lzcnt", \
-                   "popcnt")
+                   "lzcnt", "popcnt")
 #endif
 
 #pragma region Word_Break Classifier
@@ -141,7 +141,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_icelake_(__m512i classes
 
 /** @brief  64-lane mask of lanes whose `(high, low)` 16-bit value lies inside any sorted `[lo, hi]` range (WSegSpace
  *          WB3d and Extended_Pictographic WB3c, which are NOT part of the 4-bit Word_Break model). */
-SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_icelake_( //
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_icelake_( //
     __m512i high_u8x64, __m512i low_u8x64, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
     __mmask64 hit_m64 = _cvtu64_mask64(0);
     for (int range = 0; range < count; ++range) {
@@ -164,7 +164,7 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_icelake_( //
 
 /** @brief  Look up one cp < 0x800 page over @ref sz_utf8_word_break_flat_lut_0800_ via an in-register `vpermi2b`
  *          network (cheaper than the flat gather for the dense 2-byte scripts). */
-SZ_HELPER_AUTO __m512i sz_utf8_word_break_small_page_icelake_(__m512i high_u8x64, __m512i low_u8x64) {
+SZ_HELPER_INLINE __m512i sz_utf8_word_break_small_page_icelake_(__m512i high_u8x64, __m512i low_u8x64) {
     __m512i const in_seven_u8x64 = _mm512_and_si512(low_u8x64, _mm512_set1_epi8(0x7F));
     __m512i const low_high_bit_u8x64 = sz_utf8_srl8_icelake_(low_u8x64, 7, 0x01);
     __m512i const page_u8x64 = _mm512_or_si512(
@@ -195,8 +195,8 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_small_page_icelake_(__m512i high_u8x64
 /** @brief  Classify the 4-byte (astral) lanes of a window via the aligned `.rodata` astral trie. Four 16-lane chunks
  *          reconstruct the 21-bit codepoint and walk the 4-stage trie; the caller blends the result onto `is_four_byte`
  *          lanes. Bit-exact with `sz_rune_word_break_property` over the astral planes. */
-SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
-                                                                      __m512i next2_u8x64, __m512i next3_u8x64) {
+SZ_HELPER_INLINE __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
+                                                                        __m512i next2_u8x64, __m512i next3_u8x64) {
     __m512i const byte0_u8x64 = _mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x07));
     __m512i const byte1_u8x64 = _mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x3F));
     __m512i const byte2_u8x64 = _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F));
@@ -234,7 +234,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i wi
  *          `vpexpandb`-scattered back onto @p classes at their original byte-lane positions. The second half only
  *          runs when more than sixteen cold starts are present. Cold continuation lanes are don't-cares (`decide`
  *          reads only start lanes) and keep their prior value. */
-SZ_HELPER_AUTO __m512i sz_utf8_word_break_cold_compact_icelake_( //
+SZ_HELPER_INLINE __m512i sz_utf8_word_break_cold_compact_icelake_( //
     __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
     __mmask64 const cold_start_mask_m64 = _cvtu64_mask64(cold_starts);
     __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, high_bytes_u8x64);
@@ -265,7 +265,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_cold_compact_icelake_( //
  *          table for the residue; 4-byte leads through the aligned `.rodata` astral trie. All cheap paths are
  *          rare-class gated.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_window_icelake_( //
+SZ_HELPER_INLINE __m512i sz_utf8_word_break_classify_window_icelake_( //
     __m512i window_u8x64, __m512i high_u8x64, __m512i low_u8x64, __mmask64 is_four_byte_m64, __m512i next1_u8x64,
     __m512i next2_u8x64, __m512i next3_u8x64) {
     __mmask64 const is_ascii_m64 = ~_mm512_movepi8_mask(window_u8x64);
@@ -324,7 +324,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_window_icelake_( //
  *          portable @ref sz_utf8_word_break_partition_from_masks_. @p at_end_of_text distinguishes a benign interior
  *          straddle (the next window completes it) from a true end-of-text truncation.
  */
-SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_icelake_( //
+SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_icelake_( //
     __m512i window_u8x64, __m512i next1_u8x64, sz_u64_t valid, int at_end_of_text) {
     sz_u64_t const real_continuation = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(
                                            _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xC0)),
@@ -516,10 +516,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
         sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + position, length - position,
                                                                                   lane_identity_u8x64);
         sz_size_t const loaded = decoded.loaded;
-        __m512i const window_u8x64 = decoded.window;
+        __m512i const window_u8x64 = decoded.window_u8x64;
         sz_u64_t const valid = sz_u64_mask_until_(loaded);
-        __m512i const high_u8x64 = decoded.high;
-        __m512i const low_u8x64 = decoded.low;
+        __m512i const high_u8x64 = decoded.high_byte_u8x64;
+        __m512i const low_u8x64 = decoded.low_byte_u8x64;
         __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
                                                             window_u8x64);
         __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)),

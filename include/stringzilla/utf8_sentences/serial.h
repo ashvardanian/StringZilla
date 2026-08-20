@@ -45,21 +45,21 @@ SZ_API_COMPTIME sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
 }
 
 /** @brief True for a Sentence_Break ParaSep (Sep, CR, or LF). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_is_parasep_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_parasep_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sep_k || property == sz_sentence_break_cr_k ||
                        property == sz_sentence_break_lf_k);
 }
 /** @brief True for a Sentence_Break SATerm (STerm or ATerm). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sterm_k || property == sz_sentence_break_aterm_k);
 }
 /** @brief True for an SB5-transparent character (Extend or Format). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_extend_k || property == sz_sentence_break_format_k);
 }
 /** @brief SB8 stop set excluding Lower: OLetter, Upper, ParaSep, or SATerm — a significant class that ends the
  *         ATerm neutral run and confirms the deferred SB11 break (a Lower in the run suppresses it instead). */
-SZ_HELPER_INLINE sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_oletter_k || property == sz_sentence_break_upper_k ||
                        sz_sentence_break_is_parasep_(property) || sz_sentence_break_is_saterm_(property));
 }
@@ -82,7 +82,7 @@ SZ_HELPER_AUTO sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t
  *         folded in with no continuation/overlong/surrogate validation, missing trailing bytes read as zero.
  *         Valid UTF-8 decodes identically to the checked path; only ill-formed input differs, by design.
  */
-SZ_HELPER_AUTO sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
+SZ_HELPER_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
     int const lead_length = ((lead & 0xE0u) == 0xC0u)   ? 2
                             : ((lead & 0xF0u) == 0xE0u) ? 3

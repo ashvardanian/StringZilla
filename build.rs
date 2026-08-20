@@ -657,24 +657,26 @@ fn stringzillas_base_build(serial_flags: &HashMap<String, bool>) -> cc::Build {
 }
 
 /// StringZillas C-API entry units, compiled once per backend - as C++ into the CPU one, as CUDA into the GPU one.
-const STRINGZILLAS_API_CPP_SOURCES: [&str; 5] = [
+const STRINGZILLAS_API_CPP_SOURCES: [&str; 6] = [
     "c/stringzillas/runtime.cpp",
     "c/stringzillas/levenshtein.cpp",
     "c/stringzillas/needleman_wunsch.cpp",
     "c/stringzillas/smith_waterman.cpp",
     "c/stringzillas/fingerprints.cpp",
+    "c/stringzillas/substrings.cpp",
 ];
-const STRINGZILLAS_API_CU_SOURCES: [&str; 5] = [
+const STRINGZILLAS_API_CU_SOURCES: [&str; 6] = [
     "c/stringzillas/runtime.cu",
     "c/stringzillas/levenshtein.cu",
     "c/stringzillas/needleman_wunsch.cu",
     "c/stringzillas/smith_waterman.cu",
     "c/stringzillas/fingerprints.cu",
+    "c/stringzillas/substrings.cu",
 ];
 
 /// Per-ISA CPU instantiation units, host C++ in every backend - NVCC forwards `.cpp` straight to the host
 /// compiler, keeping CPU SIMD out of its frontend; off-platform files compile to empty objects.
-const STRINGZILLAS_CPUS_SOURCES: [&str; 15] = [
+const STRINGZILLAS_CPUS_SOURCES: [&str; 16] = [
     "c/stringzillas/levenshtein_serial.cpp",
     "c/stringzillas/levenshtein_icelake.cpp",
     "c/stringzillas/levenshtein_haswell.cpp",
@@ -690,14 +692,16 @@ const STRINGZILLAS_CPUS_SOURCES: [&str; 15] = [
     "c/stringzillas/smith_waterman_haswell.cpp",
     "c/stringzillas/smith_waterman_neon.cpp",
     "c/stringzillas/smith_waterman_rvv.cpp",
+    "c/stringzillas/substrings_serial.cpp",
 ];
 
 /// Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
 /// from the base set.
-const STRINGZILLAS_CUDA_SOURCES: [&str; 3] = [
+const STRINGZILLAS_CUDA_SOURCES: [&str; 4] = [
     "c/stringzillas/levenshtein_cuda.cu",
     "c/stringzillas/needleman_wunsch_cuda.cu",
     "c/stringzillas/smith_waterman_cuda.cu",
+    "c/stringzillas/substrings_cuda.cu",
 ];
 const STRINGZILLAS_KEPLER_SOURCES: [&str; 1] = ["c/stringzillas/levenshtein_kepler.cu"];
 const STRINGZILLAS_HOPPER_SOURCES: [&str; 3] = [

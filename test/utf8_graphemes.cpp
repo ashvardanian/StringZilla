@@ -1,7 +1,7 @@
 /**
  *  @brief  UAX-29 grapheme-cluster (Grapheme_Cluster_Break) tests: known-answer goldens, malformed-input safety,
  *          and the serial-vs-ISA differential over hardened corpora.
- *  @file   scripts/test_utf8_graphemes.cpp
+ *  @file   test/utf8_graphemes.cpp
  *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
@@ -23,7 +23,7 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `test_stringzilla.hpp`)
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
 #pragma region Unit
 
@@ -142,11 +142,11 @@ static sz::string_view const utf8_graphemes_motifs[] = {
 static void utf8_graphemes_dense_zwj_pictograph_chain_(std::string &out, std::size_t link_count) {
     out.clear();
     static sz_rune_t const pictographs[] = {0x1F468, 0x1F469, 0x1F467, 0x1F466}; // man, woman, girl, boy
-    append_codepoint_(out, pictographs[0]);
+    out.append(encoded_rune_(pictographs[0]));
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x200D);                          // ZWJ
-        append_codepoint_(out, pictographs[(index + 1) & 0x3u]); // next pictograph
-        if (index & 1u) append_codepoint_(out, 0xFE0F);          // VS16 on alternating links
+        out.append(encoded_rune_(0x200D));                          // ZWJ
+        out.append(encoded_rune_(pictographs[(index + 1) & 0x3u])); // next pictograph
+        if (index & 1u) out.append(encoded_rune_(0xFE0F));          // VS16 on alternating links
     }
 }
 
@@ -155,27 +155,27 @@ static void utf8_graphemes_dense_combining_marks_(std::string &out, std::size_t 
     out.clear();
     static sz_rune_t const marks[] = {0x0301, 0x0300, 0x0308, 0x0327, 0x0323, // acute, grave, diaeresis, cedilla, dot
                                       0x0651, 0x093C, 0x0E48, 0x1D16E};       // shadda, nukta, Thai mai ek, astral flag
-    append_codepoint_(out, 0x0061);                                           // base 'a'
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, marks[index % 9u]);
+    out.append(encoded_rune_(0x0061));                                        // base 'a'
+    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(marks[index % 9u]));
 }
 
-/** @brief @p link_count emoji each followed by a skin-tone modifier drawn from @p rng (GB9 Extend), into @p out. */
-static void utf8_graphemes_dense_skin_tone_run_(std::string &out, std::mt19937 &rng, std::size_t link_count) {
+/** @brief @p link_count emoji each followed by a skin-tone modifier from @p generator (GB9 Extend), into @p out. */
+static void utf8_graphemes_dense_skin_tone_run_(std::string &out, std::mt19937 &generator, std::size_t link_count) {
     out.clear();
     std::uniform_int_distribution<sz_rune_t> modifier(0x1F3FB, 0x1F3FF); // U+1F3FB..U+1F3FF
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x1F44D); // thumbs up
-        append_codepoint_(out, modifier(rng));
+        out.append(encoded_rune_(0x1F44D)); // thumbs up
+        out.append(encoded_rune_(modifier(generator)));
     }
 }
 
 /** @brief @p link_count Indic consonant+virama conjunct links (GB9c InCB Consonant Linker chains), into @p out. */
 static void utf8_graphemes_dense_indic_conjunct_(std::string &out, std::size_t link_count) {
     out.clear();
-    append_codepoint_(out, 0x0915); // Devanagari KA
+    out.append(encoded_rune_(0x0915)); // Devanagari KA
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x094D); // virama (Linker)
-        append_codepoint_(out, 0x0915); // KA
+        out.append(encoded_rune_(0x094D)); // virama (Linker)
+        out.append(encoded_rune_(0x0915)); // KA
     }
 }
 
@@ -183,46 +183,46 @@ static void utf8_graphemes_dense_indic_conjunct_(std::string &out, std::size_t l
 static void utf8_graphemes_dense_hangul_jamo_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x1100); // L (Choseong Kiyeok)
-        append_codepoint_(out, 0x1161); // V (Jungseong A)
-        append_codepoint_(out, 0x11A8); // T (Jongseong Kiyeok)
+        out.append(encoded_rune_(0x1100)); // L (Choseong Kiyeok)
+        out.append(encoded_rune_(0x1161)); // V (Jungseong A)
+        out.append(encoded_rune_(0x11A8)); // T (Jongseong Kiyeok)
     }
 }
 
 /** @brief Stream the grapheme family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-static void utf8_graphemes_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+static void utf8_graphemes_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::uniform_int_distribution<std::size_t> wide(60, 220);
     std::uniform_int_distribution<std::size_t> chain(20, 80);
-    std::size_t const wide_count = wide(rng);
-    std::size_t const chain_count = chain(rng);
-    utf8_dense_regional_indicators_(scratch, rng, wide_count), sink(context, scratch.data(), scratch.size());
+    std::size_t const wide_count = wide(generator);
+    std::size_t const chain_count = chain(generator);
+    utf8_dense_regional_indicators_(scratch, generator, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_zwj_pictograph_chain_(scratch, chain_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_combining_marks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_skin_tone_run_(scratch, rng, chain_count), sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_skin_tone_run_(scratch, generator, chain_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_indic_conjunct_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_hangul_jamo_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief Stream the grapheme family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_graphemes_straddles_(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context) {
+static void utf8_graphemes_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    utf8_dense_regional_indicators_(scratch, rng, gap);
+    utf8_dense_regional_indicators_(scratch, generator, gap);
     scratch.append("a"); // ASCII tail forces the GB12/13 parity decision after the long run
     sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_zwj_pictograph_chain_(scratch, gap);
-    append_codepoint_(scratch, 0x0061); // ASCII break after the chain
+    scratch.append(encoded_rune_(0x0061)); // ASCII break after the chain
     sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_indic_conjunct_(scratch, gap);
-    append_codepoint_(scratch, 0x0061); // ASCII break after the conjunct
+    scratch.append(encoded_rune_(0x0061)); // ASCII break after the conjunct
     sink(context, scratch.data(), scratch.size());
     // A long RI run, then a ZWJ before a final RI: RI...RI ZWJ RI. The ZWJ does NOT bridge two RIs (GB11 bridges only
     // Extended_Pictographic), so this must break after the ZWJ - and the ZWJ resets the GB12/13 RI parity. Straddles
     // the 64-byte window so the parity carry and the post-ZWJ break are exercised across the edge.
-    utf8_dense_regional_indicators_(scratch, rng, gap);
-    append_codepoint_(scratch, 0x200D);  // ZWJ
-    append_codepoint_(scratch, 0x1F1E6); // Regional_Indicator after the ZWJ
-    append_codepoint_(scratch, 0x0061);  // ASCII tail
+    utf8_dense_regional_indicators_(scratch, generator, gap);
+    scratch.append(encoded_rune_(0x200D));  // ZWJ
+    scratch.append(encoded_rune_(0x1F1E6)); // Regional_Indicator after the ZWJ
+    scratch.append(encoded_rune_(0x0061));  // ASCII tail
     sink(context, scratch.data(), scratch.size());
 }
 
@@ -322,8 +322,13 @@ void test_utf8_graphemes_safety() {
 /** @brief Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
 void test_utf8_graphemes_all() {
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
-    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
-                                   scale_iterations(8)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
+                                    scale_iterations(8)); // This family's share of the suite budget
+
+    // The streaming segmenter against the per-position GB1-GB999 transcription, which nothing else calls.
+    for (sz::string_view const motif : span_over(utf8_graphemes_motifs))
+        check_utf8_segment_against_oracle_("grapheme", sz_utf8_graphemes_serial, sz_utf8_is_grapheme_boundary_serial,
+                                           motif.data(), motif.size());
 }
 
 #pragma endregion // Drivers

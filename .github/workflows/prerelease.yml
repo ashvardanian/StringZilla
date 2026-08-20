@@ -183,7 +183,7 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
 
         # JavaScript
       - name: Set up Node.js
@@ -313,7 +313,7 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
 
         # Rust
       - name: Set up Rust
@@ -387,6 +387,10 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Test C++11 language floor
+        run: build_artifacts/stringzilla_test_cpp11
+      - name: Test C++ parallel engines
+        run: build_artifacts/stringzillas_test_cpp20
       - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
@@ -401,6 +405,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install "setuptools>=64" wheel
           pip install pytest pytest-repeat numpy pyarrow affine-gaps
+          # The third-party oracles, from the one place they are declared rather than a second list here.
+          pip install --group tests-oracles
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation --no-deps
       - name: Log Python capabilities
@@ -415,7 +421,7 @@ jobs:
           print("stringzillas.__capabilities__:", szs.__capabilities__)
           PY
       - name: Test Python StringZillas-CPUs
-        run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/doctests.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/substrings.py test/doctests.py -s -vv --maxfail=1 --full-trace
 
   test_ubuntu_cuda:
     name: Ubuntu StringZillas-CUDA
@@ -497,6 +503,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install "setuptools>=64" wheel
           pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
+          # The third-party oracles, from the one place they are declared rather than a second list here.
+          pip install --group tests-oracles
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation --no-deps
       - name: Log Python capabilities
@@ -511,7 +519,7 @@ jobs:
           print("stringzillas.__capabilities__:", szs.__capabilities__)
           PY
       - name: Test Python StringZillas-CUDA
-        run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/doctests.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/substrings.py test/doctests.py -s -vv --maxfail=1 --full-trace
 
   # Temporary workaround to run Swift tests on Linux
   # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
@@ -958,7 +966,7 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
@@ -1054,7 +1062,7 @@ jobs:
           pip install pytest pytest-repeat numpy
           python -m pip install .
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
 
         # Rust
       - name: Set up Rust
@@ -1120,7 +1128,7 @@ jobs:
           pip install --break-system-packages pytest pytest-repeat
           pip install --break-system-packages .
       - name: Test Python
-        run: pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -x
+        run: pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -x
 
         # Rust
       - name: Set up Rust

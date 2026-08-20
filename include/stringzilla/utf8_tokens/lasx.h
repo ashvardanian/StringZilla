@@ -18,7 +18,7 @@ extern "C" {
 /** @brief  Peel the tile's first `emit_count` matches with a `__lasx_xvperm_w` left-pack, 4 lanes per sub-block.
  *  Each sub-block gathers its set `(position+lane, length)` pairs to the front (same dword-index table as
  *  `sz_utf8_iterate_peel_haswell_`) and element-stores `min(popcount, remaining)` at the advancing cursor. */
-SZ_HELPER_AUTO void sz_utf8_iterate_peel_lasx_(                                //
+SZ_HELPER_INLINE void sz_utf8_iterate_peel_lasx_(                              //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {

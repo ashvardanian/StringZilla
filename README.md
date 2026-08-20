@@ -29,7 +29,7 @@ Reach for it from your language of choice:
 
 - 🐂 __[C](#c-and-c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
 - 🐉 __[C++](#c-and-c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
-- 🧮 __[CUDA](include/stringzillas/README.md):__ Process in-bulk with `<stringzillas/stringzillas.cuh>` in CUDA C++ 17
+- 🧮 __[CUDA](include/stringzillas/README.md):__ Process in-bulk with `<stringzillas/stringzillas.h>` in CUDA C++ 20
 - 🐍 __[Python](#python):__ Upgrade your `str` to faster `Str`
 - 🦀 __[Rust](#rust):__ Use the `StringZilla` traits crate
 - 🦫 __[Go](#go):__ Use the `StringZilla` cGo module
@@ -94,11 +94,11 @@ Needleman-Wunsch scores, ≅ 1 KB DNA, one core  (MCUPS)
 > Treat these as a first impression, not a benchmark suite.
 > The Unicode numbers were obtained on a 128 MB slice of multilingual XLSum; the similarity rows on synthetic DNA strings.
 > `Xeon4` is an Intel Sapphire Rapids with GCC and `glibc`, `M5 Pro` an 18-core Apple Silicon with Apple clang and `libc++`, `H100` an Nvidia Hopper GPU.
-> The two CPUs therefore differ in standard library as much as in ISA, which is most of the gap in the `strstr`, `std::string::rfind`, and `bytes.translate` rows; the StringZilla rows build from the same source on both.
+> The two CPUs therefore differ in standard library as much as in ISA, which is most of the gap in the `strstr`, `strcspn`, and `std::string::find_first_of` rows; the StringZilla rows build from the same source on both.
 > These will not reproduce exactly; the links below carry the methodology and the per-library breakdowns.
 
 Most StringZilla modules ship ready-to-run benchmarks for C, C++, Python, and more.
-Grab them from `./scripts`, and see [`CONTRIBUTING.md`](CONTRIBUTING.md), [`test/README.md`](test/README.md), and [`bench/README.md`](bench/README.md) for instructions.
+Grab them from `./bench`, and see [`CONTRIBUTING.md`](CONTRIBUTING.md), [`test/README.md`](test/README.md), and [`bench/README.md`](bench/README.md) for instructions.
 For wider head-to-heads against Rust and Python favorites, browse the __[StringWars][stringwars]__ repository.
 To inspect collision resistance and distribution shapes for our hashers, see __[HashEvals][hashevals]__.
 
@@ -174,6 +174,7 @@ Consider contributing if you need a feature that's not yet implemented.
 |                                |          |       |       |        |       |       |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 | Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Parallel Multi-Pattern Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 
 > 🌳 parts are used in production.
 > 🧐 parts are in beta.
@@ -390,8 +391,10 @@ The naive implementation, however:
 There are several ways to improve the original algorithm.
 One is to use sparse DFA representation, which is more cache-friendly, but would require extra processing to navigate state transitions.
 
-StringZilla does not ship an Aho-Corasick automaton today.
-For multi-pattern workloads, the rolling-fingerprint machinery described below covers the near-duplicate and candidate-filtering cases, and [hyperscan](https://github.com/intel/hyperscan) or [pyahocorasick](https://github.com/WojciechMula/pyahocorasick) remain the better fit for large literal dictionaries.
+StringZilla takes that route in [`stringzillas`](include/stringzillas/substrings/README.md), compiling a needle dictionary once into a goto-completed Aho-Corasick automaton and reusing it across every later call.
+The automaton is split into two tiers - a dense 256-wide row per frequently-visited state and a double array for the rest - so a step is one load with no failure-following at runtime.
+It matches raw bytes or applies full Unicode case folding to both sides, runs across a slice of CPU cores or a CUDA GPU, and is reachable as `szs::Substrings` in Rust and `szs.Substrings` in Python.
+Where only near-duplicate detection or candidate filtering is needed, the rolling-fingerprint machinery described below is the cheaper tool.
 
 ### Levenshtein Edit Distance
 

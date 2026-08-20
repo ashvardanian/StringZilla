@@ -1,6 +1,6 @@
 /**
  *  @brief  Comparisons, search/find_all/split, misaligned-repetition search, and replacement tests.
- *  @file   scripts/test_find.cpp
+ *  @file   test/find.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
@@ -49,19 +49,12 @@
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm>     // `std::transform`
-#include <iterator>      // `std::distance`
-#include <map>           // `std::map`
-#include <memory>        // `std::allocator`
-#include <numeric>       // `std::accumulate`
-#include <random>        // `std::random_device`
-#include <set>           // `std::set`
-#include <sstream>       // `std::ostringstream`
-#include <string>        // Baseline
-#include <string_view>   // Baseline
-#include <unordered_map> // `std::unordered_map`
-#include <unordered_set> // `std::unordered_set`
-#include <vector>        // `std::vector`
+#include <algorithm>   // `std::transform`
+#include <iterator>    // `std::distance`
+#include <random>      // `std::uniform_int_distribution`
+#include <string>      // Baseline
+#include <string_view> // Baseline
+#include <vector>      // `std::vector`
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
@@ -134,9 +127,94 @@ static void check_find_unit_(                      //
     // The C++ `sz::string_view` wrapper resolves to the same offsets.
     sz::string_view const haystack_view(haystack, haystack_length);
     sz::string_view const needle_view(needle, needle_length);
-    verify(haystack_view.find(needle_view) == (forward_offset == SZ_SIZE_MAX ? sz::string_view::npos : forward_offset));
+    verify(haystack_view.find(needle_view) ==
+               (forward_offset == SZ_SIZE_MAX ? sz::string_view::npos : forward_offset) &&
+           "sz::string_view::find must agree with the C API's forward offset");
     verify(haystack_view.rfind(needle_view) ==
-           (backward_offset == SZ_SIZE_MAX ? sz::string_view::npos : backward_offset));
+               (backward_offset == SZ_SIZE_MAX ? sz::string_view::npos : backward_offset) &&
+           "sz::string_view::rfind must agree with the C API's backward offset");
+}
+
+/** @brief Lengths every comparison and byte-scan size ladder switches at, plus one either side of each. */
+static sz_size_t const backend_ladder_lengths_[] = {1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255};
+
+/**
+ *  @brief Drives one comparison backend across the lengths its size ladder switches at.
+ *
+ *  Every backend delegates to serial below its vector width, so the three-byte literals above never reach the
+ *  vectorized body at all. The overlapping-load boundaries at 8, 16, 32 and 64 are where these ladders break,
+ *  and a mismatch is placed at the front, the middle and the last byte of each length to catch a tail that
+ *  reads one byte too few or one too many.
+ */
+static void check_compare_unit_(char const *name, sz_equal_t equal, sz_order_t order) {
+    std::string left, right;
+    for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
+        left.assign((std::size_t)length, 'a');
+
+        right = left;
+        if (equal(left.data(), right.data(), length) != sz_true_k) {
+            std::fprintf(stderr, "%s: equal() denied identical %zu-byte inputs\n", name, (std::size_t)length);
+            verify(false && "Comparison backend must accept identical inputs at every ladder length");
+        }
+        verify(order(left.data(), length, right.data(), length) == sz_equal_k &&
+               "Comparison backend must order two identical inputs as equal");
+
+        sz_size_t const positions[] = {0, length / 2, length - 1};
+        for (sz_size_t const position : span_over(positions)) {
+            right = left, right[(std::size_t)position] = 'b'; // ? 'b' sorts after 'a', so `left` is the lesser
+            if (equal(left.data(), right.data(), length) != sz_false_k) {
+                std::fprintf(stderr, "%s: equal() missed a difference at byte %zu of %zu\n", name,
+                             (std::size_t)position, (std::size_t)length);
+                verify(false && "Comparison backend must see a single differing byte at every ladder length");
+            }
+            verify(order(left.data(), length, right.data(), length) == sz_less_k &&
+                   "Comparison backend must order the byte-decreased input as lesser");
+            verify(order(right.data(), length, left.data(), length) == sz_greater_k &&
+                   "Comparison backend must order the byte-increased input as greater");
+        }
+    }
+}
+
+/**
+ *  @brief Drives one byte-scanner pair across the same ladder, with the match at both ends and absent.
+ *
+ *  The reverse scanners are the risky half: each backend reaches "last match" differently - predicate
+ *  reversal, gather-reversal, or a leading-zero count with a hand-written offset correction - and all of it
+ *  is index arithmetic that an eleven-byte literal never exercises.
+ */
+static void check_find_byte_unit_(char const *name, sz_find_byte_t find_byte, sz_find_byte_t rfind_byte) {
+    std::string haystack;
+    for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
+        haystack.assign((std::size_t)length, 'a');
+        verify(find_byte(haystack.data(), length, "z") == SZ_NULL_CHAR && "Forward byte scan must miss an absent byte");
+        verify(rfind_byte(haystack.data(), length, "z") == SZ_NULL_CHAR &&
+               "Reverse byte scan must miss an absent byte");
+
+        sz_size_t const positions[] = {0, length / 2, length - 1};
+        for (sz_size_t const position : span_over(positions)) {
+            haystack.assign((std::size_t)length, 'a');
+            haystack[(std::size_t)position] = 'z';
+            sz_cptr_t const expected = haystack.data() + position;
+            if (find_byte(haystack.data(), length, "z") != expected) {
+                std::fprintf(stderr, "%s: find_byte missed the byte at %zu of %zu\n", name, (std::size_t)position,
+                             (std::size_t)length);
+                verify(false && "Forward byte scan must find a lone match at every ladder length");
+            }
+            if (rfind_byte(haystack.data(), length, "z") != expected) {
+                std::fprintf(stderr, "%s: rfind_byte missed the byte at %zu of %zu\n", name, (std::size_t)position,
+                             (std::size_t)length);
+                verify(false && "Reverse byte scan must find a lone match at every ladder length");
+            }
+        }
+
+        // Both ends occupied, so forward and reverse must disagree about which one they report.
+        haystack.assign((std::size_t)length, 'a');
+        haystack[0] = 'z', haystack[(std::size_t)length - 1] = 'z';
+        verify(find_byte(haystack.data(), length, "z") == haystack.data() &&
+               "Forward byte scan must report the first of two matches");
+        verify(rfind_byte(haystack.data(), length, "z") == haystack.data() + length - 1 &&
+               "Reverse byte scan must report the last of two matches");
+    }
 }
 
 #pragma endregion // Helpers
@@ -172,24 +250,48 @@ void test_find_unit() {
     check_find_unit_(hello, hello_length, "xyz", 3, SZ_SIZE_MAX, SZ_SIZE_MAX); // Missing needle
 
     // `sz_find_byte` / `sz_rfind_byte` in isolation: the byte 'l' occurs at offsets 2, 3, and 9.
-    verify(sz_find_byte(hello, hello_length, "l") == hello + 2);           // Dispatched (automatic kernel)
-    verify(sz_rfind_byte(hello, hello_length, "l") == hello + 9);          // Dispatched (automatic kernel)
-    verify(sz_find_byte_serial(hello, hello_length, "l") == hello + 2);    // Manual propagation to the serial kernel
-    verify(sz_rfind_byte_serial(hello, hello_length, "l") == hello + 9);   // Manual propagation to the serial kernel
+    // Dispatched (automatic kernel resolution).
+    verify(sz_find_byte(hello, hello_length, "l") == hello + 2);
+    verify(sz_rfind_byte(hello, hello_length, "l") == hello + 9);
+    // Manual propagation to the serial kernel.
+    verify(sz_find_byte_serial(hello, hello_length, "l") == hello + 2);
+    verify(sz_rfind_byte_serial(hello, hello_length, "l") == hello + 9);
     verify(sz_find_byte(hello, hello_length, "z") == SZ_NULL_CHAR);        // Missing byte
     verify(sz_rfind_byte(hello, hello_length, "z") == SZ_NULL_CHAR);       // Missing byte
-    verify(sz_find_byte_serial(hello, hello_length, "z") == SZ_NULL_CHAR); // Missing byte, serial kernel
+    verify(sz_find_byte_serial(hello, hello_length, "z") == SZ_NULL_CHAR); // Missing byte
+    // Every compiled tier, swept across the lengths its ladder switches at - "hello world" is eleven bytes,
+    // so the literals above only ever reach each backend's scalar tail.
+    check_find_byte_unit_("dispatched", sz_find_byte, sz_rfind_byte);
+    check_find_byte_unit_("serial", sz_find_byte_serial, sz_rfind_byte_serial);
 #if SZ_USE_WESTMERE
-    verify(sz_find_byte_westmere(hello, hello_length, "l") == hello + 2);
-    verify(sz_rfind_byte_westmere(hello, hello_length, "l") == hello + 9);
+    check_find_byte_unit_("westmere", sz_find_byte_westmere, sz_rfind_byte_westmere);
 #endif
 #if SZ_USE_HASWELL
-    verify(sz_find_byte_haswell(hello, hello_length, "l") == hello + 2);
-    verify(sz_rfind_byte_haswell(hello, hello_length, "l") == hello + 9);
+    check_find_byte_unit_("haswell", sz_find_byte_haswell, sz_rfind_byte_haswell);
 #endif
 #if SZ_USE_SKYLAKE
-    verify(sz_find_byte_skylake(hello, hello_length, "l") == hello + 2);
-    verify(sz_rfind_byte_skylake(hello, hello_length, "l") == hello + 9);
+    check_find_byte_unit_("skylake", sz_find_byte_skylake, sz_rfind_byte_skylake);
+#endif
+#if SZ_USE_NEON
+    check_find_byte_unit_("neon", sz_find_byte_neon, sz_rfind_byte_neon);
+#endif
+#if SZ_USE_SVE
+    check_find_byte_unit_("sve", sz_find_byte_sve, sz_rfind_byte_sve);
+#endif
+#if SZ_USE_V128
+    check_find_byte_unit_("v128", sz_find_byte_v128, sz_rfind_byte_v128);
+#endif
+#if SZ_USE_V128RELAXED
+    check_find_byte_unit_("v128relaxed", sz_find_byte_v128relaxed, sz_rfind_byte_v128relaxed);
+#endif
+#if SZ_USE_RVV
+    check_find_byte_unit_("rvv", sz_find_byte_rvv, sz_rfind_byte_rvv);
+#endif
+#if SZ_USE_LASX
+    check_find_byte_unit_("lasx", sz_find_byte_lasx, sz_rfind_byte_lasx);
+#endif
+#if SZ_USE_POWERVSX
+    check_find_byte_unit_("powervsx", sz_find_byte_powervsx, sz_rfind_byte_powervsx);
 #endif
 
     // `sz_find_byteset` / `sz_rfind_byteset`: a set of vowels {a, e, i, o, u} first hits 'e' at offset 1
@@ -201,199 +303,85 @@ void test_find_unit() {
     sz_byteset_add(&vowels, 'i');
     sz_byteset_add(&vowels, 'o');
     sz_byteset_add(&vowels, 'u');
-    verify(sz_find_byteset(hello, hello_length, &vowels) == hello + 1);  // Dispatched (automatic kernel)
-    verify(sz_rfind_byteset(hello, hello_length, &vowels) == hello + 7); // Dispatched (automatic kernel)
-    verify(sz_find_byteset_serial(hello, hello_length, &vowels) ==
-           hello + 1); // Manual propagation to the serial kernel
-    verify(sz_rfind_byteset_serial(hello, hello_length, &vowels) ==
-           hello + 7); // Manual propagation to the serial kernel
+    // Dispatched (automatic kernel resolution).
+    verify(sz_find_byteset(hello, hello_length, &vowels) == hello + 1);
+    verify(sz_rfind_byteset(hello, hello_length, &vowels) == hello + 7);
+    // Manual propagation to the serial kernel.
+    verify(sz_find_byteset_serial(hello, hello_length, &vowels) == hello + 1);
+    verify(sz_rfind_byteset_serial(hello, hello_length, &vowels) == hello + 7);
     // A set with none of the present bytes returns `SZ_NULL_CHAR`.
     sz_byteset_t digits;
     sz_byteset_init(&digits);
     sz_byteset_add(&digits, '0');
     sz_byteset_add(&digits, '9');
     verify(sz_find_byteset(hello, hello_length, &digits) == SZ_NULL_CHAR);        // No digit present
-    verify(sz_find_byteset_serial(hello, hello_length, &digits) == SZ_NULL_CHAR); // No digit present, serial kernel
+    verify(sz_find_byteset_serial(hello, hello_length, &digits) == SZ_NULL_CHAR); // No digit present
+
+    // `sz_find_byte_from` / `sz_find_byte_not_from` / `sz_rfind_byte_from` / `sz_rfind_byte_not_from`:
+    // the `_from` family takes the needle bytes as the accepted set (the byteset built out of them), and
+    // the `_not_from` family inverts that set, so they are the byteset family above spelled with a needle
+    // string in place of an `sz_byteset_t`. Against "hello world" and the needle "helo" (accepts h, e, l, o):
+    // the first accepted byte is 'h' at offset 0 and the last is 'l' at offset 9; the first byte NOT in the
+    // set is ' ' at offset 5, and the last byte not in the set is 'd' at offset 10.
+    verify(sz_find_byte_from(hello, hello_length, "helo", 4) == hello + 0);       // First accepted: 'h'
+    verify(sz_rfind_byte_from(hello, hello_length, "helo", 4) == hello + 9);      // Last accepted: 'l'
+    verify(sz_find_byte_not_from(hello, hello_length, "helo", 4) == hello + 5);   // First rejected: ' '
+    verify(sz_rfind_byte_not_from(hello, hello_length, "helo", 4) == hello + 10); // Last rejected: 'd'
+    // An empty needle accepts nothing, so `_from` must miss everywhere and `_not_from` must hit immediately.
+    verify(sz_find_byte_from(hello, hello_length, "", 0) == SZ_NULL_CHAR);
+    verify(sz_rfind_byte_from(hello, hello_length, "", 0) == SZ_NULL_CHAR);
+    verify(sz_find_byte_not_from(hello, hello_length, "", 0) == hello + 0);
+    verify(sz_rfind_byte_not_from(hello, hello_length, "", 0) == hello + hello_length - 1);
+    // A needle covering the whole alphabet present in the haystack leaves `_not_from` with nothing to reject.
+    verify(sz_find_byte_not_from(hello, hello_length, hello, hello_length) == SZ_NULL_CHAR);
+    verify(sz_rfind_byte_not_from(hello, hello_length, hello, hello_length) == SZ_NULL_CHAR);
 
     // `sz_order` / `sz_equal`: lexicographic ordering and byte-equality on hand-verifiable pairs.
-    verify(sz_order("abc", 3, "abc", 3) == sz_equal_k);       // Equal strings
-    verify(sz_order("abc", 3, "abd", 3) == sz_less_k);        // Differ in the last byte
-    verify(sz_order("abd", 3, "abc", 3) == sz_greater_k);     // Differ in the last byte
-    verify(sz_order("ab", 2, "abc", 3) == sz_less_k);         // Prefix orders before the longer string
-    verify(sz_order("abc", 3, "ab", 2) == sz_greater_k);      // Longer string orders after its prefix
-    verify(sz_equal("abc", "abc", 3) == sz_true_k);           // Identical bytes
-    verify(sz_equal("abc", "abd", 3) == sz_false_k);          // Differing bytes
-    verify(sz_order_serial("abc", 3, "abd", 3) == sz_less_k); // Manual propagation to the serial kernel
-    verify(sz_equal_serial("abc", "abc", 3) == sz_true_k);    // Manual propagation to the serial kernel
-    verify(sz_equal_serial("abc", "abd", 3) == sz_false_k);   // Manual propagation to the serial kernel
+    verify(sz_order("abc", 3, "abc", 3) == sz_equal_k);   // Equal strings
+    verify(sz_order("abc", 3, "abd", 3) == sz_less_k);    // Differ in the last byte
+    verify(sz_order("abd", 3, "abc", 3) == sz_greater_k); // Differ in the last byte
+    verify(sz_order("ab", 2, "abc", 3) == sz_less_k);     // Prefix orders before the longer string
+    verify(sz_order("abc", 3, "ab", 2) == sz_greater_k);  // Longer string orders after its prefix
+    verify(sz_equal("abc", "abc", 3) == sz_true_k);       // Identical bytes
+    verify(sz_equal("abc", "abd", 3) == sz_false_k);      // Differing bytes
+    // Manual propagation to the serial kernel.
+    verify(sz_order_serial("abc", 3, "abd", 3) == sz_less_k);
+    verify(sz_equal_serial("abc", "abc", 3) == sz_true_k);
+    verify(sz_equal_serial("abc", "abd", 3) == sz_false_k);
+    // As above: the three-byte literals never reach a vectorized body, so every tier is swept across the
+    // lengths its ladder switches at.
+    check_compare_unit_("dispatched", sz_equal, sz_order);
+    check_compare_unit_("serial", sz_equal_serial, sz_order_serial);
+#if SZ_USE_WESTMERE
+    check_compare_unit_("westmere", sz_equal_westmere, sz_order_westmere);
+#endif
 #if SZ_USE_HASWELL
-    verify(sz_order_haswell("abc", 3, "abd", 3) == sz_less_k);
-    verify(sz_equal_haswell("abc", "abc", 3) == sz_true_k);
-    verify(sz_equal_haswell("abc", "abd", 3) == sz_false_k);
+    check_compare_unit_("haswell", sz_equal_haswell, sz_order_haswell);
 #endif
 #if SZ_USE_SKYLAKE
-    verify(sz_order_skylake("abc", 3, "abd", 3) == sz_less_k);
-    verify(sz_equal_skylake("abc", "abc", 3) == sz_true_k);
-    verify(sz_equal_skylake("abc", "abd", 3) == sz_false_k);
+    check_compare_unit_("skylake", sz_equal_skylake, sz_order_skylake);
 #endif
-    // And the same orderings through the C++ `sz::string_view` comparison operators.
-    verify("abc"_sv == "abc"_sv); // Equality operator
-    verify("abc"_sv != "abd"_sv); // Inequality operator
-    verify("abc"_sv < "abd"_sv);  // Strictly-less operator
-    verify("abd"_sv > "abc"_sv);  // Strictly-greater operator
-    verify("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
-
-    // Searching for a set of characters
-    verify(sz::string_view("a").find_first_of("az") == 0);
-    verify(sz::string_view("a").find_last_of("az") == 0);
-    verify(sz::string_view("a").find_first_of("xz") == sz::string_view::npos);
-    verify(sz::string_view("a").find_last_of("xz") == sz::string_view::npos);
-
-    verify(sz::string_view("a").find_first_not_of("xz") == 0);
-    verify(sz::string_view("a").find_last_not_of("xz") == 0);
-    verify(sz::string_view("a").find_first_not_of("az") == sz::string_view::npos);
-    verify(sz::string_view("a").find_last_not_of("az") == sz::string_view::npos);
-
-    verify(sz::string_view("aXbYaXbY").find_first_of("XY") == 1);
-    verify(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
-    verify(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
-    verify(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
-    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("_") == sz::string_view::npos);
-    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("+") == 62);
-    verify(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
-           sz::string_view::npos);
-
-    verify("aabaa"_sv.remove_prefix("a") == "abaa");
-    verify("aabaa"_sv.remove_suffix("a") == "aaba");
-    verify("aabaa"_sv.lstrip("a"_bs) == "baa");
-    verify("aabaa"_sv.rstrip("a"_bs) == "aab");
-    verify("aabaa"_sv.strip("a"_bs) == "b");
-
-    // Check more advanced composite operations
-    verify("abbccc"_sv.partition('b').before.size() == 1);
-    verify("abbccc"_sv.partition("bb").before.size() == 1);
-    verify("abbccc"_sv.partition("bb").match.size() == 2);
-    verify("abbccc"_sv.partition("bb").after.size() == 3);
-    verify("abbccc"_sv.partition("bb").before == "a");
-    verify("abbccc"_sv.partition("bb").match == "bb");
-    verify("abbccc"_sv.partition("bb").after == "ccc");
-    verify("abb ccc"_sv.partition(sz::whitespaces_set()).after == "ccc");
-
-    // Check ranges of search matches
-    verify("hello"_sv.find_all("l").size() == 2);
-    verify("hello"_sv.rfind_all("l").size() == 2);
-
-    verify(""_sv.find_all(".", sz::include_overlaps_type {}).size() == 0);
-    verify(""_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    verify("."_sv.find_all(".", sz::include_overlaps_type {}).size() == 1);
-    verify("."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    verify(".."_sv.find_all(".", sz::include_overlaps_type {}).size() == 2);
-    verify(".."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
-    verify(""_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
-    verify(""_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    verify("."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
-    verify("."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    verify(".."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
-    verify(".."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
-
-    verify("a.b.c.d"_sv.find_all(".").size() == 3);
-    verify("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
-    verify("a.,b.,c.,d"_sv.rfind_all(".,").size() == 3);
-    verify("a.b,c.d"_sv.find_all(".,"_bs).size() == 3);
-    verify("a...b...c"_sv.rfind_all("..").size() == 4);
-    verify("a...b...c"_sv.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
-    verify("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
-
-    let_verify(auto finds = "a.b.c"_sv.find_all("abcd"_bs).template to<std::vector<std::string>>(),
-               finds.size() == 3 && finds[0] == "a");
-    let_verify(auto rfinds = "a.b.c"_sv.rfind_all("abcd"_bs).template to<std::vector<std::string>>(),
-               rfinds.size() == 3 && rfinds[0] == "c");
-
-    // Test propagating strings and their non-owning views into temporary ranges and iterators
-    verify(sz::find_all("abc"_sv, "b"_sv).size() == 1);
-    verify(sz::find_all("hello"_sv, "l"_sv).size() == 2);
-    verify(sz::rfind_all("abc"_sv, "b"_sv).size() == 1);
-
-    {
-        sz::string h("abc"), n("b");
-        verify(sz::find_all(h, n).size() == 1);
-    }
-    {
-        sz::string h("hello"), n("l");
-        verify(sz::find_all(h, n).size() == 2);
-    }
-    {
-        sz::string h("abc"), n("b");
-        verify(sz::rfind_all(h, n).size() == 1);
-    }
-
-    verify(sz::find_all(sz::string("abc"), sz::string("b")).size() == 1);
-    verify(sz::find_all(sz::string("hello"), sz::string("l")).size() == 2);
-    verify(sz::rfind_all(sz::string("abc"), sz::string("b")).size() == 1);
-
-    // Lvalue haystacks are borrowed, so slices land inside the caller's own buffer. A copied
-    // haystack would offset into a private copy - and under SSO those offsets look plausible.
-    {
-        sz::string haystack("hello world, hello cpp");
-        sz::string sso("a b a");
-        let_verify(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view>>(),
-                   matches.size() == 2 &&                          //
-                       matches[0].data() - haystack.data() == 0 && //
-                       matches[1].data() - haystack.data() == 13);
-        let_verify(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view>>(),
-                   in_sso.size() == 2 &&                     //
-                       in_sso[0].data() - sso.data() == 0 && //
-                       in_sso[1].data() - sso.data() == 4);
-    }
-
-    // Needles are copied into the matcher, so a temporary one outlives the expression that built it.
-    verify(sz::find_all(sz::string("hello world, hello cpp"), sz::string("hello")).size() == 2);
-
-    // Haystack and needle need not share a type - literals, views, and owning strings mix.
-    {
-        sz::string owning("a-b-c");
-        sz::string_view view("a-b-c");
-        sz::string needle("-");
-        verify(sz::find_all(view, "-").size() == 2);
-        verify(sz::find_all(owning, "-").size() == 2);
-        verify(sz::find_all(owning, view.substr(1, 1)).size() == 2);
-        verify(sz::find_all(view, needle).size() == 2);
-        verify(sz::split(owning, "-").size() == 3);
-        verify(sz::rsplit(view, needle).size() == 3);
-        verify(sz::split_characters(owning, "-").size() == 3);
-    }
-
-    // Check splitting - the inverse of `find_all` ranges
-    let_verify(auto splits = ".a..c."_sv.split("."_bs).template to<std::vector<std::string>>(),
-               splits.size() == 5 && splits[0] == "" && splits[1] == "a" && splits[4] == "");
-    let_verify(auto line_splits = "line1\nline2\nline3"_sv.split("line3").template to<std::vector<std::string>>(),
-               line_splits.size() == 2 && line_splits[0] == "line1\nline2\n" && line_splits[1] == "");
-
-    verify(""_sv.split(".").size() == 1);
-    verify(""_sv.rsplit(".").size() == 1);
-
-    verify("hello"_sv.split("l").size() == 3);
-    verify("hello"_sv.rsplit("l").size() == 3);
-    verify(*advanced("hello"_sv.split("l").begin(), 0) == "he");
-    verify(*advanced("hello"_sv.rsplit("l").begin(), 0) == "o");
-    verify(*advanced("hello"_sv.split("l").begin(), 1) == "");
-    verify(*advanced("hello"_sv.rsplit("l").begin(), 1) == "");
-    verify(*advanced("hello"_sv.split("l").begin(), 2) == "o");
-    verify(*advanced("hello"_sv.rsplit("l").begin(), 2) == "he");
-
-    verify("a.b.c.d"_sv.split(".").size() == 4);
-    verify("a.b.c.d"_sv.rsplit(".").size() == 4);
-    verify(*("a.b.c.d"_sv.split(".").begin()) == "a");
-    verify(*("a.b.c.d"_sv.rsplit(".").begin()) == "d");
-    verify(*advanced("a.b.c.d"_sv.split(".").begin(), 1) == "b");
-    verify(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 1) == "c");
-    verify(*advanced("a.b.c.d"_sv.split(".").begin(), 3) == "d");
-    verify(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 3) == "a");
-    verify("a.b.,c,d"_sv.split(".,").size() == 2);
-    verify("a.b,c.d"_sv.split(".,"_bs).size() == 4);
-
-    let_verify(auto rsplits = ".a..c."_sv.rsplit("."_bs).template to<std::vector<std::string>>(),
-               rsplits.size() == 5 && rsplits[0] == "" && rsplits[1] == "c" && rsplits[4] == "");
+#if SZ_USE_NEON
+    check_compare_unit_("neon", sz_equal_neon, sz_order_neon);
+#endif
+#if SZ_USE_SVE
+    check_compare_unit_("sve", sz_equal_sve, sz_order_sve);
+#endif
+#if SZ_USE_V128
+    check_compare_unit_("v128", sz_equal_v128, sz_order_v128);
+#endif
+#if SZ_USE_V128RELAXED
+    check_compare_unit_("v128relaxed", sz_equal_v128relaxed, sz_order_v128relaxed);
+#endif
+#if SZ_USE_RVV
+    check_compare_unit_("rvv", sz_equal_rvv, sz_order_rvv);
+#endif
+#if SZ_USE_LASX
+    check_compare_unit_("lasx", sz_equal_lasx, sz_order_lasx);
+#endif
+#if SZ_USE_POWERVSX
+    check_compare_unit_("powervsx", sz_equal_powervsx, sz_order_powervsx);
+#endif
 }
 
 /**
@@ -410,6 +398,13 @@ void test_compare_unit() {
     verify("a"_sv == "a"_sv);
     verify("a"_sv != "a\0"_sv);
     verify("a\0"_sv == "a\0"_sv);
+
+    // The relational operators over the same orderings.
+    verify("abc"_sv == "abc"_sv); // Equality operator
+    verify("abc"_sv != "abd"_sv); // Inequality operator
+    verify("abc"_sv < "abd"_sv);  // Strictly-less operator
+    verify("abd"_sv > "abc"_sv);  // Strictly-greater operator
+    verify("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
 }
 
 #pragma endregion // Unit
@@ -420,7 +415,7 @@ void test_compare_unit() {
  *  @brief One substring-search backend (find or rfind), stored by pointer so the differential driver can iterate a
  *         table. `reference(haystack, hlen, needle, nlen)` invokes the kernel via `operator()`.
  */
-struct search_backend_t {
+struct find_backend_t {
     char const *name;
     sz_find_t kernel;
     sz_cptr_t operator()(sz_cptr_t haystack, sz_size_t haystack_length, //
@@ -450,7 +445,7 @@ struct byteset_backend_t {
  *  `for_each_cacheline_offset_`, so a needle straddling a 64-byte boundary is always exercised.
  */
 template <typename reference_, typename candidate_>
-void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_find_search_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     // Replays one haystack/needle pair at every intra-cacheline alignment and compares the backends.
     auto compare_on = [&](std::string const &haystack_pattern, std::string const &needle) {
@@ -462,7 +457,12 @@ void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size
 
                 sz_cptr_t const result_reference = reference(haystack, haystack_length, needle.data(), needle_length);
                 sz_cptr_t const result_candidate = candidate(haystack, haystack_length, needle.data(), needle_length);
-                verify(result_reference == result_candidate);
+                if (result_reference != result_candidate) {
+                    std::fprintf(
+                        stderr, "%s vs %s: substring search disagreed on a %zu-byte needle in a %zu-byte haystack\n",
+                        reference.name, candidate.name, (std::size_t)needle_length, (std::size_t)haystack_length);
+                    verify(false && "Candidate backend must resolve every needle to the same offset as the reference");
+                }
             });
     };
 
@@ -500,7 +500,7 @@ void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size
  *  `for_each_cacheline_offset_`, so a match straddling a 64-byte boundary is always exercised.
  */
 template <typename reference_, typename candidate_>
-void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_byteset_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     // The byteset of ASCII vowels, used for the hand-picked structured cases.
     sz_byteset_t vowels;
@@ -520,7 +520,11 @@ void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_siz
 
                 sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset);
                 sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset);
-                verify(result_reference == result_candidate);
+                if (result_reference != result_candidate) {
+                    std::fprintf(stderr, "%s vs %s: byteset search disagreed on a %zu-byte haystack\n", reference.name,
+                                 candidate.name, (std::size_t)haystack_length);
+                    verify(false && "Candidate backend must resolve every byteset to the same offset as the reference");
+                }
             });
     };
 
@@ -627,15 +631,16 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
                 std::printf("Mismatch at index #%zu: %zu != %zu\n", match_idx, match_stl.data() - haystack_stl.data(),
                             match_sz.data() - haystack_sz.data());
                 print_all_matches();
-                verify(false);
+                verify(false && "StringZilla must land on the same match offset as the STL reference matcher");
             }
         }
 
         if (count_stl != count_sz) {
             print_all_matches();
-            verify(false);
+            verify(false && "StringZilla must report the same match count as the STL reference matcher");
         }
-        verify(begin_stl == end_stl && begin_sz == end_sz);
+        verify(begin_stl == end_stl && begin_sz == end_sz &&
+               "Both matchers must exhaust their ranges together, not leave one with unconsumed matches");
 
         offsets_stl.clear();
         offsets_sz.clear();
@@ -700,7 +705,7 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
  *  @brief Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
  *         Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
  */
-void test_find_misaligned_all() {
+void test_find_misaligned_equivalence() {
     // When haystack is only formed of needles:
     check_find_misaligned_("a", "a");
     check_find_misaligned_("ab", "ab");
@@ -752,7 +757,7 @@ void test_find_misaligned_all() {
 #endif
 
 /** @brief Evaluates the correctness of look-up table transforms using random lookup tables. */
-void test_lookup_all(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
+void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
 
     std::size_t const body_length = 1024 * 1024;
     std::string body(body_length, '\0'), transformed(body_length, '\0');
@@ -779,12 +784,103 @@ void test_lookup_all(std::size_t lookup_tables_to_try, std::size_t slices_per_ta
     }
 }
 
+/**
+ *  @brief Degenerate and boundary shapes for the search family, asserting survival and in-bounds results.
+ *
+ *  Answers are not the subject here - a needle longer than its haystack, a zero length, or an empty byteset
+ *  each has one defensible reply, and what matters is that every backend gives it without reading a byte it
+ *  was not handed. The scanners run at every sub-cache-line alignment, since a misaligned tail is where an
+ *  overlapping load reaches past the end.
+ */
+void test_find_safety() {
+    std::printf("  - testing degenerate and boundary inputs of the search kernels...\n");
+
+    char const *body = "the quick brown fox";
+    sz_size_t const body_length = (sz_size_t)std::strlen(body);
+
+    // A zero-length haystack, and a needle longer than what it is searched in, must both miss rather than
+    // read - and every compiled backend has to say so, not merely whichever one the dispatcher picks here.
+    auto check_degenerate_ = [&](char const *name, sz_find_byte_t find_byte, sz_find_byte_t rfind_byte) {
+        if (find_byte(body, 0, "a") != SZ_NULL_CHAR) {
+            std::fprintf(stderr, "%s: find_byte reported a match in a zero-length haystack\n", name);
+            verify(false && "A zero-length haystack holds no byte to find");
+        }
+        if (rfind_byte(body, 0, "a") != SZ_NULL_CHAR) {
+            std::fprintf(stderr, "%s: rfind_byte reported a match in a zero-length haystack\n", name);
+            verify(false && "A zero-length haystack holds no byte to find");
+        }
+    };
+    check_degenerate_("dispatched", sz_find_byte, sz_rfind_byte);
+    check_degenerate_("serial", sz_find_byte_serial, sz_rfind_byte_serial);
+#if SZ_USE_WESTMERE
+    check_degenerate_("westmere", sz_find_byte_westmere, sz_rfind_byte_westmere);
+#endif
+#if SZ_USE_HASWELL
+    check_degenerate_("haswell", sz_find_byte_haswell, sz_rfind_byte_haswell);
+#endif
+#if SZ_USE_SKYLAKE
+    check_degenerate_("skylake", sz_find_byte_skylake, sz_rfind_byte_skylake);
+#endif
+#if SZ_USE_NEON
+    check_degenerate_("neon", sz_find_byte_neon, sz_rfind_byte_neon);
+#endif
+#if SZ_USE_SVE
+    check_degenerate_("sve", sz_find_byte_sve, sz_rfind_byte_sve);
+#endif
+#if SZ_USE_V128
+    check_degenerate_("v128", sz_find_byte_v128, sz_rfind_byte_v128);
+#endif
+#if SZ_USE_V128RELAXED
+    check_degenerate_("v128relaxed", sz_find_byte_v128relaxed, sz_rfind_byte_v128relaxed);
+#endif
+#if SZ_USE_RVV
+    check_degenerate_("rvv", sz_find_byte_rvv, sz_rfind_byte_rvv);
+#endif
+#if SZ_USE_LASX
+    check_degenerate_("lasx", sz_find_byte_lasx, sz_rfind_byte_lasx);
+#endif
+#if SZ_USE_POWERVSX
+    check_degenerate_("powervsx", sz_find_byte_powervsx, sz_rfind_byte_powervsx);
+#endif
+
+    verify(sz_find(body, 0, "a", 1) == SZ_NULL_CHAR);
+    verify(sz_rfind(body, 0, "a", 1) == SZ_NULL_CHAR);
+    verify(sz_find(body, 3, body, body_length) == SZ_NULL_CHAR);
+    verify(sz_rfind(body, 3, body, body_length) == SZ_NULL_CHAR);
+
+    // An empty byteset matches nothing; a full one matches the first and last byte.
+    sz_byteset_t empty_set, full_set;
+    sz_byteset_init(&empty_set);
+    sz_byteset_init(&full_set);
+    for (int byte_value = 0; byte_value != 256; ++byte_value) sz_byteset_add_u8(&full_set, (sz_u8_t)byte_value);
+    verify(sz_find_byteset(body, body_length, &empty_set) == SZ_NULL_CHAR);
+    verify(sz_rfind_byteset(body, body_length, &empty_set) == SZ_NULL_CHAR);
+    verify(sz_find_byteset(body, body_length, &full_set) == body);
+    verify(sz_rfind_byteset(body, body_length, &full_set) == body + body_length - 1);
+    verify(sz_find_byteset(body, 0, &full_set) == SZ_NULL_CHAR);
+
+    // Every scanner, at every sub-cache-line alignment, over a buffer with no match and then one at the end.
+    for (sz_size_t length : span_over(backend_ladder_lengths_)) {
+        for_each_cacheline_offset_((std::size_t)length, [&](sz_ptr_t buffer, std::size_t) {
+            std::memset(buffer, 'a', (std::size_t)length);
+            verify(sz_find_byte(buffer, length, "z") == SZ_NULL_CHAR);
+            verify(sz_rfind_byte(buffer, length, "z") == SZ_NULL_CHAR);
+            verify(sz_find(buffer, length, "zz", 2) == SZ_NULL_CHAR);
+            buffer[length - 1] = 'z';
+            verify(sz_find_byte(buffer, length, "z") == buffer + length - 1);
+            verify(sz_rfind_byte(buffer, length, "z") == buffer + length - 1);
+        });
+    }
+
+    std::printf("    boundary-input safety passed!\n");
+}
+
 #pragma endregion // Safety
 
 #pragma region Drivers
 
 /** @brief Forward substring-search (`sz_find`) backends; `dispatched` first keeps the table non-empty on baseline. */
-static search_backend_t const find_backends[] = {
+static find_backend_t const find_backends[] = {
     {"dispatched", sz_find},
 #if SZ_USE_WESTMERE
     {"westmere", sz_find_westmere},
@@ -819,7 +915,7 @@ static search_backend_t const find_backends[] = {
 };
 
 /** @brief Backward substring-search (`sz_rfind`) backends; same tiers as forward. */
-static search_backend_t const rfind_backends[] = {
+static find_backend_t const rfind_backends[] = {
     {"dispatched", sz_rfind},
 #if SZ_USE_SVE
     {"sve", sz_rfind_sve},
@@ -923,19 +1019,19 @@ static byteset_backend_t const rfind_byteset_backends[] = {
  *         back to back — forward/backward substring search and forward/backward byteset search.
  */
 void test_find_all() {
-    search_backend_t const find_serial {"serial", sz_find_serial};
-    for (search_backend_t const &backend : find_backends) test_search_equivalence(find_serial, backend, 200);
+    find_backend_t const find_serial {"serial", sz_find_serial};
+    for (find_backend_t const &backend : find_backends) check_find_search_equivalence_(find_serial, backend, 200);
 
-    search_backend_t const rfind_serial {"serial", sz_rfind_serial};
-    for (search_backend_t const &backend : rfind_backends) test_search_equivalence(rfind_serial, backend, 200);
+    find_backend_t const rfind_serial {"serial", sz_rfind_serial};
+    for (find_backend_t const &backend : rfind_backends) check_find_search_equivalence_(rfind_serial, backend, 200);
 
     byteset_backend_t const find_byteset_serial {"serial", sz_find_byteset_serial};
     for (byteset_backend_t const &backend : find_byteset_backends)
-        test_byteset_equivalence(find_byteset_serial, backend, 200);
+        check_byteset_equivalence_(find_byteset_serial, backend, 200);
 
     byteset_backend_t const rfind_byteset_serial {"serial", sz_rfind_byteset_serial};
     for (byteset_backend_t const &backend : rfind_byteset_backends)
-        test_byteset_equivalence(rfind_byteset_serial, backend, 200);
+        check_byteset_equivalence_(rfind_byteset_serial, backend, 200);
 }
 
 #pragma endregion // Drivers

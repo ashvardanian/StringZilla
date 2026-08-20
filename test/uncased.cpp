@@ -1,6 +1,6 @@
 /**
  *  @brief  Uncased UTF-8 case-folding equivalence/fuzzing and uncased substring search tests.
- *  @file   scripts/test_uncased.cpp
+ *  @file   test/uncased.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
@@ -49,26 +49,17 @@
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm>     // `std::transform`
-#include <array>         // `std::array`
-#include <iterator>      // `std::distance`
-#include <map>           // `std::map`
-#include <memory>        // `std::allocator`
-#include <numeric>       // `std::accumulate`
-#include <random>        // `std::random_device`
-#include <set>           // `std::set`
-#include <sstream>       // `std::ostringstream`
-#include <string>        // Baseline
-#include <string_view>   // Baseline
-#include <unordered_map> // `std::unordered_map`
-#include <unordered_set> // `std::unordered_set`
-#include <vector>        // `std::vector`
+#include <array>       // `std::array`
+#include <random>      // `std::uniform_int_distribution`
+#include <string>      // Baseline
+#include <string_view> // Baseline
+#include <vector>      // `std::vector`
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
 #endif
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "utf8.hpp" // `print_utf8_test_bytes_`, `encoded_rune_`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
@@ -102,13 +93,6 @@ static void check_uncased_fold_unit_( //
     sz_size_t const expected_length = (sz_size_t)std::strlen(expected);
     verify(produced_length == expected_length);
     verify(std::memcmp(produced, expected, expected_length) == 0);
-}
-
-/** @brief Prints one labeled hex dump line to `stderr`; used by the adversarial UTF-8 case tests below. */
-static void print_uncased_test_bytes_(char const *label, char const *bytes, std::size_t length) {
-    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
-    for (std::size_t i = 0; i < length; ++i) std::fprintf(stderr, "%02X ", (unsigned char)bytes[i]);
-    std::fprintf(stderr, "\n");
 }
 
 /**
@@ -229,8 +213,8 @@ static void check_uncased_find_three_way_(                                  //
         stderr, "%s FAIL: base offset=%ld len=%zu | simd offset=%ld len=%zu kernel=%u | reference offset=%ld len=%zu\n",
         test_name, base_offset, (std::size_t)base_matched, simd_offset, (std::size_t)simd_matched,
         simd_metadata.kernel_id, reference_offset, (std::size_t)reference_matched);
-    print_uncased_test_bytes_("needle  ", needle, needle_length);
-    print_uncased_test_bytes_("haystack", haystack, haystack_length);
+    print_utf8_test_bytes_("needle  ", needle, needle_length);
+    print_utf8_test_bytes_("haystack", haystack, haystack_length);
     verify(base_matches_reference && "Uncased find base backend disagrees with the reference");
     verify(simd_matches_reference && "Uncased find SIMD backend disagrees with the reference");
     verify(base_matches_simd && "Uncased find backends disagree with each other");
@@ -254,15 +238,15 @@ static void check_uncased_find_three_way_(                                  //
  *  @param max_needles_per_haystack  0 = exhaustive, >0 = sample this many per haystack
  *  @param total_queries Total needle searches to perform across all haystacks
  */
-static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8_uncased_search_t find_simd,
-                                   sz_utf8_uncased_fold_t uncased_fold, sz_utf8_seek_t utf8_seek,
-                                   sz_utf8_count_t utf8_count, std::size_t haystack_length,
-                                   std::size_t max_needles_per_haystack, std::size_t total_queries) {
+static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_utf8_uncased_search_t find_simd,
+                                     sz_utf8_uncased_fold_t uncased_fold, sz_utf8_seek_t utf8_seek,
+                                     sz_utf8_count_t utf8_count, std::size_t haystack_length,
+                                     std::size_t max_needles_per_haystack, std::size_t total_queries) {
 
     char const *mode = max_needles_per_haystack == 0 ? "exhaustive" : "sampled";
     std::printf("    - fuzz testing (%s, haystack_len=%zu, queries=%zu)...\n", mode, haystack_length, total_queries);
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
 
     // Character pool with normal + weird Unicode characters from safety profiles
     char const *char_pool[] = {
@@ -448,7 +432,7 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
     while (queries_remaining > 0) {
         // 1. Generate random haystack of ~haystack_length bytes
         haystack.clear();
-        while (haystack.size() < haystack_length) haystack += char_pool[pool_dist(rng)];
+        while (haystack.size() < haystack_length) haystack += char_pool[pool_dist(generator)];
 
         // 2. Case-fold the haystack - expands up to 3x
         haystack_folded.resize(haystack.size() * 3);
@@ -533,9 +517,9 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
             // Sampled mode: random (start, length) pairs
             std::uniform_int_distribution<sz_size_t> start_dist(0, runes_in_folded_haystack - 1);
             for (std::size_t i = 0; i < needles_in_this_haystack && queries_remaining > 0; ++i) {
-                sz_size_t start = start_dist(rng);
+                sz_size_t start = start_dist(generator);
                 std::uniform_int_distribution<sz_size_t> rune_count_dist(1, runes_in_folded_haystack - start);
-                if (test_needle(start, rune_count_dist(rng))) {
+                if (test_needle(start, rune_count_dist(generator))) {
                     ++total_passed;
                     --queries_remaining;
                 }
@@ -806,8 +790,8 @@ static void check_uncased_find_crossing_(sz_utf8_uncased_search_t find_base, sz_
  *  short helpers - swept across the 64-byte chunk boundary, each result checked against the independent
  *  fold-subset reference via the three-way `check_uncased_find_three_way_`.
  */
-static void test_uncased_find_long_crossing_fuzz(sz_utf8_uncased_search_t find_base,
-                                                 sz_utf8_uncased_search_t find_simd) {
+static void check_uncased_find_long_crossing_fuzz_(sz_utf8_uncased_search_t find_base,
+                                                   sz_utf8_uncased_search_t find_simd) {
     std::printf("  - testing uncased find across long (Rabin-Karp) expansion runs...\n");
 
     struct expander_t {
@@ -867,21 +851,21 @@ static void test_uncased_find_long_crossing_fuzz(sz_utf8_uncased_search_t find_b
  *  cross-expansion needles) of `find_simd` against the serial baseline and the independent reference.
  *  Called once per backend so coverage stays uniform and a new backend cannot silently skip a test.
  */
-static void run_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
+static void check_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
     sz_utf8_uncased_search_t const find_serial = sz_utf8_uncased_search_serial;
     std::size_t const queries = scale_iterations(8000);
-    test_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
-                           sz_utf8_count_serial, 16, 0, queries);
-    test_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
-                           sz_utf8_count_serial, 32, 0, queries);
-    test_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
-                           sz_utf8_count_serial, 100, 100, queries);
-    test_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
-                           sz_utf8_count_serial, 200, 100, queries);
+    check_uncased_find_fuzz_(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 16, 0, queries);
+    check_uncased_find_fuzz_(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 32, 0, queries);
+    check_uncased_find_fuzz_(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 100, 100, queries);
+    check_uncased_find_fuzz_(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 200, 100, queries);
     check_uncased_find_preimages_(find_serial, find_simd);
     check_uncased_find_tails_(find_serial, find_simd);
     check_uncased_find_crossing_(find_serial, find_simd);
-    test_uncased_find_long_crossing_fuzz(find_serial, find_simd);
+    check_uncased_find_long_crossing_fuzz_(find_serial, find_simd);
 
     // A long ASCII needle (well past the 32-rune ring buffer and the 3-rune short helpers) drives the
     // pure Rabin-Karp path inside a large random haystack, both where the needle was spliced in (so a
@@ -917,18 +901,11 @@ static void run_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
 #pragma region Unit
 
 /**
- *  @brief Known-answer + C++ API coverage for the uncased UTF-8 family on simple, hand-verifiable inputs.
+ *  @brief Known-answer battery for a single `sz_utf8_uncased_order` backend: case-insensitive equality,
+ *  ASCII less/greater, length-prefix ordering, and 2-byte accented folds (ö = C3 B6, é = C3 A9).
  *
- *  First exercises each function through the dispatched C API (automatic kernel resolution), through the
- *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through the
- *  C++ wrappers, so a regression that the serial-vs-SIMD agreement tests would miss - because both share
- *  a wrong constant - is still caught against an external, hand-derived ground truth. It then sweeps a
- *  broad battery of cross-script C++ wrapper cases: ordering, finding, ligatures, expansions, and
- *  SIMD-boundary regressions discovered by earlier fuzzing.
+ *  Each compiled per-ISA kernel is run through it directly, mirroring the per-ISA `_search` coverage.
  */
-// Known-answer battery for a single `sz_utf8_uncased_order` backend: case-insensitive equality, ASCII
-// less/greater, length-prefix ordering, and 2-byte accented folds (ö = C3 B6, é = C3 A9). Each compiled
-// per-ISA kernel is run through it directly, mirroring the per-ISA `_search` coverage.
 static void check_uncased_order_(sz_utf8_uncased_order_t order) {
     verify(order("Hello", 5, "HELLO", 5) == sz_equal_k);
     verify(order("abc", 3, "abd", 3) == sz_less_k);
@@ -938,6 +915,14 @@ static void check_uncased_order_(sz_utf8_uncased_order_t order) {
     verify(order("caf\xC3\xA9", 5, "CAF\xC3\x89", 5) == sz_equal_k);       // 'é' fold (2-byte)
 }
 
+/**
+ *  @brief Known-answer + C++ API coverage for the uncased UTF-8 family on simple, hand-verifiable inputs.
+ *
+ *  First exercises each function through the dispatched C API (automatic kernel resolution), through the
+ *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through the
+ *  C++ wrappers, so a regression that the serial-vs-SIMD agreement tests would miss - because both share
+ *  a wrong constant - is still caught against an external, hand-derived ground truth.
+ */
 void test_uncased_unit() {
 
     using str = sz::string_view;
@@ -947,33 +932,29 @@ void test_uncased_unit() {
         // `sz_utf8_uncased_search`: "world" matches case-insensitively in "Hello World" at byte offset 6, length 5.
         char const *greeting = "Hello World";
         sz_size_t const greeting_length = (sz_size_t)std::strlen(greeting);
-        check_uncased_find_unit_(sz_utf8_uncased_search, greeting, greeting_length, // Dispatched (automatic kernel)
-                                 "world", 5, 6, 5);
-        check_uncased_find_unit_(sz_utf8_uncased_search_serial, greeting, greeting_length, // Manual: serial kernel
-                                 "world", 5, 6, 5);
+        // Dispatched (automatic kernel resolution).
+        check_uncased_find_unit_(sz_utf8_uncased_search, greeting, greeting_length, "world", 5, 6, 5);
+        // Manual propagation to each natively-compiled backend kernel.
+        check_uncased_find_unit_(sz_utf8_uncased_search_serial, greeting, greeting_length, "world", 5, 6, 5);
 #if SZ_USE_HASWELL
-        check_uncased_find_unit_(sz_utf8_uncased_search_haswell, greeting, greeting_length, // Manual: haswell kernel
-                                 "world", 5, 6, 5);
+        check_uncased_find_unit_(sz_utf8_uncased_search_haswell, greeting, greeting_length, "world", 5, 6, 5);
 #endif
 #if SZ_USE_ICELAKE
-        check_uncased_find_unit_(sz_utf8_uncased_search_icelake, greeting, greeting_length, // Manual: icelake kernel
-                                 "world", 5, 6, 5);
+        check_uncased_find_unit_(sz_utf8_uncased_search_icelake, greeting, greeting_length, "world", 5, 6, 5);
 #endif
 
         // `sz_utf8_uncased_search`: 'ß' (U+00DF, C3 9F) folds to "ss", so needle "SS" matches the whole 2-byte 'ß'.
         char const *sharp_s = "\xC3\x9F" "fox"; // 'ß' followed by "fox" → folds to "ssfox"
         sz_size_t const sharp_s_length = (sz_size_t)std::strlen(sharp_s);
-        check_uncased_find_unit_(sz_utf8_uncased_search, sharp_s, sharp_s_length, // Dispatched (automatic kernel)
-                                 "SS", 2, 0, 2);
-        check_uncased_find_unit_(sz_utf8_uncased_search_serial, sharp_s, sharp_s_length, // Manual: serial kernel
-                                 "SS", 2, 0, 2);
+        // Dispatched (automatic kernel resolution).
+        check_uncased_find_unit_(sz_utf8_uncased_search, sharp_s, sharp_s_length, "SS", 2, 0, 2);
+        // Manual propagation to each natively-compiled backend kernel.
+        check_uncased_find_unit_(sz_utf8_uncased_search_serial, sharp_s, sharp_s_length, "SS", 2, 0, 2);
 #if SZ_USE_HASWELL
-        check_uncased_find_unit_(sz_utf8_uncased_search_haswell, sharp_s, sharp_s_length, // Manual: haswell kernel
-                                 "SS", 2, 0, 2);
+        check_uncased_find_unit_(sz_utf8_uncased_search_haswell, sharp_s, sharp_s_length, "SS", 2, 0, 2);
 #endif
 #if SZ_USE_ICELAKE
-        check_uncased_find_unit_(sz_utf8_uncased_search_icelake, sharp_s, sharp_s_length, // Manual: icelake kernel
-                                 "SS", 2, 0, 2);
+        check_uncased_find_unit_(sz_utf8_uncased_search_icelake, sharp_s, sharp_s_length, "SS", 2, 0, 2);
 #endif
 
         // C++ wrapper on `sz::string_view`: same two cases through `utf8_uncased_search`.
@@ -997,13 +978,15 @@ void test_uncased_unit() {
         }
 
         // `sz_utf8_uncased_fold`: "HeLLo" → "hello", and 'ß' (U+00DF) → "ss".
-        check_uncased_fold_unit_(sz_utf8_uncased_fold, "HeLLo", 5, "hello");        // Dispatched (automatic kernel)
-        check_uncased_fold_unit_(sz_utf8_uncased_fold_serial, "HeLLo", 5, "hello"); // Manual: serial kernel
-        check_uncased_fold_unit_(sz_utf8_uncased_fold, "\xC3\x9F", 2, "ss");        // Dispatched (automatic kernel)
-        check_uncased_fold_unit_(sz_utf8_uncased_fold_serial, "\xC3\x9F", 2, "ss"); // Manual: serial kernel
+        // Dispatched (automatic kernel resolution).
+        check_uncased_fold_unit_(sz_utf8_uncased_fold, "HeLLo", 5, "hello");
+        // Manual propagation to each natively-compiled backend kernel.
+        check_uncased_fold_unit_(sz_utf8_uncased_fold_serial, "HeLLo", 5, "hello");
+        check_uncased_fold_unit_(sz_utf8_uncased_fold, "\xC3\x9F", 2, "ss");
+        check_uncased_fold_unit_(sz_utf8_uncased_fold_serial, "\xC3\x9F", 2, "ss");
 #if SZ_USE_ICELAKE
-        check_uncased_fold_unit_(sz_utf8_uncased_fold_icelake, "HeLLo", 5, "hello"); // Manual: icelake kernel
-        check_uncased_fold_unit_(sz_utf8_uncased_fold_icelake, "\xC3\x9F", 2, "ss"); // Manual: icelake kernel
+        check_uncased_fold_unit_(sz_utf8_uncased_fold_icelake, "HeLLo", 5, "hello");
+        check_uncased_fold_unit_(sz_utf8_uncased_fold_icelake, "\xC3\x9F", 2, "ss");
 #endif
 
         // C++ wrapper: in-place fold on a mutable `sz::string`.
@@ -1019,29 +1002,34 @@ void test_uncased_unit() {
         }
 
         // `sz_utf8_uncased_order`: "Hello" and "HELLO" compare equal ignoring case.
-        verify(sz_utf8_uncased_order("Hello", 5, "HELLO", 5) == sz_equal_k);        // Dispatched (automatic kernel)
-        verify(sz_utf8_uncased_order_serial("Hello", 5, "HELLO", 5) == sz_equal_k); // Manual: serial kernel
-        check_uncased_order_(sz_utf8_uncased_order_serial);                         // serial battery
+        // Dispatched (automatic kernel resolution).
+        verify(sz_utf8_uncased_order("Hello", 5, "HELLO", 5) == sz_equal_k);
+        // Manual propagation to each natively-compiled backend kernel.
+        verify(sz_utf8_uncased_order_serial("Hello", 5, "HELLO", 5) == sz_equal_k);
+        check_uncased_order_(sz_utf8_uncased_order_serial); // serial battery
 #if SZ_USE_HASWELL
-        check_uncased_order_(sz_utf8_uncased_order_haswell); // Manual: haswell kernel
+        check_uncased_order_(sz_utf8_uncased_order_haswell);
 #endif
 #if SZ_USE_ICELAKE
-        check_uncased_order_(sz_utf8_uncased_order_icelake); // Manual: icelake kernel
+        check_uncased_order_(sz_utf8_uncased_order_icelake);
 #endif
 #if SZ_USE_NEON
-        check_uncased_order_(sz_utf8_uncased_order_neon); // Manual: neon kernel
+        check_uncased_order_(sz_utf8_uncased_order_neon);
+#endif
+#if SZ_USE_SVE2
+        check_uncased_order_(sz_utf8_uncased_order_sve2);
 #endif
 #if SZ_USE_V128
-        check_uncased_order_(sz_utf8_uncased_order_v128); // Manual: v128 kernel
+        check_uncased_order_(sz_utf8_uncased_order_v128);
 #endif
 #if SZ_USE_RVV
-        check_uncased_order_(sz_utf8_uncased_order_rvv); // Manual: rvv kernel
+        check_uncased_order_(sz_utf8_uncased_order_rvv);
 #endif
 #if SZ_USE_LASX
-        check_uncased_order_(sz_utf8_uncased_order_lasx); // Manual: lasx kernel
+        check_uncased_order_(sz_utf8_uncased_order_lasx);
 #endif
 #if SZ_USE_POWERVSX
-        check_uncased_order_(sz_utf8_uncased_order_powervsx); // Manual: powervsx kernel
+        check_uncased_order_(sz_utf8_uncased_order_powervsx);
 #endif
         verify(str("Hello").utf8_uncased_order("HELLO") == sz_equal_k); // C++ wrapper
 
@@ -1049,19 +1037,23 @@ void test_uncased_unit() {
         // "价格 123" is caseless (CJK + digits + space), so no rune participates in case → NULL.
         char const *caseless = "\xE4\xBB\xB7\xE6\xA0\xBC 123"; // "价格 123"
         sz_size_t const caseless_length = (sz_size_t)std::strlen(caseless);
-        verify(sz_utf8_find_cased(caseless, caseless_length) == SZ_NULL_CHAR);        // Dispatched (automatic kernel)
-        verify(sz_utf8_find_cased_serial(caseless, caseless_length) == SZ_NULL_CHAR); // Manual: serial kernel
+        // Dispatched (automatic kernel resolution).
+        verify(sz_utf8_find_cased(caseless, caseless_length) == SZ_NULL_CHAR);
+        // Manual propagation to each natively-compiled backend kernel.
+        verify(sz_utf8_find_cased_serial(caseless, caseless_length) == SZ_NULL_CHAR);
 #if SZ_USE_ICELAKE
-        verify(sz_utf8_find_cased_icelake(caseless, caseless_length) == SZ_NULL_CHAR); // Manual: icelake kernel
+        verify(sz_utf8_find_cased_icelake(caseless, caseless_length) == SZ_NULL_CHAR);
 #endif
 
         // "123Abc" has its first cased codepoint 'A' at byte offset 3.
         char const *mixed = "123Abc";
         sz_size_t const mixed_length = (sz_size_t)std::strlen(mixed);
-        verify(sz_utf8_find_cased(mixed, mixed_length) == mixed + 3);        // Dispatched (automatic kernel)
-        verify(sz_utf8_find_cased_serial(mixed, mixed_length) == mixed + 3); // Manual: serial kernel
+        // Dispatched (automatic kernel resolution).
+        verify(sz_utf8_find_cased(mixed, mixed_length) == mixed + 3);
+        // Manual propagation to each natively-compiled backend kernel.
+        verify(sz_utf8_find_cased_serial(mixed, mixed_length) == mixed + 3);
 #if SZ_USE_ICELAKE
-        verify(sz_utf8_find_cased_icelake(mixed, mixed_length) == mixed + 3); // Manual: icelake kernel
+        verify(sz_utf8_find_cased_icelake(mixed, mixed_length) == mixed + 3);
 #endif
 
         // A cased rune hiding behind a caseless prefix longer than any SIMD front's block: sixteen
@@ -1089,7 +1081,30 @@ void test_uncased_unit() {
 #if SZ_USE_V128
         verify(sz_utf8_find_cased_v128(deep, deep_length) == deep + 64);
 #endif
+#if SZ_USE_RVV
+        verify(sz_utf8_find_cased_rvv(deep, deep_length) == deep + 64);
+#endif
+#if SZ_USE_LASX
+        verify(sz_utf8_find_cased_lasx(deep, deep_length) == deep + 64);
+#endif
+#if SZ_USE_POWERVSX
+        verify(sz_utf8_find_cased_powervsx(deep, deep_length) == deep + 64);
+#endif
     }
+}
+
+/**
+ *  @brief Known-answer sweep of the uncased C++ wrappers across the world's scripts.
+ *
+ *  Ordering, finding, ligatures and expansions over Latin-1, Central European, German Eszett, math
+ *  symbols, Greek, Cyrillic, Turkish, Armenian, Vietnamese, Georgian, Cherokee, Coptic, Glagolitic and
+ *  the caseless scripts - CJK, Arabic, Hebrew and emoji - each with a hand-derived expected offset and
+ *  byte length, including the runs that straddle a 64-byte SIMD block.
+ */
+void test_uncased_scripts_unit() {
+    std::printf("  - testing uncased search and order across Unicode scripts...\n");
+
+    using str = sz::string_view;
 
     // Equal strings (ASCII)
     verify(str("hello").utf8_uncased_order("HELLO") == sz_equal_k);
@@ -1545,7 +1560,6 @@ void test_uncased_unit() {
     // Emoji Context
     let_verify(auto m = str("smile 😀😁😂").utf8_uncased_search("😁"), m.offset == 10 && m.length == 4);
 
-    // Regressions & Complex Cases
     // "Fuzz Regression": Needle "nԱԲՐԵշ" (Mixed case Armenian + ASCII)
     let_verify(auto m = str("nԱԲՐԵշ").utf8_uncased_search("nաբրեշ"), m.offset == 0 && m.length == 11);
 
@@ -1668,12 +1682,23 @@ void test_uncased_unit() {
     let_verify(auto m = str("HELLO").utf8_uncased_search("hello"), m.offset == 0 && m.length == 5);
     let_verify(auto m = str("Hello").utf8_uncased_search("xyz"), m.offset == str::npos);
     let_verify(auto m = str("Hello").utf8_uncased_search(""), m.offset == 0 && m.length == 0);
+}
+
+/**
+ *  @brief Minimized known-answer vectors pinning serial-vs-SIMD mismatches found by the find fuzzers.
+ *
+ *  Each numbered pattern pins the smallest input reproducing a serial-vs-SIMD disagreement - ligature and
+ *  Eszett expansions, one-to-many folds with combining marks, ring-buffer-length needles, and runs
+ *  landing on a 64-byte block edge - so the fix stays nailed down at a fixed cost.
+ */
+void test_uncased_regressions_unit() {
+    std::printf("  - testing uncased fuzz-discovered regressions...\n");
+
+    using str = sz::string_view;
 
     // Fuzz-Discovered Regressions (Serial vs SIMD mismatches)
-    // These patterns were discovered by the find fuzzers and expose
-    // disagreements between serial and SIMD implementations.
 
-    // Pattern 0: Ligature tail-match in mixed-case context (historical verify crash).
+    // Pattern 0: Ligature tail-match in mixed-case context; pins a verify crash on this input.
     // Haystack: C3 96 45 47 76 C3 91 2C 50 EF AC 84 ... EF AC 82 70
     // Needle:   67 76 C3 B1 2C 70 66
     {
@@ -1848,10 +1873,10 @@ void test_uncased_unit() {
     }
 
     // Minimal Divergence Cases (Ice Lake vs Serial)
-    // These were discovered by multi-seed fuzzing and represent minimal inputs
-    // that previously caused Serial/SIMD disagreement.
+    // Minimal inputs pinning Serial/SIMD agreement on expansion boundaries that generic
+    // fuzzing rarely hits: a fold that grows the needle mid-match, straddling a kernel's block edge.
 
-    // Pattern 7: "sss" prefix matching "Sß" (seed 5678, Kernel 2)
+    // Pattern 7: "sss" prefix matching "Sß" - a triple-s expansion from the Eszett fold.
     // Haystack: "brown Sßà jumps" - bytes at [6]: 53 C3 9F C3 A0 ("Sßà") = 5 bytes
     // Needle: "sssà" - bytes: 73 73 73 C3 A0 = 5 bytes
     // 'S' → 's', 'ß' → "ss", 'à' → 'à', so "Sßà" → "sssà" (should match!)
@@ -1868,7 +1893,7 @@ void test_uncased_unit() {
         let_verify(auto m = str("brown \xE1\xBA\x9E\xC3\xA0 jumps").utf8_uncased_search("ss\xC3\xA0"),
                    m.offset == 6 && m.length == 5);
 
-        // Triple-s with space (seed 1234): "sß " should match "sss "
+        // Triple-s with space: "sß " should match "sss "
         // Match starts at byte 7 where 's' is (byte 6 is space before 's')
         let_verify(auto m = str("\xC7\xB0" "bee3 s\xC3\x9F ee\xC3\xA9 nc").utf8_uncased_search("sss ee\xC3\xA9"),
                    m.offset == 7 && m.length == 8);
@@ -1880,10 +1905,10 @@ void test_uncased_unit() {
         let_verify(auto m = str("s\xC3\x9F" "abc").utf8_uncased_search("sssabc"), m.offset == 0 && m.length == 6);
     }
 
-    // Pattern 8: Greek Mu UTF-8 boundary (seed 300, 1000, 1700, Kernel 5)
+    // Pattern 8: Greek Mu UTF-8 boundary.
     // Needle: CE BC (Greek μ - U+03BC)
-    // Bug: SIMD was incorrectly matching mid-byte BC as standalone
-    // Fix: Ensure proper UTF-8 character boundary validation
+    // Pins that a match only lands on a valid UTF-8 character boundary, never on the mid-byte
+    // BC that also appears as the trailing byte of an unrelated codepoint such as ¼.
     {
         // Simple Greek mu search
         let_verify(auto m = str("hello \xCE\xBC world").utf8_uncased_search("\xCE\xBC"),
@@ -1900,7 +1925,7 @@ void test_uncased_unit() {
                    m.offset == 2 && m.length == 2);
     }
 
-    // Pattern 9: Cyrillic Moscow case folding (seed 9999, 44444, 55555, Kernel 4)
+    // Pattern 9: Cyrillic Moscow case folding.
     // Haystack: "се Москва" (uppercase М - D0 9C)
     // Needle: "се москва" (lowercase м - D0 BC)
     // Should match uncasedly
@@ -1926,7 +1951,7 @@ void test_uncased_unit() {
                    m.offset == 0 && m.length == 12);
     }
 
-    // Pattern 10: Ligature fi expansion (seed 500, Kernel 2)
+    // Pattern 10: Ligature fi expansion.
     // Haystack contains ﬁ (EF AC 81 - U+FB01)
     // Needle has "fi" (66 69)
     // ﬁ should case-fold to "fi"
@@ -1950,7 +1975,7 @@ void test_uncased_unit() {
         let_verify(auto m = str("wa\xEF\xAC\x84" "e").utf8_uncased_search("waffle"), m.offset == 0 && m.length == 6);
     }
 
-    // Pattern 11: Combining marks vs precomposed (seed 123, 42, Kernel 2)
+    // Pattern 11: Combining marks vs precomposed.
     // j + combining caron (6A CC 8C) vs ǰ (C7 B0 - U+01F0)
     // These are canonically equivalent in Unicode
     // Note: StringZilla may or may not perform normalization - document behavior
@@ -1965,7 +1990,7 @@ void test_uncased_unit() {
         let_verify(auto m = str("\xC3\xA9" "lan").utf8_uncased_search("e\xCC\x81" "lan"), m.offset == str::npos);
     }
 
-    // Pattern 12: Mixed script verification (seeds 456, 789, 22222, Kernels 3, 5, 6)
+    // Pattern 12: Mixed script verification.
     // These test that case folding works correctly when multiple scripts are mixed
     {
         // Greek κόσμ mixed with Latin
@@ -1997,8 +2022,8 @@ void test_uncased_unit() {
  *         sweep of every valid Unicode codepoint, both in order and shuffled.
  */
 template <typename reference_, typename candidate_>
-void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t min_text_length,
-                           sz_size_t min_iterations) {
+void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate, sz_size_t min_text_length,
+                                     sz_size_t min_iterations) {
 
     // Output buffers (3x input for worst-case expansion)
     std::vector<char> output_base(min_text_length * 3 + 256);
@@ -2104,7 +2129,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
         "Hello \xF0\x9F\x8C\x8D World", // Hello 🌍 World
     };
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::size_t const content_count = span_over(utf8_content).size();
     std::uniform_int_distribution<std::size_t> content_dist(0, content_count - 1);
 
@@ -2117,7 +2142,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
 
         // Build up a random string of at least `min_text_length` bytes
         while (text.size() < min_text_length) {
-            std::size_t content_index = content_dist(rng);
+            std::size_t content_index = content_dist(generator);
             text.append(utf8_content[content_index]);
         }
         check(text);
@@ -2137,7 +2162,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
     std::vector<char> input_buffer(all_runes.size() * 4); // Max UTF-8 size is 4 bytes per rune
     std::size_t const sweep_iterations = scale_iterations(6);
     for (std::size_t iteration = 0; iteration < sweep_iterations; ++iteration) {
-        if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
+        if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), generator);
 
         char *write_cursor = input_buffer.data();
         for (sz_rune_t codepoint : all_runes) write_cursor += sz_rune_encode(codepoint, (sz_u8_t *)write_cursor);
@@ -2156,7 +2181,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
  *  inside a folded expansion (like 'ʾ' U+02BE inside 'ẚ' → "aʾ"), so neither may be invariant.
  *  Fully generative: a Unicode table update re-derives the expected set automatically.
  */
-void test_uncased_invariant_reference() {
+void check_uncased_invariant_reference_() {
 
     std::printf("  - testing case-invariant closure over the fold table...\n");
     std::size_t preimages_checked = 0, outputs_checked = 0;
@@ -2208,7 +2233,6 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
 
     std::printf("  - testing invalid-input safety of case kernels (%zu random buffers)...\n", random_inputs);
 
-    std::size_t const max_input_length = 70;
     char const *needle = "st"; // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
 
     auto check = [&](char const *input, std::size_t input_length) {
@@ -2221,7 +2245,7 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
                 if (folded_length > length) {
                     std::fprintf(stderr, "%s fold of invalid input returned %zu bytes for %zu input bytes\n",
                                  candidate.name, (std::size_t)folded_length, input_length);
-                    print_uncased_test_bytes_("input", input, input_length);
+                    print_utf8_test_bytes_("input", input, input_length);
                     verify(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
                 }
             });
@@ -2234,34 +2258,9 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
         }
     };
 
-    char input[max_input_length];
+    for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
 
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF
-    for (std::size_t byte = 0; byte < 256; ++byte) {
-        input[0] = (char)byte;
-        check(input, 1);
-    }
-
-    // All 65,536 byte pairs: every lead × continuation interaction, including overlong shapes
-    for (std::size_t first_byte = 0; first_byte < 256; ++first_byte)
-        for (std::size_t second_byte = 0; second_byte < 256; ++second_byte) {
-            input[0] = (char)first_byte;
-            input[1] = (char)second_byte;
-            check(input, 2);
-        }
-
-    // Random garbage buffers spanning whole SIMD chunks
-    auto &rng = global_random_generator();
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    for (std::size_t iteration = 0; iteration < random_inputs; ++iteration) {
-        std::size_t input_length = length_distribution(rng);
-        for (std::size_t index = 0; index < input_length; ++index) input[index] = (char)byte_distribution(rng);
-        check(input, input_length);
-    }
-
-    std::printf("    passed %zu cases (256 singles + 65536 pairs + %zu random)\n", //
-                256 + 65536 + random_inputs, random_inputs);
+    std::printf("    invalid-input safety passed!\n");
 }
 
 /**
@@ -2284,6 +2283,18 @@ static uncased_safety_backend_t const uncased_safety_backends[] = {
 #if SZ_USE_SVE2
     {"sve2", sz_utf8_uncased_fold_sve2, sz_utf8_uncased_search_sve2, sz_utf8_find_cased_sve2},
 #endif
+#if SZ_USE_V128
+    {"v128", sz_utf8_uncased_fold_v128, sz_utf8_uncased_search_v128, sz_utf8_find_cased_v128},
+#endif
+#if SZ_USE_RVV
+    {"rvv", sz_utf8_uncased_fold_rvv, sz_utf8_uncased_search_rvv, sz_utf8_find_cased_rvv},
+#endif
+#if SZ_USE_LASX
+    {"lasx", sz_utf8_uncased_fold_lasx, sz_utf8_uncased_search_lasx, sz_utf8_find_cased_lasx},
+#endif
+#if SZ_USE_POWERVSX
+    {"powervsx", sz_utf8_uncased_fold_powervsx, sz_utf8_uncased_search_powervsx, sz_utf8_find_cased_powervsx},
+#endif
 };
 
 /** @brief Adversarial invalid-input safety driver across every backend compiled on this target. */
@@ -2295,8 +2306,8 @@ void test_uncased_safety() { check_uncased_safety_(span_over(uncased_safety_back
 
 /**
  *  @brief One UTF-8 case-folding + case-insensitive search backend compiled on this target. The struct doubles as
- *         the fold functor for `test_fold_equivalence` (via `operator()`), so the differential and the find battery
- *         iterate one table; the always-present `dispatched` entry keeps it non-empty on a baseline build.
+ *         the fold functor for `check_uncased_fold_equivalence_` (via `operator()`), so the differential and the find
+ *         battery iterate one table; the always-present `dispatched` entry keeps it non-empty on a baseline build.
  */
 struct uncased_backend_t {
     char const *name;
@@ -2347,13 +2358,13 @@ void test_uncased_all() {
     uncased_backend_t const serial {"serial", sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial};
 
     // Backend-independent: the fold table and the case-invariant classifier must stay closed.
-    test_uncased_invariant_reference();
+    check_uncased_invariant_reference_();
 
     // Serial reference vs every compiled backend (dispatched first): the case-fold differential and the full find
     // battery, paired per backend so their ISA coverage stays in lockstep.
     for (uncased_backend_t const &backend : uncased_backends) {
-        test_fold_equivalence(serial, backend, 4000, scale_iterations(1200));
-        run_uncased_find_battery_(backend.search);
+        check_uncased_fold_equivalence_(serial, backend, 4000, scale_iterations(1200));
+        check_uncased_find_battery_(backend.search);
     }
 }
 

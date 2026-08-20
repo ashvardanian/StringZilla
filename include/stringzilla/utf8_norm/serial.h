@@ -91,7 +91,7 @@ enum sz_utf8_norm_quick_check_t {
 };
 
 /** @brief 3-stage trie index for @p codepoint (0 for out-of-range / default). Shared by the props and scan lookups. */
-SZ_HELPER_INLINE sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
     if (codepoint >= sz_utf8_norm_table_max_k) return 0;
     sz_size_t leaf = codepoint >> sz_utf8_norm_low_bits_k;
     sz_u16_t mid = sz_utf8_norm_stage1_[leaf >> sz_utf8_norm_mid_bits_k];
@@ -112,7 +112,7 @@ SZ_HELPER_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) 
  *  (~20% slower). Hangul's decomposition bits are baked into the generated values, so no runtime Hangul
  *  test is needed here.
  */
-SZ_HELPER_INLINE sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
     if (codepoint >= sz_utf8_norm_table_max_k) return 0;
     sz_size_t leaf = codepoint >> sz_utf8_norm_scan_low_bits_k;
     sz_u16_t mid = sz_utf8_norm_scan_stage1_[leaf >> sz_utf8_norm_scan_mid_bits_k];
@@ -259,7 +259,7 @@ SZ_HELPER_AUTO void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) 
  *  output verbatim, never round-tripped through `sz_rune_encode`. It is an opaque barrier: it does
  *  not decompose, compose, or participate in canonical ordering.
  */
-SZ_HELPER_INLINE void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
+SZ_HELPER_AUTO void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
     if (out->dst) { *out->dst++ = byte, ++out->written; }
     else if (out->matches) {
         if (out->cmp == out->cmp_end || *out->cmp++ != byte) out->matches = sz_false_k;
@@ -301,8 +301,8 @@ SZ_HELPER_AUTO void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_com
 }
 
 /** @brief Core normalization engine, shared by the write and compare entry points. */
-SZ_HELPER_AUTO void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                      sz_utf8_norm_out_t *out) {
+SZ_HELPER_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                        sz_utf8_norm_out_t *out) {
     sz_bool_t compat = (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
     sz_bool_t compose = (form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
 
@@ -427,7 +427,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_si
 }
 
 /** @brief Map a normalization form to its hot-path `sz_utf8_norm_quick_check_k*` flag bit. */
-SZ_HELPER_INLINE sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
+SZ_HELPER_AUTO sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
     switch (form) {
     case sz_normal_form_nfc_k: return sz_utf8_norm_quick_check_nfc_k;
     case sz_normal_form_nfkc_k: return sz_utf8_norm_quick_check_nfkc_k;
@@ -526,7 +526,7 @@ SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz
  *  well-formed lead (or that would cross @p begin) is treated as single literal bytes, so the cursor
  *  retreats exactly one byte rather than over-reading.
  */
-SZ_HELPER_AUTO sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
+SZ_HELPER_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
     sz_u8_t const *probe = position - 1;
     while (probe > begin && (*probe & 0xC0u) == 0x80u && (position - probe) < 4) --probe;
     sz_rune_t rune;
@@ -541,8 +541,8 @@ SZ_HELPER_AUTO sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, s
  *  @p scan primitive) and run the decompose/reorder/compose engine only on the short dirty regions,
  *  each delimited by safe boundaries so composition never crosses a split. Shared across ISAs.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                              sz_ptr_t destination, sz_utf8_norm_scan_t scan) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                                sz_ptr_t destination, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const begin = (sz_u8_t const *)source;
     sz_u8_t const *const end = begin + source_length;
     sz_u8_t *out = (sz_u8_t *)destination;
@@ -607,8 +607,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source
  *  benign segments and back up to the same boundary), and it carries the clean guarantee that every
  *  byte before the returned pointer is provably in @p form.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
-                                                           sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
+                                                             sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const end = (sz_u8_t const *)source + source_length;
     sz_u8_t const *cur = (sz_u8_t const *)source;
 

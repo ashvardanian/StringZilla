@@ -474,7 +474,8 @@ Every engine is called as `engine(queries, candidates=None, device=None, out=Non
 - `queries` — the collection forming the matrix rows, either a `sz.Strs` or any string sequence.
 - `candidates` — the collection forming the matrix columns; when omitted or `None`, the engine computes the symmetric self-similarity of `queries`.
 - `device` — an optional `DeviceScope` overriding the constructor's.
-- `out` — an optional pre-allocated 2-D NumPy output buffer of shape `(len(queries), len(candidates))`.
+- `out` — an optional pre-allocated 2-D output buffer of shape `(len(queries), len(candidates))`.
+  On a CPU scope this is a NumPy array; on a GPU scope it must be a CUDA buffer, as described under [Unified Memory](#unified-memory).
 
 The result `result[i, j]` is the distance or score between `queries[i]` and `candidates[j]`.
 
@@ -548,7 +549,79 @@ distances = engine(a, b, device=gpu)
 ```
 
 Each engine also exposes a read-only `__capabilities__` property reporting the backends it selected at runtime.
-The module-level `szs.to_device(strs)` converts a `sz.Strs` to use a unified/device-accessible allocator, forcing the allocator swap that normally happens during GPU kernel execution.
+
+### Unified Memory
+
+On a GPU scope every array an engine reads or writes lives on the device — unified or plain CUDA memory, never page-locked host memory.
+Most of that is handled for you: `sz.Strs` inputs are moved to a device-accessible allocator on the way in, and every array an engine returns is already allocated there.
+The rule is therefore only visible on the arrays _you_ supply, of which there are two: the optional `out` matrix of an alignment engine, and `Substrings.score_bm25`'s `needle_weights` and `document_lengths`.
+A host array in one of those positions raises `BufferError` rather than being copied behind your back.
+A CPU scope imposes no requirement at all.
+
+```python
+gpu = szs.DeviceScope(gpu_device=0)
+engine = szs.LevenshteinDistances(capabilities=gpu)
+
+distances = engine(a, b, device=gpu)          # returned array is already device-resident
+distances = engine(a, b, device=gpu, out=np.zeros((len(a), len(b)), dtype=np.uint64))  # BufferError
+
+out = szs.unified_array((len(a), len(b)), dtype=np.uint64)   # this one qualifies
+distances = engine(a, b, device=gpu, out=out)
+```
+
+`szs.unified_array(shape, dtype)` is how you produce a qualifying array without CuPy or Torch; anything exposing `__cuda_array_interface__` or `__dlpack__` works too.
+The module-level `szs.to_device(strs)` does the same for a `sz.Strs`, which is worth doing to pay the swap once for a collection reused across many calls.
+
+## Multi-Pattern Matching
+
+`Substrings(needles, case_sensitivity='cased', device=None, capabilities=None)` matches a whole dictionary of needles against a whole collection of haystacks in one pass.
+The needle set is compiled once into an Aho-Corasick automaton and reused across every later call, so the dictionary is paid for once rather than per haystack.
+Construction is itself a device operation — the automaton's tier split is sized against the cache the walk reads through, and a CUDA automaton is uploaded to the device — which is why `device` belongs on the constructor as well as on each call.
+
+| Argument           | Default    | Meaning                                                       |
+| ------------------ | ---------- | ------------------------------------------------------------- |
+| `needles`          | required   | `sz.Strs` of needles, non-empty, valid UTF-8 when folding.     |
+| `case_sensitivity` | `'cased'`  | `'cased'` matches bytes, `'uncased'` folds both sides.         |
+| `device`           | `None`     | `DeviceScope` the automaton is built for and uploaded to.      |
+| `capabilities`     | `None`     | Capabilities tuple restricting the engine, may include `'cuda'`. |
+
+Four operations share that automaton, each taking an optional `device` overriding the constructor's:
+
+| Call                                                                  | Returns                                                                    |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `count(haystacks, policy='overlapping')`                               | A `uint64` count per haystack, and the corpus-wide total as an `int`.      |
+| `find(haystacks, policy='overlapping')`                                | Four `uint64` arrays — haystack indices, needle indices, offsets, lengths. |
+| `score_bm25(haystacks, needle_weights, average_document_length, ...)`  | One `float32` score per haystack.                                          |
+| `replace(haystacks, replacements, policy='leftmost-longest')`          | The rewritten tape as `bytes`, and its `uint64` offsets, one per haystack plus one. |
+
+`policy` picks how overlaps resolve — `'overlapping'` reports every match, while `'leftmost-longest'` and `'leftmost-first'` each keep a non-overlapping cover.
+`replace` accepts only the two cover policies, since a rewrite cannot substitute two matches at the same byte.
+`replace_bound(replacements, input_bytes)` bounds the bytes a rewrite can produce from the needle set alone, needing no haystacks, no walk, and no device.
+
+```python
+import stringzilla as sz
+import stringzillas as szs
+
+engine = szs.Substrings(sz.Strs(["he", "she", "his", "hers"]))
+haystacks = sz.Strs(["ushers", "hershey"])
+
+counts, total = engine.count(haystacks)
+assert total == 7
+
+tape, offsets = engine.replace(haystacks, sz.Strs(["H", "SH", "HIS", "HERS"]))
+assert bytes(tape[offsets[0]:offsets[1]]) == b"uSHrs"
+```
+
+The same engine runs on a GPU by passing a GPU `DeviceScope`, at construction and per call:
+
+```python
+gpu = szs.DeviceScope(gpu_device=0)
+engine = szs.Substrings(sz.Strs(["he", "she"]), device=gpu)
+counts, total = engine.count(haystacks, device=gpu)
+```
+
+`score_bm25` is the one operation whose device rule you have to meet yourself: its `needle_weights` and optional `document_lengths` are read on the device, so on a GPU scope they must be CUDA buffers rather than plain NumPy arrays.
+See [Unified Memory](#unified-memory) above.
 
 ## Rolling Fingerprints
 
@@ -607,7 +680,7 @@ Each yields `Str` views into the original buffer, so segmentation stays allocati
 | `utf8_split_delimiters(string, skip_empty=False, with_separators=False)`  | punctuation/symbol/separator     | content BETWEEN any Unicode delimiter (superset of whitespace).                        |
 | `utf8_delimiters(string, skip_empty=False)`                               | punctuation/symbol/separator     | the delimiter runs themselves (the separators).                                        |
 
-Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators**, while `split_*` yields the content **between** them.
+Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the __separators__, while `split_*` yields the content __between__ them.
 `skip_empty` drops empty segments; `with_separators=True` interleaves both losslessly (concatenation reproduces the input), replacing the old `keepends`.
 
 ```python

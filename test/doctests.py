@@ -5,7 +5,7 @@ This keeps those examples honest: if an API changes, the example fails here.
 
 Run with::
 
-    python -m pytest scripts/test_doctests.py -v
+    python -m pytest test/doctests.py -v
 """
 
 import doctest

@@ -21,8 +21,11 @@ code_only() {
         -e 's,^([0-9]*:?\+[[:space:]]*)(\*|/\*).*$,\1,'
 }
 
-# Decorative comment separators - runs of three or more `-` or `=` used purely as visual dividers inside
-# C/C++ comments. Proper sentences communicate structure better than attention-grabbing rules.
+# Decorative separators - runs of three or more `-` or `=` used purely as visual dividers, whether in a
+# C/C++ comment or printed at runtime as `printf("\n=== Section ===\n")`. Proper sentences communicate
+# structure better than attention-grabbing rules, and a banner a test prints is the same habit as a banner
+# a comment draws. The literal arm requires the run to sit against whitespace or an escaped newline, so a
+# rule used as a divider is caught while `"---"` or `"a---b"` as test DATA is not.
 mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM \
     -- '*.c' '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx' '*.cu' '*.cuh' '*.inl')
 separators=0
@@ -30,9 +33,9 @@ for file in "${staged[@]}"; do
     [ -f "$file" ] || continue
     while IFS= read -r line; do
         added="${line#+}"
-        if printf '%s\n' "$added" | grep -qE '(//|/\*|^\s*\*).*[-=]{3,}'; then
+        if printf '%s\n' "$added" | grep -qE '(//|/\*|^\s*\*).*[-=]{3,}|"[^"]*([[:space:]]|\\n)[-=]{3,}|"[^"]*[-=]{3,}([[:space:]]|\\n)'; then
             if [ "$separators" -eq 0 ]; then
-                printf 'Decorative comment separators are not allowed (--- / ===):\n\n' >&2
+                printf 'Decorative separators are not allowed in comments or printed banners (--- / ===):\n\n' >&2
             fi
             printf '  %s: %s\n' "$file" "$(printf '%s' "$added" | sed 's/^[[:space:]]*//')" >&2
             separators=$((separators + 1))
@@ -42,6 +45,27 @@ done
 if [ "$separators" -ne 0 ]; then
     printf '\nWrite a plain sentence instead, or bypass with --no-verify.\n' >&2
     exit 1
+fi
+
+# Doxygen section anchors. `@section <id> <Title>` binds the FIRST token as the link target and the rest as
+# the visible title, so `@section Device Memory` silently anchors "Device" and titles the section "Memory" -
+# the heading reads wrong and nothing can link to it. House convention is a lowercase snake_case id carrying
+# its domain, since ids share one namespace project-wide and two headers both document "Buffer Sizing":
+# `utf8_norm_buffer_sizing`, not `buffer_sizing`. A Title-Case first token is the exact signature of a
+# missing id, and an id with no title renders an empty heading, so both arms are required. Reads raw lines
+# rather than `code_only` ones, since these live inside comments by construction.
+doxygen_sections=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx' '*.cu' '*.cuh' '*.inl' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '@(section|subsection|subsubsection|page)[[:space:]]' \
+  | grep -vE '@(section|subsection|subsubsection|page)[[:space:]]+[a-z][a-z0-9_]*[[:space:]]+[^[:space:]]' || true)
+if [ -n "$doxygen_sections" ]; then
+  cat >&2 <<EOF
+pre-commit: Doxygen section missing its lowercase snake_case id, or carrying an id with no title. Doxygen
+anchors the first token, so '@section Device Memory' anchors "Device". Write '@section domain_topic Title':
+$doxygen_sections
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
 fi
 
 # The `&*iterator` antipattern (iterator -> reference -> pointer laundering). Use the container's
@@ -105,6 +129,42 @@ EOF
   exit 1
 fi
 
+# clang-format's `BreakStringLiterals` splits an overlong string literal in place - two adjacent
+# fragments left on one line, continuations re-indented under them. A hand-broken literal never leaves
+# two fragments on the same line, so same-line adjacency is the mangle's exact signature. The escape
+# hatch is a trailing `//` comment pinning the split as deliberate, as when stopping `"\x9F" "e"` from
+# parsing as one escape - clang-format never re-joins a line that ends in a comment. This guard reads
+# raw lines, not `code_only` ones, precisely so it can see that pin.
+mangled_literals=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '"([^"\\]|\\.)*"[[:space:]]+"' \
+  | grep -v '//' || true)
+if [ -n "$mangled_literals" ]; then
+  cat >&2 <<EOF
+pre-commit: two string-literal fragments on one line - clang-format's BreakStringLiterals mangle
+signature. Hand-break the literal onto per-fragment lines, or pin a deliberate same-line split with a
+trailing // comment naming why:
+$mangled_literals
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# Indexing straight through a call - `owner.view()[index]`, `data()[index]`, a cast-then-index chain.
+# The owning containers carry their own `operator[]`, and anything else deserves a named local: the call
+# names WHAT is indexed, the local names what it MEANS. The `)[` adjacency is the whole signature.
+call_indexing=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | code_only | grep -E '\)\[' || true)
+if [ -n "$call_indexing" ]; then
+  cat >&2 <<EOF
+pre-commit: ')[' chain in staged changes - indexing through a call or cast. Index the owning container
+directly, or bind the callee's result to a named local first:
+$call_indexing
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
 # LibC string/memory symbols under include/stringzilla/**: StringZilla supersedes LibC and cannot share a
 # translation unit with the compiler `__builtin_*` it emits. Use the project wrappers (`sz_copy`, `sz_fill`,
 # `sz_move`, `sz_equal`) or a `sz_u(128|256|512)_vec_t` union `.u8s[]` buffer for staging. The default allocator
@@ -119,6 +179,22 @@ if [ -n "$libc" ]; then
 pre-commit: LibC string/memory symbol in staged include/stringzilla changes (StringZilla supersedes LibC).
 Use sz_copy / sz_fill / sz_move / sz_equal, or a sz_u(128|256|512)_vec_t union .u8s[] staging buffer:
 $libc
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# Iostreams are banned house-wide: <iostream>/<fstream>/<sstream> and their std::cout/cerr/ifstream/
+# ofstream/stringstream/endl symbols drag in the virtual-dispatch streambuf machinery. Use LibC <cstdio>:
+# std::fopen/std::fread/std::fwrite/std::fprintf/std::snprintf, as read_file and log_failure already do.
+iostreams=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx' '*.cu' '*.cuh' '*.inl' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E '#include[[:space:]]*<(iostream|fstream|sstream)>|std::(cout|cerr|cin|ifstream|ofstream|fstream|stringstream|ostringstream|istringstream|endl)\b' || true)
+if [ -n "$iostreams" ]; then
+  cat >&2 <<EOF
+pre-commit: iostream/fstream/sstream in staged changes - the streambuf machinery is banned house-wide.
+Use LibC <cstdio>: std::fopen / std::fread / std::fwrite / std::fprintf / std::snprintf (see read_file):
+$iostreams
 Bypass with --no-verify only if intentional.
 EOF
   exit 1
@@ -236,16 +312,56 @@ fi
 
 # Raw libc assert() in test/ is silently stripped by the -DNDEBUG that CMake's Release and
 # RelWithDebInfo configs add by default - exactly the configs CI builds the test binaries with.
-# The test suite's oracle must never be a no-op: use verify() / let_verify() / scope_verify() /
-# throws_verify() from test/stringzilla.hpp instead, which are never gated by NDEBUG or SZ_DEBUG.
+# `sz_assert_` is the same trap wearing the project's own name: `CMakeLists.txt` defines SZ_DEBUG=0 for
+# every config but Debug, and types.h then expands it to `((void)(condition))`, so the oracle evaluates
+# its argument and throws the verdict away. The test suite's oracle must never be a no-op: use verify() /
+# let_verify() / scope_verify() / throws_verify() from test/stringzilla.hpp, which no config gates.
 raw_assert=$(git diff --cached --no-color -U0 -- 'test/*.c' 'test/*.h' 'test/*.cpp' 'test/*.hpp' 'test/*.cuh' 'test/*.cu' \
   | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
-  | grep -E '(^|[^A-Za-z0-9_])assert[[:space:]]*\(' || true)
+  | grep -E '(^|[^A-Za-z0-9_])(assert|sz_assert_)[[:space:]]*\(' || true)
 if [ -n "$raw_assert" ]; then
   cat >&2 <<EOF
-pre-commit: raw assert() in staged test/ changes (stripped by -DNDEBUG in CI's Release/RelWithDebInfo
-test builds). Use verify() / let_verify() / scope_verify() / throws_verify() instead:
+pre-commit: assert() or sz_assert_() in staged test/ changes - both are compiled out of CI's
+Release/RelWithDebInfo test builds. Use verify() / let_verify() / scope_verify() / throws_verify():
 $raw_assert
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# A coverage assertion over a randomized sweep: `saw_x |= ...` inside a loop, then a `verify(saw_x)` that
+# the loop reached that case at all. `SZ_TESTS_MULTIPLIER` scales fuzz loops down - the QEMU jobs run at
+# 0.05, turning a scale_iterations(80) sweep into 4 draws - so the assertion stops being a property of the
+# code and becomes a property of the seed. Sweep the fixed pool deterministically instead, or, when the
+# trip count really is fixed and the coverage claim really is exact, pin it with `// sz-nolint: coverage`.
+# Reads raw lines rather than `code_only` ones, precisely so it can see that pin.
+coverage_assert=$(git diff --cached --no-color -U0 -- 'test/*.cpp' 'test/*.hpp' 'test/*.cuh' 'test/*.cu' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E 'verify\([[:space:]]*(saw|seen|observed)_' \
+  | grep -v 'sz-nolint: coverage' || true)
+if [ -n "$coverage_assert" ]; then
+  cat >&2 <<EOF
+pre-commit: coverage assertion over a randomized sweep - a low SZ_TESTS_MULTIPLIER makes this a coin
+flip rather than a test. Walk the pool deterministically, or pin with '// sz-nolint: coverage':
+$coverage_assert
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# Export macros on binding-internal definitions. Everything under python/ is one CPython extension module:
+# its cross-TU helpers are declared plain `extern` in the module's own header, so defining them with
+# SZ_API_RUNTIME / SZ_PUBLIC / SZ_DYNAMIC contradicts that declaration. GCC and Clang shrug; MSVC, where
+# SZ_API_RUNTIME is __declspec(dllexport), rejects the pair with "error C2375: redefinition; different
+# linkage" and takes both Windows jobs down. Nothing in a binding needs to be exported from the module.
+binding_exports=$(git diff --cached --no-color -U0 -- 'python/*.c' 'python/*/*.c' 'javascript/*.c' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E '^\+[[:space:]]*(SZ_API_RUNTIME|SZ_PUBLIC|SZ_DYNAMIC)[[:space:]]' || true)
+if [ -n "$binding_exports" ]; then
+  cat >&2 <<EOF
+pre-commit: export macro on a binding-internal definition (MSVC C2375 against the plain 'extern'
+declaration in the binding's own header). Drop the macro - the module exports only its init function:
+$binding_exports
 Bypass with --no-verify only if intentional.
 EOF
   exit 1

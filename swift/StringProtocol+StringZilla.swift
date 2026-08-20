@@ -111,7 +111,7 @@ public protocol StringZillaViewable: Collection {
     ///
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
-    ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
+    ///   - startPointer: The starting pointer for the calculation, previously obtained from `withStringZillaScope`.
     /// - Returns: The calculated index offset.
     func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index
 }
@@ -157,7 +157,7 @@ extension Substring.UTF8View: StringZillaViewable {
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
-    ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
+    ///   - startPointer: The starting pointer for the calculation, previously obtained from `withStringZillaScope`.
     /// - Returns: The calculated index offset.
     @_transparent
     public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
@@ -188,7 +188,7 @@ extension String.UTF8View: StringZillaViewable {
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
-    ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
+    ///   - startPointer: The starting pointer for the calculation, previously obtained from `withStringZillaScope`.
     /// - Returns: The calculated index offset.
     public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
         -> Index
@@ -682,8 +682,8 @@ public class StringZillaHasher {
     /// Alias for `finalize()`.
     public func digest() -> UInt64 { return finalize() }
 
-    /// Resets the hasher to its initial state with the same seed.
-    /// - Parameter seed: Optional new seed value (if nil, uses the original seed).
+    /// Resets the hasher to its initial state.
+    /// - Parameter seed: New seed value; the original seed is not retained, so omitting this re-seeds with 0.
     public func reset(seed: UInt64? = nil) {
         let newSeed = seed ?? 0  // Default to 0 if no seed provided
         sz_hash_state_init(&state, newSeed)

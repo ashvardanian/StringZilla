@@ -36,7 +36,7 @@ SZ_HELPER_INLINE v128_t sz_utf8_rotate2_v128_(v128_t bytes_u8x16) {
  *  `(position+lane, length)` pairs to the front of a 16-wide stack scratch via one swizzle from `compact_lut`,
  *  then copies the low @p emit_count entries out - ascending lane order, byte-exact, no per-match `ctz`.
  */
-SZ_HELPER_AUTO void sz_utf8_iterate_peel_v128_(                                //
+SZ_HELPER_INLINE void sz_utf8_iterate_peel_v128_(                              //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {

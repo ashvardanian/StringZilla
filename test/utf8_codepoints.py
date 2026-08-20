@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """UTF-8 codepoint counting and iteration: sz.utf8_count and sz.utf8_codepoints.
 
-Mirrors the C++ scripts/test_utf8_codepoints.cpp translation unit.
+Mirrors the C++ test/utf8_runes.cpp translation unit.
 
 Covers: utf8_count and utf8_codepoints on ASCII, multi-byte, and mixed-script text, str/Str/bytes
 input parity, round-trip fidelity against random valid UTF-8 corpora, malformed-byte safety

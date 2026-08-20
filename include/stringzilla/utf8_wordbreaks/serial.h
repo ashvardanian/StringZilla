@@ -94,12 +94,12 @@ enum {
 };
 
 /** @brief Check if a property is WB4-ignorable (Extend, Format, ZWJ). */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_ignorable_set_k >> property) & 1u);
 }
 
 /** @brief Check if a property is AHLetter (ALetter or Hebrew_Letter). */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_aletter_or_hebrew_set_k >> property) & 1u);
 }
 
@@ -107,7 +107,7 @@ SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t prop
  *  @brief Check if a property is MidNumLetQ (MidNumLet or Single_Quote).
  *         In our encoding, MID_QUOTES (15) covers MidNumLet + quotes.
  */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_mid_quotes_set_k >> property) & 1u);
 }
 
@@ -133,7 +133,7 @@ typedef struct sz_word_element_t {
 } sz_word_element_t;
 
 /** @brief True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
-SZ_HELPER_INLINE sz_bool_t sz_word_is_newline_(sz_u8_t property) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_newline_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_utf8_word_break_cr_k || property == sz_utf8_word_break_lf_k ||
                        property == sz_utf8_word_break_newline_k);
 }
@@ -141,13 +141,13 @@ SZ_HELPER_INLINE sz_bool_t sz_word_is_newline_(sz_u8_t property) {
 /*  The 4-bit model lumps Single_Quote (U+0027), Double_Quote (U+0022), and MidNumLet into MID_QUOTES, so the
  *  WB6/WB7/WB7a-c/WB11/WB12 distinctions are recovered from the codepoint. MidNumLetQ = MidNumLet + Single_Quote,
  *  i.e. every MID_QUOTES codepoint that is NOT the Double_Quote. */
-SZ_HELPER_INLINE sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0027u);
 }
-SZ_HELPER_INLINE sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0022u);
 }
-SZ_HELPER_INLINE sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint != 0x0022u);
 }
 
@@ -199,7 +199,7 @@ SZ_HELPER_AUTO sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_si
 }
 
 /** @brief The element following the one whose base is at @p position (eot sentinel at end of text). */
-SZ_HELPER_AUTO sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_HELPER_INLINE sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
     sz_size_t cursor = position;
@@ -238,8 +238,11 @@ SZ_HELPER_AUTO sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t 
 
 /**
  *  @brief Whether @p position is a UAX-29 word boundary. Direct, branch-per-rule transcription of WB1-WB16 over
- *         the WB4 element model; used unchanged by the forward and reverse drivers (and every backend that
- *         delegates here), so segmentation is identical in either direction.
+ *         the WB4 element model, re-walking left context per position.
+ *
+ *  Nothing in the library calls this: the segmenters run a streaming state machine instead, which carries that
+ *  context forward. It is the independent second opinion the tests measure that machine against, which is what
+ *  turns `sz_word_serial_boundary_`'s byte-identity claim into something checked rather than asserted.
  */
 SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // WB1

@@ -24,6 +24,15 @@ def device_scope_and_capabilities(device: DeviceName):
         raise ValueError(f"Unknown device type: {device}")
 
 
+def device_float32_array(values, device: DeviceName):
+    """One float32 array per scope: unified memory on a GPU scope, which refuses host buffers."""
+    if device != "gpu_device":
+        return np.asarray(values, dtype=np.float32)
+    array = szs.unified_array(len(values), dtype=np.float32)
+    array[:] = values
+    return array
+
+
 InputSizeConfig = Literal["one-large", "few-big", "many-small"]
 INPUT_SIZE_CONFIGS = ["one-large", "few-big", "many-small"]
 

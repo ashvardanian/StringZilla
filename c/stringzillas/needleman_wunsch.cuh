@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_SZS_NEEDLEMAN_WUNSCH_CUH_
-#define STRINGZILLAS_SZS_NEEDLEMAN_WUNSCH_CUH_
+#ifndef SZS_NEEDLEMAN_WUNSCH_CUH_
+#define SZS_NEEDLEMAN_WUNSCH_CUH_
 #include "stringzillas.cuh"
 
 /**
@@ -236,4 +236,4 @@ SZ_API_RUNTIME void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores
 #pragma endregion Needleman Wunsch
 }
 
-#endif // STRINGZILLAS_SZS_NEEDLEMAN_WUNSCH_CUH_
+#endif // SZS_NEEDLEMAN_WUNSCH_CUH_

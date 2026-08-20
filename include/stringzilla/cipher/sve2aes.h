@@ -481,7 +481,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_sve2aes_(sz_aes256_gcm_state_t *state,
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_size_t const lane_count = svcntb() / 8;
     sz_size_t const group_blocks = sz_ghash_group_blocks_sve2aes_();
@@ -691,7 +691,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *st
  *  @param state The state, left untouched, so a caller may digest and keep streaming.
  *  @param tag Receives the sixteen tag bytes.
  */
-SZ_HELPER_AUTO void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+SZ_HELPER_INLINE void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     svuint8_t const subkey_u8x = sz_ghash_load_sve2aes_(state->key.powers);

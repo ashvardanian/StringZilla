@@ -1,6 +1,6 @@
 /**
  *  @brief Hardware-accelerated UAX-14 line break segmentation.
- *  @file utf8_linebreaks.h
+ *  @file include/stringzilla/utf8_linebreaks.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_LINEBREAKS_H_

@@ -1,10 +1,10 @@
 /**
  *  @brief  Helper structures and functions for C++ unit- and stress-tests.
- *  @file   scripts/test_stringzilla.hpp
+ *  @file   test/stringzilla.hpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  *
- *  @section Environment Variables
+ *  @section test_environment_variables Environment Variables
  *
  *  The test infrastructure supports the following environment variables for reproducible
  *  stress testing and fuzzing:
@@ -20,7 +20,26 @@
  *  - `SZ_TESTS_FILTER` : ECMAScript regex matched against test names; only matching tests run
  *    (e.g. `SZ_TESTS_FILTER=utf8`). Unset or empty runs everything. Honored by `run_test`.
  *
- *  @section Example Usage
+ *  @section test_driver_tiers Driver Tiers
+ *
+ *  A driver's suffix states what it costs and what it may assume, so the name answers both without
+ *  reading the body. A family names its drivers `test_<family>_<tier>`, or `test_<family>_<operation>_<tier>`
+ *  where one family covers several operations - `substrings` counts, finds, rewrites and scores, and each
+ *  wants its own tiers. Helpers that are not drivers take a `check_` prefix and a trailing underscore, and
+ *  are never registered in a `main`.
+ *
+ *  - `_unit`        Known-answer vectors against an external ground truth. Fixed cost: it must run
+ *                   identically at every `SZ_TESTS_MULTIPLIER`, so no randomness and no sweeps.
+ *  - `_equivalence` A reference against a candidate over generated corpora - serial against each compiled
+ *                   backend, or the library against `std::`. This tier owns randomness.
+ *  - `_safety`      Malformed, adversarial and boundary inputs. Asserts survival, bounds and stated
+ *                   refusals - never answers, since a wrong answer is not what is under test here.
+ *                   Scales with `SZ_TESTS_MULTIPLIER` alongside `_equivalence`; only `_unit` is pinned.
+ *  - `_all`         Walks the family's backend table and drives the tiers above. Holds no assertions
+ *                   of its own; a literal here belongs in `_unit`.
+ *  - `_rules`       Annex rule coverage, where a family transcribes a published spec (UAX-29, UAX-14).
+ *
+ *  @section test_example_usage Example Usage
  *
  *  @code{.sh}
  *  # Run with a specific seed for reproducibility
@@ -49,7 +68,6 @@
 #include <algorithm> // `std::copy`, `std::generate`
 #include <chrono>    // `std::chrono::steady_clock` for per-test timing
 #include <exception> // `std::exception`
-#include <fstream>   // `std::ifstream`
 #include <random>    // `std::random_device`
 #include <regex>     // `std::regex_search` for `SZ_TESTS_FILTER`
 #include <string>    // `std::string`
@@ -79,12 +97,20 @@
         }                                                                                                  \
     } while (0)
 
+/**
+ *  @brief One case whose subject has to be named before it can be asserted on, scoped to the case.
+ *
+ *  Prefer it wherever a bare `verify` would need a preceding declaration that outlives its one use:
+ *  a run of these reads as a table of cases, where the same run written longhand reads as prose.
+ */
 #define let_verify(init, condition) \
     do {                            \
         init;                       \
         verify(condition);          \
     } while (0)
 
+/** @brief As `let_verify`, when the subject must also be acted on before the assertion holds - a mutation
+ *         whose result is the subject itself, so there is nothing for the condition to bind. */
 #define scope_verify(init, operation, condition) \
     do {                                         \
         init;                                    \
@@ -92,6 +118,8 @@
         verify(condition);                       \
     } while (0)
 
+/** @brief That @p expression throws @p exception_type. The only assertion whose subject is the failure,
+ *         so a passing call - or one that throws something else - is the defect it reports. */
 #define throws_verify(expression, exception_type) \
     do {                                          \
         bool threw = false;                       \
@@ -122,17 +150,74 @@ template <typename value_type_>
 using unified_vector = std::vector<value_type_, stringzillas::unified_alloc<value_type_>>;
 #endif
 
-inline std::string read_file(std::string path) noexcept(false) {
-    std::ifstream stream(path);
-    if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
-    return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-}
+#if SZ_USE_CUDA
+/**
+ *  @brief Page-locked host memory, which the driver reports as host and every engine therefore refuses.
+ *
+ *  A third memory kind beside unified and device, and the one a caller is most likely to expect to work.
+ */
+template <typename value_type_>
+using pinned_vector = std::vector<value_type_, stringzillas::pinned_alloc<value_type_>>;
 
-inline void write_file(std::string path, std::string content) noexcept(false) {
-    std::ofstream stream(path);
-    if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
-    stream << content;
-    stream.close();
+/**
+ *  @brief Plain device memory a kernel can write and the host cannot touch.
+ *
+ *  `safe_vector` is what the engines already store device-resident scratch in, and its
+ *  `try_resize_uninitialized` is the only growth a non-host-accessible allocator admits.
+ */
+template <typename value_type_>
+using device_vector = stringzillas::safe_vector<value_type_, stringzillas::device_alloc<value_type_>>;
+
+/**
+ *  @brief Drains a device-resident buffer into @p destination, forwarding whatever the driver reported.
+ *  @param[out] destination At least as many elements as @p source holds; only that prefix is written.
+ */
+template <typename value_type_>
+inline CUresult copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
+    if (source.size() == 0) return CUDA_SUCCESS;
+    if (destination.size() < source.size()) return CUDA_ERROR_INVALID_VALUE;
+    return cuMemcpyDtoH(destination.data(), (CUdeviceptr)source.data(), source.size() * sizeof(value_type_));
+}
+#endif // SZ_USE_CUDA
+
+/**
+ *  @brief Copies @p texts into unified memory a CUDA kernel can reach, as one span per string.
+ *
+ *  Owns the bytes the spans point into, so it has to outlive every call that reads `view()`.
+ */
+struct unified_texts_t {
+    std::vector<unified_vector<char>> storage;
+    unified_vector<span<char const>> spans;
+
+    explicit unified_texts_t(std::vector<std::string> const &texts) : storage(texts.size()), spans(texts.size()) {
+        for (std::size_t index = 0; index != texts.size(); ++index) {
+            storage[index].assign(texts[index].begin(), texts[index].end());
+            spans[index] = {storage[index].data(), storage[index].size()};
+        }
+    }
+
+    span<span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
+};
+
+/**
+ *  @brief Reads a file into a string via LibC `<cstdio>`. A non-zero @p max_bytes stops the read after
+ *         that many bytes, so the file tail is never touched.
+ */
+inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexcept(false) {
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    if (!file) throw std::runtime_error("Failed to open file: " + path);
+    std::size_t capacity = max_bytes;
+    if (capacity == 0) {
+        std::fseek(file, 0, SEEK_END);
+        long const size = std::ftell(file);
+        std::fseek(file, 0, SEEK_SET);
+        capacity = size > 0 ? static_cast<std::size_t>(size) : 0;
+    }
+    std::string content(capacity, '\0');
+    std::size_t const read_bytes = std::fread(&content[0], 1, capacity, file);
+    std::fclose(file);
+    content.resize(read_bytes);
+    return content;
 }
 
 /**
@@ -391,7 +476,6 @@ inline sz_sequence_t sequence_from_(std::vector<std::string> const &strings) {
     return sequence;
 }
 
-
 struct fuzzy_config_t {
     std::string alphabet = "ABC"; // ? Drawn one UTF-8 character at a time, so `"αβγ"` yields valid multi-byte text.
     std::size_t batch_size = 16;
@@ -399,29 +483,22 @@ struct fuzzy_config_t {
     std::size_t max_string_length = 200;
 };
 
-inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, bool unique = false) {
+inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array) {
     array.resize(config.batch_size);
 
     std::vector<std::string> const characters = alphabet_characters(config.alphabet);
     std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
-    for (std::size_t i = 0; i != config.batch_size; ++i)
-        array[i] = random_string(length_distribution(global_random_generator()), characters);
-
-    if (unique) {
-        std::sort(array.begin(), array.end());
-        auto last = std::unique(array.begin(), array.end());
-        array.erase(last, array.end());
-    }
+    for (std::size_t index = 0; index != config.batch_size; ++index)
+        array[index] = random_string(length_distribution(global_random_generator()), characters);
 }
 
-inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape,
-                              bool unique = false) {
+inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape) {
 
-    randomize_strings(config, array, unique);
+    randomize_strings(config, array);
 
     // Convert to a GPU-friendly layout
-    status_t status = tape.try_assign(array.data(), array.data() + array.size());
-    sz_assert_(status == status_t::success_k);
+    status_t const status = tape.try_assign(array.data(), array.data() + array.size());
+    verify(status == status_t::success_k);
 }
 
 inline char const *status_name(status_t s) noexcept {
@@ -648,6 +725,7 @@ void test_byteset_unit();
 #pragma region Hashing
 
 void test_hash_unit();
+void test_hash_safety();
 void test_hash_all();
 void test_hash_multiseed_all();
 
@@ -664,9 +742,11 @@ void test_cipher_all();
 #pragma region UTF-8
 
 void test_utf8_runes_unit();
+void test_utf8_runes_scripts_unit();
 void test_utf8_runes_safety();
 void test_utf8_runes_all();
 void test_utf8_tokens_unit();
+void test_utf8_tokens_scripts_unit();
 void test_utf8_tokens_safety();
 void test_utf8_tokens_all();
 void test_utf8_wordbreaks_unit();
@@ -697,6 +777,8 @@ void test_utf8_delimiters_all();
 #pragma region Uncased UTF-8
 
 void test_uncased_unit();
+void test_uncased_scripts_unit();
+void test_uncased_regressions_unit();
 void test_uncased_all();
 void test_uncased_safety();
 
@@ -727,18 +809,20 @@ void test_extensions_reads_unit();
 void test_extensions_updates_unit();
 void test_string_constructors_unit();
 void test_string_reserve_unit();
-void test_memory_stability_unit(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100));
-void test_string_updates_unit(std::size_t repetitions = 1024);
+void test_memory_stability_equivalence(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100));
+void test_string_updates_equivalence(std::size_t repetitions = 1024);
 
 #pragma endregion // String Class and STL Compatibility
 
 #pragma region Search and Comparison
 
 void test_compare_unit();
+void test_extensions_ranges_unit();
 void test_find_unit();
+void test_find_safety();
 void test_find_all();
-void test_find_misaligned_all();
-void test_lookup_all(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
+void test_find_misaligned_equivalence();
+void test_lookup_equivalence(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
 
 #pragma endregion // Search and Comparison
 
@@ -746,6 +830,9 @@ void test_lookup_all(std::size_t lookup_tables_to_try = 32, std::size_t slices_p
 
 void test_sort_all();
 void test_sort_unit();
+void test_sort_safety();
+void test_sort_reference_equivalence();
 void test_intersect_unit();
+void test_intersect_equivalence();
 
 #pragma endregion // Sequence Algorithms

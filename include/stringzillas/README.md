@@ -113,14 +113,22 @@ Each engine exposes a call on each layout, for example `szs_levenshtein_distance
 
 ### Unified Memory
 
-For zero-copy sharing between the CPU and the GPU, initialize the allocator with unified memory.
-On CUDA-capable systems it uses `cudaMallocManaged`, so the same buffers are reachable from both host and device.
+A GPU scope addresses its work from the device, so every buffer you hand an engine must be __device-accessible__.
+That means unified memory, or plain device memory you allocated yourself.
 
 ```c
 sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc, char const **error_message);
 void *szs_unified_alloc(sz_size_t size_bytes);
 void szs_unified_free(void *ptr, sz_size_t size_bytes);
 ```
+
+The rule covers __outputs as well as inputs__, and the small per-collection arrays with them.
+Match counts, tape offsets, BM25 weights and lengths, and score vectors are no different from a result matrix.
+Host memory is refused with `sz_device_memory_mismatch_k` and nothing is written, so a copy across the bus is yours to make rather than one the engine makes unasked.
+Page-locked host memory counts as host memory here, since the driver reports it as such.
+
+The single-value out-parameters are the exception and take ordinary host addresses: `matches_total`, `matches_found`, `output_bytes_written`, and every `error_message`.
+A CPU scope has no such requirement and reads and writes host memory throughout.
 
 Pass the resulting `sz_memory_allocator_t *` as the `alloc` argument of any engine's `*_init`, or pass `NULL` to use the default allocator.
 
@@ -163,12 +171,8 @@ A self-contained byte-distance example over a tiny corpus:
 
 void run(void) {
     char const *strings[] = {"listen", "silent", "kitten"};
-    sz_size_t lengths[] = {6, 6, 6};
     sz_sequence_t queries;
-    queries.count = 3;
-    queries.handle = strings;
-    queries.get_start = NULL; // ... wire your own getters in real code
-    queries.get_length = NULL;
+    sz_sequence_from_null_terminated_strings(strings, 3, &queries);
 
     szs_device_scope_t device = NULL;
     char const *error = NULL;
@@ -188,7 +192,6 @@ void run(void) {
 
     szs_levenshtein_distances_free(engine);
     szs_device_scope_free(device);
-    (void)lengths;
 }
 ```
 
@@ -261,6 +264,86 @@ void run(void) {
 }
 ```
 
+## Multi-Pattern Search
+
+The substrings engine compiles a whole needle set into one Aho-Corasick automaton and walks every haystack against all of them at once, so a dictionary of thousands of terms costs one pass rather than thousands.
+Unlike the other engines it is constructed in two steps: `szs_substrings_init` picks the backend and allocates the handle, while `szs_substrings_index` compiles a needle set into it and sizes the automaton's hot and cold tiers against the cache that will walk it.
+Re-indexing replaces the needle set, so one engine serves a new vocabulary or another device without being rebuilt.
+
+```c
+sz_status_t szs_substrings_init(
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,
+    szs_substrings_t *engine, char const **error_message);
+
+sz_status_t szs_substrings_index(
+    szs_substrings_t engine, sz_sequence_t const *needles,
+    szs_substrings_case_sensitivity_t case_sensitivity, szs_device_scope_t device,
+    char const **error_message);
+
+sz_status_t szs_substrings_count(
+    szs_substrings_t engine, szs_device_scope_t device,
+    sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy,
+    sz_size_t *counts, sz_size_t *matches_total,
+    char const **error_message);
+
+sz_status_t szs_substrings_find(
+    szs_substrings_t engine, szs_device_scope_t device,
+    sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy,
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found,
+    char const **error_message);
+
+void szs_substrings_free(szs_substrings_t engine);
+```
+
+`szs_substrings_cased_k` matches raw bytes and accepts any needle, including malformed UTF-8, while `szs_substrings_uncased_k` applies full Unicode case folding and requires valid UTF-8 on both sides.
+Folding does not preserve byte length — needle `k` matches both the 1-byte `k` and the 3-byte Kelvin sign `U+212A` — which is why every `szs_substrings_match_t` carries its own `byte_length` rather than borrowing the needle's.
+
+The overlap policy decides how matches that collide are resolved: `szs_substrings_overlapping_k` reports all of them, while `szs_substrings_leftmost_longest_k` and `szs_substrings_leftmost_first_k` each keep one non-overlapping cover.
+`szs_substrings_find` follows the size-query convention — passing `matches_capacity == 0` writes nothing and returns `sz_unexpected_dimensions_k` with `matches_found` holding the count a full call would need.
+
+Two more operations share the same automaton.
+`szs_substrings_score_bm25` treats the dictionary itself as the query, taking one `needle_weights` entry per needle and returning one score per haystack; its term frequencies are raw overlapping counts, which is classic BM25, so no overlap policy applies.
+`szs_substrings_replace_u32tape` and its 64-bit sibling rewrite every haystack, substituting each match with its needle's replacement, and accept only the tape layouts, since a rewrite's product is itself a tape.
+Size their `output_data` with `szs_substrings_replace_bound`, which answers from the needle set alone and needs no haystacks, no walk, and no device.
+
+```c
+#include <assert.h>
+#include <stringzillas/stringzillas.h>
+
+void multi_pattern_example(void) {
+    char const *error = NULL;
+    szs_device_scope_t device = NULL;
+    sz_status_t status = szs_device_scope_init_default(&device, &error);
+    assert(status == sz_success_k);
+
+    char const *needle_texts[] = {"he", "she", "his", "hers"};
+    sz_size_t const needle_count = 4;
+    sz_sequence_t needles;
+    sz_sequence_from_null_terminated_strings(needle_texts, needle_count, &needles);
+
+    szs_substrings_t engine = NULL;
+    status = szs_substrings_init(NULL, sz_cap_serial_k, &engine, &error);
+    assert(status == sz_success_k);
+    status = szs_substrings_index(engine, &needles, szs_substrings_cased_k, device, &error);
+    assert(status == sz_success_k);
+
+    char const *haystack_texts[] = {"ushers", "hershey"};
+    sz_sequence_t haystacks;
+    sz_sequence_from_null_terminated_strings(haystack_texts, 2, &haystacks);
+
+    sz_size_t counts[2], matches_total = 0;
+    status = szs_substrings_count(engine, device, &haystacks, szs_substrings_overlapping_k, //
+                                  counts, &matches_total, &error);
+    assert(status == sz_success_k);
+    assert(matches_total == 7);
+
+    szs_substrings_free(engine);
+    szs_device_scope_free(device);
+}
+```
+
+On a GPU scope every buffer above is device-accessible, `counts` and the BM25 weights included, as [Unified Memory](#unified-memory) spells out; `matches_total`, `matches_found`, and `output_bytes_written` stay ordinary host addresses.
+
 ## Fingerprints
 
 The fingerprints engine sketches each string into a fixed-width MinHash plus a Count-Min-Sketch, so two near-duplicate documents land on overlapping hash dimensions even after small edits.
@@ -310,26 +393,32 @@ void run(void) {
         NULL, szs_capabilities(), &engine, &error);
     assert(status == sz_success_k);
 
-    char const *docs[] = {"the quick brown fox", "the quick brown dog"};
-    sz_size_t lengths[] = {19, 19};
-    sz_sequence_t texts;
-    texts.count = 2;
-    texts.handle = docs;
-    texts.get_start = NULL;
-    texts.get_length = NULL;
+    // One tape of two documents, and both output arrays, in memory either backend can reach.
+    char *data = (char *)szs_unified_alloc(38);
+    sz_u32_t *offsets = (sz_u32_t *)szs_unified_alloc(3 * sizeof(sz_u32_t));
+    sz_u32_t *hashes = (sz_u32_t *)szs_unified_alloc(2 * 256 * sizeof(sz_u32_t));
+    sz_u32_t *counts = (sz_u32_t *)szs_unified_alloc(2 * 256 * sizeof(sz_u32_t));
+    memcpy(data, "the quick brown foxthe quick brown dog", 38);
+    offsets[0] = 0, offsets[1] = 19, offsets[2] = 38;
 
-    sz_u32_t hashes[2 * 256];
-    sz_u32_t counts[2 * 256];
-    status = szs_fingerprints_sequence(
+    sz_sequence_u32tape_t texts;
+    texts.data = data;
+    texts.offsets = offsets;
+    texts.count = 2;
+
+    status = szs_fingerprints_u32tape(
         engine, device, &texts,
         hashes, 256 * sizeof(sz_u32_t),
         counts, 256 * sizeof(sz_u32_t),
         &error);
     assert(status == sz_success_k);
 
+    szs_unified_free(data, 38);
+    szs_unified_free(offsets, 3 * sizeof(sz_u32_t));
+    szs_unified_free(hashes, 2 * 256 * sizeof(sz_u32_t));
+    szs_unified_free(counts, 2 * 256 * sizeof(sz_u32_t));
     szs_fingerprints_free(engine);
     szs_device_scope_free(device);
-    (void)lengths;
 }
 ```
 
@@ -345,7 +434,7 @@ The device scope is the single knob for __where__ and __how widely__ an engine r
 
 A CPU slice spreads the cross-product (or the corpus of texts) across a thread pool, so you can reserve cores for other work by asking for fewer than all of them.
 A GPU device offloads the whole batch to one CUDA device, where each engine routes string pairs into size-tiered kernels.
-Unified memory is what makes the GPU path seamless: allocate inputs and outputs through the unified allocator, and the same pointers are valid on host and device with no explicit copies.
+Every buffer a GPU scope touches must be device-accessible, which the __Unified Memory__ section above states in full.
 
 The underlying C++ engines are templated on an __executor__: `dummy_executor_t` runs serially, and `forkunion_executor_t` is the preferred library-grade thread pool, wrapping a [ForkUnion](https://github.com/ashvardanian/ForkUnion) pool through its C API so the compiled runtime handles NUMA-aware placement.
 The C ABI hides this choice behind the device scope, picking the right executor for the cores or GPU you requested.

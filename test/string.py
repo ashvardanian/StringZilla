@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Str and Strs containers: construction, indexing, slicing, comparisons, and the buffer protocol.
 
-Mirrors the C++ scripts/test_string.cpp translation unit.
+Mirrors the C++ test/string.cpp translation unit.
 
 Covers: Str/Strs construction from native str, bytes, and bytearray, indexing, slicing, and rich
 comparisons, the read-only buffer protocol, split, rsplit, strip, and splitlines in both eager and
@@ -1159,10 +1159,10 @@ def test_strs_from_python_basic(container_class: type, view: bool):
 def test_strs_from_4gb_list():
     """Growing a `Strs` past 4 GB of total content forces its offset table from u32 to u64, and indexing
     still returns the correct first and last strings afterward.
-    This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 5 and 13 GB:
+    This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 9 and 13 GB:
 
-    ulimit -v 9437184 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_list
-    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_list
+    ulimit -v 9437184 && uv run --no-project python -m pytest test/string.py -s -x -k 4gb_list
+    ulimit -v 13631488 && uv run --no-project python -m pytest test/string.py -s -x -k 4gb_list
     """
 
     try:
@@ -1201,8 +1201,8 @@ def test_strs_from_4gb_generator():
     u64, and indexing still returns the correct first and last strings afterward.
     This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 5 and 13 GB:
 
-    ulimit -v 5242880 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_generator
-    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_generator
+    ulimit -v 5242880 && uv run --no-project python -m pytest test/string.py -s -x -k 4gb_generator
+    ulimit -v 13631488 && uv run --no-project python -m pytest test/string.py -s -x -k 4gb_generator
     """
 
     try:

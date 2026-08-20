@@ -3216,7 +3216,7 @@ class basic_string_slice {
 /**
  *  @brief Memory-owning string class with a Small String Optimization.
  *
- *  @section API
+ *  @section sz_cpp_api API
  *
  *  Some APIs are different from `basic_string_slice`:
  *      * `lstrip`, `rstrip`, `strip` modify the string in-place, instead of returning a new view.
@@ -3233,7 +3233,7 @@ class basic_string_slice {
  *      * `[r]partition`, `[r]split`, `[r]find_all` missing to enforce lifetime on long operations.
  *      * `remove_prefix`, `remove_suffix` for now.
  *
- *  @section Exceptions
+ *  @section sz_cpp_exceptions Exceptions
  *
  *  Default constructor is `constexpr`. Move constructor and move assignment operator are `noexcept`.
  *  Copy constructor and copy assignment operator are not! They may throw `std::bad_alloc` if the memory

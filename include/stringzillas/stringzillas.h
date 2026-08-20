@@ -109,6 +109,20 @@ SZ_API_RUNTIME sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_
  *
  *  Set `cpu_cores` to 0 to target all available CPU cores, to -1 to avoid CPUs, to 1 to use only calling thread.
  *  Set `gpu_device` to -1 to avoid GPUs, or to a positive device ID to target a specific GPU.
+ *
+ *  @section szs_unified_memory Unified Memory
+ *
+ *  A GPU scope addresses its work from the device, so every @b buffer an operation reads or writes must be
+ *  device-accessible: unified memory from @ref szs_unified_alloc or @ref sz_memory_allocator_init_unified, or
+ *  plain device memory. Outputs are held to this as firmly as inputs, and the small per-collection arrays
+ *  with them - match counts, tape offsets, BM25 weights and lengths, and score vectors are no different from
+ *  a result matrix. Host memory is refused with `sz_device_memory_mismatch_k` and nothing is written, so a
+ *  copy across the bus is the caller's to make rather than one the engine makes unasked. Page-locked host
+ *  memory is host memory here - the driver reports it as such - and is refused too.
+ *
+ *  The single-value out-parameters are the exception and take ordinary host addresses: `matches_total`,
+ *  `matches_found`, `output_bytes_written`, and every `error_message` are written by the host once the device
+ *  has finished. A CPU scope has no requirement at all and reads and writes host memory throughout.
  */
 typedef void *szs_device_scope_t;
 
@@ -491,7 +505,7 @@ SZ_API_RUNTIME void szs_smith_waterman_scores_free(szs_smith_waterman_scores_t e
  *  APIs for computing fingerprints, Min-Hashes, and Count-Min-Sketches of binary and UTF-8 strings.
  *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  *
- *  @section Speed Considerations
+ *  @section szs_speed_considerations Speed Considerations
  *
  *  For each window width you should aim for a multiple of 64 dimensions. Rolling hashes with identical window widths
  *  will share the same memory access pattern and can be effectively parallelized. For each platform, different minimum
@@ -594,6 +608,312 @@ SZ_API_RUNTIME sz_status_t szs_fingerprints_u32tape(      //
  *  @param[in] engine Engine handle to free.
  */
 SZ_API_RUNTIME void szs_fingerprints_free(szs_fingerprints_t engine);
+
+/**
+ *  @brief Multi-pattern search: one compiled dictionary of needles applied to many haystacks in one pass.
+ *
+ *  Compiles a needle set into an Aho-Corasick automaton once, then reuses it across every later call, so
+ *  the build cost is paid per dictionary rather than per haystack. Every needle is tested against every
+ *  haystack in a single walk, and matches are reported under a caller-chosen overlap policy: every
+ *  overlapping match, or a non-overlapping leftmost cover.
+ *
+ *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
+ *
+ *  Beyond counting and locating matches, the engine scores haystacks against per-needle weights with BM25
+ *  and rewrites haystacks by substituting matches, on every backend. A rewrite needs a cover whose matches
+ *  share no bytes, so `szs_substrings_overlapping_k` is the one policy it refuses.
+ *
+ *  @section szs_case_sensitivity Case Sensitivity
+ *
+ *  `szs_substrings_cased_k` matches raw bytes and accepts any needle, including malformed UTF-8.
+ *
+ *  `szs_substrings_uncased_k` applies full Unicode case folding as defined by `CaseFolding.txt` status codes
+ *  `C` and `F`, the same contract `sz_utf8_uncased_find` implements, so the two agree. Needles must be
+ *  well-formed UTF-8 and are rejected with `sz_invalid_utf8_k` otherwise. Folding applies no normalization,
+ *  so a precomposed character does not match its decomposed spelling; compose `sz_utf8_norm` ahead of the
+ *  search when canonical equivalence is wanted.
+ */
+typedef void *szs_substrings_t;
+
+/** @brief Whether a dictionary matches needles byte-for-byte or folds both sides to a shared case first. */
+typedef enum szs_substrings_case_sensitivity_t {
+    /** Byte-exact matching; needles may be arbitrary bytes. */
+    szs_substrings_cased_k = 0,
+    /** Full Unicode case folding; needles must be valid UTF-8. */
+    szs_substrings_uncased_k = 1,
+} szs_substrings_case_sensitivity_t;
+
+/**
+ *  @brief How overlapping matches resolve: reported in full, or reduced to a non-overlapping cover.
+ *
+ *  The three states map one-to-one onto the `MatchKind` trio of the reference Rust engines. The policy
+ *  travels per call rather than per engine, since it never shapes the compiled automaton - one dictionary
+ *  serves all three.
+ */
+typedef enum szs_substrings_overlap_policy_t {
+    /** Every match of every needle, including overlapping and nested ones. */
+    szs_substrings_overlapping_k = 0,
+    /** Non-overlapping cover: earliest start, then longest span, then lower needle index. */
+    szs_substrings_leftmost_longest_k = 1,
+    /** Non-overlapping cover: earliest start, then lower needle index, even when a longer needle matches. */
+    szs_substrings_leftmost_first_k = 2,
+} szs_substrings_overlap_policy_t;
+
+/**
+ *  @brief One reported match, locating it by haystack, by needle, and by byte span.
+ *
+ *  Under case folding a needle's own byte length is not the length of every match - needle "k" matches both
+ *  the 1-byte "k" and the 3-byte Kelvin sign - so the span is carried per match rather than looked up.
+ */
+typedef struct szs_substrings_match_t {
+    /** Which haystack the match was found in. */
+    sz_size_t haystack_index;
+    /** Which needle matched. */
+    sz_size_t needle_index;
+    /** Offset of the match within its haystack, in bytes. */
+    sz_size_t byte_offset;
+    /** Length of the matched span, in bytes. */
+    sz_size_t byte_length;
+} szs_substrings_match_t;
+
+/** @brief Classic BM25's continuous parameters. */
+typedef struct szs_substrings_bm25_t {
+    /** The literature's `k1`: how slowly repeated occurrences stop adding score; 1.2 is customary. */
+    sz_f32_t term_frequency_saturation;
+    /** The literature's `b`, in [0, 1]: 0 ignores document length and every length input with it, 1
+     *  normalizes fully; 0.75 is customary. */
+    sz_f32_t length_normalization;
+    /** Corpus-wide mean of `document_lengths`, in the same unit; never derived from the batch, and read
+     *  only when `length_normalization` is positive. A non-positive mean is then refused rather than
+     *  silently discarding both it and `document_lengths`. */
+    sz_f32_t average_document_length;
+} szs_substrings_bm25_t;
+
+/**
+ *  @brief Create a multi-pattern search engine on the backend @p capabilities names.
+ *
+ *  Unlike the other engines, this one is constructed in two steps: the automaton's hot/cold tier is sized
+ *  from the cache that will walk it, and no scope reaches a constructor. This call picks the backend and
+ *  allocates the handle; @ref szs_substrings_index compiles a needle set into it. Every operation refuses an
+ *  engine that has not been indexed.
+ *
+ *  @param[in] alloc Memory allocator (NULL for default).
+ *  @param[in] capabilities Hardware capabilities mask, which selects the backend.
+ *  @param[out] engine Pointer to initialized engine handle.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ */
+SZ_API_RUNTIME sz_status_t szs_substrings_init(                       //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    szs_substrings_t *engine, char const **error_message);
+
+/**
+ *  @brief Compile @p needles into @p engine, tiered for @p device.
+ *
+ *  Replaces any needle set the engine already held, so one engine can be re-indexed for a new vocabulary or
+ *  re-tiered for another device. The state-id width is not a caller's choice: it follows from the needle set,
+ *  so construction derives the automaton wide and keeps the narrower one whenever its ceilings hold.
+ *
+ *  Operations may later name a different scope - the automaton is reachable from every device - but the tier
+ *  stays as this call sized it.
+ *
+ *  @param[in] engine Engine handle from @ref szs_substrings_init.
+ *  @param[in] needles Needle collection to compile into the automaton.
+ *  @param[in] case_sensitivity Byte-exact or case-folded matching.
+ *  @param[in] device Device scope whose cache sizes the hot tier, and whose backend must match the engine's.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @retval `sz_invalid_utf8_k` A needle is not well-formed UTF-8 while folding is requested.
+ *  @retval `sz_unexpected_dimensions_k` A needle is empty.
+ *  @retval `sz_device_code_mismatch_k` @p device names a backend the engine was not created for.
+ */
+SZ_API_RUNTIME sz_status_t szs_substrings_index(                                   //
+    szs_substrings_t engine, sz_sequence_t const *needles,                         //
+    szs_substrings_case_sensitivity_t case_sensitivity, szs_device_scope_t device, //
+    char const **error_message);
+
+/**
+ *  @brief Count matches of every needle in every haystack.
+ *  @param[in] engine Initialized search engine.
+ *  @param[in] device Device scope for execution.
+ *  @param[in] haystacks Input haystack collection.
+ *  @param[in] overlap_policy Whether overlapping matches all count, or only a leftmost cover.
+ *  @param[out] counts Output array of per-haystack match counts, one entry per haystack.
+ *  @param[out] matches_total Matches across every haystack, the sum @p counts would produce.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ */
+SZ_API_RUNTIME sz_status_t szs_substrings_count(                                    //
+    szs_substrings_t engine, szs_device_scope_t device,                             //
+    sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t *counts, sz_size_t *matches_total,                                    //
+    char const **error_message);
+
+/**
+ *  @brief Locate matches of every needle in every haystack, resolved under @p overlap_policy.
+ *  @param[in] engine Initialized search engine.
+ *  @param[in] device Device scope for execution.
+ *  @param[in] haystacks Input haystack collection.
+ *  @param[in] overlap_policy Whether overlapping matches are all reported, or only a leftmost cover.
+ *  @param[out] matches Output match array, filled in ascending haystack order.
+ *  @param[in] matches_capacity Number of entries @p matches can hold.
+ *  @param[out] matches_found Matches written, or - when capacity is short - the count that would be.
+ *  @retval `sz_unexpected_dimensions_k` @p matches_capacity is too small; @p matches_found holds the
+ *          need and nothing was written, so `matches_capacity == 0` is the canonical size query.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ */
+SZ_API_RUNTIME sz_status_t szs_substrings_find(                                            //
+    szs_substrings_t engine, szs_device_scope_t device,                                    //
+    sz_sequence_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy,        //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
+    char const **error_message);
+
+/**
+ *  @brief Score every haystack against the compiled dictionary in one automaton walk.
+ *
+ *  The dictionary @b is the query: `needle_weights[needle_index]` is that needle's IDF or boost, and one
+ *  score comes back per haystack. Term frequencies are raw overlapping counts, which is classic BM25 - a
+ *  leftmost cover would suppress genuine occurrences of any needle nested in another, so no overlap policy
+ *  applies here. Frequencies are integers, and each backend reaches a total no run of it can perturb - the
+ *  CPU sums in ascending needle order, the GPU sums fixed-point integers, whose addition is associative - so
+ *  scores are bit-stable across runs of one backend, and agree numerically rather than bitwise between two.
+ *
+ *  @param[in] engine Initialized search engine.
+ *  @param[in] device Device scope for execution.
+ *  @param[in] haystacks Input haystack collection.
+ *  @param[in] document_lengths One per haystack, in whatever unit the pipeline normalizes by;
+ *             NULL uses byte lengths, the only unit a byte-level engine can own.
+ *  @param[in] parameters BM25's continuous parameters.
+ *  @param[in] needle_weights One IDF or boost per needle; as many entries as the dictionary has needles.
+ *  @param[out] scores One per haystack.
+ *  @retval `sz_unexpected_dimensions_k` @p needle_weights is NULL, or `length_normalization` is positive
+ *          while `average_document_length` is not - there would be no mean to divide by.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ */
+SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25(   //
+    szs_substrings_t engine, szs_device_scope_t device, //
+    sz_sequence_t const *haystacks,                     //
+    sz_f32_t const *document_lengths,                   //
+    szs_substrings_bm25_t parameters,                   //
+    sz_f32_t const *needle_weights, sz_f32_t *scores,   //
+    char const **error_message);
+
+/**
+ *  @brief Bound the bytes a rewrite can produce, from the dictionary and @p replacements alone.
+ *
+ *  A cover's matches share no bytes and each consumes at least its needle's shortest matchable span, so
+ *  every input byte emits at most `max over needles of replacement_bytes / min_source_match_bytes`. Sizing an
+ *  output tape to this bound makes `szs_substrings_replace` a single call that cannot be refused, at the
+ *  cost of over-allocating whenever the corpus does not consist entirely of the widest-expanding needle.
+ *
+ *  Needs no haystacks, no walk, and no device: the answer is arithmetic over the needle set.
+ *
+ *  @param[in] engine Initialized search engine.
+ *  @param[in] replacements One replacement per needle; count must equal the dictionary's needle count.
+ *  @param[in] input_bytes Total bytes of the haystacks to be rewritten.
+ *  @param[out] output_bytes_bound Bytes an output tape must hold to accept any such rewrite.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ */
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_bound(  //
+    szs_substrings_t engine,                              //
+    sz_sequence_t const *replacements,                    //
+    sz_size_t input_bytes, sz_size_t *output_bytes_bound, //
+    char const **error_message);
+
+/**
+ *  @brief Rewrite every haystack of a tape into another tape, substituting matches with replacements.
+ *
+ *  Matches resolve under @p overlap_policy, which must name a non-overlapping cover - an overlapping rewrite
+ *  is not a function, so `szs_substrings_overlapping_k` is rejected. Replacements are indexed by needle and
+ *  inserted verbatim, even in uncased mode where the removed span's byte length varies per match, and an
+ *  empty replacement deletes.
+ *
+ *  Tape in, tape out: only the Apache Arrow-like shapes are accepted, since a rewrite's product is itself a
+ *  tape and a callback-addressed `sz_sequence_t` has nowhere to put one. Size @p output_data with
+ *  `szs_substrings_replace_bound` for a call that cannot be refused.
+ *
+ *  @param[in] engine Initialized search engine.
+ *  @param[in] device Device scope for execution.
+ *  @param[in] haystacks Input haystack tape.
+ *  @param[in] overlap_policy Cover policy; `szs_substrings_overlapping_k` is rejected.
+ *  @param[in] replacements One replacement per needle; count must equal the dictionary's needle count.
+ *  @param[out] output_data Byte buffer receiving every rewritten haystack back to back.
+ *  @param[in] output_data_capacity Bytes @p output_data can hold; a short buffer is refused, never overrun.
+ *  @param[out] output_offsets Receives `haystacks->count + 1` boundaries partitioning the output tape:
+ *              `output_offsets[0]` is zero, they ascend, and `output_offsets[haystacks->count]` is the total,
+ *              so the array can be wrapped as a tape view directly. They are written before the capacity
+ *              check, so a refused call still names every boundary it would have produced.
+ *  @param[out] output_bytes_written Bytes written, or - when the buffer is short - the bytes needed.
+ *  @retval `sz_unexpected_dimensions_k` @p output_data_capacity is too small and nothing was written.
+ *  @param[out] error_message Optional output pointer for detailed error information.
+ */
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u32tape(                           //
+    szs_substrings_t engine, szs_device_scope_t device,                              //
+    sz_sequence_u32tape_t const *haystacks,                                          //
+    szs_substrings_overlap_policy_t overlap_policy,                                  //
+    sz_sequence_t const *replacements,                                               //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_size_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                 //
+    char const **error_message);
+
+/** @copydoc szs_substrings_replace_u32tape */
+SZ_API_RUNTIME sz_status_t szs_substrings_replace_u64tape(                           //
+    szs_substrings_t engine, szs_device_scope_t device,                              //
+    sz_sequence_u64tape_t const *haystacks,                                          //
+    szs_substrings_overlap_policy_t overlap_policy,                                  //
+    sz_sequence_t const *replacements,                                               //
+    sz_ptr_t output_data, sz_size_t output_data_capacity, sz_size_t *output_offsets, //
+    sz_size_t *output_bytes_written,                                                 //
+    char const **error_message);
+
+/** @copydoc szs_substrings_count */
+SZ_API_RUNTIME sz_status_t szs_substrings_count_u32tape(                                    //
+    szs_substrings_t engine, szs_device_scope_t device,                                     //
+    sz_sequence_u32tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t *counts, sz_size_t *matches_total,                                            //
+    char const **error_message);
+
+/** @copydoc szs_substrings_count */
+SZ_API_RUNTIME sz_status_t szs_substrings_count_u64tape(                                    //
+    szs_substrings_t engine, szs_device_scope_t device,                                     //
+    sz_sequence_u64tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    sz_size_t *counts, sz_size_t *matches_total,                                            //
+    char const **error_message);
+
+/** @copydoc szs_substrings_find */
+SZ_API_RUNTIME sz_status_t szs_substrings_find_u32tape(                                     //
+    szs_substrings_t engine, szs_device_scope_t device,                                     //
+    sz_sequence_u32tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found,  //
+    char const **error_message);
+
+/** @copydoc szs_substrings_find */
+SZ_API_RUNTIME sz_status_t szs_substrings_find_u64tape(                                     //
+    szs_substrings_t engine, szs_device_scope_t device,                                     //
+    sz_sequence_u64tape_t const *haystacks, szs_substrings_overlap_policy_t overlap_policy, //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found,  //
+    char const **error_message);
+
+/** @copydoc szs_substrings_score_bm25 */
+SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25_u32tape( //
+    szs_substrings_t engine, szs_device_scope_t device,       //
+    sz_sequence_u32tape_t const *haystacks,                   //
+    sz_f32_t const *document_lengths,                         //
+    szs_substrings_bm25_t parameters,                         //
+    sz_f32_t const *needle_weights, sz_f32_t *scores,         //
+    char const **error_message);
+
+/** @copydoc szs_substrings_score_bm25 */
+SZ_API_RUNTIME sz_status_t szs_substrings_score_bm25_u64tape( //
+    szs_substrings_t engine, szs_device_scope_t device,       //
+    sz_sequence_u64tape_t const *haystacks,                   //
+    sz_f32_t const *document_lengths,                         //
+    szs_substrings_bm25_t parameters,                         //
+    sz_f32_t const *needle_weights, sz_f32_t *scores,         //
+    char const **error_message);
+
+/**
+ *  @brief Free multi-pattern search engine resources.
+ *  @param[in] engine Engine handle to free.
+ */
+SZ_API_RUNTIME void szs_substrings_free(szs_substrings_t engine);
 
 /**
  *  @brief Allocates memory using unified memory allocator.

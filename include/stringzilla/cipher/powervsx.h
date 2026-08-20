@@ -681,7 +681,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_powervsx_(sz_aes256_gcm_state_t *state
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                        sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     __vector unsigned char const subkey_u8x16 = sz_aes256_block_load_powervsx_(state->key.powers);
     __vector unsigned char powers_u8x16[8];
@@ -949,7 +950,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_state_t *s
  *  @param state The state, left unmodified so a caller may keep appending.
  *  @param tag Receives the sixteen tag bytes.
  */
-SZ_HELPER_AUTO void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+SZ_HELPER_INLINE void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state,
+                                                     sz_u8_t tag[sz_at_least_(16)]) {
     __vector unsigned char const subkey_u8x16 = sz_aes256_block_load_powervsx_(state->key.powers);
     __vector unsigned char accumulator_u8x16 = sz_aes256_block_load_powervsx_(state->accumulator);
     sz_u128_vec_t lengths_vec;

@@ -11,7 +11,7 @@
  *  @see StringZilla docs: https://github.com/ashvardanian/StringZilla/blob/main/README.md
  *  @see LibC string docs: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
  *
- *  @section Introduction
+ *  @section sz_introduction Introduction
  *
  *  StringZilla is multi-language project designed for high-throughput string processing, differentiating
  *  the low-level "embeddable" mostly-C core implementation, containing:
@@ -36,7 +36,7 @@
  *  The core implementations of those algorithms are mostly structured as callable structure templates, as opposed to
  *  template functions to simplify specialized overloads and reusing the state between invocations.
  *
- *  @section Compilation Settings
+ *  @section sz_compilation_settings Compilation Settings
  *
  *  Consider overriding the following macros to customize the library:
  *
@@ -268,35 +268,28 @@ SZ_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char co
 }
 
 /**
- *  @brief Internal helper function to convert SIMD capabilities to a string.
+ *  @brief Writes the comma-separated capability names into @p buffer, always null-terminating.
+ *  @return Bytes written, excluding the terminator; the text truncates rather than overflowing @p capacity.
  *  @sa sz_capabilities_to_string, sz_capabilities
  */
-SZ_HELPER_AUTO sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t caps) {
+SZ_HELPER_AUTO sz_size_t sz_capabilities_to_string_implementation_(sz_capability_t caps, char *buffer,
+                                                                   sz_size_t capacity) {
 
-    static char buffer[256];
+    if (capacity == 0) return 0;
     char *p = buffer;
-    char *const end = buffer + sizeof(buffer);
+    char *const end = buffer + capacity;
 
-    // Use the new function to get capability strings
     char const *cap_strings[SZ_CAPABILITIES_COUNT];
     sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
 
-    // Build the comma-separated string
     for (sz_size_t capability_index = 0; capability_index < cap_count; capability_index++) {
-        if (capability_index > 0) {
-            // Add separator if this is not the first capability.
-            char const sep[2] = {',', '\0'};
-            char const *s = sep;
-            while (*s && p < end - 1) *p++ = *s++;
-        }
-        // Append the capability name character by character.
+        if (capability_index > 0 && p < end - 1) *p++ = ',';
         char const *s = cap_strings[capability_index];
         while (*s && p < end - 1) *p++ = *s++;
     }
 
-    // Null-terminate the string.
     *p = '\0';
-    return buffer;
+    return (sz_size_t)(p - buffer);
 }
 
 /*  The runtime detectors below report the FULL hardware capability set, independent of which `SZ_USE_*`
@@ -576,7 +569,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
  *  @brief Function to determine the SIMD capabilities of the current 64-bit RISC-V machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
 
     // The base "V" extension is reported through the auxiliary vector, but the individual
@@ -634,7 +627,7 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
  *  @brief Function to determine the SIMD capabilities of the current LoongArch machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_loongarch_(void) {
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_loongarch_(void) {
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
 
     // The SIMD extensions are reported through the auxiliary vector, matching `asm/hwcap.h`:
@@ -657,7 +650,7 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_loongarch_(void) {
  *  @brief Function to determine the SIMD capabilities of the current IBM POWER machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_power_(void) {
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
 #if (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && !SZ_AVOID_LIBC
 
     // The `powervsx` kernels target POWER9 (`-mcpu=power9 -mvsx`), so both facts are required,
@@ -760,7 +753,10 @@ SZ_API_RUNTIME sz_capability_t sz_capabilities(void) {
     return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 }
 SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
-    return sz_capabilities_to_string_implementation_(caps);
+    // The one place that must own storage, because the signature returns a string it does not receive.
+    static char names[256];
+    sz_capabilities_to_string_implementation_(caps, names, sizeof(names));
+    return names;
 }
 SZ_API_RUNTIME void sz_dispatch_table_init(void) {}
 SZ_API_RUNTIME void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds

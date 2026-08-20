@@ -1,6 +1,6 @@
 /**
  *  @brief  UTF-8 newline/whitespace boundary equivalence and C++ line/token splitting semantics.
- *  @file   scripts/test_utf8_tokens.cpp
+ *  @file   test/utf8_tokens.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
@@ -60,7 +60,7 @@
 #error "This test requires C++11 or later."
 #endif
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
@@ -68,19 +68,18 @@ using sz::literals::operator""_sv; // for `sz::string_view`
 
 #pragma region Helpers
 
-/** @brief Prints one labeled hex dump line to `stderr`; used by the malformed-input safety test below. */
-static void print_utf8_test_bytes_(char const *label, char const *bytes, std::size_t length) {
-    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
-    for (std::size_t index = 0; index < length; ++index) std::fprintf(stderr, "%02X ", (unsigned char)bytes[index]);
-    std::fprintf(stderr, "\n");
-}
+/** @brief One expected boundary match: the byte offset where it starts and its byte length. */
+struct boundary_span_t {
+    sz_size_t offset;
+    sz_size_t length;
+};
 
 /**
  *  @brief Runs one UTF-8 backend's counting and boundary-finding kernels over the known-answer anchors
  *         and asserts the produced codepoint count and the emitted newline/whitespace (offset, length)
  *         spans match the expected lists exactly.
  *
- *  Mirrors `check_sha256_unit_` in `test_hash.cpp`: the caller drives it once per backend (dispatched,
+ *  Mirrors `check_sha256_unit_` in `hash.cpp`: the caller drives it once per backend (dispatched,
  *  serial, and each natively-compiled kernel), so a wrong constant shared by the serial-vs-SIMD agreement
  *  tests is still caught against these external ground-truth vectors.
  *
@@ -101,24 +100,24 @@ static void check_utf8_unit_(                                                   
     sz_utf8_count_t count, sz_utf8_segmenter_t newlines, sz_utf8_segmenter_t whitespaces, //
     sz_cptr_t count_text, sz_size_t count_length, sz_size_t expected_count,               //
     sz_cptr_t newline_text, sz_size_t newline_length,                                     //
-    std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_newlines,                //
+    std::vector<boundary_span_t> const &expected_newlines,                                //
     sz_cptr_t whitespace_text, sz_size_t whitespace_length,                               //
-    std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_whitespaces) {
+    std::vector<boundary_span_t> const &expected_whitespaces) {
 
     verify(count(count_text, count_length) == expected_count);
 
-    auto check_boundaries = [](sz_utf8_segmenter_t finder, sz_cptr_t text, sz_size_t length,
-                               std::vector<std::pair<sz_size_t, sz_size_t>> const &expected) {
+    auto check_boundaries_ = [](sz_utf8_segmenter_t finder, sz_cptr_t text, sz_size_t length,
+                                std::vector<boundary_span_t> const &expected) {
         sz_size_t found_offsets[16], found_lengths[16], consumed = 0;
         sz_size_t const found = finder(text, length, found_offsets, found_lengths, 16u, &consumed);
         verify(found == expected.size());
         for (sz_size_t index = 0; index != found; ++index) {
-            verify(found_offsets[index] == expected[index].first);
-            verify(found_lengths[index] == expected[index].second);
+            verify(found_offsets[index] == expected[index].offset);
+            verify(found_lengths[index] == expected[index].length);
         }
     };
-    check_boundaries(newlines, newline_text, newline_length, expected_newlines);
-    check_boundaries(whitespaces, whitespace_text, whitespace_length, expected_whitespaces);
+    check_boundaries_(newlines, newline_text, newline_length, expected_newlines);
+    check_boundaries_(whitespaces, whitespace_text, whitespace_length, expected_whitespaces);
 }
 
 /**
@@ -220,7 +219,7 @@ void test_utf8_tokens_unit() {
     // single length-2 newline at byte 3 (CRLF merges into one match).
     char const newline_text[] = "a\nb\r\nc";
     sz_size_t const newline_length = (sz_size_t)(sizeof(newline_text) - 1);
-    std::vector<std::pair<sz_size_t, sz_size_t>> const newline_spans = {{1u, 1u}, {3u, 2u}};
+    std::vector<boundary_span_t> const newline_spans = {{1u, 1u}, {3u, 2u}};
 
     // `sz_utf8_whitespaces`: the space is a length-1 match at byte 1, the tab at byte 3, and U+200A HAIR SPACE
     // (E2 80 8A) a length-3 match at byte 5 (there is no CRLF merging in the whitespace set - each codepoint is its
@@ -231,13 +230,12 @@ void test_utf8_tokens_unit() {
                                    "d" "\xE2\x80\x8B\xE2\x80\x8C\xE2\x80\x8D" // U+200B/200C/200D (NOT whitespace)
                                    "e";
     sz_size_t const whitespace_length = (sz_size_t)(sizeof(whitespace_text) - 1);
-    std::vector<std::pair<sz_size_t, sz_size_t>> const whitespace_spans = {{1u, 1u}, {3u, 1u}, {5u, 3u}};
+    std::vector<boundary_span_t> const whitespace_spans = {{1u, 1u}, {3u, 1u}, {5u, 3u}};
 
     // `sz_utf8_count` (6 bytes, 3 codepoints) plus the newline/whitespace boundary anchors, driven through
     // the dispatched (automatic kernel), serial, and each natively-compiled backend.
-    check_utf8_unit_(sz_utf8_count, sz_utf8_newlines, sz_utf8_whitespaces, // Dispatched
-                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
-                     whitespace_length, whitespace_spans);
+    check_utf8_unit_(sz_utf8_count, sz_utf8_newlines, sz_utf8_whitespaces, mixed, mixed_length, 3u, newline_text,
+                     newline_length, newline_spans, whitespace_text, whitespace_length, whitespace_spans);
     check_utf8_unit_(sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial, // serial
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
@@ -323,6 +321,58 @@ void test_utf8_tokens_unit() {
         let_verify(auto l = lines("\x00\n"_sv), l.size() == 2); // NUL before newline - find \n, yields 2 segments
         let_verify(auto l = lines("\n\x00"_sv), l.size() == 2); // Newline before NUL - split correctly
     }
+
+    // Test with `sz::string` - not just `sz::string_view`
+    {
+        sz::string multiline = "a\nb\nc";
+        let_verify(auto l = multiline.utf8_split_newlines().template to<std::vector<std::string>>(),
+                   l.size() == 3 && l[1] == "b");
+
+        sz::string words_str = "foo bar baz";
+        let_verify(auto w = words_str.utf8_split_whitespaces().template to<std::vector<std::string>>(),
+                   w.size() == 3 && w[2] == "baz");
+    }
+
+    // The kernel-named accessors yield the DELIMITER runs themselves (not the segments between).
+    {
+        // `utf8_newlines` on "a\nb\r\nc": the "\n" and "\r\n".
+        let_verify(auto n = sz::string_view("a\nb\r\nc").utf8_newlines().template to<std::vector<std::string>>(),
+                   n.size() == 2 && n[0] == "\n" && n[1] == "\r\n");
+        // `utf8_whitespaces` on "a b  c": each whitespace codepoint is its own delimiter (runs are not coalesced).
+        let_verify(auto w = sz::string_view("a b  c").utf8_whitespaces().template to<std::vector<std::string>>(),
+                   w.size() == 3 && w[0] == " " && w[1] == " " && w[2] == " ");
+    }
+
+    // `.with_separators()` interleaves segments and delimiters losslessly: concatenation reconstructs the input.
+    {
+        for (sz::string_view input : {sz::string_view("Hi, world"), sz::string_view("a\nb\nc"),
+                                      sz::string_view("  x  "), sz::string_view(""), sz::string_view("plain")}) {
+            std::string rejoined;
+            for (auto piece : input.utf8_split_whitespaces().with_separators())
+                rejoined.append(piece.data(), piece.size());
+            let_verify(std::string round = rejoined, round == std::string(input.data(), input.size()));
+        }
+    }
+
+    // `.skip_empty()`: a compile-time, branchless variant that drops empty segments, matching Rust/Python.
+    {
+        // Whitespace tokens across a double space: "a  b" -> "a", "b" (the empty middle dropped).
+        let_verify(
+            auto t =
+                sz::string_view("a  b").utf8_split_whitespaces().skip_empty().template to<std::vector<std::string>>(),
+            t.size() == 2 && t[0] == "a" && t[1] == "b");
+    }
+}
+
+/**
+ *  @brief Known-answer whitespace-splitting vectors covering all 25 Unicode White_Space characters by byte length.
+ *
+ *  Walks the 1-byte ASCII set, the 2-byte NEL/NBSP pair and the 17 three-byte space forms through the C++
+ *  `utf8_split_whitespaces` wrapper, and pins the Format characters U+200B/200C/200D as NOT whitespace, so a
+ *  backend that widens the E2 80 [80-8A] block would shatter ZWJ emoji and Arabic/Indic words is caught here.
+ */
+void test_utf8_tokens_scripts_unit() {
+    std::printf("  - testing UTF-8 whitespace codepoints across Unicode scripts...\n");
 
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
@@ -434,47 +484,6 @@ void test_utf8_tokens_unit() {
             sz::string_view(long_mixed).utf8_split_whitespaces().template to<std::vector<std::string>>().size() ==
                 50); // 50 words
     }
-
-    // Test with `sz::string` - not just `sz::string_view`
-    {
-        sz::string multiline = "a\nb\nc";
-        let_verify(auto l = multiline.utf8_split_newlines().template to<std::vector<std::string>>(),
-                   l.size() == 3 && l[1] == "b");
-
-        sz::string words_str = "foo bar baz";
-        let_verify(auto w = words_str.utf8_split_whitespaces().template to<std::vector<std::string>>(),
-                   w.size() == 3 && w[2] == "baz");
-    }
-
-    // The kernel-named accessors yield the DELIMITER runs themselves (not the segments between).
-    {
-        // `utf8_newlines` on "a\nb\r\nc": the "\n" and "\r\n".
-        let_verify(auto n = sz::string_view("a\nb\r\nc").utf8_newlines().template to<std::vector<std::string>>(),
-                   n.size() == 2 && n[0] == "\n" && n[1] == "\r\n");
-        // `utf8_whitespaces` on "a b  c": each whitespace codepoint is its own delimiter (runs are not coalesced).
-        let_verify(auto w = sz::string_view("a b  c").utf8_whitespaces().template to<std::vector<std::string>>(),
-                   w.size() == 3 && w[0] == " " && w[1] == " " && w[2] == " ");
-    }
-
-    // `.with_separators()` interleaves segments and delimiters losslessly: concatenation reconstructs the input.
-    {
-        for (sz::string_view input : {sz::string_view("Hi, world"), sz::string_view("a\nb\nc"),
-                                      sz::string_view("  x  "), sz::string_view(""), sz::string_view("plain")}) {
-            std::string rejoined;
-            for (auto piece : input.utf8_split_whitespaces().with_separators())
-                rejoined.append(piece.data(), piece.size());
-            let_verify(std::string round = rejoined, round == std::string(input.data(), input.size()));
-        }
-    }
-
-    // `.skip_empty()`: a compile-time, branchless variant that drops empty segments, matching Rust/Python.
-    {
-        // Whitespace tokens across a double space: "a  b" -> "a", "b" (the empty middle dropped).
-        let_verify(
-            auto t =
-                sz::string_view("a  b").utf8_split_whitespaces().skip_empty().template to<std::vector<std::string>>(),
-            t.size() == 2 && t[0] == "a" && t[1] == "b");
-    }
 }
 
 #pragma endregion // Unit
@@ -503,8 +512,8 @@ struct utf8_tokens_backend_t {
  *
  *  For each generated string, compares:
  *  - sz_utf8_count: character counting
- *  - sz_utf8_find_newline: newline detection (position and matched length)
- *  - sz_utf8_find_whitespace: whitespace detection (position and matched length)
+ *  - sz_utf8_newlines: newline detection (position and matched length)
+ *  - sz_utf8_whitespaces: whitespace detection (position and matched length)
  *
  *  @param reference       Serial reference backend bundle (counting + newline/whitespace boundaries).
  *  @param candidate       ISA-specific backend bundle under test (counting + newline/whitespace boundaries).
@@ -512,8 +521,8 @@ struct utf8_tokens_backend_t {
  *  @param min_iterations  Number of random strings to generate and check.
  */
 template <typename reference_, typename candidate_>
-void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
-                                  std::size_t min_text_length, std::size_t min_iterations) {
+void check_utf8_tokens_equivalence_(reference_ reference, candidate_ candidate, //
+                                    std::size_t min_text_length, std::size_t min_iterations) {
 
     // Adapt the bundle methods to the plain boundary-finder signature `drain_matches_`/`reconstruct_segments_` expect.
     auto reference_newlines = [&](sz_cptr_t data, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
@@ -612,7 +621,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
         "\xE2\x81\x9F", "\xE3\x80\x80",                                                      // 3-byte
     };
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::size_t const utf8_content_count = span_over(utf8_content).size();
     std::size_t const special_delimiter_count = span_over(special_chars).size();
     std::size_t const total_strings_to_sample = utf8_content_count + special_delimiter_count;
@@ -645,7 +654,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
 
         // Build up a random string of at least `min_text_length` bytes
         while (text.size() < min_text_length) {
-            std::size_t random_content_index = content_dist(rng);
+            std::size_t random_content_index = content_dist(generator);
             if (random_content_index < utf8_content_count) { text.append(utf8_content[random_content_index]); }
             else { text.append(special_chars[random_content_index - utf8_content_count]); }
         }
@@ -655,15 +664,15 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
         std::size_t num_bytes_to_corrupt = text.size() / 10;
         std::uniform_int_distribution<std::size_t> byte_index_dist(0, text.size() - 1);
         for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
-            std::size_t byte_index = byte_index_dist(rng);
+            std::size_t byte_index = byte_index_dist(generator);
             text[byte_index] = '\0';
         }
         check(text.data(), text.size());
 
         // Swap 10% of bytes at random positions, creating malformed UTF-8 sequences
         for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
-            std::size_t byte_index_1 = byte_index_dist(rng);
-            std::size_t byte_index_2 = byte_index_dist(rng);
+            std::size_t byte_index_1 = byte_index_dist(generator);
+            std::size_t byte_index_2 = byte_index_dist(generator);
             std::swap(text[byte_index_1], text[byte_index_2]);
         }
         check(text.data(), text.size());
@@ -673,7 +682,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
     // so the SIMD load alignment - not just the content - is swept against the serial reference.
     std::string alignment_probe;
     while (alignment_probe.size() < 256) {
-        std::size_t random_content_index = content_dist(rng);
+        std::size_t random_content_index = content_dist(generator);
         if (random_content_index < utf8_content_count) { alignment_probe.append(utf8_content[random_content_index]); }
         else { alignment_probe.append(special_chars[random_content_index - utf8_content_count]); }
     }
@@ -696,12 +705,12 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
 void test_utf8_tokens_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 newline/whitespace kernels...\n");
 
-    static constexpr std::size_t max_input_length = 70;
+    static constexpr std::size_t max_input_length = utf8_unit_capacity_k;
 
     // Drive every newline/whitespace boundary finder shipped on this target over one malformed input.
     auto check = [&](char const *input, std::size_t input_length) {
         sz_size_t boundary_offsets[max_input_length + 1], boundary_lengths[max_input_length + 1];
-        auto check_boundaries = [&](sz_utf8_segmenter_t finder, char const *finder_name) {
+        auto check_boundaries_ = [&](sz_utf8_segmenter_t finder, char const *finder_name) {
             sz_size_t bytes_consumed = 0;
             sz_size_t const found = finder(input, (sz_size_t)input_length, boundary_offsets, boundary_lengths,
                                            (sz_size_t)(max_input_length + 1), &bytes_consumed);
@@ -716,81 +725,45 @@ void test_utf8_tokens_safety() {
         };
 
         // Serial baseline and the dispatched (automatic kernel resolution) entry points face the same contract.
-        check_boundaries(sz_utf8_newlines_serial, "serial newline finder");
-        check_boundaries(sz_utf8_whitespaces_serial, "serial whitespace finder");
-        check_boundaries(sz_utf8_newlines, "dispatched newline finder");
-        check_boundaries(sz_utf8_whitespaces, "dispatched whitespace finder");
+        check_boundaries_(sz_utf8_newlines_serial, "serial newline finder");
+        check_boundaries_(sz_utf8_whitespaces_serial, "serial whitespace finder");
+        check_boundaries_(sz_utf8_newlines, "dispatched newline finder");
+        check_boundaries_(sz_utf8_whitespaces, "dispatched whitespace finder");
 #if SZ_USE_HASWELL
-        check_boundaries(sz_utf8_newlines_haswell, "haswell newline finder");
-        check_boundaries(sz_utf8_whitespaces_haswell, "haswell whitespace finder");
+        check_boundaries_(sz_utf8_newlines_haswell, "haswell newline finder");
+        check_boundaries_(sz_utf8_whitespaces_haswell, "haswell whitespace finder");
 #endif
 #if SZ_USE_ICELAKE
-        check_boundaries(sz_utf8_newlines_icelake, "icelake newline finder");
-        check_boundaries(sz_utf8_whitespaces_icelake, "icelake whitespace finder");
+        check_boundaries_(sz_utf8_newlines_icelake, "icelake newline finder");
+        check_boundaries_(sz_utf8_whitespaces_icelake, "icelake whitespace finder");
 #endif
 #if SZ_USE_NEON
-        check_boundaries(sz_utf8_newlines_neon, "neon newline finder");
-        check_boundaries(sz_utf8_whitespaces_neon, "neon whitespace finder");
+        check_boundaries_(sz_utf8_newlines_neon, "neon newline finder");
+        check_boundaries_(sz_utf8_whitespaces_neon, "neon whitespace finder");
 #endif
 #if SZ_USE_SVE2
-        check_boundaries(sz_utf8_newlines_sve2, "sve2 newline finder");
-        check_boundaries(sz_utf8_whitespaces_sve2, "sve2 whitespace finder");
+        check_boundaries_(sz_utf8_newlines_sve2, "sve2 newline finder");
+        check_boundaries_(sz_utf8_whitespaces_sve2, "sve2 whitespace finder");
 #endif
 #if SZ_USE_V128
-        check_boundaries(sz_utf8_newlines_v128, "v128 newline finder");
-        check_boundaries(sz_utf8_whitespaces_v128, "v128 whitespace finder");
+        check_boundaries_(sz_utf8_newlines_v128, "v128 newline finder");
+        check_boundaries_(sz_utf8_whitespaces_v128, "v128 whitespace finder");
 #endif
 #if SZ_USE_RVV
-        check_boundaries(sz_utf8_newlines_rvv, "rvv newline finder");
-        check_boundaries(sz_utf8_whitespaces_rvv, "rvv whitespace finder");
+        check_boundaries_(sz_utf8_newlines_rvv, "rvv newline finder");
+        check_boundaries_(sz_utf8_whitespaces_rvv, "rvv whitespace finder");
 #endif
 #if SZ_USE_LASX
-        check_boundaries(sz_utf8_newlines_lasx, "lasx newline finder");
-        check_boundaries(sz_utf8_whitespaces_lasx, "lasx whitespace finder");
+        check_boundaries_(sz_utf8_newlines_lasx, "lasx newline finder");
+        check_boundaries_(sz_utf8_whitespaces_lasx, "lasx whitespace finder");
 #endif
 #if SZ_USE_POWERVSX
-        check_boundaries(sz_utf8_newlines_powervsx, "powervsx newline finder");
-        check_boundaries(sz_utf8_whitespaces_powervsx, "powervsx whitespace finder");
+        check_boundaries_(sz_utf8_newlines_powervsx, "powervsx newline finder");
+        check_boundaries_(sz_utf8_whitespaces_powervsx, "powervsx whitespace finder");
 #endif
     };
 
-    char input[max_input_length];
-
-    // The named adversarial shapes the task calls out, exercised directly.
-    check("\x80", 1);              // Lone continuation byte
-    check("\xC0\x80", 2);          // Overlong encoding of NUL
-    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
-    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
-
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF. Both the single-byte sweep and the
-    // pair sweep below stride each dimension, so a low multiplier samples the whole space instead of a prefix.
-    std::size_t const byte_step = sweep_stride(256);
-    for (std::size_t byte = 0; byte < 256; byte += byte_step) {
-        input[0] = (char)byte;
-        check(input, 1);
-    }
-
-    // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
-    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
-    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
-        input[0] = (char)(pair >> 8);
-        input[1] = (char)(pair & 0xFF);
-        check(input, 2);
-    }
-
-    // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
-    std::size_t const random_inputs = scale_iterations(10000);
-    auto &rng = global_random_generator();
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(rng);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
-        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, input, input_length);
-            check(buffer, input_length);
-        });
-    }
+    for_each_adversarial_utf8_input_(global_random_generator(), scale_iterations(10000), check);
 
     std::printf("    malformed-input safety passed!\n");
 }
@@ -842,46 +815,12 @@ void test_utf8_tokens_all() {
     // Each iteration drains a 4 KB input through six capacities down to 1, re-entering the kernel once per match.
     // The input count is this family's share of the suite budget, sized against its siblings.
     for (utf8_tokens_backend_t const &backend : utf8_tokens_backends)
-        test_utf8_tokens_equivalence(serial, backend, 4000, scale_iterations(250));
+        check_utf8_tokens_equivalence_(serial, backend, 4000, scale_iterations(250));
 }
 
 #pragma endregion // Drivers
 
 #pragma region Delimiter Helpers
-
-/** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_encode` (silently skips invalid runes). */
-static void append_codepoint_(std::string &text, sz_rune_t codepoint) {
-    sz_u8_t bytes[4];
-    sz_rune_length_t const length = sz_rune_encode(codepoint, bytes);
-    if (length == sz_rune_invalid_k) return;
-    text.append((char const *)bytes, (std::size_t)length);
-}
-
-/**
- *  @brief Builds a random, well-formed UTF-8 string whose codepoints span all four byte-widths and every
- *         1->2->3->4 transition, mixing delimiter and non-delimiter codepoints so the scan kernels hit their
- *         mixed-width paths and resolve a match at every alignment.
- */
-static std::string random_valid_utf8_(std::size_t target_codepoints, std::mt19937 &rng) {
-    static struct {
-        sz_rune_t low, high;
-    } const ranges[] = {
-        {0x000020u, 0x00007Eu}, // 1-byte ASCII printable (space + punctuation + letters + digits)
-        {0x0000A1u, 0x0007FFu}, // 2-byte (Latin-1 symbols, Greek/Cyrillic letters)
-        {0x000800u, 0x00CFFFu}, // 3-byte (general punctuation, CJK; stays below U+D800 surrogates)
-        {0x010000u, 0x0EFFFFu}, // 4-byte (symbols, emoji; avoids the plane-ender noncharacters)
-    };
-    std::uniform_int_distribution<int> width_pick(0, 3);
-    std::string text;
-    text.reserve(target_codepoints * 4);
-    for (std::size_t index = 0; index != target_codepoints; ++index) {
-        int const width = width_pick(rng);
-        std::uniform_int_distribution<sz_rune_t> codepoint(ranges[width].low, ranges[width].high);
-        std::size_t const before = text.size();
-        while (text.size() == before) append_codepoint_(text, codepoint(rng));
-    }
-    return text;
-}
 
 /**
  *  @brief The UTF-8 delimiter segmenters compiled on this target. The always-present `dispatched` entry keeps the
@@ -889,12 +828,7 @@ static std::string random_valid_utf8_(std::size_t target_codepoints, std::mt1993
  *         safety and equivalence drivers so their ISA coverage cannot diverge. Only serial, Haswell, Ice Lake,
  *         NEON and SVE2 implement `sz_utf8_delimiters`; every other target dispatches to serial.
  */
-struct utf8_delimiters_backend_t {
-    char const *name;
-    sz_utf8_segmenter_t finder;
-};
-
-static utf8_delimiters_backend_t const utf8_delimiters_backends[] = {
+static utf8_segment_backend_t const utf8_delimiters_backends[] = {
     {"dispatched", sz_utf8_delimiters},
 #if SZ_USE_HASWELL
     {"haswell", sz_utf8_delimiters_haswell},
@@ -965,7 +899,7 @@ void test_utf8_delimiters_unit() {
     }
 
     std::vector<sz_size_t> offsets, lengths;
-    auto check_backend = [&](sz_utf8_segmenter_t finder) {
+    auto check_backend_ = [&](sz_utf8_segmenter_t finder) {
         for (auto const &one : cases) {
             drain_matches_(finder, one.text, one.length, one.length + 1, offsets, lengths);
             verify(offsets.size() == one.expected_count && "Delimiter count mismatch");
@@ -986,8 +920,8 @@ void test_utf8_delimiters_unit() {
                    "Resume offset must be the end of the last emitted delimiter, not the vector window's edge");
         }
     };
-    check_backend(sz_utf8_delimiters_serial);
-    for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends) check_backend(backend.finder);
+    check_backend_(sz_utf8_delimiters_serial);
+    for (utf8_segment_backend_t const &backend : utf8_delimiters_backends) check_backend_(backend.finder);
 
     // The C++ range wrappers over the same kernel, on the same hand-verifiable inputs.
     {
@@ -1022,9 +956,9 @@ void test_utf8_delimiters_unit() {
  *         well-formed inputs: the full (offset, length) match list must agree, both in one shot and when the
  *         candidate is drained through a tiny capacity so its `bytes_consumed` resume path is exercised.
  */
-static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, sz_utf8_segmenter_t finder_candidate,
-                                             sz_size_t inputs) {
-    auto &rng = global_random_generator();
+static void check_utf8_delimiters_equivalence_(sz_utf8_segmenter_t finder_serial, sz_utf8_segmenter_t finder_candidate,
+                                               sz_size_t inputs) {
+    auto &generator = global_random_generator();
     std::vector<sz_size_t> serial_offsets, serial_lengths, candidate_offsets, candidate_lengths, resumed_offsets,
         resumed_lengths;
 
@@ -1052,7 +986,7 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 
     sz_size_t const ladder[] = {0u, 1u, 2u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 100u, 200u};
     for (sz_size_t codepoints : ladder) {
-        std::string const text = random_valid_utf8_(codepoints, rng);
+        std::string const text = random_valid_utf8_(codepoints, generator);
         check(text.data(), (sz_size_t)text.size());
     }
 
@@ -1074,7 +1008,7 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 
     std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 300);
     for (sz_size_t iteration = 0; iteration != inputs; ++iteration) {
-        std::string const text = random_valid_utf8_(codepoint_distribution(rng), rng);
+        std::string const text = random_valid_utf8_(codepoint_distribution(generator), generator);
         // The probe buffer itself is handed to the kernels: copying it back into a fresh `std::string` would
         // hand them whatever alignment the allocator picked, and the sweep would test one alignment repeatedly.
         for_each_cacheline_offset_(text.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
@@ -1091,7 +1025,6 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 /** @brief Feeds malformed / invalid UTF-8 through one backend, asserting in-bounds, ascending, well-formed output. */
 static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
                                           std::size_t random_inputs = scale_iterations(2500)) {
-    static constexpr std::size_t max_input_length = 70;
     std::vector<sz_size_t> offsets, lengths;
 
     // Malformed bytes meet a capacity too small to hold the batch, so the resume path - not just the one-shot
@@ -1110,32 +1043,7 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
         }
     };
 
-    char input[max_input_length];
-    check("\x80", 1);              // Lone continuation byte
-    check("\xC0\x80", 2);          // Overlong encoding of NUL
-    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
-    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
-
-    // Both sweeps stride every dimension, so a low multiplier samples the whole space instead of a prefix.
-    std::size_t const byte_step = sweep_stride(256);
-    for (std::size_t byte = 0; byte < 256; byte += byte_step) { input[0] = (char)byte, check(input, 1); }
-    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
-    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
-        input[0] = (char)(pair >> 8), input[1] = (char)(pair & 0xFF);
-        check(input, 2);
-    }
-
-    auto &rng = global_random_generator();
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(rng);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
-        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, input, input_length);
-            check(buffer, input_length);
-        });
-    }
+    for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
 }
 
 #pragma endregion // Safety
@@ -1146,7 +1054,7 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
 void test_utf8_delimiters_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 delimiter kernels...\n");
     check_utf8_delimiters_safety_(sz_utf8_delimiters_serial);
-    for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends)
+    for (utf8_segment_backend_t const &backend : utf8_delimiters_backends)
         check_utf8_delimiters_safety_(backend.finder);
     std::printf("    malformed-input safety passed!\n");
 }
@@ -1154,8 +1062,8 @@ void test_utf8_delimiters_safety() {
 /** @brief Drive the serial-vs-SIMD UTF-8 delimiter differential across every backend compiled on this target. */
 void test_utf8_delimiters_all() {
     sz_size_t const inputs = (sz_size_t)scale_iterations(700);
-    for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends)
-        test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, backend.finder, inputs);
+    for (utf8_segment_backend_t const &backend : utf8_delimiters_backends)
+        check_utf8_delimiters_equivalence_(sz_utf8_delimiters_serial, backend.finder, inputs);
 }
 
 #pragma endregion // Drivers

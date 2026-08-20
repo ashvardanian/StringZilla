@@ -5,7 +5,7 @@ Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends 
 
 ## Methodology
 
-Numbers are throughput in MB/s, measured with `bench/utf8_iterate.cpp` over the full multilingual `xlsum.csv` corpus, reporting the median of repeated runs.
+Numbers are throughput in MB/s, measured with `bench/utf8_segment.cpp` over the full multilingual `xlsum.csv` corpus, reporting the median of repeated runs.
 Each table fixes one input shape; its single column is the `sz_utf8_graphemes` operation and its rows are a backend on a chip, so reading down the column compares the backend ladder on one fixed input shape.
 Results are split into a Short Words workload (whitespace-delimited tokens averaging a few bytes) and a Long Lines workload (full text lines) to expose how each kernel scales with token length.
 A `↑` cell means there is no dedicated kernel at that backend, so the dispatcher reuses the tier above it.

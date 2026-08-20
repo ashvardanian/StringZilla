@@ -1,5 +1,5 @@
 /**
- *  @file       lib.c
+ *  @file       javascript/lib.c
  *  @brief      JavaScript bindings for StringZilla.
  *  @author     Ash Vardanian
  *  @date       September 18, 2023

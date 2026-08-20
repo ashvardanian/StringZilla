@@ -320,7 +320,7 @@ SZ_HELPER_INLINE sz_u8_t const *sz_utf8_pack8_lut_lasx_(void) {
  *          lane. The four packed groups are stitched in order by their `popcount` offset (the group base + local
  *          index gives the absolute byte offset). @return the popcount of @p mask.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out) {
     sz_u8_t const *lut = sz_utf8_pack8_lut_lasx_();
     // Lane-local byte identity {0..15, 0..15}: each 128-bit lane shuffles its own 0..15 identity by the LUT row, so
     // the packed values are the within-half bit positions; we add the half base to recover absolute offsets.
@@ -355,7 +355,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out)
  *          lane never skips bytes owing their own next U+FFFD).
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_lasx_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_lasx_( //
     __m256i window_u8x32, sz_u32_t emit_starts, sz_u32_t ill_formed, __m256i consumed_length_u8x32, int has_three,
     int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
@@ -488,9 +488,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_lasx_( //
  *          declines (`*runes_unpacked == 0`, cursor unchanged) ONLY when the first lead's declared sequence crosses
  *          the window edge (a boundary truncation), which the public entry finalizes without a serial re-decode.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_lasx_( //
-    sz_cptr_t text, sz_size_t length,               //
-    sz_rune_t *runes, sz_size_t runes_capacity,     //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_lasx_( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_rune_t *runes, sz_size_t runes_capacity,       //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 32 ? length : 32;
@@ -914,8 +914,8 @@ SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_lasx_(sz_u32_t bits) {
 /** @brief  Masked 64-byte load into two halves; bytes [loaded, 64) read as zero (the LASX stand-in for
  *          `_mm512_maskz_loadu_epi8`). A stack staging union covers the partial tail so we never read past
  *          `text + loaded`. */
-SZ_HELPER_AUTO void sz_utf8_load_window_lasx_(sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32,
-                                              __m256i *out_high_u8x32) {
+SZ_HELPER_INLINE void sz_utf8_load_window_lasx_(sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32,
+                                                __m256i *out_high_u8x32) {
     if (loaded >= 64) {
         *out_low_u8x32 = __lasx_xvld(text + 0, 0);
         *out_high_u8x32 = __lasx_xvld(text + 32, 0);
@@ -962,7 +962,7 @@ SZ_HELPER_INLINE void sz_utf8_forward_neighbours_lasx_( //
 
 /** @brief  Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves - the LASX twin of
  *          @ref sz_utf8_rune_decode_window_, bit-identical on every lane. */
-SZ_HELPER_AUTO sz_utf8_rune_window_lasx_t sz_utf8_rune_decode_window_lasx_(sz_u8_t const *text, sz_size_t available) {
+SZ_HELPER_INLINE sz_utf8_rune_window_lasx_t sz_utf8_rune_decode_window_lasx_(sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_lasx_t result;
     result.loaded = available < 64 ? available : 64;
 
@@ -1054,7 +1054,7 @@ SZ_HELPER_AUTO sz_utf8_rune_window_lasx_t sz_utf8_rune_decode_window_lasx_(sz_u8
 
 /** @brief  256-entry byte LUT addressed by a per-lane byte index in `[0,256)`: `result[lane] = table[index[lane]]` via
  *          a bounded scalar L1 walk (LASX has no gather). The LASX stand-in for the substrate `lut256` leaf. */
-SZ_HELPER_AUTO __m256i sz_utf8_rune_lut256_scalar_lasx_(sz_u8_t const *table, __m256i index_u8x32) {
+SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_scalar_lasx_(sz_u8_t const *table, __m256i index_u8x32) {
     sz_u256_vec_t index_vec, result_vec;
     index_vec.lasx = index_u8x32;
     for (int lane = 0; lane < 32; ++lane) result_vec.u8s[lane] = table[index_vec.u8s[lane]];
@@ -1065,7 +1065,7 @@ SZ_HELPER_AUTO __m256i sz_utf8_rune_lut256_scalar_lasx_(sz_u8_t const *table, __
  *          (0 when @p selector reaches @p tile_count). Each 16-byte row is double-broadcast into both 128-bit lanes with
  *          `xvpermi.q(row, row, 0x00)` and shuffled by @p within (a nibble, so `xvshuf.b` never crosses the seam), then
  *          blended in for the lanes whose @p selector picks that row - the LASX twin of the AVX2 cascade stage. */
-SZ_HELPER_AUTO __m256i sz_utf8_rune_cascade_stage_lasx_( //
+SZ_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_lasx_( //
     sz_u8_t const *table, int tile_count, __m256i selector_u8x32, __m256i within_u8x32) {
     __m256i result_u8x32 = __lasx_xvreplgr2vr_b(0);
     for (int tile = 0; tile < tile_count; ++tile) {
@@ -1082,7 +1082,7 @@ SZ_HELPER_AUTO __m256i sz_utf8_rune_cascade_stage_lasx_( //
  *          `flat[page * 256 + low]` per lane. LASX has no gather, so the leaf read is a bounded scalar L1 walk over the
  *          fused 16-bit index `(page << 8) | low` (the NEON strategy). Lanes whose page index reaches @p page_count
  *          return zero. */
-SZ_HELPER_AUTO __m256i sz_utf8_rune_flat_lookup_lasx_( //
+SZ_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_lasx_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, __m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     sz_u256_vec_t high_vec, low_vec, result_vec;
     high_vec.lasx = high_bytes_u8x32;
@@ -1109,7 +1109,7 @@ SZ_HELPER_INLINE int sz_utf8_rune_byte_popcount_lasx_(sz_u32_t byte) {
 /** @brief  Left-pack the set lane indices (in [0, 64), ascending) of a 64-bit @p mask into @p out[0..popcount) via the
  *          existing 256-row @ref sz_utf8_pack8_lut_lasx_ + `xvshuf.b` (eight 8-bit groups), NOT a scalar `ctz` walk.
  *          @return the popcount of @p mask. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_pack_boundaries_lasx_(sz_u64_t mask, sz_u8_t *out) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_pack_boundaries_lasx_(sz_u64_t mask, sz_u8_t *out) {
     sz_u8_t const *lut = sz_utf8_pack8_lut_lasx_();
     static sz_u8_t const identity_bytes[32] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
                                                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
@@ -1134,7 +1134,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_pack_boundaries_lasx_(sz_u64_t mask, sz_u8
  *          via @p previous_io; bit-exact with the Ice Lake leaf. The set lanes are left-packed once (pack8 LUT), then
  *          streamed in waves of four u64 positions (`xvperm.w` shift + lane-0 carry seat via `xvinsgr2vr.d`, lengths via
  *          `xvsub.d`), with a scalar tail for the final partial wave. Count is `xvpcnt.d`, never a scalar `popcount`. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_lasx_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_lasx_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = sz_utf8_rune_popcount64_lasx_(boundary);

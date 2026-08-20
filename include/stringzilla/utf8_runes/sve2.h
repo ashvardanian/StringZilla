@@ -133,7 +133,7 @@ SZ_HELPER_INLINE svuint32_t sz_utf8_rune_flat_lookup_quarter_sve2_( //
  *          `svtbl_u8` scan of the 256-entry page LUT would cost sixteen shuffle-pipe lookups at the architectural
  *          minimum vector length, while gathering both stages stays length-agnostic with no VL-dependent branch.
  */
-SZ_HELPER_AUTO svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
+SZ_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t high_bytes_u8x, svuint8_t low_bytes_u8x) {
 
     // Widen both byte-lane vectors into four 32-bit-lane quarters each, preserving lane order. SVE vector types
@@ -164,7 +164,7 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
 
 /** @brief  Read up to 256 LUT entries by per-lane u8 index via overlapping `svtbl_u8` chunks (gather-free); lanes
  *          outside a chunk's span select zero and OR away. Serves the astral cascade stage-1 tables. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count, svuint8_t index_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count, svuint8_t index_u8x) {
     svbool_t const all_bytes_b8x = svptrue_b8();
     int const vector_length = (int)svcntb();
     svuint8_t result_u8x = svdup_n_u8(0);
@@ -184,7 +184,7 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count,
  *          falls to the full gather unchanged (so mixed/multibyte chunks pay only one compare + `ptest`, never an
  *          extra LUT). Requires inactive lanes of @p bytes_u8x to be zero-filled (any `svld1` with a `whilelt`
  *          predicate is), so the whole-chunk ASCII test never trips on tail garbage. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
+SZ_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t bytes_u8x, svuint8_t high_u8x, svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     if (!svptest_any(all_b8x, svcmpge_n_u8(all_b8x, bytes_u8x, 0x80)))
@@ -194,8 +194,8 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
 
 /** @brief  Select one of `tile_count` 16-entry rows by `selector` and index it by `within` (nibble cascade tile),
  *          serving the astral cascade stages on every property. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count, svuint8_t selector_u8x,
-                                                    svuint8_t within_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count, svuint8_t selector_u8x,
+                                                      svuint8_t within_u8x) {
     svbool_t const all_bytes_b8x = svptrue_b8();
     svbool_t const row_b8x = svwhilelt_b8_u64(0, 16);
     svuint8_t result_u8x = svdup_n_u8(0);
@@ -364,9 +364,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_packed_sve2_(                     
  *          (`*runes_unpacked == 0`, cursor unchanged) ONLY when that happens on the very first lead (a boundary
  *          truncation), which the public entry finalizes without a serial re-decode.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_sve2_( //
-    sz_cptr_t text, sz_size_t length,               //
-    sz_rune_t *runes, sz_size_t runes_capacity,     //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_rune_t *runes, sz_size_t runes_capacity,       //
     sz_size_t *runes_unpacked) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
