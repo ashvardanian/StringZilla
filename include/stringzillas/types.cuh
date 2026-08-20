@@ -266,7 +266,7 @@ using pinned_alloc_t = pinned_alloc<char>;
 
 /** @brief Returns `true` if the pointer refers to device-accessible memory (Device or Managed/Unified). */
 inline bool is_device_accessible_memory(void const *ptr) noexcept {
-    if (!ptr) return true;
+    if (!ptr) return false;
     // Without a current context the query fails and every pointer reads back as host, including device memory.
     [[maybe_unused]] CUcontext const context = ensure_primary_context_();
     // Driver query: `CU_POINTER_ATTRIBUTE_MEMORY_TYPE` collapses both device and managed/unified memory onto
@@ -277,6 +277,36 @@ inline bool is_device_accessible_memory(void const *ptr) noexcept {
     CUresult error = cuPointerGetAttribute(&memory_type, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)ptr);
     if (error != CUDA_SUCCESS) return false;
     return memory_type == CU_MEMORYTYPE_DEVICE;
+}
+
+/**
+ *  @brief Refuses a region no kernel can reach, so a caller's buffer is never written across the bus.
+ *
+ *  An empty region is accepted, because nothing is read or written through it - which is what keeps a
+ *  zero-capacity call a size query rather than a refusal.
+ */
+template <typename value_type_, sz_size_t extent_>
+inline status_t check_device_accessible_memory(span<value_type_, extent_> region) noexcept {
+    if (region.size() == 0) return status_t::success_k;
+    return is_device_accessible_memory((void const *)region.data()) ? status_t::success_k
+                                                                    : status_t::device_memory_mismatch_k;
+}
+
+/**
+ *  @brief Refuses a sequence whose bytes no kernel can reach, probing its first non-empty element.
+ *
+ *  One driver round-trip decides for the whole batch: a tape is one allocation, and scattered elements come
+ *  from one allocator. An empty element carries no address to probe, so the walk steps past it.
+ */
+template <typename sequence_type_>
+inline status_t check_device_accessible_sequence(sequence_type_ const &sequence) noexcept {
+    for (size_t index = 0; index < sequence.size(); ++index) {
+        span<byte_t const> const element = to_bytes_view(sequence[index]);
+        if (element.size() == 0) continue;
+        return is_device_accessible_memory((void const *)element.data()) ? status_t::success_k
+                                                                         : status_t::device_memory_mismatch_k;
+    }
+    return status_t::success_k;
 }
 
 struct cuda_status_t {

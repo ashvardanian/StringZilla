@@ -68,6 +68,7 @@ struct sz_sequence_as_cpp_container_t {
 struct sz_sequence_u64tape_as_cpp_container_t {
     using self_t = sz_sequence_u64tape_as_cpp_container_t;
     using value_type = std::string_view;
+    using offset_t = sz_u64_t;
     using iterator = sz::indexed_container_iterator<self_t>;
 
     sz_sequence_u64tape_t const *tape_ = nullptr;
@@ -84,12 +85,27 @@ struct sz_sequence_u64tape_as_cpp_container_t {
         sz_assert_(index < tape_->count && "Index out of bounds");
         return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
     }
+
+    /** @brief The contiguous block the elements slice; starts wherever `offsets[0]` points. */
+    sz::span<char const> tape_bytes() const noexcept {
+        if (size() == 0) return {};
+        return {tape_->data + tape_->offsets[0], (std::size_t)(tape_->offsets[size()] - tape_->offsets[0])};
+    }
+    /** @brief Every element's length summed, in the tape's own offset width, without walking the elements. */
+    offset_t tape_total_bytes() const noexcept {
+        return size() == 0 ? offset_t {} : (offset_t)(tape_->offsets[size()] - tape_->offsets[0]);
+    }
+    /** @brief One element's length, in the tape's own offset width. */
+    offset_t tape_length_at(std::size_t index) const noexcept {
+        return (offset_t)(tape_->offsets[index + 1] - tape_->offsets[index]);
+    }
 };
 
 /** Wraps a `sz_sequence_u32tape_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_u32tape_as_cpp_container_t {
     using self_t = sz_sequence_u32tape_as_cpp_container_t;
     using value_type = std::string_view;
+    using offset_t = sz_u32_t;
     using iterator = sz::indexed_container_iterator<self_t>;
 
     sz_sequence_u32tape_t const *tape_ = nullptr;
@@ -105,6 +121,20 @@ struct sz_sequence_u32tape_as_cpp_container_t {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
         sz_assert_(index < tape_->count && "Index out of bounds");
         return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
+    }
+
+    /** @brief The contiguous block the elements slice; starts wherever `offsets[0]` points. */
+    sz::span<char const> tape_bytes() const noexcept {
+        if (size() == 0) return {};
+        return {tape_->data + tape_->offsets[0], (std::size_t)(tape_->offsets[size()] - tape_->offsets[0])};
+    }
+    /** @brief Every element's length summed, in the tape's own offset width, without walking the elements. */
+    offset_t tape_total_bytes() const noexcept {
+        return size() == 0 ? offset_t {} : (offset_t)(tape_->offsets[size()] - tape_->offsets[0]);
+    }
+    /** @brief One element's length, in the tape's own offset width. */
+    offset_t tape_length_at(std::size_t index) const noexcept {
+        return (offset_t)(tape_->offsets[index + 1] - tape_->offsets[index]);
     }
 };
 
@@ -243,7 +273,9 @@ inline sz_status_t propagate_error(sz::status_t status, char const **reporter_me
     case sz::status_t::unexpected_dimensions_k: *reporter_message = "Input/output size mismatch"; break;
     case sz::status_t::missing_gpu_k: *reporter_message = "GPU device not available or CUDA not initialized"; break;
     case sz::status_t::device_code_mismatch_k: *reporter_message = "Backend and executor mismatch"; break;
-    case sz::status_t::device_memory_mismatch_k: *reporter_message = "Use device-reachable or unified memory"; break;
+    case sz::status_t::device_memory_mismatch_k:
+        *reporter_message = "Use device-reachable or unified memory; page-locked host memory is not either";
+        break;
     case sz::status_t::unknown_k: *reporter_message = "Unknown error"; break;
     default: *reporter_message = "Unrecognized error code"; break;
     }

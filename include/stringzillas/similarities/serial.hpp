@@ -451,12 +451,21 @@ SZ_INLINE bool text_is_ascii_(span<char const> text) noexcept {
     return find_byteset_(text.data(), text.size(), &non_ascii) == SZ_NULL_CHAR;
 }
 
-/** @brief Whether every string in @p corpus is ASCII, so rune distances equal byte distances. */
+/**
+ *  @brief Whether every string in @p corpus is ASCII, so rune distances equal byte distances.
+ *
+ *  A tape is one contiguous block, so it is scanned in a single pass rather than one byteset launch per
+ *  element. Any terminator bytes the block carries between elements are themselves ASCII, so the answer is
+ *  the same either way.
+ */
 template <sz_find_byteset_t find_byteset_, typename corpus_type_>
 SZ_INLINE bool corpus_is_ascii_(corpus_type_ const &corpus) noexcept {
-    for (size_t index = 0; index != corpus.size(); ++index)
-        if (!text_is_ascii_<find_byteset_>(to_view(corpus[index]))) return false;
-    return true;
+    if constexpr (is_tape_like<corpus_type_>::value) { return text_is_ascii_<find_byteset_>(corpus.tape_bytes()); }
+    else {
+        for (size_t index = 0; index != corpus.size(); ++index)
+            if (!text_is_ascii_<find_byteset_>(to_view(corpus[index]))) return false;
+        return true;
+    }
 }
 
 #pragma region Core Templates

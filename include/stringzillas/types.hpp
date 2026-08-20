@@ -485,7 +485,33 @@ concept continuous_like = requires(continuous_type_ container) {
 
 static_assert(continuous_like<span<char>>);
 static_assert(!continuous_like<int>);
+
 #endif
+
+/**
+ *  @brief Whether a container's elements are slices of one contiguous block, addressed by an offsets array.
+ *
+ *  Detects lengths rather than offsets on purpose: the packed and NULL-terminated flavors disagree on what an
+ *  element's length is, and a caller doing its own offset arithmetic would silently get one of them wrong.
+ *
+ *  A trait rather than a concept, so the engines can branch on it at C++17 - which the Python bindings build
+ *  these headers at - without a preprocessor conditional cutting through the control flow that uses it.
+ */
+template <typename tape_type_, typename = void>
+struct is_tape_like {
+    static constexpr bool value = false;
+};
+
+template <typename tape_type_>
+struct is_tape_like<tape_type_, std::void_t<decltype(std::declval<tape_type_ const &>().tape_bytes()),
+                                            decltype(std::declval<tape_type_ const &>().tape_total_bytes()),
+                                            decltype(std::declval<tape_type_ const &>().tape_length_at(size_t {}))>> {
+    static constexpr bool value = true;
+};
+
+static_assert(is_tape_like<arrow_strings_view<char, u32_t>>::value);
+static_assert(is_tape_like<arrow_packed_view<char, u32_t>>::value);
+static_assert(!is_tape_like<span<char>>::value);
 
 /**
  *  @brief A function that takes a range of elements and a @p callback function and groups the elements

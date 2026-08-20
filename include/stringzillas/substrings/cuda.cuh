@@ -362,19 +362,6 @@ constexpr size_t substrings_chunks_for_haystack_(size_t haystack_length, size_t 
 }
 
 /**
- *  @brief Writes each haystack's chunk count, feeding the exclusive scan that turns this into
- *         `haystack_chunk_offsets` (chunk-index range per haystack) - the input the two chunk kernels below
- *         binary-search to resolve a global chunk index back to its owning haystack.
- */
-static __global__ void substrings_count_chunks_per_haystack_(span<span<byte_t const> const> haystacks,
-                                                             size_t chunk_bytes, span<size_t> chunks_per_haystack) {
-    for (size_t haystack_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x; haystack_index < haystacks.size();
-         haystack_index += (size_t)gridDim.x * blockDim.x)
-        chunks_per_haystack[haystack_index] = substrings_chunks_for_haystack_(haystacks[haystack_index].size(),
-                                                                              chunk_bytes);
-}
-
-/**
  *  @brief Walks every chunk of every haystack, one thread per chunk, in whichever pass @p pass_ names.
  *
  *  Both passes share one @p chunk_match_slots buffer, because the host's in-place exclusive scan already
@@ -536,14 +523,28 @@ static __global__ void substrings_cover_compact_(span<substrings_match_t const> 
         if (keep_offsets[index + 1] > keep_offsets[index]) survivors[keep_offsets[index]] = matches[index];
 }
 
-/** @brief Maps each haystack's match range through the cover's scan, so its survivors stay addressable. */
-static __global__ void substrings_cover_haystack_offsets_(span<size_t const> haystack_chunk_offsets,
+/**
+ *  @brief Maps each haystack's match range onto the boundaries its reported matches occupy.
+ *  @param[in] keep_offsets The cover's scanned keep flags, or empty when every emitted match is reported.
+ */
+static __global__ void substrings_haystack_match_offsets_(span<size_t const> haystack_chunk_offsets,
                                                           span<size_t const> chunk_match_offsets,
-                                                          span<size_t const> keep_offsets, size_t haystack_count,
-                                                          span<size_t> cover_offsets) {
-    for (size_t haystack_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x; haystack_index <= haystack_count;
-         haystack_index += (size_t)gridDim.x * blockDim.x)
-        cover_offsets[haystack_index] = keep_offsets[chunk_match_offsets[haystack_chunk_offsets[haystack_index]]];
+                                                          span<size_t const> keep_offsets,
+                                                          span<size_t> haystack_match_offsets) {
+    for (size_t haystack_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         haystack_index < haystack_match_offsets.size(); haystack_index += (size_t)gridDim.x * blockDim.x) {
+        size_t const emitted_before = chunk_match_offsets[haystack_chunk_offsets[haystack_index]];
+        haystack_match_offsets[haystack_index] = keep_offsets.size() ? keep_offsets[emitted_before] : emitted_before;
+    }
+}
+
+/** @brief Writes how many matches each haystack owns, as the gap between its two boundaries. */
+static __global__ void substrings_counts_from_boundaries_(span<size_t const> haystack_match_offsets,
+                                                          span<size_t> counts_per_haystack) {
+    for (size_t haystack_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         haystack_index < counts_per_haystack.size(); haystack_index += (size_t)gridDim.x * blockDim.x)
+        counts_per_haystack[haystack_index] = haystack_match_offsets[haystack_index + 1] -
+                                              haystack_match_offsets[haystack_index];
 }
 
 /**
@@ -883,10 +884,6 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     /** @brief Per-call scratch: holds per-chunk counts, then - in place - per-chunk exclusive offsets, with the
      *         grand total in the trailing slot. Grown as needed, reused across calls. */
     safe_vector<size_t, offset_allocator_t> chunk_match_offsets_ {};
-    /** @brief Staging the matches reach the caller through when its span is host memory a kernel cannot
-     *         reach. Mirrors `cuda_cross_buffers::results_staging_` in the similarities engines. */
-    safe_vector<substrings_match_t, device_match_allocator_t> matches_staging_ {};
-
     /**
      *  @brief Every match the walk emitted, before any cover has been applied to them.
      *
@@ -902,29 +899,19 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     safe_vector<size_t, device_offset_allocator_t> scan_partials_ {};
     /** @brief The survivors themselves, gathered out of the emitted list. */
     safe_vector<substrings_match_t, device_match_allocator_t> cover_survivors_ {};
-    /** @brief Per-haystack survivor boundaries, the cover's twin of `haystack_chunk_offsets_`. */
-    safe_vector<size_t, offset_allocator_t> cover_haystack_offsets_ {};
+    /** @brief Per-haystack match boundaries, the reported twin of `haystack_chunk_offsets_`. */
+    safe_vector<size_t, offset_allocator_t> haystack_match_offsets_ {};
     /** @brief Where each match's preceding gap begins, relative to its haystack's rewritten start. The only
      *         thing the copy kernel cannot recompute, since it is the running drift the scan produced. */
     safe_vector<size_t, device_offset_allocator_t> rewrite_gap_offsets_ {};
-    /** @brief Per-haystack rewritten sizes, then - in place - their exclusive offsets, with the grand total
-     *         trailing. The device twin of `substrings_sizes_into_offsets`. */
-    safe_vector<size_t, offset_allocator_t> rewrite_output_offsets_ {};
     /** @brief The replacements as one tape, uploaded per call: the caller's container is host-addressed. */
     safe_vector<byte_t, byte_allocator_t> replacement_bytes_ {};
     /** @brief Where each needle's replacement starts in `replacement_bytes_`, with a trailing terminator. */
     safe_vector<size_t, offset_allocator_t> replacement_offsets_ {};
-    /** @brief Staging the rewrite copies into when the caller's output span is host memory. */
-    safe_vector<byte_t, device_byte_allocator_t> output_bytes_staging_ {};
 
     /** @brief One `needle_count`-wide row per resident block, catching what will not seat in that block's
      *         table. Empty for any dictionary the table can hold, which is most of them. */
     safe_vector<u32_t, device_word_allocator_t> bm25_overflow_ {};
-    /** @brief Staging for the three BM25 spans, used only when the caller's own are host memory. The two
-     *         inputs are host-written and so unified; the scores are drained by a copy and so device-side. */
-    safe_vector<f32_t, typename allocator_traits_t::template rebind_alloc<f32_t>> bm25_weights_staging_ {};
-    safe_vector<f32_t, typename allocator_traits_t::template rebind_alloc<f32_t>> bm25_lengths_staging_ {};
-    safe_vector<f32_t, device_alloc<f32_t>> bm25_scores_staging_ {};
 
     /**
      *  @brief The automaton this engine compiles from its needles, at whichever state-id width it fits.
@@ -960,21 +947,15 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         haystack_descriptors_.reset();
         haystack_chunk_offsets_.reset();
         chunk_match_offsets_.reset();
-        matches_staging_.reset();
         emitted_matches_.reset();
         cover_keep_.reset();
         scan_partials_.reset();
         cover_survivors_.reset();
-        cover_haystack_offsets_.reset();
+        haystack_match_offsets_.reset();
         rewrite_gap_offsets_.reset();
-        rewrite_output_offsets_.reset();
         replacement_bytes_.reset();
         replacement_offsets_.reset();
-        output_bytes_staging_.reset();
         bm25_overflow_.reset();
-        bm25_weights_staging_.reset();
-        bm25_lengths_staging_.reset();
-        bm25_scores_staging_.reset();
         staged_rows_ = u32_t {};
         staged_accepts_words_ = u32_t {};
     }
@@ -1026,13 +1007,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                 return width == substrings_state_width_t::u16_k ? u16 : u32;
             }
         };
-        kernel_shape_t chunks_per_haystack;
         by_width_t count_chunk;
         by_width_t scatter_chunk;
         exclusive_sum_shapes_t exclusive_sum;
         kernel_shape_t cover_resolve;
         kernel_shape_t cover_compact;
-        kernel_shape_t cover_haystack_offsets;
+        kernel_shape_t haystack_match_offsets;
+        kernel_shape_t counts_from_boundaries;
         kernel_shape_t rewrite_offsets;
         kernel_shape_t rewrite_copy;
         by_width_t score_bm25;
@@ -1047,10 +1028,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         int shared_memory_ceiling = 0;
         cuDeviceGetAttribute(&shared_memory_ceiling, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, device);
 
-        cuda_status_t status = resolve_kernel_shape(
-            table.chunks_per_haystack, reinterpret_cast<void const *>(&substrings_count_chunks_per_haystack_), 0, 0,
-            false);
-        if (status.status != status_t::success_k) return status;
+        cuda_status_t status {status_t::success_k, cudaSuccess};
 
         // One lambda per kernel family, invoked once per width, as `resolve_warp` does in `similarities/cuda.cuh`.
         auto const resolve_walk =
@@ -1094,8 +1072,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
-        status = resolve_kernel_shape(table.cover_haystack_offsets,
-                                      reinterpret_cast<void const *>(&substrings_cover_haystack_offsets_),
+        status = resolve_kernel_shape(table.haystack_match_offsets,
+                                      reinterpret_cast<void const *>(&substrings_haystack_match_offsets_),
+                                      substrings_threads_per_block_k, 0, true);
+        if (status.status != status_t::success_k) return status;
+
+        status = resolve_kernel_shape(table.counts_from_boundaries,
+                                      reinterpret_cast<void const *>(&substrings_counts_from_boundaries_),
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
@@ -1335,6 +1318,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         total_bytes = 0;
         longest_bytes = 0;
+
         bool probed = false;
         for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index) {
             span<byte_t const> const haystack = to_bytes_view(haystacks[haystack_index]);
@@ -1374,7 +1358,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         CUresult const start_error = timer_.record_start(executor.stream());
         if (start_error != CUDA_SUCCESS) return make_cuda_status(start_error);
 
-        cuda_status_t const plan_status = plan_haystack_chunks_(total_bytes, executor, specs, pass.kernel_table,
+        cuda_status_t const plan_status = plan_haystack_chunks_(total_bytes, specs, pass.kernel_table,
                                                                 pass.shared_memory_bytes, pass.blocks_per_grid,
                                                                 pass.chunk_bytes, pass.chunk_count);
         if (plan_status.status != status_t::success_k) return plan_status;
@@ -1450,14 +1434,15 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
     /**
      *  @brief Sizes the chunk grid from the counting kernel's occupancy under the dictionary's actual
-     *         shared-memory footprint, then lays out every haystack's chunks against that target: counts
-     *         chunks per haystack on the device, exclusive-scans them into `haystack_chunk_offsets_`, and
-     *         syncs once to read the grand total chunk count back, which the two chunk kernels need as their
-     *         loop bound.
+     *         shared-memory footprint, then lays out every haystack's chunks against that target.
+     *
+     *  The layout is arithmetic over lengths the descriptor walk already read, so the host writes
+     *  `haystack_chunk_offsets_` outright rather than counting on the device and scanning back. The array stays
+     *  unified because every chunk thread reads it.
      */
-    cuda_status_t plan_haystack_chunks_(size_t total_bytes, cuda_executor_t const &executor, gpu_specs_t const &specs,
-                                        kernels_t const &kernel_table, unsigned &shared_memory_bytes,
-                                        unsigned &blocks_per_grid, size_t &chunk_bytes, size_t &chunk_count) noexcept {
+    cuda_status_t plan_haystack_chunks_(size_t total_bytes, gpu_specs_t const &specs, kernels_t const &kernel_table,
+                                        unsigned &shared_memory_bytes, unsigned &blocks_per_grid, size_t &chunk_bytes,
+                                        size_t &chunk_count) noexcept {
         size_t const haystack_count = haystack_descriptors_.size();
 
         size_t const staged_bytes = (size_t)staged_rows_ * substrings_alphabet_size_k * bytes_per_state_id_() +
@@ -1480,28 +1465,12 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (haystack_chunk_offsets_.try_resize_uninitialized(haystack_count + 1) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
-        span<span<byte_t const> const> haystacks_argument {haystack_descriptors_.data(), haystack_descriptors_.size()};
-        size_t chunk_bytes_argument = chunk_bytes;
-        span<size_t> chunks_per_haystack_argument {haystack_chunk_offsets_.data(), haystack_count};
-        void *chunks_per_haystack_arguments[3] = {&haystacks_argument, &chunk_bytes_argument,
-                                                  &chunks_per_haystack_argument};
-        CUresult const chunks_error = cuda_launch_t {}
-                                          .grid(blocks_per_grid)
-                                          .block(substrings_threads_per_block_k)
-                                          .shared(0)
-                                          .stream(executor.stream())
-                                          .launch(kernel_table.chunks_per_haystack.function,
-                                                  chunks_per_haystack_arguments);
-        if (chunks_error != CUDA_SUCCESS) return make_cuda_status(chunks_error);
-
-        cuda_status_t const scan_status = cuda_launch_exclusive_sum_(
-            kernel_table.exclusive_sum, haystack_chunk_offsets_.data(), haystack_count, haystack_chunk_offsets_.data(),
-            {scan_partials_.data(), scan_partials_.size()}, specs, executor.stream());
-        if (scan_status.status != status_t::success_k) return scan_status;
-
-        CUresult const sync_error = timer_.synchronize(executor.stream());
-        if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
-        chunk_count = haystack_chunk_offsets_[haystack_count];
+        chunk_count = 0;
+        for (size_t haystack_index = 0; haystack_index < haystack_count; ++haystack_index) {
+            haystack_chunk_offsets_[haystack_index] = chunk_count;
+            chunk_count += substrings_chunks_for_haystack_(haystack_descriptors_[haystack_index].size(), chunk_bytes);
+        }
+        haystack_chunk_offsets_[haystack_count] = chunk_count;
         return {status_t::success_k, cudaSuccess};
     }
 
@@ -1529,6 +1498,95 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     }
 
     /**
+     *  @brief Lays each haystack's match range onto the boundaries its reported matches occupy.
+     *  @param[in] keep_offsets The cover's scanned keep flags, or empty when every emitted match is reported.
+     */
+    cuda_status_t publish_haystack_match_offsets_(planned_pass_t const &pass, span<size_t const> keep_offsets,
+                                                  size_t haystack_count, cuda_executor_t const &executor,
+                                                  gpu_specs_t const &specs) noexcept {
+        if (haystack_match_offsets_.try_resize_uninitialized(haystack_count + 1) != status_t::success_k)
+            return {status_t::bad_alloc_k, cudaSuccess};
+
+        span<size_t const> haystack_chunk_offsets_argument {haystack_chunk_offsets_.data(),
+                                                            haystack_chunk_offsets_.size()};
+        span<size_t const> chunk_match_offsets_argument {chunk_match_offsets_.data(), chunk_match_offsets_.size()};
+        span<size_t const> keep_offsets_argument = keep_offsets;
+        span<size_t> boundaries_argument {haystack_match_offsets_.data(), haystack_count + 1};
+        void *boundary_arguments[4] = {&haystack_chunk_offsets_argument, &chunk_match_offsets_argument,
+                                       &keep_offsets_argument, &boundaries_argument};
+        unsigned const boundary_grid = grid_for_items_(pass.kernel_table.haystack_match_offsets, haystack_count + 1,
+                                                       specs);
+        CUresult const boundary_error = cuda_launch_t {}
+                                            .grid(boundary_grid)
+                                            .block(substrings_threads_per_block_k)
+                                            .shared(0)
+                                            .stream(executor.stream())
+                                            .launch(pass.kernel_table.haystack_match_offsets.function,
+                                                    boundary_arguments);
+        if (boundary_error != CUDA_SUCCESS) return make_cuda_status(boundary_error);
+        return {status_t::success_k, cudaSuccess};
+    }
+
+    /**
+     *  @brief Fences, then reads the rewritten tape's length out of the caller's own offsets array.
+     *
+     *  The trailing boundary is the total, and the array may be plain device memory, so it comes back through
+     *  a driver copy rather than a dereference.
+     */
+    cuda_status_t read_rewritten_bytes_(span<size_t> output_offsets, size_t haystack_count,
+                                        cuda_executor_t const &executor, size_t &rewritten_bytes) noexcept {
+        CUresult const sync_error = timer_.synchronize(executor.stream());
+        if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
+        CUresult const read_error = cuMemcpyDtoH(&rewritten_bytes,
+                                                 (CUdeviceptr)(output_offsets.data() + haystack_count), sizeof(size_t));
+        if (read_error != CUDA_SUCCESS) return make_cuda_status(read_error);
+        return {status_t::success_k, cudaSuccess};
+    }
+
+    /** @brief Zeroes the caller's counts through the driver, for a corpus the walk never reaches. */
+    cuda_status_t clear_counts_(span<size_t> counts_per_haystack, cuda_executor_t const &executor) noexcept {
+        if (counts_per_haystack.size() == 0) return {status_t::success_k, cudaSuccess};
+        CUresult const clear_error = cuMemsetD8Async((CUdeviceptr)counts_per_haystack.data(), 0,
+                                                     counts_per_haystack.size() * sizeof(size_t), executor.stream());
+        if (clear_error != CUDA_SUCCESS) return make_cuda_status(clear_error);
+        CUresult const sync_error = timer_.synchronize(executor.stream());
+        if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
+        return {status_t::success_k, cudaSuccess};
+    }
+
+    /** @brief Zeroes the caller's scores through the driver, for a batch no walk reaches. */
+    cuda_status_t clear_scores_(span<f32_t> scores, cuda_executor_t const &executor) noexcept {
+        if (scores.size() == 0) return {status_t::success_k, cudaSuccess};
+        CUresult const clear_error = cuMemsetD8Async((CUdeviceptr)scores.data(), 0, scores.size() * sizeof(f32_t),
+                                                     executor.stream());
+        if (clear_error != CUDA_SUCCESS) return make_cuda_status(clear_error);
+        CUresult const sync_error = timer_.synchronize(executor.stream());
+        if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
+        return {status_t::success_k, cudaSuccess};
+    }
+
+    /** @brief Differences the published boundaries into the caller's per-haystack counts, then fences once. */
+    cuda_status_t count_from_boundaries_(planned_pass_t const &pass, span<size_t> counts_per_haystack,
+                                         cuda_executor_t const &executor, gpu_specs_t const &specs) noexcept {
+        span<size_t const> boundaries_argument {haystack_match_offsets_.data(), haystack_match_offsets_.size()};
+        span<size_t> counts_argument = counts_per_haystack;
+        void *counts_arguments[2] = {&boundaries_argument, &counts_argument};
+        unsigned const counts_grid = grid_for_items_(pass.kernel_table.counts_from_boundaries,
+                                                     counts_per_haystack.size(), specs);
+        CUresult const counts_error = cuda_launch_t {}
+                                          .grid(counts_grid)
+                                          .block(substrings_threads_per_block_k)
+                                          .shared(0)
+                                          .stream(executor.stream())
+                                          .launch(pass.kernel_table.counts_from_boundaries.function, counts_arguments);
+        if (counts_error != CUDA_SUCCESS) return make_cuda_status(counts_error);
+
+        CUresult const sync_error = timer_.synchronize(executor.stream());
+        if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
+        return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, timer_.elapsed_milliseconds()};
+    }
+
+    /**
      *  @brief Resolves a leftmost cover over an already-emitted match list, and compacts the survivors.
      *
      *  The walk emits every match, which is the only thing it is fast at; deciding between them is a pass
@@ -1547,16 +1605,14 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         surviving = emitted;
         if (overlap_policy == substrings_overlapping_k) return {status_t::success_k, cudaSuccess};
 
-        // A corpus nothing matched still owes its caller a boundary per haystack, all of them zero.
+        // A corpus nothing matched still owes its caller a boundary per haystack; an empty keep span makes the
+        // boundary kernel the identity over the emitted offsets, which are all zero in that case.
         if (emitted == 0) {
-            if (cover_haystack_offsets_.try_resize(haystack_count + 1) != status_t::success_k)
-                return {status_t::bad_alloc_k, cudaSuccess};
-            for (size_t index = 0; index <= haystack_count; ++index) cover_haystack_offsets_[index] = 0;
-            return {status_t::success_k, cudaSuccess};
+            surviving = 0;
+            return publish_haystack_match_offsets_(pass, {}, haystack_count, executor, specs);
         }
 
-        if (cover_keep_.try_resize_uninitialized(emitted + 1) != status_t::success_k ||
-            cover_haystack_offsets_.try_resize_uninitialized(haystack_count + 1) != status_t::success_k)
+        if (cover_keep_.try_resize_uninitialized(emitted + 1) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
         span<match_t const> matches_argument {matches.data(), emitted};
@@ -1578,24 +1634,10 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
             {scan_partials_.data(), scan_partials_.size()}, specs, executor.stream());
         if (scan_status.status != status_t::success_k) return scan_status;
 
-        span<size_t const> haystack_chunk_offsets_argument {haystack_chunk_offsets_.data(),
-                                                            haystack_chunk_offsets_.size()};
-        span<size_t const> chunk_match_offsets_argument {chunk_match_offsets_.data(), chunk_match_offsets_.size()};
-        span<size_t const> cover_scan_argument {cover_keep_.data(), emitted + 1};
-        size_t haystack_count_argument = haystack_count;
-        span<size_t> cover_offsets_argument {cover_haystack_offsets_.data(), haystack_count + 1};
-        void *boundary_arguments[5] = {&haystack_chunk_offsets_argument, &chunk_match_offsets_argument,
-                                       &cover_scan_argument, &haystack_count_argument, &cover_offsets_argument};
-        unsigned const boundary_grid = grid_for_items_(pass.kernel_table.cover_haystack_offsets, haystack_count + 1,
-                                                       specs);
-        CUresult const boundary_error = cuda_launch_t {}
-                                            .grid(boundary_grid)
-                                            .block(substrings_threads_per_block_k)
-                                            .shared(0)
-                                            .stream(executor.stream())
-                                            .launch(pass.kernel_table.cover_haystack_offsets.function,
-                                                    boundary_arguments);
-        if (boundary_error != CUDA_SUCCESS) return make_cuda_status(boundary_error);
+        if (cuda_status_t const boundary_status = publish_haystack_match_offsets_(
+                pass, {cover_keep_.data(), emitted + 1}, haystack_count, executor, specs);
+            boundary_status.status != status_t::success_k)
+            return boundary_status;
 
         CUresult const sync_error = timer_.synchronize(executor.stream());
         if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
@@ -1708,17 +1750,35 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                             span<size_t> counts_per_haystack, size_t &matches_total,
                             cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
         matches_total = 0;
-        sz_assert_(counts_per_haystack.size() == haystacks.size());
-        for (size_t index = 0; index < counts_per_haystack.size(); ++index) counts_per_haystack[index] = 0;
+        if (counts_per_haystack.size() != haystacks.size()) return {status_t::unexpected_dimensions_k, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(counts_per_haystack);
+            reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
 
         size_t total_bytes = 0;
         [[maybe_unused]] size_t longest_bytes = 0;
         cuda_status_t const describe_status = describe_haystacks_(haystacks, total_bytes, longest_bytes);
         if (describe_status.status != status_t::success_k) return describe_status;
 
+        return count_described_(haystacks.size(), total_bytes, overlap_policy, counts_per_haystack, matches_total,
+                                executor, specs);
+    }
+
+    /**
+     *  @brief Everything `try_count` does once the haystacks are described, with the container behind it.
+     *
+     *  The descriptors are the type-erasure boundary, so the work below compiles once rather than once per
+     *  input shape. @sa `describe_haystacks_`.
+     */
+    cuda_status_t count_described_(size_t haystack_count, size_t total_bytes,
+                                   substrings_overlap_policy_t overlap_policy, span<size_t> counts_per_haystack,
+                                   size_t &matches_total, cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
         planned_pass_t pass;
         cuda_status_t const pass_status = plan_and_count_(total_bytes, executor, specs, pass);
-        if (pass_status.status != status_t::success_k || !pass.has_work) return pass_status;
+        if (pass_status.status != status_t::success_k) return pass_status;
+        // A corpus with nothing to walk still owes its caller a count per haystack, all of them zero, and the
+        // caller's span may be plain device memory - so the driver clears it rather than a host loop.
+        if (!pass.has_work) return clear_counts_(counts_per_haystack, executor);
 
         CUresult const stop_error = timer_.record_stop(executor.stream());
         if (stop_error != CUDA_SUCCESS) return make_cuda_status(stop_error);
@@ -1727,29 +1787,28 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         matches_total = chunk_match_offsets_[pass.chunk_count];
         if (overlap_policy == substrings_overlapping_k) {
-            for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index)
-                counts_per_haystack[haystack_index] =
-                    chunk_match_offsets_[haystack_chunk_offsets_[haystack_index + 1]] -
-                    chunk_match_offsets_[haystack_chunk_offsets_[haystack_index]];
-            return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, timer_.elapsed_milliseconds()};
+            if (cuda_status_t const boundary_status = publish_haystack_match_offsets_(pass, {}, haystack_count,
+                                                                                      executor, specs);
+                boundary_status.status != status_t::success_k)
+                return boundary_status;
+        }
+        else {
+            // A cover is decided between matches, so counting one means emitting them first - the walk cannot
+            // know which survive. That makes a counted cover cost what a found one does.
+            if (emitted_matches_.try_resize_uninitialized(sz_max_of_two(matches_total, (size_t)1)) !=
+                status_t::success_k)
+                return {status_t::bad_alloc_k, cudaSuccess};
+            CUresult const scatter_error = launch_scatter_(pass, {emitted_matches_.data(), matches_total}, executor);
+            if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
+
+            // No gather: a count wants the boundaries, and those the resolve already wrote.
+            cuda_status_t const cover_status = resolve_cover_(pass, {emitted_matches_.data(), matches_total},
+                                                              overlap_policy, haystack_count, executor, specs,
+                                                              matches_total);
+            if (cover_status.status != status_t::success_k) return cover_status;
         }
 
-        // A cover is decided between matches, so counting one means emitting them first - the walk cannot
-        // know which survive. That makes a counted cover cost what a found one does.
-        if (emitted_matches_.try_resize_uninitialized(sz_max_of_two(matches_total, (size_t)1)) != status_t::success_k)
-            return {status_t::bad_alloc_k, cudaSuccess};
-        CUresult const scatter_error = launch_scatter_(pass, {emitted_matches_.data(), matches_total}, executor);
-        if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
-
-        cuda_status_t const cover_status = resolve_cover_(pass, {emitted_matches_.data(), matches_total},
-                                                          overlap_policy, haystacks.size(), executor, specs,
-                                                          matches_total);
-        if (cover_status.status != status_t::success_k) return cover_status;
-        // No gather: a count wants the boundaries, and those the resolve already wrote.
-        for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index)
-            counts_per_haystack[haystack_index] = cover_haystack_offsets_[haystack_index + 1] -
-                                                  cover_haystack_offsets_[haystack_index];
-        return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, timer_.elapsed_milliseconds()};
+        return count_from_boundaries_(pass, counts_per_haystack, executor, specs);
     }
 
     /**
@@ -1763,13 +1822,24 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     cuda_status_t try_find(haystacks_type_ const &haystacks, substrings_overlap_policy_t overlap_policy,
                            span<match_t> matches_out, size_t &matches_found, cuda_executor_t const &executor = {},
                            gpu_specs_t specs = {}) noexcept {
-        size_t const matches_capacity = matches_out.size();
         matches_found = 0;
+        if (status_t const reachable = check_device_accessible_memory(matches_out); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
 
         size_t total_bytes = 0;
         [[maybe_unused]] size_t longest_bytes = 0;
         cuda_status_t const describe_status = describe_haystacks_(haystacks, total_bytes, longest_bytes);
         if (describe_status.status != status_t::success_k) return describe_status;
+
+        return find_described_(haystacks.size(), total_bytes, overlap_policy, matches_out, matches_found, executor,
+                               specs);
+    }
+
+    /** @brief Everything `try_find` does once the haystacks are described. @sa `count_described_`. */
+    cuda_status_t find_described_(size_t haystack_count, size_t total_bytes, substrings_overlap_policy_t overlap_policy,
+                                  span<match_t> matches_out, size_t &matches_found, cuda_executor_t const &executor,
+                                  gpu_specs_t specs) noexcept {
+        size_t const matches_capacity = matches_out.size();
 
         planned_pass_t pass;
         cuda_status_t const pass_status = plan_and_count_(total_bytes, executor, specs, pass);
@@ -1782,10 +1852,9 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         bool const covering = overlap_policy != substrings_overlapping_k;
 
         // Under a cover the walk's output is an intermediate, so it lands in scratch and only the survivors
-        // reach the caller. Without one it is the answer, and a device-accessible span takes it directly.
+        // reach the caller. Without one it is the answer, and the caller's span takes it directly.
         size_t matches_in_batch = emitted;
         span<match_t> scatter_target;
-        bool output_is_device_accessible = true;
         if (covering) {
             if (emitted_matches_.try_resize_uninitialized(sz_max_of_two(emitted, (size_t)1)) != status_t::success_k)
                 return {status_t::bad_alloc_k, cudaSuccess};
@@ -1794,55 +1863,29 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         else {
             if (emitted > matches_capacity)
                 return matches_found = emitted, cuda_status_t {status_t::unexpected_dimensions_k, cudaSuccess};
-            output_is_device_accessible = emitted == 0 || is_device_accessible_memory((void const *)matches_out.data());
             scatter_target = {matches_out.data(), emitted};
-            if (!output_is_device_accessible) {
-                if (matches_staging_.try_resize_uninitialized(emitted) != status_t::success_k)
-                    return {status_t::bad_alloc_k, cudaSuccess};
-                scatter_target = {matches_staging_.data(), emitted};
-            }
         }
 
         CUresult const scatter_error = launch_scatter_(pass, scatter_target, executor);
         if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
 
         if (covering) {
-            cuda_status_t const cover_status = resolve_cover_(pass, scatter_target, overlap_policy, haystacks.size(),
+            cuda_status_t const cover_status = resolve_cover_(pass, scatter_target, overlap_policy, haystack_count,
                                                               executor, specs, matches_in_batch);
             if (cover_status.status != status_t::success_k) return cover_status;
             // The survivors' count survives the refusal, so a caller that brought no buffer learns its size.
             if (matches_in_batch > matches_capacity)
                 return matches_found = matches_in_batch, cuda_status_t {status_t::unexpected_dimensions_k, cudaSuccess};
 
-            // The count is known before the gather runs, so the gather can write where the caller wants it
-            // rather than into scratch that would then need copying out.
-            output_is_device_accessible = matches_in_batch == 0 ||
-                                          is_device_accessible_memory((void const *)matches_out.data());
-            span<match_t> gather_target {matches_out.data(), matches_in_batch};
-            if (!output_is_device_accessible) {
-                if (matches_staging_.try_resize_uninitialized(matches_in_batch) != status_t::success_k)
-                    return {status_t::bad_alloc_k, cudaSuccess};
-                gather_target = {matches_staging_.data(), matches_in_batch};
-            }
             if (matches_in_batch) {
-                CUresult const gather_error = compact_cover_(pass, {scatter_target.data(), emitted}, gather_target,
-                                                             executor, specs);
+                CUresult const gather_error = compact_cover_(pass, {scatter_target.data(), emitted},
+                                                             {matches_out.data(), matches_in_batch}, executor, specs);
                 if (gather_error != CUDA_SUCCESS) return make_cuda_status(gather_error);
             }
         }
 
         CUresult const stop_error = timer_.record_stop(executor.stream());
         if (stop_error != CUDA_SUCCESS) return make_cuda_status(stop_error);
-
-        // The drain is stream-ordered after the scatter and after the timer's stop event, so the kernel time
-        // excludes it and the one synchronize below covers it - the same driver-copy idiom as the strided
-        // `cuMemcpy2DAsync` draining `results_staging_` in the similarities engines.
-        if (!output_is_device_accessible) {
-            CUresult const drain_error = cuMemcpyAsync(
-                (CUdeviceptr)matches_out.data(), (CUdeviceptr)matches_staging_.data(),
-                matches_in_batch * sizeof(substrings_match_t), executor.stream());
-            if (drain_error != CUDA_SUCCESS) return make_cuda_status(drain_error);
-        }
 
         CUresult const sync_error = timer_.synchronize(executor.stream());
         if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
@@ -1873,11 +1916,14 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                               replacements_type_ const &replacements, span<char> output_bytes,
                               span<size_t> output_offsets, size_t &output_bytes_written,
                               cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
-        sz_assert_(output_offsets.size() == haystacks.size() + 1);
         output_bytes_written = 0;
-        for (size_t index = 0; index < output_offsets.size(); ++index) output_offsets[index] = 0;
+        if (output_offsets.size() != haystacks.size() + 1) return {status_t::unexpected_dimensions_k, cudaSuccess};
         if (status_t const rewritable = substrings_check_rewritable(overlap_policy); rewritable != status_t::success_k)
             return {rewritable, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(output_offsets); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(output_bytes); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
 
         size_t total_bytes = 0;
         [[maybe_unused]] size_t longest_bytes = 0;
@@ -1886,21 +1932,32 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         cuda_status_t const upload_status = upload_replacements_(replacements);
         if (upload_status.status != status_t::success_k) return upload_status;
 
+        // The bound is arithmetic over the needle set, so it is settled here and the rewrite below never
+        // names either container again.
+        return replace_described_(haystacks.size(), total_bytes, replace_bound_host_(total_bytes, replacements),
+                                  overlap_policy, output_bytes, output_offsets, output_bytes_written, executor, specs);
+    }
+
+    /** @brief Everything `try_replace` does once the haystacks and replacements are staged. @sa `count_described_`. */
+    cuda_status_t replace_described_(size_t haystack_count, size_t total_bytes, size_t bound,
+                                     substrings_overlap_policy_t overlap_policy, span<char> output_bytes,
+                                     span<size_t> output_offsets, size_t &output_bytes_written,
+                                     cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
         planned_pass_t pass;
         cuda_status_t const pass_status = plan_and_count_(total_bytes, executor, specs, pass);
-        if (pass_status.status != status_t::success_k || !pass.has_work) return pass_status;
+        if (pass_status.status != status_t::success_k) return pass_status;
+        // A corpus with nothing to rewrite still owes its caller a boundary per haystack, all of them zero.
+        if (!pass.has_work) return clear_counts_({output_offsets.data(), output_offsets.size()}, executor);
 
         // The match count sizes three buffers, so it has to reach the host before they can be allocated.
         CUresult const count_sync_error = timer_.synchronize(executor.stream());
         if (count_sync_error != CUDA_SUCCESS) return make_cuda_status(count_sync_error);
 
-        size_t const haystack_count = haystacks.size();
         size_t const matches_in_batch = chunk_match_offsets_[pass.chunk_count];
         if (emitted_matches_.try_resize_uninitialized(sz_max_of_two(matches_in_batch, (size_t)1)) !=
                 status_t::success_k ||
             rewrite_gap_offsets_.try_resize_uninitialized(sz_max_of_two(matches_in_batch, (size_t)1)) !=
-                status_t::success_k ||
-            rewrite_output_offsets_.try_resize_uninitialized(haystack_count + 1) != status_t::success_k)
+                status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
         CUresult const scatter_error = launch_scatter_(pass, {emitted_matches_.data(), matches_in_batch}, executor);
@@ -1919,11 +1976,11 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         }
 
         span<span<byte_t const> const> haystacks_argument {haystack_descriptors_.data(), haystack_descriptors_.size()};
-        span<size_t const> match_offsets_argument {cover_haystack_offsets_.data(), haystack_count + 1};
+        span<size_t const> match_offsets_argument {haystack_match_offsets_.data(), haystack_count + 1};
         span<match_t const> matches_argument {cover_survivors_.data(), surviving};
         span<size_t const> replacement_offsets_argument {replacement_offsets_.data(), replacement_offsets_.size()};
         span<size_t> gap_offsets_argument {rewrite_gap_offsets_.data(), surviving};
-        span<size_t> output_sizes_argument {rewrite_output_offsets_.data(), haystack_count};
+        span<size_t> output_sizes_argument {output_offsets.data(), haystack_count};
         void *offsets_arguments[6] = {&haystacks_argument,           &match_offsets_argument, &matches_argument,
                                       &replacement_offsets_argument, &gap_offsets_argument,   &output_sizes_argument};
         unsigned const offsets_grid = grid_for_items_(pass.kernel_table.rewrite_offsets, haystack_count, specs);
@@ -1935,40 +1992,32 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
                                            .launch(pass.kernel_table.rewrite_offsets.function, offsets_arguments);
         if (offsets_error != CUDA_SUCCESS) return make_cuda_status(offsets_error);
 
+        // The scan writes the caller's own array, so the boundaries are complete before any capacity check -
+        // which is what lets a refused call name the exact size it wanted.
         cuda_status_t const scan_status = cuda_launch_exclusive_sum_(
-            pass.kernel_table.exclusive_sum, rewrite_output_offsets_.data(), haystack_count,
-            rewrite_output_offsets_.data(), {scan_partials_.data(), scan_partials_.size()}, specs, executor.stream());
+            pass.kernel_table.exclusive_sum, output_offsets.data(), haystack_count, output_offsets.data(),
+            {scan_partials_.data(), scan_partials_.size()}, specs, executor.stream());
         if (scan_status.status != status_t::success_k) return scan_status;
 
         // A caller sized against the dictionary's own bound cannot be refused, so neither the check nor the
         // fence it needs happens at all - the copy kernel reads the tape's length from the scan itself.
-        size_t const bound = replace_bound_host_(total_bytes, replacements);
         bool const pre_sized = output_bytes.size() >= bound;
         size_t rewritten_bytes = 0;
         if (!pre_sized) {
-            CUresult const size_sync_error = timer_.synchronize(executor.stream());
-            if (size_sync_error != CUDA_SUCCESS) return make_cuda_status(size_sync_error);
-            rewritten_bytes = rewrite_output_offsets_[haystack_count];
+            cuda_status_t const size_status = read_rewritten_bytes_(output_offsets, haystack_count, executor,
+                                                                    rewritten_bytes);
+            if (size_status.status != status_t::success_k) return size_status;
             if (rewritten_bytes > output_bytes.size())
                 return output_bytes_written = rewritten_bytes,
                        cuda_status_t {status_t::unexpected_dimensions_k, cudaSuccess};
         }
 
-        // Staging is sized against the bound a pre-sized caller already proved it could afford, so the
-        // decision needs no more knowledge of the tape than the caller's own span already carries.
-        size_t const staging_bytes = pre_sized ? bound : rewritten_bytes;
-        bool const output_is_device_accessible = staging_bytes == 0 ||
-                                                 is_device_accessible_memory((void const *)output_bytes.data());
+        size_t const copy_bytes = pre_sized ? bound : rewritten_bytes;
         char *copy_target = output_bytes.data();
-        if (!output_is_device_accessible) {
-            if (output_bytes_staging_.try_resize_uninitialized(staging_bytes) != status_t::success_k)
-                return {status_t::bad_alloc_k, cudaSuccess};
-            copy_target = (char *)output_bytes_staging_.data();
-        }
 
         span<size_t const> gap_offsets_const_argument {rewrite_gap_offsets_.data(), surviving};
         byte_t const *replacement_bytes_argument = replacement_bytes_.data();
-        span<size_t const> output_offsets_argument {rewrite_output_offsets_.data(), haystack_count + 1};
+        span<size_t const> output_offsets_argument {output_offsets.data(), haystack_count + 1};
         size_t tile_bytes_argument = substrings_rewrite_tile_bytes_k;
         void *copy_arguments[9] = {
             &haystacks_argument,         &match_offsets_argument,     &matches_argument,
@@ -1976,7 +2025,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
             &output_offsets_argument,    &tile_bytes_argument,        &copy_target};
         unsigned const copy_grid = grid_for_items_(
             pass.kernel_table.rewrite_copy,
-            divide_round_up(sz_max_of_two(staging_bytes, (size_t)1), substrings_rewrite_tile_bytes_k), specs);
+            divide_round_up(sz_max_of_two(copy_bytes, (size_t)1), substrings_rewrite_tile_bytes_k), specs);
 
         CUresult const copy_error = cuda_launch_t {}
                                         .grid(copy_grid)
@@ -1989,21 +2038,11 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         CUresult const stop_error = timer_.record_stop(executor.stream());
         if (stop_error != CUDA_SUCCESS) return make_cuda_status(stop_error);
 
-        // The drain has to know the tape's length, which a pre-sized caller never fetched, so it is deferred
-        // past the one fence this call always pays - the same fence that makes the offsets host-readable.
-        CUresult const sync_error = timer_.synchronize(executor.stream());
-        if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);
-        rewritten_bytes = rewrite_output_offsets_[haystack_count];
-        for (size_t index = 0; index <= haystack_count; ++index) output_offsets[index] = rewrite_output_offsets_[index];
-
-        if (!output_is_device_accessible && rewritten_bytes) {
-            CUresult const drain_error = cuMemcpyAsync((CUdeviceptr)output_bytes.data(),
-                                                       (CUdeviceptr)output_bytes_staging_.data(), rewritten_bytes,
-                                                       executor.stream());
-            if (drain_error != CUDA_SUCCESS) return make_cuda_status(drain_error);
-            CUresult const drain_sync = timer_.synchronize(executor.stream());
-            if (drain_sync != CUDA_SUCCESS) return make_cuda_status(drain_sync);
-        }
+        // A pre-sized caller never fetched the tape's length, so it is read past the one fence this call
+        // always pays - the same fence that makes the caller's offsets readable.
+        cuda_status_t const size_status = read_rewritten_bytes_(output_offsets, haystack_count, executor,
+                                                                rewritten_bytes);
+        if (size_status.status != status_t::success_k) return size_status;
 
         output_bytes_written = rewritten_bytes;
         return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, timer_.elapsed_milliseconds()};
@@ -2024,27 +2063,40 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     cuda_status_t try_score_bm25(haystacks_type_ const &haystacks, span<f32_t const> document_lengths,
                                  substrings_bm25_t parameters, span<f32_t const> needle_weights, span<f32_t> scores,
                                  cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
-        sz_assert_(scores.size() == haystacks.size());
-        sz_assert_(document_lengths.size() == 0 || document_lengths.size() == haystacks.size());
+        size_t total_bytes = 0, longest_bytes = 0;
+        cuda_status_t const describe_status = describe_haystacks_(haystacks, total_bytes, longest_bytes);
+        if (describe_status.status != status_t::success_k) return describe_status;
+        return score_bm25_described_(haystacks.size(), total_bytes, longest_bytes, document_lengths, parameters,
+                                     needle_weights, scores, executor, specs);
+    }
 
-        sz_assert_(needle_weights.size() == count_needles());
-
-        size_t const haystack_count = haystacks.size();
+    /** @brief Everything `try_score_bm25` does once the haystacks are described. @sa `count_described_`. */
+    cuda_status_t score_bm25_described_(size_t haystack_count, size_t total_bytes, size_t longest_bytes,
+                                        span<f32_t const> document_lengths, substrings_bm25_t parameters,
+                                        span<f32_t const> needle_weights, span<f32_t> scores,
+                                        cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
         size_t const needle_count = needle_weights.size();
-        for (size_t index = 0; index < scores.size(); ++index) scores[index] = 0.0f;
-        if (haystack_count == 0 || needle_count == 0) return {status_t::success_k, cudaSuccess};
+        if (needle_count != count_needles() || scores.size() != haystack_count ||
+            (document_lengths.size() != 0 && document_lengths.size() != haystack_count))
+            return {status_t::unexpected_dimensions_k, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(needle_weights); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(document_lengths);
+            reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
+        if (status_t const reachable = check_device_accessible_memory(scores); reachable != status_t::success_k)
+            return {reachable, cudaSuccess};
 
         cuda_status_t const current_status = executor.ensure_current();
         if (current_status.status != status_t::success_k) return current_status;
+        // A dictionary with no needles scores every haystack zero, and the caller's span may be plain device
+        // memory, so the driver clears it rather than a host loop.
+        if (haystack_count == 0 || needle_count == 0) return clear_scores_(scores, executor);
         // Scoring bypasses `plan_and_count_`, so it budgets its own staging against this call's device.
         if (cuda_status_t const budgeted = try_budget_staging_(executor); budgeted.status != status_t::success_k)
             return budgeted;
         auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
-
-        size_t total_bytes = 0, longest_bytes = 0;
-        cuda_status_t const describe_status = describe_haystacks_(haystacks, total_bytes, longest_bytes);
-        if (describe_status.status != status_t::success_k) return describe_status;
 
         // The counter table shares the dynamic allocation with the staged automaton, so it must be counted
         // before the occupancy query - that query settles `blocks_per_grid`, which sizes the overflow rows.
@@ -2078,30 +2130,9 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (bm25_overflow_.try_resize_uninitialized(overflow_total) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaSuccess};
 
-        // The three caller spans are host pointers whenever the C shim passed them straight through, so each
-        // is staged the same way `try_find` stages its matches - copied in, or drained out after the launch.
         span<f32_t const> weights_argument = needle_weights;
-        if (!is_device_accessible_memory((void const *)needle_weights.data())) {
-            if (bm25_weights_staging_.try_resize_uninitialized(needle_count) != status_t::success_k)
-                return {status_t::bad_alloc_k, cudaSuccess};
-            for (size_t index = 0; index < needle_count; ++index) bm25_weights_staging_[index] = needle_weights[index];
-            weights_argument = {bm25_weights_staging_.data(), needle_count};
-        }
         span<f32_t const> lengths_argument = document_lengths;
-        if (document_lengths.size() && !is_device_accessible_memory((void const *)document_lengths.data())) {
-            if (bm25_lengths_staging_.try_resize_uninitialized(haystack_count) != status_t::success_k)
-                return {status_t::bad_alloc_k, cudaSuccess};
-            for (size_t index = 0; index < haystack_count; ++index)
-                bm25_lengths_staging_[index] = document_lengths[index];
-            lengths_argument = {bm25_lengths_staging_.data(), haystack_count};
-        }
-        bool const scores_are_device_accessible = is_device_accessible_memory((void const *)scores.data());
         span<f32_t> scores_argument = scores;
-        if (!scores_are_device_accessible) {
-            if (bm25_scores_staging_.try_resize_uninitialized(haystack_count) != status_t::success_k)
-                return {status_t::bad_alloc_k, cudaSuccess};
-            scores_argument = {bm25_scores_staging_.data(), haystack_count};
-        }
 
         CUresult const timer_error = timer_.ensure_created(executor.device_id());
         if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
@@ -2118,13 +2149,6 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
         CUresult const stop_error = timer_.record_stop(executor.stream());
         if (stop_error != CUDA_SUCCESS) return make_cuda_status(stop_error);
-
-        if (!scores_are_device_accessible) {
-            CUresult const drain_error = cuMemcpyAsync((CUdeviceptr)scores.data(),
-                                                       (CUdeviceptr)bm25_scores_staging_.data(),
-                                                       haystack_count * sizeof(f32_t), executor.stream());
-            if (drain_error != CUDA_SUCCESS) return make_cuda_status(drain_error);
-        }
 
         CUresult const sync_error = timer_.synchronize(executor.stream());
         if (sync_error != CUDA_SUCCESS) return make_cuda_status(sync_error);

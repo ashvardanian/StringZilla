@@ -109,6 +109,20 @@ SZ_API_RUNTIME sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_
  *
  *  Set `cpu_cores` to 0 to target all available CPU cores, to -1 to avoid CPUs, to 1 to use only calling thread.
  *  Set `gpu_device` to -1 to avoid GPUs, or to a positive device ID to target a specific GPU.
+ *
+ *  @section szs_unified_memory Unified Memory
+ *
+ *  A GPU scope addresses its work from the device, so every @b buffer an operation reads or writes must be
+ *  device-accessible: unified memory from @ref szs_unified_alloc or @ref sz_memory_allocator_init_unified, or
+ *  plain device memory. Outputs are held to this as firmly as inputs, and the small per-collection arrays
+ *  with them - match counts, tape offsets, BM25 weights and lengths, and score vectors are no different from
+ *  a result matrix. Host memory is refused with `sz_device_memory_mismatch_k` and nothing is written, so a
+ *  copy across the bus is the caller's to make rather than one the engine makes unasked. Page-locked host
+ *  memory is host memory here - the driver reports it as such - and is refused too.
+ *
+ *  The single-value out-parameters are the exception and take ordinary host addresses: `matches_total`,
+ *  `matches_found`, `output_bytes_written`, and every `error_message` are written by the host once the device
+ *  has finished. A CPU scope has no requirement at all and reads and writes host memory throughout.
  */
 typedef void *szs_device_scope_t;
 
@@ -491,7 +505,7 @@ SZ_API_RUNTIME void szs_smith_waterman_scores_free(szs_smith_waterman_scores_t e
  *  APIs for computing fingerprints, Min-Hashes, and Count-Min-Sketches of binary and UTF-8 strings.
  *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  *
- *  @section Speed Considerations
+ *  @section szs_speed_considerations Speed Considerations
  *
  *  For each window width you should aim for a multiple of 64 dimensions. Rolling hashes with identical window widths
  *  will share the same memory access pattern and can be effectively parallelized. For each platform, different minimum
@@ -609,7 +623,7 @@ SZ_API_RUNTIME void szs_fingerprints_free(szs_fingerprints_t engine);
  *  and rewrites haystacks by substituting matches, on every backend. A rewrite needs a cover whose matches
  *  share no bytes, so `szs_substrings_overlapping_k` is the one policy it refuses.
  *
- *  @section Case Sensitivity
+ *  @section szs_case_sensitivity Case Sensitivity
  *
  *  `szs_substrings_cased_k` matches raw bytes and accepts any needle, including malformed UTF-8.
  *
@@ -822,9 +836,10 @@ SZ_API_RUNTIME sz_status_t szs_substrings_replace_bound(  //
  *  @param[in] replacements One replacement per needle; count must equal the dictionary's needle count.
  *  @param[out] output_data Byte buffer receiving every rewritten haystack back to back.
  *  @param[in] output_data_capacity Bytes @p output_data can hold; a short buffer is refused, never overrun.
- *  @param[out] output_offsets Receives `haystacks->count + 1` ascending boundaries, in the same width the
- *              engines address the output tape with - a rewrite that outgrows `sz_size_t` has no buffer to
- *              land in either.
+ *  @param[out] output_offsets Receives `haystacks->count + 1` boundaries partitioning the output tape:
+ *              `output_offsets[0]` is zero, they ascend, and `output_offsets[haystacks->count]` is the total,
+ *              so the array can be wrapped as a tape view directly. They are written before the capacity
+ *              check, so a refused call still names every boundary it would have produced.
  *  @param[out] output_bytes_written Bytes written, or - when the buffer is short - the bytes needed.
  *  @retval `sz_unexpected_dimensions_k` @p output_data_capacity is too small and nothing was written.
  *  @param[out] error_message Optional output pointer for detailed error information.
