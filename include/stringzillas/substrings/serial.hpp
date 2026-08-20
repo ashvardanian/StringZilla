@@ -1909,6 +1909,38 @@ struct aho_corasick_dictionary {
 using substrings_u16_dictionary_t = aho_corasick_dictionary<u16_t, std::allocator<char>>;
 using substrings_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocator<char>>;
 
+/**
+ *  @brief Compiles @p needles into @p dictionary at whichever state-id width the vocabulary fits.
+ *  @sa `aho_corasick_dictionary::try_insert` for the status codes this forwards.
+ *
+ *  The wide automaton is always built, then narrowed; `overflow_risk_k` from the narrowing is the vocabulary
+ *  declining to fit sixteen bits rather than a failure, so the wide one is kept instead. Every CPU engine
+ *  compiles a vocabulary this way and differs only in how it walks a haystack afterwards.
+ */
+template <typename dictionary_variant_type_, typename allocator_type_, typename needles_type_>
+status_t substrings_try_index(dictionary_variant_type_ &dictionary, allocator_type_ const &alloc,
+                              needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity,
+                              cpu_specs_t const &specs) noexcept {
+
+    aho_corasick_dictionary<u32_t, allocator_type_> wide(alloc);
+    wide.case_sensitivity(case_sensitivity);
+    for (auto const &needle : needles) {
+        status_t const status = wide.try_insert(to_bytes_view(needle));
+        if (status != status_t::success_k) return status;
+    }
+    if (status_t const built = wide.try_build(specs); built != status_t::success_k) return built;
+
+    aho_corasick_dictionary<u16_t, allocator_type_> narrow(alloc);
+    status_t const narrowed = narrow.try_build(wide);
+    if (narrowed == status_t::success_k) {
+        dictionary.template emplace<aho_corasick_dictionary<u16_t, allocator_type_>>(std::move(narrow));
+        return status_t::success_k;
+    }
+    if (narrowed != status_t::overflow_risk_k) return narrowed;
+    dictionary.template emplace<aho_corasick_dictionary<u32_t, allocator_type_>>(std::move(wide));
+    return status_t::success_k;
+}
+
 #pragma endregion Dictionary
 
 #pragma region Rewriting
@@ -2152,23 +2184,7 @@ struct substrings<allocator_type_, capability_,
     status_t try_index(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
         sz_unused_(executor);
-        wide_dictionary_t wide(alloc_);
-        wide.case_sensitivity(case_sensitivity);
-        for (auto const &needle : needles) {
-            status_t const status = wide.try_insert(to_bytes_view(needle));
-            if (status != status_t::success_k) return status;
-        }
-        if (status_t const built = wide.try_build(specs); built != status_t::success_k) return built;
-
-        narrow_dictionary_t narrow(alloc_);
-        status_t const narrowed = narrow.try_build(wide);
-        if (narrowed == status_t::success_k) {
-            dict_.template emplace<narrow_dictionary_t>(std::move(narrow));
-            return status_t::success_k;
-        }
-        if (narrowed != status_t::overflow_risk_k) return narrowed;
-        dict_.template emplace<wide_dictionary_t>(std::move(wide));
-        return status_t::success_k;
+        return substrings_try_index(dict_, alloc_, needles, case_sensitivity, specs);
     }
 
     /**
@@ -2435,23 +2451,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
     status_t try_index(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
         sz_unused_(executor);
-        wide_dictionary_t wide(alloc_);
-        wide.case_sensitivity(case_sensitivity);
-        for (auto const &needle : needles) {
-            status_t const status = wide.try_insert(to_bytes_view(needle));
-            if (status != status_t::success_k) return status;
-        }
-        if (status_t const built = wide.try_build(specs); built != status_t::success_k) return built;
-
-        narrow_dictionary_t narrow(alloc_);
-        status_t const narrowed = narrow.try_build(wide);
-        if (narrowed == status_t::success_k) {
-            dict_.template emplace<narrow_dictionary_t>(std::move(narrow));
-            return status_t::success_k;
-        }
-        if (narrowed != status_t::overflow_risk_k) return narrowed;
-        dict_.template emplace<wide_dictionary_t>(std::move(wide));
-        return status_t::success_k;
+        return substrings_try_index(dict_, alloc_, needles, case_sensitivity, specs);
     }
 
     /**
