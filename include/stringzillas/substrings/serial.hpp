@@ -280,18 +280,12 @@ struct aho_corasick_view {
     state_id_t state_count {};
     state_id_t root {};
 
-    /** @brief Longest needle, in the folded bytes the automaton walks. */
-    state_id_t max_folded_match_bytes {};
-
-    /** @brief Shortest needle, in folded bytes; bounds how densely a rewrite can fire. */
-    state_id_t min_folded_match_bytes {};
-
     /**
      *  @brief Most @b haystack bytes one match can span, which is what every slice, halo and warm-up needs.
      *
      *  A fold can contract three source bytes into one - the Kelvin sign into `k` - so a folded length says
-     *  nothing directly about how far back into the haystack a match reaches. Sizing a window from
-     *  `max_folded_match_bytes` instead would silently drop matches straddling a boundary.
+     *  nothing directly about how far back into the haystack a match reaches. Sizing a window from the
+     *  folded length instead would silently drop matches straddling a boundary.
      */
     state_id_t max_source_match_bytes {};
 
@@ -776,8 +770,6 @@ struct aho_corasick_dictionary {
 
     size_t count_states_ = 0;
     size_t count_needles_ = 0;
-    state_id_t max_folded_match_bytes_ = 0;
-    state_id_t min_folded_match_bytes_ = 0;
     /** @brief Worst-case haystack span of one match; a fold contracting 3 bytes into 1 is what widens it. */
     state_id_t max_source_match_bytes_ = 0;
     state_id_t min_source_match_bytes_ = 0;
@@ -880,9 +872,6 @@ struct aho_corasick_dictionary {
             return status_t::bad_alloc_k;
         run.own_head = (own_outputs_.size() - 1);
         ++run.own_count;
-        max_folded_match_bytes_ = sz_max_of_two(max_folded_match_bytes_, folded_narrow);
-        min_folded_match_bytes_ = min_folded_match_bytes_ ? sz_min_of_two(min_folded_match_bytes_, folded_narrow)
-                                                          : folded_narrow;
 
         // One folded byte can stand for up to `sz_utf8_fold_max_contraction_k` source bytes, and one source
         // byte for up to `sz_utf8_fold_max_expansion_k` folded ones, so a folded length brackets rather than
@@ -1488,8 +1477,6 @@ struct aho_corasick_dictionary {
         outputs_offsets_.reset();
         count_states_ = 0;
         count_needles_ = 0;
-        max_folded_match_bytes_ = 0;
-        min_folded_match_bytes_ = 0;
         max_source_match_bytes_ = 0;
         min_source_match_bytes_ = 0;
         max_outputs_per_state_ = 0;
@@ -1510,8 +1497,6 @@ struct aho_corasick_dictionary {
 
     size_t count_states() const noexcept { return count_states_; }
     size_t count_needles() const noexcept { return count_needles_; }
-    state_id_t max_folded_match_bytes() const noexcept { return max_folded_match_bytes_; }
-    state_id_t min_folded_match_bytes() const noexcept { return min_folded_match_bytes_; }
     state_id_t max_source_match_bytes() const noexcept { return max_source_match_bytes_; }
     state_id_t min_source_match_bytes() const noexcept { return min_source_match_bytes_; }
     size_t hot_count() const noexcept { return hot_count_; }
@@ -1666,8 +1651,6 @@ struct aho_corasick_dictionary {
         count_needles_ = wider.count_needles();
         hot_count_ = source.hot_count;
         root_ = static_cast<state_id_t>(source.root);
-        max_folded_match_bytes_ = static_cast<state_id_t>(source.max_folded_match_bytes);
-        min_folded_match_bytes_ = static_cast<state_id_t>(source.min_folded_match_bytes);
         max_source_match_bytes_ = static_cast<state_id_t>(source.max_source_match_bytes);
         min_source_match_bytes_ = static_cast<state_id_t>(source.min_source_match_bytes);
         max_outputs_per_state_ = static_cast<state_id_t>(source.max_outputs_per_state);
@@ -1696,8 +1679,6 @@ struct aho_corasick_dictionary {
         result.hot_count = state_id_of_(hot_count_);
         result.state_count = state_id_of_(count_states_);
         result.root = root_;
-        result.max_folded_match_bytes = max_folded_match_bytes_;
-        result.min_folded_match_bytes = min_folded_match_bytes_;
         result.max_source_match_bytes = max_source_match_bytes_;
         result.min_source_match_bytes = min_source_match_bytes_;
         result.max_outputs_per_state = max_outputs_per_state_;
