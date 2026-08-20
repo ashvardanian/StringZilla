@@ -647,6 +647,8 @@ struct aho_corasick_dictionary {
     static constexpr state_id_t invalid_state_k = std::numeric_limits<state_id_t>::max();
     /** @brief `hot_count_`'s "not chosen yet" state, so `hot_count(0)` stays a real all-cold request. */
     static constexpr size_t derive_hot_count_k = std::numeric_limits<size_t>::max();
+    /** @brief Interior vacancies one row may reject before it settles on the arena frontier instead. */
+    static constexpr size_t max_interior_probes_k = 256;
 
     /**
      *  @brief Narrows @p value to a state id, asserting in debug that the pool ceiling still holds.
@@ -750,6 +752,8 @@ struct aho_corasick_dictionary {
     safe_vector<u64_t, word_allocator_t> occupied_bits_;
     /** @brief Lowest slot that could still be free; packing only fills forward, so it never moves back. */
     size_t lowest_free_cursor_ = 0;
+    /** @brief One past the highest claimed slot, so every slot at or above it is free by construction. */
+    size_t arena_frontier_ = 0;
 
     /** @brief Hot tier: `hot_count_ * alphabet_size_k` goto-completed targets, row-major, shallow states
      *         first and each depth band ordered by out-degree descending. */
@@ -1155,8 +1159,12 @@ struct aho_corasick_dictionary {
         return status_t::success_k;
     }
 
-    /** @brief Marks @p slot taken; the bitmap is the only record of what is free. */
-    void claim_slot_(size_t slot) noexcept { occupied_bits_[slot >> 6] |= (u64_t)1 << (slot & 63); }
+    /** @brief Marks @p slot taken and carries the frontier past it; the bitmap is the only record of what
+     *         is free, so the frontier has to move with every single claim to stay a valid bound. */
+    void claim_slot_(size_t slot) noexcept {
+        occupied_bits_[slot >> 6] |= (u64_t)1 << (slot & 63);
+        arena_frontier_ = sz_max_of_two(arena_frontier_, slot + 1);
+    }
 
     /**
      *  @brief First free slot at or after @p from, growing the arena when the search runs off the end.
@@ -1261,7 +1269,10 @@ struct aho_corasick_dictionary {
      *  @brief Places a cold parent's children on one shared base, so `base_[parent] + byte` addresses each.
      *
      *  Candidates are scanned out of the occupancy bitmap anchored on the parent's smallest child byte, and
-     *  the whole row is tested at once rather than probed child by child.
+     *  the whole row is tested at once rather than probed child by child. After `max_interior_probes_k`
+     *  rejections the row settles on the arena frontier instead: the vacancies a packed arena leaves behind
+     *  are mostly singletons no multi-byte row can ever cover, and a search that keeps re-walking them is
+     *  quadratic in the states it places rather than linear.
      */
     status_t pack_cold_children_(state_id_t const *offsets, csr_edge_t const *rows, state_id_t parent) noexcept {
         if (offsets[parent] == offsets[parent + 1]) return status_t::success_k;
@@ -1286,7 +1297,7 @@ struct aho_corasick_dictionary {
         if (status_t const status = next_free_slot_(first_free, first_free); status != status_t::success_k)
             return status;
 
-        for (size_t candidate = first_free;;) {
+        for (size_t candidate = first_free, rejected = 0;;) {
             status_t status = next_free_slot_(candidate, candidate);
             if (status != status_t::success_k) return status;
             if (candidate < anchor_byte) {
@@ -1297,7 +1308,10 @@ struct aho_corasick_dictionary {
             status = ensure_slot_capacity_(candidate_base + alphabet_size_k);
             if (status != status_t::success_k) return status;
             if (!slots_are_free_(candidate_base, child_mask)) {
-                ++candidate;
+                // Landing on the frontier itself, rather than an anchor byte past it, is what keeps the
+                // fallback free: every slot from there up is unclaimed, so the row strands nothing behind it.
+                if (++rejected >= max_interior_probes_k) candidate = arena_frontier_;
+                else ++candidate;
                 continue;
             }
 
@@ -1460,6 +1474,7 @@ struct aho_corasick_dictionary {
         old_of_final_.reset();
         occupied_bits_.reset();
         lowest_free_cursor_ = 0;
+        arena_frontier_ = 0;
     }
 
     void reset() noexcept {
