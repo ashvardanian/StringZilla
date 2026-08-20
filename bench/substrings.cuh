@@ -235,8 +235,8 @@ void print_dictionary_properties(dictionary_type_ const &dictionary, needle_slic
     size_t const state_count = dictionary.count_states();
     size_t const hot_count = dictionary.hot_count();
     // Sized at the width this automaton actually settled on - a narrowed one halves every hot row.
-    size_t const hot_tier_bytes =
-        hot_count * substrings_alphabet_size_k * sizeof(typename dictionary_type_::state_id_t);
+    size_t const hot_tier_bytes = hot_count * substrings_alphabet_size_k *
+                                  sizeof(typename dictionary_type_::state_id_t);
     size_t const cold_tier_bytes = dictionary.transitions_bytes() - hot_tier_bytes;
 
     std::printf(" - Needles: %zu requested, %zu inserted, %zu bytes\n", needles.size(), dictionary.count_needles(),
@@ -345,7 +345,7 @@ void bench_substrings_dictionary(                                        //
     cpu_specs_t const &cpu_specs, forkunion_executor_t &pool) {
 
     std::string const dictionary_label = cell.label();
-    std::printf("\n=== Dictionary %s ===\n", dictionary_label.c_str());
+    std::printf("\nBenchmarking dictionary %s\n", dictionary_label.c_str());
 
     needle_slice_t const needles = needle_slice_of(vocabulary, cell.slice);
     if (needles.size() == 0) {
@@ -358,19 +358,22 @@ void bench_substrings_dictionary(                                        //
     dummy_executor_t serial_executor;
 
     // Construction reports needle-bytes per second through the same callable as the searches below.
-    substrings_serial_t rebuilt_engine;
-    auto build_call = make_substrings_callable(needles.total_bytes, rebuilt_engine, [&] {
-        rebuilt_engine.reset(); // ? Rebuilding from scratch on every call IS the measured operation
-        return rebuilt_engine.try_index(needles.terms, cell.sensitivity, serial_executor, cpu_specs);
-    });
-    bench_nullary(env, "substrings_build_serial:" + dictionary_label, build_call).log();
-
     substrings_serial_t serial_engine;
-    status_t const serial_build_status =
-        serial_engine.try_index(needles.terms, cell.sensitivity, serial_executor, cpu_specs);
-    if (serial_build_status != status_t::success_k)
-        throw std::runtime_error(std::string("Failed to build the serial dictionary: ") +
-                                 status_name(serial_build_status));
+    auto build_call = make_substrings_callable(needles.total_bytes, serial_engine, [&] {
+        serial_engine.reset(); // ? Rebuilding from scratch on every call IS the measured operation
+        return serial_engine.try_index(needles.terms, cell.sensitivity, serial_executor, cpu_specs);
+    });
+
+    // The measured row leaves a built automaton behind; only a filtered-out row still owes one.
+    bench_result_t const build_result = bench_nullary(env, "substrings_build_serial:" + dictionary_label, build_call);
+    build_result.log();
+    if (build_result.skipped) {
+        status_t const serial_build_status = serial_engine.try_index(needles.terms, cell.sensitivity, serial_executor,
+                                                                     cpu_specs);
+        if (serial_build_status != status_t::success_k)
+            throw std::runtime_error(std::string("Failed to build the serial dictionary: ") +
+                                     status_name(serial_build_status));
+    }
 
     substrings_parallel_t parallel_engine;
     status_t const parallel_build_status = parallel_engine.try_index(needles.terms, cell.sensitivity, pool, cpu_specs);
@@ -389,8 +392,8 @@ void bench_substrings_dictionary(                                        //
     auto count_with = [&](auto &engine, auto &&executor, auto const &specs, unified_vector<size_t> &counts,
                           size_t &total) {
         return make_substrings_callable(haystack_bytes, counts, [&] {
-            return engine.try_count(env.tokens, substrings_overlapping_k,
-                                    span<size_t>(counts.data(), counts.size()), total, executor, specs);
+            return engine.try_count(env.tokens, substrings_overlapping_k, span<size_t>(counts.data(), counts.size()),
+                                    total, executor, specs);
         });
     };
 
@@ -417,8 +420,8 @@ void bench_substrings_dictionary(                                        //
     }
 
     size_t serial_found = 0, parallel_found = 0;
-    auto find_with = [&](auto &engine, auto &&executor, auto const &specs,
-                         unified_vector<substrings_match_t> &matches, size_t &found) {
+    auto find_with = [&](auto &engine, auto &&executor, auto const &specs, unified_vector<substrings_match_t> &matches,
+                         size_t &found) {
         return make_substrings_callable(haystack_bytes, matches, [&] {
             return engine.try_find(env.tokens, substrings_overlapping_k,
                                    span<substrings_match_t>(matches.data(), matches.size()), found, executor, specs);
@@ -449,8 +452,8 @@ void bench_substrings_dictionary(                                        //
     // `gpu_specs_t` describes an A100 and would tier this dictionary against hardware that is not here,
     // beside CPU dictionaries tiered against the real machine.
     substrings_cuda_t device_engine;
-    cuda_status_t const device_build_status =
-        device_engine.try_index(needles.terms, cell.sensitivity, device_executor, gpu_specs);
+    cuda_status_t const device_build_status = device_engine.try_index(needles.terms, cell.sensitivity, device_executor,
+                                                                      gpu_specs);
     if (device_build_status.status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the device dictionary: ") +
                                  status_name(device_build_status.status));
@@ -486,7 +489,8 @@ void bench_substrings_dictionary(                                        //
             needles.terms.size(), span<char const> {replacement_literal, sizeof(replacement_literal) - 1});
         span<span<char const> const> const replacements {replacement_spans.data(), replacement_spans.size()};
 
-        std::vector<size_t> rewrite_offsets(env.tokens.size() + 1, 0);
+        // Shared by the serial and device rewrites below, so it lives where a kernel can write it.
+        unified_vector<size_t> rewrite_offsets(env.tokens.size() + 1, 0);
         span<size_t> const rewrite_offsets_view(rewrite_offsets.data(), rewrite_offsets.size());
         // A zero-capacity rewrite is the size query, so it refuses and names what it wanted. Letting that
         // refusal pass unread would leave `rewrite_bytes` at zero and time every rewrite below against an
@@ -502,8 +506,8 @@ void bench_substrings_dictionary(                                        //
         auto replace_with = [&](auto &engine, auto &&executor, auto const &specs, size_t &written) {
             return make_substrings_callable(haystack_bytes, rewritten, [&] {
                 return engine.try_replace(env.tokens, substrings_leftmost_longest_k, replacements,
-                                          span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view,
-                                          written, executor, specs);
+                                          span<char>(rewritten.data(), rewritten.size()), rewrite_offsets_view, written,
+                                          executor, specs);
             });
         };
 
@@ -516,7 +520,8 @@ void bench_substrings_dictionary(                                        //
                       parallel_replace_call, callable_no_op_t {}, arrays_equality<char> {})
             .log(serial_replace_result);
 
-        std::vector<float> const weights(needles.terms.size(), 1.0f);
+        // Read per needle by the scoring kernel, so the device backend needs it reachable from there.
+        unified_vector<float> const weights(needles.terms.size(), 1.0f);
         span<float const> const weights_view(weights.data(), weights.size());
         unified_vector<float> scores(env.tokens.size(), 0.0f);
         substrings_bm25_t bm25_parameters;

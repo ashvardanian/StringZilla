@@ -1162,7 +1162,8 @@ struct aho_corasick_dictionary {
      *  @brief First free slot at or after @p from, growing the arena when the search runs off the end.
      *
      *  Packing only ever fills forward, so `lowest_free_cursor_` never moves back and the whole walk across
-     *  one build is amortized linear in the slot count.
+     *  one build is amortized linear in the slot count - but only while every packing phase advances it.
+     *  A phase that scans from the cursor without advancing it is quadratic in the states it places.
      */
     status_t next_free_slot_(size_t from, size_t &found) noexcept {
         for (size_t word = from >> 6;; ++word) {
@@ -1280,7 +1281,12 @@ struct aho_corasick_dictionary {
                 break;
             }
 
-        for (size_t candidate = lowest_free_cursor_;;) {
+        // The arena's lowest vacancy, and the cursor this call publishes: a rejected row leaves it free.
+        size_t first_free = lowest_free_cursor_;
+        if (status_t const status = next_free_slot_(first_free, first_free); status != status_t::success_k)
+            return status;
+
+        for (size_t candidate = first_free;;) {
             status_t status = next_free_slot_(candidate, candidate);
             if (status != status_t::success_k) return status;
             if (candidate < anchor_byte) {
@@ -1310,6 +1316,8 @@ struct aho_corasick_dictionary {
                     sz_assert_(trie_states_[child].published_id == invalid_state_k && "One parent edge per state");
                     trie_states_[child].published_id = state_id_of_(slot);
                 }
+            // `candidate` is the lowest slot just claimed, so only a row landing on `first_free` frees it.
+            lowest_free_cursor_ = first_free == candidate ? first_free + 1 : first_free;
             return status_t::success_k;
         }
     }
