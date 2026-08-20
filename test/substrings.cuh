@@ -145,15 +145,13 @@ void collect_matches_under_(engine_type_ &engine, haystacks_type_ const &haystac
     std::size_t matches_total = 0;
     span<std::size_t> const counts {out.collected_counts.data(), out.collected_counts.size()};
 
-    verify(engine.try_count(haystacks, overlap_policy, counts, matches_total, trailing_args...) ==
-           status_t::success_k);
+    verify(engine.try_count(haystacks, overlap_policy, counts, matches_total, trailing_args...) == status_t::success_k);
 
     // Sized to exactly what counting promised, so a `try_find` overrun trips instead of writing into slack.
     out.collected_matches.assign(matches_total, substrings_match_t {});
     std::size_t matches_found = 0;
     span<substrings_match_t> const matches {out.collected_matches.data(), out.collected_matches.size()};
-    verify(engine.try_find(haystacks, overlap_policy, matches, matches_found, trailing_args...) ==
-           status_t::success_k);
+    verify(engine.try_find(haystacks, overlap_policy, matches, matches_found, trailing_args...) == status_t::success_k);
     verify(matches_found == matches_total && "try_count and try_find disagree on the match count");
 
     out.clear();
@@ -460,7 +458,10 @@ inline fold_preimage_index_t const &fold_preimage_index_() {
             built.sources_of_image[std::vector<sz_rune_t>(images, images + runes)].push_back(rune);
         }
         for (auto const &[image, sources] : built.sources_of_image) {
-            if (image.size() == 1) { built.narrow_images.push_back(image[0]); continue; }
+            if (image.size() == 1) {
+                built.narrow_images.push_back(image[0]);
+                continue;
+            }
             std::array<sz_rune_t, 3> padded {};
             for (std::size_t index = 0; index < image.size(); ++index) padded[index] = image[index];
             built.wide_images.push_back(padded);
@@ -1484,7 +1485,7 @@ void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
  *         haystacks are refused with `device_memory_mismatch_k` rather than silently copied.
  */
 void test_substrings_cuda_memory_safety() {
-    std::printf("  - testing scattered unified haystacks and the host-memory refusal...\n");
+    std::printf("  - testing unified, host, pinned and device memory against the contract...\n");
 #if SZ_USE_CUDA
 
     gpu_specs_t gpu_specs;
@@ -1524,6 +1525,64 @@ void test_substrings_cuda_memory_safety() {
                                                    span<std::size_t>(counts.data(), counts.size()), matches_total,
                                                    executor, gpu_specs);
     verify(host_status == status_t::device_memory_mismatch_k && "Host input must be refused, not copied");
+
+    // Host OUTPUTS are refused just as firmly, and every verb probes its own. The haystacks below are the
+    // unified ones, so the only illegal thing in each call is where the results were asked to land.
+    {
+        std::vector<std::size_t> host_counts(scattered_view.size());
+        std::size_t total = 0;
+        verify(cuda_engine.try_count(scattered_view, substrings_overlapping_k,
+                                     span<std::size_t>(host_counts.data(), host_counts.size()), total, executor,
+                                     gpu_specs) == status_t::device_memory_mismatch_k &&
+               "A host counts array must be refused");
+
+        std::vector<substrings_match_t> host_matches(16);
+        std::size_t found = 0;
+        verify(cuda_engine.try_find(scattered_view, substrings_overlapping_k,
+                                    span<substrings_match_t>(host_matches.data(), host_matches.size()), found, executor,
+                                    gpu_specs) == status_t::device_memory_mismatch_k &&
+               "A host matches array must be refused");
+
+        unified_vector<float> weights(needle_strings.size(), 1.0f);
+        std::vector<float> host_scores(scattered_view.size());
+        substrings_bm25_t parameters;
+        parameters.average_document_length = 8.0f;
+        verify(cuda_engine.try_score_bm25(scattered_view, span<float const>(), parameters,
+                                          {weights.data(), weights.size()},
+                                          span<float>(host_scores.data(), host_scores.size()), executor,
+                                          gpu_specs) == status_t::device_memory_mismatch_k &&
+               "A host scores array must be refused");
+    }
+
+    // Page-locked host memory is a third kind, and the driver reports it as host - so it is refused too,
+    // which is the refusal a caller is least likely to predict.
+    {
+        pinned_vector<std::size_t> pinned_counts(scattered_view.size());
+        std::size_t total = 0;
+        verify(cuda_engine.try_count(scattered_view, substrings_overlapping_k,
+                                     span<std::size_t>(pinned_counts.data(), pinned_counts.size()), total, executor,
+                                     gpu_specs) == status_t::device_memory_mismatch_k &&
+               "Page-locked host memory must be refused, like any other host memory");
+    }
+
+    // Plain device memory is accepted, which unified memory alone would not prove: every host loop that once
+    // filled these arrays would have faulted on a pointer the host cannot touch.
+    {
+        device_vector<std::size_t> device_counts;
+        verify(device_counts.try_resize_uninitialized(scattered_view.size()) == status_t::success_k);
+        std::size_t total = 0;
+        verify(cuda_engine.try_count(scattered_view, substrings_overlapping_k,
+                                     span<std::size_t>(device_counts.data(), device_counts.size()), total, executor,
+                                     gpu_specs) == status_t::success_k &&
+               "Plain device memory must be accepted, not just unified");
+
+        std::vector<std::size_t> drained(device_counts.size());
+        verify(copy_device_to_host(device_counts, span<std::size_t>(drained.data(), drained.size())) == CUDA_SUCCESS &&
+               "Draining the device counts must succeed");
+        std::size_t drained_total = 0;
+        for (std::size_t const count : drained) drained_total += count;
+        verify(drained_total == total && "Counts written to device memory must sum to the reported total");
+    }
 #endif // SZ_USE_CUDA
 }
 
@@ -1643,8 +1702,8 @@ void test_substrings_large_haystacks_equivalence() {
         for (std::size_t index = 0; index < scale_iterations(4) * 1024; ++index) multibyte += cycle[index % 5];
         std::vector<std::string> const uncased_haystack_strings {multibyte};
         arrow_strings_tape_t uncased_haystacks;
-        verify(uncased_haystacks.try_assign(uncased_haystack_strings.data(),
-                                            uncased_haystack_strings.data() + 1) == status_t::success_k);
+        verify(uncased_haystacks.try_assign(uncased_haystack_strings.data(), uncased_haystack_strings.data() + 1) ==
+               status_t::success_k);
 
         substrings_serial_t uncased_serial;
         verify(uncased_serial.try_index(uncased_needles.view(), substrings_uncased_k) == status_t::success_k);
@@ -1758,9 +1817,8 @@ void test_substrings_construction_equivalence() {
         // Both widths still find the sharp S spelling of the same run, which is what makes it the hard case.
         std::string const spelled = "\xC3\x9F\xC3\x9F\xC3\x9F\xC3\x9F\xC3\x9Fs";
         std::size_t found = 0;
-        wide.find({spelled.data(), spelled.size()}, [&](std::size_t, std::size_t, std::size_t) {
-            return ++found, true;
-        });
+        wide.find({spelled.data(), spelled.size()},
+                  [&](std::size_t, std::size_t, std::size_t) { return ++found, true; });
         verify(found != 0 && "Eleven folded s-runes are spelled by five sharp-S codepoints and one s");
     }
 
@@ -1770,8 +1828,8 @@ void test_substrings_construction_equivalence() {
     // identically to the wide ones is `check_substrings_narrow_width_`'s job, against the brute-force oracle.
     {
         std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(200), 3, 7);
-        std::vector<std::string> const haystack_strings =
-            random_haystacks_with_needles_(needle_strings, scale_iterations(64), 16, 96);
+        std::vector<std::string> const haystack_strings = random_haystacks_with_needles_(needle_strings,
+                                                                                         scale_iterations(64), 16, 96);
         arrow_strings_tape_t needles, haystacks;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
@@ -1901,8 +1959,8 @@ void test_substrings_cover_equivalence() {
     std::printf("  - testing that a leftmost cover is a non-overlapping subset of every match...\n");
 
     std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(150), 2, 5);
-    std::vector<std::string> const haystack_strings =
-        random_haystacks_with_needles_(needle_strings, scale_iterations(40), 16, 64);
+    std::vector<std::string> const haystack_strings = random_haystacks_with_needles_(needle_strings,
+                                                                                     scale_iterations(40), 16, 64);
     arrow_strings_tape_t needles, haystacks;
     verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
            status_t::success_k);
@@ -1943,15 +2001,25 @@ void test_substrings_cover_equivalence() {
 
 #pragma region Rewriting
 
-/** @brief The flat tape and per-haystack offsets a single rewrite pass produced. */
+/**
+ *  @brief The flat tape and per-haystack offsets a single rewrite pass produced.
+ *
+ *  Both members are unified, because a CUDA engine writes them from the device and refuses host memory.
+ */
 struct substrings_rewrite_tape_t {
-    std::string text;
-    std::vector<std::size_t> offsets;
+    unified_vector<char> text;
+    unified_vector<std::size_t> offsets;
 
     span<char const> operator[](std::size_t haystack_index) const noexcept {
         return {text.data() + offsets[haystack_index], offsets[haystack_index + 1] - offsets[haystack_index]};
     }
 };
+
+/** @brief Whether @p rewritten 's whole tape holds @p expected, compared as bytes. */
+inline bool tape_equals_(substrings_rewrite_tape_t const &rewritten, std::string const &expected) noexcept {
+    return rewritten.text.size() == expected.size() &&
+           std::memcmp(rewritten.text.data(), expected.data(), expected.size()) == 0;
+}
 
 /** @brief Whether @p rewritten holds @p expected at @p haystack_index, compared as bytes. */
 inline bool rewritten_equals_(substrings_rewrite_tape_t const &rewritten, std::size_t haystack_index,
@@ -2004,8 +2072,8 @@ void test_substrings_rewriting_equivalence() {
     // Replacing each needle with itself is the identity, so any deviation is the rewrite's own bug.
     {
         std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(200), 2, 6);
-        std::vector<std::string> const haystack_strings =
-            random_haystacks_with_needles_(needle_strings, scale_iterations(50), 16, 64);
+        std::vector<std::string> const haystack_strings = random_haystacks_with_needles_(needle_strings,
+                                                                                         scale_iterations(50), 16, 64);
         arrow_strings_tape_t needles, haystacks, replacements;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
@@ -2112,8 +2180,7 @@ void test_substrings_rewriting_equivalence() {
         verify(haystacks.try_assign(long_strings.data(), long_strings.data() + long_strings.size()) ==
                status_t::success_k);
         verify(replacements.try_assign(replacement_strings.data(),
-                                       replacement_strings.data() + replacement_strings.size()) ==
-               status_t::success_k);
+                                       replacement_strings.data() + replacement_strings.size()) == status_t::success_k);
         verify(identity.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
 
@@ -2128,17 +2195,17 @@ void test_substrings_rewriting_equivalence() {
 
         for (substrings_overlap_policy_t policy : leftmost_policies) {
             substrings_rewrite_tape_t const unsplit = rewrite_all_(serial_engine, haystacks.view(), policy,
-                                                                    replacements);
+                                                                   replacements);
             substrings_rewrite_tape_t const split = rewrite_all_(parallel_engine, haystacks.view(), policy,
-                                                                  replacements, pool, split_specs);
+                                                                 replacements, pool, split_specs);
             verify(split.offsets == unsplit.offsets && "A split rewrite must land on the same boundaries");
             verify(split.text == unsplit.text && "A split rewrite must produce the same bytes");
 
             substrings_rewrite_tape_t const unchanged = rewrite_all_(parallel_engine, haystacks.view(), policy,
-                                                                      identity, pool, split_specs);
+                                                                     identity, pool, split_specs);
             std::string packed;
             for (std::string const &text : long_strings) packed += text;
-            verify(unchanged.text == packed && "Self-replacement must survive every slice boundary");
+            verify(tape_equals_(unchanged, packed) && "Self-replacement must survive every slice boundary");
         }
     }
 }
@@ -2304,7 +2371,8 @@ void test_substrings_scoring_wide_equivalence() {
         substrings_bm25_t const parameters {.term_frequency_saturation = 1.2f,
                                             .length_normalization = 0.75f,
                                             .average_document_length = 4096.0f};
-        std::vector<float> weights(needle_count);
+        // Weights are read by the scoring kernel, so on a CUDA scope they must live where it can reach them.
+        unified_vector<float> weights(needle_count);
         for (std::size_t index = 0; index < needle_count; ++index) weights[index] = 1.0f + (float)(index % 7);
         span<float const> const weights_view {weights.data(), weights.size()};
 
@@ -2340,9 +2408,9 @@ void test_substrings_scoring_wide_equivalence() {
         verify(cuda_engine.try_index(needles.view(), substrings_cased_k, executor, gpu_specs) == status_t::success_k);
 
         unified_vector<float> device_scores(texts.size(), 0.0f);
-        verify(cuda_engine.try_score_bm25(haystacks_view, span<float const>(), parameters, weights_view,
-                                          span<float>(device_scores.data(), device_scores.size()), executor,
-                                          gpu_specs)
+        verify(cuda_engine
+                   .try_score_bm25(haystacks_view, span<float const>(), parameters, weights_view,
+                                   span<float>(device_scores.data(), device_scores.size()), executor, gpu_specs)
                    .status == status_t::success_k);
 
         for (std::size_t index = 0; index < texts.size(); ++index) {
@@ -2362,12 +2430,11 @@ void test_substrings_scoring_wide_equivalence() {
 
             unified_texts_t const watched_staged {{text}};
 
-            std::vector<float> lone_weights(needle_count, 0.0f);
+            unified_vector<float> lone_weights(needle_count, 0.0f);
             lone_weights[watched] = 1.0f;
             unified_vector<float> lone_score(1, 0.0f);
             verify(cuda_engine
-                       .try_score_bm25(watched_staged.view(),
-                                       span<float const>(), parameters,
+                       .try_score_bm25(watched_staged.view(), span<float const>(), parameters,
                                        span<float const>(lone_weights.data(), lone_weights.size()),
                                        span<float>(lone_score.data(), lone_score.size()), executor, gpu_specs)
                        .status == status_t::success_k);
@@ -2385,8 +2452,9 @@ void test_substrings_scoring_wide_equivalence() {
         // accumulation is what makes the total independent of it.
         for (std::size_t repeat = 0; repeat < 3; ++repeat) {
             unified_vector<float> repeated(texts.size(), 0.0f);
-            verify(cuda_engine.try_score_bm25(haystacks_view, span<float const>(), parameters, weights_view,
-                                              span<float>(repeated.data(), repeated.size()), executor, gpu_specs)
+            verify(cuda_engine
+                       .try_score_bm25(haystacks_view, span<float const>(), parameters, weights_view,
+                                       span<float>(repeated.data(), repeated.size()), executor, gpu_specs)
                        .status == status_t::success_k);
             for (std::size_t index = 0; index < texts.size(); ++index)
                 verify(repeated[index] == device_scores[index] && "Device scores must repeat bit for bit");
@@ -2408,7 +2476,7 @@ void test_substrings_scoring_wide_equivalence() {
         substrings_bm25_t const degenerate {.term_frequency_saturation = 1.2f,
                                             .length_normalization = 1.0f,
                                             .average_document_length = 6.0f};
-        std::vector<float> const weights {1.0f, 1.0f};
+        unified_vector<float> const weights(2, 1.0f);
         span<float const> const weights_view {weights.data(), weights.size()};
 
         substrings_serial_t serial_engine;
@@ -2430,8 +2498,7 @@ void test_substrings_scoring_wide_equivalence() {
         verify(cuda_engine.try_index(needles.view(), substrings_cased_k, executor, gpu_specs) == status_t::success_k);
         unified_vector<float> device_scores(1, 1.0f);
         verify(cuda_engine
-                   .try_score_bm25(empty_staged.view(), span<float const>(),
-                                   degenerate, weights_view,
+                   .try_score_bm25(empty_staged.view(), span<float const>(), degenerate, weights_view,
                                    span<float>(device_scores.data(), device_scores.size()), executor, gpu_specs)
                    .status == status_t::success_k);
         verify(device_scores[0] == 0.0f && "An empty haystack scores zero on the device too");
@@ -2483,21 +2550,21 @@ void test_substrings_cuda_equivalence() {
 
         for (substrings_overlap_policy_t policy : {substrings_leftmost_longest_k, substrings_leftmost_first_k}) {
             substrings_rewrite_tape_t const on_host = rewrite_all_(serial_engine, reference_haystacks.view(), policy,
-                                                                    replacements);
+                                                                   replacements);
             substrings_rewrite_tape_t const on_device = rewrite_all_(cuda_engine, haystacks_view, policy, replacements,
-                                                                      executor, gpu_specs);
+                                                                     executor, gpu_specs);
             verify(on_device.offsets == on_host.offsets && "Rewritten boundaries must agree with the serial engine");
             verify(on_device.text == on_host.text && "Rewritten bytes must agree with the serial engine");
 
             // Replacing every needle with itself is the identity, whatever the cover resolved to.
             substrings_rewrite_tape_t const unchanged = rewrite_all_(cuda_engine, haystacks_view, policy, identity,
-                                                                      executor, gpu_specs);
+                                                                     executor, gpu_specs);
             std::string packed;
             for (std::string const &text : texts) packed += text;
-            verify(unchanged.text == packed && "Replacing each needle with itself must reproduce the input");
+            verify(tape_equals_(unchanged, packed) && "Replacing each needle with itself must reproduce the input");
         }
 
-        std::vector<float> weights(needle_strings.size(), 1.5f);
+        unified_vector<float> weights(needle_strings.size(), 1.5f);
         unified_vector<float> device_scores(texts.size());
         std::vector<float> host_scores(texts.size());
         substrings_bm25_t parameters;
@@ -2505,10 +2572,9 @@ void test_substrings_cuda_equivalence() {
         verify(serial_engine.try_score_bm25(reference_haystacks.view(), span<float const>(), parameters,
                                             {weights.data(), weights.size()},
                                             {host_scores.data(), host_scores.size()}) == status_t::success_k);
-        verify(cuda_engine.try_score_bm25(haystacks_view, span<float const>(), parameters,
-                                          {weights.data(), weights.size()},
-                                          {device_scores.data(), device_scores.size()}, executor,
-                                          gpu_specs) == status_t::success_k);
+        verify(cuda_engine.try_score_bm25(
+                   haystacks_view, span<float const>(), parameters, {weights.data(), weights.size()},
+                   {device_scores.data(), device_scores.size()}, executor, gpu_specs) == status_t::success_k);
         // Bit-stability is promised per backend, not across two of them: both reduce in ascending needle
         // order, but `nvcc` contracts `score + weight * term` into an FMA where the host compiler need not,
         // which moves the last ulp. So the backends are compared numerically, and the device is compared
@@ -2522,9 +2588,8 @@ void test_substrings_cuda_equivalence() {
         for (std::size_t repeat = 0; repeat < 3; ++repeat) {
             std::fill(repeated.begin(), repeated.end(), 0.0f);
             verify(cuda_engine.try_score_bm25(haystacks_view, span<float const>(), parameters,
-                                              {weights.data(), weights.size()},
-                                              {repeated.data(), repeated.size()}, executor,
-                                              gpu_specs) == status_t::success_k);
+                                              {weights.data(), weights.size()}, {repeated.data(), repeated.size()},
+                                              executor, gpu_specs) == status_t::success_k);
             for (std::size_t index = 0; index < texts.size(); ++index)
                 verify(repeated[index] == device_scores[index] &&
                        "Scores must be bit-identical across runs of one backend");

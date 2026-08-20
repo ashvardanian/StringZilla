@@ -688,8 +688,7 @@ static void check_similarities_fuzzy_(base_operator_ &&base_operator, simd_opera
         for (std::size_t i = 0; i != config.batch_size; ++i) {
             if (results_base[i] == results_simd[i]) continue;
             edit_distance_log_mismatch(first_array[i], second_array[i], results_base[i], results_simd[i]);
-            verify(results_base[i] == results_simd[i] &&
-                   "Base and SIMD engines disagree on a fuzzy-generated pair");
+            verify(results_base[i] == results_simd[i] && "Base and SIMD engines disagree on a fuzzy-generated pair");
         }
     }
 }
@@ -910,8 +909,7 @@ void test_similarities_equivalence() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs),
-               specs_status == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 #endif
 
 #if SZ_USE_CUDA
@@ -1039,9 +1037,9 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
     for (auto const &pair : degenerate_cases) {
         let_verify(status_t const first_append_status = first_tape.try_append({pair.first.data(), pair.first.size()}),
                    first_append_status == status_t::success_k);
-        let_verify(status_t const second_append_status =
-                       second_tape.try_append({pair.second.data(), pair.second.size()}),
-                   second_append_status == status_t::success_k);
+        let_verify(
+            status_t const second_append_status = second_tape.try_append({pair.second.data(), pair.second.size()}),
+            second_append_status == status_t::success_k);
     }
 
     status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
@@ -1071,12 +1069,12 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
 
     unified_vector<score_type_> closed_form(1);
     score_type_ const expected_all_gaps = static_cast<score_type_>(sample.size() * static_cast<std::size_t>(gap_cost));
-    let_verify(status_t const against_empty_status =
-                   simd_operator(sample_tape.view(), empty_tape.view(), closed_form.data(), simd_extra_args...),
+    let_verify(status_t const against_empty_status = simd_operator(sample_tape.view(), empty_tape.view(),
+                                                                   closed_form.data(), simd_extra_args...),
                against_empty_status == status_t::success_k);
     verify(closed_form[0] == expected_all_gaps);
-    let_verify(status_t const against_copy_status =
-                   simd_operator(sample_tape.view(), copy_tape.view(), closed_form.data(), simd_extra_args...),
+    let_verify(status_t const against_copy_status = simd_operator(sample_tape.view(), copy_tape.view(),
+                                                                  closed_form.data(), simd_extra_args...),
                against_copy_status == status_t::success_k);
     verify(closed_form[0] == static_cast<score_type_>(0));
 }
@@ -1105,8 +1103,7 @@ void test_similarities_safety() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs),
-               specs_status == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 #endif
 
     // Serial Levenshtein distance against the dual-row baseline on degenerate inputs.
@@ -1218,8 +1215,8 @@ static void check_cross_product_cell_exact_(engine_type_ &&engine, baseline_oper
     // empty sub-view sliced (one offset, zero strings) off a one-string fallback tape.
     std::string const empty_fallback_string;
     arrow_strings_tape_t empty_fallback_tape;
-    let_verify(status_t const fallback_append_status =
-                   empty_fallback_tape.try_append({empty_fallback_string.data(), empty_fallback_string.size()}),
+    let_verify(status_t const fallback_append_status = empty_fallback_tape.try_append(
+                   {empty_fallback_string.data(), empty_fallback_string.size()}),
                fallback_append_status == status_t::success_k);
     auto build_view = [&](fuzzy_config_t config, std::vector<std::string> &array,
                           arrow_strings_tape_t &tape) -> arrow_strings_view_t {
@@ -1989,8 +1986,7 @@ void test_similarities_cross_product_equivalence() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs),
-               specs_status == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 
     // CUDA cross-product and symmetric matrices stay small so device memory remains bounded. The empty shapes here
     // pin that a zero-sized grid never reaches `cuLaunchKernelEx`.
@@ -2178,8 +2174,7 @@ void test_similarities_memory_usage_equivalence() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs),
-               specs_status == status_t::success_k);
+    let_verify(status_t const specs_status = gpu_specs_fetch(first_gpu_specs), specs_status == status_t::success_k);
 #endif
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
@@ -2250,6 +2245,63 @@ void test_similarities_memory_usage_equivalence() {
             cuda_executor_t {}, first_gpu_specs);
 #endif
     }
+}
+
+/**
+ *  @brief Pins the device-memory contract for the CUDA cross-product engines: a result matrix must be
+ *         reachable from the device, whether it is unified or plain device memory.
+ *
+ *  Host inputs were already refused; this covers the results, which used to be staged and copied back.
+ */
+void test_similarities_cuda_memory_safety() {
+    std::printf("  - testing unified, host, pinned and device result matrices against the contract...\n");
+#if SZ_USE_CUDA
+
+    gpu_specs_t gpu_specs;
+    verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
+    cuda_executor_t executor;
+
+    std::vector<std::string> const texts {"kitten", "sitting", "flaw"};
+    arrow_strings_tape_t tape;
+    verify(tape.try_assign(texts.begin(), texts.end()) == status_t::success_k);
+    arrow_strings_view_t const view = tape.view();
+    std::size_t const count = view.size();
+
+    constexpr uniform_substitution_costs_t unit_uniform {0, 1};
+    constexpr linear_gap_costs_t unit_linear {1};
+    levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> engine {unit_uniform, unit_linear};
+
+    // Unified results are the baseline, and give the answers the other rows are compared against.
+    unified_vector<sz_size_t> unified_matrix(count * count);
+    strided_rows<sz_size_t> const unified_results {unified_matrix.data(), count, count, count};
+    verify(engine(view, view, unified_results, executor, gpu_specs) == status_t::success_k &&
+           "A unified result matrix must be accepted");
+
+    // Host results are refused rather than staged and drained, which is what this contract removed.
+    std::vector<sz_size_t> host_matrix(count * count);
+    strided_rows<sz_size_t> const host_results {host_matrix.data(), count, count, count};
+    verify(engine(view, view, host_results, executor, gpu_specs) == status_t::device_memory_mismatch_k &&
+           "A host result matrix must be refused");
+
+    // Page-locked host memory is host memory to the driver, and refused with it.
+    pinned_vector<sz_size_t> pinned_matrix(count * count);
+    strided_rows<sz_size_t> const pinned_results {pinned_matrix.data(), count, count, count};
+    verify(engine(view, view, pinned_results, executor, gpu_specs) == status_t::device_memory_mismatch_k &&
+           "A page-locked result matrix must be refused");
+
+    // Plain device memory is accepted, and agrees with the unified answers once drained.
+    device_vector<sz_size_t> device_matrix;
+    verify(device_matrix.try_resize_uninitialized(count * count) == status_t::success_k);
+    strided_rows<sz_size_t> const device_results {device_matrix.data(), count, count, count};
+    verify(engine(view, view, device_results, executor, gpu_specs) == status_t::success_k &&
+           "A plain device result matrix must be accepted");
+
+    std::vector<sz_size_t> drained(count * count);
+    verify(copy_device_to_host(device_matrix, span<sz_size_t>(drained.data(), drained.size())) == CUDA_SUCCESS &&
+           "Draining the device matrix must succeed");
+    for (std::size_t cell = 0; cell < count * count; ++cell)
+        verify(drained[cell] == unified_matrix[cell] && "Device and unified matrices must agree cell for cell");
+#endif // SZ_USE_CUDA
 }
 
 #pragma endregion // Drivers

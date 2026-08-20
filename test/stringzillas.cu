@@ -47,19 +47,21 @@ int main(int argc, char const **argv) {
 
     std::size_t failures = 0;
 
-    std::printf("\n=== Fingerprints ===\n");
+    std::printf("\nTesting fingerprints\n");
     failures += run_test("test_fingerprints_unit", test_fingerprints_unit);
     failures += run_test("test_fingerprints_equivalence", test_fingerprints_equivalence);
     failures += run_test("test_fingerprints_safety", test_fingerprints_safety);
+    failures += run_test("test_fingerprints_cuda_memory_safety", test_fingerprints_cuda_memory_safety);
 
-    std::printf("\n=== Similarities ===\n");
+    std::printf("\nTesting similarities\n");
     failures += run_test("test_similarities_unit", test_similarities_unit);
     failures += run_test("test_similarities_equivalence", test_similarities_equivalence);
     failures += run_test("test_similarities_cross_product_equivalence", test_similarities_cross_product_equivalence);
     failures += run_test("test_similarities_safety", test_similarities_safety);
+    failures += run_test("test_similarities_cuda_memory_safety", test_similarities_cuda_memory_safety);
     failures += run_test("test_similarities_memory_usage_equivalence", test_similarities_memory_usage_equivalence);
 
-    std::printf("\n=== Substrings ===\n");
+    std::printf("\nTesting substrings\n");
     failures += run_test("test_substrings_unit", test_substrings_unit);
     failures += run_test("test_substrings_uncased_unit", test_substrings_uncased_unit);
     failures += run_test("test_substrings_uncased_equivalence", test_substrings_uncased_equivalence);

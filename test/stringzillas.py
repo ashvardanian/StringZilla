@@ -285,8 +285,7 @@ def test_parameter_validation():
     # Test computation input validation
     engine = szs.LevenshteinDistances()
 
-    # A None query raises `TypeError` or `RuntimeError`, the latter from GPU memory issues.
-    # `candidates=None` is valid and requests symmetric self-similarity, so it is not an error.
+    # A None query is a type error; `candidates=None` is valid and requests symmetric self-similarity.
     with pytest.raises((TypeError, RuntimeError)):
         engine(None, Strs(["test"]))
 

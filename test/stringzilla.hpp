@@ -4,7 +4,7 @@
  *  @author Ash Vardanian
  *  @date June 16, 2026
  *
- *  @section Environment Variables
+ *  @section test_environment_variables Environment Variables
  *
  *  The test infrastructure supports the following environment variables for reproducible
  *  stress testing and fuzzing:
@@ -20,7 +20,7 @@
  *  - `SZ_TESTS_FILTER` : ECMAScript regex matched against test names; only matching tests run
  *    (e.g. `SZ_TESTS_FILTER=utf8`). Unset or empty runs everything. Honored by `run_test`.
  *
- *  @section Driver Tiers
+ *  @section test_driver_tiers Driver Tiers
  *
  *  A driver's suffix states what it costs and what it may assume, so the name answers both without
  *  reading the body. A family names its drivers `test_<family>_<tier>`, or `test_<family>_<operation>_<tier>`
@@ -39,7 +39,7 @@
  *                   of its own; a literal here belongs in `_unit`.
  *  - `_rules`       Annex rule coverage, where a family transcribes a published spec (UAX-29, UAX-14).
  *
- *  @section Example Usage
+ *  @section test_example_usage Example Usage
  *
  *  @code{.sh}
  *  # Run with a specific seed for reproducibility
@@ -149,6 +149,36 @@ using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, stringzillas::u
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, stringzillas::unified_alloc<value_type_>>;
 #endif
+
+#if SZ_USE_CUDA
+/**
+ *  @brief Page-locked host memory, which the driver reports as host and every engine therefore refuses.
+ *
+ *  A third memory kind beside unified and device, and the one a caller is most likely to expect to work.
+ */
+template <typename value_type_>
+using pinned_vector = std::vector<value_type_, stringzillas::pinned_alloc<value_type_>>;
+
+/**
+ *  @brief Plain device memory a kernel can write and the host cannot touch.
+ *
+ *  `safe_vector` is what the engines already store device-resident scratch in, and its
+ *  `try_resize_uninitialized` is the only growth a non-host-accessible allocator admits.
+ */
+template <typename value_type_>
+using device_vector = stringzillas::safe_vector<value_type_, stringzillas::device_alloc<value_type_>>;
+
+/**
+ *  @brief Drains a device-resident buffer into @p destination, forwarding whatever the driver reported.
+ *  @param[out] destination At least as many elements as @p source holds; only that prefix is written.
+ */
+template <typename value_type_>
+inline CUresult copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
+    if (source.size() == 0) return CUDA_SUCCESS;
+    if (destination.size() < source.size()) return CUDA_ERROR_INVALID_VALUE;
+    return cuMemcpyDtoH(destination.data(), (CUdeviceptr)source.data(), source.size() * sizeof(value_type_));
+}
+#endif // SZ_USE_CUDA
 
 /**
  *  @brief Copies @p texts into unified memory a CUDA kernel can reach, as one span per string.
@@ -445,7 +475,6 @@ inline sz_sequence_t sequence_from_(std::vector<std::string> const &strings) {
     sequence.get_length = sequence_get_length_;
     return sequence;
 }
-
 
 struct fuzzy_config_t {
     std::string alphabet = "ABC"; // ? Drawn one UTF-8 character at a time, so `"αβγ"` yields valid multi-byte text.
@@ -780,8 +809,7 @@ void test_extensions_reads_unit();
 void test_extensions_updates_unit();
 void test_string_constructors_unit();
 void test_string_reserve_unit();
-void test_memory_stability_equivalence(std::size_t length = 1ull << 10,
-                                       std::size_t iterations = scale_iterations(100));
+void test_memory_stability_equivalence(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100));
 void test_string_updates_equivalence(std::size_t repetitions = 1024);
 
 #pragma endregion // String Class and STL Compatibility

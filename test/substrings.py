@@ -31,7 +31,7 @@ import stringzillas as szs
 from stringzilla import Strs
 
 from test.sz_helpers import SEED_VALUES, malformed_utf8_corpus, scale_iterations, seed_random_generators
-from test.szs_helpers import DEVICE_NAMES, device_scope_and_capabilities
+from test.szs_helpers import DEVICE_NAMES, device_float32_array, device_scope_and_capabilities
 
 CLASSIC_NEEDLES = ["he", "she", "his", "hers"]
 CLASSIC_HAYSTACKS = ["ushers", "nothing", "hishers"]
@@ -203,7 +203,7 @@ def test_substrings_score_bm25_hand_computed(device_name: str):
     device, capabilities = device_scope_and_capabilities(device_name)
     engine = szs.Substrings(Strs(["cat", "dog"]), device=device, capabilities=capabilities)
     haystacks = Strs(["catcat", "dog", "nothing"])
-    weights = np.array([1.0, 2.0], dtype=np.float32)
+    weights = device_float32_array([1.0, 2.0], device_name)
 
     scores = engine.score_bm25(haystacks, weights, 6.0, device=device)
     # "catcat" is 6 bytes against a 6-byte mean, so the length term is exactly one and "cat" twice scores
@@ -220,12 +220,12 @@ def test_substrings_score_bm25_hand_computed(device_name: str):
         assert np.array_equal(repeated, scores), "Scores must be bit-identical across runs of one backend"
 
     # Omitted `document_lengths` means byte lengths, which the caller can also state outright.
-    byte_lengths = np.array([6.0, 3.0, 7.0], dtype=np.float32)
+    byte_lengths = device_float32_array([6.0, 3.0, 7.0], device_name)
     stated = engine.score_bm25(haystacks, weights, 6.0, device=device, document_lengths=byte_lengths)
     assert np.array_equal(stated, scores), "Byte lengths stated outright must score identically"
 
     # A zero weight removes its needle from the ranking without removing it from the automaton.
-    muted = engine.score_bm25(haystacks, np.zeros(2, dtype=np.float32), 6.0, device=device)
+    muted = engine.score_bm25(haystacks, device_float32_array([0.0, 0.0], device_name), 6.0, device=device)
     assert not muted.any(), "Zero weights must score zero"
 
 
@@ -237,13 +237,15 @@ def test_substrings_score_bm25_orders_documents(device_name: str):
     engine = szs.Substrings(Strs(CLASSIC_NEEDLES), device=device, capabilities=capabilities)
     haystacks = Strs(CLASSIC_HAYSTACKS)
 
-    uniform = np.ones(len(CLASSIC_NEEDLES), dtype=np.float32)
+    uniform = device_float32_array([1.0] * len(CLASSIC_NEEDLES), device_name)
     scores = engine.score_bm25(haystacks, uniform, 6.0, device=device)
     assert scores.dtype == np.float32 and len(scores) == 3
     assert scores[1] == 0.0  # "nothing" holds no needle
     assert scores[2] > scores[0] > 0.0  # "hishers" holds four, "ushers" three
 
-    louder = engine.score_bm25(haystacks, uniform * 2.0, 6.0, device=device)
+    # Scaling has to allocate for the scope too, since `uniform * 2.0` would land back on the host.
+    doubled = device_float32_array([2.0] * len(CLASSIC_NEEDLES), device_name)
+    louder = engine.score_bm25(haystacks, doubled, 6.0, device=device)
     assert louder[0] > scores[0] and louder[1] == 0.0
 
 
@@ -253,8 +255,9 @@ def test_substrings_score_bm25_checks_the_weight_count(device_name: str):
     device, capabilities = device_scope_and_capabilities(device_name)
     engine = szs.Substrings(Strs(CLASSIC_NEEDLES), device=device, capabilities=capabilities)
 
+    # Two weights against four needles, on the scope's own memory so the refusal is about the count.
     with pytest.raises(Exception):
-        engine.score_bm25(Strs(CLASSIC_HAYSTACKS), np.ones(2, dtype=np.float32), 6.0, device=device)
+        engine.score_bm25(Strs(CLASSIC_HAYSTACKS), device_float32_array([1.0, 1.0], device_name), 6.0, device=device)
 
 
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
@@ -264,7 +267,7 @@ def test_substrings_score_bm25_refuses_a_missing_mean(device_name: str):
     device, capabilities = device_scope_and_capabilities(device_name)
     engine = szs.Substrings(Strs(CLASSIC_NEEDLES), device=device, capabilities=capabilities)
     haystacks = Strs(CLASSIC_HAYSTACKS)
-    uniform = np.ones(len(CLASSIC_NEEDLES), dtype=np.float32)
+    uniform = device_float32_array([1.0] * len(CLASSIC_NEEDLES), device_name)
 
     with pytest.raises(Exception):
         engine.score_bm25(haystacks, uniform, 0.0, device=device)
@@ -377,7 +380,8 @@ def test_substrings_empty_batch(device_name: str):
     counts, total = engine.count(empty, device=device)
     assert len(counts) == 0 and total == 0
     assert all(len(column) == 0 for column in engine.find(empty, device=device))
-    assert len(engine.score_bm25(empty, np.ones(4, dtype=np.float32), 6.0, device=device)) == 0
+    weights = device_float32_array([1.0] * len(CLASSIC_NEEDLES), device_name)
+    assert len(engine.score_bm25(empty, weights, 6.0, device=device)) == 0
 
     data, offsets = engine.replace(empty, Strs(CLASSIC_NEEDLES), device=device)
     assert len(data) == 0 and list(offsets) == [0]

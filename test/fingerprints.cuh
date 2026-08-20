@@ -809,6 +809,66 @@ void test_fingerprints_safety() {
 #endif
 }
 
+/**
+ *  @brief Pins the device-memory contract for both CUDA fingerprinters: unified and plain device outputs are
+ *         accepted, host and page-locked ones refused.
+ *
+ *  Both engines are driven, because the C ABI routes between them on whether the dimension count divides
+ *  evenly by the slice width - and only one of them used to validate anything.
+ */
+void test_fingerprints_cuda_memory_safety() {
+    std::printf("  - testing unified, host, pinned and device memory against the contract...\n");
+#if SZ_USE_CUDA
+
+    gpu_specs_t gpu_specs;
+    verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
+    cuda_executor_t executor;
+
+    constexpr std::size_t dims_k = 64;
+    constexpr std::size_t window_width_k = 5;
+    using min_hashes_t = safe_array<u32_t, dims_k>;
+    using min_counts_t = safe_array<u32_t, dims_k>;
+
+    std::vector<std::string> const texts {"the quick brown fox", "jumps over the lazy dog"};
+    arrow_strings_tape_t staged;
+    verify(staged.try_assign(texts.begin(), texts.end()) == status_t::success_k);
+
+    auto check_engine_ = [&](auto &engine) {
+        // Unified outputs are accepted, which is the baseline every other row is measured against.
+        unified_vector<min_hashes_t> unified_hashes(texts.size());
+        unified_vector<min_counts_t> unified_counts(texts.size());
+        verify(engine(staged.view(), unified_hashes, unified_counts, executor, gpu_specs) == status_t::success_k &&
+               "Unified outputs must be accepted");
+
+        // Host outputs are refused rather than written through, which is the hole this contract closed.
+        std::vector<min_hashes_t> host_hashes(texts.size());
+        std::vector<min_counts_t> host_counts(texts.size());
+        verify(engine(staged.view(), host_hashes, host_counts, executor, gpu_specs) ==
+                   status_t::device_memory_mismatch_k &&
+               "Host outputs must be refused, not written from the device");
+
+        // Page-locked host memory is still host memory to the driver.
+        pinned_vector<min_hashes_t> pinned_hashes(texts.size());
+        pinned_vector<min_counts_t> pinned_counts(texts.size());
+        verify(engine(staged.view(), pinned_hashes, pinned_counts, executor, gpu_specs) ==
+                   status_t::device_memory_mismatch_k &&
+               "Page-locked host outputs must be refused");
+    };
+
+    // The sliced engine, which the C ABI picks whenever the dimensions divide evenly - and which validated
+    // nothing at all before this contract landed.
+    floating_rolling_hashers<sz_cap_cuda_k, dims_k> sliced_engine;
+    verify(sliced_engine.try_seed(window_width_k) == status_t::success_k);
+    check_engine_(sliced_engine);
+
+    // The per-dimension fallback, which the C ABI picks for a dimension count it cannot slice.
+    basic_rolling_hashers<floating_rolling_hasher<f64_t>, u32_t, u32_t, unified_alloc<char>, sz_cap_cuda_k>
+        fallback_engine;
+    verify(fallback_engine.try_extend(window_width_k, dims_k) == status_t::success_k);
+    check_engine_(fallback_engine);
+#endif // SZ_USE_CUDA
+}
+
 #pragma endregion // Safety
 
 } // namespace scripts
