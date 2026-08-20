@@ -294,7 +294,7 @@ SZ_API_RUNTIME sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequ
 }
 
 #endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

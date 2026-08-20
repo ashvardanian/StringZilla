@@ -52,7 +52,7 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
-#pragma region AES based hashing
+#pragma region AES Based Hashing
 
 /*
  *  StringZilla guarantees that every backend produces @b bit-identical hashes for a given input and
@@ -423,7 +423,7 @@ SZ_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t length, sz
 
 #endif // SZ_IS_BIG_ENDIAN_
 
-#pragma endregion // AES based hashing
+#pragma endregion AES Based Hashing
 
 #pragma region SHA256
 
@@ -440,7 +440,7 @@ SZ_API_COMPTIME void sz_sha256_state_digest_powervsx(sz_sha256_state_t const *st
     sz_sha256_state_digest_serial(state, digest);
 }
 
-#pragma endregion // SHA256
+#pragma endregion SHA256
 
 #if defined(__clang__)
 #pragma clang attribute pop

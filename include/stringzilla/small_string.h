@@ -124,7 +124,7 @@ sz_static_assert(offsetof(sz_string_t, external.length) == 12, External_length_o
 #endif
 #endif
 
-#pragma endregion // Core Structure
+#pragma endregion Core Structure
 
 #pragma region Core API
 
@@ -483,7 +483,7 @@ SZ_API_COMPTIME void sz_string_free(sz_string_t *string, sz_memory_allocator_t *
     sz_string_init(string);
 }
 
-#pragma endregion // Serial Implementation
+#pragma endregion Serial Implementation
 
 #ifdef __cplusplus
 }

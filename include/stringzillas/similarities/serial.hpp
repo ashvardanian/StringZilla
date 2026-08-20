@@ -3106,7 +3106,7 @@ struct smith_waterman_score {
     }
 };
 
-#pragma endregion
+#pragma endregion Pairwise Algorithms on CPU
 
 #pragma region Parallel Batch Algorithms
 

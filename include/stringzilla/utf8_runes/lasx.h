@@ -760,7 +760,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx(  //
     return cursor;
 }
 
-#pragma region Multistep Newline & Whitespace Iteration
+#pragma region Multistep Newline and Whitespace Iteration
 
 /*  Multistep newline / whitespace iteration (LoongArch LASX).
  *
@@ -856,6 +856,8 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz
 
     return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
+
+#pragma endregion Multistep Newline and Whitespace Iteration
 
 #pragma region Word boundaries windowed substrate
 

@@ -51,7 +51,7 @@ using sz::scripts::span_over;                  // views a C array as a `sz::span
 using sz::scripts::sweep_stride;               // scales exhaustive sweeps by `SZ_TESTS_MULTIPLIER`
 using sz::literals::operator""_sv;
 
-#pragma region Prose fixtures
+#pragma region Prose Fixtures
 
 /**
  *  @brief Realistic multi-script paragraphs shared by the segmentation family tests.
@@ -292,9 +292,9 @@ using sz::literals::operator""_sv;
     return result;
 }
 
-#pragma endregion // Prose fixtures
+#pragma endregion Prose Fixtures
 
-#pragma region Shared constants and types
+#pragma region Shared Constants and Types
 
 /** @brief The 64-byte window every SIMD backend processes; phase sweeps and gaps are sized from it. */
 static constexpr sz_size_t utf8_window_k = 64;
@@ -363,9 +363,9 @@ struct utf8_repro_t {
  *         Declared here rather than beside `sz_utf8_segmenter_t` because only the tests call one. */
 typedef sz_bool_t (*utf8_boundary_oracle_t)(sz_cptr_t, sz_size_t, sz_size_t);
 
-#pragma endregion // Shared constants and types
+#pragma endregion Shared Constants and Types
 
-#pragma region Shared helpers
+#pragma region Shared Helpers
 
 /** @brief Prints one labeled hex dump line to `stderr`; used by the safety sweep and the divergence repro. */
 inline void print_utf8_test_bytes_(char const *label, char const *bytes, std::size_t length) {
@@ -593,9 +593,9 @@ inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_l
     }
 }
 
-#pragma endregion // Shared helpers
+#pragma endregion Shared Helpers
 
-#pragma region Lazy streaming comparison
+#pragma region Lazy Streaming Comparison
 
 /**
  *  @brief Streams one backend at a fixed @ref capacity, yielding one (absolute start, length) segment at a time and
@@ -709,7 +709,7 @@ inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t
     }
 }
 
-#pragma endregion // Lazy streaming comparison
+#pragma endregion Lazy Streaming Comparison
 
 /**
  *  @brief One segmentation backend (its named `sz_utf8_segmenter_t`) for a kernel family. Each family builds a
@@ -723,7 +723,7 @@ struct utf8_segment_backend_t {
     sz_utf8_segmenter_t finder;
 };
 
-#pragma region Unit driver
+#pragma region Unit Driver
 
 /**
  *  @brief Drive one segmentation backend over the hand-checked goldens, streaming its segments and comparing each
@@ -749,9 +749,9 @@ inline void check_utf8_segment_unit_(char const *family, sz_utf8_segmenter_t for
     }
 }
 
-#pragma endregion // Unit driver
+#pragma endregion Unit Driver
 
-#pragma region Rule coverage
+#pragma region Rule Coverage
 
 /** @brief Whether a rule-coverage motif fires the rule in its break or its no-break (join) direction. */
 enum utf8_rule_direction_t { utf8_rule_breaks_k, utf8_rule_joins_k };
@@ -796,9 +796,9 @@ inline void check_utf8_rule_coverage_(char const *family, sz_utf8_segmenter_t re
     }
 }
 
-#pragma endregion // Rule coverage
+#pragma endregion Rule Coverage
 
-#pragma region Safety sweep
+#pragma region Safety Sweep
 
 /**
  *  @brief Feed the full adversarial-byte battery (4 named shapes, the astral fixtures, all 256 single bytes, all
@@ -900,9 +900,9 @@ inline void check_utf8_segment_against_oracle_(char const *family, sz_utf8_segme
     }
 }
 
-#pragma endregion // Safety sweep
+#pragma endregion Safety Sweep
 
-#pragma region Differential stressors
+#pragma region Differential Stressors
 
 /** @brief Caller capacities swept per differential input: small values exercise the window-loop resume at every
  *         phase; the window-adjacent values (32/33/63/64/65) catch resume-seam bugs; the batch value is the
@@ -1197,9 +1197,9 @@ inline void utf8_differential_byte_edge_exhaustive_(utf8_differential_context_t 
         }
 }
 
-#pragma endregion // Differential stressors
+#pragma endregion Differential Stressors
 
-#pragma region Differential driver
+#pragma region Differential Driver
 
 /**
  *  @brief Differential of every ISA finder against the serial reference: a short orchestrator over the randomized fuzz
@@ -1229,6 +1229,6 @@ inline void check_utf8_segment_equivalence_(sz_utf8_segmenter_t reference,
     utf8_differential_byte_edge_exhaustive_(context);
 }
 
-#pragma endregion // Differential driver
+#pragma endregion Differential Driver
 
 #endif // STRINGZILLA_TEST_UTF8_HPP_

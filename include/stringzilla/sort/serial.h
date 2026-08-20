@@ -83,7 +83,7 @@ SZ_API_COMPTIME void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t
 #endif
 }
 
-#pragma endregion // Generic Public Helpers
+#pragma endregion Generic Public Helpers
 
 #pragma region Generic Internal Helpers
 
@@ -278,7 +278,7 @@ SZ_HELPER_AUTO void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_
     }
 }
 
-#pragma endregion // Generic Internal Helpers
+#pragma endregion Generic Internal Helpers
 /**
  *  @brief Exports the next N-gram (pgram) slice for each string in the given range, storing the results
  *      as byte-reversed integers so that simple integer comparisons yield lexicographic ordering.
@@ -788,7 +788,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_serial(  //
     return sz_success_k;
 }
 
-#pragma endregion // Case Insensitive
+#pragma endregion Case Insensitive
 
 /**
  *  @brief Helper function similar to `std::set_union` over pairs of integers and their original indices.

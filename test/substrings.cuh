@@ -859,7 +859,7 @@ inline void generate_substrings_placements_(substrings_placement_t placement, su
     }
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
@@ -1010,7 +1010,7 @@ void test_substrings_unit() {
     }
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Uncased Conformance
 
@@ -1075,7 +1075,7 @@ void test_substrings_uncased_unit() {
     check_uncased_needle_matches_("wei\xC3\x9Frd", {"weissrd", "weiSSrd", "wei\xE1\xBA\x9Erd"}, {"weisrd", "weird"});
 }
 
-#pragma endregion // Uncased Conformance
+#pragma endregion Uncased Conformance
 
 #pragma region Agreement
 
@@ -1213,7 +1213,7 @@ void test_substrings_uncased_equivalence() {
     }
 }
 
-#pragma endregion // Agreement
+#pragma endregion Agreement
 
 #pragma region Adversarial
 
@@ -1721,7 +1721,7 @@ void test_substrings_large_haystacks_equivalence() {
     }
 }
 
-#pragma endregion // Adversarial
+#pragma endregion Adversarial
 
 #pragma region Construction
 
@@ -1945,7 +1945,7 @@ void test_substrings_construction_equivalence() {
     }
 }
 
-#pragma endregion // Construction
+#pragma endregion Construction
 
 #pragma region Matching
 
@@ -1997,7 +1997,7 @@ void test_substrings_cover_equivalence() {
     }
 }
 
-#pragma endregion // Matching
+#pragma endregion Matching
 
 #pragma region Rewriting
 
@@ -2210,7 +2210,7 @@ void test_substrings_rewriting_equivalence() {
     }
 }
 
-#pragma endregion // Rewriting
+#pragma endregion Rewriting
 
 #pragma region Scoring
 
@@ -2598,7 +2598,7 @@ void test_substrings_cuda_equivalence() {
 #endif // SZ_USE_CUDA
 }
 
-#pragma endregion // Scoring
+#pragma endregion Scoring
 
 #pragma region Safety
 
@@ -2768,7 +2768,7 @@ void test_substrings_safety() {
     }
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 } // namespace scripts
 } // namespace stringzilla

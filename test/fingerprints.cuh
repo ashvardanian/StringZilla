@@ -221,7 +221,7 @@ std::vector<std::string> rolling_hasher_inconvenient_inputs(std::size_t max_len 
     return strings;
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
@@ -340,7 +340,7 @@ void test_fingerprints_unit() {
     for (auto hasher : f64u64_hashers) check_rolling_hasher_unit_(hasher, unit_strings);
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
@@ -708,7 +708,7 @@ void test_fingerprints_equivalence() {
     check_rolling_hashers_for_width_<16, 32>(unit, dna, bad);
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
@@ -869,7 +869,7 @@ void test_fingerprints_cuda_memory_safety() {
 #endif // SZ_USE_CUDA
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 } // namespace scripts
 } // namespace stringzilla

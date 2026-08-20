@@ -422,7 +422,7 @@ inline pairwise_via_cross_t<engine_type_> make_pairwise(engine_type_ engine) noe
     return pairwise_via_cross_t<engine_type_> {std::move(engine)};
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
@@ -655,7 +655,7 @@ void test_similarities_unit() {
     }
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
@@ -1007,7 +1007,7 @@ void test_similarities_equivalence() {
 #endif
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
@@ -1173,7 +1173,7 @@ void test_similarities_safety() {
 #endif
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Cross Product
 
@@ -2135,7 +2135,7 @@ void test_similarities_cross_product_equivalence() {
 #endif
 }
 
-#pragma endregion // Cross Product
+#pragma endregion Cross Product
 
 #pragma region Drivers
 
@@ -2304,7 +2304,7 @@ void test_similarities_cuda_memory_safety() {
 #endif // SZ_USE_CUDA
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers
 
 } // namespace scripts
 } // namespace stringzilla

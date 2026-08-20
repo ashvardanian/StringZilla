@@ -172,7 +172,7 @@ SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_
     }
 }
 
-#pragma endregion // Case Invariance & Ordering
+#pragma endregion Case Invariance & Ordering
 
 /** @brief  Pops the lowest candidate position from @p matches and returns its bit index - the shared scalar
  *          walk behind every ISA probe filter, so the vector kernels never materialize their own bit scans. */
@@ -983,7 +983,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Substring Search
+#pragma endregion Substring Search
 
 #pragma region Character Safety Profiles
 
@@ -1797,7 +1797,7 @@ SZ_HELPER_AUTO void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t
     }
 }
 
-#pragma endregion // Character Safety Profiles
+#pragma endregion Character Safety Profiles
 
 #ifdef __cplusplus
 }

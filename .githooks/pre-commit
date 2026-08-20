@@ -129,6 +129,68 @@ EOF
   exit 1
 fi
 
+# Brackets in a `#pragma region` / `#pragma endregion` name. A region name is a heading, not a signature:
+# write 'Tiled Large Input Device Kernel with Register Micro Tiles', never '... (register micro tiles)'.
+# Parentheses also feed clang-format's expression parser, the same hazard the dash check above guards.
+pragma_brackets=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '#pragma[[:space:]]+(region|endregion)[[:space:]]' | grep -E '[][(){}]' || true)
+if [ -n "$pragma_brackets" ]; then
+  cat >&2 <<EOF
+pre-commit: bracket in a #pragma region/endregion name. Region names are headings - fold the parenthetical
+into the sentence with 'with', 'via' or 'for', or drop it:
+$pragma_brackets
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# A `//` between `#pragma endregion` and its name. Everything after the directive is already free text that
+# MSVC and the IDE folders consume as the region's label, so the comment marker is a second spelling of the
+# same thing. Write `#pragma endregion Common Helpers`.
+pragma_endregion_comment=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '#pragma[[:space:]]+endregion[[:space:]]+//' || true)
+if [ -n "$pragma_endregion_comment" ]; then
+  cat >&2 <<EOF
+pre-commit: '//' between #pragma endregion and its name. The name is already free text - drop the marker:
+$pragma_endregion_comment
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# Title Case in a `#pragma region` / `#pragma endregion` name. Every word is capitalized except the minor
+# ones, which stay lowercase unless they lead the name. Tokens carrying an underscore or a digit are code
+# identifiers and table names - `Word_Break`, `match_masks`, `v128relaxed` - and are read as written.
+pragma_titlecase=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '#pragma[[:space:]]+(region|endregion)[[:space:]]+[^[:space:]]' \
+  | awk '{
+        name = $0
+        sub(/^.*#pragma[[:space:]]+(region|endregion)[[:space:]]+/, "", name)
+        sub(/^\/\/[[:space:]]*/, "", name)
+        if (name == "") next
+        count = split(name, word, /[[:space:]]+/)
+        for (i = 1; i <= count; i++) {
+            token = word[i]
+            if (token ~ /_/ || token ~ /[0-9]/ || token !~ /^[a-z]/) continue
+            if (i > 1 && token ~ /^(a|an|the|and|or|for|of|in|on|to|via|with|per|at|by|from|as|vs|into|over)$/) continue
+            print $0
+            break
+        }
+    }' || true)
+if [ -n "$pragma_titlecase" ]; then
+  cat >&2 <<EOF
+pre-commit: #pragma region/endregion name is not Title Case. Capitalize every word except the minor ones
+- a, an, the, and, or, for, of, in, on, to, via, with, per, at, by, from, as, vs, into, over - which stay
+lowercase unless they lead:
+$pragma_titlecase
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
 # clang-format's `BreakStringLiterals` splits an overlong string literal in place - two adjacent
 # fragments left on one line, continuations re-indented under them. A hand-broken literal never leaves
 # two fragments on the same line, so same-line adjacency is the mangle's exact signature. The escape

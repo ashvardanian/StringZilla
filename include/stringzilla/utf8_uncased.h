@@ -1029,7 +1029,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_powervsx( //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Declarations
+
+#pragma endregion Core API
 
 /*  Backends in serial-first order: every SIMD/ISA header includes `serial.h` for the shared
  *  scaffolding (verify helpers, hash-free finders, Rabin-Karp serial search, the safety classifier
@@ -1129,7 +1131,7 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_find_cased(sz_cptr_t str, sz_size_t length) {
 }
 
 #endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

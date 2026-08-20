@@ -2580,7 +2580,7 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
     }
 };
 
-#pragma endregion // Uniform Cost Levenshtein
+#pragma endregion Uniform Cost Levenshtein
 
 /** @brief Redirects the Haswell template specialization to the serial version. */
 template <typename char_type_, typename score_type_, typename substituter_type_, typename gap_costs_type_,
@@ -7610,7 +7610,7 @@ struct smith_waterman_scores<
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_HASWELL
-#pragma endregion // Haswell Implementation
+#pragma endregion Haswell Implementation
 
 } // namespace stringzillas
 } // namespace ashvardanian

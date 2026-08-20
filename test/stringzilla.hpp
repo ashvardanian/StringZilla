@@ -132,7 +132,7 @@
         verify(threw);                            \
     } while (0)
 
-#pragma endregion // Assertion Helpers
+#pragma endregion Assertion Helpers
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -720,7 +720,7 @@ void test_strings_tape_overflow_unit();
 void test_allocator_unit();
 void test_byteset_unit();
 
-#pragma endregion // Basic Utilities
+#pragma endregion Basic Utilities
 
 #pragma region Hashing
 
@@ -729,7 +729,7 @@ void test_hash_safety();
 void test_hash_all();
 void test_hash_multiseed_all();
 
-#pragma endregion // Hashing
+#pragma endregion Hashing
 
 #pragma region Ciphers
 
@@ -737,9 +737,9 @@ void test_cipher_unit();
 void test_cipher_safety();
 void test_cipher_all();
 
-#pragma endregion // Ciphers
+#pragma endregion Ciphers
 
-#pragma region UTF-8
+#pragma region UTF 8
 
 void test_utf8_runes_unit();
 void test_utf8_runes_scripts_unit();
@@ -772,9 +772,9 @@ void test_utf8_delimiters_unit();
 void test_utf8_delimiters_safety();
 void test_utf8_delimiters_all();
 
-#pragma endregion // UTF-8
+#pragma endregion UTF 8
 
-#pragma region Uncased UTF-8
+#pragma region Uncased UTF 8
 
 void test_uncased_unit();
 void test_uncased_scripts_unit();
@@ -782,7 +782,7 @@ void test_uncased_regressions_unit();
 void test_uncased_all();
 void test_uncased_safety();
 
-#pragma endregion // Uncased UTF-8
+#pragma endregion Uncased UTF 8
 
 #pragma region String Class and STL Compatibility
 
@@ -812,7 +812,7 @@ void test_string_reserve_unit();
 void test_memory_stability_equivalence(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100));
 void test_string_updates_equivalence(std::size_t repetitions = 1024);
 
-#pragma endregion // String Class and STL Compatibility
+#pragma endregion String Class and STL Compatibility
 
 #pragma region Search and Comparison
 
@@ -824,7 +824,7 @@ void test_find_all();
 void test_find_misaligned_equivalence();
 void test_lookup_equivalence(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
 
-#pragma endregion // Search and Comparison
+#pragma endregion Search and Comparison
 
 #pragma region Sequence Algorithms
 
@@ -835,4 +835,4 @@ void test_sort_reference_equivalence();
 void test_intersect_unit();
 void test_intersect_equivalence();
 
-#pragma endregion // Sequence Algorithms
+#pragma endregion Sequence Algorithms

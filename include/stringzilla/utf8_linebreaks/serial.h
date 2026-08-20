@@ -557,9 +557,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_serial( //
     return lines;
 }
 
-#pragma endregion // UAX 14 Line Boundaries
+#pragma endregion UAX 14 Line Boundaries
 
-#pragma region UAX 14 Line Boundaries window engine
+#pragma region UAX 14 Line Boundaries Window Engine
 
 /** @brief Number of distinct UAX-14 Line_Break classes (`xx_k` .. `hh_k`); array stride for per-class membership. */
 enum { sz_line_break_class_count_k = 49 };
@@ -1418,7 +1418,7 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     return result;
 }
 
-#pragma endregion // UAX 14 Line Boundaries window engine
+#pragma endregion UAX 14 Line Boundaries Window Engine
 
 #ifdef __cplusplus
 }

@@ -732,7 +732,7 @@ SZ_API_COMPTIME void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length, 
     }
 }
 
-#pragma endregion // Multi Seed Hashing
+#pragma endregion Multi Seed Hashing
 
 #pragma region Serial SHA256 Implementation
 
@@ -949,7 +949,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_serial(sz_sha256_state_t *state
                                       texts->get_length(texts->handle, lane_index));
 }
 
-#pragma endregion // Serial SHA256 Implementation
+#pragma endregion Serial SHA256 Implementation
 
 SZ_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = sz_hash_pi_constants_();

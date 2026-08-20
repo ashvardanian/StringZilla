@@ -51,7 +51,7 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
     return bytesum;
 }
 
-#pragma region RVV AES Round (vector permute tower field)
+#pragma region RVV AES Round via Vector Permute Tower Field
 
 /*  AES-based hashing on RVV without the optional `Zvkned` AES instructions.
  *
@@ -228,7 +228,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, s
     return result_vec;
 }
 
-#pragma endregion // RVV AES Round
+#pragma endregion RVV AES Round via Vector Permute Tower Field
 
 #pragma region RVV Hash Drivers
 
@@ -520,7 +520,7 @@ SZ_API_COMPTIME void sz_fill_random_rvv(sz_ptr_t text, sz_size_t length, sz_u64_
     }
 }
 
-#pragma endregion // RVV Hash Drivers
+#pragma endregion RVV Hash Drivers
 
 /*  SHA-256 has no AES structure to vectorize within RVV's base profile, so it stays serial. */
 SZ_API_COMPTIME void sz_sha256_state_init_rvv(sz_sha256_state_t *state_ptr) { sz_sha256_state_init_serial(state_ptr); }

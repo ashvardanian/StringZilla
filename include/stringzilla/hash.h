@@ -601,7 +601,7 @@ SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *sta
 
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Helper Methods
 
@@ -617,7 +617,7 @@ SZ_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_has
     return sz_true_k;
 }
 
-#pragma endregion // Helper Methods
+#pragma endregion Helper Methods
 
 #include "stringzilla/hash/serial.h"
 #include "stringzilla/hash/westmere.h"
@@ -917,7 +917,7 @@ SZ_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states,
 }
 
 #endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

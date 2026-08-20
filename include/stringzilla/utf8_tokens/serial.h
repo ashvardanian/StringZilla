@@ -197,7 +197,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_serial(    //
     return sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }
 
-#pragma endregion // Serial
+#pragma endregion Serial
 
 #ifdef __cplusplus
 }

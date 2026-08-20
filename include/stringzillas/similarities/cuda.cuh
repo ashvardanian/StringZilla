@@ -570,7 +570,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     }
 };
 
-#pragma region Tiled large input device kernel (register micro tiles)
+#pragma region Tiled Large Input Device Kernel with Register Micro Tiles
 
 /**
  *  @brief One DP cell's substitution cost, computed directly in @p score_type_. For the uniform (unit-cost
@@ -637,7 +637,7 @@ struct affine_score_cell {
     }
 };
 
-#pragma region Micro tile helpers
+#pragma region Micro Tile Helpers
 
 /**
  *  @brief Resolves a micro-tile's left boundary column + diagonal corner for the @b linear-gap march. Lane 0 reads the
@@ -720,7 +720,7 @@ SZ_DEVICE_INLINE void capture_cell_(                                            
     }
 }
 
-#pragma endregion Micro tile helpers
+#pragma endregion Micro Tile Helpers
 
 /**
  *  @brief Tiled large-matrix linear-gap scorer: one @b warp owns a 128-wide tile-COLUMN and marches it top-to-bottom,
@@ -1223,7 +1223,7 @@ __global__ void affine_frontier_init_across_cuda_device_(task_type_ *tasks, scor
     if (global_index == 0) *reinterpret_cast<final_score_type_ *>(&tasks[pair].result) = final_score_type_ {0};
 }
 
-#pragma endregion
+#pragma endregion Tiled Large Input Device Kernel with Register Micro Tiles
 
 /**
  *  @brief Advances the three rolling score diagonals across the central anti-diagonal band: drops the leading element of
@@ -4701,7 +4701,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
     }
 }
 
-#pragma endregion
+#pragma endregion Levenshtein Distance in CUDA
 
 #pragma region UTF 8 Levenshtein Distances in CUDA
 
@@ -6097,7 +6097,7 @@ struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_typ
     }
 };
 
-#pragma endregion
+#pragma endregion Needleman Wunsch and Smith Waterman Scores in CUDA
 
 } // namespace stringzillas
 } // namespace ashvardanian

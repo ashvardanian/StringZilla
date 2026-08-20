@@ -22,6 +22,8 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
+#pragma region Multistep Newline and Whitespace Iteration
+
 /**
  *  @brief Peel the window's first `emit_count` matches by SIMD left-pack (no `ctz`, no per-match branch).
  *         Each ascending 2-lane sub-block gathers its set lanes' `(position+lane, length)` `u64` pairs with one
@@ -257,7 +259,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
     return count;
 }
 
-#pragma endregion Multistep newline / whitespace iteration
+#pragma endregion Multistep Newline and Whitespace Iteration
 
 /**
  *  @brief UAX-29 word boundary detection using IBM Power VSX (forward & reverse). Stateful sub-rules stay in

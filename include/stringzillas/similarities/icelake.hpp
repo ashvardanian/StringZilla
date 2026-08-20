@@ -7828,7 +7828,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_ICELAKE
-#pragma endregion // Ice Lake Implementation
+#pragma endregion Ice Lake Implementation
 
 } // namespace stringzillas
 } // namespace ashvardanian

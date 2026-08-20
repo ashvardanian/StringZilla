@@ -3086,7 +3086,7 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
     }
 };
 
-#pragma endregion // Uniform Cost Levenshtein
+#pragma endregion Uniform Cost Levenshtein
 
 /**
  *  @brief NEON diagonal "walker" for class-based substitution costs with linear gaps. Mirrors the Ice Lake
@@ -6950,7 +6950,7 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_NEON
-#pragma endregion // NEON Implementation
+#pragma endregion NEON Implementation
 
 } // namespace stringzillas
 } // namespace ashvardanian

@@ -1852,7 +1852,7 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
     }
 };
 
-#pragma endregion // Uniform Cost Levenshtein
+#pragma endregion Uniform Cost Levenshtein
 
 #pragma region RVV Inter Sequence Candidate Lanes
 // ! Future home of the lane-per-pair candidate-lane Levenshtein driver (mirrors the weighted NW/SW walker below,
@@ -3417,7 +3417,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
 #endif
 
 #endif            // SZ_USE_RVV
-#pragma endregion // RVV Implementation
+#pragma endregion RVV Implementation
 
 } // namespace stringzillas
 } // namespace ashvardanian

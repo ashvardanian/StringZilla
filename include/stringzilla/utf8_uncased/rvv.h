@@ -380,7 +380,7 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-#pragma endregion // Per Script Fold Strips
+#pragma endregion Per Script Fold Strips
 
 #pragma region Per Script Alarm Strips
 
@@ -678,7 +678,7 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const 
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-#pragma endregion // Per Script Alarm Strips
+#pragma endregion Per Script Alarm Strips
 
 #pragma region Scripted Driver
 
@@ -837,7 +837,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Scripted Driver
+#pragma endregion Scripted Driver
 
 #pragma region Per Script Kernels
 
@@ -914,7 +914,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Per Script Kernels
+#pragma endregion Per Script Kernels
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
     sz_cptr_t haystack, sz_size_t haystack_length,    //
@@ -978,7 +978,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
                                          matched_length);
 }
 
-#pragma endregion // Substring Search
+#pragma endregion Substring Search
 
 /*  Byte-for-byte equivalent to `sz_utf8_find_cased_serial`. A string is NOT case-invariant the moment it
  *  contains a case-participating character. ASCII letters (`A`-`Z`, `a`-`z`) occupy `0x41-0x7A`, byte values

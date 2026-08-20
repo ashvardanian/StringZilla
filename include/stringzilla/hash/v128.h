@@ -471,9 +471,9 @@ SZ_API_COMPTIME void sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length,   
     }
 }
 
-#pragma endregion // Multi Seed Hashing
+#pragma endregion Multi Seed Hashing
 
-#pragma endregion // Hash with SIMD128 AES
+#pragma endregion Hash with SIMD128 AES
 
 /** @brief 32-bit lane-wise rotate-right (no native WASM rotate; built from two shifts and an OR). */
 SZ_HELPER_INLINE v128_t sz_sha256_rotr_v128_(v128_t x_u32x4, int count) {

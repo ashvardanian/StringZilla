@@ -1039,7 +1039,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
 
 #pragma endregion Portable Word_Break Block Rule Engine
 
-#pragma endregion // UAX 29 Word Boundaries
+#pragma endregion UAX 29 Word Boundaries
 
 #ifdef __cplusplus
 }

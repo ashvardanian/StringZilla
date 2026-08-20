@@ -32,7 +32,7 @@ extern "C" {
 #pragma GCC target("arch=+v,+zvkned,+zvknhb")
 #endif
 
-#pragma region RVV Crypto AES Round (Zvkned)
+#pragma region RVV Crypto AES Round Zvkned
 
 /**
  *  @brief Bit-exact `Zvkned` implementation of a single `_mm_aesenc_si128` round.
@@ -53,7 +53,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_
     return result_vec;
 }
 
-#pragma endregion // RVV Crypto AES Round
+#pragma endregion RVV Crypto AES Round Zvkned
 
 #pragma region RVV Crypto Hash Drivers
 
@@ -331,9 +331,9 @@ SZ_API_COMPTIME void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t length, s
     }
 }
 
-#pragma endregion // RVV Crypto Hash Drivers
+#pragma endregion RVV Crypto Hash Drivers
 
-#pragma region RVV Crypto SHA 256 (Zvknhb)
+#pragma region RVV Crypto SHA 256 Zvknhb
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA-256 via `Zvknhb`.
@@ -549,7 +549,7 @@ SZ_API_COMPTIME void sz_sha256_state_digest_rvvcrypto(sz_sha256_state_t const *s
     }
 }
 
-#pragma endregion // RVV Crypto SHA 256
+#pragma endregion RVV Crypto SHA 256 Zvknhb
 
 #if defined(__clang__)
 #pragma clang attribute pop

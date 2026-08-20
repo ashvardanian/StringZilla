@@ -165,7 +165,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_neonaes(sz_aes256_key_t *key, sz_u8_t co
     vst1q_u8(schedule + 14 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -263,7 +263,7 @@ SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *k
     blocks_u8x16[7] = veorq_u8(blocks_u8x16[7], round_key_u8x16);
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -346,7 +346,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *key, sz_u8
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -606,7 +606,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_absorb_eight_neonaes_(uint8x16_t accumulato
     return sz_ghash_reduce_neonaes_(product_low_u8x16, product_middle_u8x16, product_high_u8x16);
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -904,7 +904,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_neonaes(sz_aes256_gcm
     return sz_aes256_tag_equal_neonaes_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -937,7 +937,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_neonaes(sz_aes256_gcm_key_t co
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

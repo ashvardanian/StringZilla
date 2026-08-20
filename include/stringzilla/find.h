@@ -360,7 +360,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_
 /*  `sz_utf8_delimiters` (UTF-8 punctuation/symbol/separator/whitespace enumeration) lives in
  *  "stringzilla/utf8_tokens.h" alongside its per-ISA backends and property tables. */
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Helper Shortcuts
 
@@ -430,7 +430,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t h
     return sz_rfind_byteset(haystack, haystack_length, &set);
 }
 
-#pragma endregion // Helper Shortcuts
+#pragma endregion Helper Shortcuts
 
 #include "stringzilla/find/serial.h"
 #include "stringzilla/find/westmere.h"
@@ -610,7 +610,7 @@ SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_b
 
 #pragma endregion
 #endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

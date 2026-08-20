@@ -89,7 +89,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_serial(sz_aes256_key_t *key, sz_u8_t con
     }
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -160,7 +160,7 @@ SZ_HELPER_INLINE void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key
     }
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -194,7 +194,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_serial(sz_aes256_key_t const *key, sz_u8_
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -250,7 +250,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_serial(sz_aes256_gcm_key_t *key, sz_
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -469,7 +469,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_serial(sz_aes256_gcm_
     return sz_aes256_tag_equal_serial_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -501,7 +501,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_serial(sz_aes256_gcm_key_t con
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

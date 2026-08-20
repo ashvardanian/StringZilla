@@ -103,7 +103,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
         wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_substituted_high_v128_()), high_inverse_u8x16));
 }
 
-#pragma endregion // Substitution Box
+#pragma endregion Substitution Box
 
 #pragma region Key Schedule
 
@@ -179,7 +179,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_
     wasm_v128_store(&key->round_keys[56], even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -200,7 +200,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t con
                          sz_aes256_round_key_v128_(key, 14));
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -240,7 +240,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -259,7 +259,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -403,7 +403,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_v128relaxed(sz_aes256
     return sz_aes256_gcm_decryptor_verify_v128(decryptor, tag);
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -437,7 +437,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

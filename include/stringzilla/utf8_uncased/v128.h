@@ -97,9 +97,9 @@ SZ_HELPER_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_window_v128_
     return window;
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
-#pragma region Per script fold strips
+#pragma region Per Script Fold Strips
 
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
                                                                sz_u8_t *dst) {
@@ -294,9 +294,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t cons
     }
 }
 
-#pragma endregion // Per script fold strips
+#pragma endregion Per Script Fold Strips
 
-#pragma region Per script alarm strips
+#pragma region Per Script Alarm Strips
 
 /** @brief Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
 SZ_HELPER_INLINE void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos, sz_size_t window,
@@ -494,9 +494,9 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const
     return best;
 }
 
-#pragma endregion // Per script alarm strips
+#pragma endregion Per Script Alarm Strips
 
-#pragma region Scripted driver
+#pragma region Scripted Driver
 
 typedef void (*sz_utf8_uncased_fold_strip_v128_t)(sz_u8_t const *, sz_size_t, sz_u8_t *);
 typedef long (*sz_utf8_uncased_alarm_strip_v128_t)(sz_u8_t const *, sz_size_t);
@@ -595,7 +595,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(               
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Scripted driver
+#pragma endregion Scripted Driver
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length);
 
@@ -771,7 +771,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t lengt
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Case Invariance
+#pragma endregion Case Invariance
 
 SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                          sz_size_t b_length) {

@@ -309,7 +309,7 @@ void bench_fingerprints(environment_t const &env) {
 #endif // SZ_USE_CUDA
 }
 
-#pragma endregion // Rolling Fingerprinting
+#pragma endregion Rolling Fingerprinting
 
 } // namespace scripts
 } // namespace stringzilla

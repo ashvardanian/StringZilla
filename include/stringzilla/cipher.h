@@ -969,7 +969,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_powervsx(sz_aes256_gc
 
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #include "stringzilla/cipher/serial.h"
 #include "stringzilla/cipher/westmere.h"
@@ -1288,7 +1288,7 @@ SZ_API_RUNTIME sz_status_t sz_aes256_gcm_decryptor_verify(sz_aes256_gcm_decrypto
 }
 
 #endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

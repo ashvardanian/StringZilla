@@ -307,7 +307,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // ASCII Uncased Find
+#pragma endregion ASCII Uncased Find
 
 #pragma region Scripted Uncased Find
 
@@ -468,7 +468,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Scripted Uncased Find
+#pragma endregion Scripted Uncased Find
 
 #pragma region Western European Uncased Find
 
@@ -708,7 +708,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_western_europe_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Western European Uncased Find
+#pragma endregion Western European Uncased Find
 
 #pragma region Central European Uncased Find
 
@@ -1046,7 +1046,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_central_europe_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Central European Uncased Find
+#pragma endregion Central European Uncased Find
 
 #pragma region Cyrillic Uncased Find
 
@@ -1247,7 +1247,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_cyrillic_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Cyrillic Uncased Find
+#pragma endregion Cyrillic Uncased Find
 
 #pragma region Armenian Uncased Find
 
@@ -1465,7 +1465,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_armenian_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Armenian Uncased Find
+#pragma endregion Armenian Uncased Find
 
 #pragma region Greek Uncased Find
 
@@ -1826,7 +1826,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_greek_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Greek Uncased Find
+#pragma endregion Greek Uncased Find
 
 #pragma region Vietnamese Uncased Find
 
@@ -2214,7 +2214,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_vietnamese_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Vietnamese Uncased Find
+#pragma endregion Vietnamese Uncased Find
 
 #pragma region Georgian Uncased Find
 
@@ -2360,7 +2360,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_georgian_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Georgian Uncased Find
+#pragma endregion Georgian Uncased Find
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_icelake( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //

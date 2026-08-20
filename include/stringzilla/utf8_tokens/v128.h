@@ -27,7 +27,7 @@ SZ_HELPER_INLINE v128_t sz_utf8_rotate2_v128_(v128_t bytes_u8x16) {
     return wasm_i8x16_shuffle(bytes_u8x16, bytes_u8x16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1);
 }
 
-#pragma region Multistep newline / whitespace iteration
+#pragma region Multistep Newline and Whitespace Iteration
 
 /**
  *  @brief  Peel the tile's first @p emit_count matches with a `wasm_i8x16_swizzle` left-pack, 4 lanes per block.
@@ -264,7 +264,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128(     //
     return count;
 }
 
-#pragma endregion // Multistep newline / whitespace iteration
+#pragma endregion Multistep Newline and Whitespace Iteration
 
 #if defined(__clang__)
 #pragma clang attribute pop

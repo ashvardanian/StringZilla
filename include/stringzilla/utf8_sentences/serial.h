@@ -289,7 +289,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_serial(          //
     return sentences;
 }
 
-#pragma endregion // UAX 29 Sentence Boundaries
+#pragma endregion UAX 29 Sentence Boundaries
 
 #pragma region Portable dense rule engine
 
