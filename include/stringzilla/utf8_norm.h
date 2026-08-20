@@ -26,7 +26,7 @@ extern "C" {
 /**
  *  @brief Transform a UTF-8 string into a Unicode normalization form.
  *
- *  @section Buffer Sizing
+ *  @section utf8_norm_buffer_sizing Buffer Sizing
  *
  *  Decomposition forms (NFD, NFKD) can expand the input; the destination must hold up to
  *  `source_length * 18` bytes for the worst single-codepoint compatibility decomposition. The

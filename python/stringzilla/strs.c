@@ -2454,7 +2454,7 @@ static PyMethodDef Strs_methods[] = {
     {"argsort", Strs_argsort, SZ_METHOD_FLAGS, doc_argsort},            //
     {"sample", Strs_sample, SZ_METHOD_FLAGS, doc_Strs_sample},          //
     {"intersect", Strs_intersect, SZ_METHOD_FLAGS, doc_Strs_intersect}, //
-    {NULL, NULL, 0, NULL} // Sentinel
+    {NULL, NULL, 0, NULL}                                               // Sentinel
 };
 
 static char const doc_Strs[] =                                                                   //

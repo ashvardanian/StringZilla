@@ -199,8 +199,7 @@ static void utf8_graphemes_dense_runs_(std::mt19937 &generator, utf8_run_sink_t 
     utf8_dense_regional_indicators_(scratch, generator, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_zwj_pictograph_chain_(scratch, chain_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_combining_marks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_skin_tone_run_(scratch, generator, chain_count),
-        sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_skin_tone_run_(scratch, generator, chain_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_indic_conjunct_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_graphemes_dense_hangul_jamo_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }

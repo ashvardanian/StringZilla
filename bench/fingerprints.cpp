@@ -57,8 +57,7 @@ int main(int argc, char const **argv) {
         environment_t env = build_environment( //
             argc, argv,                        //
             "leipzig1M.txt",                   //
-            environment_t::tokenization_t::lines_k,
-            compute_bound_slice_bytes_k);
+            environment_t::tokenization_t::lines_k, compute_bound_slice_bytes_k);
 
         std::printf("Starting string fingerprinting benchmarks...\n");
         bench_fingerprints(env);

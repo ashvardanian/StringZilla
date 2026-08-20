@@ -50,7 +50,7 @@ extern "C" {
  *         It's designed to avoid any branches on read-only operations, and can store up
  *         to 22 characters on stack on 64-bit machines, followed by the SZ_NULL-termination character.
  *
- *  @section Changing Length
+ *  @section small_string_changing_length Changing Length
  *
  *  One nice thing about this design, is that you can, in many cases, change the length of the string
  *  without any branches, invoking a `+=` or `-=` on the 64-bit `length` field. If the string is on heap,

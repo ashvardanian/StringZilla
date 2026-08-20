@@ -225,8 +225,7 @@ int main(int argc, char const **argv) {
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual testing
-        environment_t::tokenization_t::lines_k,
-        compute_bound_slice_bytes_k);
+        environment_t::tokenization_t::lines_k, compute_bound_slice_bytes_k);
 
     std::printf("Starting Unicode benchmarks...\n");
 

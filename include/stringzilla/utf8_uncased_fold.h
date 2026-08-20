@@ -24,7 +24,7 @@ extern "C" {
  *  Case folding normalizes text for uncased comparisons by mapping uppercase letters
  *  to their lowercase equivalents and handling special expansions defined in Unicode CaseFolding.txt.
  *
- *  @section Buffer Sizing
+ *  @section utf8_uncased_fold_buffer_sizing Buffer Sizing
  *
  *  The destination buffer must be at least `source_length * 3` bytes to guarantee sufficient space
  *  for worst-case expansion. The maximum expansion ratio is 3:1 (3x), which occurs with Greek

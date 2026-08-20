@@ -66,8 +66,7 @@ int main(int argc, char const **argv) {
         environment_t env = build_environment( //
             argc, argv,                        //
             "xlsum.csv",                       // Preferred for UTF-8 content
-            environment_t::tokenization_t::lines_k,
-            compute_bound_slice_bytes_k);
+            environment_t::tokenization_t::lines_k, compute_bound_slice_bytes_k);
 
         std::printf("Starting string similarity benchmarks...\n");
         bench_levenshtein(env);

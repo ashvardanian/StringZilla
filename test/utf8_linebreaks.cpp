@@ -118,7 +118,7 @@ static void utf8_linebreaks_dense_mandatory_breaks_(std::string &out, std::size_
     for (std::size_t index = 0; index != link_count; ++index) {
         out.append(encoded_rune_(0x0061)); // 'a'
         switch (index & 0x3u) {
-        case 0: out.append("\r\n"); break;              // CRLF
+        case 0: out.append("\r\n"); break;                 // CRLF
         case 1: out.append(encoded_rune_(0x2028)); break;  // LINE SEPARATOR
         case 2: out.append(encoded_rune_(0x2029)); break;  // PARAGRAPH SEPARATOR
         default: out.append(encoded_rune_(0x000B)); break; // vertical tab (BK)

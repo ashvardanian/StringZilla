@@ -11,7 +11,7 @@
  *  @see StringZilla docs: https://github.com/ashvardanian/StringZilla/blob/main/README.md
  *  @see LibC string docs: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
  *
- *  @section Introduction
+ *  @section sz_introduction Introduction
  *
  *  StringZilla is multi-language project designed for high-throughput string processing, differentiating
  *  the low-level "embeddable" mostly-C core implementation, containing:
@@ -36,7 +36,7 @@
  *  The core implementations of those algorithms are mostly structured as callable structure templates, as opposed to
  *  template functions to simplify specialized overloads and reusing the state between invocations.
  *
- *  @section Compilation Settings
+ *  @section sz_compilation_settings Compilation Settings
  *
  *  Consider overriding the following macros to customize the library:
  *

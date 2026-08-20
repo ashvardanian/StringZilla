@@ -517,7 +517,9 @@ inline environment_t build_environment(                                        /
     }
 
     // Use `STRINGWARS_DATASET_LIMIT` to bound the dataset read, so the file tail is never touched.
-    if (char const *env_var = std::getenv("STRINGWARS_DATASET_LIMIT")) { env.dataset_limit_bytes = parse_size(env_var); }
+    if (char const *env_var = std::getenv("STRINGWARS_DATASET_LIMIT")) {
+        env.dataset_limit_bytes = parse_size(env_var);
+    }
 
     // Use `STRINGWARS_BATCH` to override the per-benchmark batch sizes with a comma-separated list,
     // e.g. `STRINGWARS_BATCH=1024` to run a single batch and skip the slow/largest default sweep entries.

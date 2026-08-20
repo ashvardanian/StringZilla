@@ -516,26 +516,29 @@ static void bench_sha256_multistate_shape(environment_t const &env, std::string 
     auto validator = sha256_multistate_loop_from_sz<lanes_> {env};
     bench_result_t base = bench_unary(env, "sz_sha256_multistate_loop" + suffix, validator).log();
 
-    bench_unary(env, "sz_sha256_multistate_serial" + suffix, validator,
-                sha256_multistate_from_sz<sz_sha256_multistate_update_serial, sz_sha256_multistate_digest_serial,
-                                          lanes_> {env})
+    bench_unary(
+        env, "sz_sha256_multistate_serial" + suffix, validator,
+        sha256_multistate_from_sz<sz_sha256_multistate_update_serial, sz_sha256_multistate_digest_serial, lanes_> {env})
         .log(base);
 #if SZ_USE_GOLDMONT
-    bench_unary(env, "sz_sha256_multistate_goldmont" + suffix, validator,
-                sha256_multistate_from_sz<sz_sha256_multistate_update_goldmont, sz_sha256_multistate_digest_goldmont,
-                                          lanes_> {env})
+    bench_unary(
+        env, "sz_sha256_multistate_goldmont" + suffix, validator,
+        sha256_multistate_from_sz<sz_sha256_multistate_update_goldmont, sz_sha256_multistate_digest_goldmont, lanes_> {
+            env})
         .log(base);
 #endif
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_sha256_multistate_haswell" + suffix, validator,
-                sha256_multistate_from_sz<sz_sha256_multistate_update_haswell, sz_sha256_multistate_digest_haswell,
-                                          lanes_> {env})
+    bench_unary(
+        env, "sz_sha256_multistate_haswell" + suffix, validator,
+        sha256_multistate_from_sz<sz_sha256_multistate_update_haswell, sz_sha256_multistate_digest_haswell, lanes_> {
+            env})
         .log(base);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_sha256_multistate_skylake" + suffix, validator,
-                sha256_multistate_from_sz<sz_sha256_multistate_update_skylake, sz_sha256_multistate_digest_skylake,
-                                          lanes_> {env})
+    bench_unary(
+        env, "sz_sha256_multistate_skylake" + suffix, validator,
+        sha256_multistate_from_sz<sz_sha256_multistate_update_skylake, sz_sha256_multistate_digest_skylake, lanes_> {
+            env})
         .log(base);
 #endif
 }

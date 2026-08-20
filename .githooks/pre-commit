@@ -21,8 +21,11 @@ code_only() {
         -e 's,^([0-9]*:?\+[[:space:]]*)(\*|/\*).*$,\1,'
 }
 
-# Decorative comment separators - runs of three or more `-` or `=` used purely as visual dividers inside
-# C/C++ comments. Proper sentences communicate structure better than attention-grabbing rules.
+# Decorative separators - runs of three or more `-` or `=` used purely as visual dividers, whether in a
+# C/C++ comment or printed at runtime as `printf("\n=== Section ===\n")`. Proper sentences communicate
+# structure better than attention-grabbing rules, and a banner a test prints is the same habit as a banner
+# a comment draws. The literal arm requires the run to sit against whitespace or an escaped newline, so a
+# rule used as a divider is caught while `"---"` or `"a---b"` as test DATA is not.
 mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM \
     -- '*.c' '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx' '*.cu' '*.cuh' '*.inl')
 separators=0
@@ -30,9 +33,9 @@ for file in "${staged[@]}"; do
     [ -f "$file" ] || continue
     while IFS= read -r line; do
         added="${line#+}"
-        if printf '%s\n' "$added" | grep -qE '(//|/\*|^\s*\*).*[-=]{3,}'; then
+        if printf '%s\n' "$added" | grep -qE '(//|/\*|^\s*\*).*[-=]{3,}|"[^"]*([[:space:]]|\\n)[-=]{3,}|"[^"]*[-=]{3,}([[:space:]]|\\n)'; then
             if [ "$separators" -eq 0 ]; then
-                printf 'Decorative comment separators are not allowed (--- / ===):\n\n' >&2
+                printf 'Decorative separators are not allowed in comments or printed banners (--- / ===):\n\n' >&2
             fi
             printf '  %s: %s\n' "$file" "$(printf '%s' "$added" | sed 's/^[[:space:]]*//')" >&2
             separators=$((separators + 1))
@@ -42,6 +45,27 @@ done
 if [ "$separators" -ne 0 ]; then
     printf '\nWrite a plain sentence instead, or bypass with --no-verify.\n' >&2
     exit 1
+fi
+
+# Doxygen section anchors. `@section <id> <Title>` binds the FIRST token as the link target and the rest as
+# the visible title, so `@section Device Memory` silently anchors "Device" and titles the section "Memory" -
+# the heading reads wrong and nothing can link to it. House convention is a lowercase snake_case id carrying
+# its domain, since ids share one namespace project-wide and two headers both document "Buffer Sizing":
+# `utf8_norm_buffer_sizing`, not `buffer_sizing`. A Title-Case first token is the exact signature of a
+# missing id, and an id with no title renders an empty heading, so both arms are required. Reads raw lines
+# rather than `code_only` ones, since these live inside comments by construction.
+doxygen_sections=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx' '*.cu' '*.cuh' '*.inl' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '@(section|subsection|subsubsection|page)[[:space:]]' \
+  | grep -vE '@(section|subsection|subsubsection|page)[[:space:]]+[a-z][a-z0-9_]*[[:space:]]+[^[:space:]]' || true)
+if [ -n "$doxygen_sections" ]; then
+  cat >&2 <<EOF
+pre-commit: Doxygen section missing its lowercase snake_case id, or carrying an id with no title. Doxygen
+anchors the first token, so '@section Device Memory' anchors "Device". Write '@section domain_topic Title':
+$doxygen_sections
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
 fi
 
 # The `&*iterator` antipattern (iterator -> reference -> pointer laundering). Use the container's
