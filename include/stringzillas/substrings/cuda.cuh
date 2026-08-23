@@ -42,30 +42,29 @@ using ashvardanian::stringzilla::to_bytes_view;
 
 #pragma region Device Kernels
 
-/** @brief Block size every `substrings_cuda` kernel launches with; occupancy is shared-memory-bound, not
- *         thread-count-bound, so a modest fixed block keeps the launch geometry simple. */
+/** Block size every `substrings_cuda` kernel launches with; occupancy is shared-memory-bound, not thread-count-bound,
+ *  so a modest fixed block keeps the launch geometry simple. */
 static constexpr unsigned substrings_threads_per_block_k = 256;
 
-/** @brief Candidates one thread will scan quadratically before a segment falls back to emitted order. */
+/** Candidates one thread will scan quadratically before a segment falls back to emitted order. */
 static constexpr size_t substrings_cover_segment_limit_k = 4096;
 
-/** @brief Output bytes one block of a rewrite's copy owns, so no block's work scales with a run's width. */
+/** Output bytes one block of a rewrite's copy owns, so no block's work scales with a run's width. */
 static constexpr size_t substrings_rewrite_tile_bytes_k = 4096;
 
-/** @brief Counter slots a scoring block keeps in shared memory, sized by the document rather than by the
- *         dictionary. 64 KiB is the largest power of two that still leaves two blocks resident per
- *         multiprocessor, and it seats the distinct needles of a 40 KiB document below half load. */
+/** Counter slots a scoring block keeps in shared memory, sized by the document rather than by the dictionary. 64 KiB
+ *  is the largest power of two that still leaves two blocks resident per multiprocessor, and it seats the distinct
+ *  needles of a 40 KiB document below half load. */
 static constexpr size_t substrings_bm25_slots_k = 8192;
 
-/** @brief Probe distance a scoring insert gives up at, spilling to the overflow row. */
+/** Probe distance a scoring insert gives up at, spilling to the overflow row. */
 static constexpr size_t substrings_bm25_probes_k = 16;
 
-/** @brief Fractional bits a block's running score carries, leaving three orders of headroom over the largest
- *         score a unit-weighted full vocabulary reaches. */
+/** Fractional bits a block's running score carries, leaving three orders of headroom over the largest score a unit-
+ *  weighted full vocabulary reaches. */
 static constexpr int substrings_bm25_scale_k = 32;
 
-/** @brief A counter slot no needle has claimed. Needle indices are dense from zero, so the top value is
- *         never one of them. */
+/** A counter slot no needle has claimed. Needle indices are dense from zero, so the top value is never one of them. */
 static constexpr u32_t substrings_bm25_empty_slot_k = 0xFFFFFFFFu;
 
 /**
@@ -91,7 +90,7 @@ SZ_DEVICE_INLINE void cuda_increment_global_(u32_t *counter, u32_t addend) noexc
     asm volatile("red.global.add.u32 [%0], %1;" ::"l"(__cvta_generic_to_global(counter)), "r"(addend) : "memory");
 }
 
-/** @brief The same reduction against a block's own shared memory, for counters that never leave it. */
+/** The same reduction against a block's own shared memory, for counters that never leave it. */
 SZ_DEVICE_INLINE void cuda_increment_shared_(u32_t *counter, u32_t addend) noexcept {
     asm volatile("red.shared.add.u32 [%0], %1;" ::"r"((u32_t)__cvta_generic_to_shared(counter)), "r"(addend)
                  : "memory");
@@ -102,8 +101,8 @@ SZ_DEVICE_INLINE void cuda_increment_shared_(u64_t *counter, u64_t addend) noexc
                  : "memory");
 }
 
-/** @brief Where a counting walk puts its counts: the block's own table first, the overflow row when full.
- *         An empty @p overflow means the dictionary fits the table, which is what lifts the probe bound. */
+/** Where a counting walk puts its counts: the block's own table first, the overflow row when full. An empty @p
+ *  overflow means the dictionary fits the table, which is what lifts the probe bound. */
 struct substrings_bm25_counters_t {
     substrings_bm25_counter_t *slots = nullptr;
     span<u32_t> overflow {};
@@ -136,22 +135,20 @@ SZ_DEVICE_INLINE void substrings_bm25_count_(substrings_bm25_counters_t const &c
     *counters.overflowed = 1;
 }
 
-/** @brief One contribution as a fixed-point integer. The scaling runs in double so the `f32` contribution
- *         survives it exactly; scaling in `f32` would quantize back to 24 significant bits and waste it. */
+/** One contribution as a fixed-point integer. The scaling runs in double so the `f32` contribution survives it
+ *  exactly; scaling in `f32` would quantize back to 24 significant bits and waste it. */
 SZ_DEVICE_INLINE i64_t substrings_bm25_to_fixed_(f32_t contribution) noexcept {
     return (i64_t)__double2ll_rn((double)contribution * (double)(1ull << (unsigned)substrings_bm25_scale_k));
 }
 
-/** @brief The block's fixed-point total, back as the score the caller reads. */
+/** The block's fixed-point total, back as the score the caller reads. */
 SZ_DEVICE_INLINE f32_t substrings_bm25_from_fixed_(i64_t total) noexcept {
     return (f32_t)((double)total / (double)(1ull << (unsigned)substrings_bm25_scale_k));
 }
 
-/**
- *  @brief Cooperatively fills @p shared_hot_rows from the head of the hot tier and @p shared_accepts_words
- *         from the acceptance bitmap, once per block. The hot tier's out-degree ordering makes its head the
- *         best prefix to stage; the bitmap span is empty when `try_build` budgeted it out of shared memory.
- */
+/** Cooperatively fills @p shared_hot_rows from the head of the hot tier and @p shared_accepts_words from the
+ *  acceptance bitmap, once per block. The hot tier's out-degree ordering makes its head the best prefix to stage; the
+ *  bitmap span is empty when `try_build` budgeted it out of shared memory. */
 template <typename state_id_type_>
 SZ_DEVICE_INLINE void substrings_stage_automaton_(aho_corasick_view<state_id_type_> const &view,
                                                   span<state_id_type_> shared_hot_rows, span<u32_t const> accepts_words,
@@ -181,11 +178,9 @@ SZ_DEVICE_INLINE state_id_type_ substrings_step_device_(aho_corasick_view<state_
     return aho_corasick_step(view, state, byte);
 }
 
-/**
- *  @brief Finds, via binary search, which haystack owns global chunk @p chunk_index, given the exclusive
- *         prefix sum of chunk counts per haystack (`haystack_chunk_offsets[haystack_count]` is the grand
- *         total chunk count, mirroring how `outputs_offsets` bounds `outputs_counts`).
- */
+/** Finds, via binary search, which haystack owns global chunk @p chunk_index, given the exclusive prefix sum of chunk
+ *  counts per haystack (`haystack_chunk_offsets[haystack_count]` is the grand total chunk count, mirroring how
+ *  `outputs_offsets` bounds `outputs_counts`). */
 SZ_DEVICE_INLINE size_t substrings_resolve_haystack_(span<size_t const> haystack_chunk_offsets,
                                                      size_t chunk_index) noexcept {
     size_t low = 0, high = haystack_chunk_offsets.size() - 1;
@@ -353,10 +348,8 @@ SZ_DEVICE_INLINE size_t substrings_walk_chunk_uncased_( //
     return matches_found;
 }
 
-/**
- *  @brief How many equal-sized chunks of `chunk_bytes` a haystack of @p haystack_length bytes needs - at
- *         least one, so even an empty or shorter-than-a-chunk haystack still gets a thread.
- */
+/** How many equal-sized chunks of `chunk_bytes` a haystack of @p haystack_length bytes needs - at least one, so even
+ *  an empty or shorter-than-a-chunk haystack still gets a thread. */
 constexpr size_t substrings_chunks_for_haystack_(size_t haystack_length, size_t chunk_bytes) noexcept {
     return haystack_length == 0 ? (size_t)1 : divide_round_up(haystack_length, chunk_bytes);
 }
@@ -538,7 +531,7 @@ static __global__ void substrings_haystack_match_offsets_(span<size_t const> hay
     }
 }
 
-/** @brief Writes how many matches each haystack owns, as the gap between its two boundaries. */
+/** Writes how many matches each haystack owns, as the gap between its two boundaries. */
 static __global__ void substrings_counts_from_boundaries_(span<size_t const> haystack_match_offsets,
                                                           span<size_t> counts_per_haystack) {
     for (size_t haystack_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -613,7 +606,7 @@ SZ_DEVICE_INLINE void substrings_copy_clipped_(char *output, size_t tile_begin, 
         output[position] = (char)source[position - output_offset];
 }
 
-/** @brief Index of the last entry at or below @p value, in an ascending array; zero when none is. */
+/** Index of the last entry at or below @p value, in an ascending array; zero when none is. */
 SZ_DEVICE_INLINE size_t substrings_last_not_above_(span<size_t const> ascending, size_t value) noexcept {
     size_t low = 0, high = ascending.size();
     while (low + 1 < high) {
@@ -808,6 +801,192 @@ __global__ void substrings_score_bm25_per_haystack_(aho_corasick_view<state_id_t
     }
 }
 
+#pragma region Trie Derivation
+
+/** Where one needle sits, in the tape and in the trie; the pair every depth reads together. */
+struct substrings_trie_cursor_t {
+    /** Where this needle's folded bytes begin in the tape. */
+    small_size_t tape_start {};
+    /** The state it currently sits on, advanced one depth per pass. */
+    small_size_t state {};
+};
+
+/** What one needle is, and where it ended. The index half is uploaded, the state half is written once, by the pass
+ *  that consumes the needle's last byte. */
+struct substrings_trie_ending_t {
+    /** The caller's own index for this needle, since the walk visits them length-ordered. */
+    small_size_t needle_index {};
+    /** The state its last byte lands on. */
+    small_size_t terminal_state {};
+};
+
+/** The two links out of a state, which a failure chase reads at one index and in one load. */
+struct substrings_trie_links_t {
+    /** Lowest child id; the row ends where the next state's own begins. */
+    small_size_t first_child {};
+    /** Deepest state spelling a proper suffix of this one; the root fails to itself. */
+    small_size_t fail {};
+};
+
+/** @brief The vocabulary as the derivation reads it: one folded tape, and one entry per needle.
+ *
+ *  Needles are ordered by folded length ascending, so the ones still alive at a depth are the contiguous
+ *  suffix starting at that depth's first live needle - which is what bounds the work at the sum of the
+ *  lengths rather than at the needle count times the longest one.
+ */
+struct substrings_trie_needles_t {
+    /** Every needle's folded bytes, laid end to end in the caller's own order. */
+    byte_t const *bytes {};
+    /** Where each needle sits, in the tape and in the trie, ordered by folded length ascending. */
+    substrings_trie_cursor_t *cursor_of {};
+    /** What each needle is and where it ended, at the same length-ordered position. */
+    substrings_trie_ending_t *ending_of {};
+};
+
+/**
+ *  @brief The trie as the derivation writes it: one entry per state, addressed by that state's own id.
+ *
+ *  `byte_of` stays a dense byte array rather than joining `links_of`, because it is what a row search
+ *  bisects: a full row is four cache lines this way and fifty-two inside a struct. `parent_of` stays out
+ *  for the opposite reason - a chase reads it at a different index than the links it then follows.
+ *
+ *  Ids are `small_size_t` rather than the published `state_id_t`, because sixteen bits is a publication
+ *  width: `try_build(wider)` only ever narrows, so both backends derive wide and narrow when they publish.
+ */
+struct substrings_trie_arrays_t {
+    /** Each state's parent; entry zero is the root and is never written. */
+    small_size_t *parent_of {};
+    /** The byte each state's parent edge spells. */
+    u8_t *byte_of {};
+    /** Where each state's children begin, and where it fails to. */
+    substrings_trie_links_t *links_of {};
+};
+
+SZ_DEVICE_INLINE small_size_t substrings_trie_child_of_(substrings_trie_arrays_t const &arrays, small_size_t state,
+                                                        u8_t byte) noexcept {
+    small_size_t low = arrays.links_of[state].first_child, high = arrays.links_of[state + 1].first_child;
+    while (low < high) {
+        small_size_t const middle = low + (high - low) / 2;
+        u8_t const spelled = arrays.byte_of[middle];
+        if (spelled == byte) return middle;
+        if (spelled < byte) low = middle + 1;
+        else high = middle;
+    }
+    return 0;
+}
+
+/**
+ *  @brief Resolves the failure link of every state in one depth band.
+ *
+ *  A failure state is strictly shallower, so a band resolves entirely against bands already final - which is
+ *  what makes the band the parallel unit, exactly as it is on the host. Here a band is a contiguous id range
+ *  rather than a slice of a permutation, because the derivation mints ids one depth at a time.
+ */
+__global__ void substrings_trie_link_failures_(substrings_trie_arrays_t arrays, small_size_t band_first,
+                                               small_size_t band_last) {
+
+    small_size_t const stride = blockDim.x * gridDim.x;
+    for (small_size_t state = band_first + blockIdx.x * blockDim.x + threadIdx.x; state < band_last; state += stride) {
+        small_size_t const parent = arrays.parent_of[state];
+        // A depth-one state fails to the root; chasing instead would land back on the state itself.
+        if (parent == 0) {
+            arrays.links_of[state].fail = 0;
+            continue;
+        }
+        u8_t const byte = arrays.byte_of[state];
+        small_size_t landed = 0;
+        for (small_size_t chased = arrays.links_of[parent].fail;;) {
+            small_size_t const child = substrings_trie_child_of_(arrays, chased, byte);
+            if (child != 0) landed = child;
+            if (child != 0 || chased == 0) break;
+            chased = arrays.links_of[chased].fail;
+        }
+        arrays.links_of[state].fail = landed;
+    }
+}
+
+/**
+ *  @brief Marks one literal edge per live needle at @p depth, counting each state's out-degree.
+ *
+ *  A trie is one state per distinct needle prefix, so deriving it is a dedup over prefixes rather than a walk
+ *  per needle. A row here is 256 bits wide, so a `(state, byte)` pair addresses one bit and no two pairs can
+ *  collide - which is what makes the dedup exact with no key, no probe and no verification pass behind it.
+ *
+ *  The plain load before the exchange is what keeps the root's single row from serializing the whole
+ *  vocabulary, and the exchange's own return value is what lets exactly one thread count each edge.
+ */
+__global__ void substrings_trie_mark_edges_(substrings_trie_needles_t needles, small_size_t first_needle,
+                                            small_size_t needles_count, small_size_t depth, small_size_t states_first,
+                                            sz_byteset_t *rows, small_size_t *degree_of) {
+
+    small_size_t const stride = blockDim.x * gridDim.x;
+    for (small_size_t needle = first_needle + blockIdx.x * blockDim.x + threadIdx.x; needle < needles_count;
+         needle += stride) {
+        substrings_trie_cursor_t const cursor = needles.cursor_of[needle]; // ? Both halves in one load
+        small_size_t const row = cursor.state - states_first;
+        u8_t const byte = (u8_t)needles.bytes[cursor.tape_start + depth];
+        u64_t *const quarter = &rows[row]._u64s[byte >> 6];
+        u64_t const bit = (u64_t)1 << (byte & 63u);
+        if (*quarter & bit) continue; // ? Already set, and setting it again would change nothing
+        // ? Lost the race, and whoever won it is the one that counts the edge
+        if (atomicOr((unsigned long long *)quarter, (unsigned long long)bit) & bit) continue;
+        atomicAdd(degree_of + row, 1u);
+    }
+}
+
+/**
+ *  @brief Mints one state per marked bit, in byte-ascending order within each row.
+ *
+ *  The scan left each row's first child counted from the depth's own start; this turns it absolute. Minting
+ *  in bit order is what leaves a state's children contiguous and their bytes ascending, so the CSR needs no
+ *  row array of its own and a later goto can binary-search whichever row it lands on.
+ */
+__global__ void substrings_trie_emit_states_(sz_byteset_t const *rows, small_size_t const *offset_of,
+                                             small_size_t states_first, small_size_t states_last,
+                                             substrings_trie_arrays_t arrays) {
+
+    small_size_t const stride = blockDim.x * gridDim.x;
+    for (small_size_t state = states_first + blockIdx.x * blockDim.x + threadIdx.x; state < states_last;
+         state += stride) {
+        sz_byteset_t const &row = rows[state - states_first];
+        small_size_t child = states_last + offset_of[state - states_first];
+        arrays.links_of[state].first_child = child;
+        for (small_size_t quarter = 0; quarter != 4; ++quarter)
+            for (u64_t remaining = row._u64s[quarter]; remaining; remaining &= remaining - 1, ++child) {
+                arrays.parent_of[child] = state;
+                arrays.byte_of[child] = (u8_t)(quarter * 64u + __ffsll((long long)remaining) - 1);
+            }
+        // Closes the row of the band's last state, which no later thread owns. The deepest band emits nothing,
+        // so without this its rows would keep the scan's relative zero as their end.
+        if (state + 1 == states_last) arrays.links_of[states_last].first_child = child;
+    }
+}
+
+/**
+ *  @brief Moves every live needle onto the child its byte spells, and records where a needle ends.
+ *
+ *  The mint above laid each row out contiguously and byte-ascending, so the child is found by the same
+ *  bisect a failure chase uses rather than by ranking the marked bits a second time.
+ */
+__global__ void substrings_trie_advance_needles_(substrings_trie_needles_t needles, small_size_t first_needle,
+                                                 small_size_t needles_count, small_size_t dying_last,
+                                                 small_size_t depth, substrings_trie_arrays_t arrays) {
+
+    small_size_t const stride = blockDim.x * gridDim.x;
+    for (small_size_t needle = first_needle + blockIdx.x * blockDim.x + threadIdx.x; needle < needles_count;
+         needle += stride) {
+        substrings_trie_cursor_t &cursor = needles.cursor_of[needle];
+        u8_t const byte = (u8_t)needles.bytes[cursor.tape_start + depth];
+        // The mark pass set this byte's bit, so the row holds it and the search always lands.
+        small_size_t const child = substrings_trie_child_of_(arrays, cursor.state, byte);
+        cursor.state = child;
+        // Needles are length-ordered, so the ones ending here are the range the host already knows.
+        if (needle < dying_last) needles.ending_of[needle].terminal_state = child;
+    }
+}
+
+#pragma endregion Trie Derivation
+
 #pragma endregion Device Kernels
 
 #pragma region Engine
@@ -854,11 +1033,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
 
   private:
     using allocator_traits_t = std::allocator_traits<allocator_t>;
-    /** @brief Rebinds to `size_t`, for the output CSR and the chunk offsets, neither of which has a ceiling. */
+    /** Rebinds to `size_t`, for the output CSR and the chunk offsets, neither of which has a ceiling. */
     using offset_allocator_t = typename allocator_traits_t::template rebind_alloc<size_t>;
     using descriptor_allocator_t = typename allocator_traits_t::template rebind_alloc<span<byte_t const>>;
     using word_allocator_t = typename allocator_traits_t::template rebind_alloc<u32_t>;
     using byte_allocator_t = typename allocator_traits_t::template rebind_alloc<byte_t>;
+    using cursor_allocator_t = typename allocator_traits_t::template rebind_alloc<substrings_trie_cursor_t>;
+    using ending_allocator_t = typename allocator_traits_t::template rebind_alloc<substrings_trie_ending_t>;
     /*  Scratch no host ever touches - written by one kernel, read by the next, or drained by a copy. Unified
      *  memory would fault it in on first touch and migrate it again on the drain, so it is device-resident by
      *  the algorithm's nature rather than by the caller's allocator choice. @sa `similarities/cuda.cuh`. */
@@ -866,6 +1047,10 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     using device_offset_allocator_t = device_alloc<size_t>;
     using device_byte_allocator_t = device_alloc<byte_t>;
     using device_word_allocator_t = device_alloc<u32_t>;
+    using device_row_allocator_t = device_alloc<sz_byteset_t>;
+    using device_cursor_allocator_t = device_alloc<substrings_trie_cursor_t>;
+    using device_ending_allocator_t = device_alloc<substrings_trie_ending_t>;
+    using device_links_allocator_t = device_alloc<substrings_trie_links_t>;
 
     /**
      *  @brief Dense acceptance bitmap: bit `state` is set when some needle ends at that state, hot or cold.
@@ -876,13 +1061,13 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
      */
     safe_vector<u32_t, word_allocator_t> accepts_words_ {};
 
-    /** @brief One descriptor per haystack. Unified, as the host writes them and every chunk thread reads them. */
+    /** One descriptor per haystack. Unified, as the host writes them and every chunk thread reads them. */
     safe_vector<span<byte_t const>, descriptor_allocator_t> haystack_descriptors_ {};
-    /** @brief Per-call scratch: chunk count per haystack, then - in place - the exclusive chunk-index offset
-     *         per haystack, with the grand total chunk count trailing at `[haystack_count]`. */
+    /** Per-call scratch: chunk count per haystack, then - in place - the exclusive chunk-index offset per haystack,
+     *  with the grand total chunk count trailing at `[haystack_count]`. */
     safe_vector<size_t, offset_allocator_t> haystack_chunk_offsets_ {};
-    /** @brief Per-call scratch: holds per-chunk counts, then - in place - per-chunk exclusive offsets, with the
-     *         grand total in the trailing slot. Grown as needed, reused across calls. */
+    /** Per-call scratch: holds per-chunk counts, then - in place - per-chunk exclusive offsets, with the grand total
+     *  in the trailing slot. Grown as needed, reused across calls. */
     safe_vector<size_t, offset_allocator_t> chunk_match_offsets_ {};
     /**
      *  @brief Every match the walk emitted, before any cover has been applied to them.
@@ -891,27 +1076,49 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
      *  then decide between what it holds - so it is engine scratch the caller never sees.
      */
     safe_vector<substrings_match_t, device_match_allocator_t> emitted_matches_ {};
-    /** @brief One flag per emitted match going in, its scanned slot coming out, with the survivor count
-     *         trailing - the same in-place trick `chunk_match_offsets_` plays, and for the same reason. */
+    /** One flag per emitted match going in, its scanned slot coming out, with the survivor count trailing - the same
+     *  in-place trick `chunk_match_offsets_` plays, and for the same reason. */
     safe_vector<size_t, device_offset_allocator_t> cover_keep_ {};
-    /** @brief Tile totals for the multi-block route of `cuda_launch_exclusive_sum_`, sized once at its grid
-     *         ceiling so no scan ever has to fall back to one block for want of scratch. */
+    /** Tile totals for `cuda_launch_exclusive_sum_`'s multi-block route at `size_t`, sized at its grid ceiling. */
     safe_vector<size_t, device_offset_allocator_t> scan_partials_ {};
-    /** @brief The survivors themselves, gathered out of the emitted list. */
+    /** The same for the `small_size_t` route the derivation scans at, so neither falls back to one block. */
+    safe_vector<small_size_t, device_word_allocator_t> scan_partials_u32_ {};
+    /** The survivors themselves, gathered out of the emitted list. */
     safe_vector<substrings_match_t, device_match_allocator_t> cover_survivors_ {};
-    /** @brief Per-haystack match boundaries, the reported twin of `haystack_chunk_offsets_`. */
+    /** Per-haystack match boundaries, the reported twin of `haystack_chunk_offsets_`. */
     safe_vector<size_t, offset_allocator_t> haystack_match_offsets_ {};
-    /** @brief Where each match's preceding gap begins, relative to its haystack's rewritten start. The only
-     *         thing the copy kernel cannot recompute, since it is the running drift the scan produced. */
+    /** Where each match's preceding gap begins, relative to its haystack's rewritten start. The only thing the copy
+     *  kernel cannot recompute, since it is the running drift the scan produced. */
     safe_vector<size_t, device_offset_allocator_t> rewrite_gap_offsets_ {};
-    /** @brief The replacements as one tape, uploaded per call: the caller's container is host-addressed. */
+    /** The replacements as one tape, uploaded per call: the caller's container is host-addressed. */
     safe_vector<byte_t, byte_allocator_t> replacement_bytes_ {};
-    /** @brief Where each needle's replacement starts in `replacement_bytes_`, with a trailing terminator. */
+    /** Where each needle's replacement starts in `replacement_bytes_`, with a trailing terminator. */
     safe_vector<size_t, offset_allocator_t> replacement_offsets_ {};
 
-    /** @brief One `needle_count`-wide row per resident block, catching what will not seat in that block's
-     *         table. Empty for any dictionary the table can hold, which is most of them. */
+    /** One `needle_count`-wide row per resident block, catching what will not seat in that block's table. Empty for
+     *  any dictionary the table can hold, which is most of them. */
     safe_vector<u32_t, device_word_allocator_t> bm25_overflow_ {};
+
+    /** The needles as one tape, folded when the mode asks, in the caller's own order. */
+    safe_vector<byte_t, device_byte_allocator_t> needle_bytes_ {};
+    /** Where each needle sits, in the tape and in the trie, ordered by folded length ascending. */
+    safe_vector<substrings_trie_cursor_t, device_cursor_allocator_t> needle_cursors_ {};
+    /** What each needle is and where it ended, at that same length-ordered position. */
+    safe_vector<substrings_trie_ending_t, device_ending_allocator_t> needle_endings_ {};
+    /** Host-side: needles already spent by each depth, so the live ones are the suffix from there. */
+    safe_vector<small_size_t, word_allocator_t> needle_first_live_ {};
+    /** Each state's parent; entry zero is the root and is never written. */
+    safe_vector<small_size_t, device_word_allocator_t> trie_parent_of_ {};
+    /** The byte each state's parent edge spells, dense so that a row search can bisect it. */
+    safe_vector<byte_t, device_byte_allocator_t> trie_byte_of_ {};
+    /** Where each state's children begin, and where it fails to. */
+    safe_vector<substrings_trie_links_t, device_links_allocator_t> trie_links_ {};
+    /** Host-side: where each depth's states begin, with the state total trailing. */
+    safe_vector<small_size_t, word_allocator_t> trie_band_firsts_ {};
+    /** One 256-bit row per state at the depth being derived, its own array so the alignment survives. */
+    safe_vector<sz_byteset_t, device_row_allocator_t> trie_rows_ {};
+    /** That depth's out-degrees, which the scan turns in place into where each of its rows begins. */
+    safe_vector<small_size_t, device_word_allocator_t> trie_degrees_ {};
 
     /**
      *  @brief The automaton this engine compiles from its needles, at whichever state-id width it fits.
@@ -921,10 +1128,10 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
      */
     std::variant<narrow_dictionary_t, wide_dictionary_t> dictionary_;
 
-    /** @brief Hot rows staged into shared memory at block start - all of them, or zero when they would cost
-     *         a resident block and the kernels read them through the cache instead. */
+    /** Hot rows staged into shared memory at block start - all of them, or zero when they would cost a resident block
+     *  and the kernels read them through the cache instead. */
     u32_t staged_rows_ {};
-    /** @brief Acceptance bitmap words staged alongside `staged_rows_`, under the same all-or-nothing rule. */
+    /** Acceptance bitmap words staged alongside `staged_rows_`, under the same all-or-nothing rule. */
     u32_t staged_accepts_words_ {};
     allocator_t alloc_ {};
     cuda_timer_t timer_ {};
@@ -936,8 +1143,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     substrings_cuda(substrings_cuda &&) noexcept = default;
     substrings_cuda &operator=(substrings_cuda &&) noexcept = default;
 
-    /** @brief Releases the automaton and every device-resident buffer this engine owns; a fresh
-     *         `try_insert_all` is required after. */
+    /** Releases the automaton and every device-resident buffer this engine owns; a fresh `try_insert_all` is required
+     *  after. */
     void reset() noexcept {
         std::visit([](auto &dictionary) noexcept { dictionary.reset(); }, dictionary_);
         accepts_words_.reset();
@@ -957,7 +1164,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         staged_accepts_words_ = u32_t {};
     }
 
-    /** @brief The state-id width this engine's automaton settled on, once finalized. */
+    /** The state-id width this engine's automaton settled on, once finalized. */
     substrings_state_width_t state_width() const noexcept {
         return std::holds_alternative<narrow_dictionary_t>(dictionary_) ? substrings_state_width_t::u16_k
                                                                         : substrings_state_width_t::u32_k;
@@ -980,7 +1187,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return std::visit([](auto const &dictionary) noexcept { return dictionary.hot_count(); }, dictionary_);
     }
 
-    /** @brief Runs @p callable against the automaton at whichever state-id width it settled on. */
+    /** Runs @p callable against the automaton at whichever state-id width it settled on. */
     template <typename callable_type_>
     auto visit_dictionary(callable_type_ &&callable) const noexcept {
         return std::visit(std::forward<callable_type_>(callable), dictionary_);
@@ -1001,7 +1208,10 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         };
         by_width_t count_chunk;
         by_width_t scatter_chunk;
+        /** The prefix sum at both widths the engine scans at: match and haystack counts, which can outgrow 32 bits,
+         *  and the derivation's out-degrees, which provably cannot. */
         exclusive_sum_shapes_t exclusive_sum;
+        exclusive_sum_shapes_t exclusive_sum_u32;
         kernel_shape_t cover_resolve;
         kernel_shape_t cover_compact;
         kernel_shape_t haystack_match_offsets;
@@ -1009,12 +1219,17 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         kernel_shape_t rewrite_offsets;
         kernel_shape_t rewrite_copy;
         by_width_t score_bm25;
+        /** One depth of the derivation; none of the four walks the automaton, so none is width-typed. */
+        kernel_shape_t trie_mark_edges;
+        kernel_shape_t trie_emit_states;
+        kernel_shape_t trie_advance_needles;
+        kernel_shape_t trie_link_failures;
     };
 
-    /** @brief Resolves every kernel handle for @p device_id into @p table, raising the dynamic shared-memory
-     *         ceiling on the two chunk kernels to the device's opt-in maximum. The per-launch allocation
-     *         depends on the dictionary's hot-tier size, so occupancy is queried per launch.
-     *         Both state-id widths are resolved into one table, since the automaton picks its own. */
+    /** Resolves every kernel handle for @p device_id into @p table, raising the dynamic shared-memory ceiling on the
+     *  two chunk kernels to the device's opt-in maximum. The per-launch allocation depends on the dictionary's hot-
+     *  tier size, so occupancy is queried per launch. Both state-id widths are resolved into one table, since the
+     *  automaton picks its own. */
     static cuda_status_t resolve_kernels_(kernels_t &table, int device_id) noexcept {
         CUdevice const device = device_id;
         int shared_memory_ceiling = 0;
@@ -1056,6 +1271,23 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
             cuda_device_collective_threads_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
+        status = resolve_kernel_shape(table.exclusive_sum_u32.whole,
+                                      reinterpret_cast<void const *>(&exclusive_sum_across_cuda_device_<u32_t>), 0, 0,
+                                      false);
+        if (status.status != status_t::success_k) return status;
+
+        status = resolve_kernel_shape(
+            table.exclusive_sum_u32.reduce_tiles,
+            reinterpret_cast<void const *>(&exclusive_sum_reduce_tiles_across_cuda_device_<u32_t>),
+            cuda_device_collective_threads_k, 0, true);
+        if (status.status != status_t::success_k) return status;
+
+        status = resolve_kernel_shape(
+            table.exclusive_sum_u32.apply_tiles,
+            reinterpret_cast<void const *>(&exclusive_sum_apply_tiles_across_cuda_device_<u32_t>),
+            cuda_device_collective_threads_k, 0, true);
+        if (status.status != status_t::success_k) return status;
+
         status = resolve_kernel_shape(table.cover_resolve, reinterpret_cast<void const *>(&substrings_cover_resolve_),
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
@@ -1083,6 +1315,24 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         if (status.status != status_t::success_k) return status;
 
         status = resolve_kernel_shape(table.rewrite_copy, reinterpret_cast<void const *>(&substrings_rewrite_copy_),
+                                      substrings_threads_per_block_k, 0, true);
+        if (status.status != status_t::success_k) return status;
+
+        // The derivation stages nothing, so none of the three takes a shared ceiling.
+        status = resolve_kernel_shape(table.trie_mark_edges,
+                                      reinterpret_cast<void const *>(&substrings_trie_mark_edges_),
+                                      substrings_threads_per_block_k, 0, true);
+        if (status.status != status_t::success_k) return status;
+        status = resolve_kernel_shape(table.trie_emit_states,
+                                      reinterpret_cast<void const *>(&substrings_trie_emit_states_),
+                                      substrings_threads_per_block_k, 0, true);
+        if (status.status != status_t::success_k) return status;
+        status = resolve_kernel_shape(table.trie_advance_needles,
+                                      reinterpret_cast<void const *>(&substrings_trie_advance_needles_),
+                                      substrings_threads_per_block_k, 0, true);
+        if (status.status != status_t::success_k) return status;
+        status = resolve_kernel_shape(table.trie_link_failures,
+                                      reinterpret_cast<void const *>(&substrings_trie_link_failures_),
                                       substrings_threads_per_block_k, 0, true);
         if (status.status != status_t::success_k) return status;
 
@@ -1162,22 +1412,269 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     }
 
   private:
-    /** @brief One cell's width in the settled automaton, which is what a staged hot row costs per entry. */
+    /** One cell's width in the settled automaton, which is what a staged hot row costs per entry. */
     size_t bytes_per_state_id_() const noexcept {
         return state_width() == substrings_state_width_t::u16_k ? sizeof(u16_t) : sizeof(u32_t);
     }
 
-    /** @brief Shared bytes a scoring block's counter table costs, read by the occupancy query and by the
-     *         launch alike so the two cannot disagree about the footprint they are sizing. A dictionary
-     *         narrower than the table gets a slot per needle and pays for no more than that. */
+    /** Shared bytes a scoring block's counter table costs, read by the occupancy query and by the launch alike so the
+     *  two cannot disagree about the footprint they are sizing. A dictionary narrower than the table gets a slot per
+     *  needle and pays for no more than that. */
     size_t substrings_bm25_counters_bytes_() const noexcept {
         return sz_min_of_two(count_needles(), substrings_bm25_slots_k) * sizeof(substrings_bm25_counter_t);
     }
 
-    /** @brief The settled automaton at @p state_id_type_, which `try_build` has already pinned. */
+    /** The settled automaton at @p state_id_type_, which `try_build` has already pinned. */
     template <typename state_id_type_>
     aho_corasick_dictionary<state_id_type_, allocator_t> const &settled_dictionary_() const noexcept {
         return std::get<aho_corasick_dictionary<state_id_type_, allocator_t>>(dictionary_);
+    }
+
+    /**
+     *  @brief Uploads the vocabulary as one tape, folding it when the mode asks and ordering it by length.
+     *
+     *  Folding stays on the host: it is one pass over the needle bytes, it is shared with every CPU backend
+     *  through `substrings_fold_needle`, and the fold ladder is not reachable from device code.
+     *
+     *  The ordering is a counting sort on folded length, which turns "still alive at this depth" into a
+     *  contiguous suffix - so the derivation walks the sum of the lengths rather than the needle count times
+     *  the longest one, and a single long needle stops being a cost every other needle pays for.
+     */
+    template <typename needles_type_>
+    cuda_status_t try_upload_needles_(needles_type_ const &needles, substrings_case_sensitivity_t case_sensitivity,
+                                      cuda_executor_t const &executor) noexcept {
+
+        size_t const count = needles.size();
+        safe_vector<byte_t, byte_allocator_t> folded(alloc_), tape(alloc_);
+        safe_vector<size_t, offset_allocator_t> starts(alloc_), lengths(alloc_);
+        if (starts.try_reserve(count) != status_t::success_k || lengths.try_reserve(count) != status_t::success_k)
+            return {status_t::bad_alloc_k, cudaSuccess};
+
+        // Staged host-side first, because the tape's total length is only known once every needle is folded.
+        size_t longest = 0;
+        for (auto const &needle : needles) {
+            span<byte_t const> const source = to_bytes_view(needle);
+            if (source.size() == 0) return {status_t::unexpected_dimensions_k, cudaSuccess};
+            span<byte_t const> spelled = source;
+            if (case_sensitivity == substrings_uncased_k) {
+                folded.clear();
+                if (status_t const status = substrings_fold_needle(source, folded); status != status_t::success_k)
+                    return {status, cudaSuccess};
+                spelled = {folded.data(), folded.size()};
+            }
+            if (starts.try_push_back(tape.size()) != status_t::success_k ||
+                lengths.try_push_back(spelled.size()) != status_t::success_k)
+                return {status_t::bad_alloc_k, cudaSuccess};
+            if (tape.try_append(spelled) != status_t::success_k) return {status_t::bad_alloc_k, cudaSuccess};
+            longest = sz_max_of_two(longest, spelled.size());
+        }
+        // One state per tape byte plus the root is the most a vocabulary can spell, and the widest array
+        // below runs one past that, so the tape is refused wherever `tape + 2` would not itself fit. Every
+        // size and id derived from the tape is a `small_size_t`, and none of them may wrap.
+        if (tape.size() + 2 > (size_t)std::numeric_limits<small_size_t>::max())
+            return {status_t::unexpected_dimensions_k, cudaSuccess};
+
+        // Counting sort by folded length. Its cursor array is left holding, for each depth, how many needles
+        // are spent by then - which is exactly where that depth's live suffix begins.
+        if (needle_first_live_.try_resize(longest + 2) != status_t::success_k)
+            return {status_t::bad_alloc_k, cudaSuccess};
+        // `try_resize` leaves a trivial type uninitialized, and this one is a histogram before it is a cursor.
+        for (size_t depth = 0; depth != needle_first_live_.size(); ++depth) needle_first_live_[depth] = 0;
+        for (size_t needle = 0; needle != count; ++needle) ++needle_first_live_[lengths[needle]];
+        for (size_t depth = 0, running = 0; depth != needle_first_live_.size(); ++depth) {
+            size_t const here = needle_first_live_[depth];
+            needle_first_live_[depth] = (small_size_t)running;
+            running += here;
+        }
+
+        safe_vector<substrings_trie_cursor_t, cursor_allocator_t> sorted_cursors(alloc_);
+        safe_vector<substrings_trie_ending_t, ending_allocator_t> sorted_endings(alloc_);
+        if (sorted_cursors.try_resize(count) != status_t::success_k ||
+            sorted_endings.try_resize(count) != status_t::success_k)
+            return {status_t::bad_alloc_k, cudaSuccess};
+        for (size_t needle = 0; needle != count; ++needle) {
+            small_size_t const slot = needle_first_live_[lengths[needle]]++;
+            sorted_cursors[slot] = {(small_size_t)starts[needle], 0}; // ? Every needle starts on the root
+            sorted_endings[slot] = {(small_size_t)needle, 0};
+        }
+
+        if (needle_bytes_.try_resize_uninitialized(tape.size()) != status_t::success_k ||
+            needle_cursors_.try_resize_uninitialized(count) != status_t::success_k ||
+            needle_endings_.try_resize_uninitialized(count) != status_t::success_k)
+            return {status_t::bad_alloc_k, cudaSuccess};
+        if (CUresult const copied = cuMemcpyHtoDAsync((CUdeviceptr)needle_bytes_.data(), tape.data(), tape.size(),
+                                                      executor.stream());
+            copied != CUDA_SUCCESS)
+            return make_cuda_status(copied);
+        if (CUresult const copied = cuMemcpyHtoDAsync((CUdeviceptr)needle_cursors_.data(), sorted_cursors.data(),
+                                                      count * sizeof(substrings_trie_cursor_t), executor.stream());
+            copied != CUDA_SUCCESS)
+            return make_cuda_status(copied);
+        if (CUresult const copied = cuMemcpyHtoDAsync((CUdeviceptr)needle_endings_.data(), sorted_endings.data(),
+                                                      count * sizeof(substrings_trie_ending_t), executor.stream());
+            copied != CUDA_SUCCESS)
+            return make_cuda_status(copied);
+        return {status_t::success_k, cudaSuccess};
+    }
+
+    /**
+     *  @brief Derives the trie on the device, one depth at a time: mark, scan, mint, advance.
+     *  @param[out] states_count States the vocabulary spells, the root included.
+     *
+     *  A state's 256 possible edges are one `sz_byteset_t` row, so marking is exact and needs no key to say
+     *  what it marked. Scanning one depth's out-degrees is what mints the next depth's ids, which is why they
+     *  come out dense, depth-ascending, and grouped under each parent in byte order.
+     *
+     *  The per-state arrays are sized once, against the tape: the host learns a depth's size only from that
+     *  depth's scan, and `try_resize_uninitialized` discards what it holds when it grows, so growing later
+     *  would discard the depths already derived. One state per tape byte is the most any vocabulary spells.
+     */
+    cuda_status_t try_derive_trie_(kernels_t const &kernel_table, gpu_specs_t const &specs,
+                                   cuda_executor_t const &executor, size_t &states_count) noexcept {
+
+        size_t const count = needle_cursors_.size();
+        size_t const tape = needle_bytes_.size();
+        states_count = 1;
+        if (count == 0) return {status_t::success_k, cudaSuccess};
+        size_t const longest = needle_first_live_.size() - 2;
+
+        // Sized in `size_t` and bounded by the tape ceiling `try_upload_needles_` enforced, so none of these
+        // can wrap the width the ids themselves are carried at.
+        if (trie_parent_of_.try_resize_uninitialized(tape + 1) != status_t::success_k ||
+            trie_byte_of_.try_resize_uninitialized(tape + 1) != status_t::success_k ||
+            trie_links_.try_resize_uninitialized(tape + 2) != status_t::success_k ||
+            trie_rows_.try_resize_uninitialized(count) != status_t::success_k ||
+            // One past the widest depth, because the scan leaves that depth's total trailing its offsets.
+            trie_degrees_.try_resize_uninitialized(count + 1) != status_t::success_k ||
+            scan_partials_u32_.try_resize_uninitialized(cuda_device_collective_max_blocks_k + 1) != status_t::success_k)
+            return {status_t::bad_alloc_k, cudaSuccess};
+
+        // The root is state zero at depth zero, it is its own parent, and every needle starts on it.
+        if (CUresult const cleared = cuMemsetD8Async((CUdeviceptr)trie_parent_of_.data(), 0, sizeof(small_size_t),
+                                                     executor.stream());
+            cleared != CUDA_SUCCESS)
+            return make_cuda_status(cleared);
+
+        substrings_trie_needles_t needles_argument;
+        needles_argument.bytes = needle_bytes_.data();
+        needles_argument.cursor_of = needle_cursors_.data();
+        needles_argument.ending_of = needle_endings_.data();
+
+        substrings_trie_arrays_t arrays_argument;
+        arrays_argument.parent_of = trie_parent_of_.data();
+        arrays_argument.byte_of = (u8_t *)trie_byte_of_.data();
+        arrays_argument.links_of = trie_links_.data();
+
+        sz_byteset_t *rows_argument = trie_rows_.data();
+        small_size_t *degrees_argument = trie_degrees_.data();
+        small_size_t count_argument = (small_size_t)count;
+        // The launch protocol takes the address of every argument, so the loop's own state is what it passes -
+        // a shadow copy per depth would only be one more thing to keep in step.
+        small_size_t states_first = 0, states_last = 1, depth = 0, first_live = 0, dying = 0;
+        trie_band_firsts_.clear();
+        if (trie_band_firsts_.try_push_back(0u) != status_t::success_k) return {status_t::bad_alloc_k, cudaSuccess};
+        for (; depth <= longest; ++depth) {
+            small_size_t const level = states_last - states_first;
+            first_live = needle_first_live_[depth];
+
+            if (CUresult const cleared = cuMemsetD8Async((CUdeviceptr)rows_argument, 0, level * sizeof(sz_byteset_t),
+                                                         executor.stream());
+                cleared != CUDA_SUCCESS)
+                return make_cuda_status(cleared);
+            if (CUresult const cleared = cuMemsetD8Async((CUdeviceptr)degrees_argument, 0, level * sizeof(small_size_t),
+                                                         executor.stream());
+                cleared != CUDA_SUCCESS)
+                return make_cuda_status(cleared);
+
+            void *mark_arguments[7] = {&needles_argument, &first_live,    &count_argument,  &depth,
+                                       &states_first,     &rows_argument, &degrees_argument};
+            CUresult launched = cuda_launch_t {}
+                                    .grid(grid_for_items_(kernel_table.trie_mark_edges, count - first_live, specs))
+                                    .block(substrings_threads_per_block_k)
+                                    .shared(0)
+                                    .stream(executor.stream())
+                                    .launch(kernel_table.trie_mark_edges.function, mark_arguments);
+            if (launched != CUDA_SUCCESS) return make_cuda_status(launched);
+
+            cuda_status_t const scanned = cuda_launch_exclusive_sum_(
+                kernel_table.exclusive_sum_u32, trie_degrees_.data(), level, trie_degrees_.data(),
+                {scan_partials_u32_.data(), scan_partials_u32_.size()}, specs, executor.stream());
+            if (scanned.status != status_t::success_k) return scanned;
+
+            // The depth's own size is the one thing the host cannot predict, and the next resize waits on it.
+            small_size_t minted = 0;
+            if (CUresult const synchronized = cuStreamSynchronize(executor.stream()); synchronized != CUDA_SUCCESS)
+                return make_cuda_status(synchronized);
+            if (CUresult const read = cuMemcpyDtoH(&minted, (CUdeviceptr)(trie_degrees_.data() + level),
+                                                   sizeof(small_size_t));
+                read != CUDA_SUCCESS)
+                return make_cuda_status(read);
+
+            // Runs even when the depth minted nothing, because it is also what turns a childless row's own
+            // entry from the scan's relative zero into the absolute end of the trie.
+            void *emit_arguments[5] = {&rows_argument, &degrees_argument, &states_first, &states_last,
+                                       &arrays_argument};
+            launched = cuda_launch_t {}
+                           .grid(grid_for_items_(kernel_table.trie_emit_states, level, specs))
+                           .block(substrings_threads_per_block_k)
+                           .shared(0)
+                           .stream(executor.stream())
+                           .launch(kernel_table.trie_emit_states.function, emit_arguments);
+            if (launched != CUDA_SUCCESS) return make_cuda_status(launched);
+            if (minted == 0) break; // ? No needle reaches this deep, so none can move
+
+            dying = needle_first_live_[depth + 1];
+            void *advance_arguments[6] = {&needles_argument, &first_live, &count_argument, &dying, &depth,
+                                          &arrays_argument};
+            launched = cuda_launch_t {}
+                           .grid(grid_for_items_(kernel_table.trie_advance_needles, count - first_live, specs))
+                           .block(substrings_threads_per_block_k)
+                           .shared(0)
+                           .stream(executor.stream())
+                           .launch(kernel_table.trie_advance_needles.function, advance_arguments);
+            if (launched != CUDA_SUCCESS) return make_cuda_status(launched);
+
+            states_first = states_last, states_last += minted;
+            if (trie_band_firsts_.try_push_back(states_first) != status_t::success_k)
+                return {status_t::bad_alloc_k, cudaSuccess};
+        }
+
+        if (trie_band_firsts_.try_push_back(states_last) != status_t::success_k)
+            return {status_t::bad_alloc_k, cudaSuccess};
+
+        states_count = states_last;
+        return {status_t::success_k, cudaSuccess};
+    }
+
+    /**
+     *  @brief Resolves every failure link, one depth band at a time.
+     *
+     *  Bands run shallowest first because a failure state is strictly shallower, so each launch resolves
+     *  against bands already final. The root's band is skipped: it fails to itself, which the zeroing below
+     *  already says.
+     */
+    cuda_status_t try_link_failures_(kernels_t const &kernel_table, size_t states_count, gpu_specs_t const &specs,
+                                     cuda_executor_t const &executor) noexcept {
+
+        substrings_trie_arrays_t arrays_argument;
+        arrays_argument.parent_of = trie_parent_of_.data();
+        arrays_argument.byte_of = (u8_t *)trie_byte_of_.data();
+        arrays_argument.links_of = trie_links_.data();
+
+        for (size_t band = 1; band + 1 < trie_band_firsts_.size(); ++band) {
+            u32_t band_first = trie_band_firsts_[band], band_last = trie_band_firsts_[band + 1];
+            if (band_first == band_last) break;
+            void *arguments[3] = {&arrays_argument, &band_first, &band_last};
+            CUresult const launched = cuda_launch_t {}
+                                          .grid(grid_for_items_(kernel_table.trie_link_failures, band_last - band_first,
+                                                                specs))
+                                          .block(substrings_threads_per_block_k)
+                                          .shared(0)
+                                          .stream(executor.stream())
+                                          .launch(kernel_table.trie_link_failures.function, arguments);
+            if (launched != CUDA_SUCCESS) return make_cuda_status(launched);
+        }
+        return {status_t::success_k, cudaSuccess};
     }
 
     /**
@@ -1248,19 +1745,19 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return {status_t::success_k, cudaSuccess};
     }
 
-    /** @brief Everything the counting pass establishes that a following scatter pass still needs. */
+    /** Everything the counting pass establishes that a following scatter pass still needs. */
     struct planned_pass_t {
-        /** @brief This device's resolved table, which outlives every pass that reads it. Null until the plan
-         *         has work to name, which is what `has_work` reads rather than a flag of its own. */
+        /** This device's resolved table, which outlives every pass that reads it. Null until the plan has work to
+         *  name, which is what `has_work` reads rather than a flag of its own. */
         kernels_t const *kernel_table = nullptr;
-        /** @brief Dynamic shared memory each walk block takes, and the grid the two passes share. */
+        /** Dynamic shared memory each walk block takes, and the grid the two passes share. */
         unsigned shared_memory_bytes = 0;
         unsigned blocks_per_grid = 0;
-        /** @brief The chunk the corpus was cut into, and how many of them cover it. */
+        /** The chunk the corpus was cut into, and how many of them cover it. */
         size_t chunk_bytes = 0;
         size_t chunk_count = 0;
 
-        /** @brief Whether the plan named any work; an empty corpus leaves it unplanned and launches nothing. */
+        /** Whether the plan named any work; an empty corpus leaves it unplanned and launches nothing. */
         bool has_work() const noexcept { return kernel_table != nullptr; }
     };
 
@@ -1329,10 +1826,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return {status_t::success_k, cudaSuccess};
     }
 
-    /**
-     *  @brief Runs everything `try_count` and `try_find` share: the guards, the kernel table, the timer's
-     *         start, the chunk plan, and the counting pass whose exclusive scan both then read.
-     */
+    /** Runs everything `try_count` and `try_find` share: the guards, the kernel table, the timer's start, the chunk
+     *  plan, and the counting pass whose exclusive scan both then read. */
     cuda_status_t plan_and_count_(size_t total_bytes, cuda_executor_t const &executor, gpu_specs_t const &specs,
                                   planned_pass_t &pass) noexcept {
         cuda_status_t const current_status = executor.ensure_current();
@@ -1467,9 +1962,8 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return {status_t::success_k, cudaSuccess};
     }
 
-    /** @brief Runs the counting pass, then the in-place exclusive scan, so `chunk_match_offsets_` holds every
-     *         chunk's write offset with the grand total trailing at `[chunk_count]` - the shared core of
-     *         `try_count` and `try_find`. */
+    /** Runs the counting pass, then the in-place exclusive scan, so `chunk_match_offsets_` holds every chunk's write
+     *  offset with the grand total trailing at `[chunk_count]` - the shared core of `try_count` and `try_find`. */
     cuda_status_t count_into_offsets_(cuda_executor_t const &executor, gpu_specs_t const &specs,
                                       kernels_t const &kernel_table, unsigned shared_memory_bytes,
                                       unsigned blocks_per_grid, size_t chunk_bytes, size_t chunk_count) noexcept {
@@ -1536,7 +2030,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return {status_t::success_k, cudaSuccess};
     }
 
-    /** @brief Zeroes the caller's counts through the driver, for a corpus the walk never reaches. */
+    /** Zeroes the caller's counts through the driver, for a corpus the walk never reaches. */
     cuda_status_t clear_counts_(span<size_t> counts_per_haystack, cuda_executor_t const &executor) noexcept {
         if (counts_per_haystack.size() == 0) return {status_t::success_k, cudaSuccess};
         CUresult const clear_error = cuMemsetD8Async((CUdeviceptr)counts_per_haystack.data(), 0,
@@ -1547,7 +2041,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return {status_t::success_k, cudaSuccess};
     }
 
-    /** @brief Zeroes the caller's scores through the driver, for a batch no walk reaches. */
+    /** Zeroes the caller's scores through the driver, for a batch no walk reaches. */
     cuda_status_t clear_scores_(span<f32_t> scores, cuda_executor_t const &executor) noexcept {
         if (scores.size() == 0) return {status_t::success_k, cudaSuccess};
         CUresult const clear_error = cuMemsetD8Async((CUdeviceptr)scores.data(), 0, scores.size() * sizeof(f32_t),
@@ -1558,7 +2052,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         return {status_t::success_k, cudaSuccess};
     }
 
-    /** @brief Differences the published boundaries into the caller's per-haystack counts, then fences once. */
+    /** Differences the published boundaries into the caller's per-haystack counts, then fences once. */
     cuda_status_t count_from_boundaries_(planned_pass_t const &pass, span<size_t> counts_per_haystack,
                                          cuda_executor_t const &executor, gpu_specs_t const &specs) noexcept {
         span<size_t const> boundaries_argument {haystack_match_offsets_.data(), haystack_match_offsets_.size()};
@@ -2149,7 +2643,7 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
     }
 
   private:
-    /** @brief The scoring launch, at the width the automaton settled on; the ten arguments stay in one order. */
+    /** The scoring launch, at the width the automaton settled on; the ten arguments stay in one order. */
     template <typename state_id_type_>
     CUresult launch_score_bm25_at_(kernels_t const &kernel_table, unsigned blocks_per_grid,
                                    unsigned shared_memory_bytes, substrings_bm25_t parameters,

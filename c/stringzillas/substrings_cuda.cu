@@ -32,6 +32,13 @@ template __global__ void exclusive_sum_reduce_tiles_across_cuda_device_<size_t>(
 template __global__ void exclusive_sum_apply_tiles_across_cuda_device_<size_t>( //
     size_t const *, size_t, size_t, size_t const *, size_t *);
 
+template __global__ void exclusive_sum_across_cuda_device_<u32_t>( //
+    u32_t const *, size_t, u32_t *);
+template __global__ void exclusive_sum_reduce_tiles_across_cuda_device_<u32_t>( //
+    u32_t const *, size_t, size_t, u32_t *);
+template __global__ void exclusive_sum_apply_tiles_across_cuda_device_<u32_t>( //
+    u32_t const *, size_t, size_t, u32_t const *, u32_t *);
+
 template __global__ void substrings_score_bm25_per_haystack_<u16_t>( //
     aho_corasick_view<u16_t>, u16_t, span<u32_t const>, u32_t, span<span<byte_t const> const>, span<f32_t const>,
     substrings_bm25_t, span<f32_t const>, span<u32_t>, span<f32_t>);

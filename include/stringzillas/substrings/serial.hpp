@@ -734,7 +734,8 @@ struct aho_corasick_dictionary {
      *         Insertion order is not depth order, so this permutation - not the id itself - is what a band
      *         is a contiguous range of. */
     safe_vector<state_id_t, state_id_allocator_t> trie_order_;
-    /** @brief Scratch the band sort permutes through, since a band's states are not a contiguous id range. */
+    /** @brief Scratch the band sort permutes through, since a band's states are not a contiguous id range.
+     *         The band loop also parks each parent's child offset here, before the sort refills it. */
     safe_vector<state_id_t, state_id_allocator_t> trie_order_scratch_;
     /** @brief The root's goto-completed row, dense over the alphabet, so a failure chase ends in one lookup
      *         rather than a scan of the root's whole edge list. */
@@ -1084,35 +1085,51 @@ struct aho_corasick_dictionary {
      *  trie is a tree, so each state is reached by exactly one edge and this visits each exactly once - which
      *  is why the state count is final at insertion and nothing is minted here.
      */
-    status_t build_failure_links_(layout_t const &layout) noexcept {
+    template <typename executor_type_>
+    status_t build_failure_links_(layout_t const &layout, executor_type_ &executor) noexcept {
         state_id_t const *const offsets = edge_offsets_at_(layout);
         csr_edge_t const *const rows = edges_at_(layout);
 
         if (trie_states_.try_resize(count_states_) != status_t::success_k) return status_t::bad_alloc_k;
-        for (size_t state = 0; state < count_states_; ++state) trie_states_[state] = trie_state_t {};
+        executor.for_slices(count_states_, [&](size_t first, size_t last) noexcept {
+            for (size_t state = first; state < last; ++state) trie_states_[state] = trie_state_t {};
+        });
         if (trie_order_.try_resize(count_states_) != status_t::success_k) return status_t::bad_alloc_k;
         if (trie_order_scratch_.try_resize(count_states_) != status_t::success_k) return status_t::bad_alloc_k;
+
+        // Every chase ends at the root's dense row, so it has to exist before the first of them rather than
+        // after the band that happens to contain the root.
+        if (status_t const status = fill_root_row_(offsets, rows); status != status_t::success_k) return status;
 
         trie_order_[0] = 0; // ? The root fails to itself, which `trie_state_t` already defaults to.
         size_t discovered = 1;
         for (size_t band_first = 0, band_last = 1; band_first != band_last;) {
+            // Where each parent's children land, so a band writes them without a shared cursor. The scratch
+            // is free here: the band ordering below refills it from `trie_order_` before reading it.
+            size_t running = discovered;
             for (size_t index = band_first; index < band_last; ++index) {
                 state_id_t const parent = trie_order_[index];
+                trie_order_scratch_[index] = state_id_of_(running);
+                running += offsets[parent + 1] - offsets[parent];
+            }
+
+            // A failure state is strictly shallower, so every state in this band resolves against bands
+            // already final - which is what makes a band a parallel unit rather than a sequence.
+            executor.for_n(band_last - band_first, [&](auto prong) noexcept {
+                size_t const index = band_first + prong.task;
+                state_id_t const parent = trie_order_[index];
                 state_id_t const parent_failure = trie_states_[parent].failure_state;
+                size_t written = trie_order_scratch_[index];
                 for (size_t edge = offsets[parent]; edge < offsets[parent + 1]; ++edge) {
                     state_id_t const child = rows[edge].child;
                     // A depth-one state fails to the root; anything deeper chases its parent's failure link.
                     trie_states_[child].failure_state =
                         parent == 0 ? 0 : chase_trie_(offsets, rows, parent_failure, rows[edge].byte);
-                    trie_order_[discovered++] = child;
+                    trie_order_[written++] = child;
                 }
-                // The root's own row has to be dense before any chase consults it, and the root is the only
-                // state in the first band, so filling it here is still ahead of every lookup.
-                if (parent == 0) {
-                    status_t const status = fill_root_row_(offsets, rows);
-                    if (status != status_t::success_k) return status;
-                }
-            }
+            });
+
+            discovered = running;
             order_band_by_out_degree_(offsets, band_first, band_last);
             band_first = band_last, band_last = discovered;
         }
@@ -1535,13 +1552,16 @@ struct aho_corasick_dictionary {
 
     /**
      *  @brief Constructs the automaton from the vocabulary. Can only be called @b once.
+     *  @param[in] executor Spreads the phases whose work is order-free, and resolves one depth band at a time.
      *  @param[in] specs Sizes the hot tier from the host's last-level cache, unless `hot_count` forced it.
      *
      *  Seven phases, each named below: the edge pool becomes the spelling CSR, the splitting pass derives the
      *  walking automaton one depth band at a time while ordering each band by out-degree, the hot/cold split
      *  falls out of that ordering, the double array packs the rest, and the outputs and hot rows materialize.
      */
-    status_t try_build(cpu_specs_t const &specs = {}) noexcept {
+    template <typename executor_type_ = dummy_executor_t,
+              typename = decltype(std::declval<executor_type_ &>().threads_count())>
+    status_t try_build(executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
         status_t status = ensure_root_();
         if (status != status_t::success_k) return status;
 
@@ -1562,7 +1582,7 @@ struct aho_corasick_dictionary {
         state_id_t const *const offsets = edge_offsets_at_(layout);
         csr_edge_t const *const rows = edges_at_(layout);
 
-        status = build_failure_links_(layout);
+        status = build_failure_links_(layout, executor);
         if (status != status_t::success_k) return status;
 
         // Hot rows are shared, read-mostly, and re-entered on nearly every byte, so they're sized against
@@ -1917,10 +1937,10 @@ using substrings_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocato
  *  declining to fit sixteen bits rather than a failure, so the wide one is kept instead. Every CPU engine
  *  compiles a vocabulary this way and differs only in how it walks a haystack afterwards.
  */
-template <typename dictionary_variant_type_, typename allocator_type_, typename needles_type_>
+template <typename dictionary_variant_type_, typename allocator_type_, typename needles_type_, typename executor_type_>
 status_t substrings_try_index(dictionary_variant_type_ &dictionary, allocator_type_ const &alloc,
                               needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity,
-                              cpu_specs_t const &specs) noexcept {
+                              executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
 
     aho_corasick_dictionary<u32_t, allocator_type_> wide(alloc);
     wide.case_sensitivity(case_sensitivity);
@@ -1928,7 +1948,7 @@ status_t substrings_try_index(dictionary_variant_type_ &dictionary, allocator_ty
         status_t const status = wide.try_insert(to_bytes_view(needle));
         if (status != status_t::success_k) return status;
     }
-    if (status_t const built = wide.try_build(specs); built != status_t::success_k) return built;
+    if (status_t const built = wide.try_build(executor, specs); built != status_t::success_k) return built;
 
     aho_corasick_dictionary<u16_t, allocator_type_> narrow(alloc);
     status_t const narrowed = narrow.try_build(wide);
@@ -2183,8 +2203,7 @@ struct substrings<allocator_type_, capability_,
 #endif
     status_t try_index(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
-        sz_unused_(executor);
-        return substrings_try_index(dict_, alloc_, needles, case_sensitivity, specs);
+        return substrings_try_index(dict_, alloc_, needles, case_sensitivity, executor, specs);
     }
 
     /**
@@ -2450,8 +2469,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
 #endif
     status_t try_index(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
-        sz_unused_(executor);
-        return substrings_try_index(dict_, alloc_, needles, case_sensitivity, specs);
+        return substrings_try_index(dict_, alloc_, needles, case_sensitivity, executor, specs);
     }
 
     /**
