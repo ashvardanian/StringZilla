@@ -1387,18 +1387,19 @@ struct substrings_cuda<allocator_type_, capability_, std::enable_if_t<(capabilit
         // points; binding the named device first is what keeps it off whichever one happened to be current.
         if (cuda_status_t const current = executor.ensure_current(); current.status != status_t::success_k)
             return current;
-        wide_dictionary_t wide(alloc_);
-        wide.case_sensitivity(case_sensitivity);
+        wide_dictionary_t wide(case_sensitivity, alloc_);
         for (auto const &needle : needles) {
             status_t const status = wide.try_insert(to_bytes_view(needle));
             if (status != status_t::success_k) return {status, cudaSuccess};
         }
         // The tier split follows the cache the device walks through rather than the host's last level, which
         // a default `cpu_specs_t` would put at 8 MB whatever the GPU.
-        wide.hot_count(specs.l2_bytes / (substrings_alphabet_size_k * sizeof(u32_t)));
-        if (status_t const built = wide.try_build(); built != status_t::success_k) return {built, cudaSuccess};
+        size_t const hot_count = specs.l2_bytes / (substrings_alphabet_size_k * sizeof(u32_t));
+        if (status_t const built = wide.try_build(dummy_executor_t {}, cpu_specs_t {}, hot_count);
+            built != status_t::success_k)
+            return {built, cudaSuccess};
 
-        narrow_dictionary_t narrow(alloc_);
+        narrow_dictionary_t narrow(case_sensitivity, alloc_);
         status_t const narrowed = narrow.try_build(wide);
         if (narrowed != status_t::success_k && narrowed != status_t::overflow_risk_k) return {narrowed, cudaSuccess};
         if (narrowed == status_t::success_k) dictionary_.template emplace<narrow_dictionary_t>(std::move(narrow));

@@ -639,7 +639,8 @@ struct aho_corasick_dictionary {
      *         `overflow_risk_k` at its own growth site, so a `u16` dictionary caps needles at 65535 bytes.
      */
     static constexpr state_id_t invalid_state_k = std::numeric_limits<state_id_t>::max();
-    /** @brief `hot_count_`'s "not chosen yet" state, so `hot_count(0)` stays a real all-cold request. */
+    /** @brief `try_build`'s "size the tier yourself" argument, so a `hot_count` of zero stays a real
+     *         all-cold request rather than a request for the default. */
     static constexpr size_t derive_hot_count_k = std::numeric_limits<size_t>::max();
     /** @brief Interior vacancies one row may reject before it settles on the arena frontier instead. */
     static constexpr size_t max_interior_probes_k = 256;
@@ -777,8 +778,8 @@ struct aho_corasick_dictionary {
     state_id_t max_outputs_per_state_ = 0;
     substrings_case_sensitivity_t case_sensitivity_ = substrings_cased_k;
 
-    /** @brief States `[0, hot_count_)` live in `hot_rows_`; `derive_hot_count_k` asks `try_build` to size
-     *         the tier from `cpu_specs_t` instead, which `hot_count` overrides with any explicit value. */
+    /** @brief States `[0, hot_count_)` live in `hot_rows_`, settled by `try_build` from its own argument or
+     *         from `cpu_specs_t`, and clamped to the state count. */
     size_t hot_count_ = derive_hot_count_k;
     /** @brief The root's ID in the published numbering; always `0`, since the root is the unique
      *         shallowest state and therefore always sorts first. */
@@ -1453,12 +1454,20 @@ struct aho_corasick_dictionary {
     aho_corasick_dictionary() = default;
     ~aho_corasick_dictionary() noexcept { reset(); }
 
-    explicit aho_corasick_dictionary(allocator_t alloc) noexcept
+    /**
+     *  @brief Builds an empty dictionary that matches byte-exact or case-folded, as @p sensitivity asks.
+     *
+     *  Sensitivity is a constructor argument because it decides how the very first `try_insert` folds, and
+     *  nothing may change it afterwards - so a dictionary that can insert at all has already answered it.
+     *  The default constructor above leaves it byte-exact and exists for `std::variant`, whose first
+     *  alternative is always emplaced over before anything reaches it.
+     */
+    explicit aho_corasick_dictionary(substrings_case_sensitivity_t sensitivity, allocator_t alloc = {}) noexcept
         : edges_(alloc), edge_index_(alloc), own_outputs_(alloc), output_runs_(alloc), folded_needle_(alloc),
           build_scratch_(alloc), trie_states_(alloc), trie_order_(alloc), trie_order_scratch_(alloc),
           trie_root_row_(alloc), old_of_final_(alloc), occupied_bits_(alloc), hot_rows_(alloc), base_(alloc),
-          check_(alloc), fail_(alloc), outputs_(alloc), outputs_counts_(alloc), outputs_offsets_(alloc), alloc_(alloc) {
-    }
+          check_(alloc), fail_(alloc), outputs_(alloc), outputs_counts_(alloc), outputs_offsets_(alloc),
+          case_sensitivity_(sensitivity), alloc_(alloc) {}
 
     aho_corasick_dictionary(aho_corasick_dictionary &&) noexcept = default;
     aho_corasick_dictionary &operator=(aho_corasick_dictionary &&) noexcept = default;
@@ -1502,15 +1511,7 @@ struct aho_corasick_dictionary {
         root_ = 0;
     }
 
-    /** @brief Selects byte-exact or case-folded matching; must be called before the first `try_insert`. */
-    void case_sensitivity(substrings_case_sensitivity_t desired) noexcept {
-        sz_assert_(count_needles_ == 0 && "Case sensitivity can't change once needles have been inserted");
-        case_sensitivity_ = desired;
-    }
     substrings_case_sensitivity_t case_sensitivity() const noexcept { return case_sensitivity_; }
-
-    /** @brief Forces the hot-tier size instead of deriving it from `cpu_specs_t` in `try_build`. */
-    void hot_count(size_t desired) noexcept { hot_count_ = desired; }
 
     size_t count_states() const noexcept { return count_states_; }
     size_t count_needles() const noexcept { return count_needles_; }
@@ -1553,7 +1554,9 @@ struct aho_corasick_dictionary {
     /**
      *  @brief Constructs the automaton from the vocabulary. Can only be called @b once.
      *  @param[in] executor Spreads the phases whose work is order-free, and resolves one depth band at a time.
-     *  @param[in] specs Sizes the hot tier from the host's last-level cache, unless `hot_count` forced it.
+     *  @param[in] specs Sizes the hot tier from the host's last-level cache, unless @p hot_count names one.
+     *  @param[in] hot_count States to keep in the dense hot rows; `derive_hot_count_k` sizes it from @p specs
+     *             instead, and zero is a real all-cold request.
      *
      *  Seven phases, each named below: the edge pool becomes the spelling CSR, the splitting pass derives the
      *  walking automaton one depth band at a time while ordering each band by out-degree, the hot/cold split
@@ -1561,7 +1564,8 @@ struct aho_corasick_dictionary {
      */
     template <typename executor_type_ = dummy_executor_t,
               typename = decltype(std::declval<executor_type_ &>().threads_count())>
-    status_t try_build(executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
+    status_t try_build(executor_type_ &&executor = {}, cpu_specs_t const &specs = {},
+                       size_t hot_count = derive_hot_count_k) noexcept {
         status_t status = ensure_root_();
         if (status != status_t::success_k) return status;
 
@@ -1587,7 +1591,8 @@ struct aho_corasick_dictionary {
 
         // Hot rows are shared, read-mostly, and re-entered on nearly every byte, so they're sized against
         // the last-level cache rather than a private L2 slice.
-        if (hot_count_ == derive_hot_count_k) hot_count_ = specs.l3_bytes / (alphabet_size_k * sizeof(state_id_t));
+        hot_count_ = hot_count == derive_hot_count_k ? specs.l3_bytes / (alphabet_size_k * sizeof(state_id_t))
+                                                     : hot_count;
         hot_count_ = sz_min_of_two(hot_count_, count_states_);
 
         status = pack_cold_tier_(offsets, rows);
@@ -1942,15 +1947,14 @@ status_t substrings_try_index(dictionary_variant_type_ &dictionary, allocator_ty
                               needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity,
                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
 
-    aho_corasick_dictionary<u32_t, allocator_type_> wide(alloc);
-    wide.case_sensitivity(case_sensitivity);
+    aho_corasick_dictionary<u32_t, allocator_type_> wide(case_sensitivity, alloc);
     for (auto const &needle : needles) {
         status_t const status = wide.try_insert(to_bytes_view(needle));
         if (status != status_t::success_k) return status;
     }
     if (status_t const built = wide.try_build(executor, specs); built != status_t::success_k) return built;
 
-    aho_corasick_dictionary<u16_t, allocator_type_> narrow(alloc);
+    aho_corasick_dictionary<u16_t, allocator_type_> narrow(case_sensitivity, alloc);
     status_t const narrowed = narrow.try_build(wide);
     if (narrowed == status_t::success_k) {
         dictionary.template emplace<aho_corasick_dictionary<u16_t, allocator_type_>>(std::move(narrow));
@@ -2145,7 +2149,7 @@ struct substrings<allocator_type_, capability_,
     using u32_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
 
     explicit substrings(allocator_t alloc = allocator_t()) noexcept
-        : alloc_(alloc), dict_(std::in_place_type_t<wide_dictionary_t>(), alloc) {}
+        : alloc_(alloc), dict_(std::in_place_type_t<wide_dictionary_t>(), substrings_cased_k, alloc) {}
     void reset() noexcept {
         std::visit([](auto &dict) noexcept { dict.reset(); }, dict_);
     }
@@ -2411,7 +2415,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
     using u32_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
 
     explicit substrings(allocator_t alloc = allocator_t()) noexcept
-        : alloc_(alloc), dict_(std::in_place_type_t<wide_dictionary_t>(), alloc) {}
+        : alloc_(alloc), dict_(std::in_place_type_t<wide_dictionary_t>(), substrings_cased_k, alloc) {}
     void reset() noexcept {
         std::visit([](auto &dict) noexcept { dict.reset(); }, dict_);
     }

@@ -1321,8 +1321,7 @@ bool check_substrings_narrow_width_(substrings_case_sensitivity_t sensitivity,
     arrow_strings_view_t const needles_view = scratch.needles.view();
     arrow_strings_view_t const haystacks_view = scratch.haystacks.view();
 
-    substrings_u16_dictionary_t narrow;
-    narrow.case_sensitivity(sensitivity);
+    substrings_u16_dictionary_t narrow {sensitivity};
     for (std::size_t index = 0; index < needles_view.size(); ++index) {
         status_t const status = narrow.try_insert(needles_view[index]);
         if (status == status_t::overflow_risk_k) return false;
@@ -1364,8 +1363,7 @@ void check_substrings_tier_invariant_(substrings_case_sensitivity_t sensitivity,
 
     std::size_t raw_state_count = 0;
     {
-        substrings_u32_dictionary_t probe;
-        probe.case_sensitivity(sensitivity);
+        substrings_u32_dictionary_t probe {sensitivity};
         for (std::size_t index = 0; index < needles_view.size(); ++index)
             verify(probe.try_insert(needles_view[index]) == status_t::success_k);
         // Build it: uncased reconvergence splits states during the build, so the published state count -
@@ -1378,12 +1376,11 @@ void check_substrings_tier_invariant_(substrings_case_sensitivity_t sensitivity,
     std::size_t const hot_counts[] = {0, 1, raw_state_count / 2, raw_state_count};
     bool saw_cold_tier = false, saw_all_hot = false;
     for (std::size_t variant_index = 0; variant_index < 4; ++variant_index) {
-        substrings_u32_dictionary_t dictionary;
-        dictionary.case_sensitivity(sensitivity);
+        substrings_u32_dictionary_t dictionary {sensitivity};
         for (std::size_t index = 0; index < needles_view.size(); ++index)
             verify(dictionary.try_insert(needles_view[index]) == status_t::success_k);
-        dictionary.hot_count(hot_counts[variant_index]);
-        verify(dictionary.try_build() == status_t::success_k);
+        verify(dictionary.try_build(dummy_executor_t {}, cpu_specs_t {}, hot_counts[variant_index]) ==
+               status_t::success_k);
 
         auto const automaton = dictionary.view();
         saw_cold_tier |= automaton.hot_count < automaton.state_count;
@@ -1802,14 +1799,12 @@ void test_substrings_construction_equivalence() {
     // width has room for it, whatever `state_id_t` is.
     {
         std::string const long_run(11, 's');
-        substrings_u16_dictionary_t narrow;
-        narrow.case_sensitivity(substrings_uncased_k);
+        substrings_u16_dictionary_t narrow {substrings_uncased_k};
         verify(narrow.try_insert({long_run.data(), long_run.size()}) == status_t::success_k);
         verify(narrow.try_build() == status_t::success_k && "The doubling family is linear once the stream folds");
         verify(narrow.count_states() == long_run.size() + 1 && "One state per folded byte, plus the root");
 
-        substrings_u32_dictionary_t wide;
-        wide.case_sensitivity(substrings_uncased_k);
+        substrings_u32_dictionary_t wide {substrings_uncased_k};
         verify(wide.try_insert({long_run.data(), long_run.size()}) == status_t::success_k);
         verify(wide.try_build() == status_t::success_k);
         verify(wide.count_states() == narrow.count_states() && "The id width cannot change the automaton's shape");
@@ -1842,8 +1837,7 @@ void test_substrings_construction_equivalence() {
                "A few hundred short needles fit the narrow id, so the engine must have kept it");
 
         // The wide derivation the narrowing copied from, rebuilt here, must describe the same automaton.
-        substrings_u32_dictionary_t wide;
-        wide.case_sensitivity(substrings_cased_k);
+        substrings_u32_dictionary_t wide {substrings_cased_k};
         for (span<char const> const &needle : needles.view()) verify(wide.try_insert(needle) == status_t::success_k);
         verify(wide.try_build() == status_t::success_k);
         verify(narrowed.count_states() == wide.count_states());
@@ -1862,12 +1856,10 @@ void test_substrings_construction_equivalence() {
         arrow_strings_tape_t needles;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
-        substrings_u32_dictionary_t dictionary;
-        dictionary.case_sensitivity(substrings_cased_k);
+        substrings_u32_dictionary_t dictionary {substrings_cased_k};
         for (span<char const> const &needle : needles.view())
             verify(dictionary.try_insert(needle) == status_t::success_k);
-        dictionary.hot_count(0);
-        verify(dictionary.try_build() == status_t::success_k);
+        verify(dictionary.try_build(dummy_executor_t {}, cpu_specs_t {}, 0) == status_t::success_k);
 
         auto const automaton = dictionary.view();
         constexpr u32_t invalid_state_k = std::numeric_limits<u32_t>::max();
