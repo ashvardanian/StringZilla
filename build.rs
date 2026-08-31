@@ -399,7 +399,7 @@ const RISCV_PROBES: &[IsaProbe] = &[
         gcc_flags: &[],
         msvc_flags: &[],
         token: "rvvcrypto",
-        runs_on: &["v", "zvkned", "zvknhb"],
+        runs_on: &["v", "zvkned", "zvknhb", "zvkg"],
     },
     IsaProbe {
         define: "SZ_USE_RVV",

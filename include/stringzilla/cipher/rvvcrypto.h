@@ -27,11 +27,11 @@ extern "C" {
 #pragma GCC target("arch=+v,+zvkned,+zvkg")
 #endif
 
-/*  `SZ_USE_RVVCRYPTO` turns on for `Zvkned` and `Zvknhb`, the pair `sz_hash` needs, and says nothing
- *  about `Zvkg`. A target carrying AES but not the Galois hash therefore reaches this file, and every
- *  hash step below is written against one pair of helpers that resolve to `vghsh.vv` and `vgmul.vv`
- *  where the extension is present and to the constant-time serial reduction where it is not. The AES
- *  side is vectorized either way. */
+/*  `SZ_USE_RVVCRYPTO` covers `Zvkned`, `Zvknhb` and `Zvkg` together, and `sz_capabilities` probes all
+ *  three, so the hash steps below reach for `vghsh.vv` and `vgmul.vv` unconditionally. RVA23 sells the
+ *  NIST algorithms only as `Zvkng`, which bundles GHASH in, so no conformant part reaches this file
+ *  without it - a `Zvkn` or `Zvknc` part that did would want its own capability, and the serial
+ *  reduction it needs stays commented inside the two helpers. */
 
 #pragma region Block Element Groups
 
@@ -332,16 +332,15 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const *
  */
 SZ_HELPER_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t block_u32m1,
                                                         vuint32m1_t subkey_u32m1) {
-#if defined(__riscv_zvkg)
+    // Without `Zvkg`, the same step spills all three operands and reduces serially:
+    //
+    //      sz_u128_vec_t staged_accumulator_vec, staged_block_vec, staged_subkey_vec;
+    //      sz_aes256_block_store_rvvcrypto_(staged_accumulator_vec.u8s, accumulator_u32m1);
+    //      sz_aes256_block_store_rvvcrypto_(staged_block_vec.u8s, block_u32m1);
+    //      sz_aes256_block_store_rvvcrypto_(staged_subkey_vec.u8s, subkey_u32m1);
+    //      sz_ghash_absorb_serial_(staged_accumulator_vec.u8s, staged_block_vec.u8s, staged_subkey_vec.u8s);
+    //      return sz_aes256_block_load_rvvcrypto_(staged_accumulator_vec.u8s);
     return __riscv_vghsh_vv_u32m1(accumulator_u32m1, subkey_u32m1, block_u32m1, 4);
-#else
-    sz_u128_vec_t staged_accumulator_vec, staged_block_vec, staged_subkey_vec;
-    sz_aes256_block_store_rvvcrypto_(staged_accumulator_vec.u8s, accumulator_u32m1);
-    sz_aes256_block_store_rvvcrypto_(staged_block_vec.u8s, block_u32m1);
-    sz_aes256_block_store_rvvcrypto_(staged_subkey_vec.u8s, subkey_u32m1);
-    sz_ghash_absorb_serial_(staged_accumulator_vec.u8s, staged_block_vec.u8s, staged_subkey_vec.u8s);
-    return sz_aes256_block_load_rvvcrypto_(staged_accumulator_vec.u8s);
-#endif
 }
 
 /**
@@ -351,15 +350,14 @@ SZ_HELPER_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_
  *  @return The product.
  */
 SZ_HELPER_INLINE vuint32m1_t sz_ghash_multiply_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t subkey_u32m1) {
-#if defined(__riscv_zvkg)
+    // Without `Zvkg`, the same step spills both operands and reduces serially:
+    //
+    //      sz_u128_vec_t staged_accumulator_vec, staged_subkey_vec;
+    //      sz_aes256_block_store_rvvcrypto_(staged_accumulator_vec.u8s, accumulator_u32m1);
+    //      sz_aes256_block_store_rvvcrypto_(staged_subkey_vec.u8s, subkey_u32m1);
+    //      sz_ghash_multiply_serial_(staged_accumulator_vec.u8s, staged_subkey_vec.u8s);
+    //      return sz_aes256_block_load_rvvcrypto_(staged_accumulator_vec.u8s);
     return __riscv_vgmul_vv_u32m1(accumulator_u32m1, subkey_u32m1, 4);
-#else
-    sz_u128_vec_t staged_accumulator_vec, staged_subkey_vec;
-    sz_aes256_block_store_rvvcrypto_(staged_accumulator_vec.u8s, accumulator_u32m1);
-    sz_aes256_block_store_rvvcrypto_(staged_subkey_vec.u8s, subkey_u32m1);
-    sz_ghash_multiply_serial_(staged_accumulator_vec.u8s, staged_subkey_vec.u8s);
-    return sz_aes256_block_load_rvvcrypto_(staged_accumulator_vec.u8s);
-#endif
 }
 
 SZ_API_COMPTIME void sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,

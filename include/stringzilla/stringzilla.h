@@ -593,6 +593,7 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
         // `RISCV_HWPROBE_KEY_IMA_EXT_0` (= 4), whose value carries the extension bitmask.
         // Constants confirmed against `/usr/riscv64-linux-gnu/include/asm/hwprobe.h`:
         //   RISCV_HWPROBE_KEY_IMA_EXT_0 == 4
+        //   RISCV_HWPROBE_EXT_ZVKG      == (1 << 20)  // Zvkg (GHASH)
         //   RISCV_HWPROBE_EXT_ZVKNED    == (1 << 21)  // Zvkned (AES)
         //   RISCV_HWPROBE_EXT_ZVKNHB    == (1 << 23)  // Zvknhb (SHA-256/512)
         struct {
@@ -603,9 +604,13 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
         pairs[0].value = 0;
         // `long syscall(SYS_riscv_hwprobe, pairs, pair_count, cpu_count, cpus, flags)`.
         if (syscall(258, pairs, (unsigned long)1, (unsigned long)0, (void *)0, (unsigned long)0) == 0) {
+            unsigned long long const has_zvkg = pairs[0].value & (1ULL << 20);   // RISCV_HWPROBE_EXT_ZVKG
             unsigned long long const has_zvkned = pairs[0].value & (1ULL << 21); // RISCV_HWPROBE_EXT_ZVKNED
             unsigned long long const has_zvknhb = pairs[0].value & (1ULL << 23); // RISCV_HWPROBE_EXT_ZVKNHB
-            if (has_zvkned && has_zvknhb) caps = (sz_capability_t)(caps | sz_cap_rvvcrypto_k);
+            // `Zvkg` joins the pair rather than getting a capability of its own because RVA23 offers no
+            // way to buy AES and SHA without it: its only NIST-crypto option is `Zvkng`, which bundles
+            // GHASH in. A conformant part carrying the other two carries this one.
+            if (has_zvkned && has_zvknhb && has_zvkg) caps = (sz_capability_t)(caps | sz_cap_rvvcrypto_k);
         }
     }
     return caps;
