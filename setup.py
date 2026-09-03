@@ -909,7 +909,7 @@ setup(
     include_dirs=[],
     setup_requires=[],
     ext_modules=ext_modules,
-    packages=find_packages(),
+    packages=find_packages(exclude=["test", "test.*"]),
     entry_points=entry_points,
     cmdclass=command_class,
     install_requires=install_requires,

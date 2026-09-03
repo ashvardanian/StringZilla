@@ -10,6 +10,5 @@ graft forkunion/include
 graft c
 graft python
 
-include test/stringzilla.py
-include test/stringzillas.py
+recursive-include test *.py
 include bench/*.py
