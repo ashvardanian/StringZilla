@@ -45,9 +45,29 @@ SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t v
 #pragma optimize("", on)
 #endif
 
+/** @brief Copies eight bytes through aligned scalar objects, preserving overlap-safe load-before-store ordering. */
+SZ_HELPER_AUTO void sz_copy8_serial_(sz_ptr_t target, sz_cptr_t source) {
+    char const first = source[0];
+    char const second = source[1];
+    char const third = source[2];
+    char const fourth = source[3];
+    char const fifth = source[4];
+    char const sixth = source[5];
+    char const seventh = source[6];
+    char const eighth = source[7];
+    target[0] = first;
+    target[1] = second;
+    target[2] = third;
+    target[3] = fourth;
+    target[4] = fifth;
+    target[5] = sixth;
+    target[6] = seventh;
+    target[7] = eighth;
+}
+
 SZ_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_MISALIGNED_LOADS
-    while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)source, target += 8, source += 8, length -= 8;
+    while (length >= 8) sz_copy8_serial_(target, source), target += 8, source += 8, length -= 8;
 #endif
     while (length--) *(target++) = *(source++);
 }
@@ -64,7 +84,7 @@ SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t
     // but older CPUs may predict and fetch forward-passes better.
     if (target < source || target >= source + length) {
 #if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)(source), target += 8, source += 8, length -= 8;
+        while (length >= 8) sz_copy8_serial_(target, source), target += 8, source += 8, length -= 8;
 #endif
         while (length--) *(target++) = *(source++);
     }
@@ -72,7 +92,7 @@ SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t
         // Jump to the end and walk backwards.
         target += length, source += length;
 #if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t const *)(source -= 8), length -= 8;
+        while (length >= 8) target -= 8, source -= 8, sz_copy8_serial_(target, source), length -= 8;
 #endif
         while (length--) *(--target) = *(--source);
     }

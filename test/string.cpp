@@ -29,7 +29,7 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
+#define SZ_USE_MISALIGNED_LOADS 1
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -175,12 +175,35 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
         verify(target[length] == '#'); // No overwrite past `length`
     }
 
+    // `copy` must support misaligned byte pointers when its SWAR path is enabled. `alignas(8)` makes the one-byte
+    // offsets provably unaligned for the 64-bit transfer, while the literal checks the copied bytes and both guards.
+    {
+        alignas(8) char const source[] = "abcdefghijklmnopq";
+        alignas(8) char target[sizeof(source) + 1];
+        std::memset(target, '#', sizeof(target));
+        copy(target + 1, source + 1, 16);
+        verify(std::memcmp(target + 1, "bcdefghijklmnopq", 16) == 0);
+        verify(target[0] == '#' && target[17] == '#');
+    }
+
     // `move` handles overlapping regions. Shifting "abcdef" left-into-itself by two yields "cdef" at the front.
     {
         char const expected[] = "cdef"; // After moving "cdef" (offset 2, 4 bytes) to offset 0
         char buffer[] = "abcdef";
         move(buffer, buffer + 2, 4);
         verify(std::memcmp(buffer, expected, 4) == 0);
+    }
+
+    // `move` must preserve `memmove` ordering with misaligned 64-bit transfers in either overlap direction.
+    {
+        alignas(8) char buffer[] = "abcdefghijklmnopqrstuvwx";
+        move(buffer + 1, buffer + 3, 16); // Target precedes source: copy forwards.
+        verify(std::memcmp(buffer, "adefghijklmnopqrsrstuvwx", sizeof(buffer)) == 0);
+    }
+    {
+        alignas(8) char buffer[] = "abcdefghijklmnopqrstuvwx";
+        move(buffer + 3, buffer + 1, 16); // Target follows source: copy backwards.
+        verify(std::memcmp(buffer, "abcbcdefghijklmnopqtuvwx", sizeof(buffer)) == 0);
     }
 
     // `fill` writes a known byte across a known span, leaving a guard byte untouched.
