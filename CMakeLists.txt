@@ -19,8 +19,6 @@
 # * stringzillas::cpus_shared, stringzillas::cuda_shared - from `find_package(stringzillas)`. The `cpus_static` and
 #   `cuda_static` siblings are in-tree only; see the install rules below.
 #
-# The longer spellings (stringzilla::stringzilla_header and the rest) stay available as aliases.
-#
 # Tests for different C++ standards:
 #
 # * stringzilla_test_cpp11: C++11 baseline support.
@@ -422,7 +420,6 @@ endfunction ()
 # bare `header` would be a poor global one, and `EXPORT_NAME` advertises the short spelling to installed consumers.
 add_library(stringzilla_header INTERFACE)
 add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
-add_library(${PROJECT_NAME}::stringzilla_header ALIAS stringzilla_header)
 set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
 target_include_directories(
     stringzilla_header INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}> $<INSTALL_INTERFACE:include>
@@ -454,9 +451,8 @@ set(STRINGZILLA_SHIM_SOURCES
 function (define_stringzilla_library target public_name library_type)
     add_library(${target} ${library_type} ${STRINGZILLA_SHIM_SOURCES})
 
-    # `stringzilla_shared` is published as `stringzilla::shared`. Both spellings resolve, in-tree and installed.
+    # `stringzilla_shared` is published as `stringzilla::shared`, in-tree and installed alike.
     add_library(${PROJECT_NAME}::${public_name} ALIAS ${target})
-    add_library(${PROJECT_NAME}::${target} ALIAS ${target})
     set_target_properties(${target} PROPERTIES EXPORT_NAME ${public_name})
 
     # `SOVERSION` carries the major alone - the only break the C ABI admits - so it tracks the project rather than
@@ -561,7 +557,6 @@ function (define_stringzillas_shared base public_base)
     # suffix stays on the leaf: which one a consumer links is a real choice, not noise.
     add_library(stringzillas::${public_base}_shared ALIAS ${target})
     add_library(stringzillas::${public_base}_static ALIAS ${static})
-    add_library(${PROJECT_NAME}::${target} ALIAS ${target})
     set_target_properties(${target} PROPERTIES EXPORT_NAME ${public_base}_shared)
     set_target_properties(${static} PROPERTIES EXPORT_NAME ${public_base}_static)
 
@@ -724,7 +719,6 @@ function (
     add_library(stringzillas::${public_name} ALIAS ${target})
     set_target_properties(${target} PROPERTIES EXPORT_NAME ${public_name})
     if (kind STREQUAL "SHARED")
-        add_library(${PROJECT_NAME}::${target} ALIAS ${target})
         set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
     endif ()
 

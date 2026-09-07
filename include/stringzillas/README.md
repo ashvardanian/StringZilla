@@ -12,7 +12,6 @@ The CMake project is named `stringzilla`, and it exposes four StringZillas libra
 
 The CPU libraries `stringzillas::cpus_shared` and `stringzillas::cpus_static` are built when `STRINGZILLAS_BUILD_SHARED` is on.
 The CUDA libraries `stringzillas::cuda_shared` and `stringzillas::cuda_static` are additionally built when `STRINGZILLA_BUILD_CUDA` is on.
-The longer `stringzilla::stringzillas_cpus_shared` spelling still resolves, and likewise for the rest.
 
 Pull the project in with `FetchContent` or `add_subdirectory`, then link a target:
 

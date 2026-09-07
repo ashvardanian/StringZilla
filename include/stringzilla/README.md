@@ -59,7 +59,6 @@ target_link_libraries(your_app PRIVATE stringzilla::header)
 
 `add_subdirectory(stringzilla)` works the same way.
 Pulled in as a subproject, `STRINGZILLA_BUILD_SHARED` defaults to off, so only the header target is configured and nothing is compiled.
-The longer `stringzilla::stringzilla_header` spelling still resolves, as do the equivalents for every target below.
 
 ### CMake, Precompiled Library
 
