@@ -175,23 +175,27 @@ class forkunion_executor_t {
 
     /** @brief Logical cores the process may actually use (affinity mask, cgroup cpuset), per the ForkUnion topology. */
     static size_t allowed_cores_count() noexcept {
-        fu_topology_t topology = fu_topology_new();
-        if (!topology) return 0;
-        size_t const count = fu_logical_cores_count(topology);
+        fu_topology_t topology = nullptr;
+        if (fu_topology_new(&topology) != fu_success_k) return 0;
+        size_t count = 0;
+        if (fu_logical_cores_count(topology, &count) != fu_success_k) count = 0;
         fu_topology_delete(topology);
         return count;
     }
 
     /** @brief Spawns @p threads workers (the caller included) over the detected machine topology. */
     status_t try_spawn(size_t threads) noexcept {
-        topology_ = fu_topology_new();
-        pool_ = fu_pool_new("stringzillas", fu_capabilities_all_k);
-        if (!topology_ || !pool_) return status_t::bad_alloc_k;
-        if (!fu_pool_spawn(topology_, pool_, threads, fu_caller_inclusive_k)) return status_t::bad_alloc_k;
+        if (fu_topology_new(&topology_) != fu_success_k) return status_t::bad_alloc_k;
+        if (fu_pool_new("stringzillas", fu_capabilities_all_k, &pool_) != fu_success_k) return status_t::bad_alloc_k;
+        if (fu_pool_spawn(topology_, pool_, threads, fu_caller_inclusive_k) != fu_success_k)
+            return status_t::bad_alloc_k;
         return status_t::success_k;
     }
 
-    size_t threads_count() const noexcept { return fu_pool_threads_count(pool_); }
+    size_t threads_count() const noexcept {
+        size_t threads = 0;
+        return fu_pool_threads_count(pool_, &threads) == fu_success_k ? threads : 0;
+    }
     mutex_t make_mutex() const noexcept { return {}; }
 
     /**
@@ -205,16 +209,19 @@ class forkunion_executor_t {
         if (!topology_) return specs;
         // The deepest cache confined to each compute domain - the shared L3 on uniform machines. The
         // smallest nonzero domain wins so cache-resident chunk sizing never overshoots the tightest cluster.
-        size_t const compute_domains = fu_compute_domains_count(topology_);
+        size_t compute_domains = 0;
+        if (fu_compute_domains_count(topology_, &compute_domains) != fu_success_k) compute_domains = 0;
         size_t confined_cache_bytes = 0;
         for (size_t domain = 0; domain != compute_domains; ++domain) {
-            size_t const domain_cache_bytes = fu_compute_cache_bytes_in(topology_, domain);
+            size_t domain_cache_bytes = 0;
+            if (fu_compute_cache_bytes_in(topology_, domain, &domain_cache_bytes) != fu_success_k) continue;
             if (domain_cache_bytes && (confined_cache_bytes == 0 || domain_cache_bytes < confined_cache_bytes))
                 confined_cache_bytes = domain_cache_bytes;
         }
         if (confined_cache_bytes) specs.l3_bytes = confined_cache_bytes;
-        size_t const logical_cores = fu_logical_cores_count(topology_);
-        size_t const memory_domains = fu_memory_domains_count(topology_);
+        size_t logical_cores = 0, memory_domains = 0;
+        if (fu_logical_cores_count(topology_, &logical_cores) != fu_success_k) logical_cores = 0;
+        if (fu_memory_domains_count(topology_, &memory_domains) != fu_success_k) memory_domains = 0;
         if (logical_cores) {
             specs.sockets = memory_domains ? memory_domains : 1;
             specs.cores_per_socket = sz_max_of_two(logical_cores / specs.sockets, (size_t)1);
