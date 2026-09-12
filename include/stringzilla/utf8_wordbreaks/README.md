@@ -13,25 +13,25 @@ A `↑` cell means there is no dedicated kernel at that backend, so the dispatch
 ## Short Words
 
 | Backend          | `sz_utf8_wordbreaks` |
-| :--------------- | --------------: |
-| Serial @ Xeon4   |       72.6 MB/s |
-| Haswell @ Xeon4  |       14.2 MB/s |
-| Ice Lake @ Xeon4 |       36.2 MB/s |
-| NEON @ Graviton4 |               … |
-| SVE2 @ Graviton4 |               … |
-| SVE @ Graviton3  |               … |
+| :--------------- | -------------------: |
+| Serial @ Xeon4   |            72.6 MB/s |
+| Haswell @ Xeon4  |            14.2 MB/s |
+| Ice Lake @ Xeon4 |            36.2 MB/s |
+| NEON @ Graviton4 |                    … |
+| SVE2 @ Graviton4 |                    … |
+| SVE @ Graviton3  |                    … |
 
 > Measured June 26th, 2026.
 
 ## Long Lines
 
 | Backend          | `sz_utf8_wordbreaks` |
-| :--------------- | --------------: |
-| Serial @ Xeon4   |       45.9 MB/s |
-| Haswell @ Xeon4  |       43.1 MB/s |
-| Ice Lake @ Xeon4 |      115.8 MB/s |
-| NEON @ Graviton4 |               … |
-| SVE2 @ Graviton4 |               … |
-| SVE @ Graviton3  |               … |
+| :--------------- | -------------------: |
+| Serial @ Xeon4   |            45.9 MB/s |
+| Haswell @ Xeon4  |            43.1 MB/s |
+| Ice Lake @ Xeon4 |           115.8 MB/s |
+| NEON @ Graviton4 |                    … |
+| SVE2 @ Graviton4 |                    … |
+| SVE @ Graviton3  |                    … |
 
 > Measured June 26th, 2026.

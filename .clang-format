@@ -7,6 +7,7 @@ ColumnLimit: 120
 # Docstrings are hand-formatted to a fixed 6-space continuation indent; do not let clang-format reflow
 # comment bodies (ReflowComments:true would collapse that to a 1-space hanging indent).
 ReflowComments: false
+CommentPragmas: '^ IWYU pragma:|https?://'
 UseTab: Never
 IndentPPDirectives: None
 InsertNewlineAtEOF: true

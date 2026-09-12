@@ -36,12 +36,14 @@
 #endif
 
 #if !SZ_AVOID_STL
-#include <cstddef>   // `std::size_t`
-#include <cstdint>   // `std::int8_t`
-#include <iosfwd>    // `std::basic_ostream`
-#include <stdexcept> // `std::out_of_range`
+#include <cstddef> // `std::size_t`
+#include <cstdint> // `std::int8_t`
+#include <cstdlib> // `std::rand`
+
 #include <array>     // `std::array`
 #include <bitset>    // `std::bitset`
+#include <iosfwd>    // `std::basic_ostream`
+#include <stdexcept> // `std::out_of_range`
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)

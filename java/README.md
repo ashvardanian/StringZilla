@@ -155,10 +155,10 @@ That is one linear copy of the haystack per call, or per `cursor()` for the iter
 Pass a native `MemorySegment` (an off-heap `Arena`, a direct `ByteBuffer`, an `MMapDirectory` slice, or a Spark Tungsten row) and these run fully in place with no copy.
 
 | Input                                  | Value / offset ops | Pointer search |
-| -------------------------------------- | ------------------ | -------------- |
-| on-heap `byte[]`                       | zero-copy          | copies once    |
-| heap `MemorySegment` (e.g. `BytesRef`) | zero-copy          | copies once    |
-| native `MemorySegment` (off-heap)      | zero-copy          | zero-copy      |
+| :------------------------------------- | :----------------: | :------------: |
+| on-heap `byte[]`                       |     zero-copy      |  copies once   |
+| heap `MemorySegment` (e.g. `BytesRef`) |     zero-copy      |  copies once   |
+| native `MemorySegment` (off-heap)      |     zero-copy      |   zero-copy    |
 
 The copy exists only because the JVM hides the address of pinned heap memory.
 For repeated pointer searches over the same large on-heap buffer, wrap it in a native `MemorySegment` once and reuse it.

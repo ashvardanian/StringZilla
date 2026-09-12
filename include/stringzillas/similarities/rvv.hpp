@@ -2468,7 +2468,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         scoring_t dp {substituter_, gap_costs_};
 
         auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
-            cross_cell_destination_t<value_t> destination;
+            cross_cell_destination<value_t> destination;
             destination.primary = results.data + query_index * results.row_stride + candidate_index;
             if (cross_kind == cross_similarities_t::symmetric_k && candidate_index != query_index)
                 destination.mirror = results.data + candidate_index * results.row_stride + query_index;
@@ -2485,8 +2485,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             size_t const shorter = sz_min_of_two(query.size(), candidate.size());
 
             if (shorter == 0) {
-                cross_cell_destination_t<value_t> const destination = destination_for(query_index, candidate_index);
-                cross_cell_writer_t<value_t> {&destination}[0] = sz_max_of_two(query.size(), candidate.size());
+                cross_cell_destination<value_t> const destination = destination_for(query_index, candidate_index);
+                cross_cell_writer<value_t> {&destination}[0] = sz_max_of_two(query.size(), candidate.size());
                 ++cell_index;
                 continue;
             }
@@ -2495,7 +2495,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             size_t const seed_bucket = divide_round_up<size_t>(shorter, 64);
             span<char const> group_shorters[myers_t::lanes_k], group_longers[myers_t::lanes_k];
             size_t group_positions[myers_t::lanes_k];
-            cross_cell_destination_t<value_t> group_destinations[myers_t::lanes_k];
+            cross_cell_destination<value_t> group_destinations[myers_t::lanes_k];
             bool const seed_query_shorter = query.size() <= candidate.size();
             group_shorters[0] = seed_query_shorter ? query : candidate;
             group_longers[0] = seed_query_shorter ? candidate : query;
@@ -2518,7 +2518,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 group_destinations[group] = destination_for(next_query_index, next_candidate_index);
             }
 
-            cross_cell_writer_t<value_t> group_writer;
+            cross_cell_writer<value_t> group_writer;
             group_writer.destinations = group_destinations;
             lane_pairs_view<char> const group_pairs {{group_shorters, group},
                                                      {group_longers, group},
@@ -2530,7 +2530,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                                                     specs);
                     lone_status != status_t::success_k)
                     return lone_status;
-                cross_cell_writer_t<value_t> {&group_destinations[0]}[0] = result_score;
+                cross_cell_writer<value_t> {&group_destinations[0]}[0] = result_score;
                 continue;
             }
             // Bucket 1 (shorter <= 64) takes the single-word kernel, 2..8 the compile-time multiword variant; longer
@@ -2551,7 +2551,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                                                     dummy, specs);
                     lane_status != status_t::success_k)
                     return lane_status;
-                cross_cell_writer_t<value_t> {&group_destinations[lane]}[0] = lane_score;
+                cross_cell_writer<value_t> {&group_destinations[lane]}[0] = lane_score;
             }
         }
         return status_t::success_k;
@@ -2743,13 +2743,13 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         dummy_executor_t dummy;
 
         auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
-            cross_cell_destination_t<value_t> destination;
+            cross_cell_destination<value_t> destination;
             destination.primary = results.data + query_index * results.row_stride + candidate_index;
             if (cross_kind == cross_similarities_t::symmetric_k && candidate_index != query_index)
                 destination.mirror = results.data + candidate_index * results.row_stride + query_index;
             return destination;
         };
-        auto const scatter = [&](cross_cell_destination_t<value_t> const &destination, size_t score) noexcept {
+        auto const scatter = [&](cross_cell_destination<value_t> const &destination, size_t score) noexcept {
             *destination.primary = static_cast<value_t>(score);
             if (destination.mirror) *destination.mirror = static_cast<value_t>(score);
         };
@@ -2807,7 +2807,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             size_t arena_used = 0;
             span<rune_t const> group_shorters[myers_lanes_k], group_longers[myers_lanes_k];
             size_t group_positions[myers_lanes_k];
-            cross_cell_destination_t<value_t> group_destinations[myers_lanes_k];
+            cross_cell_destination<value_t> group_destinations[myers_lanes_k];
             size_t group_query_indices[myers_lanes_k], group_candidate_indices[myers_lanes_k];
             span<rune_t const> seed_shorter, seed_longer;
             if (!transcode_cell(query, candidate, arena_used, seed_shorter, seed_longer)) {
@@ -2866,7 +2866,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
                 ++group;
             }
 
-            cross_cell_writer_t<value_t> group_writer;
+            cross_cell_writer<value_t> group_writer;
             group_writer.destinations = group_destinations;
             lane_pairs_view<rune_t> const group_pairs {{group_shorters, group},
                                                        {group_longers, group},

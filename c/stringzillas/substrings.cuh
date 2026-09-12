@@ -6,9 +6,10 @@
  */
 #ifndef SZS_SUBSTRINGS_CUH_
 #define SZS_SUBSTRINGS_CUH_
-#include "stringzillas.cuh"
 
 #include <cstddef> // `offsetof`
+
+#include "stringzillas.cuh"
 
 #pragma region Dispatch
 

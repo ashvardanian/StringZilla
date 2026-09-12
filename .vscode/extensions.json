@@ -1,12 +1,13 @@
 {
   "recommendations": [
-    "ms-vscode.cpptools-themes",
-    "ms-vscode.cmake-tools",
-    "ms-python.python",
-    "ms-python.black-formatter",
-    "esbenp.prettier-vscode",
-    "yzhang.markdown-all-in-one",
     "aaron-bond.better-comments",
-    "cheshirekow.cmake-format"
+    "cheshirekow.cmake-format",
+    "dprint.dprint",
+    "esbenp.prettier-vscode",
+    "ms-python.black-formatter",
+    "ms-python.python",
+    "ms-vscode.cmake-tools",
+    "ms-vscode.cpptools-themes",
+    "yzhang.markdown-all-in-one"
   ]
 }

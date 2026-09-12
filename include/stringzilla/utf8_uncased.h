@@ -641,7 +641,7 @@ typedef enum {
      *  So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
      *
      *  We inherit most contextual limitations for some of the ASCII characters from
-     * `sz_utf8_uncased_rune_ascii_invariant_k`:
+     *  `sz_utf8_uncased_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)

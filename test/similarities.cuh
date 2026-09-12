@@ -396,7 +396,7 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
  *  executor / spec arguments straight through.
  */
 template <typename engine_type_>
-struct pairwise_via_cross_t {
+struct pairwise_via_cross {
     using engine_t = engine_type_;
     engine_t engine = {};
 
@@ -418,8 +418,8 @@ struct pairwise_via_cross_t {
 
 /** @brief Deduces the engine type so call sites stay terse: `make_pairwise(engine)`. */
 template <typename engine_type_>
-inline pairwise_via_cross_t<engine_type_> make_pairwise(engine_type_ engine) noexcept {
-    return pairwise_via_cross_t<engine_type_> {std::move(engine)};
+inline pairwise_via_cross<engine_type_> make_pairwise(engine_type_ engine) noexcept {
+    return pairwise_via_cross<engine_type_> {std::move(engine)};
 }
 
 #pragma endregion // Helpers

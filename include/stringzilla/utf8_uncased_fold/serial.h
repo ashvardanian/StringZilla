@@ -1599,8 +1599,8 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz
 
 /**
  *  @brief Reverse iterator state for streaming through folded UTF-8 runes backwards.
- * Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently
- * in reverse order.
+ *  Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently
+ *  in reverse order.
  */
 typedef struct {
     sz_cptr_t ptr;           // Current position (points to byte AFTER current sequence)
@@ -1621,10 +1621,10 @@ SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_ite
 
 /**
  *  @brief Get previous folded rune (walking backwards). Returns `sz_false_k` when exhausted.
- * When a codepoint folds to multiple runes (like 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)), returns them in
- * reverse order ('s', then 's'). Malformed UTF-8 is handled losslessly and byte-identically to the forward
- * iterator: a byte that does not begin/end a well-formed codepoint is emitted as a single tagged literal byte and
- * the iterator resyncs by one byte, so the backward rune stream is exactly the reverse of the forward stream.
+ *  When a codepoint folds to multiple runes (like 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)), returns them in
+ *  reverse order ('s', then 's'). Malformed UTF-8 is handled losslessly and byte-identically to the forward
+ *  iterator: a byte that does not begin/end a well-formed codepoint is emitted as a single tagged literal byte and
+ *  the iterator resyncs by one byte, so the backward rune stream is exactly the reverse of the forward stream.
  */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t *it, sz_rune_t *out_rune) {
     // Return pending runes if any (stored in reverse order, consumed in reverse)

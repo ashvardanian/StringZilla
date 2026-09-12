@@ -21,16 +21,17 @@
 #ifndef STRINGZILLAS_SIMILARITIES_SERIAL_HPP_
 #define STRINGZILLAS_SIMILARITIES_SERIAL_HPP_
 
-#include "stringzilla/types.hpp"           // `sz::error_cost_t`
-#include "stringzilla/memory/serial.h"     // `sz_move_serial`
+#include <algorithm>   // `std::min` and `std::max` for cost magnitudes and memory bounds
+#include <atomic>      // `std::atomic` to synchronize threads
+#include <iterator>    // `std::iterator_traits` for iterators
+#include <limits>      // `std::numeric_limits` for numeric types
+#include <type_traits> // `std::enable_if_t` for meta-programming
+
 #include "stringzilla/find/serial.h"       // `sz_find_byteset_serial`
+#include "stringzilla/memory/serial.h"     // `sz_move_serial`
+#include "stringzilla/types.hpp"           // `sz::error_cost_t`
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
 #include "stringzillas/types.hpp"          // `sz::executor_like`
-
-#include <atomic>      // `std::atomic` to synchronize threads
-#include <type_traits> // `std::enable_if_t` for meta-programming
-#include <limits>      // `std::numeric_limits` for numeric types
-#include <iterator>    // `std::iterator_traits` for iterators
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -3267,7 +3268,7 @@ status_t cross_in_parallel_(                                         //
  *      self-similarity case (lower triangle scored once, written to both `[i][j]` and `[j][i]`).
  */
 template <typename value_type_>
-struct cross_cell_destination_t {
+struct cross_cell_destination {
     value_type_ *primary = nullptr;
     value_type_ *mirror = nullptr;
 };
@@ -3279,11 +3280,11 @@ struct cross_cell_destination_t {
  *  symmetric self-similarity, the mirrored cell too.
  */
 template <typename value_type_>
-struct cross_cell_writer_t {
-    cross_cell_destination_t<value_type_> const *destinations = nullptr;
+struct cross_cell_writer {
+    cross_cell_destination<value_type_> const *destinations = nullptr;
 
     struct cell_proxy_t {
-        cross_cell_destination_t<value_type_> destination;
+        cross_cell_destination<value_type_> destination;
         cell_proxy_t &operator=(size_t value) noexcept {
             *destination.primary = static_cast<value_type_>(value);
             if (destination.mirror) *destination.mirror = static_cast<value_type_>(value);
@@ -3469,13 +3470,13 @@ status_t cross_product_candidate_lanes_range_( //
     scratch_space_t fallback_scratch_space = scratch;
 
     auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
-        cross_cell_destination_t<value_t> destination;
+        cross_cell_destination<value_t> destination;
         destination.primary = results.data + query_index * results.row_stride + candidate_index;
         if (is_symmetric && candidate_index != query_index)
             destination.mirror = results.data + candidate_index * results.row_stride + query_index;
         return destination;
     };
-    auto const scatter = [&](cross_cell_destination_t<value_t> const &destination, value_t score) noexcept {
+    auto const scatter = [&](cross_cell_destination<value_t> const &destination, value_t score) noexcept {
         *destination.primary = score;
         if (destination.mirror) *destination.mirror = score;
     };
@@ -3483,7 +3484,7 @@ status_t cross_product_candidate_lanes_range_( //
     dummy_executor_t dummy;
     size_t lengths[narrow_lanes_k];
     size_t block_candidates[narrow_lanes_k];
-    cross_cell_destination_t<value_t> destinations[narrow_lanes_k];
+    cross_cell_destination<value_t> destinations[narrow_lanes_k];
 
     // Row state, refreshed per query-row and read by the emit/tier closures below.
     span<element_t const> query;

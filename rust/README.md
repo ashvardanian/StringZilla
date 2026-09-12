@@ -29,12 +29,12 @@ The crate ships the C/C++ sources and compiles them through a `build.rs` via `cc
 ### Feature Flags
 
 | Feature            | Default | Effect                                             |
-| ------------------ | ------- | -------------------------------------------------- |
-| `std`              | yes     | `std` support, else `no_std`                       |
-| `dynamic-dispatch` | yes     | Runtime SIMD dispatch; disable to bake in one tier |
-| `cpus`             | no      | Multi-threaded CPU backend                         |
-| `cuda`             | no      | CUDA GPU backend; implies `cpus`                   |
-| `rocm`             | no      | ROCm GPU backend; implies `cpus`                   |
+| :----------------- | :-----: | :------------------------------------------------- |
+| `std`              |   yes   | `std` support, else `no_std`                       |
+| `dynamic-dispatch` |   yes   | Runtime SIMD dispatch; disable to bake in one tier |
+| `cpus`             |   no    | Multi-threaded CPU backend                         |
+| `cuda`             |   no    | CUDA GPU backend; implies `cpus`                   |
+| `rocm`             |   no    | ROCm GPU backend; implies `cpus`                   |
 
 Without `std` the crate is `no_std`; `std` is also required for the `BuildSzHasher` integration with `HashMap`/`HashSet`.
 The `cpus` backend compiles the `stringzillas` module and pulls in `allocator-api2` and `stringtape`.

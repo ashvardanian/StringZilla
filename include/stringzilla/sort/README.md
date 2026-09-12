@@ -16,25 +16,25 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so the dispat
 ## Short Words
 
 | Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_uncased` |
-| :--------------- | --------------------: | ---------------------------------: |
-| Standard @ Xeon4 |             22 Mcmp/s |                          27 Mcmp/s |
-| Serial @ Xeon4   |             96 Mcmp/s |                          28 Mcmp/s |
-| Haswell @ Xeon4  |            140 Mcmp/s |                          57 Mcmp/s |
-| Skylake @ Xeon4  |            114 Mcmp/s |                          64 Mcmp/s |
-| NEON @ Graviton4 |                     … |                                  … |
-| SVE @ Graviton3  |                     … |                                  … |
+| :--------------- | --------------------: | ----------------------------: |
+| Standard @ Xeon4 |             22 Mcmp/s |                     27 Mcmp/s |
+| Serial @ Xeon4   |             96 Mcmp/s |                     28 Mcmp/s |
+| Haswell @ Xeon4  |            140 Mcmp/s |                     57 Mcmp/s |
+| Skylake @ Xeon4  |            114 Mcmp/s |                     64 Mcmp/s |
+| NEON @ Graviton4 |                     … |                             … |
+| SVE @ Graviton3  |                     … |                             … |
 
 > Measured June 26th, 2026.
 
 ## Long Lines
 
 | Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_uncased` |
-| :--------------- | --------------------: | ---------------------------------: |
-| Standard @ Xeon4 |             64 Mcmp/s |                          70 Mcmp/s |
-| Serial @ Xeon4   |            148 Mcmp/s |                          30 Mcmp/s |
-| Haswell @ Xeon4  |            169 Mcmp/s |                          30 Mcmp/s |
-| Skylake @ Xeon4  |            165 Mcmp/s |                          34 Mcmp/s |
-| NEON @ Graviton4 |                     … |                                  … |
-| SVE @ Graviton3  |                     … |                                  … |
+| :--------------- | --------------------: | ----------------------------: |
+| Standard @ Xeon4 |             64 Mcmp/s |                     70 Mcmp/s |
+| Serial @ Xeon4   |            148 Mcmp/s |                     30 Mcmp/s |
+| Haswell @ Xeon4  |            169 Mcmp/s |                     30 Mcmp/s |
+| Skylake @ Xeon4  |            165 Mcmp/s |                     34 Mcmp/s |
+| NEON @ Graviton4 |                     … |                             … |
+| SVE @ Graviton3  |                     … |                             … |
 
 > Measured June 26th, 2026.

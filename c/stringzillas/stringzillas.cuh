@@ -13,15 +13,15 @@
 #include <string_view> // For `std::string_view`
 #include <variant>     // For `std::variant`
 
-#include <stringzillas/stringzillas.h>   // StringZillas library header
-#include <stringzillas/substrings.hpp>   // C++ templates for multi-pattern search
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 #include <stringzillas/similarities.hpp> // C++ templates for string similarity
+#include <stringzillas/stringzillas.h>   // StringZillas library header
+#include <stringzillas/substrings.hpp>   // C++ templates for multi-pattern search
 
 #if SZ_USE_CUDA
-#include <stringzillas/substrings.cuh>   // Parallel multi-pattern search in CUDA
 #include <stringzillas/fingerprints.cuh> // Parallel string processing in CUDA
 #include <stringzillas/similarities.cuh> // Parallel string similarity in CUDA
+#include <stringzillas/substrings.cuh>   // Parallel multi-pattern search in CUDA
 #endif
 
 namespace sz = ashvardanian::stringzilla;
@@ -83,7 +83,7 @@ struct sz_sequence_u64tape_as_cpp_container_t {
     std::string_view operator[](std::size_t index) const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
         sz_assert_(index < tape_->count && "Index out of bounds");
-        return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
+        return {tape_->data + tape_->offsets[index], (std::size_t)(tape_->offsets[index + 1] - tape_->offsets[index])};
     }
 
     /** @brief The contiguous block the elements slice; starts wherever `offsets[0]` points. */
@@ -120,7 +120,7 @@ struct sz_sequence_u32tape_as_cpp_container_t {
     std::string_view operator[](std::size_t index) const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
         sz_assert_(index < tape_->count && "Index out of bounds");
-        return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
+        return {tape_->data + tape_->offsets[index], (std::size_t)(tape_->offsets[index + 1] - tape_->offsets[index])};
     }
 
     /** @brief The contiguous block the elements slice; starts wherever `offsets[0]` points. */
@@ -171,8 +171,7 @@ struct strided_rows {
 
 /**
  *  @brief Convenience class for strided pointer arithmetic.
- *  @see
- * https://github.com/ashvardanian/less_slow.cpp/blob/b21507f7143f8175b92d0b2b2d827b3bd4bb081b/less_slow.cpp#L2593-L2641
+ *  @see https://github.com/ashvardanian/less_slow.cpp/blob/b21507f7143f8175b92d0b2b2d827b3bd4bb081b/less_slow.cpp#L2593-L2641
  */
 template <typename value_type_>
 class strided_ptr {

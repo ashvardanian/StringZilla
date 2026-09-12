@@ -36,7 +36,7 @@ An empty cell is genuinely-missing data.
 
 | Backend          |               Byte Sum |                   Hash |         Multi-seed Hash |               SHA-256 |    Multi-state SHA-256 |
 | :--------------- | ---------------------: | ---------------------: | ----------------------: | --------------------: | ---------------------: |
-| Standard @ Xeon4 | 0.20 GB/s · 38 Mhash/s | 0.18 GB/s · 35 Mhash/s |                       - |                     - |                      - |
+| Standard @ Xeon4 | 0.20 GB/s · 38 Mhash/s | 0.18 GB/s · 35 Mhash/s |                       … |                     … |                      … |
 | Serial @ Xeon4   | 0.19 GB/s · 36 Mhash/s |  0.03 GB/s · 6 Mhash/s |  0.03 GB/s ·  6 Mhash/s | 0.02 GB/s · 3 Mhash/s |  0.02 GB/s · 3 Mhash/s |
 | Westmere @ Xeon4 |                      ↑ | 0.18 GB/s · 35 Mhash/s | 0.91 GB/s · 175 Mhash/s |                     ↑ |                      ↑ |
 | Goldmont @ Xeon4 |                      ↑ |                      ↑ |                       ↑ | 0.05 GB/s · 9 Mhash/s | 0.06 GB/s · 11 Mhash/s |
@@ -52,7 +52,7 @@ An empty cell is genuinely-missing data.
 
 | Backend          |               Byte Sum |                   Hash |          Multi-seed Hash |               SHA-256 |   Multi-state SHA-256 |
 | :--------------- | ---------------------: | ---------------------: | -----------------------: | --------------------: | --------------------: |
-| Standard @ Xeon4 | 2.74 GB/s · 21 Mhash/s | 3.00 GB/s · 23 Mhash/s |                        - |                     - |                     - |
+| Standard @ Xeon4 | 2.74 GB/s · 21 Mhash/s | 3.00 GB/s · 23 Mhash/s |                        … |                     … |                     … |
 | Serial @ Xeon4   | 1.94 GB/s · 15 Mhash/s |  0.17 GB/s · 1 Mhash/s |   0.18 GB/s ·  1 Mhash/s | 0.18 GB/s · 1 Mhash/s | 0.18 GB/s · 1 Mhash/s |
 | Westmere @ Xeon4 |                      ↑ | 2.94 GB/s · 23 Mhash/s |   6.36 GB/s · 49 Mhash/s |                     ↑ |                     ↑ |
 | Goldmont @ Xeon4 |                      ↑ |                      ↑ |                        ↑ | 0.71 GB/s · 5 Mhash/s | 0.81 GB/s · 6 Mhash/s |

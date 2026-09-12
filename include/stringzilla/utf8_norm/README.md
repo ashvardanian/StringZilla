@@ -17,27 +17,27 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 ## Short Words
 
 | Backend          | `sz_utf8_norm` | `sz_utf8_find_denormalized` |
-| :--------------- | -------------: | -----------------------: |
-| Serial @ Xeon4   |     112.2 MB/s |               131.5 MB/s |
-| Haswell @ Xeon4  |     121.4 MB/s |               211.6 MB/s |
-| Skylake @ Xeon4  |     122.6 MB/s |               217.8 MB/s |
-| Ice Lake @ Xeon4 |     122.0 MB/s |               212.6 MB/s |
-| NEON @ Graviton4 |              … |                        … |
-| SVE2 @ Graviton4 |              … |                        … |
-| SVE @ Graviton3  |              … |                        … |
+| :--------------- | -------------: | --------------------------: |
+| Serial @ Xeon4   |     112.2 MB/s |                  131.5 MB/s |
+| Haswell @ Xeon4  |     121.4 MB/s |                  211.6 MB/s |
+| Skylake @ Xeon4  |     122.6 MB/s |                  217.8 MB/s |
+| Ice Lake @ Xeon4 |     122.0 MB/s |                  212.6 MB/s |
+| NEON @ Graviton4 |              … |                           … |
+| SVE2 @ Graviton4 |              … |                           … |
+| SVE @ Graviton3  |              … |                           … |
 
 > Measured June 26th, 2026.
 
 ## Long Lines
 
 | Backend          | `sz_utf8_norm` | `sz_utf8_find_denormalized` |
-| :--------------- | -------------: | -----------------------: |
-| Serial @ Xeon4   |     215.5 MB/s |               266.4 MB/s |
-| Haswell @ Xeon4  |     376.5 MB/s |               492.6 MB/s |
-| Skylake @ Xeon4  |     372.7 MB/s |               530.7 MB/s |
-| Ice Lake @ Xeon4 |     379.9 MB/s |               530.2 MB/s |
-| NEON @ Graviton4 |              … |                        … |
-| SVE2 @ Graviton4 |              … |                        … |
-| SVE @ Graviton3  |              … |                        … |
+| :--------------- | -------------: | --------------------------: |
+| Serial @ Xeon4   |     215.5 MB/s |                  266.4 MB/s |
+| Haswell @ Xeon4  |     376.5 MB/s |                  492.6 MB/s |
+| Skylake @ Xeon4  |     372.7 MB/s |                  530.7 MB/s |
+| Ice Lake @ Xeon4 |     379.9 MB/s |                  530.2 MB/s |
+| NEON @ Graviton4 |              … |                           … |
+| SVE2 @ Graviton4 |              … |                           … |
+| SVE @ Graviton3  |              … |                           … |
 
 > Measured June 26th, 2026.

@@ -12,15 +12,17 @@
 #ifndef STRINGZILLAS_FINGERPRINTS_SERIAL_HPP_
 #define STRINGZILLAS_FINGERPRINTS_SERIAL_HPP_
 
-#include "stringzilla/types.hpp"  // `sz::error_cost_t`
-#include "stringzillas/types.hpp" // `sz::executor_like`
-
+#include <cmath> // `std::fabsf` for `f32_rolling_hasher`
 #include <cstddef>
-#include <limits>      // `std::numeric_limits` for numeric types
+
+#include <algorithm>   // `std::min` and `std::max` for window widths and rolling minimums
 #include <iterator>    // `std::iterator_traits` for iterators
-#include <cmath>       // `std::fabsf` for `f32_rolling_hasher`
+#include <limits>      // `std::numeric_limits` for numeric types
 #include <numeric>     // `std::gcd` for `choose_coprime_modulo`
 #include <type_traits> // `std::is_unsigned` for the rolling hashers' wraparound requirement
+
+#include "stringzilla/types.hpp"  // `sz::error_cost_t`
+#include "stringzillas/types.hpp" // `sz::executor_like`
 
 namespace ashvardanian {
 namespace stringzillas {

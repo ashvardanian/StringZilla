@@ -426,7 +426,7 @@ void run(void) {
 The device scope is the single knob for __where__ and __how widely__ an engine runs, and the same engine handle can be driven by any scope.
 
 | Scope      | Initializer                        | Targets                 |
-| ---------- | ---------------------------------- | ----------------------- |
+| :--------- | :--------------------------------- | :---------------------- |
 | Default    | `szs_device_scope_init_default`    | System defaults         |
 | CPU slice  | `szs_device_scope_init_cpu_cores`  | A fraction of CPU cores |
 | GPU device | `szs_device_scope_init_gpu_device` | One CUDA GPU            |

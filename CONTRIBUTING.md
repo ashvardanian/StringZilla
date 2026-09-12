@@ -339,21 +339,21 @@ STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS
 
 The benchmark harness reads these environment variables:
 
-| Variable                      | Description                                                                          |              Default |
-| :----------------------------- | :------------------------------------------------------------------------------------ | -------------------: |
-| `STRINGWARS_DATASET`           | Path to the input corpus                                                              |             required |
-| `STRINGWARS_DATASET_LIMIT`     | Byte cap on the dataset read, e.g. `64mb`; `0` reads the whole file                    |          0 (whole file) |
-| `STRINGWARS_TOKENS`            | Tokenization mode: `file`, `lines`, `words`, or a positive integer for N-grams        |    per-benchmark |
-| `STRINGWARS_UNIQUE`            | `1` sorts the tokenized set and drops duplicates before benchmarking                  |                   off |
-| `STRINGWARS_FILTER`            | Regex over benchmark names; only matching backends run                                |                (all) |
-| `STRINGWARS_DURATION`          | Seconds per benchmark (longer = steadier numbers)                                     | 1 debug / 10 release |
-| `STRINGWARS_SEED`              | Non-zero shuffles tokens; `0` keeps deterministic order                               |                    0 |
-| `STRINGWARS_BATCH`             | Comma-separated batch-size override (skips the largest sweep)                         |      backend default |
-| `STRINGWARS_BATCH_PER_CORE`    | Pairs scored per core for the parallel similarity benchmarks; scales with device parallelism | 16 debug / 256 release |
-| `STRINGWARS_STRESS`            | Run the correctness stress phase (`0` to skip while timing)                           |                   on |
-| `STRINGWARS_STRESS_DURATION`   | Seconds per stress-test                                                               | 1 debug / 10 release |
-| `STRINGWARS_STRESS_DIR`        | Directory for stress-test failure logs                                                |                 .tmp |
-| `STRINGWARS_STRESS_LIMIT`      | Number of stress-test failures tolerated before aborting                              |                     1 |
+| Variable                     | Description                                                                                  |                Default |
+| :--------------------------- | :------------------------------------------------------------------------------------------- | ---------------------: |
+| `STRINGWARS_DATASET`         | Path to the input corpus                                                                     |               required |
+| `STRINGWARS_DATASET_LIMIT`   | Byte cap on the dataset read, e.g. `64mb`; `0` reads the whole file                          |         0 (whole file) |
+| `STRINGWARS_TOKENS`          | Tokenization mode: `file`, `lines`, `words`, or a positive integer for N-grams               |          per-benchmark |
+| `STRINGWARS_UNIQUE`          | `1` sorts the tokenized set and drops duplicates before benchmarking                         |                    off |
+| `STRINGWARS_FILTER`          | Regex over benchmark names; only matching backends run                                       |                  (all) |
+| `STRINGWARS_DURATION`        | Seconds per benchmark (longer = steadier numbers)                                            |   1 debug / 10 release |
+| `STRINGWARS_SEED`            | Non-zero shuffles tokens; `0` keeps deterministic order                                      |                      0 |
+| `STRINGWARS_BATCH`           | Comma-separated batch-size override (skips the largest sweep)                                |        backend default |
+| `STRINGWARS_BATCH_PER_CORE`  | Pairs scored per core for the parallel similarity benchmarks; scales with device parallelism | 16 debug / 256 release |
+| `STRINGWARS_STRESS`          | Run the correctness stress phase (`0` to skip while timing)                                  |                     on |
+| `STRINGWARS_STRESS_DURATION` | Seconds per stress-test                                                                      |   1 debug / 10 release |
+| `STRINGWARS_STRESS_DIR`      | Directory for stress-test failure logs                                                       |                   .tmp |
+| `STRINGWARS_STRESS_LIMIT`    | Number of stress-test failures tolerated before aborting                                     |                      1 |
 
 For a fast inner loop, scope to one backend on a small dataset, cap the dataset size, skip the stress phase, and use short runs:
 

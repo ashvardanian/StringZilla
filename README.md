@@ -658,7 +658,7 @@ StringZilla provides Unicode-aware uncased substring search that handles the ful
 This includes multi-character expansions:
 
 | Character | Codepoint | UTF-8 Bytes | Case-Folds To | Result Bytes |
-| --------- | --------- | ----------- | ------------- | ------------ |
+| :-------- | :-------- | :---------- | :------------ | :----------- |
 | `ß`       | U+00DF    | C3 9F       | `ss`          | 73 73        |
 | `ﬃ`       | U+FB03    | EF AC 83    | `ffi`         | 66 66 69     |
 | `İ`       | U+0130    | C4 B0       | `i` + `◌̇`     | 69 CC 87     |

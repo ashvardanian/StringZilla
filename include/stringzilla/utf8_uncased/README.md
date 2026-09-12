@@ -15,25 +15,25 @@ A `↑` cell means there is no dedicated `sz_utf8_uncased_search_<isa>` kernel a
 ## Short Words
 
 | Backend          | `sz_utf8_uncased_search` |
-| :--------------- | ---------------------: |
-| Serial @ Xeon4   |              0.09 GB/s |
-| Haswell @ Xeon4  |              3.54 GB/s |
-| Ice Lake @ Xeon4 |              3.33 GB/s |
-| NEON @ Graviton4 |                      … |
-| SVE2 @ Graviton4 |                      … |
-| SVE @ Graviton3  |                      … |
+| :--------------- | -----------------------: |
+| Serial @ Xeon4   |                0.09 GB/s |
+| Haswell @ Xeon4  |                3.54 GB/s |
+| Ice Lake @ Xeon4 |                3.33 GB/s |
+| NEON @ Graviton4 |                        … |
+| SVE2 @ Graviton4 |                        … |
+| SVE @ Graviton3  |                        … |
 
 > Measured June 26th, 2026.
 
 ## Long Lines
 
 | Backend          | `sz_utf8_uncased_search` |
-| :--------------- | ---------------------: |
-| Serial @ Xeon4   |              0.11 GB/s |
-| Haswell @ Xeon4  |              2.36 GB/s |
-| Ice Lake @ Xeon4 |              4.60 GB/s |
-| NEON @ Graviton4 |                      … |
-| SVE2 @ Graviton4 |                      … |
-| SVE @ Graviton3  |                      … |
+| :--------------- | -----------------------: |
+| Serial @ Xeon4   |                0.11 GB/s |
+| Haswell @ Xeon4  |                2.36 GB/s |
+| Ice Lake @ Xeon4 |                4.60 GB/s |
+| NEON @ Graviton4 |                        … |
+| SVE2 @ Graviton4 |                        … |
+| SVE @ Graviton3  |                        … |
 
 > Measured June 26th, 2026.

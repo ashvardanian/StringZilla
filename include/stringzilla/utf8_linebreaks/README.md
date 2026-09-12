@@ -13,25 +13,25 @@ Results are split into a Short Words workload (whitespace-delimited tokens avera
 ## Short Words
 
 | Backend          | `sz_utf8_linebreaks` |
-| :--------------- | ------------------: |
-| Serial @ Xeon4   |           20.9 MB/s |
-| Haswell @ Xeon4  |            9.8 MB/s |
-| Ice Lake @ Xeon4 |           39.8 MB/s |
-| NEON @ Graviton4 |                   … |
-| SVE2 @ Graviton4 |                   … |
-| SVE @ Graviton3  |                   … |
+| :--------------- | -------------------: |
+| Serial @ Xeon4   |            20.9 MB/s |
+| Haswell @ Xeon4  |             9.8 MB/s |
+| Ice Lake @ Xeon4 |            39.8 MB/s |
+| NEON @ Graviton4 |                    … |
+| SVE2 @ Graviton4 |                    … |
+| SVE @ Graviton3  |                    … |
 
 > Measured June 26th, 2026.
 
 ## Long Lines
 
 | Backend          | `sz_utf8_linebreaks` |
-| :--------------- | ------------------: |
-| Serial @ Xeon4   |            2.5 MB/s |
-| Haswell @ Xeon4  |           25.3 MB/s |
-| Ice Lake @ Xeon4 |           92.8 MB/s |
-| NEON @ Graviton4 |                   … |
-| SVE2 @ Graviton4 |                   … |
-| SVE @ Graviton3  |                   … |
+| :--------------- | -------------------: |
+| Serial @ Xeon4   |             2.5 MB/s |
+| Haswell @ Xeon4  |            25.3 MB/s |
+| Ice Lake @ Xeon4 |            92.8 MB/s |
+| NEON @ Graviton4 |                    … |
+| SVE2 @ Graviton4 |                    … |
+| SVE @ Graviton3  |                    … |
 
 > Measured June 26th, 2026.

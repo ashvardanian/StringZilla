@@ -80,7 +80,7 @@ It carries one of three internal storage layouts:
 Several read-only properties expose the tape for Apache Arrow / StringTape interop:
 
 | Property                 | Meaning                                    |
-| ------------------------ | ------------------------------------------ |
+| :----------------------- | :----------------------------------------- |
 | `Strs.tape`              | In-place transform to the Arrow layout.    |
 | `Strs.tape_address`      | Address of the tape buffer's first byte.   |
 | `Strs.tape_nbytes`       | Total tape length in bytes.                |
@@ -486,12 +486,12 @@ The result `result[i, j]` is the distance or score between `queries[i]` and `can
 The result matrix is `uint64`.
 
 | Argument       | Default | Meaning                                                                                         |
-| -------------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `match`        | `0`     | Cost of a matching character.                                                                   |
-| `mismatch`     | `1`     | Cost of a substitution.                                                                         |
-| `open`         | `1`     | Cost of opening a gap, meaning an insertion or deletion run.                                    |
-| `extend`       | `1`     | Cost of extending a gap.                                                                        |
-| `capabilities` | `None`  | A capabilities tuple like `('serial', 'parallel')`, or a `DeviceScope` for automatic inference. |
+| :------------- | ------: | :---------------------------------------------------------------------------------------------- |
+| `match`        |     `0` | Cost of a matching character.                                                                   |
+| `mismatch`     |     `1` | Cost of a substitution.                                                                         |
+| `open`         |     `1` | Cost of opening a gap, meaning an insertion or deletion run.                                    |
+| `extend`       |     `1` | Cost of extending a gap.                                                                        |
+| `capabilities` |  `None` | A capabilities tuple like `('serial', 'parallel')`, or a `DeviceScope` for automatic inference. |
 
 ```python
 import stringzilla as sz
@@ -516,7 +516,7 @@ utf8_engine(sz.Strs(["café", "naïve"]), sz.Strs(["caffe", "naive"]))
 Both score from a class-based substitution matrix, and the result matrix is `int64`.
 
 | Argument                   | Meaning                                                                   |
-| -------------------------- | ------------------------------------------------------------------------- |
+| :------------------------- | :------------------------------------------------------------------------ |
 | `byte_to_class`            | A 256-element `uint8` NumPy array mapping each byte to one of 32 classes. |
 | `class_substitution_costs` | A `32x32` `int8` NumPy matrix of costs between classes.                   |
 | `open`                     | Gap-open cost, defaulting to `-1`.                                        |
@@ -578,21 +578,21 @@ The module-level `szs.to_device(strs)` does the same for a `sz.Strs`, which is w
 The needle set is compiled once into an Aho-Corasick automaton and reused across every later call, so the dictionary is paid for once rather than per haystack.
 Construction is itself a device operation — the automaton's tier split is sized against the cache the walk reads through, and a CUDA automaton is uploaded to the device — which is why `device` belongs on the constructor as well as on each call.
 
-| Argument           | Default    | Meaning                                                       |
-| ------------------ | ---------- | ------------------------------------------------------------- |
-| `needles`          | required   | `sz.Strs` of needles, non-empty, valid UTF-8 when folding.     |
-| `case_sensitivity` | `'cased'`  | `'cased'` matches bytes, `'uncased'` folds both sides.         |
-| `device`           | `None`     | `DeviceScope` the automaton is built for and uploaded to.      |
-| `capabilities`     | `None`     | Capabilities tuple restricting the engine, may include `'cuda'`. |
+| Argument           | Default   | Meaning                                                          |
+| :----------------- | :-------- | :--------------------------------------------------------------- |
+| `needles`          | required  | `sz.Strs` of needles, non-empty, valid UTF-8 when folding.       |
+| `case_sensitivity` | `'cased'` | `'cased'` matches bytes, `'uncased'` folds both sides.           |
+| `device`           | `None`    | `DeviceScope` the automaton is built for and uploaded to.        |
+| `capabilities`     | `None`    | Capabilities tuple restricting the engine, may include `'cuda'`. |
 
 Four operations share that automaton, each taking an optional `device` overriding the constructor's:
 
-| Call                                                                  | Returns                                                                    |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `count(haystacks, policy='overlapping')`                               | A `uint64` count per haystack, and the corpus-wide total as an `int`.      |
-| `find(haystacks, policy='overlapping')`                                | Four `uint64` arrays — haystack indices, needle indices, offsets, lengths. |
-| `score_bm25(haystacks, needle_weights, average_document_length, ...)`  | One `float32` score per haystack.                                          |
-| `replace(haystacks, replacements, policy='leftmost-longest')`          | The rewritten tape as `bytes`, and its `uint64` offsets, one per haystack plus one. |
+| Call                                                                  | Returns                                                                             |
+| :-------------------------------------------------------------------- | :---------------------------------------------------------------------------------- |
+| `count(haystacks, policy='overlapping')`                              | A `uint64` count per haystack, and the corpus-wide total as an `int`.               |
+| `find(haystacks, policy='overlapping')`                               | Four `uint64` arrays — haystack indices, needle indices, offsets, lengths.          |
+| `score_bm25(haystacks, needle_weights, average_document_length, ...)` | One `float32` score per haystack.                                                   |
+| `replace(haystacks, replacements, policy='leftmost-longest')`         | The rewritten tape as `bytes`, and its `uint64` offsets, one per haystack plus one. |
 
 `policy` picks how overlaps resolve — `'overlapping'` reports every match, while `'leftmost-longest'` and `'leftmost-first'` each keep a non-overlapping cover.
 `replace` accepts only the two cover policies, since a rewrite cannot substitute two matches at the same byte.
@@ -629,7 +629,7 @@ See [Unified Memory](#unified-memory) above.
 The sketches drive near-duplicate detection, clustering, and multi-pattern search, and share the same device model as the alignment engines.
 
 | Argument        | Default  | Meaning                                      |
-| --------------- | -------- | -------------------------------------------- |
+| :-------------- | :------- | :------------------------------------------- |
 | `ndim`          | required | Dimensions per fingerprint.                  |
 | `window_widths` | `None`   | 1-D `uint64` array of rolling-window widths. |
 | `alphabet_size` | `256`    | Alphabet size.                               |
@@ -667,7 +667,7 @@ hashes, counts = engine(docs)
 Each yields `Str` views into the original buffer, so segmentation stays allocation-free, except `utf8_codepoints`, which yields `int` code points.
 
 | Method / function                                                         | Standard                         | Yields                                                                                 |
-| ------------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------- |
+| :------------------------------------------------------------------------ | :------------------------------- | :------------------------------------------------------------------------------------- |
 | `utf8_codepoints(string)`                                                 | scalar values                    | `int` code points; ill-formed bytes decode to `U+FFFD`, so iteration never raises.     |
 | `utf8_graphemes(string, skip_empty=False)`                                | UAX-29 grapheme clusters         | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
 | `utf8_wordbreaks(string, skip_empty=False)`                               | UAX-29 word boundaries           | all UAX-29 word segments (words and the separators between them; they tile).           |

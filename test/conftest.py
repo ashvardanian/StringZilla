@@ -46,7 +46,7 @@ def log_test_environment():
     """Automatically log environment info before running any tests."""
 
     print()  # New line for better readability
-    print("=== StringZilla Test Environment ===")
+    print("StringZilla Test Environment")
     print(f"Platform: {platform.platform()}")
     print(f"Architecture: {platform.machine()}")
     print(f"Processor: {platform.processor()}")
@@ -75,7 +75,6 @@ def log_test_environment():
             print(f"QEMU env detected; disabling {sve_like} for stability")
             sz.reset_capabilities(desired)
 
-    print("=" * 40)
     print()  # New line for better readability
 
 

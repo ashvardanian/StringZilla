@@ -32,19 +32,21 @@
 #ifndef STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_
 #define STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_
 
-#include "stringzilla/types.hpp"                  // `status_t::status_t`
+#include <limits>      // `std::numeric_limits` for numeric types
+#include <memory>      // `std::allocator_traits` to re-bind the allocator
+#include <type_traits> // `std::enable_if_t` for meta-programming
+#include <variant>     // `std::variant` holds the automaton at whichever state-id width it fits
+
+#include <forkunion/types.hpp> // `indexed_split_t` - the balanced range split every executor uses
+
 #include "stringzilla/memory.h"                   // `sz_copy`
+#include "stringzilla/types.hpp"                  // `status_t::status_t`
 #include "stringzilla/utf8_runes/serial.h"        // `sz_rune_decode`, `sz_rune_encode`
 #include "stringzilla/utf8_uncased.h"             // `sz_utf8_folded_reverse_iter_t`, via its own backends
 #include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`, `sz_ascii_fold_`
 #include "stringzillas/types.hpp"                 // `dummy_executor_t`
 
-#include <forkunion/types.hpp> // `indexed_split_t` - the balanced range split every executor uses
 
-#include <limits>      // `std::numeric_limits` for numeric types
-#include <memory>      // `std::allocator_traits` to re-bind the allocator
-#include <type_traits> // `std::enable_if_t` for meta-programming
-#include <variant>     // `std::variant` holds the automaton at whichever state-id width it fits
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -3071,7 +3073,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         size_t const cores = executor.threads_count();
         fu::indexed_split_t const optimal_split {haystack.size(), cores};
         executor.for_threads([&](size_t core_index) noexcept {
-            fu::indexed_range_t const slice = snapped_subrange_(haystack, optimal_split, core_index);
+            fu::tasks_range_t const slice = snapped_subrange_(haystack, optimal_split, core_index);
             shares[core_index] = rewrite_share_of_core_(haystack, slice.first, slice.first + slice.count, policy,
                                                         replacements, pending_starts_of_(core_index),
                                                         spanned_of_(core_index));
@@ -3132,7 +3134,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
         size_t const longest = max_source_match_bytes();
 
         executor.for_threads([&](size_t core_index) noexcept {
-            fu::indexed_range_t const slice = snapped_subrange_(haystack, optimal_split, core_index);
+            fu::tasks_range_t const slice = snapped_subrange_(haystack, optimal_split, core_index);
             size_t const slice_begin = slice.first, slice_end = slice.first + slice.count;
             size_t const walk_begin = slice_begin >= longest ? slice_begin - longest : 0;
             span<byte_t const> const walked {haystack.data() + walk_begin, slice_end - walk_begin};
@@ -3213,7 +3215,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
             size_t const count_matches_expected_on_this_core = counts_per_core[core_index] -
                                                                count_matches_before_this_core;
 
-            fu::indexed_range_t const optimal_subrange = snapped_subrange_(haystack, optimal_split, core_index);
+            fu::tasks_range_t const optimal_subrange = snapped_subrange_(haystack, optimal_split, core_index);
             byte_t const *optimal_begin = haystack.begin() + optimal_subrange.first;
             byte_t const *const optimal_end = optimal_begin + optimal_subrange.count;
             // An empty dictionary reports zero, where `optimal_end + 0 - 1` would step past the end.
@@ -3250,9 +3252,9 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
      *  otherwise spend treating a continuation byte as malformed. Both ends go through the same snap and one
      *  core's end is the next one's start, so the slices stay an exact partition however the boundaries move.
      */
-    fu::indexed_range_t snapped_subrange_(span<byte_t const> haystack, fu::indexed_split_t const &split,
-                                          size_t core_index) const noexcept {
-        fu::indexed_range_t subrange = split[core_index];
+    fu::tasks_range_t snapped_subrange_(span<byte_t const> haystack, fu::indexed_split_t const &split,
+                                        size_t core_index) const noexcept {
+        fu::tasks_range_t subrange = split[core_index];
         if (case_sensitivity() != substrings_uncased_k) return subrange;
         size_t const begin = sz_utf8_rune_start_at_((cptr_t)haystack.data(), haystack.size(), subrange.first);
         size_t const end = sz_utf8_rune_start_at_((cptr_t)haystack.data(), haystack.size(),
@@ -3297,7 +3299,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
      *  @return Number of matches that @b begin in this core's slice and may end in another core's slice.
      */
     size_t count_matches_in_one_part(span<byte_t const> haystack,
-                                     fu::indexed_range_t const optimal_subrange) const noexcept {
+                                     fu::tasks_range_t const optimal_subrange) const noexcept {
 
         size_t const max_source_match_bytes = sz_min_of_two(this->max_source_match_bytes(), haystack.size());
 
@@ -3344,7 +3346,7 @@ struct substrings<allocator_type_, sz_caps_sp_k, enable_> {
      *              which the preceding core has already counted as its own overlapping tail.
      *  @return Total matches ending anywhere in this core's slice or its overlapping tail.
      */
-    size_t count_short_matches_in_one_part(span<byte_t const> haystack, fu::indexed_range_t const optimal_subrange,
+    size_t count_short_matches_in_one_part(span<byte_t const> haystack, fu::tasks_range_t const optimal_subrange,
                                            size_t &matches_in_prefix) const noexcept {
 
         // One dispatch per core per haystack, outside the walk, so the transition chain below stays monomorphic.

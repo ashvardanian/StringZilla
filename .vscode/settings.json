@@ -9,14 +9,10 @@
     "editor.tabSize": 4
   },
   "[json]": {
-    "editor.defaultFormatter": "vscode.json-language-features",
-    "editor.insertSpaces": true,
-    "editor.tabSize": 2
+    "editor.defaultFormatter": "dprint.dprint"
   },
   "[jsonc]": {
-    "editor.defaultFormatter": "vscode.json-language-features",
-    "editor.insertSpaces": true,
-    "editor.tabSize": 2
+    "editor.defaultFormatter": "dprint.dprint"
   },
   "[python]": {
     "editor.defaultFormatter": "ms-python.black-formatter",
@@ -29,8 +25,7 @@
     "editor.tabSize": 4
   },
   "[yaml]": {
-    "editor.insertSpaces": true,
-    "editor.tabSize": 2
+    "editor.defaultFormatter": "dprint.dprint"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "C_Cpp.dimInactiveRegions": false,
