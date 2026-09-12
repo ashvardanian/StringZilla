@@ -28,7 +28,7 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v3.0.1
+        uses: ashvardanian/tinysemver@v3
         with:
           verbose: "true"
           version-file: "VERSION"
@@ -552,7 +552,7 @@ jobs:
           python-version: 3.x
         # Only `nvcc`, the runtime and the MSVC integration - the full toolkit is several GB.
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
+        uses: Jimver/cuda-toolkit@v0.2.36
         with:
           cuda: "12.9.1"
           method: "network"

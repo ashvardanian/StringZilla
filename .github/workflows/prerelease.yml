@@ -19,6 +19,9 @@ env:
   PYTHON_VERSION: 3.13
   SWIFT_VERSION: 6.2
   PYTHONUTF8: 1
+  WASI_SDK_VERSION: "34"
+  # wasi-threads runs on Wasmtime 46 and older, so the threaded rows take the 36 LTS line.
+  WASMTIME_VERSION: v36.0.15
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
@@ -36,7 +39,7 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v3.0.1
+        uses: ashvardanian/tinysemver@v3
         with:
           verbose: "true"
           version-file: "VERSION"
@@ -86,14 +89,10 @@ jobs:
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
           lscpu
           echo ""
           echo "CPU Info:"
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
@@ -131,7 +130,7 @@ jobs:
           cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ">=1.24"
           cache: false
@@ -225,14 +224,10 @@ jobs:
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
           lscpu
           echo ""
           echo "CPU Info:"
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
         # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
@@ -272,7 +267,7 @@ jobs:
           cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ">=1.24"
           cache: false
@@ -351,14 +346,10 @@ jobs:
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
           lscpu
           echo ""
           echo "CPU Info:"
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
       - name: Install dependencies
@@ -438,16 +429,13 @@ jobs:
 
         # Install CUDA Toolkit
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
+        uses: Jimver/cuda-toolkit@v0.2.36
         with:
           cuda: "12.9.1"
           method: "network"
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
           lscpu
           echo ""
           echo "CPU Info:"
@@ -456,7 +444,6 @@ jobs:
           echo "GPU Info:"
           nvcc --version 2>/dev/null || echo "nvcc not yet installed"
           nvidia-smi 2>/dev/null || echo "nvidia-smi not yet available"
-          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
       - name: Install dependencies
@@ -535,14 +522,10 @@ jobs:
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
           lscpu || true
           echo ""
           echo "CPU Info:"
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
 
       - name: Test Swift
         run: swift test
@@ -574,7 +557,7 @@ jobs:
           cp -L build_shared/libstringzilla_shared.so csharp/runtimes/linux-x64/native/libstringzilla.so
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
@@ -614,7 +597,7 @@ jobs:
 
         # JDK 23: finalized Foreign Function & Memory API (since 22) and Palantir Java Format (needs <= 23).
       - name: Set up JDK
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "23"
@@ -692,14 +675,11 @@ jobs:
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
           echo "Cross-Compilation: ${{ matrix.arch }} → ${{ matrix.target_arch }}"
-          echo "────────────────────────────────────────────────────────────────"
           lscpu
           echo ""
           echo "CPU Info:"
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
 
       - name: Install cross-compilation toolchain
         run: |
@@ -832,8 +812,20 @@ jobs:
           done
 
   test_wasm:
-    name: WebAssembly wasm32-wasip1
+    name: WebAssembly wasm32-wasip1 ${{ matrix.tier }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tier: v128relaxed
+            target_features: "+simd128,+relaxed-simd"
+            relaxed_simd: "y"
+            use_v128relaxed: 1
+          - tier: v128
+            target_features: "+simd128"
+            relaxed_simd: "n"
+            use_v128relaxed: 0
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -842,68 +834,91 @@ jobs:
 
       - name: Install WASI SDK
         run: |
-          WASI_VERSION_FULL=33.0
-          curl -sSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-${WASI_VERSION_FULL}-x86_64-linux.tar.gz" \
+          curl -sSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz" \
             | tar xz -C "$HOME"
-          echo "WASI_SDK_PATH=$HOME/wasi-sdk-${WASI_VERSION_FULL}-x86_64-linux" >> "$GITHUB_ENV"
+          echo "WASI_SDK_PATH=$HOME/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux" >> "$GITHUB_ENV"
 
       - name: Install Wasmtime
         run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
+          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version "$WASMTIME_VERSION"
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1
+          targets: wasm32-wasip1, wasm32-wasip1-threads
 
-      # The C kernels need the WASI SDK clang + sysroot; `build.rs` passes `-msimd128` (+ probed
-      # `-mrelaxed-simd`). Tests run under Wasmtime via the `.cargo/config.toml` runner, single-threaded
-      # (wasm32-wasip1 has no threads).
-      - name: Test Rust with relaxed SIMD128
+      # The C kernels need the WASI SDK clang and sysroot, and compile the SIMD tier that `RUSTFLAGS` declares.
+      # Tests run single-threaded under Wasmtime, which refuses relaxed SIMD in the strict row.
+      - name: Test Rust
         env:
           CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
           AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
           CFLAGS_wasm32_wasip1: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+          RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} --dir .
         run: |
           cargo build --target wasm32-wasip1
           cargo test --release --target wasm32-wasip1 -- --test-threads=1
 
-      - name: Test Rust with baseline SIMD128
-        env:
-          CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
-          AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
-          CFLAGS_wasm32_wasip1: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
-          SZ_USE_V128RELAXED: "0"
-        run: cargo test --release --target wasm32-wasip1 -- --test-threads=1
-
-      # The same C++ test suite every native platform runs, cross-compiled to wasm32-wasip1: the WASI SDK
-      # `eh` multilib plus `-fwasm-exceptions` (exnref flavor) gives working C++ exceptions under
-      # Wasmtime's exceptions proposal, and WASI signal emulation covers the harness hooks. The `utf8`
-      # filter scopes the run to the Unicode families; `test_hash_unit` still asserts on wasm and is
-      # tracked separately, so the filter widens once that is fixed.
+      # The C++ suite every native platform runs; the strict row's module runs with relaxed SIMD refused.
+      # The `utf8` filter stays until `test_hash_unit` stops asserting on wasm.
       - name: Build C++ tests for wasm32-wasip1
         run: |
           cmake -B build_wasi \
-            -DCMAKE_TOOLCHAIN_FILE=${WASI_SDK_PATH}/share/cmake/wasi-sdk-p1.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32.cmake \
             -DWASI_SDK_PREFIX=${WASI_SDK_PATH} \
+            -DSZ_USE_V128RELAXED=${{ matrix.use_v128relaxed }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DSTRINGZILLA_BUILD_TEST=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=0 \
             -DSTRINGZILLA_BUILD_SHARED=0 \
             -DSTRINGZILLAS_BUILD_SHARED=0 \
-            -DSTRINGZILLA_BUILD_CUDA=0 \
-            -DCMAKE_C_FLAGS="-msimd128 -D_WASI_EMULATED_SIGNAL" \
-            -DCMAKE_CXX_FLAGS="-msimd128 -D_WASI_EMULATED_SIGNAL -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false" \
-            -DCMAKE_EXE_LINKER_FLAGS="-lwasi-emulated-signal -lunwind -fwasm-exceptions"
+            -DSTRINGZILLA_BUILD_CUDA=0
           cmake --build build_wasi --target stringzilla_test_cpp20
       - name: Test C++ UTF-8 suites under Wasmtime
         env:
           SZ_TESTS_FILTER: utf8
           SZ_TESTS_MULTIPLIER: "0.05"
         run: |
-          wasmtime -W exceptions=y --dir . --env SZ_TESTS_FILTER --env SZ_TESTS_MULTIPLIER \
+          wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} -W exceptions=y \
+            --dir . --env SZ_TESTS_FILTER --env SZ_TESTS_MULTIPLIER \
             build_wasi/stringzilla_test_cpp20
+
+      # The parallel kernels and the ForkUnion pool behind `cpus` need wasi-threads; no test drives them yet.
+      - name: Build Rust with threads and the `cpus` feature
+        if: matrix.tier == 'v128relaxed'
+        env:
+          CC_wasm32_wasip1_threads: ${{ env.WASI_SDK_PATH }}/bin/clang
+          CXX_wasm32_wasip1_threads: ${{ env.WASI_SDK_PATH }}/bin/clang++
+          AR_wasm32_wasip1_threads: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
+          CFLAGS_wasm32_wasip1_threads: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+          CXXFLAGS_wasm32_wasip1_threads: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+          WASI_SYSROOT: ${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+          RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
+        run: cargo build --target wasm32-wasip1-threads --features cpus
+
+      # The parallel suite needs wasi-threads: one imported shared memory and Wasmtime's threads switches on.
+      - name: Build parallel C++ tests for wasm32-wasip1-threads
+        if: matrix.tier == 'v128relaxed'
+        run: |
+          cmake -B build_wasi_threads \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32-threads.cmake \
+            -DWASI_SDK_PREFIX=${WASI_SDK_PATH} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTRINGZILLA_BUILD_TEST=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=0 \
+            -DSTRINGZILLA_BUILD_SHARED=0 \
+            -DSTRINGZILLAS_BUILD_SHARED=0 \
+            -DSTRINGZILLA_BUILD_CUDA=0
+          cmake --build build_wasi_threads --target stringzillas_test_cpp20
+      - name: Test parallel C++ suites under Wasmtime
+        if: matrix.tier == 'v128relaxed'
+        env:
+          SZ_TESTS_MULTIPLIER: "0.05"
+        run: |
+          wasmtime -W relaxed-simd=y -W threads=y -W exceptions=y -S threads=y --dir . --env SZ_TESTS_MULTIPLIER \
+            build_wasi_threads/stringzillas_test_cpp20
 
   test_macos:
     name: MacOS
@@ -917,14 +932,10 @@ jobs:
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
           sysctl -a | grep machdep.cpu || true
           echo ""
           echo "System Info:"
           system_profiler SPHardwareDataType || true
-          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
       - name: Install dependencies
@@ -1012,11 +1023,7 @@ jobs:
       - name: Log hardware capabilities
         shell: powershell
         run: |
-          Write-Host "────────────────────────────────────────────────────────────────"
-          Write-Host "Hardware Capabilities"
-          Write-Host "────────────────────────────────────────────────────────────────"
           Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed | Format-List
-          Write-Host "────────────────────────────────────────────────────────────────"
 
       - name: Build C/C++
         shell: cmd
@@ -1097,14 +1104,10 @@ jobs:
 
       - name: Log hardware capabilities
         run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
           lscpu || true
           echo ""
           echo "CPU Info:"
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
       - name: Build C/C++

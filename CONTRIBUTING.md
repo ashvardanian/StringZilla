@@ -553,6 +553,25 @@ cmake -D CMAKE_BUILD_TYPE=Release \
 cmake --build build_artifacts --config Release --parallel
 ```
 
+### WebAssembly
+
+Two toolchain files under `cmake/` cover WebAssembly, and both need the [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) and [Wasmtime](https://wasmtime.dev).
+`toolchain-wasm32.cmake` builds `wasm32-wasip1` modules, single-threaded, for the single-string core.
+`toolchain-wasm32-threads.cmake` builds `wasm32-wasip1-threads` modules over one shared memory, which the parallel `stringzillas` kernels and ForkUnion's pools need.
+Point either file at the SDK with `-DWASI_SDK_PREFIX=...` or the `WASI_SDK_PATH` environment variable.
+
+```sh
+export WASI_SDK_PATH=~/wasi-sdk
+cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32.cmake \
+    -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_SHARED=0 -DSTRINGZILLAS_BUILD_SHARED=0 -DCMAKE_BUILD_TYPE=Release
+cmake --build build_wasm --target stringzilla_test_cpp20
+ctest --test-dir build_wasm # runs each .wasm under Wasmtime
+```
+
+A module carries one SIMD tier, so the relaxed-SIMD `v128relaxed` build above is a separate artifact from the strict `v128` one.
+Pass `-DSZ_USE_V128RELAXED=0` for the strict module; the override zeroes the macro and drops `-mrelaxed-simd` at once, so no relaxed opcode reaches the binary.
+Shared libraries stay off in both configurations, since WASI has no dynamic loader.
+
 ## Parallel C++ and CUDA
 
 ```sh

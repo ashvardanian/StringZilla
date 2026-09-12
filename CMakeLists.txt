@@ -147,8 +147,8 @@ elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc64|PPC64|POWERPC64")
     set(SZ_IS_64BIT_POWER_ TRUE)
     message(STATUS "Platform: PowerPC64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "wasm")
-    # WebAssembly is 32-bit; SIMD comes from the toolchain's `-msimd128` / `-mrelaxed-simd`, and the
-    # `set_architecture_simd_definitions` wasm branch keys off `CMAKE_SYSTEM_NAME`, not a 64-bit flag.
+    # WebAssembly is 32-bit; its SIMD tier is the toolchain's `-msimd128` / `-mrelaxed-simd`, which `types.h`
+    # reads off the predefined macros, so no 64-bit flag and no probe verdict is set here.
     message(STATUS "Platform: WebAssembly (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")

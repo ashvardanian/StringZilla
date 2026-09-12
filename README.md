@@ -23,7 +23,7 @@ StringZilla is the GodZilla of string libraries, accelerating exact and fuzzy ma
 - It can be __3x faster than LibC__ doing substring search on Arm servers, and __9x on Apple Silicon__, where the system `strstr` is weaker.
 - It can be __10-70x faster than ICU__, both ICU4C and its Rust successor ICU4X, in UTF-8 handling, case folding, segmentation, and tokenization.
 - It can be __over 10x faster than NVIDIA's own libraries__ for on-GPU Levenshtein, NW, and SW edit distances.
-- It comes with built-in custom __WebAssembly__ backend for sandboxed browser, DBMS, & LLM environments, custom __RVV__ backend for RISC-V CPUs, __PowerPC__ backend for IBM Power servers, __LoongArch__ for Chinese domestic chips, and more!
+- It comes with built-in custom __WebAssembly__ backend for sandboxed WASI, DBMS, & LLM environments, custom __RVV__ backend for RISC-V CPUs, __PowerPC__ backend for IBM Power servers, __LoongArch__ for Chinese domestic chips, and more!
 
 Reach for it from your language of choice:
 

@@ -115,6 +115,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
     // Dynamic dispatch (default) enables the COMPILE set - the load-time table masks what the CPU lacks -
     // but only where the built library has real runtime detection (`probes/runtime_detection.c`); static
     // dispatch bakes the best tier into every symbol with no guard, so it enables COMPILE ∩ RUN.
+    // WebAssembly engines validate a module whole, so there both models enable COMPILE ∩ the target description.
     let is_wasm = target_arch == "wasm32" || target_arch == "wasm64";
     let dynamic_dispatch = env::var("CARGO_FEATURE_DYNAMIC_DISPATCH").is_ok();
     let target_features: std::collections::HashSet<String> = env::var("CARGO_CFG_TARGET_FEATURE")
@@ -135,7 +136,9 @@ fn build_stringzilla() -> HashMap<String, bool> {
             .as_ref()
             .map_or(described, |tokens| tokens.contains(probe.token));
         let default_on = compilable
-            && if dynamic_dispatch {
+            && if is_wasm {
+                described
+            } else if dynamic_dispatch {
                 runtime_detectable || described
             } else {
                 runnable
@@ -207,15 +210,8 @@ fn build_stringzilla() -> HashMap<String, bool> {
         );
     }
 
-    // WebAssembly selects SIMD through instruction flags rather than per-function `target` attributes, so
-    // mirror the enabled tiers onto the compiler invocation; the flags define `__wasm_simd128__` /
-    // `__wasm_relaxed_simd__`, which `types.h` maps back to `SZ_USE_V128` / `SZ_USE_V128RELAXED`.
-    if is_wasm {
-        if *flags.get("SZ_USE_V128RELAXED").unwrap_or(&false) {
-            build.flag("-msimd128").flag("-mrelaxed-simd");
-        } else if *flags.get("SZ_USE_V128").unwrap_or(&false) {
-            build.flag("-msimd128");
-        }
+    for flag in wasm_simd_flags(&flags) {
+        build.flag(flag);
     }
 
     // The compile probes already rejected anything this toolchain cannot build, so failures here are real
@@ -259,7 +255,7 @@ struct IsaProbe {
     /// Cumulative Rust `target_feature` tokens a CPU needs to RUN this tier, mirroring the nesting that
     /// `types.h` closes downward (NEON ⊂ SVE ⊂ SVE2; WESTMERE ⊂ HASWELL ⊂ SKYLAKE ⊂ ICELAKE; Goldmont and
     /// the Arm crypto tiers are orthogonal). This is the fallback RUN answer when the machine cannot be
-    /// probed (cross builds); empty means "the build flags are the description" (the wasm tiers).
+    /// probed (cross builds), and the only answer on WebAssembly.
     runs_on: &'static [&'static str],
 }
 
@@ -380,7 +376,7 @@ const WASM_PROBES: &[IsaProbe] = &[
         gcc_flags: &["-msimd128", "-mrelaxed-simd"],
         msvc_flags: &[],
         token: "v128relaxed",
-        runs_on: &[],
+        runs_on: &["simd128", "relaxed-simd"],
     },
     IsaProbe {
         define: "SZ_USE_V128",
@@ -388,7 +384,7 @@ const WASM_PROBES: &[IsaProbe] = &[
         gcc_flags: &["-msimd128"],
         msvc_flags: &[],
         token: "v128",
-        runs_on: &[],
+        runs_on: &["simd128"],
     },
 ];
 
@@ -634,6 +630,21 @@ fn no_builtin_flags() -> &'static [&'static str] {
     }
 }
 
+/// WebAssembly selects SIMD through whole-module flags rather than per-function `target` attributes, so both builds
+/// mirror the enabled tier onto the compiler; the flags define `__wasm_simd128__` / `__wasm_relaxed_simd__`, which
+/// `types.h` maps back to `SZ_USE_V128` / `SZ_USE_V128RELAXED`. Empty off WebAssembly.
+fn wasm_simd_flags(flags: &HashMap<String, bool>) -> &'static [&'static str] {
+    if !matches!(env::var("CARGO_CFG_TARGET_ARCH").as_deref(), Ok("wasm32" | "wasm64")) {
+        &[]
+    } else if *flags.get("SZ_USE_V128RELAXED").unwrap_or(&false) {
+        &["-msimd128", "-mrelaxed-simd"]
+    } else if *flags.get("SZ_USE_V128").unwrap_or(&false) {
+        &["-msimd128"]
+    } else {
+        &[]
+    }
+}
+
 /// A fresh StringZillas build with the configuration shared by every backend: include paths, the dispatch/NUMA
 /// defines, the C++20 standard, common flags, and the architecture flags inherited from the StringZilla build.
 /// Each backend adds only its own sources (and, for CUDA, its nvcc flags) on top.
@@ -652,6 +663,9 @@ fn stringzillas_base_build(serial_flags: &HashMap<String, bool>) -> cc::Build {
     // Apply the same architecture-specific flags as determined for stringzilla.
     for (flag, enabled) in serial_flags.iter() {
         build.define(flag, if *enabled { "1" } else { "0" });
+    }
+    for flag in wasm_simd_flags(serial_flags) {
+        build.flag(flag);
     }
     build
 }
