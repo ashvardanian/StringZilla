@@ -6,11 +6,11 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probe_(SVE2AES SOURCE probes/arm_sve2aes.c)
-sz_isa_probe_(SVE2 SOURCE probes/arm_sve2.c)
-sz_isa_probe_(SVE SOURCE probes/arm_sve.c)
-sz_isa_probe_(NEONSHA SOURCE probes/arm_neonsha.c)
-sz_isa_probe_(NEONAES SOURCE probes/arm_neonaes.c)
-sz_isa_probe_(NEON SOURCE probes/arm_neon.c)
+sz_instruction_set_probe_(SVE2AES SOURCE probes/arm_sve2aes.c)
+sz_instruction_set_probe_(SVE2 SOURCE probes/arm_sve2.c)
+sz_instruction_set_probe_(SVE SOURCE probes/arm_sve.c)
+sz_instruction_set_probe_(NEONSHA SOURCE probes/arm_neonsha.c)
+sz_instruction_set_probe_(NEONAES SOURCE probes/arm_neonaes.c)
+sz_instruction_set_probe_(NEON SOURCE probes/arm_neon.c)
 
-set(SZ_ISA_CAPABILITIES "SVE2AES;SVE2;SVE;NEONSHA;NEONAES;NEON")
+sz_build_instruction_set_definitions_("Arm" "SVE2AES;SVE2;SVE;NEONSHA;NEONAES;NEON")

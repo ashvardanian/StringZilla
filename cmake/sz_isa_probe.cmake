@@ -2,41 +2,64 @@
 # same files the Cargo build compiles. A per-capability compile probe asks what the toolchain can emit;
 # one executed machine probe asks what this machine can run. Runtime-dispatched targets enable everything
 # compilable and trust the load-time dispatch table; comptime-dispatched targets require a capability to
-# pass both probes. Per-architecture modules declare `SZ_ISA_CAPABILITIES`, newest first.
+# pass both probes. Per-architecture modules call `sz_instruction_set_probe_` per tier, newest first, then
+# `sz_build_instruction_set_definitions_`, which fills the cached `sz_compile_definitions_` and
+# `sz_run_definitions_` lists of `SZ_USE_<TIER>=0/1` that the targets take.
+
+include_guard(GLOBAL)
 
 # Probe verdicts are cached, but they answer for one set of compiler flags: changing them in the same
-# build tree must re-ask every question, or the wrong kernels get enabled with no message.
+# build tree must re-ask every question, or the wrong kernels get enabled with no message. A fresh tree
+# holds nothing stale, and sweeping it would erase a preset `-D sz_target_<tier>_compiles` verdict.
 set(sz_probe_key_ "${CMAKE_C_COMPILER}|${CMAKE_C_FLAGS}|${CMAKE_TOOLCHAIN_FILE}")
 if (NOT "${SZ_PROBE_KEY}" STREQUAL "${sz_probe_key_}")
     if (DEFINED SZ_PROBE_KEY)
         message(STATUS "Toolchain changed - re-running the ISA probes")
+        get_cmake_property(sz_cache_entries_ CACHE_VARIABLES)
+        list(FILTER sz_cache_entries_ INCLUDE REGEX "^sz_target_.*_(compiles|flags)$")
+        foreach (sz_cache_entry_ IN LISTS sz_cache_entries_)
+            unset(${sz_cache_entry_} CACHE)
+        endforeach ()
     endif ()
-    unset(SZ_PROBED_CAPABILITIES CACHE)
-    unset(SZ_COMPILABLE_CAPABILITIES CACHE)
     unset(SZ_RUNTIME_DETECTABLE CACHE)
     unset(SZ_MACHINE_CAPABILITIES CACHE)
-    set(SZ_PROBE_KEY "${sz_probe_key_}" CACHE INTERNAL "Toolchain the cached probe verdicts answer for")
+    set(SZ_PROBE_KEY
+        "${sz_probe_key_}"
+        CACHE INTERNAL "Toolchain the cached probe verdicts answer for"
+    )
 endif ()
+set(sz_compile_definitions_
+    ""
+    CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for runtime-dispatched units"
+)
+set(sz_run_definitions_
+    ""
+    CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for comptime-dispatched executables"
+)
 
-# Try-compile one capability's probe, recording the verdict in two cached sets - `SZ_PROBED_CAPABILITIES`
-# holds every capability already asked, `SZ_COMPILABLE_CAPABILITIES` the subset whose probe compiled:
+# Try-compile one capability's probe, caching the verdict as `sz_target_<tier>_compiles` and the flags it
+# took as `sz_target_<tier>_flags`; a preset `-D sz_target_<tier>_compiles=0` skips the probe:
 #
-#   sz_isa_probe_(<TIER> SOURCE <probes/file.c> [GNU_FLAGS <flags...>] [MSVC_FLAGS <flags...>])
+#   sz_instruction_set_probe_(<TIER> SOURCE <probes/file.c> [GNU_FLAGS <flags...>] [MSVC_FLAGS <flags...>])
 #
 # `GNU_FLAGS` reach GCC and Clang, both `GNU` frontend variants in CMake terms; only the wasm capabilities
 # need any. The probe file is compiled as-is, byte-identical to what `build.rs` sees: a string round-trip
 # would swallow the backslash line-continuations inside multi-line pragmas and mis-fail the probe. The
 # Release configuration pin is function-scoped, so Debug-only sanitizer runtimes cannot interfere.
-function (sz_isa_probe_ capability_)
-    if (capability_ IN_LIST SZ_PROBED_CAPABILITIES)
+function (sz_instruction_set_probe_ capability_)
+    string(TOLOWER "${capability_}" tier_lowercase_)
+    if (DEFINED sz_target_${tier_lowercase_}_compiles)
         return()
     endif ()
     cmake_parse_arguments(PARSE_ARGV 1 sz_arg "" "SOURCE" "GNU_FLAGS;MSVC_FLAGS")
     if (NOT sz_arg_SOURCE)
-        message(FATAL_ERROR "sz_isa_probe_(${capability_}) requires SOURCE <probes/file.c>")
+        message(FATAL_ERROR "sz_instruction_set_probe_(${capability_}) requires SOURCE <probes/file.c>")
     endif ()
     if (sz_arg_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "sz_isa_probe_(${capability_}) got unexpected arguments: ${sz_arg_UNPARSED_ARGUMENTS}")
+        message(
+            FATAL_ERROR
+                "sz_instruction_set_probe_(${capability_}) got unexpected arguments: ${sz_arg_UNPARSED_ARGUMENTS}"
+        )
     endif ()
     if (MSVC)
         set(sz_probe_flags_ "${sz_arg_MSVC_FLAGS}")
@@ -50,15 +73,21 @@ function (sz_isa_probe_ capability_)
         COMPILE_DEFINITIONS "${sz_probe_flags_}" C_STANDARD 99
         OUTPUT_VARIABLE sz_probe_output_
     )
-    set(sz_probed_capabilities_ ${SZ_PROBED_CAPABILITIES} ${capability_})
-    set(SZ_PROBED_CAPABILITIES "${sz_probed_capabilities_}" CACHE INTERNAL "Tiers whose compile probe already ran")
+    set(sz_probe_verdict_ 0)
+    set(sz_probe_outcome_ "Failed")
     if (sz_probe_succeeded_)
-        set(sz_compilable_capabilities_ ${SZ_COMPILABLE_CAPABILITIES} ${capability_})
-        set(SZ_COMPILABLE_CAPABILITIES "${sz_compilable_capabilities_}" CACHE INTERNAL "Tiers whose compile probe succeeded")
-        message(STATUS "Performing ISA probe ${capability_} - Success")
-    else ()
-        message(STATUS "Performing ISA probe ${capability_} - Failed")
+        set(sz_probe_verdict_ 1)
+        set(sz_probe_outcome_ "Success")
     endif ()
+    set(sz_target_${tier_lowercase_}_compiles
+        ${sz_probe_verdict_}
+        CACHE INTERNAL "Whether the ${capability_} probe compiles with this toolchain"
+    )
+    set(sz_target_${tier_lowercase_}_flags
+        "${sz_probe_flags_}"
+        CACHE INTERNAL "Flags the ${capability_} probe compiled under"
+    )
+    message(STATUS "Performing ISA probe ${capability_} - ${sz_probe_outcome_}")
 endfunction ()
 
 # Compile-probe `probes/runtime_detection.c` into the cached `SZ_RUNTIME_DETECTABLE`: whether the built
@@ -126,4 +155,71 @@ function (sz_machine_capabilities_)
         )
         message(STATUS "Machine capabilities: unknown, run probe unavailable")
     endif ()
+endfunction ()
+
+# Fold the cached verdicts into `sz_compile_definitions_`, the `SZ_USE_<TIER>=0/1` list for
+# runtime-dispatched units, and `sz_run_definitions_`, the same for comptime-dispatched executables that
+# must also run here. A list stays empty when its answer is unknowable, so `types.h` decides under the
+# unit's own flags; `-D SZ_USE_<TIER>=0/1` outranks both lists, except past a failed compile probe.
+function (sz_build_instruction_set_definitions_ architecture_name_ tier_names_)
+    sz_runtime_detectable_()
+    set(compile_verdicts_known_ ${SZ_RUNTIME_DETECTABLE})
+    set(run_verdicts_known_ 0)
+    set(machine_tiers_ "")
+    if (SZ_RUNTIME_DETECTABLE)
+        sz_machine_capabilities_()
+    endif ()
+    if (NOT "${SZ_MACHINE_CAPABILITIES}" STREQUAL "")
+        set(run_verdicts_known_ 1)
+        string(REPLACE "," ";" machine_tiers_ "${SZ_MACHINE_CAPABILITIES}")
+    endif ()
+    set(compile_definitions_ "")
+    set(run_definitions_ "")
+    foreach (tier_ IN LISTS tier_names_)
+        string(TOLOWER "${tier_}" tier_lowercase_)
+        set(toolchain_compiles_ ${sz_target_${tier_lowercase_}_compiles})
+        set(machine_runs_ ${toolchain_compiles_})
+        if (machine_runs_
+            AND run_verdicts_known_
+            AND NOT tier_lowercase_ IN_LIST machine_tiers_
+        )
+            set(machine_runs_ 0)
+        endif ()
+        if (DEFINED SZ_USE_${tier_})
+            message(STATUS "SZ_USE_${tier_} override in effect: ${SZ_USE_${tier_}}")
+            set(toolchain_compiles_ 0)
+            set(machine_runs_ 0)
+        endif ()
+        if (DEFINED SZ_USE_${tier_} AND SZ_USE_${tier_})
+            set(toolchain_compiles_ 1)
+            set(machine_runs_ 1)
+        endif ()
+        if (toolchain_compiles_ AND NOT sz_target_${tier_lowercase_}_compiles)
+            message(WARNING "SZ_USE_${tier_}=1 requested, but its probe does not compile here; ignoring")
+            set(toolchain_compiles_ 0)
+            set(machine_runs_ 0)
+        endif ()
+        if (compile_verdicts_known_ OR DEFINED SZ_USE_${tier_})
+            list(APPEND compile_definitions_ "SZ_USE_${tier_}=${toolchain_compiles_}")
+        endif ()
+        if (run_verdicts_known_ OR DEFINED SZ_USE_${tier_})
+            list(APPEND run_definitions_ "SZ_USE_${tier_}=${machine_runs_}")
+        endif ()
+    endforeach ()
+    if (NOT "${compile_definitions_}" STREQUAL "")
+        list(JOIN compile_definitions_ " " compile_summary_)
+        message(STATUS "${architecture_name_} compile verdicts: ${compile_summary_}")
+    endif ()
+    if (NOT "${run_definitions_}" STREQUAL "")
+        list(JOIN run_definitions_ " " run_summary_)
+        message(STATUS "${architecture_name_} run verdicts: ${run_summary_}")
+    endif ()
+    set(sz_compile_definitions_
+        "${compile_definitions_}"
+        CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for runtime-dispatched units"
+    )
+    set(sz_run_definitions_
+        "${run_definitions_}"
+        CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for comptime-dispatched executables"
+    )
 endfunction ()

@@ -154,9 +154,8 @@ else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
 endif ()
 
-# ISA capability probes: which SIMD capabilities can this toolchain COMPILE, and which can this machine RUN. The probe
-# sources under `probes/` are shared with the Cargo build (`build.rs`); the model and the helper macros are documented
-# in `cmake/sz_isa_probe.cmake`. Each module fills the cached `SZ_COMPILABLE_CAPABILITIES` set and `SZ_ISA_CAPABILITIES`.
+# One compile probe per tier under `probes/`, `SZ_USE_<TIER>=0/1`: the verdicts reach the units that admit tiers at
+# runtime, never `stringzilla_header`, whose consumers derive each tier from their own flags in `types.h`.
 if (SZ_IS_64BIT_X86_)
     include(cmake/sz_x86_isa_probes.cmake)
 elseif (SZ_IS_64BIT_ARM_)
@@ -174,77 +173,10 @@ elseif (
 )
     include(cmake/sz_wasm_isa_probes.cmake)
 else ()
-    # Unknown architecture: no SIMD capability probes, but the shared probe module must still load so the
-    # `sz_runtime_detectable_` / `sz_machine_capabilities_` calls below resolve and configuration
-    # degrades to a serial-only build instead of failing.
+    # Unknown architecture: no tier probes, but the shared module still loads to clear both verdict lists, so
+    # configuration degrades to a serial-only build instead of failing.
     include(cmake/sz_isa_probe.cmake)
-    set(SZ_ISA_CAPABILITIES "")
 endif ()
-
-# SIMD capability verdicts: fold the probe results, the machine answer, and any `-D SZ_USE_<X>=0/1` overrides into two
-# capability sets:
-#   SZ_CAPABILITIES_TO_COMPILE → runtime-dispatched libraries (the load-time table masks what the CPU lacks)
-#   SZ_CAPABILITIES_TO_RUN     → comptime-dispatched tests & benchmarks (the picked capability must also run HERE)
-# When a set is unknowable — no runtime detection on this platform, or a machine we cannot probe — the matching
-# `SZ_*_CAPABILITIES_KNOWN` flag stays 0, targets get no explicit definitions, and `types.h` auto-detection under
-# their own flags decides, as it did before the probes existed.
-sz_runtime_detectable_()
-set(SZ_COMPILE_CAPABILITIES_KNOWN ${SZ_RUNTIME_DETECTABLE})
-set(SZ_RUN_CAPABILITIES_KNOWN 0)
-if (SZ_RUNTIME_DETECTABLE)
-    sz_machine_capabilities_()
-    if (NOT "${SZ_MACHINE_CAPABILITIES}" STREQUAL "")
-        set(SZ_RUN_CAPABILITIES_KNOWN 1)
-        string(REPLACE "," ";" sz_machine_tokens_ "${SZ_MACHINE_CAPABILITIES}")
-    endif ()
-endif ()
-set(SZ_CAPABILITIES_TO_COMPILE "")
-set(SZ_CAPABILITIES_TO_RUN "")
-foreach (sz_capability_ IN LISTS SZ_ISA_CAPABILITIES)
-    if (sz_capability_ IN_LIST SZ_COMPILABLE_CAPABILITIES)
-        set(sz_to_compile_ 1)
-    else ()
-        set(sz_to_compile_ 0)
-    endif ()
-    set(sz_to_run_ ${sz_to_compile_})
-    string(TOLOWER "${sz_capability_}" sz_token_)
-    if (sz_to_run_
-        AND SZ_RUN_CAPABILITIES_KNOWN
-        AND NOT sz_token_ IN_LIST sz_machine_tokens_
-    )
-        set(sz_to_run_ 0)
-    endif ()
-    if (DEFINED SZ_USE_${sz_capability_}) # The user override wins both verdicts, except past a failed compile probe.
-        # A command-line `-D SZ_USE_X` becomes a cache entry that outlives its command line, so every
-        # configure names the overrides in effect - a stale one is visible instead of silently sticky.
-        message(STATUS "SZ_USE_${sz_capability_} override in effect: ${SZ_USE_${sz_capability_}}")
-        if (SZ_USE_${sz_capability_} AND NOT sz_to_compile_)
-            message(WARNING "SZ_USE_${sz_capability_}=1 requested, but its probe does not compile here; ignoring")
-        elseif (SZ_USE_${sz_capability_})
-            set(sz_to_compile_ 1)
-            set(sz_to_run_ 1)
-        else ()
-            set(sz_to_compile_ 0)
-            set(sz_to_run_ 0)
-        endif ()
-    endif ()
-    if (sz_to_compile_)
-        list(APPEND SZ_CAPABILITIES_TO_COMPILE ${sz_capability_})
-    endif ()
-    if (sz_to_run_)
-        list(APPEND SZ_CAPABILITIES_TO_RUN ${sz_capability_})
-    endif ()
-endforeach ()
-if (SZ_COMPILE_CAPABILITIES_KNOWN)
-    message(STATUS "SIMD capabilities to compile: [${SZ_CAPABILITIES_TO_COMPILE}]")
-endif ()
-if (SZ_RUN_CAPABILITIES_KNOWN)
-    message(STATUS "SIMD capabilities to run here: [${SZ_CAPABILITIES_TO_RUN}]")
-endif ()
-unset(sz_to_compile_)
-unset(sz_to_run_)
-unset(sz_token_)
-unset(sz_machine_tokens_)
 
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
 set(STRINGZILLA_IS_MAIN_PROJECT ${PROJECT_IS_TOP_LEVEL})
@@ -288,7 +220,8 @@ endif ()
 # to link when the dynamic one was never built.
 if (STRINGZILLAS_BUILD_SHARED AND NOT STRINGZILLA_BUILD_SHARED)
     message(FATAL_ERROR "STRINGZILLAS_BUILD_SHARED needs STRINGZILLA_BUILD_SHARED - the parallel libraries "
-                        "resolve their `sz_*` calls against it. Enable it, or set STRINGZILLAS_BUILD_SHARED=0.")
+                        "resolve their `sz_*` calls against it. Enable it, or set STRINGZILLAS_BUILD_SHARED=0."
+    )
 endif ()
 
 if (STRINGZILLA_NEEDS_FORKUNION AND NOT TARGET forkunion_header)

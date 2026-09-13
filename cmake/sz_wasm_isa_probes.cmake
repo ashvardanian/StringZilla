@@ -6,7 +6,7 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probe_(V128RELAXED SOURCE probes/wasm_v128relaxed.c GNU_FLAGS -msimd128 -mrelaxed-simd)
-sz_isa_probe_(V128 SOURCE probes/wasm_v128.c GNU_FLAGS -msimd128)
+sz_instruction_set_probe_(V128RELAXED SOURCE probes/wasm_v128relaxed.c GNU_FLAGS -msimd128 -mrelaxed-simd)
+sz_instruction_set_probe_(V128 SOURCE probes/wasm_v128.c GNU_FLAGS -msimd128)
 
-set(SZ_ISA_CAPABILITIES "V128RELAXED;V128")
+sz_build_instruction_set_definitions_("WebAssembly" "V128RELAXED;V128")

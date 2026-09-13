@@ -111,8 +111,7 @@ function (set_optimization_flags target compiler_id target_type)
         # `RelWithDebInfo` matched both lists and asked `ptxas` for `-G` beside `-O2`, which it refuses.
         # `-G` stays with `Debug`; `-lineinfo` carries the same source correlation through optimized code.
         target_compile_options(
-            ${target} PRIVATE "$<$<CONFIG:Debug>:${sz_nvcc_debug_}>"
-                              "$<$<CONFIG:RelWithDebInfo>:${sz_nvcc_lineinfo_}>"
+            ${target} PRIVATE "$<$<CONFIG:Debug>:${sz_nvcc_debug_}>" "$<$<CONFIG:RelWithDebInfo>:${sz_nvcc_lineinfo_}>"
                               "$<$<CONFIG:Release,RelWithDebInfo>:${sz_nvcc_release_}>"
         )
     endif ()
@@ -291,9 +290,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 endfunction ()
 
-# Stamps the architecture id and the per-capability `SZ_USE_*` verdicts onto a target. `mode` is `COMPILE` for
-# runtime-dispatched libraries and `RUN` for comptime-dispatched executables; the verdicts themselves are resolved once
-# at configure time, in the "SIMD capability verdicts" block right after the probe includes.
+# Stamps the architecture id and the `SZ_USE_*` verdicts onto a target: `COMPILE` for runtime-dispatched libraries,
+# `RUN` for comptime-dispatched executables whose picked tier must also run on this machine.
 function (set_architecture_simd_definitions target mode)
     if (SZ_IS_64BIT_X86_)
         target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=1" "SZ_IS_64BIT_ARM_=0")
@@ -303,26 +301,12 @@ function (set_architecture_simd_definitions target mode)
         target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=0")
     endif ()
     if (mode STREQUAL "COMPILE")
-        set(sz_selected_capabilities_ "${SZ_CAPABILITIES_TO_COMPILE}")
-        set(sz_capabilities_known_ "${SZ_COMPILE_CAPABILITIES_KNOWN}")
+        target_compile_definitions(${target} PRIVATE ${sz_compile_definitions_})
     elseif (mode STREQUAL "RUN")
-        set(sz_selected_capabilities_ "${SZ_CAPABILITIES_TO_RUN}")
-        set(sz_capabilities_known_ "${SZ_RUN_CAPABILITIES_KNOWN}")
+        target_compile_definitions(${target} PRIVATE ${sz_run_definitions_})
     else ()
         message(FATAL_ERROR "set_architecture_simd_definitions: mode must be COMPILE or RUN, got `${mode}`")
     endif ()
-    # Without verdicts, `types.h` auto-detection under the target's own flags decides — except for an
-    # explicit `-D SZ_USE_<TIER>`, the one signal that outranks auto-detection.
-    foreach (sz_capability_ IN LISTS SZ_ISA_CAPABILITIES)
-        if (NOT sz_capabilities_known_ AND NOT DEFINED SZ_USE_${sz_capability_})
-            continue()
-        endif ()
-        if (sz_capability_ IN_LIST sz_selected_capabilities_)
-            target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_capability_}=1")
-        else ()
-            target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_capability_}=0")
-        endif ()
-    endforeach ()
 endfunction ()
 
 # Apply the conservative baseline architecture (`-march`/`-mcpu`) that lets one shared/OBJECT compilation host every

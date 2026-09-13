@@ -1,7 +1,7 @@
 # cmake/sz_cuda_probes.cmake — CUDA toolchain probes over the checked-in `probes/cuda_*.cu` sources.
 #
 # Separate from the `sz_*_isa_probes.cmake` family, which asks the C compiler what it can emit and answers in
-# `SZ_ISA_CAPABILITIES`. These ask what NVCC and its host compiler will accept together: NVCC delegates host
+# `sz_target_<tier>_compiles`. These ask what NVCC and its host compiler will accept together: NVCC delegates host
 # compilation but parses the host's headers itself on the device pass, so the pair decides, and putting the
 # question to the C++ compiler gets an answer about the wrong toolchain - it accepts flags NVCC then chokes on.
 

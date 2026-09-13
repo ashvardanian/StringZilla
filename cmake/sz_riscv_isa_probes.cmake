@@ -6,7 +6,7 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probe_(RVVCRYPTO SOURCE probes/riscv_rvvcrypto.c)
-sz_isa_probe_(RVV SOURCE probes/riscv_rvv.c)
+sz_instruction_set_probe_(RVVCRYPTO SOURCE probes/riscv_rvvcrypto.c)
+sz_instruction_set_probe_(RVV SOURCE probes/riscv_rvv.c)
 
-set(SZ_ISA_CAPABILITIES "RVVCRYPTO;RVV")
+sz_build_instruction_set_definitions_("RISC-V" "RVVCRYPTO;RVV")

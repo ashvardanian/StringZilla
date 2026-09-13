@@ -6,6 +6,6 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probe_(LASX SOURCE probes/loongarch_lasx.c)
+sz_instruction_set_probe_(LASX SOURCE probes/loongarch_lasx.c)
 
-set(SZ_ISA_CAPABILITIES "LASX")
+sz_build_instruction_set_definitions_("LoongArch" "LASX")
