@@ -59,6 +59,7 @@ using ashvardanian::stringzillas::substrings_u32_dictionary_t;
 using ashvardanian::stringzillas::substrings_uncased_k;
 
 #if SZ_USE_CUDA
+using ashvardanian::stringzillas::aho_corasick_view;
 using ashvardanian::stringzillas::cuda_executor_t;
 using ashvardanian::stringzillas::substrings_cuda_t;
 using ashvardanian::stringzillas::gpu_specs_fetch;
@@ -1935,6 +1936,120 @@ void test_substrings_construction_equivalence() {
             verify(end_is_boundary && "Uncased match ends mid-codepoint");
         }
     }
+}
+
+#if SZ_USE_CUDA
+
+/** @brief Drains @p count elements of @p device_array into a host vector, since a device-built automaton is
+ *         device-resident and `copy_device_to_host` takes an owning `device_vector` rather than a view. */
+template <typename element_type_>
+std::vector<element_type_> drained_from_device_(element_type_ const *device_array, std::size_t count) {
+    std::vector<element_type_> drained(count);
+    verify(cuMemcpyDtoH(drained.data(), (CUdeviceptr)device_array, count * sizeof(element_type_)) == CUDA_SUCCESS &&
+           "Draining the published automaton must succeed");
+    return drained;
+}
+
+/**
+ *  @brief The double array's own invariants, read back off the device automaton @p automaton published.
+ *
+ *  The device twin of the cold-tier sweep below, and the only check that looks at the packing rather than at
+ *  what a walk over it reports. Two things must hold: a slot names an owner that could have placed it, and
+ *  the failure chain out of every cold slot terminates on the root.
+ */
+template <typename state_id_type_>
+void check_substrings_device_double_array_(aho_corasick_view<state_id_type_> const &automaton) {
+    constexpr state_id_type_ invalid_state_k = std::numeric_limits<state_id_type_>::max();
+    std::size_t const cold_capacity = (std::size_t)automaton.state_count + 255;
+    std::vector<state_id_type_> const check = drained_from_device_(automaton.check, cold_capacity);
+    std::vector<state_id_type_> const base = drained_from_device_(automaton.base, cold_capacity);
+    std::vector<state_id_type_> const fail = drained_from_device_(automaton.fail, cold_capacity);
+
+    bool exercised_cold_tier = false;
+    for (std::size_t slot = automaton.hot_count; slot < cold_capacity; ++slot) {
+        state_id_type_ const owner = check[slot];
+        if (owner == invalid_state_k) continue;
+        verify(owner < automaton.state_count && "Cold slot owned by an out-of-range state");
+        // A hot parent's children share no base - the completed row addresses them - so each checks against
+        // itself, and only a cold owner's slot is reachable as `base + byte`.
+        if ((std::size_t)owner == slot) continue;
+        std::size_t const base_of_owner = base[owner];
+        verify(slot >= base_of_owner && slot - base_of_owner < 256 &&
+               "Cold slot's offset from its owner's base is not a valid byte");
+        exercised_cold_tier = true;
+    }
+    verify(exercised_cold_tier && "The device build never packed a cold row - shrink `l2_bytes` further");
+
+    for (state_id_type_ state = automaton.hot_count; state < automaton.state_count; ++state) {
+        state_id_type_ cursor = state;
+        std::size_t hops = 0;
+        while (cursor != automaton.root && hops <= automaton.state_count) cursor = fail[cursor], ++hops;
+        verify(cursor == automaton.root && "Failure chain never reaches the root");
+    }
+}
+
+#endif // SZ_USE_CUDA
+
+/**
+ *  @brief Derivation on the device, swept across the tier split, against the serial engine as the oracle.
+ *
+ *  `l2_bytes` is the only hook the split has - the device sizes its hot tier against the cache its walk
+ *  reads through - so shrinking it is what drives states out of the hot rows and into the double array.
+ *  A default `gpu_specs_t` on any real GPU makes every state of a fixture this size hot, which leaves the
+ *  ballot search, the stranded fallback and the rank-to-vacancy walk untouched by every other test here.
+ */
+void test_substrings_cuda_construction_equivalence() {
+    std::printf("  - testing CUDA automaton construction across the tier split...\n");
+#if SZ_USE_CUDA
+
+    gpu_specs_t gpu_specs;
+    verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
+    cuda_executor_t executor;
+
+    for (substrings_case_sensitivity_t sensitivity : {substrings_cased_k, substrings_uncased_k}) {
+        std::vector<std::string> const needle_strings = random_short_strings_(scale_iterations(300), 3, 7);
+        std::vector<std::string> const texts = random_haystacks_with_needles_(needle_strings, scale_iterations(64), 24,
+                                                                              96);
+        arrow_strings_tape_t needles, reference_haystacks;
+        verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
+               status_t::success_k);
+        verify(reference_haystacks.try_assign(texts.data(), texts.data() + texts.size()) == status_t::success_k);
+        unified_texts_t const staged {texts};
+
+        substrings_serial_t serial_engine;
+        verify(serial_engine.try_index(needles.view(), sensitivity) == status_t::success_k);
+        substrings_match_set_t serial_keys;
+        collect_overlapping_matches_into_(serial_engine, reference_haystacks.view(), serial_keys);
+        verify(!serial_keys.empty() && "The fixture must produce matches to compare");
+
+        // Zero drives the tier to its floor of one - the root, which has no parent edge to place it and so
+        // can never be cold - and the rest walk the split up until the whole automaton is hot again.
+        std::size_t const hot_bytes[] = {0, 4 * 1024, 64 * 1024, gpu_specs.l2_bytes};
+        bool saw_cold_tier = false, saw_all_hot = false;
+        for (std::size_t variant_index = 0; variant_index < 4; ++variant_index) {
+            gpu_specs_t split_specs = gpu_specs;
+            split_specs.l2_bytes = hot_bytes[variant_index];
+
+            substrings_cuda_t cuda_engine;
+            verify(cuda_engine.try_index(needles.view(), sensitivity, executor, split_specs) == status_t::success_k);
+            verify(cuda_engine.count_needles() == needle_strings.size());
+            verify(cuda_engine.hot_count() >= 1 && "The root is hot at every split");
+            saw_cold_tier |= cuda_engine.hot_count() < cuda_engine.count_states();
+            saw_all_hot |= cuda_engine.hot_count() >= cuda_engine.count_states();
+
+            substrings_match_set_t device_keys;
+            collect_overlapping_matches_into_(cuda_engine, staged.view(), device_keys, executor, split_specs);
+            verify(device_keys == serial_keys && "The device automaton must match the serial engine at every split");
+
+            if (variant_index == 0)
+                cuda_engine.visit_dictionary([](auto const &dictionary) { //
+                    check_substrings_device_double_array_(dictionary.view());
+                });
+        }
+        verify(saw_cold_tier && "The sweep never packed a cold row");
+        verify(saw_all_hot && "The sweep never reached an all-hot automaton");
+    }
+#endif // SZ_USE_CUDA
 }
 
 #pragma endregion Construction

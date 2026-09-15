@@ -73,6 +73,8 @@ int main(int argc, char const **argv) {
     failures += run_test("test_substrings_scoring_unit", test_substrings_scoring_unit);
     failures += run_test("test_substrings_scoring_wide_equivalence", test_substrings_scoring_wide_equivalence);
     failures += run_test("test_substrings_cuda_memory_safety", test_substrings_cuda_memory_safety);
+    failures += run_test("test_substrings_cuda_construction_equivalence",
+                         test_substrings_cuda_construction_equivalence);
     failures += run_test("test_substrings_cuda_equivalence", test_substrings_cuda_equivalence);
     failures += run_test("test_substrings_safety", test_substrings_safety);
     failures += run_test("test_substrings_buffer_safety", test_substrings_buffer_safety);

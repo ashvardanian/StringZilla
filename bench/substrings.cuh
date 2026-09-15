@@ -452,11 +452,23 @@ void bench_substrings_dictionary(                                        //
     // `gpu_specs_t` describes an A100 and would tier this dictionary against hardware that is not here,
     // beside CPU dictionaries tiered against the real machine.
     substrings_cuda_t device_engine;
-    cuda_status_t const device_build_status = device_engine.try_index(needles.terms, cell.sensitivity, device_executor,
-                                                                      gpu_specs);
-    if (device_build_status.status != status_t::success_k)
-        throw std::runtime_error(std::string("Failed to build the device dictionary: ") +
-                                 status_name(device_build_status.status));
+    auto device_build_call = make_substrings_callable(needles.total_bytes, device_engine, [&] {
+        device_engine.reset(); // ? Rebuilding from scratch on every call IS the measured operation
+        return device_engine.try_index(needles.terms, cell.sensitivity, device_executor, gpu_specs);
+    });
+
+    // Against the serial build rather than standalone: both report needle-bytes per second over the same
+    // vocabulary, so the ratio is what deriving the automaton on the device is worth.
+    bench_result_t const device_build_result = bench_nullary(env, "substrings_build_cuda:" + dictionary_label,
+                                                             device_build_call);
+    device_build_result.log(build_result);
+    if (device_build_result.skipped) {
+        cuda_status_t const device_build_status = device_engine.try_index(needles.terms, cell.sensitivity,
+                                                                          device_executor, gpu_specs);
+        if (device_build_status.status != status_t::success_k)
+            throw std::runtime_error(std::string("Failed to build the device dictionary: ") +
+                                     status_name(device_build_status.status));
+    }
 
     // The device engine reports the same per-haystack breakdown, so this compares element-wise against the
     // serial pass that already ran.
