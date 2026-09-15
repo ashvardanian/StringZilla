@@ -32,6 +32,10 @@
 #define SZ_USE_RVVCRYPTO 0
 #define SZ_USE_LASX 0
 #define SZ_USE_POWERVSX 0
+#define SZ_USE_CUDA 0
+#define SZ_USE_KEPLER 0
+#define SZ_USE_HOPPER 0
+#define SZ_USE_ROCM 0
 
 #include <stringzilla/stringzilla.h>
 

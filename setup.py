@@ -125,19 +125,31 @@ def _run_compilations_in_parallel(jobs, max_workers: int) -> None:
         stop_sampler()
 
 
-# CUDA architecture partition, kept in lockstep with the CMake build (`define_stringzillas_cuda_library` in
-# CMakeLists.txt) and build.rs. The base tier executes natively on both supported generations (it is the only
-# implementation for some ops even on sm_90), so it ships SASS for both plus forward PTX. The Kepler tier is
-# superseded by Hopper on sm_90, so it ships sm_80 SASS only, with PTX covering forced-tier corners. The Hopper
-# DPX tier starts at sm_90. sm_80/sm_90 are valid on CUDA 12.x and 13.x alike, so no per-toolkit probing.
+# CUDA architecture partition per tier, in lockstep with `STRINGZILLA_*_ARCHS` in CMakeLists.txt and build.rs:
+# `-real` emits SASS, `-virtual` forward PTX. The base tier is the only implementation for some ops even on sm_90,
+# so it ships both generations; Kepler is superseded by Hopper there and ships sm_80 alone; the DPX tier starts at
+# sm_90. Both are valid on CUDA 12.x and 13.x alike, so no per-toolkit probing.
 _CUDA_ARCHES: Final = ["80-real", "90-real", "90-virtual"]
 _KEPLER_ARCHES: Final = ["80-real", "80-virtual"]
 _HOPPER_ARCHES: Final = ["90-real", "90-virtual"]
 
 
+def _arch_number(arch: str) -> int:
+    """The GPU generation an arch entry names, as nvcc spells it: `"90-real"` → 90."""
+    return int(arch.split("-")[0])
+
+
+# The GPU switches are an exclusive family - an extension carries NVIDIA kernels, AMD kernels, or neither - and
+# every translation unit in one extension has to agree on all of them, so both sets are spelled out rather than
+# left to the header's defaults. `SZ_USE_HOPPER` follows the architectures above rather than the toolkit version,
+# since a newer nvcc asked for sm_80 alone emits no DPX.
+_USE_HOPPER: Final = "1" if max(map(_arch_number, _CUDA_ARCHES)) >= 90 else "0"
+_CUDA_MACROS: Final = [("SZ_USE_CUDA", "1"), ("SZ_USE_HOPPER", _USE_HOPPER), ("SZ_USE_ROCM", "0")]
+_NO_GPU_MACROS: Final = [("SZ_USE_CUDA", "0"), ("SZ_USE_HOPPER", "0"), ("SZ_USE_ROCM", "0")]
+
+
 def _cuda_gencode_flags(cuda_source: str) -> List[str]:
-    """`-gencode` flags for one `.cu`, by tier so no group carries dead SASS. Mirrors the CMake
-    `<x>-real` / `<x>-virtual` arch lists: `-real` emits SASS (`code=sm_x`), `-virtual` emits PTX (`code=compute_x`)."""
+    """`-gencode` flags for one `.cu`, by tier so no group carries dead SASS."""
     stem = os.path.splitext(os.path.basename(cuda_source))[0]
     if stem.endswith("_hopper"):
         arches = _HOPPER_ARCHES
@@ -413,7 +425,7 @@ class CudaBuildExtension(NumpyBuildExt):
                 *_cuda_gencode_flags(cuda_source),
                 "-Xfatbin=--compress-all",  # erases the size cost of multi-arch breadth (compressed ~= single arch)
                 "-DSZ_DYNAMIC_DISPATCH=1",
-                "-DSZ_USE_CUDA=1",
+                *(f"-D{name}={value}" for name, value in _CUDA_MACROS),
             ]
             if use_depfiles:
                 # Emit a depfile so incremental rebuilds can skip translation units with no changed header.
@@ -799,7 +811,7 @@ elif sz_target == "stringzillas-cpus":
             include_dirs=["include", "c/stringzillas", "forkunion/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0"), ("FU_WITH_TOPOLOGY", "0")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("FU_WITH_TOPOLOGY", "0")] + _NO_GPU_MACROS + macros_args,
         ),
     ]
     command_class = {"build_ext": NumpyBuildExt}
@@ -846,7 +858,7 @@ elif sz_target == "stringzillas-cuda":
             include_dirs=["include", "c/stringzillas", "forkunion/include", f"{cuda_home}/include"],
             extra_compile_args=compile_args,
             extra_link_args=cuda_link_args,
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_WITH_TOPOLOGY", "0")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("FU_WITH_TOPOLOGY", "0")] + _CUDA_MACROS + macros_args,
             language="c++",  # Force C++ linking
         ),
     ]

@@ -322,6 +322,9 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
         (sz_cap_rvvcrypto_k * SZ_USE_RVVCRYPTO) |     //
         (sz_cap_lasx_k * SZ_USE_LASX) |               //
         (sz_cap_powervsx_k * SZ_USE_POWERVSX) |       //
+        (sz_cap_cuda_k * SZ_USE_CUDA) |               //
+        (sz_cap_kepler_k * SZ_USE_KEPLER) |           //
+        (sz_cap_hopper_k * SZ_USE_HOPPER) |           //
         (sz_cap_serial_k));
 }
 
@@ -679,8 +682,8 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
 #endif // defined(__powerpc64__) || defined(__powerpc__)
 
 /**
- *  @brief Whether `sz_capabilities_runtime_implementation_` performs real hardware introspection on this
- *         platform, or merely mirrors the compile-time mask because no portable probe exists.
+ *  @brief Whether `sz_capabilities_runtime_cpu_` performs real hardware introspection on this platform,
+ *         or merely mirrors the compile-time mask because no portable probe exists.
  *
  *  This is the header-owned source of truth the build systems infer from - the run probe
  *  (`probes/run_capabilities.c`) reports "no answer" when it is 0, and a compile probe
@@ -703,11 +706,38 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
 #endif
 
 /**
+ *  @brief The CUDA generations the devices on this machine support, or none when there is no usable device.
+ *
+ *  A whole second definition below covers builds that cannot probe, rather than a preprocessor branch inside
+ *  one body. The tier is reported by the device's compute capability, and a later generation reports every
+ *  earlier tier with it - Blackwell runs the Hopper kernels unchanged, so it reports @c hopper too.
+ *
+ *  @c CUDART_VERSION rather than @c SZ_USE_CUDA gates the probe: a translation unit may declare the CUDA
+ *  layer exists and still be compiled as plain C++, where these entry points are not declared.
+ */
+#if SZ_USE_CUDA && defined(CUDART_VERSION)
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) {
+    int devices_count = 0, highest_major = 0;
+    if (cudaGetDeviceCount(&devices_count) != cudaSuccess) return sz_caps_none_k;
+    for (int device = 0; device != devices_count; ++device) {
+        int major = 0;
+        if (cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device) != cudaSuccess) continue;
+        if (major > highest_major) highest_major = major;
+    }
+    if (highest_major == 0) return sz_caps_none_k;
+    if (highest_major >= 9) return (sz_capability_t)(sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k);
+    return (sz_capability_t)(sz_cap_cuda_k | sz_cap_kepler_k);
+}
+#else
+SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) { return sz_caps_none_k; }
+#endif
+
+/**
  *  @brief Function to determine the SIMD capabilities of the current CPU at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
- *  @note Excludes parallel-processing & GPGPU capabilities, which are detected separately in StringZillas.
+ *  @note Excludes parallel-processing capabilities, which are detected separately in StringZillas.
  */
-SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
+SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_cpu_(void) {
 #if !SZ_CAPABILITIES_RUNTIME_DETECTABLE_
     // WebAssembly and OS-less exotic targets expose their SIMD support at compile time only,
     // so runtime capabilities mirror compile-time ones.
@@ -725,6 +755,15 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
 #else
     return sz_capabilities_comptime_implementation_();
 #endif
+}
+
+/**
+ *  @brief Function to determine the CPU and GPU capabilities of this machine at @b runtime.
+ *  @return A bitmask of the capabilities represented as a `sz_capability_t` enum value.
+ *  @note Excludes parallel-processing capabilities, which are detected separately in StringZillas.
+ */
+SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
+    return (sz_capability_t)(sz_capabilities_runtime_cpu_() | sz_capabilities_implementation_cuda_());
 }
 
 #if SZ_DYNAMIC_DISPATCH

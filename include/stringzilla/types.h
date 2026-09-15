@@ -494,20 +494,36 @@
 #endif
 #endif
 
-/*  Kepler-generation logic requires SM30+, but the tier is reached through `__shfl_sync` & friends,
- *  which replaced the un-suffixed warp shuffles in CUDA 9.0. */
+/*  Whether a ROCm layer exists at all is a build-wide switch every build system stamps explicitly, beside
+ *  `SZ_USE_CUDA` and never with it; this fallback only serves header-only use. `__HIP__` alone would also
+ *  catch HIP targeting NVIDIA, so the CUDA switch decides that case - and `__HIP_PLATFORM_AMD__` cannot,
+ *  being defined by `hip_common.h` rather than by the compiler, long after this header is read. */
+#if !defined(SZ_USE_ROCM)
+#if defined(__HIP__) && !SZ_USE_CUDA
+#define SZ_USE_ROCM (1)
+#else
+#define SZ_USE_ROCM (0)
+#endif
+#endif
+
+/*  The Kepler tier is reached through `__shfl_sync`, `__ballot_sync` and `__popc`. Every architecture a
+ *  current toolkit can target has them - CUDA 13 dropped everything below SM75 - so a CUDA compilation
+ *  brings the tier with it. */
 #if !defined(SZ_USE_KEPLER)
-#if SZ_USE_CUDA && defined(CUDART_VERSION) && (CUDART_VERSION >= 9000)
+#if SZ_USE_CUDA
 #define SZ_USE_KEPLER (1)
 #else
 #define SZ_USE_KEPLER (0)
 #endif
 #endif
 
-/*  Hopper-generation logic requires SM90+, which arrives together with the DPX intrinsics it is built
- *  from (`__viaddmax_s16x2`, `__vimax3`, `__reduce_max_sync`) in CUDA 11.8. */
+/*  The Hopper tier needs SM90 code in the shipped binary, which is a property of the architectures this
+ *  build compiles for and not of the toolkit that compiles them - a CUDA 13 toolkit asked for SM75 alone
+ *  emits no DPX and no bulk copies. Both build systems stamp this explicitly; the device pass knows its
+ *  own target, and the host pass cannot scan `__CUDA_ARCH_LIST__` in the preprocessor, so an unstamped
+ *  host pass under-reports rather than claiming code it may not have emitted. */
 #if !defined(SZ_USE_HOPPER)
-#if SZ_USE_CUDA && defined(CUDART_VERSION) && (CUDART_VERSION >= 11080)
+#if SZ_USE_CUDA && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
 #define SZ_USE_HOPPER (1)
 #else
 #define SZ_USE_HOPPER (0)
@@ -899,16 +915,16 @@ typedef enum sz_capability_t {
     sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
 
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |
-        sz_cap_icelake_k,                                               ///< Serial code with Fork Union and Ice Lake
+                     sz_cap_icelake_k,                                  ///< Serial code with Fork Union and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_icelake_k |
-        sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k | sz_cap_sve_k |
-        sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k | sz_cap_rvv_k | sz_cap_rvvcrypto_k |
-        sz_cap_lasx_k | sz_cap_powervsx_k,
+                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k |
+                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k |
+                     sz_cap_rvv_k | sz_cap_rvvcrypto_k | sz_cap_lasx_k | sz_cap_powervsx_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;

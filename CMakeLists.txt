@@ -262,10 +262,13 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
-    # Real SASS for the supported datacenter generations - Ampere sm_80 and Hopper sm_90 (the DPX kernels need only
-    # sm_90, not the H100-locked sm_90a). One constant serves the fallback below, the static library's base tier, and
-    # the GPU launchers; per-tier targets override it with their own sets.
+    # Real SASS per tier, in lockstep with `_CUDA_ARCHES` in setup.py and build.rs. The base tier is the only
+    # implementation for some ops even on sm_90, so it ships both generations; Kepler is superseded by Hopper there
+    # and ships sm_80 alone; the DPX tier starts at sm_90 (plain sm_90, not the H100-locked sm_90a). The shared
+    # library adds forward PTX on top of these; the static one, built for local testing, runs without any JIT.
     set(STRINGZILLA_CUDA_ARCHS "80-real;90-real")
+    set(STRINGZILLA_KEPLER_ARCHS "80-real")
+    set(STRINGZILLA_HOPPER_ARCHS "90-real")
     set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHS})
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
@@ -286,6 +289,31 @@ if (STRINGZILLA_BUILD_CUDA)
     message(STATUS "CUDA Toolkit Version: ${CUDAToolkit_VERSION}")
     message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 endif ()
+
+# Stamps the whole GPU switch family on one target. They are exclusive - a build carries NVIDIA kernels, AMD kernels,
+# or neither - and every translation unit linked into one library has to agree on all three, so no site picks a subset
+# and leans on the header's defaults for the rest. `SZ_USE_HOPPER` follows the architectures compiled rather than the
+# toolkit version, since a newer nvcc asked for sm_80 alone emits no DPX, and it takes the library-wide set because a
+# tier's narrower one would make the Kepler objects disagree with their siblings about which engines exist.
+function (set_gpu_definitions name backend)
+    set(uses_cuda 0)
+    set(carries_hopper 0)
+    set(uses_rocm 0)
+    if (backend STREQUAL "cuda")
+        set(uses_cuda 1)
+        foreach (architecture IN LISTS STRINGZILLA_CUDA_ARCHS)
+            string(REGEX MATCH "^[0-9]+" architecture_number "${architecture}")
+            if (architecture_number AND NOT architecture_number LESS 90)
+                set(carries_hopper 1)
+            endif ()
+        endforeach ()
+    elseif (backend STREQUAL "rocm")
+        set(uses_rocm 1)
+    endif ()
+    target_compile_definitions(
+        ${name} PRIVATE "SZ_USE_CUDA=${uses_cuda}" "SZ_USE_HOPPER=${carries_hopper}" "SZ_USE_ROCM=${uses_rocm}"
+    )
+endfunction ()
 
 # Configuration
 include(GNUInstallDirs)
@@ -331,7 +359,8 @@ function (define_gpu_launcher exec_name cuda_standard target_arch)
     set_source_files_properties(${ARGN} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CUDA)
     target_include_directories(${exec_name} PRIVATE test bench)
     target_link_libraries(${exec_name} PRIVATE forkunion::header)
-    target_compile_definitions(${exec_name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
+    target_compile_definitions(${exec_name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS})
+    set_gpu_definitions(${exec_name} cuda)
     set_target_properties(${exec_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_include_directories(
         ${exec_name} PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
@@ -508,7 +537,8 @@ function (define_stringzillas_shared base public_base)
     # backend declares its own `SZ_USE_*` pair here.
     target_include_directories(${objects} PRIVATE include)
     target_link_libraries(${objects} PRIVATE forkunion::header)
-    target_compile_definitions(${objects} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=0" "SZ_USE_ROCM=0")
+    target_compile_definitions(${objects} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS})
+    set_gpu_definitions(${objects} none)
     target_compile_options(
         ${objects} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O2;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
     )
@@ -567,7 +597,8 @@ function (define_stringzillas_cuda_objects name gpu_archs)
         ${name} SYSTEM PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
                                $<$<BOOL:${STRINGZILLA_CCCL_INCLUDE_DIR}>:${STRINGZILLA_CCCL_INCLUDE_DIR}>
     )
-    target_compile_definitions(${name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
+    target_compile_definitions(${name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS})
+    set_gpu_definitions(${name} cuda)
     target_compile_options(${name} PRIVATE "--expt-relaxed-constexpr" "-Xfatbin=--compress-all")
     set_architecture_simd_definitions(${name} COMPILE)
     set_baseline_architecture_flags(${name} "${CMAKE_CUDA_COMPILER_ID}")
@@ -625,7 +656,10 @@ function (define_stringzillas_cpus_objects name)
     )
     target_include_directories(${name} PRIVATE include)
     target_link_libraries(${name} PRIVATE forkunion::header)
-    target_compile_definitions(${name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
+    # These host units are linked into the CUDA library beside its device objects, so they take the same GPU
+    # switches: a translation unit that disagreed would register a different set of engines.
+    target_compile_definitions(${name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS})
+    set_gpu_definitions(${name} cuda)
     set_architecture_simd_definitions(${name} COMPILE)
     set_baseline_architecture_flags(${name} "${CMAKE_CXX_COMPILER_ID}")
 endfunction ()
@@ -677,19 +711,18 @@ if (STRINGZILLAS_BUILD_SHARED)
     define_stringzillas_shared(stringzillas_cpus cpus ${STRINGZILLAS_API_CPP_SOURCES} ${STRINGZILLAS_CPUS_SOURCES})
 endif ()
 
-# Define StringZillas CUDA shared + static libraries (only if CUDA is available). The static library is for local
-# testing and benchmarking, so it ships real SASS only and runs without any load-time JIT. The shared library is for
-# distribution, so on top of that real SASS it also packages forward-compatible PTX (the `-virtual` entries) that the
-# driver JITs on newer GPUs. The base tier executes natively on both supported generations; the Kepler tier is
-# superseded by Hopper on sm_90, so it ships sm_80 SASS only; the Hopper DPX tier exists only from sm_90.
+# Define StringZillas CUDA shared + static libraries (only if CUDA is available). The static one is for local testing,
+# so it ships the real SASS alone and runs without any load-time JIT; the shared one is for distribution, so it adds
+# the forward PTX the driver JITs on newer GPUs.
 if (STRINGZILLAS_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
     find_package(Threads REQUIRED)
     define_stringzillas_cuda_library(
-        stringzillas_cuda_static cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}" "80-real" "90-real"
+        stringzillas_cuda_static cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}" "${STRINGZILLA_KEPLER_ARCHS}"
+        "${STRINGZILLA_HOPPER_ARCHS}"
     )
     define_stringzillas_cuda_library(
-        stringzillas_cuda_shared cuda_shared SHARED "80-real;90-real;90-virtual" "80-real;80-virtual"
-        "90-real;90-virtual"
+        stringzillas_cuda_shared cuda_shared SHARED "${STRINGZILLA_CUDA_ARCHS};90-virtual"
+        "${STRINGZILLA_KEPLER_ARCHS};80-virtual" "${STRINGZILLA_HOPPER_ARCHS};90-virtual"
     )
 endif ()
 

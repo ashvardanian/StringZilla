@@ -711,6 +711,29 @@ const STRINGZILLAS_CPUS_SOURCES: [&str; 16] = [
     "c/stringzillas/substrings_serial.cpp",
 ];
 
+/// CUDA architecture set, the base tier's from `STRINGZILLA_CUDA_ARCHS` in CMakeLists.txt and `_CUDA_ARCHES` in
+/// setup.py: `-real` emits SASS, `-virtual` forward PTX. Those two give each tier its own narrower set, but the
+/// `cc` crate emits one archive (per-tier splitting would need non-portable linker grouping), so every unit here
+/// shares this one - the extra cubins that gives the Kepler and Hopper units are weight `--compress-all` erases.
+const STRINGZILLAS_CUDA_ARCHES: [&str; 3] = ["80-real", "90-real", "90-virtual"];
+
+/// The GPU generation an arch entry names, as nvcc spells it: `"90-real"` → 90.
+fn cuda_arch_number(arch: &str) -> u32 {
+    let (number, _) = arch.split_once('-').unwrap_or((arch, "real"));
+    number.parse().unwrap_or(0)
+}
+
+/// `-gencode` flags for an architecture list: `"90-real"` → `arch=compute_90,code=sm_90`.
+fn cuda_gencode_flags(arches: &[&str]) -> Vec<String> {
+    let mut flags = Vec::with_capacity(arches.len());
+    for arch in arches {
+        let (number, kind) = arch.split_once('-').unwrap_or((arch, "real"));
+        let code = if kind == "real" { "sm" } else { "compute" };
+        flags.push(format!("-gencode=arch=compute_{number},code={code}_{number}"));
+    }
+    flags
+}
+
 /// Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
 /// from the base set.
 const STRINGZILLAS_CUDA_SOURCES: [&str; 4] = [
@@ -730,7 +753,14 @@ const STRINGZILLAS_HOPPER_SOURCES: [&str; 3] = [
 /// sources fail to compile; the driver-API link directive is emitted only on success.
 fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(), cc::Error> {
     let mut build = stringzillas_base_build(serial_flags);
-    build.cuda(true).define("SZ_USE_CUDA", "1").define("SZ_USE_ROCM", "0");
+    // `SZ_USE_HOPPER` follows the architectures actually compiled, not the toolkit version: a newer nvcc asked
+    // for sm_80 alone emits no DPX, and the host pass cannot scan `__CUDA_ARCH_LIST__` in the preprocessor.
+    let carries_hopper = STRINGZILLAS_CUDA_ARCHES.iter().any(|arch| cuda_arch_number(arch) >= 90);
+    build
+        .cuda(true)
+        .define("SZ_USE_CUDA", "1")
+        .define("SZ_USE_HOPPER", if carries_hopper { "1" } else { "0" })
+        .define("SZ_USE_ROCM", "0");
     // nvcc rejects host compilers newer than it supports (CUDA 12.x caps at GCC 14); honor CUDAHOSTCXX so the caller
     // can point nvcc at a compatible host compiler, mirroring CMAKE_CUDA_HOST_COMPILER.
     if let Ok(host_cxx) = env::var("CUDAHOSTCXX") {
@@ -740,15 +770,7 @@ fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(
     // default to an older standard and `cudafe++` chokes on the C++20 device code (templated lambdas, designated
     // initializers), so set nvcc's own device standard too — as the CMake build does.
     build.flag("-std=c++20").flag("--expt-relaxed-constexpr");
-    // Coverage-parity with the CMake build and setup.py: Ampere (sm_80) and Hopper (sm_90) real SASS plus forward PTX.
-    // Those two give each GPU tier its own narrower set; the `cc` crate emits one static archive (per-tier splitting
-    // would need non-portable linker grouping), so every TU shares this union set - the Hopper providers' extra sm_80
-    // cubin and the Kepler provider's extra sm_90 cubin are dead weight that `--compress-all` erases.
-    for gencode in [
-        "-gencode=arch=compute_80,code=sm_80",
-        "-gencode=arch=compute_90,code=sm_90",
-        "-gencode=arch=compute_90,code=compute_90",
-    ] {
+    for gencode in cuda_gencode_flags(&STRINGZILLAS_CUDA_ARCHES) {
         build.flag(gencode);
     }
     build.flag("-Xfatbin=--compress-all");
@@ -780,7 +802,11 @@ fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(
 /// the `.cu` sources with a plain C++ compiler, so callers fall back to the CPU-only backend.
 fn try_build_stringzillas_rocm(serial_flags: &HashMap<String, bool>) -> Result<(), cc::Error> {
     let mut build = stringzillas_base_build(serial_flags);
-    build.cpp(true).define("SZ_USE_CUDA", "0").define("SZ_USE_ROCM", "1");
+    build
+        .cpp(true)
+        .define("SZ_USE_CUDA", "0")
+        .define("SZ_USE_HOPPER", "0")
+        .define("SZ_USE_ROCM", "1");
     for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
         build.flag(flag);
     }
@@ -793,7 +819,11 @@ fn try_build_stringzillas_rocm(serial_flags: &HashMap<String, bool>) -> Result<(
 /// so it carries no `.cu` sources — only a host C++ compiler is needed.
 fn try_build_stringzillas_cpus(serial_flags: &HashMap<String, bool>) -> Result<(), cc::Error> {
     let mut build = stringzillas_base_build(serial_flags);
-    build.cpp(true).define("SZ_USE_CUDA", "0").define("SZ_USE_ROCM", "0");
+    build
+        .cpp(true)
+        .define("SZ_USE_CUDA", "0")
+        .define("SZ_USE_HOPPER", "0")
+        .define("SZ_USE_ROCM", "0");
     for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
         build.flag(flag);
     }
