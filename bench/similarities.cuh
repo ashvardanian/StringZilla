@@ -71,6 +71,7 @@ using ashvardanian::stringzillas::gpu_specs_fetch;
 using ashvardanian::stringzillas::levenshtein_cuda_t;
 using ashvardanian::stringzillas::levenshtein_hopper_t;
 using ashvardanian::stringzillas::levenshtein_kepler_t;
+using ashvardanian::stringzillas::levenshtein_utf8_cuda_t;
 using ashvardanian::stringzillas::needleman_wunsch_cuda_t;
 using ashvardanian::stringzillas::needleman_wunsch_hopper_t;
 using ashvardanian::stringzillas::smith_waterman_cuda_t;
@@ -539,6 +540,15 @@ void bench_levenshtein(environment_t const &env) {
                         similarities_equality_t {}) // equality check
                 .log(linear_baseline, affine_baseline);
             scramble_accelerated_results(results_affine_accelerated);
+
+            bench_unary(env, "levenshtein_utf8_cuda_"s + scheme.tag + ":" + shape_label, call_utf8_baseline,
+                        similarities_callable<levenshtein_utf8_cuda_t, cuda_executor_t, gpu_specs_t>(
+                            env, results_utf8_accelerated, shape,
+                            levenshtein_utf8_cuda_t {scheme.uniform, scheme.linear}, cuda_executor_t {}, specs),
+                        callable_no_op_t {},        // preprocessing
+                        similarities_equality_t {}) // equality check
+                .log(utf8_baseline);
+            scramble_accelerated_results(results_utf8_accelerated);
 #endif
 
 #if SZ_USE_KEPLER

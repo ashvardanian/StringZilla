@@ -301,6 +301,11 @@ SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8_init(                 
     if (can_use_cuda && can_use_linear_costs)
         return emplace_levenshtein_utf8_engine<szs::levenshtein_utf8_cuda_t>(engine_punned, error_message,
                                                                              substitution_costs, linear_costs);
+    // A GPU scope carries no serial bit, so an affine request would otherwise fall through to the serial engine and
+    // only fail once a kernel launch found a device scope holding CPU code.
+    else if (can_use_cuda)
+        return propagate_error(sz::status_t::device_code_mismatch_k, error_message,
+                               "Affine UTF-8 Levenshtein has no GPU backend; use linear gap costs or a CPU scope");
 #endif // SZ_USE_CUDA
 
     bool const can_use_serial = (capabilities & sz_cap_serial_k) == sz_cap_serial_k;
@@ -310,8 +315,6 @@ SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8_init(                 
     else
         return emplace_levenshtein_utf8_engine<szs::affine_levenshtein_utf8_serial_t>(engine_punned, error_message,
                                                                                       substitution_costs, affine_costs);
-
-    return propagate_error(sz::status_t::unknown_k, error_message, "No supported UTF-8 Levenshtein backends available");
 }
 
 SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8(                            //

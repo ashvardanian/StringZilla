@@ -86,27 +86,23 @@ template __global__ void affine_frontier_init_across_cuda_device_<              
     u64_t, u64_t, sz_minimize_distance_k, sz_similarity_global_k, cuda_similarity_task<char>>( //
     cuda_similarity_task<char> *, u64_t *, u64_t *, u64_t *, u32_t *, u32_t, u32_t, affine_gap_costs_t const);
 
-template __global__ void unit_utf8_score_across_cuda_device_<              //
-    8U, u16_t, u64_t, cuda_similarity_task<char>>(                         //
-    cuda_similarity_task<char> *, u16_t *, u16_t *, u32_t *, u32_t, u32_t, //
+/*  The codepoint device tier reuses the byte tiled scorer through a `rune_cursor_t`, so only the score kernel needs
+ *  a second instantiation - the frontier-seed sibling reads only lengths, so the byte instantiations above serve it. */
+template __global__ void score_across_cuda_device_<                                                            //
+    8U, char, u16_t, u64_t, uniform_substitution_costs_t,                                                      //
+    sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k, cuda_similarity_task<char>, rune_cursor_t>( //
+    cuda_similarity_task<char> *, u16_t *, u16_t *, u32_t *, u32_t, u32_t,                                     //
     uniform_substitution_costs_t const, linear_gap_costs_t const);
-template __global__ void unit_utf8_score_across_cuda_device_<              //
-    8U, u32_t, u64_t, cuda_similarity_task<char>>(                         //
-    cuda_similarity_task<char> *, u32_t *, u32_t *, u32_t *, u32_t, u32_t, //
+template __global__ void score_across_cuda_device_<                                                            //
+    8U, char, u32_t, u64_t, uniform_substitution_costs_t,                                                      //
+    sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k, cuda_similarity_task<char>, rune_cursor_t>( //
+    cuda_similarity_task<char> *, u32_t *, u32_t *, u32_t *, u32_t, u32_t,                                     //
     uniform_substitution_costs_t const, linear_gap_costs_t const);
-template __global__ void unit_utf8_score_across_cuda_device_<              //
-    8U, u64_t, u64_t, cuda_similarity_task<char>>(                         //
-    cuda_similarity_task<char> *, u64_t *, u64_t *, u32_t *, u32_t, u32_t, //
+template __global__ void score_across_cuda_device_<                                                            //
+    8U, char, u64_t, u64_t, uniform_substitution_costs_t,                                                      //
+    sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k, cuda_similarity_task<char>, rune_cursor_t>( //
+    cuda_similarity_task<char> *, u64_t *, u64_t *, u32_t *, u32_t, u32_t,                                     //
     uniform_substitution_costs_t const, linear_gap_costs_t const);
-template __global__ void unit_utf8_frontier_init_across_cuda_device_< //
-    u16_t, u64_t, cuda_similarity_task<char>>(                        //
-    cuda_similarity_task<char> *, u16_t *, u16_t *, u32_t *, u32_t, u32_t, linear_gap_costs_t const);
-template __global__ void unit_utf8_frontier_init_across_cuda_device_< //
-    u32_t, u64_t, cuda_similarity_task<char>>(                        //
-    cuda_similarity_task<char> *, u32_t *, u32_t *, u32_t *, u32_t, u32_t, linear_gap_costs_t const);
-template __global__ void unit_utf8_frontier_init_across_cuda_device_< //
-    u64_t, u64_t, cuda_similarity_task<char>>(                        //
-    cuda_similarity_task<char> *, u64_t *, u64_t *, u32_t *, u32_t, u32_t, linear_gap_costs_t const);
 
 template struct levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 template struct levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;

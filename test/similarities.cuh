@@ -2085,10 +2085,9 @@ void test_similarities_cross_product_equivalence() {
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_200, empty_set,
         cuda_executor_t {}, first_gpu_specs);
 
-    // CUDA UTF-8 rune scoring. This is the only GPU UTF-8 coverage in this file: it pins the GPU engine's
-    // whole-batch tier routing, which, unlike the byte engine, never consults `task.density`.
-    // Linear costs only: the library header `include/stringzillas/similarities.cuh` extern-templates just that
-    // one for the GPU, and affine UTF-8 is documented as staying on the CPU.
+    // The only GPU UTF-8 coverage here. Each config straddles a tier cutoff, so one batch spans the Myers,
+    // register and device runs at once rather than landing the whole matrix on one kernel. Linear costs only:
+    // affine UTF-8 has no GPU instantiation and fails at init.
     {
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_cuda_oracle {};
         auto const utf8_cuda_baseline = [&utf8_cuda_oracle](arrow_strings_view_t queries,
@@ -2100,9 +2099,9 @@ void test_similarities_cross_product_equivalence() {
             return levenshtein_distances_utf8<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {};
         };
 
-        // Lengths are in runes, and the engine picks one tier for the whole batch, so each config lands the entire
-        // matrix on a different kernel: register (<= 128 runes), warp anti-diagonal, then the tiled device sweep
-        // (>= `tiled_promotion_min_shorter_k`).
+        // Lengths are in runes. Each config centres on one kernel: single-word Myers (<= 64 runes), the register
+        // recurrence (both sides <= 128), multi-word Myers (<= 256 runes, only where the registers refuse), the warp
+        // anti-diagonal, then the tiled device sweep (>= `tiled_promotion_min_shorter_k`).
         fuzzy_config_t const utf8_register_tier {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
         fuzzy_config_t const utf8_register_candidates {"AÉ中😀", /* batch_size */ 12, /* min */ 1, /* max */ 48};
         fuzzy_config_t const utf8_warp_tier {"AÉ中😀", /* batch_size */ 3, /* min */ 200, /* max */ 400};
@@ -2114,8 +2113,44 @@ void test_similarities_cross_product_equivalence() {
         check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_device_tier,
                                                    utf8_device_tier, cuda_executor_t {}, first_gpu_specs);
 
-        // Empty matrices, and empty strings mixed into a non-empty batch - the shapes whose results the whole-batch
-        // router leaves to the kernels themselves, since it never separates degenerate cells out.
+        // One batch spanning every rune cutoff at once - 64 (single-word Myers), 128 (register), 256 (multi-word
+        // Myers). Per-task routing has to split these into separate runs; whole-batch routing would sink them all
+        // to the slowest tier and still agree with the oracle, so only a mixed batch can tell the two apart.
+        fuzzy_config_t const utf8_straddling {"AÉ中😀", /* batch_size */ 16, /* min */ 1, /* max */ 300};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_straddling,
+                                                   utf8_straddling, cuda_executor_t {}, first_gpu_specs);
+
+        // The warp-cooperative Myers tier, where lane `w` owns word `w` of the bit-vector state. Its three shapes
+        // cover 512 / 1024 / 2048 runes with block widths of 8 / 4 / 2 warps, and the batch has to straddle 2048 so
+        // the cap itself is exercised alongside the pairs that fall past it to the tiled wavefront.
+        fuzzy_config_t const utf8_cooperative_tier {"AÉ中😀", /* batch_size */ 3, /* min */ 500, /* max */ 1100};
+        fuzzy_config_t const utf8_cooperative_cap {"AÉ中😀", /* batch_size */ 3, /* min */ 2000, /* max */ 2100};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_cooperative_tier,
+                                                   utf8_cooperative_tier, cuda_executor_t {}, first_gpu_specs);
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_cooperative_cap,
+                                                   utf8_cooperative_cap, cuda_executor_t {}, first_gpu_specs);
+
+        // A short pattern against a very long text. Both Myers tiers accept these however long the other side runs,
+        // which is what keeps them off the tiled wavefront whose frontier that long side would otherwise size.
+        fuzzy_config_t const utf8_short_patterns {"AÉ中😀", /* batch_size */ 6, /* min */ 1, /* max */ 40};
+        fuzzy_config_t const utf8_long_texts {"AÉ中😀", /* batch_size */ 6, /* min */ 3000, /* max */ 3200};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_short_patterns,
+                                                   utf8_long_texts, cuda_executor_t {}, first_gpu_specs);
+
+        // Pure ASCII diverts the whole batch to the byte engine, whose distances are already rune distances. Every
+        // other fixture here is multi-byte, so nothing else reaches that path; and a single multi-byte string has to
+        // hold the whole batch back from it, which the mixed alphabet below covers.
+        fuzzy_config_t const utf8_ascii_only {"ABC", /* batch_size */ 8, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const utf8_mostly_ascii {"AAAÉ", /* batch_size */ 8, /* min */ 1, /* max */ 200};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_ascii_only,
+                                                   utf8_ascii_only, cuda_executor_t {}, first_gpu_specs);
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_mostly_ascii,
+                                                   utf8_mostly_ascii, cuda_executor_t {}, first_gpu_specs);
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_ascii_only,
+                                                   utf8_mostly_ascii, cuda_executor_t {}, first_gpu_specs);
+
+        // Empty matrices, and empty strings mixed into a non-empty batch - the degenerate cells the router tiers
+        // like any other, leaving the distance to the kernel that receives them.
         check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, empty_set,
                                                    utf8_register_candidates, cuda_executor_t {}, first_gpu_specs);
         check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_register_tier,
@@ -2124,9 +2159,18 @@ void test_similarities_cross_product_equivalence() {
         check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_ragged,
                                                    utf8_ragged, cuda_executor_t {}, first_gpu_specs);
 
-        // ! Pairs are sorted by BYTE length, but scored in runes, and nothing re-sorts the rune counts. Four-byte
-        // ! emoji against single-byte ASCII inverts the two: the byte-shorter side carries MORE runes. A corpus
-        // ! drawing both sides from one mixed alphabet never reaches this, so it gets its own asymmetric pair.
+        // ! Every empty string paired with a multi-byte one. `similarity_materialize_tasks_per_cuda_thread_`
+        // ! pre-seeds such a cell's result from the longer side's byte length, which is not its rune count - so the
+        // ! distance is only right because a scoring kernel overwrites it. Pinning it here keeps that true if the
+        // ! seeding is ever consumed.
+        fuzzy_config_t const utf8_all_empty {"AÉ中😀", /* batch_size */ 4, /* min */ 0, /* max */ 0};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_all_empty,
+                                                   utf8_warp_tier, cuda_executor_t {}, first_gpu_specs);
+
+        // ! Pairs are sorted by byte length, but tiered and scored in runes, and nothing re-sorts the rune counts.
+        // ! Four-byte emoji against single-byte ASCII inverts the two: the byte-shorter side carries more runes, so
+        // ! the pattern the tier cutoffs measure is not the side the materializer called shorter. A corpus drawing
+        // ! both sides from one mixed alphabet never reaches this, so it gets its own asymmetric pair.
         fuzzy_config_t const utf8_dense_queries {"😀😁😂🤣", /* batch_size */ 4, /* min */ 30, /* max */ 40};
         fuzzy_config_t const utf8_sparse_candidates {"ABC", /* batch_size */ 12, /* min */ 60, /* max */ 90};
         check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_dense_queries,
