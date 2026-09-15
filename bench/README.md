@@ -12,6 +12,7 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 - `memory.cpp` — copies, moves, fills, and lookup-table transforms.
 - `cipher.cpp` — AES-256 counter mode and Galois/counter mode throughput.
 - `container.cpp` — STL associative containers with string keys.
+- `levenshtein.cpp` — one-to-one and one-to-many edit distances, over bytes and over runes.
 - `similarities.cpp` — Levenshtein, Needleman-Wunsch, and Smith-Waterman scoring.
 - `fingerprints.cpp` — MinHash rolling fingerprints.
 - `substrings.cpp` — multi-pattern Aho-Corasick counting, locating, rewriting, and BM25 scoring.

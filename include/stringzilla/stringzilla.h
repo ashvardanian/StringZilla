@@ -87,8 +87,9 @@
 #include "stringzilla/cipher.h"  // `sz_aes256_key_init`, `sz_aes256_ctr_xor`, `sz_aes256_gcm_encrypt`
 #include "stringzilla/find.h"    // `sz_find`, `sz_find_byteset`, `sz_rfind`
 
-#include "stringzilla/sort.h"      // `sz_sequence_argsort`, `sz_pgrams_sort`
-#include "stringzilla/intersect.h" // `sz_sequence_intersect`
+#include "stringzilla/sort.h"        // `sz_sequence_argsort`, `sz_pgrams_sort`
+#include "stringzilla/intersect.h"   // `sz_sequence_intersect`
+#include "stringzilla/levenshtein.h" // `sz_levenshtein_distance`, `sz_levenshtein_distances`
 
 #include "stringzilla/utf8_runes.h"        // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
 #include "stringzilla/utf8_tokens.h"       // `sz_utf8_newlines`, `sz_utf8_whitespaces`, `sz_utf8_delimiters`

@@ -667,6 +667,7 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/find.c",
     "c/stringzilla/sort.c",
     "c/stringzilla/intersect.c",
+    "c/stringzilla/levenshtein.c",
     "c/stringzilla/utf8_norm.c",
     "c/stringzilla/utf8_runes.c",
     "c/stringzilla/utf8_tokens.c",

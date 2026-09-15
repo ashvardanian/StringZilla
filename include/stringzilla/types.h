@@ -1239,6 +1239,14 @@ typedef sz_status_t (*sz_sequence_intersect_t)(struct sz_sequence_t const *, str
                                                sz_memory_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
                                                sz_sorted_idx_t *);
 
+/** @brief Signature of `sz_levenshtein_distance` and `sz_levenshtein_distance_utf8`. */
+typedef sz_status_t (*sz_levenshtein_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_memory_allocator_t *,
+                                                 sz_size_t *);
+
+/** @brief Signature of `sz_levenshtein_distances` and `sz_levenshtein_distances_utf8`. */
+typedef sz_status_t (*sz_levenshtein_distances_t)(sz_cptr_t, sz_size_t, struct sz_sequence_t const *,
+                                                  sz_memory_allocator_t *, sz_size_t *);
+
 #pragma endregion
 
 #pragma region Helper Structures

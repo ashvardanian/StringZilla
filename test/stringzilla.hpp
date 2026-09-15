@@ -834,5 +834,8 @@ void test_sort_safety();
 void test_sort_reference_equivalence();
 void test_intersect_unit();
 void test_intersect_equivalence();
+void test_levenshtein_unit();
+void test_levenshtein_equivalence();
+void test_levenshtein_safety();
 
 #pragma endregion // Sequence Algorithms

@@ -48,6 +48,7 @@
 # * stringzilla_bench_utf8_segment_cpp20: A benchmark for the `sz_utf8_*` boundary-segmentation family
 #   (words/graphemes/sentences/linebreaks).
 # * stringzilla_bench_utf8_norm_cpp20: A benchmark for the `sz_utf8_norm` normalization family.
+# * stringzilla_bench_levenshtein_cpp20: A benchmark for the `sz_levenshtein_*` edit-distance family.
 #
 # Parallel Benchmarks:
 #
@@ -369,6 +370,7 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/find.c
     c/stringzilla/sort.c
     c/stringzilla/intersect.c
+    c/stringzilla/levenshtein.c
     c/stringzilla/utf8_norm.c
     c/stringzilla/utf8_runes.c
     c/stringzilla/utf8_tokens.c
@@ -704,6 +706,7 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     define_launcher(stringzilla_bench_container_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/container.cpp)
     define_launcher(stringzilla_bench_memory_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/memory.cpp)
     define_launcher(stringzilla_bench_cipher_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/cipher.cpp)
+    define_launcher(stringzilla_bench_levenshtein_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/levenshtein.cpp)
 
     # Parallel benchmarks link the precompiled static libraries when those are built.
     define_launcher(stringzillas_bench_similarities_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cpp)
@@ -761,6 +764,7 @@ if (STRINGZILLA_BUILD_TEST)
         test/uncased.cpp
         test/string.cpp
         test/find.cpp
+        test/levenshtein.cpp
         test/sort.cpp
     )
 
