@@ -569,7 +569,7 @@ struct diagonal_walker;
  *
  *  @note The API of this algorithm is a bit weird, but it's designed to minimize the reliance on the definitions
  *        in the `stringzilla.hpp` header, making compilation times shorter for the end-user.
- *  @sa For lower-level API, check `szs_levenshtein_distance[_utf8]` and `szs_needleman_wunsch_score`.
+ *  @sa For lower-level API, check `szs_levenshtein_distances[_utf8]` and `szs_needleman_wunsch_scores`.
  *  @sa For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
  *  @sa For bulk API, use `sz::levenshtein_distances[_utf8]`.
  */
@@ -1850,7 +1850,7 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, lin
 
         // Initialize the first row:
         tile_scorer_t scorer {substituter_, gap_costs_};
-        // The horizontal walker broadcasts characters of the @b longer string into the `first` operand, so the
+        // The horizontal walker broadcasts characters of the longer string into the `first` operand, so the
         // transpose condition is inverted relative to the diagonal walker: compensate when no exchange happened.
         scorer.prepare(first.size() <= second.size());
         for (size_t col_idx = 0; col_idx < shorter_dim; ++col_idx) scorer.init_score(previous_scores[col_idx], col_idx);
@@ -2007,7 +2007,7 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, aff
 
         // Initialize the first row:
         tile_scorer_t scorer {substituter_, gap_costs_};
-        // The horizontal walker broadcasts characters of the @b longer string into the `first` operand, so the
+        // The horizontal walker broadcasts characters of the longer string into the `first` operand, so the
         // transpose condition is inverted relative to the diagonal walker: compensate when no exchange happened.
         scorer.prepare(first.size() <= second.size());
         previous_scores[0] = 0;
@@ -2538,7 +2538,7 @@ struct levenshtein_distance {
         diagonal_walker<char_t, u64_t, uniform_substitution_costs_t, gap_costs_t, //
                         sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
 
-    using linearized_fallback_t = levenshtein_distance<char_t, linear_gap_costs_t, capability_k>;
+    using linear_fallback_t = levenshtein_distance<char_t, linear_gap_costs_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -2554,7 +2554,7 @@ struct levenshtein_distance {
         if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
             if (gap_costs_.is_linear()) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
-                linearized_fallback_t linear_backend(substituter_, linear_gap);
+                linear_fallback_t linear_backend(substituter_, linear_gap);
                 return linear_backend.scratch_space_needed(first, second, specs);
             }
 
@@ -2612,7 +2612,7 @@ struct levenshtein_distance {
         if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
             if (gap_costs_.is_linear()) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
-                linearized_fallback_t linear_backend(substituter_, linear_gap);
+                linear_fallback_t linear_backend(substituter_, linear_gap);
                 return linear_backend(first, second, result_ref, scratch_space, executor, specs);
             }
 
@@ -2702,8 +2702,8 @@ struct levenshtein_distance_utf8 {
     using diagonal_u64_t = diagonal_walker<rune_t, u64_t, uniform_substitution_costs_t, gap_costs_t, //
                                            sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
 
-    using linearized_fallback_t = levenshtein_distance<char, linear_gap_costs_t, capability_k>;
-    using ascii_fallback_t = levenshtein_distance<char, gap_costs_t, capability_k>;
+    using linear_fallback_t = levenshtein_distance<char, linear_gap_costs_t, capability_k>;
+    using bytes_fallback_t = levenshtein_distance<char, gap_costs_t, capability_k>;
 
     /** @brief Bit-parallel rune Myers fast path for unit-cost linear UTF-8 Levenshtein (rune-keyed `match_masks`, R8). */
     using rune_myers_t = levenshtein_distance_myers<rune_t, sz_cap_serial_k>;
@@ -2738,10 +2738,10 @@ struct levenshtein_distance_utf8 {
                                 cpu_specs_t const &specs) const noexcept {
         size_t const transcode_bytes = transcode_layout_(first, second, specs).total;
 
-        // The UTF-8 path transcodes both strings into the front of scratch, then runs a @b rune diagonal walker on
+        // The UTF-8 path transcodes both strings into the front of scratch, then runs a rune diagonal walker on
         // the remainder. The walker sees at most `first.size()`/`second.size()` runes (one rune per byte in the
         // worst case), and its reversed-rune buffer costs `runes * sizeof(rune_t)` - so we must size the walker
-        // region from rune-width requirements, not the byte-width `ascii_fallback` (which would under-reserve here).
+        // region from rune-width requirements, not the byte-width `bytes_fallback` (which would under-reserve here).
         diagonal_memory_requirements<size_t> rune_requirements(                        //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -2762,7 +2762,7 @@ struct levenshtein_distance_utf8 {
             }
 
         // The pure-ASCII shortcut bypasses transcoding and runs the char fallback over the whole buffer instead.
-        size_t const ascii_path = ascii_fallback_t {substituter_, gap_costs_}.scratch_space_needed(first, second,
+        size_t const ascii_path = bytes_fallback_t {substituter_, gap_costs_}.scratch_space_needed(first, second,
                                                                                                    specs);
         return sz_max_of_two(utf8_path, ascii_path);
     }
@@ -2785,14 +2785,14 @@ struct levenshtein_distance_utf8 {
         if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
             if (gap_costs_.is_linear()) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
-                linearized_fallback_t linear_backend(substituter_, linear_gap);
+                linear_fallback_t linear_backend(substituter_, linear_gap);
                 return linear_backend(first, second, result_ref, scratch_space, executor, specs);
             }
 
         // Check if the strings are entirely composed of ASCII characters,
         // and default to a simpler algorithm in that case.
         if (text_is_ascii_<sz_find_byteset_serial>(first) && text_is_ascii_<sz_find_byteset_serial>(second))
-            return ascii_fallback_t {substituter_, gap_costs_}(first, second, result_ref, scratch_space, executor,
+            return bytes_fallback_t {substituter_, gap_costs_}(first, second, result_ref, scratch_space, executor,
                                                                specs);
 
         // Carve the transcode region off the front of scratch, then pass the remainder to walkers.
@@ -3687,7 +3687,7 @@ struct levenshtein_distances {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances(uniform_substitution_costs_t subs, gap_costs_t gaps,
@@ -3700,7 +3700,7 @@ struct levenshtein_distances {
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                           cross_similarities_t::all_pairs_k, scratch_, specs);
+                                           cross_similarities_t::all_pairs_k, score_scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
@@ -3708,7 +3708,7 @@ struct levenshtein_distances {
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                          cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+                                          cross_similarities_t::all_pairs_k, score_scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -3716,14 +3716,14 @@ struct levenshtein_distances {
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                           cross_similarities_t::symmetric_k, scratch_, specs);
+                                           cross_similarities_t::symmetric_k, score_scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                          cross_similarities_t::symmetric_k, scratch_, executor, specs);
+                                          cross_similarities_t::symmetric_k, score_scratch_, executor, specs);
     }
 };
 
@@ -3744,7 +3744,7 @@ struct levenshtein_distances_utf8 {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances_utf8(uniform_substitution_costs_t subs, gap_costs_t gaps,
@@ -3755,7 +3755,7 @@ struct levenshtein_distances_utf8 {
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                           cross_similarities_t::all_pairs_k, scratch_, specs);
+                                           cross_similarities_t::all_pairs_k, score_scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
@@ -3763,7 +3763,7 @@ struct levenshtein_distances_utf8 {
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                          cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+                                          cross_similarities_t::all_pairs_k, score_scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -3771,14 +3771,14 @@ struct levenshtein_distances_utf8 {
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                           cross_similarities_t::symmetric_k, scratch_, specs);
+                                           cross_similarities_t::symmetric_k, score_scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                          cross_similarities_t::symmetric_k, scratch_, executor, specs);
+                                          cross_similarities_t::symmetric_k, score_scratch_, executor, specs);
     }
 };
 
@@ -3801,7 +3801,7 @@ struct needleman_wunsch_scores {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     needleman_wunsch_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -3811,7 +3811,7 @@ struct needleman_wunsch_scores {
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                            cross_similarities_t::all_pairs_k, scratch_, specs);
+                                            cross_similarities_t::all_pairs_k, score_scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
@@ -3819,7 +3819,7 @@ struct needleman_wunsch_scores {
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                           cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+                                           cross_similarities_t::all_pairs_k, score_scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -3827,14 +3827,14 @@ struct needleman_wunsch_scores {
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                            cross_similarities_t::symmetric_k, scratch_, specs);
+                                            cross_similarities_t::symmetric_k, score_scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                           cross_similarities_t::symmetric_k, scratch_, executor, specs);
+                                           cross_similarities_t::symmetric_k, score_scratch_, executor, specs);
     }
 };
 
@@ -3857,7 +3857,7 @@ struct smith_waterman_scores {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     smith_waterman_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -3867,7 +3867,7 @@ struct smith_waterman_scores {
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                            cross_similarities_t::all_pairs_k, scratch_, specs);
+                                            cross_similarities_t::all_pairs_k, score_scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
@@ -3875,7 +3875,7 @@ struct smith_waterman_scores {
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                           cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+                                           cross_similarities_t::all_pairs_k, score_scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -3883,18 +3883,18 @@ struct smith_waterman_scores {
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                            cross_similarities_t::symmetric_k, scratch_, specs);
+                                            cross_similarities_t::symmetric_k, score_scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                           cross_similarities_t::symmetric_k, scratch_, executor, specs);
+                                           cross_similarities_t::symmetric_k, score_scratch_, executor, specs);
     }
 };
 
-#pragma endregion
+#pragma endregion Parallel Batch Algorithms
 
 } // namespace stringzillas
 } // namespace ashvardanian

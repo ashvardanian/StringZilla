@@ -3254,7 +3254,7 @@ struct levenshtein_distance_utf8<linear_gap_costs_t, capability_,
     using diagonal_u64_t = diagonal_walker<rune_t, u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
                                            sz_minimize_distance_k, sz_similarity_global_k, capability_wout_simd_k>;
 
-    using ascii_fallback_t = levenshtein_distance<char_t, linear_gap_costs_t, capability_k>;
+    using bytes_fallback_t = levenshtein_distance<char_t, linear_gap_costs_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -3269,7 +3269,7 @@ struct levenshtein_distance_utf8<linear_gap_costs_t, capability_,
                                                                     specs.cache_line_width);
         size_t const second_unpacking_ceiling = round_up_to_multiple(sizeof(rune_t) * second.size(),
                                                                      specs.cache_line_width);
-        return ascii_fallback_t {substituter_, gap_costs_}.scratch_space_needed(first, second, specs) +
+        return bytes_fallback_t {substituter_, gap_costs_}.scratch_space_needed(first, second, specs) +
                first_unpacking_ceiling + second_unpacking_ceiling;
     }
 
@@ -3284,7 +3284,7 @@ struct levenshtein_distance_utf8<linear_gap_costs_t, capability_,
         // Check if the strings are entirely composed of ASCII characters,
         // and default to a simpler algorithm in that case.
         if (text_is_ascii_<sz_find_byteset_icelake>(first) && text_is_ascii_<sz_find_byteset_icelake>(second))
-            return ascii_fallback_t {substituter_, gap_costs_}(first, second, result_ref, scratch_space, executor,
+            return bytes_fallback_t {substituter_, gap_costs_}(first, second, result_ref, scratch_space, executor,
                                                                specs);
 
         // Carve the transcode region off the front of scratch, then pass the remainder to walkers.
@@ -3940,7 +3940,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     using lane_walker_wide_t =
         candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, gap_costs_t, sz_minimize_distance_k,
                               sz_similarity_global_k, sz_cap_icelake_k, 16, void>; // ? 16-lane `u32` non-unit rune.
-    // The driver's per-pair fallback receives @b rune views, so it is a rune-typed `levenshtein_distance`; the serial
+    // The driver's per-pair fallback receives rune views, so it is a rune-typed `levenshtein_distance`; the serial
     // capability covers every cell width (the icelake rune diagonal walker only goes up to `u16`), and this long-tail
     // path is rare. It stays bit-exact with the serial engine.
     using rune_scoring_t = levenshtein_distance<rune_t, gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
@@ -3965,7 +3965,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
     // The non-unit path transcodes every query/candidate to UTF-32 once and exposes each as a `span<rune_t const>`
-    // view, so the driver's `to_view` yields rune spans. Queries and candidates own @b separate arenas so the second
+    // view, so the driver's `to_view` yields rune spans. Queries and candidates own separate arenas so the second
     // transcode does not invalidate the first set of views; the symmetric self-similarity case reuses the query arena.
     safe_vector<rune_t, rune_allocator_t> query_arena_ {alloc_};
     safe_vector<rune_t, rune_allocator_t> candidate_arena_ {alloc_};
@@ -4608,7 +4608,7 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
  *
  *  The byte-to-class mapping uses the 256-entry `byte_to_class` table (the 4x `VPERMB`-blend technique, since
  *  a single `VPERMB` register only holds 64 bytes) and is exposed via `classify64`,
- *  so diagonal walkers can pre-classify both strings @b once and feed class-index buffers into the hot loop. The
+ *  so diagonal walkers can pre-classify both strings once and feed class-index buffers into the hot loop. The
  *  second stage looks up the cost for two varying class operands at once by keeping the matrix folded into 16
  *  loop-invariant 64-byte windows, addressed as `idx = ((first_class & 1) << 5) | second_class` with the window
  *  `window = first_class >> 1`, resolved through 16x `VPERMB` and a balanced tree of mask-blends.
@@ -4863,7 +4863,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linea
         i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
         i16_t const *scores_pre_deletion, i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
 
@@ -5056,7 +5056,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linea
         i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
         i16_t const *scores_pre_deletion, i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t *const scores_new_begin = scores_new;
@@ -5236,7 +5236,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linea
         i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
         i32_t const *scores_pre_deletion, i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
 
@@ -5415,7 +5415,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linea
         i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
         i32_t const *scores_pre_deletion, i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i32_t *const scores_new_begin = scores_new;
@@ -5562,7 +5562,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         i16_t *scores_new_insertions, i16_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
 
@@ -5655,7 +5655,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
                                                   _mm512_add_epi16(pre_insert_open.zmm, gap_open_vec.zmm));
             cost_if_delete.zmm = _mm512_max_epi16(_mm512_add_epi16(run_delete.zmm, gap_expand_vec.zmm),
                                                   _mm512_add_epi16(pre_delete_open.zmm, gap_open_vec.zmm));
-            // In Local Alignment for SW the zero-reset is applied to @b only the substitution term;
+            // In Local Alignment for SW the zero-reset is applied to only the substitution term;
             // the insertion/deletion gap matrices are not clamped, exactly like the serial scorer.
             cell_score.zmm = _mm512_max_epi16(
                 _mm512_max_epi16(_mm512_add_epi16(pre_substitution.zmm, cost_of_substitution_i16_vecs[part].zmm),
@@ -5700,7 +5700,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         i16_t *scores_new_insertions, i16_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t *const scores_new_begin = scores_new;
@@ -5844,7 +5844,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
         i32_t *scores_new_insertions, i32_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
 
@@ -5942,7 +5942,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
                                                   _mm512_add_epi32(pre_insert_open.zmm, gap_open_vec.zmm));
             cost_if_delete.zmm = _mm512_max_epi32(_mm512_add_epi32(run_delete.zmm, gap_expand_vec.zmm),
                                                   _mm512_add_epi32(pre_delete_open.zmm, gap_open_vec.zmm));
-            // In Local Alignment for SW the zero-reset is applied to @b only the substitution term;
+            // In Local Alignment for SW the zero-reset is applied to only the substitution term;
             // the insertion/deletion gap matrices are not clamped, exactly like the serial scorer.
             cell_score.zmm = _mm512_max_epi32(
                 _mm512_max_epi32(_mm512_add_epi32(pre_substitution.zmm, cost_of_substitution_i32_vecs[part].zmm),
@@ -5987,7 +5987,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
         i32_t *scores_new_insertions, i32_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i32_t *const scores_new_begin = scores_new;
@@ -6154,7 +6154,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_
         char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
         char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
-        // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
+        // Export the reversed shorter string, then classify both strings once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         tile_scorer_t scorer {substituter_, gap_costs_};
@@ -6382,7 +6382,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, affine_gap_costs_
         char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
         char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
-        // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
+        // Export the reversed shorter string, then classify both strings once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         tile_scorer_t scorer {substituter_, gap_costs_};
