@@ -80,6 +80,7 @@ sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, szs_device_sc
 sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope, sz_size_t *cpu_cores, char const **error_message);
 sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope, sz_size_t *gpu_device, char const **error_message);
 sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope, sz_capability_t *capabilities, char const **error_message);
+sz_status_t szs_device_scope_get_specs(szs_device_scope_t scope, sz_gpu_specs_t *specs, char const **error_message);
 void szs_device_scope_free(szs_device_scope_t scope);
 ```
 
@@ -87,6 +88,17 @@ void szs_device_scope_free(szs_device_scope_t scope);
 `szs_device_scope_init_cpu_cores` targets a fraction of CPU cores: pass `0` for all cores, `1` to use only the calling thread.
 `szs_device_scope_init_gpu_device` targets a specific GPU by device index.
 One device scope can be shared across engines and calls, then freed with `szs_device_scope_free`.
+
+Which GPUs exist is a separate question from which one a scope opened, so it is answered without retaining a context on any of them:
+
+```c
+sz_status_t szs_gpu_devices_count(sz_size_t *gpu_devices, char const **error_message);
+sz_status_t szs_gpu_device_specs(sz_size_t gpu_device, sz_gpu_specs_t *specs, char const **error_message);
+```
+
+`szs_gpu_devices_count` reports zero rather than failing when no GPU can be reached, so `[0, gpu_devices)` is always safe to walk.
+`szs_gpu_device_specs` describes one of them by index, and `szs_device_scope_get_specs` answers the same for a GPU scope that is already open, reading what it cached rather than querying the driver again.
+All three fill an `sz_gpu_specs_t` from the `stringzilla` headers, the same field list the C++ `gpu_specs_t` inherits, so a spec crosses the language boundary without a field-by-field copy that could drift.
 
 ### Inputs: Sequences and Apache Arrow Tapes
 

@@ -127,6 +127,26 @@ SZ_API_RUNTIME sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_
 typedef void *szs_device_scope_t;
 
 /**
+ * @brief Count addressable GPUs, without retaining a context on any of them.
+ * @param[out] gpu_devices Number of GPUs, zero when none or when built without a GPU backend.
+ * @param[out] error_message Optional output pointer for detailed error information.
+ *
+ * Reports zero rather than failing when no GPU can be reached, so a caller can walk `[0, gpu_devices)`
+ * through @ref szs_gpu_device_specs without a second probe for whether a GPU exists at all.
+ */
+SZ_API_RUNTIME sz_status_t szs_gpu_devices_count(sz_size_t *gpu_devices, char const **error_message);
+
+/**
+ * @brief Describe one GPU by index, without retaining a context on it.
+ * @param[in] gpu_device GPU device index, below @ref szs_gpu_devices_count.
+ * @param[out] specs Hardware description of that device, as @ref sz_gpu_specs_t.
+ * @param[out] error_message Optional output pointer for detailed error information.
+ * @retval sz_missing_gpu_k The index names no device, or the build has no GPU backend.
+ */
+SZ_API_RUNTIME sz_status_t szs_gpu_device_specs(sz_size_t gpu_device, sz_gpu_specs_t *specs,
+                                                char const **error_message);
+
+/**
  * @brief Initialize device scope with system defaults.
  * @param[out] scope Pointer to device scope handle.
  * @param[out] error_message Optional output pointer for detailed error information.
@@ -168,6 +188,16 @@ SZ_API_RUNTIME sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t sco
  */
 SZ_API_RUNTIME sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope, sz_size_t *gpu_device,
                                                            char const **error_message);
+
+/**
+ * @brief Query the specs of the GPU a scope already opened, so sizing needs no second lookup.
+ * @param[in] scope Device scope handle, which must be a GPU scope.
+ * @param[out] specs Hardware description of that device, as @ref sz_gpu_specs_t.
+ * @param[out] error_message Optional output pointer for detailed error information.
+ * @retval sz_status_unknown_k The scope drives CPU engines, matching @ref szs_device_scope_get_gpu_device.
+ */
+SZ_API_RUNTIME sz_status_t szs_device_scope_get_specs(szs_device_scope_t scope, sz_gpu_specs_t *specs,
+                                                      char const **error_message);
 
 /**
  * @brief Get device scope hardware capabilities.

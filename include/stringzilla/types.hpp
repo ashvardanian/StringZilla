@@ -926,17 +926,20 @@ struct cpu_specs_t {
  *  @sa pack_sm_code, cores_per_multiprocessor helpers.
  *  @note We recommend compiling the code for the 90a compute capability, the newest with specialized optimizations.
  */
-struct gpu_specs_t {
-    size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
-    size_t l2_bytes = 40ul * 1024 * 1024;          // ? On A100 it's 40 MB, shared by every multiprocessor
-    size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
-    size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
-    size_t streaming_multiprocessors = 108;        // ? On A100
-    size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
-    size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
-    size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
-    size_t max_blocks_per_multiprocessor = 0;      // ? Maximum number of blocks per SM
-    size_t sm_code = 0;                            // ? Compute capability code, e.g. 90a for Hopper (H100)
+struct gpu_specs_t : public sz_gpu_specs_t {
+    /** @brief Describes an A100, which is what a call site that never fetched real specs is sized against. */
+    inline gpu_specs_t() noexcept : sz_gpu_specs_t() {
+        vram_bytes = 40ull * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
+        l2_bytes = 40ull * 1024 * 1024;          // ? On A100 it's 40 MB, shared by every multiprocessor
+        constant_memory_bytes = 64 * 1024;       // ? On A100 it's 64 KB
+        shared_memory_bytes = 192 * 1024 * 108;  // ? On A100 it's 192 KB per SM
+        streaming_multiprocessors = 108;         // ? On A100
+        cuda_cores = 6912;                       // ? On A100 for f32/i32 logic
+        reserved_memory_per_block = 1024;        // ? Typically, 1 KB per block is reserved for bookkeeping
+        warp_size = 32;                          // ? Warp size is 32 threads on practically all GPUs
+        max_blocks_per_multiprocessor = 0;       // ? Maximum number of blocks per SM
+        sm_code = 0;                             // ? Compute capability code, e.g. 90a for Hopper (H100)
+    }
 
     inline size_t shared_memory_per_multiprocessor() const noexcept {
         return shared_memory_bytes / streaming_multiprocessors;

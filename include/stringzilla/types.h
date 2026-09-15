@@ -1422,6 +1422,36 @@ typedef struct sz_sequence_t {
 } sz_sequence_t;
 
 /**
+ *  @brief Hardware description of one GPU, as the schedulers size their launches against.
+ *
+ *  The field list the C++ `gpu_specs_t` inherits, so a spec crosses the C boundary by slicing rather
+ *  than by a field-by-field copy that could drift. `sm_code` packs the compute capability as
+ *  `major * 10 + minor`, so 90 is Hopper.
+ */
+typedef struct sz_gpu_specs_t {
+    /** @brief Total device memory, which batch sizing is bounded by. */
+    sz_size_t vram_bytes;
+    /** @brief L2 cache, shared by every multiprocessor, which work-splitting heuristics read. */
+    sz_size_t l2_bytes;
+    /** @brief Constant memory bank size. */
+    sz_size_t constant_memory_bytes;
+    /** @brief Shared memory aggregated over every multiprocessor, not the per-multiprocessor figure. */
+    sz_size_t shared_memory_bytes;
+    /** @brief Multiprocessor count, which the engines size their pair budget against. */
+    sz_size_t streaming_multiprocessors;
+    /** @brief Cores for `f32` and `i32` logic, summed over every multiprocessor. */
+    sz_size_t cuda_cores;
+    /** @brief Shared memory the driver reserves per block for bookkeeping. */
+    sz_size_t reserved_memory_per_block;
+    /** @brief Threads per warp, 32 on practically every GPU. */
+    sz_size_t warp_size;
+    /** @brief Resident block ceiling per multiprocessor. */
+    sz_size_t max_blocks_per_multiprocessor;
+    /** @brief Compute capability as `major * 10 + minor`. */
+    sz_size_t sm_code;
+} sz_gpu_specs_t;
+
+/**
  *  @brief Initiates the sequence structure from a typical C-style strings array, like `char *[]`.
  *  @param start Pointer to the array of strings.
  *  @param count Number of strings in the array.
