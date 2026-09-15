@@ -1247,6 +1247,14 @@ typedef sz_status_t (*sz_levenshtein_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t
 typedef sz_status_t (*sz_levenshtein_distances_t)(sz_cptr_t, sz_size_t, struct sz_sequence_t const *,
                                                   sz_memory_allocator_t *, sz_size_t *);
 
+/** @brief Signature of `sz_overlap_score`. */
+typedef sz_status_t (*sz_overlap_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t const *, sz_size_t,
+                                          sz_memory_allocator_t *, sz_f32_t *);
+
+/** @brief Signature of `sz_overlap_scores`. */
+typedef sz_status_t (*sz_overlap_scores_t)(sz_cptr_t, sz_size_t, struct sz_sequence_t const *, sz_size_t const *,
+                                           sz_size_t, sz_memory_allocator_t *, sz_f32_t *);
+
 #pragma endregion
 
 #pragma region Helper Structures

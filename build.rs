@@ -50,6 +50,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
             "c/stringzilla/sort.c",
             "c/stringzilla/intersect.c",
             "c/stringzilla/levenshtein.c",
+            "c/stringzilla/overlap.c",
             "c/stringzilla/utf8_runes.c",
             "c/stringzilla/utf8_tokens.c",
             "c/stringzilla/utf8_wordbreaks.c",

@@ -60,6 +60,8 @@
 #endif
 #endif
 
+#include <forkunion/topology.hpp> // `machine_topology_t` - the machine's cache geometry
+
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/stringzilla.hpp"
 
@@ -398,6 +400,8 @@ struct environment_t {
     dataset_t dataset;
     /** @brief Array of tokens extracted from the @p dataset. */
     tokens_t tokens;
+    /** @brief This machine's cache geometry, which cache-resident benchmark shapes are sized from. */
+    sz::cpu_specs_t specs;
 
     bool allow(std::string const &benchmark_name) const {
         return filter.empty() || std::regex_search(benchmark_name, std::regex(filter));
@@ -573,6 +577,25 @@ inline environment_t build_environment(                                        /
     // Group integer decimal separators by 3
     // https://www.ibm.com/docs/en/i/7.4?topic=categories-lc-numeric-category
     std::setlocale(LC_NUMERIC, "en_US.UTF-8");
+    // The machine's own cache geometry, harvested once: ForkUnion names the deepest cache confined to a compute
+    // domain, the shared L3 on uniform parts, and has no per-core level query, so the narrower levels keep the
+    // conservative defaults a shape sized from them is nominal against.
+    {
+        namespace fu = ashvardanian::forkunion;
+        fu::machine_topology_t topology;
+        if (fu::succeeded(topology.harvest())) {
+            std::size_t confined_bytes = 0;
+            for (std::size_t domain = 0; domain != topology.compute_domains_count(); ++domain) {
+                std::size_t const domain_bytes =
+                    topology.compute_domain_at(static_cast<fu::compute_domain_index_t>(domain)).cache_bytes;
+                if (domain_bytes && (confined_bytes == 0 || domain_bytes < confined_bytes))
+                    confined_bytes = domain_bytes;
+            }
+            if (confined_bytes) env.specs.l3_bytes = confined_bytes;
+            if (std::size_t const cores = topology.logical_cores_count()) env.specs.cores_per_socket = cores;
+        }
+    }
+
     std::printf("Environment built with the following settings:\n");
     std::printf(" - Dataset path: %s\n", env.path.c_str());
     std::printf(" - Time limit: %zu seconds per benchmark (%zu per stress-test)\n", env.benchmark_seconds,
@@ -593,8 +616,26 @@ inline environment_t build_environment(                                        /
     else std::printf(" - Dataset limit: %zu bytes\n", env.dataset_limit_bytes);
     std::printf(" - Number of tokens: %zu\n", env.tokens.size());
     std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
+    std::printf(" - Caches: %zu B first-level (assumed), %zu B confined to a compute domain\n", env.specs.l1_bytes,
+                env.specs.l3_bytes);
 
     return env;
+}
+
+/** @brief The slice's median token length in bytes: the short query, and the typical candidate. */
+inline std::size_t median_token_bytes(environment_t const &env) {
+    std::vector<std::size_t> lengths(env.tokens.size());
+    std::transform(env.tokens.begin(), env.tokens.end(), lengths.begin(),
+                   [](token_view_t token) { return token.size(); });
+    std::nth_element(lengths.begin(), lengths.begin() + lengths.size() / 2, lengths.end());
+    return lengths[lengths.size() / 2];
+}
+
+/** @brief Candidates one call scores: the first `STRINGWARS_BATCH` entry if set, else as many median tokens as
+ *         fill the first-level cache. */
+inline std::size_t candidates_per_call(environment_t const &env) {
+    if (!env.batch_sizes_override.empty()) return env.batch_sizes_override.front();
+    return std::max<std::size_t>(1, env.specs.l1_bytes / median_token_bytes(env));
 }
 
 /**

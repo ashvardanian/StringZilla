@@ -41,6 +41,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_sort_update_(caps);
     sz_dispatch_intersect_update_(caps);
     sz_dispatch_levenshtein_update_(caps);
+    sz_dispatch_overlap_update_(caps);
     sz_dispatch_utf8_norm_update_(caps);
     sz_dispatch_utf8_runes_update_(caps);
     sz_dispatch_utf8_tokens_update_(caps);

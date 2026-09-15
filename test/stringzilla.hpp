@@ -428,6 +428,16 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) noexcept
     }
 }
 
+/** @brief An allocator refusing every request, for asserting a kernel reports `sz_bad_alloc_k` and leaves its
+ *         outputs alone. */
+inline sz_memory_allocator_t refusing_allocator_() noexcept {
+    sz_memory_allocator_t refusing;
+    refusing.allocate = +[](sz_size_t, void *) -> void * { return nullptr; };
+    refusing.free = +[](void *, sz_size_t, void *) {};
+    refusing.handle = nullptr;
+    return refusing;
+}
+
 /**
  *  @brief Splits @p alphabet into its UTF-8 characters, so a multi-byte alphabet still generates valid text.
  *
@@ -481,6 +491,12 @@ struct fuzzy_config_t {
     std::size_t batch_size = 16;
     std::size_t min_string_length = 1; // ? In characters, which equals bytes only for an ASCII alphabet.
     std::size_t max_string_length = 200;
+
+    fuzzy_config_t() = default;
+    fuzzy_config_t(char const *alphabet, std::size_t batch_size, std::size_t min_string_length,
+                   std::size_t max_string_length)
+        : alphabet(alphabet), batch_size(batch_size), min_string_length(min_string_length),
+          max_string_length(max_string_length) {}
 };
 
 inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array) {
@@ -835,7 +851,10 @@ void test_sort_reference_equivalence();
 void test_intersect_unit();
 void test_intersect_equivalence();
 void test_levenshtein_unit();
-void test_levenshtein_equivalence();
+void test_levenshtein_all();
 void test_levenshtein_safety();
+void test_overlap_unit();
+void test_overlap_all();
+void test_overlap_safety();
 
 #pragma endregion // Sequence Algorithms

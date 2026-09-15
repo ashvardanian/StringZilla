@@ -6,10 +6,10 @@
  *
  *  The compiled StringZilla library is split into one translation unit per domain
  *  (`compare.c`, `memory.c`, `hash.c`, `cipher.c`, `find.c`, `sort.c`, `intersect.c`, `levenshtein.c`,
- *  `utf8_runes.c`, `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`, `utf8_sentences.c`,
- *  `utf8_linebreaks.c`, `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching one domain only
- *  recompiles that domain. Each TU includes only its own domain header, fills its slice of the shared
- *  `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_API_RUNTIME` public
+ *  `overlap.c`, `utf8_runes.c`, `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`,
+ *  `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching a
+ *  domain only recompiles that domain. Each TU includes only its own domain header, fills its slice of
+ *  the shared `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_API_RUNTIME` public
  *  wrappers that call through the table. The thin `runtime.c` owns the table definition and the
  *  one-time initialization.
  */
@@ -102,6 +102,9 @@ typedef struct sz_implementations_t {
     sz_levenshtein_distance_t levenshtein_distance_utf8;
     sz_levenshtein_distances_t levenshtein_distances_utf8;
 
+    sz_overlap_score_t overlap_score;
+    sz_overlap_scores_t overlap_scores;
+
 } sz_implementations_t;
 
 /**
@@ -121,6 +124,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_wordbreaks_update_(sz_capability_t caps);

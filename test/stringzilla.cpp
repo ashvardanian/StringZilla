@@ -132,8 +132,11 @@ int main(int argc, char const **argv) {
     failures += run_test("test_intersect_unit", test_intersect_unit);
     failures += run_test("test_intersect_equivalence", test_intersect_equivalence);
     failures += run_test("test_levenshtein_unit", test_levenshtein_unit);
-    failures += run_test("test_levenshtein_equivalence", test_levenshtein_equivalence);
+    failures += run_test("test_levenshtein_all", test_levenshtein_all);
     failures += run_test("test_levenshtein_safety", test_levenshtein_safety);
+    failures += run_test("test_overlap_unit", test_overlap_unit);
+    failures += run_test("test_overlap_all", test_overlap_all);
+    failures += run_test("test_overlap_safety", test_overlap_safety);
 
     failures += run_test("test_ascii_unit<sz::string>", test_ascii_unit<sz::string>);
     failures += run_test("test_ascii_unit<sz::string_view>", test_ascii_unit<sz::string_view>);
