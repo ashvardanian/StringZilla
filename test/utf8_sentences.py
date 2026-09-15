@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """UAX-29 sentence-boundary segmentation: sz.utf8_sentences and Str.utf8_sentences.
 
-Mirrors the C++ scripts/test_utf8_sentences.cpp translation unit.
+Mirrors the C++ test/utf8_sentences.cpp translation unit.
 
 Covers: sentence iteration and the Str method mirror across ASCII, Cyrillic, and ideographic
 terminators, malformed-byte and window-seam tiling safety, full UAX-29 SentenceBreakTest.txt

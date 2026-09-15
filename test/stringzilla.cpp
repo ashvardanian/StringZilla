@@ -1,6 +1,6 @@
 /**
  *  @brief  Test entry point and template instantiations; registers every per-domain unit and driver.
- *  @file   scripts/test_stringzilla.cpp
+ *  @file   test/stringzilla.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
@@ -104,24 +104,7 @@ int main(int argc, char const **argv) {
     sz_unused_(argc && argv);
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Hi, dear tester! You look nice today!\n");
-    std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
-    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
-    std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
-    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
-    std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
-    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICELAKE ? "yes" : "no");
-    std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
-    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEONAES ? "yes" : "no");
-    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEONSHA ? "yes" : "no");
-    std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
-    std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2AES ? "yes" : "no");
-    std::printf("- Uses WASM SIMD128: %s \n", SZ_USE_V128 ? "yes" : "no");
-    std::printf("- Uses WASM relaxed SIMD: %s \n", SZ_USE_V128RELAXED ? "yes" : "no");
-    std::printf("- Uses RISC-V RVV: %s \n", SZ_USE_RVV ? "yes" : "no");
-    std::printf("- Uses LoongArch LASX: %s \n", SZ_USE_LASX ? "yes" : "no");
-    std::printf("- Uses Power VSX: %s \n", SZ_USE_POWERVSX ? "yes" : "no");
-    std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
+    log_environment();
     print_test_environment();
 
     std::size_t failures = 0;
@@ -136,14 +119,18 @@ int main(int argc, char const **argv) {
     failures += run_test("test_hash_unit", test_hash_unit);
     failures += run_test("test_hash_all", test_hash_all);
     failures += run_test("test_hash_multiseed_all", test_hash_multiseed_all);
+    failures += run_test("test_hash_safety", test_hash_safety);
 
     failures += run_test("test_cipher_unit", test_cipher_unit);
     failures += run_test("test_cipher_safety", test_cipher_safety);
     failures += run_test("test_cipher_all", test_cipher_all);
 
     failures += run_test("test_sort_unit", test_sort_unit);
+    failures += run_test("test_sort_reference_equivalence", test_sort_reference_equivalence);
     failures += run_test("test_sort_all", test_sort_all);
+    failures += run_test("test_sort_safety", test_sort_safety);
     failures += run_test("test_intersect_unit", test_intersect_unit);
+    failures += run_test("test_intersect_equivalence", test_intersect_equivalence);
 
     failures += run_test("test_ascii_unit<sz::string>", test_ascii_unit<sz::string>);
     failures += run_test("test_ascii_unit<sz::string_view>", test_ascii_unit<sz::string_view>);
@@ -166,25 +153,29 @@ int main(int argc, char const **argv) {
     failures += run_test("test_extensions_reads_unit<sz::string_view>", test_extensions_reads_unit<sz::string_view>);
     failures += run_test("test_extensions_reads_unit<sz::string>", test_extensions_reads_unit<sz::string>);
     failures += run_test("test_extensions_updates_unit", test_extensions_updates_unit);
+    failures += run_test("test_extensions_ranges_unit", test_extensions_ranges_unit);
 
     failures += run_test("test_string_constructors_unit", test_string_constructors_unit);
     failures += run_test("test_string_reserve_unit", test_string_reserve_unit);
-    failures += run_test("test_memory_stability_unit(1024)", [] { test_memory_stability_unit(1024); });
-    failures += run_test("test_memory_stability_unit(14)", [] { test_memory_stability_unit(14); });
-    failures += run_test("test_string_updates_unit", [] { test_string_updates_unit(); }); // ! Defaulted arg
+    failures += run_test("test_memory_stability_equivalence(1024)", [] { test_memory_stability_equivalence(1024); });
+    failures += run_test("test_memory_stability_equivalence(14)", [] { test_memory_stability_equivalence(14); });
+    failures += run_test("test_string_updates_equivalence", [] { test_string_updates_equivalence(); }); // ! Defaulted
 
     failures += run_test("test_compare_unit", test_compare_unit);
     failures += run_test("test_find_unit", test_find_unit);
     failures += run_test("test_find_all", test_find_all);
-    failures += run_test("test_lookup_all", [] { test_lookup_all(); }); // ! Defaulted args
+    failures += run_test("test_find_safety", test_find_safety);
+    failures += run_test("test_lookup_equivalence", [] { test_lookup_equivalence(); }); // ! Defaulted args
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
-    failures += run_test("test_find_misaligned_all", test_find_misaligned_all);
+    failures += run_test("test_find_misaligned_equivalence", test_find_misaligned_equivalence);
 #endif
 
     failures += run_test("test_utf8_runes_unit", test_utf8_runes_unit);
+    failures += run_test("test_utf8_runes_scripts_unit", test_utf8_runes_scripts_unit);
     failures += run_test("test_utf8_runes_safety", test_utf8_runes_safety);
     failures += run_test("test_utf8_runes_all", test_utf8_runes_all);
     failures += run_test("test_utf8_tokens_unit", test_utf8_tokens_unit);
+    failures += run_test("test_utf8_tokens_scripts_unit", test_utf8_tokens_scripts_unit);
     failures += run_test("test_utf8_tokens_safety", test_utf8_tokens_safety);
     failures += run_test("test_utf8_tokens_all", test_utf8_tokens_all);
     failures += run_test("test_utf8_wordbreaks_unit", test_utf8_wordbreaks_unit);
@@ -211,6 +202,8 @@ int main(int argc, char const **argv) {
     failures += run_test("test_utf8_delimiters_all", test_utf8_delimiters_all);
 
     failures += run_test("test_uncased_unit", test_uncased_unit);
+    failures += run_test("test_uncased_scripts_unit", test_uncased_scripts_unit);
+    failures += run_test("test_uncased_regressions_unit", test_uncased_regressions_unit);
     failures += run_test("test_uncased_all", test_uncased_all);
     failures += run_test("test_uncased_safety", test_uncased_safety);
 

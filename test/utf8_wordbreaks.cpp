@@ -1,7 +1,7 @@
 /**
  *  @brief  UAX-29 word-boundary (Word_Break) tests: known-answer goldens, malformed-input safety, and the
  *          serial-vs-ISA differential over hardened corpora.
- *  @file   scripts/test_utf8_wordbreaks.cpp
+ *  @file   test/utf8_wordbreaks.cpp
  *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
@@ -23,7 +23,7 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `test_stringzilla.hpp`)
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
 #pragma region Unit
 
@@ -41,7 +41,7 @@ static utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
 };
 
 /** @brief Known-answer property table for `sz_rune_is_word_char` (UAX-29 word-character classification). */
-static void test_utf8_wordbreaks_classification_() {
+static void check_utf8_wordbreaks_classification_() {
     // ASCII letters, digits, underscore, and the mid-word apostrophe are word characters.
     verify(sz_rune_is_word_char('A') == sz_true_k);
     verify(sz_rune_is_word_char('z') == sz_true_k);
@@ -134,7 +134,7 @@ static void check_utf8_wordbreaks_lengths_(char const *label, sz_utf8_segmenter_
  *         Regression corpus for the cross-window bridge-shadow carry: a failed bridge must still emit the break
  *         at the mid, keep WB7a's Hebrew x Single_Quote join, and leave the mid as the effective left context.
  */
-static void test_utf8_wordbreaks_deferred_mid_() {
+static void check_utf8_wordbreaks_deferred_mid_() {
     static sz_size_t const run_lengths[] = {3, 8, 15, 31, 32, 33, 100};
     static char const combining_grave[] = "\xCC\x80";   // U+0300, Word_Break=Extend
     static char const hebrew_he[] = "\xD7\x94";         // U+05D4, Hebrew_Letter
@@ -179,8 +179,8 @@ static void test_utf8_wordbreaks_deferred_mid_() {
 void test_utf8_wordbreaks_unit() {
     std::printf("  - testing UTF-8 word-break known-answer vectors...\n");
 
-    test_utf8_wordbreaks_classification_();
-    test_utf8_wordbreaks_deferred_mid_();
+    check_utf8_wordbreaks_classification_();
+    check_utf8_wordbreaks_deferred_mid_();
 
     check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
@@ -234,8 +234,8 @@ static sz::string_view const utf8_wordbreaks_motifs[] = {
 };
 
 /**
- *  @brief Multi-window seam regressions (each > 64 bytes): WB15/16 Regional_Indicator parity and WB6/7/11/12
- *         Mid-bridge carry once miscounted across the 64-byte window boundary. Stored as raw bytes so the
+ *  @brief Multi-window seam regressions (each > 64 bytes): WB15/16 Regional_Indicator parity and the WB6/7/11/12
+ *         Mid-bridge carry state, each pinned across the 64-byte window boundary. Stored as raw bytes so the
  *         differential driver feeds them to serial-vs-ISA directly (no inline agreement asserts).
  */
 static sz::string_view const utf8_wordbreaks_seam_regressions[] = {
@@ -258,7 +258,7 @@ static sz::string_view const utf8_wordbreaks_seam_regressions[] = {
 /** @brief Katakana run @p link_count codepoints long (WB13 Katakana x Katakana), into @p out (cleared first). */
 static void utf8_wordbreaks_dense_katakana_(std::string &out, std::size_t link_count) {
     out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, 0x30AB); // カ
+    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(0x30AB)); // カ
 }
 
 /** @brief Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend), into @p out. */
@@ -266,8 +266,8 @@ static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_co
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
         out.append("12");
-        append_codepoint_(out, 0x0301); // Extend combining mark inside a number
-        out.append(",34 ");             // MidNum comma
+        out.append(encoded_rune_(0x0301)); // Extend combining mark inside a number
+        out.append(",34 ");                // MidNum comma
     }
 }
 
@@ -275,9 +275,9 @@ static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_co
 static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x0061);                         // 'a'
-        append_codepoint_(out, (index & 1u) ? 0x00B7 : 0x0027); // MIDDLE DOT or apostrophe
-        append_codepoint_(out, 0x0062);                         // 'b'
+        out.append(encoded_rune_(0x0061));                         // 'a'
+        out.append(encoded_rune_((index & 1u) ? 0x00B7 : 0x0027)); // MIDDLE DOT or apostrophe
+        out.append(encoded_rune_(0x0062));                         // 'b'
     }
 }
 
@@ -285,17 +285,17 @@ static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_
 static void utf8_wordbreaks_dense_hebrew_quote_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x05D0); // א
-        append_codepoint_(out, 0x0027); // single quote
-        append_codepoint_(out, 0x05D1); // ב
+        out.append(encoded_rune_(0x05D0)); // א
+        out.append(encoded_rune_(0x0027)); // single quote
+        out.append(encoded_rune_(0x05D1)); // ב
     }
 }
 
 /** @brief Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-static void utf8_wordbreaks_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+static void utf8_wordbreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
-    utf8_dense_regional_indicators_(scratch, rng, wide_count), sink(context, scratch.data(), scratch.size());
+    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
+    utf8_dense_regional_indicators_(scratch, generator, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_katakana_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_midletter_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
@@ -303,9 +303,9 @@ static void utf8_wordbreaks_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink,
 }
 
 /** @brief Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_wordbreaks_straddles_(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context) {
+static void utf8_wordbreaks_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    utf8_dense_regional_indicators_(scratch, rng, gap);
+    utf8_dense_regional_indicators_(scratch, generator, gap);
     scratch.append("a"); // ASCII tail forces the WB15/16 parity decision after the long run
     sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_midletter_(scratch, gap), sink(context, scratch.data(), scratch.size());
@@ -422,8 +422,13 @@ void test_utf8_wordbreaks_safety() {
 /** @brief Serial-vs-ISA word differential over the hardened corpora (high-density + long-range + seam regressions). */
 void test_utf8_wordbreaks_all() {
     // The iteration count is this family's share of the suite budget, sized against its siblings.
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
-                                   utf8_wordbreaks_corpora_(), scale_iterations(20));
+    check_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
+                                    utf8_wordbreaks_corpora_(), scale_iterations(20));
+
+    // The streaming segmenter against the per-position WB1-WB16 transcription, which nothing else calls.
+    for (sz::string_view const motif : span_over(utf8_wordbreaks_motifs))
+        check_utf8_segment_against_oracle_("word", sz_utf8_wordbreaks_serial, sz_utf8_is_word_boundary_serial,
+                                           motif.data(), motif.size());
 }
 
 #pragma endregion // Drivers

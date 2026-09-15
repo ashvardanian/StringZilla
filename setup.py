@@ -684,6 +684,7 @@ STRINGZILLAS_API_CPP_SOURCES = [
     "c/stringzillas/needleman_wunsch.cpp",
     "c/stringzillas/smith_waterman.cpp",
     "c/stringzillas/fingerprints.cpp",
+    "c/stringzillas/substrings.cpp",
 ]
 STRINGZILLAS_API_CU_SOURCES = [
     "c/stringzillas/runtime.cu",
@@ -691,6 +692,7 @@ STRINGZILLAS_API_CU_SOURCES = [
     "c/stringzillas/needleman_wunsch.cu",
     "c/stringzillas/smith_waterman.cu",
     "c/stringzillas/fingerprints.cu",
+    "c/stringzillas/substrings.cu",
 ]
 # Per-ISA CPU instantiation units, host C++ in every wheel; off-platform files compile to empty objects.
 STRINGZILLAS_CPUS_SOURCES = [
@@ -709,6 +711,7 @@ STRINGZILLAS_CPUS_SOURCES = [
     "c/stringzillas/smith_waterman_haswell.cpp",
     "c/stringzillas/smith_waterman_neon.cpp",
     "c/stringzillas/smith_waterman_rvv.cpp",
+    "c/stringzillas/substrings_serial.cpp",
 ]
 # Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
 # from the base set.
@@ -716,6 +719,7 @@ STRINGZILLAS_CUDA_SOURCES = [
     "c/stringzillas/levenshtein_cuda.cu",
     "c/stringzillas/needleman_wunsch_cuda.cu",
     "c/stringzillas/smith_waterman_cuda.cu",
+    "c/stringzillas/substrings_cuda.cu",
 ]
 STRINGZILLAS_KEPLER_SOURCES = [
     "c/stringzillas/levenshtein_kepler.cu",
@@ -782,10 +786,14 @@ elif sz_target == "stringzillas-cpus":
                 "python/stringzillas/device_scope.c",
                 "python/stringzillas/similarities.c",
                 "python/stringzillas/fingerprints.c",
+                "python/stringzillas/substrings.c",
             ]
             + STRINGZILLAS_API_CPP_SOURCES
             + STRINGZILLAS_CPUS_SOURCES
-            + STRINGZILLAS_RUNTIME_SOURCES,
+            + STRINGZILLAS_RUNTIME_SOURCES
+            # The multi-pattern rewrite path calls the dispatched `sz_copy`, so this wheel carries the core
+            # runtime the way every CMake target links `stringzilla_static` rather than leaving it undefined.
+            + STRINGZILLA_CORE_SOURCES,
             include_dirs=["include", "c/stringzillas", "forkunion/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
@@ -824,13 +832,15 @@ elif sz_target == "stringzillas-cuda":
                 "python/stringzillas/device_scope.c",
                 "python/stringzillas/similarities.c",
                 "python/stringzillas/fingerprints.c",
+                "python/stringzillas/substrings.c",
             ]
             + STRINGZILLAS_API_CU_SOURCES
             + STRINGZILLAS_CPUS_SOURCES
             + STRINGZILLAS_CUDA_SOURCES
             + STRINGZILLAS_KEPLER_SOURCES
             + STRINGZILLAS_HOPPER_SOURCES
-            + STRINGZILLAS_RUNTIME_SOURCES,
+            + STRINGZILLAS_RUNTIME_SOURCES
+            + STRINGZILLA_CORE_SOURCES,
             include_dirs=["include", "c/stringzillas", "forkunion/include", f"{cuda_home}/include"],
             extra_compile_args=compile_args,
             extra_link_args=cuda_link_args,
@@ -871,7 +881,8 @@ else:
 install_requires = []
 if sz_target != "stringzilla":
     # Keep versions in lockstep to ensure ABI compatibility
-    install_requires = [f"stringzilla=={__version__}"]
+    # The parallel modules call `import_array()`, so NumPy is a runtime dependency and not merely a build one.
+    install_requires = [f"stringzilla=={__version__}", "numpy"]
 
 setup(
     name=__lib_name__,

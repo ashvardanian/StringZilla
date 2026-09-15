@@ -1,8 +1,8 @@
 /**
  *  @brief Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
- *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the benchmarks under @b `bench/`.
  *
- *  @file scripts/test_stringzillas.cpp
+ *  @file test/stringzillas.cpp
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
@@ -31,6 +31,7 @@
 
 #include "stringzilla.hpp"
 
+#include "substrings.cuh"
 #include "fingerprints.cuh"
 #include "similarities.cuh"
 
@@ -49,12 +50,29 @@ int main(int argc, char const **argv) {
     failures += run_test("test_fingerprints_unit", test_fingerprints_unit);
     failures += run_test("test_fingerprints_equivalence", test_fingerprints_equivalence);
     failures += run_test("test_fingerprints_safety", test_fingerprints_safety);
+    failures += run_test("test_fingerprints_cuda_memory_safety", test_fingerprints_cuda_memory_safety);
 
     failures += run_test("test_similarities_unit", test_similarities_unit);
     failures += run_test("test_similarities_equivalence", test_similarities_equivalence);
-    failures += run_test("test_similarities_cross_product", test_similarities_cross_product);
+    failures += run_test("test_similarities_cross_product_equivalence", test_similarities_cross_product_equivalence);
     failures += run_test("test_similarities_safety", test_similarities_safety);
-    failures += run_test("test_similarities_memory_usage", test_similarities_memory_usage);
+    failures += run_test("test_similarities_cuda_memory_safety", test_similarities_cuda_memory_safety);
+    failures += run_test("test_similarities_memory_usage_equivalence", test_similarities_memory_usage_equivalence);
+
+    failures += run_test("test_substrings_unit", test_substrings_unit);
+    failures += run_test("test_substrings_uncased_unit", test_substrings_uncased_unit);
+    failures += run_test("test_substrings_uncased_equivalence", test_substrings_uncased_equivalence);
+    failures += run_test("test_substrings_construction_equivalence", test_substrings_construction_equivalence);
+    failures += run_test("test_substrings_adversarial_equivalence", test_substrings_adversarial_equivalence);
+    failures += run_test("test_substrings_large_haystacks_equivalence", test_substrings_large_haystacks_equivalence);
+    failures += run_test("test_substrings_cover_equivalence", test_substrings_cover_equivalence);
+    failures += run_test("test_substrings_rewriting_equivalence", test_substrings_rewriting_equivalence);
+    failures += run_test("test_substrings_scoring_unit", test_substrings_scoring_unit);
+    failures += run_test("test_substrings_scoring_wide_equivalence", test_substrings_scoring_wide_equivalence);
+    failures += run_test("test_substrings_cuda_memory_safety", test_substrings_cuda_memory_safety);
+    failures += run_test("test_substrings_cuda_equivalence", test_substrings_cuda_equivalence);
+    failures += run_test("test_substrings_safety", test_substrings_safety);
+    failures += run_test("test_substrings_buffer_safety", test_substrings_buffer_safety);
 
     if (failures != 0) {
         std::fprintf(stderr, "\n%zu test(s) failed.\n", failures);

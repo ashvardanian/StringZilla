@@ -162,7 +162,7 @@ SZ_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t 
 SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #include "stringzilla/compare/serial.h"
 #include "stringzilla/compare/westmere.h"
@@ -231,7 +231,7 @@ SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 }
 
 #endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

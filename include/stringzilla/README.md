@@ -392,7 +392,7 @@ assert(sentences == 2); // the dot inside $9.99 is not a sentence break
 ```
 
 The full family of ranges, each borrowing from the source and yielding `sz::string_view` segments, or `sz_rune_t` for runes.
-Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them:
+Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the __separators__ the kernel finds, while `split_*` yields the content __between__ them:
 
 - `utf8_runes()` — every codepoint as a decoded `sz_rune_t` UTF-32 scalar.
 - `utf8_graphemes()` — UAX-29 grapheme clusters, the user-perceived characters.

@@ -28,8 +28,8 @@ extern "C" {
  *  @param hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param block Pointer to 64-byte message block.
  */
-SZ_HELPER_AUTO void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)],
-                                                      sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
+SZ_HELPER_INLINE void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)],
+                                                        sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Load and byte-swap the first 16 words (big-endian) using SSE

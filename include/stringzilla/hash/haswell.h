@@ -107,12 +107,15 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
  *  ports on this class of core, so the round mix stays throughput-bound rather than shift-bound. */
 
 /** @brief Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 8 lanes. */
-SZ_HELPER_INLINE __m256i sz_sha256_choice_haswell_(__m256i state_e_u32x8, __m256i state_f_u32x8, __m256i state_g_u32x8) {
-    return _mm256_xor_si256(state_g_u32x8, _mm256_and_si256(state_e_u32x8, _mm256_xor_si256(state_f_u32x8, state_g_u32x8)));
+SZ_HELPER_INLINE __m256i sz_sha256_choice_haswell_(__m256i state_e_u32x8, __m256i state_f_u32x8,
+                                                   __m256i state_g_u32x8) {
+    return _mm256_xor_si256(state_g_u32x8,
+                            _mm256_and_si256(state_e_u32x8, _mm256_xor_si256(state_f_u32x8, state_g_u32x8)));
 }
 
 /** @brief Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 8 lanes. */
-SZ_HELPER_INLINE __m256i sz_sha256_majority_haswell_(__m256i state_a_u32x8, __m256i state_b_u32x8, __m256i state_c_u32x8) {
+SZ_HELPER_INLINE __m256i sz_sha256_majority_haswell_(__m256i state_a_u32x8, __m256i state_b_u32x8,
+                                                     __m256i state_c_u32x8) {
     return _mm256_xor_si256(_mm256_and_si256(_mm256_xor_si256(state_a_u32x8, state_b_u32x8), state_c_u32x8),
                             _mm256_and_si256(state_a_u32x8, state_b_u32x8));
 }
@@ -120,31 +123,31 @@ SZ_HELPER_INLINE __m256i sz_sha256_majority_haswell_(__m256i state_a_u32x8, __m2
 /** @brief Evaluates `ror(state_a_u32x8, 2) ^ ror(state_a_u32x8, 13) ^ ror(state_a_u32x8, 22)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_u32x8) {
     __m256i const rotated_by_2_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_a_u32x8, 2),
-                                                     _mm256_slli_epi32(state_a_u32x8, 30));
+                                                       _mm256_slli_epi32(state_a_u32x8, 30));
     __m256i const rotated_by_13_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_a_u32x8, 13),
-                                                      _mm256_slli_epi32(state_a_u32x8, 19));
+                                                        _mm256_slli_epi32(state_a_u32x8, 19));
     __m256i const rotated_by_22_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_a_u32x8, 22),
-                                                      _mm256_slli_epi32(state_a_u32x8, 10));
+                                                        _mm256_slli_epi32(state_a_u32x8, 10));
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_2_u32x8, rotated_by_13_u32x8), rotated_by_22_u32x8);
 }
 
 /** @brief Evaluates `ror(state_e_u32x8, 6) ^ ror(state_e_u32x8, 11) ^ ror(state_e_u32x8, 25)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_u32x8) {
     __m256i const rotated_by_6_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_e_u32x8, 6),
-                                                     _mm256_slli_epi32(state_e_u32x8, 26));
+                                                       _mm256_slli_epi32(state_e_u32x8, 26));
     __m256i const rotated_by_11_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_e_u32x8, 11),
-                                                      _mm256_slli_epi32(state_e_u32x8, 21));
+                                                        _mm256_slli_epi32(state_e_u32x8, 21));
     __m256i const rotated_by_25_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_e_u32x8, 25),
-                                                      _mm256_slli_epi32(state_e_u32x8, 7));
+                                                        _mm256_slli_epi32(state_e_u32x8, 7));
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_6_u32x8, rotated_by_11_u32x8), rotated_by_25_u32x8);
 }
 
 /** @brief Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_7_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 7),
-                                                     _mm256_slli_epi32(message_word_u32x8, 25));
+                                                       _mm256_slli_epi32(message_word_u32x8, 25));
     __m256i const rotated_by_18_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 18),
-                                                      _mm256_slli_epi32(message_word_u32x8, 14));
+                                                        _mm256_slli_epi32(message_word_u32x8, 14));
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_7_u32x8, rotated_by_18_u32x8),
                             _mm256_srli_epi32(message_word_u32x8, 3));
 }
@@ -152,9 +155,9 @@ SZ_HELPER_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_u3
 /** @brief Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_17_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 17),
-                                                      _mm256_slli_epi32(message_word_u32x8, 15));
+                                                        _mm256_slli_epi32(message_word_u32x8, 15));
     __m256i const rotated_by_19_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 19),
-                                                      _mm256_slli_epi32(message_word_u32x8, 13));
+                                                        _mm256_slli_epi32(message_word_u32x8, 13));
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_17_u32x8, rotated_by_19_u32x8),
                             _mm256_srli_epi32(message_word_u32x8, 10));
 }
@@ -218,17 +221,18 @@ SZ_HELPER_INLINE __m256i sz_sha256_extend_haswell_(__m256i oldest_word_u32x8, __
  *  `state_d` becomes the next round's `state_e`, and `state_h` is dead on entry so it receives the next
  *  round's `state_a`.
  */
-SZ_HELPER_INLINE void sz_sha256_round_haswell_(                                          //
+SZ_HELPER_INLINE void sz_sha256_round_haswell_(                                                  //
     __m256i state_a_u32x8, __m256i state_b_u32x8, __m256i state_c_u32x8, __m256i *state_d_u32x8, //
     __m256i state_e_u32x8, __m256i state_f_u32x8, __m256i state_g_u32x8, __m256i *state_h_u32x8, //
     __m256i message_word_u32x8, sz_u32_t round_constant) {
     __m256i const temporary_first_u32x8 = _mm256_add_epi32( //
-        _mm256_add_epi32(
-            _mm256_add_epi32(*state_h_u32x8, sz_sha256_big_sigma1_haswell_(state_e_u32x8)),
-            _mm256_add_epi32(sz_sha256_choice_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8), message_word_u32x8)),
+        _mm256_add_epi32(_mm256_add_epi32(*state_h_u32x8, sz_sha256_big_sigma1_haswell_(state_e_u32x8)),
+                         _mm256_add_epi32(sz_sha256_choice_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8),
+                                          message_word_u32x8)),
         _mm256_set1_epi32((int)round_constant));
     __m256i const temporary_second_u32x8 = _mm256_add_epi32(
-        sz_sha256_big_sigma0_haswell_(state_a_u32x8), sz_sha256_majority_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8));
+        sz_sha256_big_sigma0_haswell_(state_a_u32x8),
+        sz_sha256_majority_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8));
     *state_d_u32x8 = _mm256_add_epi32(*state_d_u32x8, temporary_first_u32x8);
     *state_h_u32x8 = _mm256_add_epi32(temporary_first_u32x8, temporary_second_u32x8);
 }
@@ -255,7 +259,7 @@ SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
 
     __m256i const byte_swap_u8x32 = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12, //
-                                                   3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+                                                     3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
     __m256i low_lanes_u32x8[8], high_lanes_u32x8[8], schedule_u32x8[16];
     for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
         low_lanes_u32x8[lane_index] = _mm256_shuffle_epi8(
@@ -271,103 +275,105 @@ SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8
     __m256i state_e_u32x8 = hashes_u32x8[4], state_f_u32x8 = hashes_u32x8[5];
     __m256i state_g_u32x8 = hashes_u32x8[6], state_h_u32x8 = hashes_u32x8[7];
 
-    sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8, state_f_u32x8, state_g_u32x8,
-                             &state_h_u32x8, schedule_u32x8[0], round_constants[0]);
-    sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8, state_e_u32x8, state_f_u32x8,
-                             &state_g_u32x8, schedule_u32x8[1], round_constants[1]);
-    sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8, state_d_u32x8, state_e_u32x8,
-                             &state_f_u32x8, schedule_u32x8[2], round_constants[2]);
-    sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8, state_c_u32x8, state_d_u32x8,
-                             &state_e_u32x8, schedule_u32x8[3], round_constants[3]);
-    sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8, state_b_u32x8, state_c_u32x8,
-                             &state_d_u32x8, schedule_u32x8[4], round_constants[4]);
-    sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8, state_a_u32x8, state_b_u32x8,
-                             &state_c_u32x8, schedule_u32x8[5], round_constants[5]);
-    sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8, state_h_u32x8, state_a_u32x8,
-                             &state_b_u32x8, schedule_u32x8[6], round_constants[6]);
-    sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8, state_g_u32x8, state_h_u32x8,
-                             &state_a_u32x8, schedule_u32x8[7], round_constants[7]);
-    sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8, state_f_u32x8, state_g_u32x8,
-                             &state_h_u32x8, schedule_u32x8[8], round_constants[8]);
-    sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8, state_e_u32x8, state_f_u32x8,
-                             &state_g_u32x8, schedule_u32x8[9], round_constants[9]);
-    sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8, state_d_u32x8, state_e_u32x8,
-                             &state_f_u32x8, schedule_u32x8[10], round_constants[10]);
-    sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8, state_c_u32x8, state_d_u32x8,
-                             &state_e_u32x8, schedule_u32x8[11], round_constants[11]);
-    sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8, state_b_u32x8, state_c_u32x8,
-                             &state_d_u32x8, schedule_u32x8[12], round_constants[12]);
-    sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8, state_a_u32x8, state_b_u32x8,
-                             &state_c_u32x8, schedule_u32x8[13], round_constants[13]);
-    sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8, state_h_u32x8, state_a_u32x8,
-                             &state_b_u32x8, schedule_u32x8[14], round_constants[14]);
-    sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8, state_g_u32x8, state_h_u32x8,
-                             &state_a_u32x8, schedule_u32x8[15], round_constants[15]);
+    sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8, state_f_u32x8,
+                             state_g_u32x8, &state_h_u32x8, schedule_u32x8[0], round_constants[0]);
+    sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8, state_e_u32x8,
+                             state_f_u32x8, &state_g_u32x8, schedule_u32x8[1], round_constants[1]);
+    sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8, state_d_u32x8,
+                             state_e_u32x8, &state_f_u32x8, schedule_u32x8[2], round_constants[2]);
+    sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8, state_c_u32x8,
+                             state_d_u32x8, &state_e_u32x8, schedule_u32x8[3], round_constants[3]);
+    sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8, state_b_u32x8,
+                             state_c_u32x8, &state_d_u32x8, schedule_u32x8[4], round_constants[4]);
+    sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8, state_a_u32x8,
+                             state_b_u32x8, &state_c_u32x8, schedule_u32x8[5], round_constants[5]);
+    sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8, state_h_u32x8,
+                             state_a_u32x8, &state_b_u32x8, schedule_u32x8[6], round_constants[6]);
+    sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8, state_g_u32x8,
+                             state_h_u32x8, &state_a_u32x8, schedule_u32x8[7], round_constants[7]);
+    sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8, state_f_u32x8,
+                             state_g_u32x8, &state_h_u32x8, schedule_u32x8[8], round_constants[8]);
+    sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8, state_e_u32x8,
+                             state_f_u32x8, &state_g_u32x8, schedule_u32x8[9], round_constants[9]);
+    sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8, state_d_u32x8,
+                             state_e_u32x8, &state_f_u32x8, schedule_u32x8[10], round_constants[10]);
+    sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8, state_c_u32x8,
+                             state_d_u32x8, &state_e_u32x8, schedule_u32x8[11], round_constants[11]);
+    sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8, state_b_u32x8,
+                             state_c_u32x8, &state_d_u32x8, schedule_u32x8[12], round_constants[12]);
+    sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8, state_a_u32x8,
+                             state_b_u32x8, &state_c_u32x8, schedule_u32x8[13], round_constants[13]);
+    sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8, state_h_u32x8,
+                             state_a_u32x8, &state_b_u32x8, schedule_u32x8[14], round_constants[14]);
+    sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8, state_g_u32x8,
+                             state_h_u32x8, &state_a_u32x8, schedule_u32x8[15], round_constants[15]);
 
     for (sz_size_t turn_index = 1; turn_index != 4; ++turn_index) {
         sz_u32_t const *turn_constants = round_constants + turn_index * 16;
         schedule_u32x8[0] = sz_sha256_extend_haswell_(schedule_u32x8[0], schedule_u32x8[1], schedule_u32x8[9],
-                                                    schedule_u32x8[14]);
-        sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8, state_f_u32x8,
-                                 state_g_u32x8, &state_h_u32x8, schedule_u32x8[0], turn_constants[0]);
+                                                      schedule_u32x8[14]);
+        sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8,
+                                 state_f_u32x8, state_g_u32x8, &state_h_u32x8, schedule_u32x8[0], turn_constants[0]);
         schedule_u32x8[1] = sz_sha256_extend_haswell_(schedule_u32x8[1], schedule_u32x8[2], schedule_u32x8[10],
-                                                    schedule_u32x8[15]);
-        sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8, state_e_u32x8,
-                                 state_f_u32x8, &state_g_u32x8, schedule_u32x8[1], turn_constants[1]);
+                                                      schedule_u32x8[15]);
+        sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8,
+                                 state_e_u32x8, state_f_u32x8, &state_g_u32x8, schedule_u32x8[1], turn_constants[1]);
         schedule_u32x8[2] = sz_sha256_extend_haswell_(schedule_u32x8[2], schedule_u32x8[3], schedule_u32x8[11],
-                                                    schedule_u32x8[0]);
-        sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8, state_d_u32x8,
-                                 state_e_u32x8, &state_f_u32x8, schedule_u32x8[2], turn_constants[2]);
+                                                      schedule_u32x8[0]);
+        sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8,
+                                 state_d_u32x8, state_e_u32x8, &state_f_u32x8, schedule_u32x8[2], turn_constants[2]);
         schedule_u32x8[3] = sz_sha256_extend_haswell_(schedule_u32x8[3], schedule_u32x8[4], schedule_u32x8[12],
-                                                    schedule_u32x8[1]);
-        sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8, state_c_u32x8,
-                                 state_d_u32x8, &state_e_u32x8, schedule_u32x8[3], turn_constants[3]);
+                                                      schedule_u32x8[1]);
+        sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8,
+                                 state_c_u32x8, state_d_u32x8, &state_e_u32x8, schedule_u32x8[3], turn_constants[3]);
         schedule_u32x8[4] = sz_sha256_extend_haswell_(schedule_u32x8[4], schedule_u32x8[5], schedule_u32x8[13],
-                                                    schedule_u32x8[2]);
-        sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8, state_b_u32x8,
-                                 state_c_u32x8, &state_d_u32x8, schedule_u32x8[4], turn_constants[4]);
+                                                      schedule_u32x8[2]);
+        sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8,
+                                 state_b_u32x8, state_c_u32x8, &state_d_u32x8, schedule_u32x8[4], turn_constants[4]);
         schedule_u32x8[5] = sz_sha256_extend_haswell_(schedule_u32x8[5], schedule_u32x8[6], schedule_u32x8[14],
-                                                    schedule_u32x8[3]);
-        sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8, state_a_u32x8,
-                                 state_b_u32x8, &state_c_u32x8, schedule_u32x8[5], turn_constants[5]);
+                                                      schedule_u32x8[3]);
+        sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8,
+                                 state_a_u32x8, state_b_u32x8, &state_c_u32x8, schedule_u32x8[5], turn_constants[5]);
         schedule_u32x8[6] = sz_sha256_extend_haswell_(schedule_u32x8[6], schedule_u32x8[7], schedule_u32x8[15],
-                                                    schedule_u32x8[4]);
-        sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8, state_h_u32x8,
-                                 state_a_u32x8, &state_b_u32x8, schedule_u32x8[6], turn_constants[6]);
-        schedule_u32x8[7] = sz_sha256_extend_haswell_(schedule_u32x8[7], schedule_u32x8[8], schedule_u32x8[0], schedule_u32x8[5]);
-        sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8, state_g_u32x8,
-                                 state_h_u32x8, &state_a_u32x8, schedule_u32x8[7], turn_constants[7]);
-        schedule_u32x8[8] = sz_sha256_extend_haswell_(schedule_u32x8[8], schedule_u32x8[9], schedule_u32x8[1], schedule_u32x8[6]);
-        sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8, state_f_u32x8,
-                                 state_g_u32x8, &state_h_u32x8, schedule_u32x8[8], turn_constants[8]);
+                                                      schedule_u32x8[4]);
+        sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8,
+                                 state_h_u32x8, state_a_u32x8, &state_b_u32x8, schedule_u32x8[6], turn_constants[6]);
+        schedule_u32x8[7] = sz_sha256_extend_haswell_(schedule_u32x8[7], schedule_u32x8[8], schedule_u32x8[0],
+                                                      schedule_u32x8[5]);
+        sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8,
+                                 state_g_u32x8, state_h_u32x8, &state_a_u32x8, schedule_u32x8[7], turn_constants[7]);
+        schedule_u32x8[8] = sz_sha256_extend_haswell_(schedule_u32x8[8], schedule_u32x8[9], schedule_u32x8[1],
+                                                      schedule_u32x8[6]);
+        sz_sha256_round_haswell_(state_a_u32x8, state_b_u32x8, state_c_u32x8, &state_d_u32x8, state_e_u32x8,
+                                 state_f_u32x8, state_g_u32x8, &state_h_u32x8, schedule_u32x8[8], turn_constants[8]);
         schedule_u32x8[9] = sz_sha256_extend_haswell_(schedule_u32x8[9], schedule_u32x8[10], schedule_u32x8[2],
-                                                    schedule_u32x8[7]);
-        sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8, state_e_u32x8,
-                                 state_f_u32x8, &state_g_u32x8, schedule_u32x8[9], turn_constants[9]);
+                                                      schedule_u32x8[7]);
+        sz_sha256_round_haswell_(state_h_u32x8, state_a_u32x8, state_b_u32x8, &state_c_u32x8, state_d_u32x8,
+                                 state_e_u32x8, state_f_u32x8, &state_g_u32x8, schedule_u32x8[9], turn_constants[9]);
         schedule_u32x8[10] = sz_sha256_extend_haswell_(schedule_u32x8[10], schedule_u32x8[11], schedule_u32x8[3],
-                                                     schedule_u32x8[8]);
-        sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8, state_d_u32x8,
-                                 state_e_u32x8, &state_f_u32x8, schedule_u32x8[10], turn_constants[10]);
+                                                       schedule_u32x8[8]);
+        sz_sha256_round_haswell_(state_g_u32x8, state_h_u32x8, state_a_u32x8, &state_b_u32x8, state_c_u32x8,
+                                 state_d_u32x8, state_e_u32x8, &state_f_u32x8, schedule_u32x8[10], turn_constants[10]);
         schedule_u32x8[11] = sz_sha256_extend_haswell_(schedule_u32x8[11], schedule_u32x8[12], schedule_u32x8[4],
-                                                     schedule_u32x8[9]);
-        sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8, state_c_u32x8,
-                                 state_d_u32x8, &state_e_u32x8, schedule_u32x8[11], turn_constants[11]);
+                                                       schedule_u32x8[9]);
+        sz_sha256_round_haswell_(state_f_u32x8, state_g_u32x8, state_h_u32x8, &state_a_u32x8, state_b_u32x8,
+                                 state_c_u32x8, state_d_u32x8, &state_e_u32x8, schedule_u32x8[11], turn_constants[11]);
         schedule_u32x8[12] = sz_sha256_extend_haswell_(schedule_u32x8[12], schedule_u32x8[13], schedule_u32x8[5],
-                                                     schedule_u32x8[10]);
-        sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8, state_b_u32x8,
-                                 state_c_u32x8, &state_d_u32x8, schedule_u32x8[12], turn_constants[12]);
+                                                       schedule_u32x8[10]);
+        sz_sha256_round_haswell_(state_e_u32x8, state_f_u32x8, state_g_u32x8, &state_h_u32x8, state_a_u32x8,
+                                 state_b_u32x8, state_c_u32x8, &state_d_u32x8, schedule_u32x8[12], turn_constants[12]);
         schedule_u32x8[13] = sz_sha256_extend_haswell_(schedule_u32x8[13], schedule_u32x8[14], schedule_u32x8[6],
-                                                     schedule_u32x8[11]);
-        sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8, state_a_u32x8,
-                                 state_b_u32x8, &state_c_u32x8, schedule_u32x8[13], turn_constants[13]);
+                                                       schedule_u32x8[11]);
+        sz_sha256_round_haswell_(state_d_u32x8, state_e_u32x8, state_f_u32x8, &state_g_u32x8, state_h_u32x8,
+                                 state_a_u32x8, state_b_u32x8, &state_c_u32x8, schedule_u32x8[13], turn_constants[13]);
         schedule_u32x8[14] = sz_sha256_extend_haswell_(schedule_u32x8[14], schedule_u32x8[15], schedule_u32x8[7],
-                                                     schedule_u32x8[12]);
-        sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8, state_h_u32x8,
-                                 state_a_u32x8, &state_b_u32x8, schedule_u32x8[14], turn_constants[14]);
+                                                       schedule_u32x8[12]);
+        sz_sha256_round_haswell_(state_c_u32x8, state_d_u32x8, state_e_u32x8, &state_f_u32x8, state_g_u32x8,
+                                 state_h_u32x8, state_a_u32x8, &state_b_u32x8, schedule_u32x8[14], turn_constants[14]);
         schedule_u32x8[15] = sz_sha256_extend_haswell_(schedule_u32x8[15], schedule_u32x8[0], schedule_u32x8[8],
-                                                     schedule_u32x8[13]);
-        sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8, state_g_u32x8,
-                                 state_h_u32x8, &state_a_u32x8, schedule_u32x8[15], turn_constants[15]);
+                                                       schedule_u32x8[13]);
+        sz_sha256_round_haswell_(state_b_u32x8, state_c_u32x8, state_d_u32x8, &state_e_u32x8, state_f_u32x8,
+                                 state_g_u32x8, state_h_u32x8, &state_a_u32x8, schedule_u32x8[15], turn_constants[15]);
     }
 
     hashes_u32x8[0] = _mm256_add_epi32(hashes_u32x8[0], _mm256_and_si256(active_u32x8, state_a_u32x8));
@@ -398,9 +404,9 @@ SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8
  *  live across the loop between them.
  *
  */
-SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
-                                                         sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
-                                                         sz_size_t const *blocks_per_lane) {
+SZ_HELPER_INLINE void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
+                                                           sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
+                                                           sz_size_t const *blocks_per_lane) {
     __m256i hashes_u32x8[8];
     sz_u256_vec_t counts_vec, buffered_vec;
     sz_u8_t const *sources[8];
@@ -518,8 +524,8 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *stat
  *  Same two-pass shape as the Skylake path, except the lane select is a blend vector rather than a k-mask,
  *  since AVX2 has no mask registers.
  */
-SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states,
-                                                               sz_size_t active_lanes_count, sz_u8_t *digests) {
+SZ_HELPER_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states,
+                                                                 sz_size_t active_lanes_count, sz_u8_t *digests) {
     // A SHA256 block is 64 bytes whatever the vector width, so the staged blocks are 512-bit unions even
     // though the lanes themselves are 256-bit wide.
     sz_u512_vec_t staged_vec[8];
@@ -548,7 +554,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t
             sz_size_t const buffered = states[source_lane].block_length;
             for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
                 staged_vec[lane_index].u8s[byte_index] = byte_index < buffered ? states[source_lane].block[byte_index]
-                                                                              : (sz_u8_t)0;
+                                                                               : (sz_u8_t)0;
             staged_vec[lane_index].u8s[buffered] = 0x80;
         }
         sz_sha256_compress_haswell_(hashes_u32x8, staged_blocks, overflow_vec.ymm);
@@ -563,7 +569,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t
         sz_size_t const kept = carried ? 0 : buffered;
         for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
             staged_vec[lane_index].u8s[byte_index] = byte_index < kept ? states[source_lane].block[byte_index]
-                                                                      : (sz_u8_t)0;
+                                                                       : (sz_u8_t)0;
         if (!carried) staged_vec[lane_index].u8s[buffered] = 0x80;
         staged_vec[lane_index].u64s[7] = sz_u64_bytes_reverse(states[source_lane].total_length * 8);
     }
@@ -571,8 +577,8 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t
 
     // Big-endian output is a byte reverse inside each word, and the same transpose that gathered the state
     // returns each lane's digest as one 32-byte register.
-    __m256i const byte_swap_u8x32 = _mm256_setr_epi8(                                //
-        3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,                        //
+    __m256i const byte_swap_u8x32 = _mm256_setr_epi8(         //
+        3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12, //
         3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
     for (sz_size_t word_index = 0; word_index != 8; ++word_index)
         hashes_u32x8[word_index] = _mm256_shuffle_epi8(hashes_u32x8[word_index], byte_swap_u8x32);

@@ -645,7 +645,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linea
         i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
         i16_t const *scores_pre_deletion, i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t const gap = static_cast<i16_t>(this->gap_costs_.open_or_extend);
@@ -1166,7 +1166,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         i16_t *scores_new_insertions, i16_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t const gap_open = static_cast<i16_t>(this->gap_costs_.open);
@@ -1252,7 +1252,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
                                                   _mm256_add_epi16(pre_insert_open.ymm, gap_open_vec.ymm));
             cost_if_delete.ymm = _mm256_max_epi16(_mm256_add_epi16(run_delete.ymm, gap_expand_vec.ymm),
                                                   _mm256_add_epi16(pre_delete_open.ymm, gap_open_vec.ymm));
-            // In Local Alignment for SW the zero-reset is applied to @b only the substitution term;
+            // In Local Alignment for SW the zero-reset is applied to only the substitution term;
             // the insertion/deletion gap matrices are not clamped, exactly like the serial scorer.
             cell_score.ymm = _mm256_max_epi16(
                 _mm256_max_epi16(_mm256_add_epi16(pre_substitution.ymm, cost_of_substitution_i16_vecs[part].ymm),
@@ -1564,7 +1564,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
                                                   _mm256_add_epi32(pre_insert_open.ymm, gap_open_vec.ymm));
             cost_if_delete.ymm = _mm256_max_epi32(_mm256_add_epi32(run_delete.ymm, gap_expand_vec.ymm),
                                                   _mm256_add_epi32(pre_delete_open.ymm, gap_open_vec.ymm));
-            // In Local Alignment for SW the zero-reset is applied to @b only the substitution term;
+            // In Local Alignment for SW the zero-reset is applied to only the substitution term;
             // the insertion/deletion gap matrices are not clamped, exactly like the serial scorer.
             cell_score.ymm = _mm256_max_epi32(
                 _mm256_max_epi32(_mm256_add_epi32(pre_substitution.ymm, cost_of_substitution_i32_vecs[part].ymm),
@@ -2580,7 +2580,7 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
     }
 };
 
-#pragma endregion // Uniform Cost Levenshtein
+#pragma endregion Uniform Cost Levenshtein
 
 /** @brief Redirects the Haswell template specialization to the serial version. */
 template <typename char_type_, typename score_type_, typename substituter_type_, typename gap_costs_type_,
@@ -2777,7 +2777,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_
         }
 
         // Make sure the size relation between the strings is correct. When the strings get swapped, the two class
-        // operands change order, so the cost table is folded @b transposed to keep the recurrence reading the
+        // operands change order, so the cost table is folded transposed to keep the recurrence reading the
         // original `class_substitution_costs[first][second]`, matching the serial scorer bit-for-bit.
         char_t const *shorter = first.data(), *longer = second.data();
         size_t shorter_length = first.size(), longer_length = second.size();
@@ -2807,7 +2807,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_
         char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
         char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
-        // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
+        // Export the reversed shorter string, then classify both strings once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         tile_scorer_t scorer {substituter_, gap_costs_};
@@ -3001,7 +3001,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, affine_gap_costs_
         }
 
         // Make sure the size relation between the strings is correct. When the strings get swapped, the two class
-        // operands change order, so the cost table is folded @b transposed to keep the recurrence reading the
+        // operands change order, so the cost table is folded transposed to keep the recurrence reading the
         // original `class_substitution_costs[first][second]`, matching the serial scorer bit-for-bit.
         char_t const *shorter = first.data(), *longer = second.data();
         size_t shorter_length = first.size(), longer_length = second.size();
@@ -3035,7 +3035,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, affine_gap_costs_
         char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
         char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
-        // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
+        // Export the reversed shorter string, then classify both strings once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         tile_scorer_t scorer {substituter_, gap_costs_};
@@ -6519,7 +6519,7 @@ struct levenshtein_distances_utf8<
     using lane_walker_wide_t =
         candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, gap_costs_t, sz_minimize_distance_k,
                               sz_similarity_global_k, sz_cap_haswell_k, 8, void>; // ? 8-lane `u32` non-unit rune.
-    // The driver's per-pair fallback receives @b rune views, so it is a rune-typed `levenshtein_distance`; the serial
+    // The driver's per-pair fallback receives rune views, so it is a rune-typed `levenshtein_distance`; the serial
     // capability covers every cell width (the Haswell rune diagonal walker only goes up to `u16`), and this long-tail
     // path is rare. It stays bit-exact with the serial engine.
     using rune_scoring_t = levenshtein_distance<rune_t, gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
@@ -6537,7 +6537,7 @@ struct levenshtein_distances_utf8<
 
     safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
     // The non-unit path transcodes every query/candidate to UTF-32 once and exposes each as a `span<rune_t const>`
-    // view, so the driver's `to_view` yields rune spans. Queries and candidates own @b separate arenas so the second
+    // view, so the driver's `to_view` yields rune spans. Queries and candidates own separate arenas so the second
     // transcode does not invalidate the first set of views; the symmetric self-similarity case reuses the query arena.
     safe_vector<rune_t, rune_allocator_t> query_arena_ {alloc_};
     safe_vector<rune_t, rune_allocator_t> candidate_arena_ {alloc_};
@@ -7610,7 +7610,7 @@ struct smith_waterman_scores<
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_HASWELL
-#pragma endregion // Haswell Implementation
+#pragma endregion Haswell Implementation
 
 } // namespace stringzillas
 } // namespace ashvardanian

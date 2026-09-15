@@ -1,13 +1,13 @@
 """
 Shared UTF-8 segmentation test driver for the per-family test modules.
 
-The Python analog of the C++ `scripts/test_utf8.hpp`: a single place that owns the boundary-relevant
+The Python analog of the C++ `test/utf8.hpp`: a single place that owns the boundary-relevant
 palettes, the SMP/astral fixtures, the malformed-UTF-8 corpus generators, the window-seam length sweep,
 the adversarial-byte battery, and the metamorphic tiling invariant, so every family TU
-(test_utf8_wordbreaks.py, test_utf8_graphemes.py, …) shares one driver instead of copying corpora.
+(utf8_wordbreaks.py, utf8_graphemes.py, …) shares one driver instead of copying corpora.
 
 Differential oracles live here too: `icu_segmenter` / `icu_normalizer` wrap PyICU (skipped when absent),
-generalizing the sentence-only ICU idiom that previously lived inline in the monolith.
+covering word, grapheme, sentence, and line boundaries through one shared idiom.
 
 Palette members are built from explicit codepoints (the source stays pure ASCII) so an editor or a
 delegated agent cannot silently NFC-normalize a raw multi-byte literal.
@@ -288,7 +288,7 @@ def icu_segmenter(kind: str) -> Callable[[str], List[str]]:
     """Return an ICU `BreakIterator`-backed segmenter `text -> list[str]` for the given boundary `kind`.
 
     `kind` is one of ``"word"`` / ``"grapheme"`` / ``"sentence"`` / ``"line"``. Skips the test when PyICU is
-    absent. Generalizes the sentence-only idiom that previously lived inline in the monolith.
+    absent.
     """
     icu = pytest.importorskip("icu", reason="PyICU not installed")
     factories = {
@@ -347,7 +347,7 @@ def icu_normalizer(form: str) -> Callable[[str], str]:
 # region Rule-derived generators
 
 # Generators that turn the UCD break-property / combining-class / decomposition tables (extracted in
-# test_helpers.py) into hard synthetic corner cases, rather than relying on a hand-picked palette.
+# sz_helpers.py) into hard synthetic corner cases, rather than relying on a hand-picked palette.
 
 
 def class_adjacency_strings(

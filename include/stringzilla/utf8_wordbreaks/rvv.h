@@ -64,7 +64,7 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_ascii_class_rvv_(vuint8m4_t raw_u
  *          values < 14, stage-2 values below the stage-3 row count) except at stage 4, where `leaf_group` is
  *          clamped for the address and the result zeroed on out-of-range groups, matching the NEON blend loop.
  *          Bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. */
-SZ_HELPER_AUTO vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
+SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
     vuint8m4_t plane_off_u8m4, vuint8m4_t high_u8m4, vuint8m4_t low_u8m4) {
     vuint8m4_t const n4_u8m4 = __riscv_vand_vx_u8m4(plane_off_u8m4, 0x0F, 64);
     vuint8m4_t const n3_u8m4 = __riscv_vsrl_vx_u8m4(high_u8m4, 4, 64);
@@ -114,8 +114,8 @@ SZ_HELPER_AUTO vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
  *  `loaded` clamp is an in-register `vid < loaded` compare (lane indices <= 63 fit `u8`). ASCII and BMP resolve
  *  through UNCONDITIONAL masked gathers — inactive lanes perform no memory access, and index safety comes from table
  *  totality, never from the mask — so only the rare 4-gather astral cascade keeps a branch. */
-SZ_HELPER_AUTO vuint8m4_t sz_utf8_word_break_classify_window_rvv_(vuint8m4_t const raw_u8m4,
-                                                                  sz_utf8_rune_window_rvv_t const *window) {
+SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_classify_window_rvv_(vuint8m4_t const raw_u8m4,
+                                                                    sz_utf8_rune_window_rvv_t const *window) {
     // In-register lead classes and the `loaded` clamp, mirroring the struct fields `decode_window` lowered for the
     // engine but kept as masks so no `sz_u64_t` is raised back to a `vbool2_t` here.
     vbool2_t const within_loaded_b2 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vid_v_u8m4(64), (sz_u8_t)window->loaded, 64);
@@ -188,7 +188,7 @@ SZ_HELPER_INLINE vuint16m8_t sz_utf8_word_break_codepoint16_rvv_(vuint8m4_t high
 
 /** @brief  A 64-bit "codepoint16 in any sorted `[lo, hi]` range" lane mask, the RVV twin of
  *          @ref sz_utf8_word_break_range16_mask_neon_ over native 16-bit lanes (WSegSpace / Extended_Pictographic). */
-SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
     vuint16m8_t values_u16m8, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
     vbool2_t hit_b2 = __riscv_vmclr_m_b2(64);
     for (int range = 0; range < count; ++range) {
@@ -206,7 +206,7 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
 /** @brief  Resolve one window into the maximal-subpart partition — the RVV twin of
  *          @ref sz_utf8_word_break_partition_neon_: compute the per-ISA `sz_u64_t` masks and delegate to the
  *          portable @ref sz_utf8_word_break_partition_from_masks_. */
-SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv_( //
+SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv_( //
     vuint8m4_t const raw_u8m4, sz_utf8_rune_window_rvv_t const *window, sz_u64_t valid, int at_end_of_text) {
     sz_u64_t const real_continuation = window->continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD -> 2, 0xE -> 3, 0xF -> 4. The strict
@@ -245,7 +245,7 @@ SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv_(
  *          the truncated-edge U+FFFD reclassify to the class lanes, materializes every per-class lane mask + the
  *          raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range scan), and the per-lane
  *          class byte array. */
-SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_( //
+SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_( //
     vuint8m4_t const raw_u8m4, sz_utf8_rune_window_rvv_t const *window, vuint8m4_t classes_u8m4,
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 

@@ -55,7 +55,7 @@ extern "C" {
  *         offset = codepoint - 0x10000 (s0 -> s1 -> s2 -> leaf). Re-init-free: every tile is read straight from
  *         aligned .rodata through the substrate permute256_/lut_cascade_ helpers. Bit-exact with
  *         `sz_rune_line_break_property` over the astral planes. */
-SZ_HELPER_AUTO __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
     __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
     __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
         sz_utf8_line_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 12), _mm512_set1_epi32(0xFF)));
@@ -80,7 +80,7 @@ SZ_HELPER_AUTO __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoin
  *         `flat_bmp_[page * 256 + (cp & 0xFF)]`. The leaf byte is an index into
  *         `sz_utf8_line_break_flat_palette_`, NOT the 62-entry cascade palette. Only the low byte of each u32 lane
  *         is the index; the caller truncates with `vpmovdb`. */
-SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
+SZ_HELPER_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
     return sz_utf8_rune_flat_lookup_icelake_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
                                              codepoints_u32x16);
 }
@@ -90,7 +90,7 @@ SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoint
  *         the decode. Lanes whose codepoint is >= 0x10000 are
  *         undefined (the caller blends the astral path over them). The sixteen-lane groups are unrolled because
  *         `vextracti32x4` / `vinserti32x4` take an immediate lane selector. */
-SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64, __m512i low_bytes_u8x64) {
+SZ_HELPER_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64, __m512i low_bytes_u8x64) {
     __m512i palette_indices_u8x64 = _mm512_setzero_si512();
     __m512i high_u32x16, low_u32x16, codepoints_u32x16, group_indices_u32x16;
 #define SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_(group)                                            \
@@ -112,9 +112,9 @@ SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_
  *         resolution aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); Pi/Pf/EAW/Cn|Ext side bits come from descriptor
  *         bits 6/7/8/9; RI/ZWJ side from the raw class; CM|ZWJ -> mark side bit; DottedCircle from bit 13. */
 SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i descriptors_u16x32,
-                                                                    __m512i *classes_u16x32_out,
-                                                                    __m512i *side_u16x32_out,
-                                                                    __mmask32 *dotted_m32_out) {
+                                                                    __m512i *classes_out_u16x32,
+                                                                    __m512i *side_out_u16x32,
+                                                                    __mmask32 *dotted_out_m32) {
     __m512i classes_u16x32 = _mm512_and_si512(descriptors_u16x32, _mm512_set1_epi16(0x3F));
     __mmask32 const is_sa_m32 = _mm512_cmpeq_epi16_mask(classes_u16x32, _mm512_set1_epi16(sz_line_break_sa_k));
     __mmask32 const sa_is_mark_m32 = _mm512_test_epi16_mask(descriptors_u16x32, _mm512_set1_epi16(1 << 12));
@@ -155,9 +155,9 @@ SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i desc
     side_u16x32 = _mm512_or_si512(
         side_u16x32, _mm512_maskz_mov_epi16(class_is_mark_m32, _mm512_set1_epi16(sz_line_break_side_mark_k)));
 
-    *classes_u16x32_out = classes_u16x32;
-    *side_u16x32_out = side_u16x32;
-    *dotted_m32_out = _mm512_test_epi16_mask(descriptors_u16x32, _mm512_set1_epi16(1 << 13));
+    *classes_out_u16x32 = classes_u16x32;
+    *side_out_u16x32 = side_u16x32;
+    *dotted_out_m32 = _mm512_test_epi16_mask(descriptors_u16x32, _mm512_set1_epi16(1 << 13));
 }
 
 /** @brief Expand sixty-four flat-palette indices to the LB1-resolved class byte, the engine side byte and the
@@ -167,9 +167,9 @@ SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i desc
  *         @ref sz_line_break_descriptor_unpack_half_icelake_ and narrow back to bytes with `vpmovwb`. Bit-identical
  *         to the cascade's `palette_class_` / `_side_` / `_dotted_` byte-table permutes, which carry the same
  *         resolution baked in. */
-SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
-                                                               __m512i *classes_u8x64_out, __m512i *side_u8x64_out,
-                                                               sz_u64_t *dotted_out) {
+SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
+                                                                 __m512i *classes_out_u8x64, __m512i *side_out_u8x64,
+                                                                 sz_u64_t *dotted_out) {
     __m512i const palette_low_tile_u16x32 = _mm512_load_si512((void const *)sz_utf8_line_break_flat_palette_);
     __m512i const palette_high_tile_u16x32 = _mm512_load_si512((void const *)(sz_utf8_line_break_flat_palette_ + 32));
     __m512i const indices_low_u16x32 = _mm512_cvtepu8_epi16(_mm512_castsi512_si256(palette_indices_u8x64));
@@ -185,22 +185,22 @@ SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_i
                                                   &dotted_low_m32);
     sz_line_break_descriptor_unpack_half_icelake_(descriptors_high_u16x32, &classes_high_u16x32, &side_high_u16x32,
                                                   &dotted_high_m32);
-    *classes_u8x64_out = _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi16_epi8(classes_low_u16x32)),
+    *classes_out_u8x64 = _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi16_epi8(classes_low_u16x32)),
                                             _mm512_cvtepi16_epi8(classes_high_u16x32), 1);
-    *side_u8x64_out = _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi16_epi8(side_low_u16x32)),
+    *side_out_u8x64 = _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi16_epi8(side_low_u16x32)),
                                          _mm512_cvtepi16_epi8(side_high_u16x32), 1);
     *dotted_out = (sz_u64_t)_cvtmask32_u32(dotted_low_m32) | ((sz_u64_t)_cvtmask32_u32(dotted_high_m32) << 32);
 }
 
 /** @brief Per-window byte-lane classification: class/side per lane, plus the effective-start and U+FFFD masks. */
 typedef struct sz_line_break_classified_t {
-    __m512i classes;      /**< Per-byte-lane Line_Break class (valid only on `starts` lanes). */
-    __m512i side;         /**< Per-byte-lane engine side byte. */
-    sz_u64_t dotted;      /**< Bit i set => lane i is DottedCircle U+25CC. */
-    sz_u64_t starts;      /**< Effective codepoint starts: valid leads (at their lane) + 1-byte U+FFFD units. */
-    sz_u64_t replacement; /**< Effective-start lanes that are ill-formed (decoded as U+FFFD, class AL). */
-    sz_u64_t non_start;   /**< Bytes that are NOT effective starts (consumed continuations) within `loaded`. */
-    sz_size_t loaded;     /**< Bytes loaded into this window (<= 64). */
+    __m512i classes_u8x64; /**< Per-byte-lane Line_Break class (valid only on `starts` lanes). */
+    __m512i side_u8x64;    /**< Per-byte-lane engine side byte. */
+    sz_u64_t dotted;       /**< Bit i set => lane i is DottedCircle U+25CC. */
+    sz_u64_t starts;       /**< Effective codepoint starts: valid leads (at their lane) + 1-byte U+FFFD units. */
+    sz_u64_t replacement;  /**< Effective-start lanes that are ill-formed (decoded as U+FFFD, class AL). */
+    sz_u64_t non_start;    /**< Bytes that are NOT effective starts (consumed continuations) within `loaded`. */
+    sz_size_t loaded;      /**< Bytes loaded into this window (<= 64). */
 } sz_line_break_classified_t;
 
 /**
@@ -210,14 +210,14 @@ typedef struct sz_line_break_classified_t {
  *          icelake agree on malformed input. Valid leads classify by decoded VALUE (page / trie / big / astral),
  *          matching the serial resolution precedence. The BMP trie uses the shared substrate `trie_walk_icelake_`.
  */
-SZ_HELPER_AUTO sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
-                                                                                 __m512i lane_identity_u8x64) {
+SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
+                                                                                   __m512i lane_identity_u8x64) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_(window.loaded);
     sz_u64_t const continuation = _cvtmask64_u64(window.continuation) & loaded_mask;
     sz_u64_t const two_byte = _cvtmask64_u64(window.two_byte_starts);
     sz_u64_t const three_byte = _cvtmask64_u64(window.three_byte_starts);
     sz_u64_t const four_byte = _cvtmask64_u64(window.four_byte_starts);
-    __m512i const raw_u8x64 = window.window;
+    __m512i const raw_u8x64 = window.window_u8x64;
     __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
                                                         raw_u8x64);
 
@@ -290,9 +290,9 @@ SZ_HELPER_AUTO sz_line_break_classified_t sz_line_break_classify_window_icelake_
         _mm512_and_si512(_mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x0F)), 4),
                          _mm512_set1_epi8((char)0xF0)),
         sz_utf8_srl8_icelake_(next2_u8x64, 2, 0x0F));
-    __m512i low_fixed_u8x64 = _mm512_mask_mov_epi8(window.low, _cvtu64_mask64(true_ascii), raw_u8x64);
+    __m512i low_fixed_u8x64 = _mm512_mask_mov_epi8(window.low_byte_u8x64, _cvtu64_mask64(true_ascii), raw_u8x64);
     low_fixed_u8x64 = _mm512_mask_mov_epi8(low_fixed_u8x64, _cvtu64_mask64(four_byte), low_four_u8x64);
-    __m512i high_fixed_u8x64 = _mm512_maskz_mov_epi8(_cvtu64_mask64(~true_ascii), window.high);
+    __m512i high_fixed_u8x64 = _mm512_maskz_mov_epi8(_cvtu64_mask64(~true_ascii), window.high_byte_u8x64);
     high_fixed_u8x64 = _mm512_mask_mov_epi8(high_fixed_u8x64, _cvtu64_mask64(four_byte), high_four_u8x64);
 
     sz_u64_t const valid_start = true_ascii | valid2 | valid3 | valid4;
@@ -383,8 +383,8 @@ SZ_HELPER_AUTO sz_line_break_classified_t sz_line_break_classify_window_icelake_
     }
 
     sz_line_break_classified_t result;
-    result.classes = classes_u8x64;
-    result.side = side_u8x64;
+    result.classes_u8x64 = classes_u8x64;
+    result.side_u8x64 = side_u8x64;
     result.dotted = dotted & starts;
     result.starts = starts;
     result.replacement = replacement;
@@ -426,25 +426,25 @@ SZ_HELPER_INLINE sz_u64_t sz_line_break_class_range_mask_icelake_(__m512i classe
 /** @brief Byte-lane gate/base derivation for the byte-level rule engine: identifies cluster bases, the transparent
  *         gate (continuations + attached combining marks), and reclassifies lone marks (LB10) to AL in @p classes. */
 typedef struct sz_line_break_byte_frame_t {
-    __m512i classes;   /**< Class per lane with lone marks reclassified to AL (LB10). */
-    sz_u64_t base;     /**< Cluster-base lanes (every effective start except an attached CM/ZWJ). */
-    sz_u64_t gate;     /**< Transparent lanes for neighbour fills: continuations + attached-mark starts. */
-    sz_u64_t attached; /**< Attached CM/ZWJ start lanes (LB9). */
+    __m512i classes_u8x64; /**< Class per lane with lone marks reclassified to AL (LB10). */
+    sz_u64_t base;         /**< Cluster-base lanes (every effective start except an attached CM/ZWJ). */
+    sz_u64_t gate;         /**< Transparent lanes for neighbour fills: continuations + attached-mark starts. */
+    sz_u64_t attached;     /**< Attached CM/ZWJ start lanes (LB9). */
     sz_u64_t
         lone_mark; /**< LB10 lone marks reclassified to AL; their side bits must be cleared (serial zeros the descriptor). */
 } sz_line_break_byte_frame_t;
 
 SZ_HELPER_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line_break_classified_t classified) {
     sz_u64_t const starts = classified.starts, non_start = classified.non_start;
-    sz_u64_t const mark_start = (sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_cm_k) |
-                                 sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_zwj_k)) &
+    sz_u64_t const mark_start = (sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_cm_k) |
+                                 sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_zwj_k)) &
                                 starts;
-    sz_u64_t const excluded = (sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_bk_k) |
-                               sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_cr_k) |
-                               sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_lf_k) |
-                               sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_nl_k) |
-                               sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_sp_k) |
-                               sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_zw_k)) &
+    sz_u64_t const excluded = (sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_bk_k) |
+                               sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_cr_k) |
+                               sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_lf_k) |
+                               sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_nl_k) |
+                               sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_sp_k) |
+                               sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_zw_k)) &
                               starts;
     sz_u64_t const good_base = starts & ~excluded & ~mark_start;
     //  A mark attaches (LB9) when reachable from a good base across only continuations and other marks. Flood each
@@ -455,8 +455,8 @@ SZ_HELPER_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz
     sz_u64_t const lone_mark = mark_start & ~attached; // LB10: a mark with no attachable base acts as AL
 
     sz_line_break_byte_frame_t frame;
-    frame.classes = _mm512_mask_mov_epi8(classified.classes, _cvtu64_mask64(lone_mark),
-                                         _mm512_set1_epi8((char)sz_line_break_al_k));
+    frame.classes_u8x64 = _mm512_mask_mov_epi8(classified.classes_u8x64, _cvtu64_mask64(lone_mark),
+                                               _mm512_set1_epi8((char)sz_line_break_al_k));
     frame.base = starts & ~attached;
     frame.gate = non_start | attached;
     frame.attached = attached;
@@ -475,10 +475,10 @@ SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_lin
                                                                           sz_u8_t *effective_class_byte_out,
                                                                           sz_u8_t *side_byte_out) {
     sz_line_break_byte_frame_t const byte_frame = sz_line_break_byte_frame_icelake_(classified);
-    __m512i const classes_u8x64 = byte_frame.classes;
+    __m512i const classes_u8x64 = byte_frame.classes_u8x64;
     //  LB10 reclassifies a lone CM/ZWJ to AL; its descriptor side bits (EAW/Pi/Pf/...) must go with it, else LB19/LB15
     //  see a phantom East-Asian / quote cluster. Mirrors the serial path zeroing `codepoint_descriptors` on LB10.
-    __m512i const side_u8x64 = _mm512_maskz_mov_epi8(_cvtu64_mask64(~byte_frame.lone_mark), classified.side);
+    __m512i const side_u8x64 = _mm512_maskz_mov_epi8(_cvtu64_mask64(~byte_frame.lone_mark), classified.side_u8x64);
 
     sz_line_break_frame_t frame;
     frame.base = byte_frame.base;
@@ -499,7 +499,7 @@ SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_lin
 #endif
     for (sz_size_t cls = 0; cls < sz_line_break_class_count_k; ++cls)
         frame.effective_class[cls] = sz_line_break_class_mask_icelake_(classes_u8x64, (sz_u8_t)cls);
-    frame.raw_zwj = sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_zwj_k);
+    frame.raw_zwj = sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_zwj_k);
     frame.side_pi = sz_line_break_side_mask_icelake_(side_u8x64, sz_line_break_side_pi_k);
     frame.side_pf = sz_line_break_side_mask_icelake_(side_u8x64, sz_line_break_side_pf_k);
     frame.side_eaw = sz_line_break_side_mask_icelake_(side_u8x64, sz_line_break_side_eaw_k);
@@ -535,7 +535,7 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_
  *          64-byte edge). Mirrors the word kernel's complete-limit: a declared-length lead whose span exceeds `loaded`
  *          ends the trusted region just before it; with no more text the whole window is complete. Never below 1.
  */
-SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
+SZ_HELPER_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_(loaded);

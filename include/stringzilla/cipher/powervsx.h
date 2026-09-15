@@ -73,7 +73,7 @@ SZ_HELPER_INLINE void sz_aes256_block_store_powervsx_(__vector unsigned char blo
 /** @brief An all-zero block, the second operand of every `vec_sld` used as a shift. */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_zero_powervsx_(void) { return vec_splats((unsigned char)0); }
 
-#pragma endregion // Byte Order
+#pragma endregion Byte Order
 
 #pragma region Key Schedule
 
@@ -218,7 +218,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_powervsx(sz_aes256_key_t *key, sz_u8_t c
     sz_aes256_round_key_store_powervsx_(even_round_key_u8x16, schedule + 14 * 4);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -304,7 +304,7 @@ SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_t const *
     blocks_u8x16[7] = vec_cipherlast_be(blocks_u8x16[7], round_key_u8x16);
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -429,7 +429,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *key, sz_u
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -609,7 +609,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_ghash_absorb_eight_powervsx_(__vector
     return sz_ghash_reduce_powervsx_(low_u8x16, middle_u8x16, high_u8x16);
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -681,7 +681,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_powervsx_(sz_aes256_gcm_state_t *state
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                        sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     __vector unsigned char const subkey_u8x16 = sz_aes256_block_load_powervsx_(state->key.powers);
     __vector unsigned char powers_u8x16[8];
@@ -949,7 +950,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_state_t *s
  *  @param state The state, left unmodified so a caller may keep appending.
  *  @param tag Receives the sixteen tag bytes.
  */
-SZ_HELPER_AUTO void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+SZ_HELPER_INLINE void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state,
+                                                     sz_u8_t tag[sz_at_least_(16)]) {
     __vector unsigned char const subkey_u8x16 = sz_aes256_block_load_powervsx_(state->key.powers);
     __vector unsigned char accumulator_u8x16 = sz_aes256_block_load_powervsx_(state->accumulator);
     sz_u128_vec_t lengths_vec;
@@ -1013,7 +1015,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_powervsx(sz_aes256_gc
                                                                              : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -1047,7 +1049,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_powervsx(sz_aes256_gcm_key_t c
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

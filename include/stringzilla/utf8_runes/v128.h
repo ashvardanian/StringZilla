@@ -100,9 +100,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz
  *          each quarter placed at bit positions [0,16)/[16,32)/[32,48)/[48,64)). Field names and semantics match
  *          @ref sz_utf8_rune_window_neon_t so the portable rule algebra is unchanged. */
 typedef struct sz_utf8_rune_window_v128_t {
-    v128_t window[4];           /**< Raw input bytes for lanes [16*q, 16*q+16). */
-    v128_t high[4];             /**< Per-lane `codepoint >> 8`. */
-    v128_t low[4];              /**< Per-lane `codepoint & 0xFF`. */
+    v128_t window_u8x16s[4];    /**< Raw input bytes for lanes [16*q, 16*q+16). */
+    v128_t high_byte_u8x16s[4]; /**< Per-lane `codepoint >> 8`. */
+    v128_t low_byte_u8x16s[4];  /**< Per-lane `codepoint & 0xFF`. */
     sz_u64_t continuation;      /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
     sz_u64_t codepoint_starts;  /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
     sz_u64_t two_byte_starts;   /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
@@ -135,7 +135,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_v128_( //
 
 /** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero. A zero-initialized vector union
  *          stages the partial tail so we never read past `text + loaded`. Mirrors @ref sz_utf8_load_window_neon_. */
-SZ_HELPER_AUTO void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_size_t loaded, v128_t *out_u8x16) {
+SZ_HELPER_INLINE void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_size_t loaded, v128_t *out_u8x16) {
     if (loaded >= 64) {
         out_u8x16[0] = wasm_v128_load(text + 0);
         out_u8x16[1] = wasm_v128_load(text + 16);
@@ -161,7 +161,7 @@ SZ_HELPER_AUTO void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_size_
  *          span extracted. The three neighbour distances are provided because the family classifiers need up to
  *          `next3` (4-byte sequences).
  */
-SZ_HELPER_AUTO void sz_utf8_forward_neighbours_v128_( //
+SZ_HELPER_INLINE void sz_utf8_forward_neighbours_v128_( //
     v128_t const *window_u8x16, v128_t *next1_u8x16, v128_t *next2_u8x16, v128_t *next3_u8x16) {
     for (int quarter = 0; quarter < 4; ++quarter) {
         v128_t const here_u8x16 = window_u8x16[quarter];
@@ -177,14 +177,14 @@ SZ_HELPER_AUTO void sz_utf8_forward_neighbours_v128_( //
 
 /** @brief  Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the v128 twin of
  *          @ref sz_utf8_rune_decode_window_neon_, bit-identical to it on every lane. */
-SZ_HELPER_AUTO sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
+SZ_HELPER_INLINE sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
     sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_v128_t result;
     result.loaded = available < 64 ? available : 64;
 
     v128_t window_u8x16[4];
     sz_utf8_rune_load_window_v128_(text, result.loaded, window_u8x16);
-    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
+    for (int quarter = 0; quarter < 4; ++quarter) result.window_u8x16s[quarter] = window_u8x16[quarter];
 
     v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
     sz_utf8_forward_neighbours_v128_(window_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
@@ -247,8 +247,8 @@ SZ_HELPER_AUTO sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
 
         // Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
         v128_t const three_select_u8x16 = three_byte_bool_u8x16[quarter];
-        result.high[quarter] = wasm_v128_bitselect(high_three_u8x16, high_two_u8x16, three_select_u8x16);
-        result.low[quarter] = wasm_v128_bitselect(low_three_u8x16, low_two_u8x16, three_select_u8x16);
+        result.high_byte_u8x16s[quarter] = wasm_v128_bitselect(high_three_u8x16, high_two_u8x16, three_select_u8x16);
+        result.low_byte_u8x16s[quarter] = wasm_v128_bitselect(low_three_u8x16, low_two_u8x16, three_select_u8x16);
     }
     return result;
 }
@@ -259,7 +259,7 @@ SZ_HELPER_AUTO sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
  *          and shuffled by @p within_u8x16, then blended in where @p selector_u8x16 picks it; the final `wasm_u8x16_lt`
  *          clamp reproduces the all-zero result for selectors past the table. @p within_u8x16 is a nibble by
  *          construction. The v128 twin of @ref sz_utf8_rune_cascade_stage_neon_. */
-SZ_HELPER_AUTO v128_t sz_utf8_rune_cascade_stage_v128_( //
+SZ_HELPER_INLINE v128_t sz_utf8_rune_cascade_stage_v128_( //
     sz_u8_t const *table, int tile_count, v128_t selector_u8x16, v128_t within_u8x16) {
     v128_t result_u8x16 = wasm_i8x16_splat(0);
     for (int tile = 0; tile < tile_count; ++tile) {
@@ -275,7 +275,7 @@ SZ_HELPER_AUTO v128_t sz_utf8_rune_cascade_stage_v128_( //
  *          `result[lane] = group_base[index_u8x16[lane]]`. `wasm_i8x16_swizzle` reaches only 16 B, so the read is a
  *          bounded scalar L1 walk (the v128 twin of the substrate `lut256` leaf); the index byte is total over the
  *          256-entry table by construction. */
-SZ_HELPER_AUTO v128_t sz_utf8_rune_lut256_v128_(sz_u8_t const *group_base, v128_t index_u8x16) {
+SZ_HELPER_INLINE v128_t sz_utf8_rune_lut256_v128_(sz_u8_t const *group_base, v128_t index_u8x16) {
     sz_align_(16) sz_u8_t index_lanes[16], out_lanes[16];
     wasm_v128_store(index_lanes, index_u8x16);
     for (int lane = 0; lane < 16; ++lane) out_lanes[lane] = group_base[index_lanes[lane]];
@@ -286,7 +286,7 @@ SZ_HELPER_AUTO v128_t sz_utf8_rune_lut256_v128_(sz_u8_t const *group_base, v128_
  *          `flat[page * 256 + low]` is read per lane. The page LUT resolves via the in-register scalar `lut256` walk;
  *          the leaf read is a bounded scalar L1 walk over fused 16-bit indices `(page << 8) | low`. Lanes whose page
  *          index reaches @p page_count return zero. The v128 twin of @ref sz_utf8_rune_flat_lookup_neon_. */
-SZ_HELPER_AUTO v128_t sz_utf8_rune_flat_lookup_v128_( //
+SZ_HELPER_INLINE v128_t sz_utf8_rune_flat_lookup_v128_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, v128_t high_bytes_u8x16, v128_t low_bytes_u8x16) {
     v128_t const page_indices_u8x16 = sz_utf8_rune_lut256_v128_(page_lut, high_bytes_u8x16);
     v128_t const in_range_u8x16 = wasm_u8x16_lt(page_indices_u8x16, wasm_i8x16_splat((sz_i8_t)page_count));
@@ -304,7 +304,7 @@ SZ_HELPER_AUTO v128_t sz_utf8_rune_flat_lookup_v128_( //
  *          via @p previous_io; bit-exact with the Ice Lake leaf. Consumption is inherently scalar (one output pair
  *          per lane), so each set lane is isolated with the `63 - clz(mask & -mask)` first-set idiom and cleared with
  *          `mask & (mask - 1)` — the cost scales with the boundary count, and no `ctz` / `popcount` builtin is used. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_v128_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_v128_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t previous = *previous_io;
@@ -362,7 +362,7 @@ SZ_HELPER_INLINE v128_t sz_utf8_rune_widen4_v128_(v128_t bytes_u8x16, int quarte
  *          bytes owed their own next U+FFFD.
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_v128_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_v128_( //
     v128_t const *regs_u8x16, sz_u64_t emit_starts, sz_u64_t ill_formed, sz_u8_t const *consumed_length, int has_three,
     int has_four, sz_size_t capacity, sz_rune_t *runes, sz_size_t *consumed_bytes) {
 
@@ -475,9 +475,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_v128_( //
  *          first decodable lead's declared sequence crosses the window edge (a boundary truncation), which the public
  *          entry finalizes without a serial re-decode.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_v128_( //
-    sz_cptr_t text, sz_size_t length,               //
-    sz_rune_t *runes, sz_size_t runes_capacity,     //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_v128_( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_rune_t *runes, sz_size_t runes_capacity,       //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 64 ? length : 64;

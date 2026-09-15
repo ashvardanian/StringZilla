@@ -110,7 +110,7 @@ SZ_API_COMPTIME sz_u64_t sz_find_byteset_neon_register_( //
  *         to avoid the per-candidate call + length re-dispatch. Loops over 16-byte `vceqq_u8` chunks with
  *         a `vminvq_u8` all-match reduction and closes with one overlapping tail window.
  */
-SZ_HELPER_AUTO sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_HELPER_INLINE sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 16) return sz_equal_serial(a, b, length);
 
     sz_size_t offset = 0;

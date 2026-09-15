@@ -62,8 +62,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t hay
  *  @param set_bottom_u8x16 Bottom half of the byteset (byte indices 16..31).
  *  @return 0xFF per lane where the byte belongs to the set, 0x00 otherwise.
  */
-SZ_HELPER_AUTO v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_u8x16, v128_t set_top_u8x16,
-                                                         v128_t set_bottom_u8x16) {
+SZ_HELPER_INLINE v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_u8x16, v128_t set_top_u8x16,
+                                                           v128_t set_bottom_u8x16) {
     v128_t byte_index_u8x16 = wasm_u8x16_shr(haystack_u8x16, 3); // c >> 3, in [0, 31]
     v128_t bit_table_u8x16 = wasm_i8x16_make(1, 2, 4, 8, 16, 32, 64, (sz_i8_t)128, 0, 0, 0, 0, 0, 0, 0, 0);
     // Index `c & 7` is in [0, 7] -> always in range -> relaxed swizzle is exact.

@@ -5,15 +5,18 @@
 //! - Needleman-Wunsch global alignment
 //! - Smith-Waterman local alignment
 //! - Min-Hash fingerprinting
+//! - Multi-pattern substring search
 
 mod device_scope;
 mod fingerprints;
 mod similarities;
+mod substrings;
 mod types;
 
 pub use device_scope::*;
 pub use fingerprints::*;
 pub use similarities::*;
+pub use substrings::*;
 pub use types::*;
 
 extern crate alloc;

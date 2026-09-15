@@ -1,24 +1,25 @@
 /**
- *  @file c/stringzillas.cuh
+ *  @file c/stringzillas/stringzillas.cuh
  *  @brief StringZillas shared scaffolding (scopes, backend variant lists, dispatch) included by
  *         the per-algorithm CPU & CUDA shims.
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_SCAFFOLDING_CUH_
-#define STRINGZILLAS_SCAFFOLDING_CUH_
-
-#include <stringzillas/stringzillas.h> // StringZillas library header
+#ifndef SZS_STRINGZILLAS_CUH_
+#define SZS_STRINGZILLAS_CUH_
 
 #include <cstring> // For `std::memcpy`
 
-#include <variant>     // For `std::variant`
 #include <string_view> // For `std::string_view`
+#include <variant>     // For `std::variant`
 
+#include <stringzillas/stringzillas.h>   // StringZillas library header
+#include <stringzillas/substrings.hpp>   // C++ templates for multi-pattern search
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 #include <stringzillas/similarities.hpp> // C++ templates for string similarity
 
 #if SZ_USE_CUDA
+#include <stringzillas/substrings.cuh>   // Parallel multi-pattern search in CUDA
 #include <stringzillas/fingerprints.cuh> // Parallel string processing in CUDA
 #include <stringzillas/similarities.cuh> // Parallel string similarity in CUDA
 #endif
@@ -41,8 +42,14 @@ overloaded(callable_types_...) -> overloaded<callable_types_...>;
 
 /** Wraps a `sz_sequence_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_as_cpp_container_t {
+    using self_t = sz_sequence_as_cpp_container_t;
     using value_type = std::string_view;
+    using iterator = sz::indexed_container_iterator<self_t>;
+
     sz_sequence_t const *sequence_ = nullptr;
+
+    iterator begin() const noexcept { return iterator(*this, 0); }
+    iterator end() const noexcept { return iterator(*this, size()); }
 
     std::size_t size() const noexcept {
         sz_assert_(sequence_ != nullptr && "Sequence must not be null");
@@ -59,8 +66,15 @@ struct sz_sequence_as_cpp_container_t {
 
 /** Wraps a `sz_sequence_u64tape_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_u64tape_as_cpp_container_t {
+    using self_t = sz_sequence_u64tape_as_cpp_container_t;
     using value_type = std::string_view;
+    using offset_t = sz_u64_t;
+    using iterator = sz::indexed_container_iterator<self_t>;
+
     sz_sequence_u64tape_t const *tape_ = nullptr;
+
+    iterator begin() const noexcept { return iterator(*this, 0); }
+    iterator end() const noexcept { return iterator(*this, size()); }
 
     std::size_t size() const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
@@ -70,13 +84,34 @@ struct sz_sequence_u64tape_as_cpp_container_t {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
         sz_assert_(index < tape_->count && "Index out of bounds");
         return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
+    }
+
+    /** @brief The contiguous block the elements slice; starts wherever `offsets[0]` points. */
+    sz::span<char const> tape_bytes() const noexcept {
+        if (size() == 0) return {};
+        return {tape_->data + tape_->offsets[0], (std::size_t)(tape_->offsets[size()] - tape_->offsets[0])};
+    }
+    /** @brief Every element's length summed, in the tape's own offset width, without walking the elements. */
+    offset_t tape_total_bytes() const noexcept {
+        return size() == 0 ? offset_t {} : (offset_t)(tape_->offsets[size()] - tape_->offsets[0]);
+    }
+    /** @brief One element's length, in the tape's own offset width. */
+    offset_t tape_length_at(std::size_t index) const noexcept {
+        return (offset_t)(tape_->offsets[index + 1] - tape_->offsets[index]);
     }
 };
 
 /** Wraps a `sz_sequence_u32tape_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_u32tape_as_cpp_container_t {
+    using self_t = sz_sequence_u32tape_as_cpp_container_t;
     using value_type = std::string_view;
+    using offset_t = sz_u32_t;
+    using iterator = sz::indexed_container_iterator<self_t>;
+
     sz_sequence_u32tape_t const *tape_ = nullptr;
+
+    iterator begin() const noexcept { return iterator(*this, 0); }
+    iterator end() const noexcept { return iterator(*this, size()); }
 
     std::size_t size() const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
@@ -86,6 +121,20 @@ struct sz_sequence_u32tape_as_cpp_container_t {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
         sz_assert_(index < tape_->count && "Index out of bounds");
         return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
+    }
+
+    /** @brief The contiguous block the elements slice; starts wherever `offsets[0]` points. */
+    sz::span<char const> tape_bytes() const noexcept {
+        if (size() == 0) return {};
+        return {tape_->data + tape_->offsets[0], (std::size_t)(tape_->offsets[size()] - tape_->offsets[0])};
+    }
+    /** @brief Every element's length summed, in the tape's own offset width, without walking the elements. */
+    offset_t tape_total_bytes() const noexcept {
+        return size() == 0 ? offset_t {} : (offset_t)(tape_->offsets[size()] - tape_->offsets[0]);
+    }
+    /** @brief One element's length, in the tape's own offset width. */
+    offset_t tape_length_at(std::size_t index) const noexcept {
+        return (offset_t)(tape_->offsets[index + 1] - tape_->offsets[index]);
     }
 };
 
@@ -224,7 +273,9 @@ inline sz_status_t propagate_error(sz::status_t status, char const **reporter_me
     case sz::status_t::unexpected_dimensions_k: *reporter_message = "Input/output size mismatch"; break;
     case sz::status_t::missing_gpu_k: *reporter_message = "GPU device not available or CUDA not initialized"; break;
     case sz::status_t::device_code_mismatch_k: *reporter_message = "Backend and executor mismatch"; break;
-    case sz::status_t::device_memory_mismatch_k: *reporter_message = "Use device-reachable or unified memory"; break;
+    case sz::status_t::device_memory_mismatch_k:
+        *reporter_message = "Use device-reachable or unified memory; page-locked host memory is not either";
+        break;
     case sz::status_t::unknown_k: *reporter_message = "Unknown error"; break;
     default: *reporter_message = "Unrecognized error code"; break;
     }
@@ -540,6 +591,25 @@ struct fingerprints_backends_t {
         : variants(std::forward<variants_arguments_>(args)...) {}
 };
 
+struct substrings_backends_t {
+
+    /**
+     *  Multi-pattern search has no per-ISA CPU kernels - a transition is one data-dependent load - so the
+     *  alternatives are one per capability, exactly as the similarity engines list theirs. The state-id width
+     *  is not an axis here: each engine settles it from its own needle set and stores whichever automaton won.
+     */
+    std::variant<
+#if SZ_USE_CUDA
+        szs::substrings_cuda_t,
+#endif
+        szs::substrings_parallel_t, szs::substrings_serial_t>
+        variants;
+
+    template <typename... variants_arguments_>
+    substrings_backends_t(variants_arguments_ &&...args) noexcept
+        : variants(std::forward<variants_arguments_>(args)...) {}
+};
+
 template <typename texts_type_>
 sz_status_t szs_fingerprints_for_(                                      //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
@@ -665,4 +735,4 @@ sz_status_t szs_fingerprints_for_(                                      //
     return result;
 }
 
-#endif // STRINGZILLAS_SCAFFOLDING_CUH_
+#endif // SZS_STRINGZILLAS_CUH_

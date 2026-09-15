@@ -120,8 +120,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t hayst
  *  @param set_bottom_u8x16 Bottom half of the byteset (byte indices 16..31).
  *  @return 0xFF per lane where the byte belongs to the set, 0x00 otherwise.
  */
-SZ_HELPER_AUTO v128_t sz_find_byteset_match_v128_(v128_t haystack_u8x16, v128_t set_top_u8x16,
-                                                  v128_t set_bottom_u8x16) {
+SZ_HELPER_INLINE v128_t sz_find_byteset_match_v128_(v128_t haystack_u8x16, v128_t set_top_u8x16,
+                                                    v128_t set_bottom_u8x16) {
     // Serial equivalent per byte `c`: `(set->_u8s[c >> 3] & (1u << (c & 7u))) != 0`.
     v128_t byte_index_u8x16 = wasm_u8x16_shr(haystack_u8x16, 3); // c >> 3, in [0, 31]
     // The bit mask `1 << (c & 7)` is produced via a swizzle into a tiny power-of-two table.
@@ -237,7 +237,7 @@ SZ_HELPER_INLINE v128_t sz_find_substr_match_v128_(                             
  *  @param needle_length Length of `needle` in bytes.
  *  @return Pointer to the first verified match, or SZ_NULL_CHAR if none.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_locate_substr_first_v128_( //
+SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_first_v128_( //
     v128_t match_u8x16, sz_cptr_t window_start, sz_cptr_t needle, sz_size_t needle_length) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_u8x16);
     while (matches) {
@@ -257,7 +257,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_locate_substr_first_v128_( //
  *  @param needle_length Length of `needle` in bytes.
  *  @return Pointer to the last verified match, or SZ_NULL_CHAR if none.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_locate_substr_last_v128_( //
+SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_last_v128_( //
     v128_t match_u8x16, sz_cptr_t window_start, sz_cptr_t needle, sz_size_t needle_length) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_u8x16);
     while (matches) {

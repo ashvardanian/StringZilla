@@ -62,7 +62,7 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_rune_start_mask_icelake_(__m512i window_u8x64
  *          widen-stores. `_mm512_alignr_epi64` shifts the compressed registers down between waves, so @p emit may
  *          exceed 8. Per-lane byte length is 1, plus 1 on a 2-byte start, plus 2 on a 3-byte start (disjoint masks).
  */
-SZ_HELPER_AUTO void sz_utf8_rune_peel_icelake_(                                          //
+SZ_HELPER_INLINE void sz_utf8_rune_peel_icelake_(                                        //
     sz_u64_t start_bits, __mmask64 two_byte_starts_m64, __mmask64 three_byte_starts_m64, //
     sz_size_t emit, sz_size_t position, __m512i lane_identity_u8x64,                     //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -110,9 +110,9 @@ SZ_HELPER_INLINE __m512i sz_utf8_srl8_icelake_(__m512i value_u8x64, int shift, s
  *  `high`/`low` holding the low 16 bits, which the caller resolves through arithmetic ranges.
  */
 typedef struct sz_utf8_rune_window_t {
-    __m512i window;              /**< The raw 64 input bytes (continuation bytes included). */
-    __m512i high;                /**< Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
-    __m512i low;                 /**< Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
+    __m512i window_u8x64;        /**< The raw 64 input bytes (continuation bytes included). */
+    __m512i high_byte_u8x64;     /**< Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
+    __m512i low_byte_u8x64;      /**< Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
     __mmask64 continuation;      /**< Bit `i` set => lane `i` is a UTF-8 continuation byte `10xxxxxx`. */
     __mmask64 codepoint_starts;  /**< Bit `i` set => lane `i` begins a codepoint (loaded, non-continuation). */
     __mmask64 two_byte_starts;   /**< Bit `i` set => lane `i` is a 2-byte lead `110xxxxx`. */
@@ -122,13 +122,13 @@ typedef struct sz_utf8_rune_window_t {
 } sz_utf8_rune_window_t;
 
 /** @brief  Load up to 64 bytes from @p text (masked tail) and decode every lane into byte-domain halves. */
-SZ_HELPER_AUTO sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
+SZ_HELPER_INLINE sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
     sz_u8_t const *text, sz_size_t available, __m512i lane_identity_u8x64) {
     sz_utf8_rune_window_t result;
     result.loaded = available < 64 ? available : 64;
     __mmask64 const load_mask_m64 = sz_u64_clamp_mask_until_(result.loaded);
     __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask_m64, text);
-    result.window = window_u8x64;
+    result.window_u8x64 = window_u8x64;
 
     // The three forward neighbours of each lane, gathered via in-register permutes (never `vpgather`).
     __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
@@ -162,8 +162,10 @@ SZ_HELPER_AUTO sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
         _mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x03)), 6),
         _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F)));
 
-    result.high = _mm512_mask_blend_epi8(result.three_byte_starts, high_two_byte_u8x64, high_three_byte_u16x32);
-    result.low = _mm512_mask_blend_epi8(result.three_byte_starts, low_two_byte_u16x32, low_three_byte_u16x32);
+    result.high_byte_u8x64 = _mm512_mask_blend_epi8(result.three_byte_starts, high_two_byte_u8x64,
+                                                    high_three_byte_u16x32);
+    result.low_byte_u8x64 = _mm512_mask_blend_epi8(result.three_byte_starts, low_two_byte_u16x32,
+                                                   low_three_byte_u16x32);
     return result;
 }
 
@@ -178,7 +180,7 @@ SZ_HELPER_AUTO sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
  *          high index bits via masked moves. The final partial page is `maskz`-loaded so an unpadded @p table
  *          is never over-read. Out-of-range lanes (none in valid trie use) read as zero.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count, __m512i indices_u16x32) {
+SZ_HELPER_INLINE __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count, __m512i indices_u16x32) {
     __m512i const within_u16x32 = _mm512_and_si512(indices_u16x32, _mm512_set1_epi16(0x7F));
     __m512i const page_u16x32 = _mm512_srli_epi16(indices_u16x32, 7);
     int const page_count = (count + 127) / 128;
@@ -219,7 +221,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count
  *          masked blends. Tiles load directly from `.rodata` (no per-call materialization), so the family
  *          classifiers stay re-init-free. @p table must be `sz_align_(64)` and exactly 256 bytes.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __m512i index_u32x16) {
+SZ_HELPER_INLINE __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __m512i index_u32x16) {
     __m512i const quad0_u8x64 = _mm512_load_si512((void const *)(table + 0 * 64));
     __m512i const quad1_u8x64 = _mm512_load_si512((void const *)(table + 1 * 64));
     __m512i const quad2_u8x64 = _mm512_load_si512((void const *)(table + 2 * 64));
@@ -254,8 +256,8 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __
  *  ! Cost scales with @p tile_count, not with the window: every tile is scanned on the single cross-lane shuffle port.
  *  ! The BMP classifiers use @ref sz_utf8_rune_flat_lookup_icelake_ instead for exactly that reason.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, int tile_count,
-                                                         __m512i index_dwords_u32x16) {
+SZ_HELPER_INLINE __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, int tile_count,
+                                                           __m512i index_dwords_u32x16) {
     __m512i const within_u32x16 = _mm512_and_si512(index_dwords_u32x16, _mm512_set1_epi32(0x7F));
     __m512i const selector_u32x16 = _mm512_srli_epi32(index_dwords_u32x16, 7);
     __m512i result_u32x16 = _mm512_setzero_si512();
@@ -281,8 +283,8 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, i
  *          tiles; @p index_dwords_u32x16 is the unpacked cell index per 32-bit lane. Reads straight from aligned
  *          `.rodata`.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const *packed, int tile_count,
-                                                                __m512i index_dwords_u32x16) {
+SZ_HELPER_INLINE __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const *packed, int tile_count,
+                                                                  __m512i index_dwords_u32x16) {
     __m512i const byte_index_u32x16 = _mm512_srli_epi32(index_dwords_u32x16, 1);
     __m512i const packed_byte_u8x64 = sz_utf8_rune_lut_cascade_icelake_(packed, tile_count, byte_index_u32x16);
     __mmask16 const odd_cell_m16 = _mm512_test_epi32_mask(index_dwords_u32x16, _mm512_set1_epi32(1));
@@ -305,7 +307,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const *p
  *  ! Only the low byte of each lane is the class; the upper three carry gather garbage. Most callers truncate with
  *  ! `vpmovdb` anyway; a caller that keeps the u32 lanes must mask with 0xFF itself.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_flat_lookup_icelake_( //
+SZ_HELPER_INLINE __m512i sz_utf8_rune_flat_lookup_icelake_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, __m512i codepoints_u32x16) {
     __m512i const high_bytes_u32x16 = _mm512_and_si512(_mm512_srli_epi32(codepoints_u32x16, 8),
                                                        _mm512_set1_epi32(0xFF));
@@ -329,7 +331,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_flat_lookup_icelake_( //
  *  start is the previous boundary position and whose length reaches to `base + i`. Output is widened to 64-bit
  *  `starts[]` / `lengths[]` in waves of eight, carrying the open segment across waves and windows via @p previous_io.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_( //
     sz_u64_t boundary, sz_size_t base, __m512i lane_identity_u8x64, sz_size_t *starts, sz_size_t *lengths,
     sz_size_t produced, sz_size_t capacity, sz_size_t *previous_io) {
     __m512i const wave_shift_u8x64 = _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(8));
@@ -378,7 +380,7 @@ SZ_HELPER_INLINE __m128i sz_utf8_rune_pick16_icelake_(__m512i value_u8x64, __m51
  *  U+FFFD.
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_icelake_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_icelake_( //
     __m512i window_u8x64, sz_u64_t emit_starts, sz_u64_t ill_formed, __m512i consumed_length_u8x64,
     __m512i lane_identity_u8x64, int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes,
     sz_size_t capacity, sz_size_t *consumed_bytes) {
@@ -545,9 +547,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length,
  *          declines (`*runes_unpacked == 0`, cursor unchanged) ONLY when the first lead's declared sequence crosses
  *          the window edge (a boundary truncation), which the public entry finalizes without a serial re-decode.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_rune_t *runes, sz_size_t runes_capacity,        //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_icelake_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_rune_t *runes, sz_size_t runes_capacity,          //
     sz_size_t *runes_unpacked) {
 
     __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();

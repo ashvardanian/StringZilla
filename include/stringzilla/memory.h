@@ -270,7 +270,7 @@ SZ_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cp
                                         char const lut[sz_at_least_(256)]);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Helper API
 
@@ -346,7 +346,7 @@ SZ_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
     for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = (sz_u8_t)(byte_index & 0x7F);
 }
 
-#pragma endregion // Helper API
+#pragma endregion Helper API
 
 #include "stringzilla/memory/serial.h"
 #include "stringzilla/memory/haswell.h"
@@ -464,8 +464,10 @@ SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 #endif
 }
 
+#pragma endregion Core Functionality
+
 #endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

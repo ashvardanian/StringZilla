@@ -24,7 +24,7 @@ extern "C" {
  *  Case folding normalizes text for uncased comparisons by mapping uppercase letters
  *  to their lowercase equivalents and handling special expansions defined in Unicode CaseFolding.txt.
  *
- *  @section Buffer Sizing
+ *  @section utf8_uncased_fold_buffer_sizing Buffer Sizing
  *
  *  The destination buffer must be at least `source_length * 3` bytes to guarantee sufficient space
  *  for worst-case expansion. The maximum expansion ratio is 3:1 (3x), which occurs with Greek
@@ -109,7 +109,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Backends
 
@@ -123,7 +123,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx( //
 #include "stringzilla/utf8_uncased_fold/lasx.h"
 #include "stringzilla/utf8_uncased_fold/powervsx.h"
 
-#pragma endregion // Backends
+#pragma endregion Backends
 
 #pragma region Dynamic Dispatch
 
@@ -153,7 +153,7 @@ SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source
 
 #endif // !SZ_DYNAMIC_DISPATCH
 
-#pragma endregion // Dynamic Dispatch
+#pragma endregion Dynamic Dispatch
 
 #ifdef __cplusplus
 }

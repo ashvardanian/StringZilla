@@ -118,7 +118,7 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_broadcast_offsets_rvvcrypto_(sz_size_t ve
     return __riscv_vsll_vx_u32m4(__riscv_vand_vx_u32m4(lane_index_u32m4, 3, vector_length), 2, vector_length);
 }
 
-#pragma endregion // Block Element Groups
+#pragma endregion Block Element Groups
 
 #pragma region Key Schedule
 
@@ -157,7 +157,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t 
     __riscv_vse32_v_u32m1(key->round_keys + 56, round_14_u32m1, vector_length);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -258,7 +258,7 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_blocks_encrypt_rvvcrypto_(sz_aes256_key_t
         vector_length);
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Blocks
 
@@ -316,7 +316,7 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const *
                                     index_lane_b8, vector_length);
 }
 
-#pragma endregion // Counter Blocks
+#pragma endregion Counter Blocks
 
 #pragma region Galois Hashing
 
@@ -379,7 +379,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Counter Mode
 
@@ -435,7 +435,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key, sz_
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Streaming Interface
 
@@ -485,7 +485,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *stat
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                         sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
@@ -526,9 +527,9 @@ SZ_HELPER_AUTO void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *st
  *  @param subkey_u32m1 The hash subkey `H`.
  *  @return The updated hash, unchanged when nothing was pending.
  */
-SZ_HELPER_AUTO vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
-                                                                  vuint32m1_t accumulator_u32m1,
-                                                                  vuint32m1_t subkey_u32m1) {
+SZ_HELPER_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
+                                                                    vuint32m1_t accumulator_u32m1,
+                                                                    vuint32m1_t subkey_u32m1) {
     vuint32m1_t padded_u32m1;
     if (state->buffered == 0) return accumulator_u32m1;
     padded_u32m1 = sz_aes256_block_load_padded_rvvcrypto_(state->partial, (sz_size_t)state->buffered);
@@ -643,7 +644,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
  *  @param state The finished state, left untouched.
  *  @param tag Receives the 16 authentication bytes.
  */
-SZ_HELPER_AUTO void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+SZ_HELPER_INLINE void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state,
+                                                      sz_u8_t tag[sz_at_least_(16)]) {
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
     sz_u128_vec_t staged_block_vec;
@@ -708,7 +710,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_rvvcrypto(sz_aes256_g
     return sz_aes256_tag_equal_rvvcrypto_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -742,7 +744,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t 
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

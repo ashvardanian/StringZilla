@@ -179,6 +179,12 @@ using rune_t = sz_rune_t;
 using size_t = sz_size_t;
 using ssize_t = sz_ssize_t;
 
+/**
+ *  @brief A size or offset deliberately held in 32 bits, where the narrower arithmetic is cheaper - GPU
+ *         address math above all. Every use pairs with a range check at the site that establishes the bound.
+ */
+using small_size_t = sz_u32_t;
+
 using f32_t = float;
 using f64_t = double;
 
@@ -568,6 +574,31 @@ struct arrow_strings_view {
         return {&buffer_[offsets_[i]], static_cast<size_t>(offsets_[i + 1] - offsets_[i]) - terminator_width_k};
     }
 
+    /**
+     *  @brief The contiguous block the elements slice, from the first element's start to the last one's end.
+     *  @note Starts at `offsets_[0]`, which a tape that is a slice of a wider one leaves non-zero.
+     */
+    constexpr span<char_t const> tape_bytes() const noexcept {
+        return size() == 0
+                   ? span<char_t const> {}
+                   : span<char_t const> {&buffer_[offsets_[0]], static_cast<size_t>(offsets_[size()] - offsets_[0])};
+    }
+
+    /**
+     *  @brief Every element's length summed, terminators excluded, without walking the elements.
+     *  @note Returns the tape's own offset width, so a 32-bit tape stays 32-bit until a caller needs more.
+     */
+    constexpr offset_t tape_total_bytes() const noexcept {
+        return size() == 0 ? offset_t {}
+                           : static_cast<offset_t>(offsets_[size()] - offsets_[0] -
+                                                   static_cast<offset_t>(size()) * terminator_width_k);
+    }
+
+    /** @brief One element's length, terminator excluded, in the tape's own offset width. */
+    constexpr offset_t tape_length_at(size_t i) const noexcept {
+        return static_cast<offset_t>(offsets_[i + 1] - offsets_[i] - terminator_width_k);
+    }
+
     constexpr iterator_t begin() const noexcept { return iterator_t(*this, 0); }
     constexpr iterator_t end() const noexcept { return iterator_t(*this, size()); }
     constexpr iterator_t cbegin() const noexcept { return begin(); }
@@ -651,10 +682,9 @@ struct arrow_strings_tape {
     status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
         // The range is walked twice - once to measure, once to copy - so single-pass "input"
         // iterators, like `std::istream_iterator`, would compile but silently copy nothing.
-        static_assert(
-            std::is_base_of<std::forward_iterator_tag,
-                            typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
-            "arrow_strings_tape::try_assign needs multi-pass (forward) iterators");
+        static_assert(std::is_base_of<std::forward_iterator_tag,
+                                      typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
+                      "arrow_strings_tape::try_assign needs multi-pass (forward) iterators");
 
         reset(); // ? Drops the old contents, so every failure below leaves an empty tape rather than a stale one
 
@@ -896,16 +926,20 @@ struct cpu_specs_t {
  *  @sa pack_sm_code, cores_per_multiprocessor helpers.
  *  @note We recommend compiling the code for the 90a compute capability, the newest with specialized optimizations.
  */
-struct gpu_specs_t {
-    size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
-    size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
-    size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
-    size_t streaming_multiprocessors = 108;        // ? On A100
-    size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
-    size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
-    size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
-    size_t max_blocks_per_multiprocessor = 0;      // ? Maximum number of blocks per SM
-    size_t sm_code = 0;                            // ? Compute capability code, e.g. 90a for Hopper (H100)
+struct gpu_specs_t : public sz_gpu_specs_t {
+    /** @brief Describes an A100, which is what a call site that never fetched real specs is sized against. */
+    inline gpu_specs_t() noexcept : sz_gpu_specs_t() {
+        vram_bytes = 40ull * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
+        l2_bytes = 40ull * 1024 * 1024;          // ? On A100 it's 40 MB, shared by every multiprocessor
+        constant_memory_bytes = 64 * 1024;       // ? On A100 it's 64 KB
+        shared_memory_bytes = 192 * 1024 * 108;  // ? On A100 it's 192 KB per SM
+        streaming_multiprocessors = 108;         // ? On A100
+        cuda_cores = 6912;                       // ? On A100 for f32/i32 logic
+        reserved_memory_per_block = 1024;        // ? Typically, 1 KB per block is reserved for bookkeeping
+        warp_size = 32;                          // ? Warp size is 32 threads on practically all GPUs
+        max_blocks_per_multiprocessor = 0;       // ? Maximum number of blocks per SM
+        sm_code = 0;                             // ? Compute capability code, e.g. 90a for Hopper (H100)
+    }
 
     inline size_t shared_memory_per_multiprocessor() const noexcept {
         return shared_memory_bytes / streaming_multiprocessors;

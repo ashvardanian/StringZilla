@@ -2,6 +2,9 @@
 /build*/
 /target*/
 
+# Per-developer preset overrides: toolchain paths that are true of one machine, not of the project
+CMakeUserPresets.json
+
 # Yes, everyone loves keeping this file in the history.
 # But with a very minimalistic binding and just a couple of dependencies
 # it brings 7000 lines of text polluting the entire repo.

@@ -6,7 +6,7 @@ The dispatcher picks the fastest one available on the running CPU.
 
 ## Methodology
 
-Numbers are throughput in GB/s, measured with `bench/token.cpp` over the `leipzig1M_en.txt` corpus, reporting the median of repeated runs.
+Numbers are throughput in GB/s, measured with `bench/token.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column, `std::memcmp` for both Equal and Order.
 Comparison is decided in the first differing bytes, so a Short Words table (tokens averaging 5 bytes) and a Long Lines table (tokens averaging 130 bytes) are enough to show how token length shifts the balance.

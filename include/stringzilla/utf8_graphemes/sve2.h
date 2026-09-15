@@ -28,8 +28,8 @@ extern "C" {
 /** @brief  Packed descriptor byte for one chunk of ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade),
  *          the SVE2 twin of @ref sz_grapheme_astral_descriptor_neon_. Per-lane bytes: @p plane = (offset>>16)&0xFF
  *          (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Bit-exact. */
-SZ_HELPER_AUTO svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
-                                                             svuint8_t low_u8x) {
+SZ_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
+                                                               svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
@@ -82,7 +82,7 @@ SZ_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svui
 
 /** @brief  Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK / Kana arithmetic ranges - the
  *          SVE2 twin of @ref sz_grapheme_cjk_other_neon_. Such lanes need no cold cascade (descriptor 0). */
-SZ_HELPER_AUTO svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
+SZ_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const run_a_b8x = sz_grapheme_cp_in_range_sve2_(high_u8x, low_u8x, 0x3000, 0xA66E);
     svbool_t const run_b_b8x = sz_grapheme_cp_in_range_sve2_(high_u8x, low_u8x, 0xD7FC, 0xFB1D);

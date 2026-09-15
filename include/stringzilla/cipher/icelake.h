@@ -108,7 +108,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_icelake(sz_aes256_key_t *key, sz_u8_t co
     _mm_storeu_epi32(key->round_keys + 56, secret_low_words_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Counter Mode
 
@@ -335,7 +335,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_icelake(sz_aes256_key_t const *key, sz_u8
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -503,7 +503,7 @@ SZ_HELPER_INLINE __m128i sz_ghash_absorb_blocks_icelake_(__m128i accumulator_u8x
     return accumulator_u8x16;
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -556,7 +556,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_icelake_(sz_aes256_gcm_state_t *state,
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     __m128i const reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
     __m512i powers_high_u8x64, powers_low_u8x64;
@@ -601,7 +601,7 @@ SZ_HELPER_AUTO void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_state_t *stat
 }
 
 /** @brief Absorbs whatever `partial` holds, zero padded to a full block, and empties it. */
-SZ_HELPER_AUTO void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gcm_state_t *state) {
+SZ_HELPER_INLINE void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gcm_state_t *state) {
     __m128i reverse_u8x16, subkey_u8x16, padded_u8x16, accumulator_u8x16;
     if (state->buffered == 0) return;
     reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
@@ -849,7 +849,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_icelake_(sz_aes256_gcm_state_t *st
  *  @param state The state, left untouched.
  *  @param tag Receives the sixteen tag bytes.
  */
-SZ_HELPER_AUTO void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+SZ_HELPER_INLINE void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     __m128i const reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
     __m128i const subkey_u8x16 = _mm_shuffle_epi8(_mm_maskz_loadu_epi8((__mmask16)0xFFFFu, state->key.powers),
                                                   reverse_u8x16);
@@ -918,7 +918,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_icelake(sz_aes256_gcm
     return sz_aes256_tag_equal_icelake_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -951,7 +951,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_icelake(sz_aes256_gcm_key_t co
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

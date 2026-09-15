@@ -4,8 +4,8 @@
  *  @author Ash Vardanian
  *  @date March 23, 2025
  */
-#ifndef STRINGZILLAS_RUNTIME_CUH_
-#define STRINGZILLAS_RUNTIME_CUH_
+#ifndef SZS_RUNTIME_CUH_
+#define SZS_RUNTIME_CUH_
 #include "stringzillas.cuh"
 
 extern "C" {
@@ -67,6 +67,39 @@ SZ_API_RUNTIME sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_
 #endif
 }
 
+SZ_API_RUNTIME sz_status_t szs_gpu_devices_count(sz_size_t *gpu_devices, char const **error_message) {
+    if (gpu_devices == nullptr)
+        return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
+    *gpu_devices = 0;
+#if SZ_USE_CUDA
+    // Same reasoning as `szs_capabilities_runtime`: every way a GPU can be unavailable reports zero devices,
+    // so a caller branching on the count needs no error taxonomy to read alongside it.
+    int visible = 0;
+    if (cuInit(0) == CUDA_SUCCESS && cuDeviceGetCount(&visible) == CUDA_SUCCESS && visible > 0)
+        *gpu_devices = static_cast<sz_size_t>(visible);
+#endif // SZ_USE_CUDA
+    return propagate_error(sz::status_t::success_k, error_message);
+}
+
+SZ_API_RUNTIME sz_status_t szs_gpu_device_specs(sz_size_t gpu_device, sz_gpu_specs_t *specs,
+                                                char const **error_message) {
+    if (specs == nullptr)
+        return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
+
+#if SZ_USE_CUDA
+    // `gpu_specs_fetch` already maps a rejected or out-of-range ordinal onto `missing_gpu_k`, so the index
+    // bound the header documents needs no second check here.
+    sz::gpu_specs_t fetched;
+    szs::cuda_status_t const status = szs::gpu_specs_fetch(fetched, static_cast<int>(gpu_device));
+    if (status.status != sz::status_t::success_k) return propagate_error(status, error_message);
+    *specs = fetched;
+    return propagate_error(sz::status_t::success_k, error_message);
+#else
+    sz_unused_(gpu_device);
+    return propagate_error(sz::status_t::missing_gpu_k, error_message, "CUDA support not compiled in");
+#endif // SZ_USE_CUDA
+}
+
 #pragma endregion Metadata
 
 #pragma region Device Scopes
@@ -91,13 +124,12 @@ SZ_API_RUNTIME sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, 
     // If `cpu_cores` is 1, redirect to default scope
     if (cpu_cores == 1) return szs_device_scope_init_default(scope_punned, error_message);
 
-    sz::cpu_specs_t specs;
     auto executor = std::make_unique<szs::forkunion_executor_t>();
     if (executor->try_spawn(cpu_cores) != sz::status_t::success_k)
         return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to spawn thread pool");
+    sz::cpu_specs_t const specs = executor->specs();
 
-    auto *scope = new (std::nothrow)
-        device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), std::move(specs));
+    auto *scope = new (std::nothrow) device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), specs);
     if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate CPU device scope");
 
     *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
@@ -170,6 +202,25 @@ SZ_API_RUNTIME sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t sc
     return propagate_error(sz::status_t::unknown_k, error_message, "Device scope is CPU-only");
 }
 
+SZ_API_RUNTIME sz_status_t szs_device_scope_get_specs(szs_device_scope_t scope_punned, sz_gpu_specs_t *specs,
+                                                      char const **error_message) {
+    if (scope_punned == nullptr || specs == nullptr)
+        return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
+
+#if SZ_USE_CUDA
+    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
+    if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
+        *specs = std::get<gpu_scope_t>(scope->variants).specs;
+        return propagate_error(sz::status_t::success_k, error_message);
+    }
+#else
+    sz_unused_(scope_punned);
+    sz_unused_(specs);
+#endif
+
+    return propagate_error(sz::status_t::unknown_k, error_message, "Device scope is CPU-only");
+}
+
 SZ_API_RUNTIME void szs_device_scope_free(szs_device_scope_t scope_punned) {
     if (scope_punned == nullptr) return;
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
@@ -223,4 +274,4 @@ SZ_API_RUNTIME void szs_unified_free(void *ptr, sz_size_t size_bytes) {
 #pragma endregion Unified Allocator
 }
 
-#endif // STRINGZILLAS_RUNTIME_CUH_
+#endif // SZS_RUNTIME_CUH_

@@ -58,7 +58,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16
  *
  *  The two logarithm lookups take nibbles and may be relaxed.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16, v128_t second_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16, v128_t second_u8x16) {
     v128_t const logarithm_table_u8x16 = wasm_v128_load(sz_aes256_nibble_logarithm_v128_());
     v128_t const exponent_low_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_low_v128_());
     v128_t const exponent_high_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_high_v128_());
@@ -77,7 +77,7 @@ SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16,
  *  The same tower-field construction the `_v128` kernel uses, with every provably in-range swizzle taken in
  *  its relaxed form.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
     v128_t const mapped_u8x16 = sz_aes256_nibble_map_v128relaxed_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
                                                                   wasm_v128_load(sz_aes256_tower_forward_high_v128_()),
                                                                   bytes_u8x16);
@@ -103,7 +103,7 @@ SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
         wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_substituted_high_v128_()), high_inverse_u8x16));
 }
 
-#pragma endregion // Substitution Box
+#pragma endregion Substitution Box
 
 #pragma region Key Schedule
 
@@ -113,7 +113,7 @@ SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
  *  @param round_constant The round constant for this step.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, sz_u8_t round_constant) {
+SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, sz_u8_t round_constant) {
     v128_t const last_word_u8x16 = wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3);
     v128_t const rotated_u8x16 = wasm_i8x16_shuffle(last_word_u8x16, last_word_u8x16, 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11,
                                                     8, 13, 14, 15, 12);
@@ -125,7 +125,7 @@ SZ_HELPER_AUTO v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, sz_
  *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_key_half_turn_v128relaxed_(v128_t previous_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_key_half_turn_v128relaxed_(v128_t previous_u8x16) {
     return sz_aes256_substitute_v128relaxed_(wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3));
 }
 
@@ -179,7 +179,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_
     wasm_v128_store(&key->round_keys[56], even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -189,7 +189,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_
  *  @param block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const *key, v128_t block_u8x16) {
+SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const *key, v128_t block_u8x16) {
     sz_size_t round_index;
     block_u8x16 = wasm_v128_xor(block_u8x16, sz_aes256_round_key_v128_(key, 0));
     for (round_index = 1; round_index != 14; ++round_index)
@@ -200,7 +200,7 @@ SZ_HELPER_AUTO v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const
                          sz_aes256_round_key_v128_(key, 14));
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -240,7 +240,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -259,7 +259,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -403,7 +403,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_v128relaxed(sz_aes256
     return sz_aes256_gcm_decryptor_verify_v128(decryptor, tag);
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -437,7 +437,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

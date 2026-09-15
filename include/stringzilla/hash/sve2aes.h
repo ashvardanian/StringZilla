@@ -33,7 +33,7 @@ SZ_HELPER_INLINE svuint8_t sz_emulate_aesenc_u8x16_sve2_(svuint8_t state_u8x, sv
 }
 
 /** @brief A variant of `sz_hash_sve2aes` for strings up to 16 bytes long - smallest SVE register size. */
-SZ_HELPER_AUTO sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     svuint8_t state_aes_u8x, state_sum_u8x, state_key_u8x;
 
     // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.

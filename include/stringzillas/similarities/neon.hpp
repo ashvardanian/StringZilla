@@ -948,7 +948,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_t
  *  The first stage maps a byte to its class using `vqtbl4q_u8`: each lookup addresses one 64-byte window of
  *  the 256-entry table, and indices that fall outside [0, 63] return zero, so XOR-ing the index by 0x40 / 0x80
  *  / 0xc0 and OR-ing the four windows reconstructs the full 256-entry map. This is exposed via `classify16`,
- *  so diagonal walkers can pre-classify both strings @b once and feed class-index buffers into the hot loop.
+ *  so diagonal walkers can pre-classify both strings once and feed class-index buffers into the hot loop.
  *
  *  The second stage looks up the cost for two varying class operands at once by keeping the matrix folded into
  *  16 loop-invariant 64-byte windows, addressed as `idx = ((first_class & 1) << 5) | second_class` with the
@@ -1136,7 +1136,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linea
         i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
         i16_t const *scores_pre_deletion, i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t const gap = static_cast<i16_t>(this->gap_costs_.open_or_extend);
@@ -1251,7 +1251,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linea
         i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
         i16_t const *scores_pre_deletion, i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t *const scores_new_begin = scores_new;
@@ -1368,7 +1368,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linea
         i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
         i32_t const *scores_pre_deletion, i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i32_t const gap = static_cast<i32_t>(this->gap_costs_.open_or_extend);
@@ -1482,7 +1482,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linea
         i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
         i32_t const *scores_pre_deletion, i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i32_t *const scores_new_begin = scores_new;
@@ -1582,7 +1582,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         i16_t *scores_new_insertions, i16_t *scores_new_deletions,                //
         i16_t gap_open, i16_t gap_extend) const noexcept {
         // The transposed cost table is folded only into the SIMD lookup, so the scalar tail must swap the
-        // two class operands itself to stay correct on @b asymmetric matrices.
+        // two class operands itself to stay correct on asymmetric matrices.
         i16_t const cost_of_substitution =
             this->transpose_ ? this->substituter_.class_substitution_costs[second_slice[i]][first_reversed_slice[i]]
                              : this->substituter_.class_substitution_costs[first_reversed_slice[i]][second_slice[i]];
@@ -1628,7 +1628,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         i16_t *scores_new_insertions, i16_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t const gap_open = static_cast<i16_t>(this->gap_costs_.open);
@@ -1711,7 +1711,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
                                                      vaddq_s16(run_insert_vec, gap_extend_vec));
             int16x8_t cost_if_delete_vec = vmaxq_s16(vaddq_s16(pre_delete_open_vec, gap_open_vec),
                                                      vaddq_s16(run_delete_vec, gap_extend_vec));
-            // In Local Alignment for SW the zero-reset is applied to @b only the substitution term;
+            // In Local Alignment for SW the zero-reset is applied to only the substitution term;
             // the insertion/deletion gap matrices are not clamped, exactly like the serial scorer.
             int16x8_t cost_if_substitution_vec = vmaxq_s16(
                 vaddq_s16(pre_substitution_vec, cost_of_substitution_i16_vecs[part]), vdupq_n_s16(0));
@@ -1731,7 +1731,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         i16_t *scores_new_insertions, i16_t *scores_new_deletions,                //
         i16_t gap_open, i16_t gap_extend) const noexcept {
         // The transposed cost table is folded only into the SIMD lookup, so the scalar tail must swap the
-        // two class operands itself to stay correct on @b asymmetric matrices.
+        // two class operands itself to stay correct on asymmetric matrices.
         i16_t const cost_of_substitution =
             this->transpose_ ? this->substituter_.class_substitution_costs[second_slice[i]][first_reversed_slice[i]]
                              : this->substituter_.class_substitution_costs[first_reversed_slice[i]][second_slice[i]];
@@ -1777,7 +1777,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         i16_t *scores_new_insertions, i16_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i16_t *const scores_new_begin = scores_new;
@@ -1881,7 +1881,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
         i32_t *scores_new_insertions, i32_t *scores_new_deletions,                //
         i32_t gap_open, i32_t gap_extend) const noexcept {
         // The transposed cost table is folded only into the SIMD lookup, so the scalar tail must swap the
-        // two class operands itself to stay correct on @b asymmetric matrices.
+        // two class operands itself to stay correct on asymmetric matrices.
         i32_t const cost_of_substitution =
             this->transpose_ ? this->substituter_.class_substitution_costs[second_slice[i]][first_reversed_slice[i]]
                              : this->substituter_.class_substitution_costs[first_reversed_slice[i]][second_slice[i]];
@@ -1927,7 +1927,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
         i32_t *scores_new_insertions, i32_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i32_t const gap_open = static_cast<i32_t>(this->gap_costs_.open);
@@ -2009,7 +2009,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
                                                      vaddq_s32(run_insert_vec, gap_extend_vec));
             int32x4_t cost_if_delete_vec = vmaxq_s32(vaddq_s32(pre_delete_open_vec, gap_open_vec),
                                                      vaddq_s32(run_delete_vec, gap_extend_vec));
-            // In Local Alignment for SW the zero-reset is applied to @b only the substitution term;
+            // In Local Alignment for SW the zero-reset is applied to only the substitution term;
             // the insertion/deletion gap matrices are not clamped, exactly like the serial scorer.
             int32x4_t cost_if_substitution_vec = vmaxq_s32(
                 vaddq_s32(pre_substitution_vec, cost_of_substitution_i32_vecs[part]), vdupq_n_s32(0));
@@ -2029,7 +2029,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
         i32_t *scores_new_insertions, i32_t *scores_new_deletions,                //
         i32_t gap_open, i32_t gap_extend) const noexcept {
         // The transposed cost table is folded only into the SIMD lookup, so the scalar tail must swap the
-        // two class operands itself to stay correct on @b asymmetric matrices.
+        // two class operands itself to stay correct on asymmetric matrices.
         i32_t const cost_of_substitution =
             this->transpose_ ? this->substituter_.class_substitution_costs[second_slice[i]][first_reversed_slice[i]]
                              : this->substituter_.class_substitution_costs[first_reversed_slice[i]][second_slice[i]];
@@ -2075,7 +2075,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
         i32_t *scores_new_insertions, i32_t *scores_new_deletions,                       //
         executor_type_ &&executor = {}) noexcept {
 
-        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        // ! Both slices already carry class bytes, pre-classified once by the diagonal walker.
         u8_t const *first_reversed_classes = (u8_t const *)first_reversed_slice;
         u8_t const *second_classes = (u8_t const *)second_slice;
         i32_t *const scores_new_begin = scores_new;
@@ -3086,11 +3086,11 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
     }
 };
 
-#pragma endregion // Uniform Cost Levenshtein
+#pragma endregion Uniform Cost Levenshtein
 
 /**
  *  @brief NEON diagonal "walker" for class-based substitution costs with linear gaps. Mirrors the Ice Lake
- *         diagonal walker: classify both strings @b once into class-index buffers, fold the resident (32 x 32)
+ *         diagonal walker: classify both strings once into class-index buffers, fold the resident (32 x 32)
  *         cost table (possibly transposed after the shorter/longer swap) into `tile_scorer_t::prepare`, then
  *         sweep three rolling anti-diagonals through the matrix.
  */
@@ -3200,7 +3200,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_
         char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
         char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
-        // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
+        // Export the reversed shorter string, then classify both strings once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         tile_scorer_t scorer {substituter_, gap_costs_};
@@ -3417,7 +3417,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, affine_gap_costs_
         char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
         char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
-        // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
+        // Export the reversed shorter string, then classify both strings once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         tile_scorer_t scorer {substituter_, gap_costs_};
@@ -6291,7 +6291,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     using lane_walker_wide_t =
         candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, gap_costs_t, sz_minimize_distance_k,
                               sz_similarity_global_k, sz_cap_neon_k, 4, void>; // ? 4-lane `u32` non-unit rune.
-    // The driver's per-pair fallback receives @b rune views, so it is a rune-typed `levenshtein_distance`; the serial
+    // The driver's per-pair fallback receives rune views, so it is a rune-typed `levenshtein_distance`; the serial
     // capability covers every cell width, and this long-tail path is rare. It stays bit-exact with the serial oracle.
     using rune_scoring_t = levenshtein_distance<rune_t, gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
     static constexpr index_t myers_lanes_k = myers_t::lanes_k;
@@ -6308,7 +6308,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
     // The non-unit path transcodes every query/candidate to UTF-32 once and exposes each as a `span<rune_t const>`
-    // view, so the driver's `to_view` yields rune spans. Queries and candidates own @b separate arenas so the second
+    // view, so the driver's `to_view` yields rune spans. Queries and candidates own separate arenas so the second
     // transcode does not invalidate the first set of views; the symmetric self-similarity case reuses the query arena.
     safe_vector<rune_t, rune_allocator_t> query_arena_ {alloc_};
     safe_vector<rune_t, rune_allocator_t> candidate_arena_ {alloc_};
@@ -6950,7 +6950,7 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_NEON
-#pragma endregion // NEON Implementation
+#pragma endregion NEON Implementation
 
 } // namespace stringzillas
 } // namespace ashvardanian

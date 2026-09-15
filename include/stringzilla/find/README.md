@@ -6,7 +6,7 @@ The dispatcher picks the fastest one available on the running CPU.
 
 ## Methodology
 
-Numbers are throughput, shown in GB/s in each cell, measured with `bench/find.cpp` over the `leipzig1M_en.txt` corpus, reporting the median of repeated runs.
+Numbers are throughput, shown in GB/s in each cell, measured with `bench/find.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `strstr` and `std::find_end` for substring search, `memchr` for the byte variants, and `strpbrk`/`strcspn` for the byte-set variants.
 Substring search depends sharply on needle length, so results are split into a Short Words table with tokens averaging 5 bytes and a Long Lines table with tokens averaging 130 bytes.

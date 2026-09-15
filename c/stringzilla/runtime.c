@@ -112,5 +112,8 @@ SZ_API_RUNTIME sz_capability_t sz_capabilities(void) {
     return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 }
 SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
-    return sz_capabilities_to_string_implementation_(caps);
+    // The one place that must own storage, because the signature returns a string it does not receive.
+    static char names[256];
+    sz_capabilities_to_string_implementation_(caps, names, sizeof(names));
+    return names;
 }

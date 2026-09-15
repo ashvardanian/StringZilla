@@ -1,9 +1,11 @@
 
 /**
- *  @file scripts/bench_sequence.cpp
+ *  @file bench/sequence.cpp
  *  @brief Benchmarks sorting, partitioning, and merging operations on string sequences.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *         validating the SIMD-accelerated backends against the serial baselines.
+ *
+ *  Memory-bound: sort cost is dominated by cache-missing permutation over the whole collection, so it reads the whole file by default.
  *
  *  Benchmarks include:
  *  - String sequence sorting algorithms - @b argsort and @b pgrams_sort.
@@ -15,6 +17,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
  *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
@@ -45,7 +48,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_find.cpp`, `bench_token.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `find.cpp`, `token.cpp`, and `memory.cpp`.
  */
 #include <memory>        // `std::memcpy`
 #include <numeric>       // `std::iota`

@@ -70,32 +70,49 @@ function (set_optimization_flags target compiler_id target_type)
         target_compile_options(${target} PRIVATE "$<$<CONFIG:Release>:-O2>")
     elseif (compiler_id STREQUAL "NVIDIA")
         if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            set(sz_nvcc_debug_ "-G" # Device debug symbols
-                               "-no-compress" # No compression of debug info
-                               "-Xcompiler=/Zi" # Host debugging symbols
-                               "-Xcompiler=/Oy-" # Frame pointers for stack traces
-                               "-Xcompiler=/Ob0" # Prevent host inlining
-                               "-maxrregcount=0" # No register count limits
+            set(sz_nvcc_debug_
+                "-G" # Device debug symbols
+                "-no-compress" # No compression of debug info
+                "-Xcompiler=/Zi" # Host debugging symbols
+                "-Xcompiler=/Oy-" # Frame pointers for stack traces
+                "-Xcompiler=/Ob0" # Prevent host inlining
+                "-maxrregcount=0" # No register count limits
             )
-            set(sz_nvcc_release_ "-O2" # NVCC optimizations
-                                 "-Xptxas=-O2" # PTX assembler optimizations
-                                 "-Xcompiler=/O2" # Host optimizations
+            set(sz_nvcc_lineinfo_
+                "-lineinfo" # Source correlation through optimized device code
+                "-Xcompiler=/Zi" # Host debugging symbols
+                "-Xcompiler=/Oy-" # Frame pointers for stack traces
+            )
+            set(sz_nvcc_release_
+                "-O2" # NVCC optimizations
+                "-Xptxas=-O2" # PTX assembler optimizations
+                "-Xcompiler=/O2" # Host optimizations
             )
         else ()
-            set(sz_nvcc_debug_ "-G" # Device debug symbols
-                               "-no-compress" # No compression of debug info
-                               "-Xcompiler=-g" # Host debugging symbols explicitly
-                               "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
-                               "-Xcompiler=-fno-inline" # Prevent host inlining
-                               "-maxrregcount=0" # No register count limits
+            set(sz_nvcc_debug_
+                "-G" # Device debug symbols
+                "-no-compress" # No compression of debug info
+                "-Xcompiler=-g" # Host debugging symbols explicitly
+                "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
+                "-Xcompiler=-fno-inline" # Prevent host inlining
+                "-maxrregcount=0" # No register count limits
             )
-            set(sz_nvcc_release_ "-O2" # NVCC optimizations
-                                 "-Xptxas=-O2" # PTX assembler optimizations
-                                 "-Xcompiler=-O2" # Host optimizations
+            set(sz_nvcc_lineinfo_
+                "-lineinfo" # Source correlation through optimized device code
+                "-Xcompiler=-g" # Host debugging symbols explicitly
+                "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
+            )
+            set(sz_nvcc_release_
+                "-O2" # NVCC optimizations
+                "-Xptxas=-O2" # PTX assembler optimizations
+                "-Xcompiler=-O2" # Host optimizations
             )
         endif ()
+        # `RelWithDebInfo` matched both lists and asked `ptxas` for `-G` beside `-O2`, which it refuses.
+        # `-G` stays with `Debug`; `-lineinfo` carries the same source correlation through optimized code.
         target_compile_options(
-            ${target} PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:${sz_nvcc_debug_}>"
+            ${target} PRIVATE "$<$<CONFIG:Debug>:${sz_nvcc_debug_}>"
+                              "$<$<CONFIG:RelWithDebInfo>:${sz_nvcc_lineinfo_}>"
                               "$<$<CONFIG:Release,RelWithDebInfo>:${sz_nvcc_release_}>"
         )
     endif ()
@@ -212,11 +229,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                     else ()
                         target_compile_options(${target} PRIVATE "-Xcompiler=/arch:AVX2")
                     endif ()
-                else ()
-                    check_cxx_compiler_flag("-march=native" supports_march_native)
-                    if (supports_march_native)
-                        target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
-                    endif ()
+                elseif (STRINGZILLA_CUDA_ACCEPTS_NATIVE_ARCH)
+                    target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
                 endif ()
             elseif (NOT (compiler_id MATCHES "MSVC"))
                 check_cxx_compiler_flag("-march=native" supports_march_native)

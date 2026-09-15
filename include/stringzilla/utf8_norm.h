@@ -26,7 +26,7 @@ extern "C" {
 /**
  *  @brief Transform a UTF-8 string into a Unicode normalization form.
  *
- *  @section Buffer Sizing
+ *  @section utf8_norm_buffer_sizing Buffer Sizing
  *
  *  Decomposition forms (NFD, NFKD) can expand the input; the destination must hold up to
  *  `source_length * 18` bytes for the worst single-codepoint compatibility decomposition. The
@@ -178,7 +178,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Backends
 
@@ -195,7 +195,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx( //
 #include "stringzilla/utf8_norm/lasx.h"
 #include "stringzilla/utf8_norm/powervsx.h"
 
-#pragma endregion // Backends
+#pragma endregion Backends
 
 #pragma region Dynamic Dispatch
 
@@ -259,7 +259,7 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized(sz_cptr_t source, sz_size_t l
 
 #endif // !SZ_DYNAMIC_DISPATCH
 
-#pragma endregion // Dynamic Dispatch
+#pragma endregion Dynamic Dispatch
 
 #ifdef __cplusplus
 }

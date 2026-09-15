@@ -17,8 +17,9 @@ extern "C" {
 
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(                                                                                               \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512,popcnt"))), \
+#pragma clang attribute push(                                                                                    \
+    __attribute__((                                                                                              \
+        target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512,popcnt"))), \
     apply_to = function)
 #elif defined(__clang__)
 #pragma clang attribute push(                                                                                       \
@@ -27,8 +28,7 @@ extern "C" {
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
-    "lzcnt", \
-                   "popcnt")
+                   "lzcnt", "popcnt")
 #endif
 
 #pragma region Sentence_Break classifier
@@ -40,7 +40,7 @@ extern "C" {
  *          `vpermb` + one `vpgatherdd` each), then `vpexpandb`-scattered back onto @p classes_u8x64 at their original
  *          byte-lane positions. The second half only runs when more than sixteen cold starts are present. Every other
  *          lane keeps its prior value. */
-SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
+SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
     __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
     __mmask64 const cold_start_mask_m64 = _cvtu64_mask64(cold_starts);
     __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, high_bytes_u8x64);
@@ -84,7 +84,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
  *  @param  four_byte_starts_m64  Lanes that begin a 4-byte UTF-8 sequence (gates the >= 0x10000 astral test).
  *  @param  codepoint_starts_m64  Lanes that begin any codepoint (non-continuation, in range).
  */
-SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(                                  //
+SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(                                //
     __m512i raw_window_u8x64, __m512i raw_next1_u8x64, __m512i raw_next2_u8x64, __m512i raw_next3_u8x64, //
     __m512i high_u8x64, __m512i low_u8x64,                                                               //
     __mmask64 four_byte_starts_m64, __mmask64 codepoint_starts_m64) {
@@ -286,7 +286,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
         __mmask64 const codepoint_starts_m64 = decoded.codepoint_starts | lead_continuation_m64;
         sz_u64_t const start_bytes = _cvtmask64_u64(codepoint_starts_m64);
 
-        __m512i const window_u8x64 = decoded.window;
+        __m512i const window_u8x64 = decoded.window_u8x64;
         __mmask64 const keep1_m64 = sz_u64_mask_until_(loaded >= 1 ? loaded - 1 : 0);
         __mmask64 const keep2_m64 = sz_u64_mask_until_(loaded >= 2 ? loaded - 2 : 0);
         __mmask64 const keep3_m64 = sz_u64_mask_until_(loaded >= 3 ? loaded - 3 : 0);

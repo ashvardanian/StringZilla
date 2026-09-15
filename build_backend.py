@@ -180,6 +180,7 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
             "--ignore=" + str(proj / "test" / "stringzillas.py"),
             "--ignore=" + str(proj / "test" / "similarities.py"),
             "--ignore=" + str(proj / "test" / "fingerprints.py"),
+            "--ignore=" + str(proj / "test" / "substrings.py"),
             "--ignore=" + str(proj / "test" / "szs_helpers.py"),
         ]
     else:
@@ -189,6 +190,7 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
             str(proj / "test" / "stringzillas.py"),
             str(proj / "test" / "similarities.py"),
             str(proj / "test" / "fingerprints.py"),
+            str(proj / "test" / "substrings.py"),
         ]
     # A free-threaded interpreter is the only place a data race can surface, and only if the suite runs
     # concurrently. Doctests sit out, asserting against a process-wide stdout capture that threads interleave.

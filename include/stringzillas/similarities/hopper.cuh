@@ -638,7 +638,7 @@ struct tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cud
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 };
 
-#pragma region Tiled tier and register tier DPX fold functors
+#pragma region Tiled Tier and Register Tier DPX Fold Functors
 
 /**
  *  @brief @b Hopper DPX partial specialization of the linear-gap DP cell: fuses `opt(diag+sub, opt(top,left)+gap)`
@@ -781,7 +781,7 @@ struct weighted_affine_gap_fold<locality_, capability_, std::enable_if_t<(capabi
     }
 };
 
-#pragma endregion Tiled tier and register tier DPX fold functors
+#pragma endregion Tiled Tier and Register Tier DPX Fold Functors
 
 #endif
 

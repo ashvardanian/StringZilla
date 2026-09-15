@@ -28,7 +28,7 @@ extern "C" {
  *  @see "Emulating x86 AES Intrinsics on ARMv8-A" by Michael Brase:
  *       https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
  */
-SZ_HELPER_AUTO uint8x16_t sz_emulate_aesenc_u8x16_neon_(uint8x16_t state_u8x16, uint8x16_t round_key_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_emulate_aesenc_u8x16_neon_(uint8x16_t state_u8x16, uint8x16_t round_key_u8x16) {
     return veorq_u8(vaesmcq_u8(vaeseq_u8(state_u8x16, vdupq_n_u8(0))), round_key_u8x16);
 }
 
@@ -52,7 +52,7 @@ SZ_HELPER_INLINE uint64x2_t sz_emulate_aesenc_u64x2_neon_(uint64x2_t state_u64x2
  *  @param state Pointer to the minimal hash state to initialize.
  *  @param seed 64-bit seed value for the hash.
  */
-SZ_HELPER_AUTO void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
+SZ_HELPER_INLINE void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     uint64x2_t seed_u64x2 = vdupq_n_u64(seed);
@@ -77,8 +77,8 @@ SZ_HELPER_AUTO void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_sho
  *  @param length Total number of bytes that were hashed.
  *  @return 64-bit hash digest.
  */
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_aligned_for_short_t const *state,
-                                                           sz_size_t length) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_aligned_for_short_t const *state,
+                                                             sz_size_t length) {
     // Mix the length into the key
     uint64x2_t key_with_length_u64x2 = vaddq_u64(state->key.u64x2, vsetq_lane_u64(length, vdupq_n_u64(0), 0));
     // Combine the "sum" and the "AES" blocks
@@ -97,7 +97,8 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_aligned
  *  @param state Pointer to the minimal hash state to update.
  *  @param block_u8x16 16-byte input block as a NEON register.
  */
-SZ_HELPER_AUTO void sz_hash_state_short_update_neon_(sz_hash_state_aligned_for_short_t *state, uint8x16_t block_u8x16) {
+SZ_HELPER_INLINE void sz_hash_state_short_update_neon_(sz_hash_state_aligned_for_short_t *state,
+                                                       uint8x16_t block_u8x16) {
     uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
     state->aes.u8x16 = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16, block_u8x16);
     uint8x16_t sum_shuffled_u8x16 = vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2), order_u8x16);
@@ -125,7 +126,7 @@ SZ_API_COMPTIME void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t
 }
 
 /** @brief Loads the packed public state into the aligned internal twin (NEON: 4x `vld1q_u8` per 64-byte field). */
-SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz_hash_state_t const *packed) {
+SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         state.aes.u8x16s[lane_index] = vld1q_u8(packed->aes + lane_index * 16);
@@ -138,7 +139,7 @@ SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz_hash_state
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state (NEON: 4x `vst1q_u8` per field). */
-SZ_HELPER_AUTO void sz_hash_state_store_neonaes_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
+SZ_HELPER_INLINE void sz_hash_state_store_neonaes_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         vst1q_u8(packed->aes + lane_index * 16, state->aes.u8x16s[lane_index]);
         vst1q_u8(packed->sum + lane_index * 16, state->sum.u8x16s[lane_index]);
@@ -152,7 +153,7 @@ SZ_HELPER_AUTO void sz_hash_state_store_neonaes_(sz_hash_state_t *packed, sz_has
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
  *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
  */
-SZ_HELPER_AUTO void sz_hash_state_update_neonaes_(sz_hash_state_aligned_t *state) {
+SZ_HELPER_INLINE void sz_hash_state_update_neonaes_(sz_hash_state_aligned_t *state) {
     uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
     state->aes.u8x16s[0] = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16s[0], state->ins.u8x16s[0]);
     uint8x16_t sum_shuffled_0_u8x16 = vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2s[0]), order_u8x16);
@@ -174,7 +175,7 @@ SZ_HELPER_AUTO void sz_hash_state_update_neonaes_(sz_hash_state_aligned_t *state
  *  @param state The internal hash state to finalize.
  *  @return 64-bit hash digest.
  */
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_neonaes_(sz_hash_state_aligned_t state) {
+SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_neonaes_(sz_hash_state_aligned_t state) {
     // Mix the length into the key
     uint64x2_t key_with_length_u64x2 = vaddq_u64(state.key.u64x2, vsetq_lane_u64(state.ins_length, vdupq_n_u64(0), 0));
 
@@ -367,8 +368,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, s
  *         the `< 16` case, where a 16-byte NEON load could read past the input.
  *  @return The number of populated text-lanes (1..4).
  */
-SZ_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,
-                                                         sz_u512_vec_t *text_lanes_vec) {
+SZ_HELPER_INLINE sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,
+                                                           sz_u512_vec_t *text_lanes_vec) {
     if (length <= 16) {
         sz_u128_vec_t lane_vec;
         if (length == 16) { lane_vec.u8x16 = vld1q_u8((sz_u8_t const *)text); }

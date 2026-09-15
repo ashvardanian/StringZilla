@@ -13,9 +13,14 @@ extern "C" {
 #endif
 #pragma region Rune Codec
 
+/** @brief The unsigned value of the byte at @p offset. A `char const *` cannot be reinterpreted as
+ *         `sz_u8_t const *` inside a constant expression, and that qualifier is what carries these
+ *         helpers into device code, so the sign is taken off one byte at a time instead. */
+SZ_HELPER_AUTO sz_u8_t sz_utf8_byte_at_(sz_cptr_t utf8, sz_size_t offset) { return (sz_u8_t)utf8[offset]; }
+
 /** @brief Whether @p byte is a UTF-8 continuation byte (`0x80..0xBF`). The single low-level predicate every decode
  *         path shares, so `sz_rune_decode` and `sz_utf8_maximal_subpart_` can never disagree on validity. */
-SZ_HELPER_INLINE sz_bool_t sz_utf8_is_continuation_(sz_u8_t byte) { return (sz_bool_t)((byte & 0xC0) == 0x80); }
+SZ_HELPER_AUTO sz_bool_t sz_utf8_is_continuation_(sz_u8_t byte) { return (sz_bool_t)((byte & 0xC0) == 0x80); }
 
 /** @brief Whether @p second is a valid @b first continuation for lead byte @p lead: a continuation byte that also
  *         satisfies the E0/ED/F0/F4 overlong/surrogate/range constraint (Unicode Table 3-7). For C2..DF and the
@@ -36,31 +41,33 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_first_continuation_ok_(sz_u8_t lead, sz_u8_t se
  *         single authority for "is this a foldable/normalizable rune"; the decode-side mirror of `sz_rune_encode`.
  *         On failure use `sz_utf8_maximal_subpart_` for how many bytes the resulting U+FFFD consumes. */
 SZ_HELPER_AUTO sz_rune_length_t sz_rune_decode(sz_cptr_t utf8, sz_cptr_t utf8_end, sz_rune_t *rune) {
-    sz_u8_t const *u = (sz_u8_t const *)utf8;
-    sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u);
-    sz_u8_t const lead = u[0];
+    sz_size_t const available = (sz_size_t)(utf8_end - utf8);
+    sz_u8_t const lead = sz_utf8_byte_at_(utf8, 0);
     if (lead < 0x80) {
         *rune = lead;
         return sz_rune_1byte_k;
     }
     if (lead < 0xC2) return sz_rune_invalid_k; // continuation byte, or C0/C1 (overlong 2-byte)
     if (lead < 0xE0) {                         // C2..DF
-        if (available < 2 || !sz_utf8_first_continuation_ok_(lead, u[1])) return sz_rune_invalid_k;
-        *rune = (sz_rune_t)(lead & 0x1F) << 6 | (u[1] & 0x3F);
+        if (available < 2 || !sz_utf8_first_continuation_ok_(lead, sz_utf8_byte_at_(utf8, 1))) return sz_rune_invalid_k;
+        *rune = (sz_rune_t)(lead & 0x1F) << 6 | (sz_utf8_byte_at_(utf8, 1) & 0x3F);
         return sz_rune_2bytes_k;
     }
     if (lead < 0xF0) { // E0..EF
-        if (available < 3 || !sz_utf8_first_continuation_ok_(lead, u[1]) || !sz_utf8_is_continuation_(u[2]))
+        if (available < 3 || !sz_utf8_first_continuation_ok_(lead, sz_utf8_byte_at_(utf8, 1)) ||
+            !sz_utf8_is_continuation_(sz_utf8_byte_at_(utf8, 2)))
             return sz_rune_invalid_k;
-        *rune = (sz_rune_t)(lead & 0x0F) << 12 | (sz_rune_t)(u[1] & 0x3F) << 6 | (u[2] & 0x3F);
+        *rune = (sz_rune_t)(lead & 0x0F) << 12 | (sz_rune_t)(sz_utf8_byte_at_(utf8, 1) & 0x3F) << 6 |
+                (sz_utf8_byte_at_(utf8, 2) & 0x3F);
         return sz_rune_3bytes_k;
     }
     if (lead <= 0xF4) { // F0..F4
-        if (available < 4 || !sz_utf8_first_continuation_ok_(lead, u[1]) || !sz_utf8_is_continuation_(u[2]) ||
-            !sz_utf8_is_continuation_(u[3]))
+        if (available < 4 || !sz_utf8_first_continuation_ok_(lead, sz_utf8_byte_at_(utf8, 1)) ||
+            !sz_utf8_is_continuation_(sz_utf8_byte_at_(utf8, 2)) ||
+            !sz_utf8_is_continuation_(sz_utf8_byte_at_(utf8, 3)))
             return sz_rune_invalid_k;
-        *rune = (sz_rune_t)(lead & 0x07) << 18 | (sz_rune_t)(u[1] & 0x3F) << 12 | (sz_rune_t)(u[2] & 0x3F) << 6 |
-                (u[3] & 0x3F);
+        *rune = (sz_rune_t)(lead & 0x07) << 18 | (sz_rune_t)(sz_utf8_byte_at_(utf8, 1) & 0x3F) << 12 |
+                (sz_rune_t)(sz_utf8_byte_at_(utf8, 2) & 0x3F) << 6 | (sz_utf8_byte_at_(utf8, 3) & 0x3F);
         return sz_rune_4bytes_k;
     }
     return sz_rune_invalid_k; // F5..FF
@@ -92,16 +99,16 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_serial_( //
 }
 
 SZ_HELPER_AUTO sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr_t utf8_end) {
-    sz_u8_t const *u = (sz_u8_t const *)utf8;
-    sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u);
-    sz_u8_t const lead = u[0];
+    sz_size_t const available = (sz_size_t)(utf8_end - utf8);
+    sz_u8_t const lead = sz_utf8_byte_at_(utf8, 0);
     // A bad lead is its own 1-byte subpart: stray continuation (< 0xC2), C0/C1 overlong, F5..FF out of range.
     if (lead < 0xC2 || lead > 0xF4) return 1;
     // 2/3/4-byte leads: count leading bytes consistent with a well-formed sequence, stopping at the first break.
-    if (available < 2 || !sz_utf8_first_continuation_ok_(lead, u[1])) return 1; // byte 1 breaks it (incl. C2..DF)
-    if (lead < 0xE0) return 1;                                      // C2..DF + good b1 would be well-formed (defensive)
-    if (available < 3 || !sz_utf8_is_continuation_(u[2])) return 2; // byte 2 breaks it
-    return 3;                                                       // E0..F4: break is at byte 3 (b1, b2 are good)
+    if (available < 2 || !sz_utf8_first_continuation_ok_(lead, sz_utf8_byte_at_(utf8, 1)))
+        return 1;              // byte 1 breaks it (incl. C2..DF)
+    if (lead < 0xE0) return 1; // C2..DF + good b1 would be well-formed (defensive)
+    if (available < 3 || !sz_utf8_is_continuation_(sz_utf8_byte_at_(utf8, 2))) return 2; // byte 2 breaks it
+    return 3; // E0..F4: break is at byte 3 (b1, b2 are good)
 }
 
 /** @brief Decode the 1-4 byte sequence the lead byte declares, with NO bounds check and NO validation; returns
@@ -109,15 +116,17 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr_t utf8
  *  @warning Assumes valid, complete UTF-8 (a truncated trailing sequence over-reads). Use `sz_rune_decode` for the
  *           bounds-checked + validating variant, or `sz_utf8_find_malformed()` first. */
 SZ_HELPER_AUTO sz_rune_length_t sz_rune_decode_unchecked(sz_cptr_t utf8, sz_rune_t *rune) {
-    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
-    sz_u8_t lead = *u8s++;
+    sz_u8_t lead = sz_utf8_byte_at_(utf8, 0);
     sz_rune_length_t length = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
     switch (length) {
     case 1: *rune = lead; break;
-    case 2: *rune = (lead & 0x1FU) << 6 | (u8s[0] & 0x3FU); break;
-    case 3: *rune = (lead & 0x0FU) << 12 | (u8s[0] & 0x3FU) << 6 | (u8s[1] & 0x3FU); break;
+    case 2: *rune = (lead & 0x1FU) << 6 | (sz_utf8_byte_at_(utf8, 1) & 0x3FU); break;
+    case 3:
+        *rune = (lead & 0x0FU) << 12 | (sz_utf8_byte_at_(utf8, 1) & 0x3FU) << 6 | (sz_utf8_byte_at_(utf8, 2) & 0x3FU);
+        break;
     default:
-        *rune = (sz_rune_t)(lead & 0x07U) << 18 | (u8s[0] & 0x3FU) << 12 | (u8s[1] & 0x3FU) << 6 | (u8s[2] & 0x3FU);
+        *rune = (sz_rune_t)(lead & 0x07U) << 18 | (sz_utf8_byte_at_(utf8, 1) & 0x3FU) << 12 |
+                (sz_utf8_byte_at_(utf8, 2) & 0x3FU) << 6 | (sz_utf8_byte_at_(utf8, 3) & 0x3FU);
         break;
     }
     return length;
@@ -170,10 +179,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_malformed(sz_cptr_t text, sz_size_t lengt
  *         U+FFFD. Genuinely ill-formed bytes (a bad lead, a malformed present continuation, or an overlong/surrogate/
  *         out-of-range prefix) return false so the caller emits the replacement character. */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_incomplete_tail_(sz_cptr_t text, sz_cptr_t end) {
-    sz_u8_t const *u = (sz_u8_t const *)text;
-    sz_size_t const available = (sz_size_t)((sz_u8_t const *)end - u);
+    sz_size_t const available = (sz_size_t)(end - text);
     if (!available) return sz_false_k;
-    sz_u8_t const lead = u[0];
+    sz_u8_t const lead = sz_utf8_byte_at_(text, 0);
     sz_rune_length_t declared;
     if (lead < 0x80) return sz_false_k;
     else if (lead >= 0xC2 && lead < 0xE0) declared = sz_rune_2bytes_k;
@@ -182,12 +190,14 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_incomplete_tail_(sz_cptr_t text, sz_cptr_t end)
     else return sz_false_k; // C0/C1, F5..FF, or a lone continuation - ill-formed, not merely truncated
     if (available >= (sz_size_t)declared) return sz_false_k; // all bytes present; `sz_rune_decode` judges validity
     for (sz_size_t index = 1; index < available; ++index)
-        if ((u[index] & 0xC0) != 0x80) return sz_false_k;    // a present continuation is malformed - ill-formed now
-    if (available >= 2) {                                    // first-continuation range constraints, where present
-        if (lead == 0xE0 && u[1] < 0xA0) return sz_false_k;  // overlong
-        if (lead == 0xED && u[1] >= 0xA0) return sz_false_k; // surrogate
-        if (lead == 0xF0 && u[1] < 0x90) return sz_false_k;  // overlong
-        if (lead == 0xF4 && u[1] >= 0x90) return sz_false_k; // > U+10FFFF
+        if ((sz_utf8_byte_at_(text, index) & 0xC0) != 0x80)
+            return sz_false_k; // a present continuation is malformed - ill-formed now
+    if (available >= 2) {      // first-continuation range constraints, where present
+        sz_u8_t const second = sz_utf8_byte_at_(text, 1);
+        if (lead == 0xE0 && second < 0xA0) return sz_false_k;  // overlong
+        if (lead == 0xED && second >= 0xA0) return sz_false_k; // surrogate
+        if (lead == 0xF0 && second < 0x90) return sz_false_k;  // overlong
+        if (lead == 0xF4 && second >= 0x90) return sz_false_k; // > U+10FFFF
     }
     return sz_true_k;
 }
@@ -274,13 +284,12 @@ SZ_HELPER_AUTO sz_rune_t sz_utf8_next_rune_(sz_cptr_t text, sz_size_t length, sz
 /**
  *  @brief Get the UTF-8 sequence length from a lead byte, branchlessly.
  *
- *  The length is fully determined by the lead byte's high nibble: 0x0-0xB map to 1 (ASCII and, for robustness,
- *  stray continuation bytes treated as single bytes), 0xC-0xD to 2, 0xE to 3, 0xF to 4. A single 16-entry
- *  table resolves it without a four-way `if`-ladder on the codepoint advance.
+ *  Three comparisons rather than a lookup: 0x00-0xBF is 1 (ASCII and, for robustness, stray continuation
+ *  bytes treated as single bytes), 0xC0-0xDF is 2, 0xE0-0xEF is 3, 0xF0 and above is 4. The same form
+ *  `sz_rune_decode_unchecked` uses, so the two can never disagree on how far a lead byte advances.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_lead_length_(sz_u8_t lead_byte) {
-    static sz_u8_t const length_by_high_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
-    return length_by_high_nibble[lead_byte >> 4];
+SZ_HELPER_AUTO sz_size_t sz_utf8_lead_length_(sz_u8_t lead_byte) {
+    return (sz_size_t)(1 + (lead_byte >= 0xC0U) + (lead_byte >= 0xE0U) + (lead_byte >= 0xF0U));
 }
 
 /** @brief Returns the start offset of the codepoint preceding `position` (a codepoint start), or `position` if none. */
@@ -289,6 +298,19 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_previous_rune_start_(sz_cptr_t text, sz_size_t 
     sz_size_t previous = position - 1;
     while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
     return previous;
+}
+
+/**
+ *  @brief Moves `position`, which may sit mid-codepoint, back to the lead byte of the codepoint holding it.
+ *  Bounded to three steps, the widest continuation run a well-formed codepoint has; malformed input therefore
+ *  bounds the cost rather than guaranteeing a real lead byte.
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_start_at_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+    for (sz_size_t step = 0; step < 3 && position > 0 && position < length; ++step) {
+        if (((sz_u8_t)text[position] & 0xC0) != 0x80) break;
+        --position;
+    }
+    return position;
 }
 
 #pragma region Shared bitmask boundary algebra
@@ -352,7 +374,7 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_segmented_parity_(sz_u64_t seed, sz_u64_t gate) {
 
 /** @brief  Low @p count bits set (`[0, count)`), 0 for `count==0`, all-ones for `count>=64`. Portable, branch-light
  *          replacement for the BMI2 `sz_u64_mask_until_` so the shared boundary algebra compiles on every backend. */
-SZ_HELPER_INLINE sz_u64_t sz_u64_mask_until_serial_(sz_size_t count) {
+SZ_HELPER_AUTO sz_u64_t sz_u64_mask_until_serial_(sz_size_t count) {
     return count >= 64 ? (sz_u64_t) ~(sz_u64_t)0 : (((sz_u64_t)1 << count) - 1);
 }
 

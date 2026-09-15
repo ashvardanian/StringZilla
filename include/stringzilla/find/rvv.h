@@ -77,8 +77,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haysta
  *  @param vector_length Vector length for this strip.
  *  @return Predicate mask where lane `i` is set if `haystack_u8m8[i]` is in the set.
  */
-SZ_HELPER_AUTO vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
-                                                     sz_size_t vector_length) {
+SZ_HELPER_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
+                                                       sz_size_t vector_length) {
     vuint8m8_t byte_index_u8m8 = __riscv_vsrl_vx_u8m8(haystack_u8m8, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m8_t bit_position_u8m8 = __riscv_vand_vx_u8m8(haystack_u8m8, 7, vector_length); // c & 7
     vuint8m8_t one_u8m8 = __riscv_vmv_v_x_u8m8(1, vector_length);
@@ -91,8 +91,8 @@ SZ_HELPER_AUTO vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, s
 /**
  *  @brief `m4` sibling of @ref sz_find_byteset_rvv_mask_m8_, used on the reversed backward strip.
  */
-SZ_HELPER_AUTO vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
-                                                     sz_size_t vector_length) {
+SZ_HELPER_INLINE vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
+                                                       sz_size_t vector_length) {
     vuint8m4_t byte_index_u8m4 = __riscv_vsrl_vx_u8m4(haystack_u8m4, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m4_t bit_position_u8m4 = __riscv_vand_vx_u8m4(haystack_u8m4, 7, vector_length); // c & 7
     vuint8m4_t one_u8m4 = __riscv_vmv_v_x_u8m4(1, vector_length);

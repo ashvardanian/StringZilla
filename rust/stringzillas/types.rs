@@ -1,8 +1,8 @@
 //! Shared value types, unified-memory containers, and library introspection.
 
 use core::ffi::{c_char, c_void, CStr};
+use core::marker::PhantomData;
 use core::ops::Index;
-use core::ptr;
 
 use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
 use stringtape::{BytesTape, BytesTapeView, CharsTape, CharsTapeView};
@@ -50,13 +50,18 @@ pub(crate) fn rust_error_from_c_message(status: Status, error_msg: *const c_char
     Error { status, message }
 }
 
-/// Tape variant that can hold either 32-bit or 64-bit string tapes with unsigned offsets
+/// Every shape a string collection can reach the engines in, one variant per layout the C API accepts.
+///
+/// Named for the tapes because most of it is tape: the four tape arms spell `sz_sequence_u32tape_t` and
+/// `sz_sequence_u64tape_t`, owned and borrowed collapsing onto the same pair. [`AnyCharsTape::Slices`] is
+/// the exception - `sz_sequence_t`, addressed by callback and copied nowhere.
 pub enum AnyCharsTape<'a> {
     Tape32(CharsTape<u32, UnifiedAlloc>),
     Tape64(CharsTape<u64, UnifiedAlloc>),
     // Zero-copy FFI views (UTF-8)
     View32(CharsTapeView<'a, u32>),
     View64(CharsTapeView<'a, u64>),
+    Slices(SzSequence<'a>),
 }
 
 impl<'a> AnyCharsTape<'a> {
@@ -66,15 +71,28 @@ impl<'a> AnyCharsTape<'a> {
     pub fn from_sequences<Sequence: AsRef<str>>(sequences: &[Sequence]) -> Result<Self, Error> {
         copy_chars_into_tape(sequences, false)
     }
+
+    /// Borrow the sequences where they already are, building no tape and copying nothing.
+    ///
+    /// A GPU scope needs its inputs in unified memory and refuses this arm, so reach for
+    /// [`AnyCharsTape::from_sequences`] there.
+    pub fn from_slices<Sequence: AsRef<str>>(sequences: &'a [Sequence]) -> Self {
+        Self::Slices(SzSequenceFromChars::to_sz_sequence(sequences))
+    }
 }
 
-/// Tape variant that can hold either 32-bit or 64-bit byte tapes with unsigned offsets
+/// Every shape a byte collection can reach the engines in, one variant per layout the C API accepts.
+///
+/// Named for the tapes because most of it is tape: the four tape arms spell `sz_sequence_u32tape_t` and
+/// `sz_sequence_u64tape_t`, owned and borrowed collapsing onto the same pair. [`AnyBytesTape::Slices`] is
+/// the exception - `sz_sequence_t`, addressed by callback and copied nowhere.
 pub enum AnyBytesTape<'a> {
     Tape32(BytesTape<u32, UnifiedAlloc>),
     Tape64(BytesTape<u64, UnifiedAlloc>),
     // Zero-copy FFI views (bytes)
     View32(BytesTapeView<'a, u32>),
     View64(BytesTapeView<'a, u64>),
+    Slices(SzSequence<'a>),
 }
 
 impl<'a> AnyBytesTape<'a> {
@@ -84,18 +102,35 @@ impl<'a> AnyBytesTape<'a> {
     pub fn from_sequences<Sequence: AsRef<[u8]>>(sequences: &[Sequence]) -> Result<Self, Error> {
         copy_bytes_into_tape(sequences, false)
     }
+
+    /// Borrow the sequences where they already are, building no tape and copying nothing.
+    ///
+    /// A GPU scope needs its inputs in unified memory and refuses this arm, so reach for
+    /// [`AnyBytesTape::from_sequences`] there.
+    pub fn from_slices<Sequence: AsRef<[u8]>>(sequences: &'a [Sequence]) -> Self {
+        Self::Slices(SzSequenceFromBytes::to_sz_sequence(sequences))
+    }
 }
 
-/// Internal representation of `sz_sequence_t` for passing to C
+/// A collection the engines reach through two accessors rather than a contiguous tape, mirroring
+/// `sz_sequence_t`.
+///
+/// Opaque: built by [`AnyBytesTape::from_slices`] or [`AnyCharsTape::from_slices`], whose lifetime is what
+/// keeps the borrowed slices alive for as long as the engine can address them.
 #[repr(C)]
-pub(crate) struct SzSequence {
+pub struct SzSequence<'a> {
     handle: *mut c_void,
     count: usize,
     get_start: extern "C" fn(*mut c_void, usize) -> *const u8,
     get_length: extern "C" fn(*mut c_void, usize) -> usize,
-    // Additional fields for our implementation
-    starts: *const *const u8,
-    lengths: *const usize,
+    borrowed: PhantomData<&'a ()>,
+}
+
+impl SzSequence<'_> {
+    /// Members the sequence carries, which every per-element output buffer is sized against.
+    pub(crate) fn count(&self) -> usize {
+        self.count
+    }
 }
 
 /// Raw C API tape structure for 32-bit offsets (data < 4GB),
@@ -286,36 +321,34 @@ extern "C" fn sz_sequence_get_length_str<Sequence: AsRef<str>>(handle: *mut c_vo
 
 /// Trait for types that can be converted to SzSequence for byte sequences
 pub(crate) trait SzSequenceFromBytes {
-    fn to_sz_sequence(&self) -> SzSequence;
+    fn to_sz_sequence(&self) -> SzSequence<'_>;
 }
 
 impl<Sequence: AsRef<[u8]>> SzSequenceFromBytes for [Sequence] {
-    fn to_sz_sequence(&self) -> SzSequence {
+    fn to_sz_sequence(&self) -> SzSequence<'_> {
         SzSequence {
             handle: self.as_ptr() as *mut c_void,
             count: self.len(),
             get_start: sz_sequence_get_start_generic::<Sequence>,
             get_length: sz_sequence_get_length_generic::<Sequence>,
-            starts: ptr::null(),
-            lengths: ptr::null(),
+            borrowed: PhantomData,
         }
     }
 }
 
 /// Trait for types that can be converted to SzSequence for string sequences
 pub(crate) trait SzSequenceFromChars {
-    fn to_sz_sequence(&self) -> SzSequence;
+    fn to_sz_sequence(&self) -> SzSequence<'_>;
 }
 
 impl<Sequence: AsRef<str>> SzSequenceFromChars for [Sequence] {
-    fn to_sz_sequence(&self) -> SzSequence {
+    fn to_sz_sequence(&self) -> SzSequence<'_> {
         SzSequence {
             handle: self.as_ptr() as *mut c_void,
             count: self.len(),
             get_start: sz_sequence_get_start_str::<Sequence>,
             get_length: sz_sequence_get_length_str::<Sequence>,
-            starts: ptr::null(),
-            lengths: ptr::null(),
+            borrowed: PhantomData,
         }
     }
 }
@@ -328,6 +361,8 @@ extern "C" {
     fn szs_version_minor() -> i32;
     fn szs_version_patch() -> i32;
     fn szs_capabilities() -> u32;
+    fn szs_capabilities_comptime() -> u32;
+    fn szs_capabilities_runtime() -> u32;
 
     // Unified allocator functions
     fn szs_unified_alloc(size_bytes: usize) -> *mut c_void;
@@ -479,6 +514,21 @@ pub fn version() -> crate::stringzilla::SemVer {
 /// The returned SmallCString is guaranteed to be null-terminated.
 pub fn capabilities() -> crate::stringzilla::SmallCString {
     let caps = unsafe { szs_capabilities() };
+    crate::stringzilla::capabilities_from_enum(caps)
+}
+
+/// What this binary *ships*: the CPU kernels compiled in, and the GPU tiers the toolkit could build.
+///
+/// Differs from [`capabilities`], which intersects this with what the machine offers - so a missing GPU
+/// bit here means "not compiled", while a bit present here and absent there means "no driver".
+pub fn capabilities_comptime() -> crate::stringzilla::SmallCString {
+    let caps = unsafe { szs_capabilities_comptime() };
+    crate::stringzilla::capabilities_from_enum(caps)
+}
+
+/// What this machine *offers*: the CPU's instruction set, its usable cores, and the first GPU's tier.
+pub fn capabilities_runtime() -> crate::stringzilla::SmallCString {
+    let caps = unsafe { szs_capabilities_runtime() };
     crate::stringzilla::capabilities_from_enum(caps)
 }
 

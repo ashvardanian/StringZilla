@@ -153,7 +153,7 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     }
 
     // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
-    sz_bool_t need_unified = requires_unified_memory(self->capabilities);
+    sz_bool_t need_unified = requires_device_memory(self->capabilities);
     if (need_unified)
         if (!try_swap_to_unified_allocator(texts_obj)) return NULL;
 

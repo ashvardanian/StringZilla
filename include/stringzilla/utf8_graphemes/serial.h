@@ -58,7 +58,7 @@ SZ_HELPER_AUTO sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t
  *         ill-formed input (UAX-29 leaves such bytes undefined). Valid UTF-8 decodes identically to the checked
  *         path; only malformed input differs, by design.
  */
-SZ_HELPER_AUTO sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
+SZ_HELPER_INLINE sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
     sz_u8_t const byte1 = (start + 1 < length) ? (sz_u8_t)text[start + 1] : 0;
     sz_u8_t const byte2 = (start + 2 < length) ? (sz_u8_t)text[start + 2] : 0;
@@ -103,6 +103,9 @@ SZ_HELPER_INLINE sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_t descrip
 
 /**
  *  @brief Check if `position` is a grapheme cluster boundary per Unicode TR29 (GB1-GB999, incl. GB9c and GB11).
+ *
+ *  Nothing in the library calls this: the segmenters run a streaming state machine instead. It is the
+ *  independent second opinion the tests measure that machine against.
  */
 SZ_API_COMPTIME sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // GB1
@@ -220,7 +223,7 @@ typedef struct sz_grapheme_serial_state_t {
 } sz_grapheme_serial_state_t;
 
 /** @brief Boundary decision between @p state's previous codepoint and the @p after codepoint, GB3..GB13 in O(1). */
-SZ_HELPER_AUTO sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
+SZ_HELPER_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
     sz_u8_t const before_class = sz_grapheme_break_descriptor_gcb_(state->previous_descriptor);
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     if (before_class == sz_grapheme_break_cr_k && after_class == sz_grapheme_break_lf_k) return sz_false_k; // GB3
@@ -257,7 +260,7 @@ SZ_HELPER_AUTO sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t
 }
 
 /** @brief Advance @p state by the @p after codepoint: toggle/close the RI, ExtPict-ZWJ and InCB runs. */
-SZ_HELPER_AUTO void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
+SZ_HELPER_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     state->regional_indicator_run_odd = (after_class == sz_grapheme_break_regional_indicator_k)
                                             ? (sz_bool_t)(!state->regional_indicator_run_odd)
@@ -545,8 +548,8 @@ SZ_HELPER_INLINE sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_ca
  *          the carry forward. The ISA-independent twin of the icelake fused window-boundaries; a per-ISA extractor
  *          builds @p window from descriptors, then calls this. Pure `sz_u64_t` algebra, no intrinsics.
  */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_masks_t const *window, int codepoint_count,
-                                                       sz_u64_t valid, sz_grapheme_carry_t *carry) {
+SZ_HELPER_INLINE sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_masks_t const *window, int codepoint_count,
+                                                         sz_u64_t valid, sz_grapheme_carry_t *carry) {
     sz_grapheme_carry_t const previous = *carry;
 
     sz_u64_t const carriage_return = window->class_bit[sz_grapheme_break_cr_k];

@@ -47,7 +47,7 @@ extern "C" {
 /** @brief  Word_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the `bmp_page_lut_`
  *          page LUT selects one of the 52 distinct 256-byte pages, then `flat_bmp_` is fetched by `vpgatherdd`.
  *          Bit-exact with `sz_rune_word_break_property` over the whole BMP. */
-SZ_HELPER_AUTO __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
@@ -57,8 +57,8 @@ SZ_HELPER_AUTO __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_bytes_
  *          @p plane_off_u8x32 = (offset>>16)&0xFF (low nibble meaningful), @p high_u8x32 = (offset>>8)&0xFF,
  *          @p low_u8x32 = offset&0xFF.
  *          Bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. */
-SZ_HELPER_AUTO __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off_u8x32, __m256i high_u8x32,
-                                                                __m256i low_u8x32) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off_u8x32, __m256i high_u8x32,
+                                                                  __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const n4_u8x32 = _mm256_and_si256(plane_off_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
@@ -115,7 +115,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes_u
  *          bits of @p bmp_starts. Bit-identical to two full
  *          @ref sz_utf8_word_break_bmp_class_haswell_ passes on every BMP-start lane; every other lane is a
  *          don't-care left at its incoming value. */
-SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
+SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_haswell_( //
     sz_u64_t bmp_starts, __m256i high_lo_u8x32, __m256i high_hi_u8x32, __m256i low_lo_u8x32, __m256i low_hi_u8x32,
     __m256i *out_lo_u8x32, __m256i *out_hi_u8x32) {
     sz_u8_t high_bytes[64], low_bytes[64];
@@ -161,9 +161,9 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
  *          @ref sz_utf8_word_break_classify_window_icelake_, bit-identical on every start lane. ASCII through the
  *          property table, BMP through the nibble cascade, 4-byte leads through the astral cascade with the codepoint
  *          high/low/plane reconstructed from the forward neighbours. */
-SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_haswell_( //
+SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_haswell_( //
     sz_utf8_rune_window_haswell_t window, __m256i *classes_lo_u8x32, __m256i *classes_hi_u8x32) {
-    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
                                   ~window.four_byte_starts;
     __m256i const four_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)window.four_byte_starts);
@@ -178,8 +178,9 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_haswell_( //
     __m256i out_hi_u8x32 = _mm256_setzero_si256();
     sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
     if (bmp_starts)
-        sz_utf8_word_break_bmp_compact_haswell_(bmp_starts, window.high_lo, window.high_hi, window.low_lo,
-                                                window.low_hi, &out_lo_u8x32, &out_hi_u8x32);
+        sz_utf8_word_break_bmp_compact_haswell_(bmp_starts, window.high_byte_low_u8x32, window.high_byte_high_u8x32,
+                                                window.low_byte_low_u8x32, window.low_byte_high_u8x32, &out_lo_u8x32,
+                                                &out_hi_u8x32);
 
     // ASCII lanes: read the 128-entry property table directly off the raw byte.
     out_lo_u8x32 = _mm256_blendv_epi8(out_lo_u8x32, sz_utf8_word_break_ascii_class_haswell_(raw_lo_u8x32),
@@ -281,7 +282,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high_u8
 
 /** @brief  A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over both window halves, the
  *          AVX2 twin of @ref sz_utf8_word_break_range16_mask_icelake_ (WSegSpace / Extended_Pictographic). */
-SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
     __m256i high_lo_u8x32, __m256i high_hi_u8x32, __m256i low_lo_u8x32, __m256i low_hi_u8x32, sz_u16_t const *lo_table,
     sz_u16_t const *hi_table, int count) {
     __m256i hit_lo_u8x32 = _mm256_setzero_si256(), hit_hi_u8x32 = _mm256_setzero_si256();
@@ -309,7 +310,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
     sz_size_t const loaded = window.loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
-    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
 
     // Truncated-edge U+FFFD reclassify (force the class to Other on a lead whose declared span runs past `loaded`).
     sz_u64_t const lead_two = length_two & start_bytes;
@@ -368,8 +369,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
     sz_u64_t wseg_multibyte = 0ull;
     if (non_ascii_lanes)
         wseg_multibyte = sz_utf8_word_break_range16_mask_haswell_(
-                             window.high_lo, window.high_hi, window.low_lo, window.low_hi, sz_utf8_word_break_wseg_lo_,
-                             sz_utf8_word_break_wseg_hi_, sz_utf8_word_break_wseg_count_k) &
+                             window.high_byte_low_u8x32, window.high_byte_high_u8x32, window.low_byte_low_u8x32,
+                             window.low_byte_high_u8x32, sz_utf8_word_break_wseg_lo_, sz_utf8_word_break_wseg_hi_,
+                             sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
     frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0x20) & valid));
 
@@ -414,8 +416,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
                              _mm256_set1_epi8((char)0xC0)),
             _mm256_and_si256(next3_hi_u8x32, _mm256_set1_epi8(0x3F)));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_haswell_(
-            window.high_lo, window.high_hi, window.low_lo, window.low_hi, sz_utf8_word_break_pict_bmp_lo_,
-            sz_utf8_word_break_pict_bmp_hi_, sz_utf8_word_break_pict_bmp_count_k);
+            window.high_byte_low_u8x32, window.high_byte_high_u8x32, window.low_byte_low_u8x32,
+            window.low_byte_high_u8x32, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
+            sz_utf8_word_break_pict_bmp_count_k);
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_haswell_(
             smp_high_lo_u8x32, smp_high_hi_u8x32, smp_low_lo_u8x32, smp_low_hi_u8x32, sz_utf8_word_break_pict_smp_lo_,
             sz_utf8_word_break_pict_smp_hi_, sz_utf8_word_break_pict_smp_count_k);
@@ -435,9 +438,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
 /** @brief  Resolve one window into the maximal-subpart partition - the AVX2 twin of
  *          @ref sz_utf8_word_break_partition_icelake_: compute the per-ISA `sz_u64_t` masks and delegate to the
  *          portable @ref sz_utf8_word_break_partition_from_masks_. */
-SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(
+SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(
     sz_utf8_rune_window_haswell_t window, sz_u64_t valid, int at_end_of_text) {
-    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
     sz_u64_t const real_continuation = window.continuation & valid;
     __m256i const high_nibble_lo_u8x32 = sz_utf8_srl8_haswell_(raw_lo_u8x32, 4, 0x0F);
     __m256i const high_nibble_hi_u8x32 = sz_utf8_srl8_haswell_(raw_hi_u8x32, 4, 0x0F);

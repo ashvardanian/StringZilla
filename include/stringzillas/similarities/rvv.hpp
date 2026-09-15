@@ -1168,7 +1168,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
             vint16m4_t const if_deletion_i16m4 = __riscv_vmax_vv_i16m4(
                 __riscv_vadd_vx_i16m4(pre_deletion_open_i16m4, gap_open, vl),
                 __riscv_vadd_vx_i16m4(running_deletion_i16m4, gap_extend, vl), vl);
-            // In Local Alignment for SW the zero-reset applies to @b only the substitution term; the
+            // In Local Alignment for SW the zero-reset applies to only the substitution term; the
             // insertion/deletion gap matrices stay unclamped, exactly like the serial scorer.
             vint16m4_t const if_substitution_i16m4 = __riscv_vmax_vx_i16m4(
                 __riscv_vadd_vv_i16m4(pre_substitution_i16m4, cost_i16m4, vl), 0, vl);
@@ -1358,7 +1358,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
             vint32m4_t const if_deletion_i32m4 = __riscv_vmax_vv_i32m4(
                 __riscv_vadd_vx_i32m4(pre_deletion_open_i32m4, gap_open, vl),
                 __riscv_vadd_vx_i32m4(running_deletion_i32m4, gap_extend, vl), vl);
-            // Zero-reset applies to @b only the substitution term, exactly like the serial scorer.
+            // Zero-reset applies to only the substitution term, exactly like the serial scorer.
             vint32m4_t const if_substitution_i32m4 = __riscv_vmax_vx_i32m4(
                 __riscv_vadd_vv_i32m4(pre_substitution_i32m4, cost_i32m4, vl), 0, vl);
             vint32m4_t const cell_i32m4 = __riscv_vmax_vv_i32m4(
@@ -1852,7 +1852,7 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
     }
 };
 
-#pragma endregion // Uniform Cost Levenshtein
+#pragma endregion Uniform Cost Levenshtein
 
 #pragma region RVV Inter Sequence Candidate Lanes
 // ! Future home of the lane-per-pair candidate-lane Levenshtein driver (mirrors the weighted NW/SW walker below,
@@ -3417,7 +3417,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
 #endif
 
 #endif            // SZ_USE_RVV
-#pragma endregion // RVV Implementation
+#pragma endregion RVV Implementation
 
 } // namespace stringzillas
 } // namespace ashvardanian

@@ -103,15 +103,15 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz
  *          `__mmask64`. Field names and semantics match @ref sz_utf8_rune_window_t so the portable rule
  *          algebra is unchanged. */
 typedef struct sz_utf8_rune_window_neon_t {
-    uint8x16_t window[4];       /**< Raw input bytes for lanes [16*q, 16*q+16). */
-    uint8x16_t high[4];         /**< Per-lane `codepoint >> 8`. */
-    uint8x16_t low[4];          /**< Per-lane `codepoint & 0xFF`. */
-    sz_u64_t continuation;      /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
-    sz_u64_t codepoint_starts;  /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
-    sz_u64_t two_byte_starts;   /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
-    sz_u64_t three_byte_starts; /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
-    sz_u64_t four_byte_starts;  /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;           /**< Number of bytes actually loaded (<= 64). */
+    uint8x16_t window_u8x16s[4];    /**< Raw input bytes for lanes [16*q, 16*q+16). */
+    uint8x16_t high_byte_u8x16s[4]; /**< Per-lane `codepoint >> 8`. */
+    uint8x16_t low_byte_u8x16s[4];  /**< Per-lane `codepoint & 0xFF`. */
+    sz_u64_t continuation;          /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
+    sz_u64_t codepoint_starts;      /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
+    sz_u64_t two_byte_starts;       /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
+    sz_u64_t three_byte_starts;     /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
+    sz_u64_t four_byte_starts;      /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
+    sz_size_t loaded;               /**< Number of bytes actually loaded (<= 64). */
 } sz_utf8_rune_window_neon_t;
 
 /** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the NEON twin of `srl8_`.
@@ -159,7 +159,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_neon_( //
 /** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero (the NEON stand-in for
  *          `_mm512_maskz_loadu_epi8`). A zero-initialized vector union stages the partial tail so we never read past
  *          `text + loaded`. Mirrors @ref sz_utf8_load_window_haswell_. */
-SZ_HELPER_AUTO void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out_u8x16) {
+SZ_HELPER_INLINE void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out_u8x16) {
     if (loaded >= 64) {
         out_u8x16[0] = vld1q_u8(text + 0);
         out_u8x16[1] = vld1q_u8(text + 16);
@@ -184,7 +184,7 @@ SZ_HELPER_AUTO void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loa
  *          quarter wraps to quarter 0 (byte 64 aliases byte 0). The three neighbour distances are provided because
  *          the family classifiers need up to `next3_u8x16` (4-byte sequences).
  */
-SZ_HELPER_AUTO void sz_utf8_forward_neighbours_neon_( //
+SZ_HELPER_INLINE void sz_utf8_forward_neighbours_neon_( //
     uint8x16_t const *window_u8x16, uint8x16_t *next1_u8x16, uint8x16_t *next2_u8x16, uint8x16_t *next3_u8x16) {
     for (int quarter = 0; quarter < 4; ++quarter) {
         uint8x16_t const here_u8x16 = window_u8x16[quarter];
@@ -197,14 +197,14 @@ SZ_HELPER_AUTO void sz_utf8_forward_neighbours_neon_( //
 
 /** @brief  Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the NEON twin of
  *          @ref sz_utf8_rune_decode_window_, bit-identical to it (and to `_haswell_`) on every lane. */
-SZ_HELPER_AUTO sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
+SZ_HELPER_INLINE sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
     sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_neon_t result;
     result.loaded = available < 64 ? available : 64;
 
     uint8x16_t window_u8x16[4];
     sz_utf8_load_window_neon_(text, result.loaded, window_u8x16);
-    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
+    for (int quarter = 0; quarter < 4; ++quarter) result.window_u8x16s[quarter] = window_u8x16[quarter];
 
     uint8x16_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
     sz_utf8_forward_neighbours_neon_(window_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
@@ -262,8 +262,8 @@ SZ_HELPER_AUTO sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
 
         // Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
         uint8x16_t const three_select_u8x16 = three_byte_bool_u8x16[quarter];
-        result.high[quarter] = vbslq_u8(three_select_u8x16, high_three_u8x16, high_two_u8x16);
-        result.low[quarter] = vbslq_u8(three_select_u8x16, low_three_u8x16, low_two_u8x16);
+        result.high_byte_u8x16s[quarter] = vbslq_u8(three_select_u8x16, high_three_u8x16, high_two_u8x16);
+        result.low_byte_u8x16s[quarter] = vbslq_u8(three_select_u8x16, low_three_u8x16, low_two_u8x16);
     }
     return result;
 }
@@ -274,7 +274,7 @@ SZ_HELPER_AUTO sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
  *          loaded into a `uint8x16_t` and shuffled by @p within_u8x16 via `vqtbl1q_u8`, then blended in for the lanes
  *          whose @p selector_u8x16 picks that row. Gather-free — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`.
  *          @p within_u8x16 / @p selector_u8x16 address one quarter; the caller iterates the four quarters. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
+SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     sz_u8_t const *table, int tile_count, uint8x16_t selector_u8x16, uint8x16_t within_u8x16) {
     // Each lane reads table[selector[lane] * 16 + within[lane]] when selector < tile_count, else 0 (no tile matched).
     // The original linear scan accumulates through a `tile_count`-deep `vbslq` chain over 16-byte rows, which is a
@@ -298,7 +298,7 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
  *          Four `vqtbl4q_u8` reads over the four resident 64-byte quads; `vqtbl4q_u8` returns zero for indices >= 64,
  *          so subtracting 64/128/192 routes each lane to exactly one quad and the four results OR together. The NEON
  *          twin of the substrate `lut256` leaf. @p index_u8x16 addresses one quarter. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index_u8x16) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index_u8x16) {
     uint8x16x4_t const quad0_u8x16x4 = vld1q_u8_x4(group_base + 0 * 64);
     uint8x16x4_t const quad1_u8x16x4 = vld1q_u8_x4(group_base + 1 * 64);
     uint8x16x4_t const quad2_u8x16x4 = vld1q_u8_x4(group_base + 2 * 64);
@@ -327,7 +327,7 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, 
  *          so the page LUT resolves in-register while the leaf read is a bounded scalar L1 walk over fused 16-bit
  *          indices `(page << 8) | low`. Lanes whose page index reaches @p page_count return zero. SVE2 does the same
  *          lookup with a real `LD1B` gather; see @ref sz_utf8_rune_flat_lookup_sve2_. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
+SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, uint8x16_t high_bytes_u8x16,
     uint8x16_t low_bytes_u8x16) {
     uint8x16_t const page_indices_u8x16 = sz_utf8_rune_lut256_neon_(page_lut, high_bytes_u8x16);
@@ -353,7 +353,7 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
  *          NEON has no `vpcompressb`/`pext`: pull the lowest set bit's index via `ctz`, clear it via `mask & (mask-1)`.
  *          This matches the AVX2 `sz_utf8_unpack_indices_haswell_` BMI2 path semantically; on AArch64
  *          `ctz` lowers to `rbit`+`clz`, and the loop trip count is the boundary popcount (sparse for real text). */
-SZ_HELPER_AUTO void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
+SZ_HELPER_INLINE void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
     while (mask) {
         *out++ = (sz_u8_t)sz_u64_ctz_neon_(mask);
         mask &= mask - 1; // clear the lowest set bit
@@ -381,7 +381,7 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
     return vceqq_u8(vandq_u8(per_half_u8x16, bit_position_u8x16), bit_position_u8x16);
 }
 
-SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
     static sz_u8_t const leftpack8[256 * 8] = {
         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x00
         0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x01
@@ -679,7 +679,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *
  *          (start, length) per set boundary lane (ascending), honoring @p capacity and the carried previous-boundary
  *          via @p previous_io; bit-exact with the Ice Lake leaf. Indices are unpacked once, then each segment's
  *          (start, length) is computed from the carried previous boundary. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_neon_( //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_neon_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = (sz_size_t)sz_u64_popcount_neon_(boundary);
@@ -728,7 +728,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_neon_( //
  *  @param  consumed_bytes   Set to the byte span the emitted runes cover (the resume cursor delta).
  *  @return Number of runes emitted (<= min(emit_count, capacity)).
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_neon_(                                          //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_neon_(                                        //
     uint8x16_t const *window_u8x16, sz_u64_t emit_starts, uint8x16_t const *ill_byte_u8x16, //
     int has_three, int has_four, sz_u8_t const *consumed_length,                            //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
@@ -881,8 +881,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_neon_(                              
  *
  *  @return Number of runes emitted (0 => tile declined); sets @p consumed_bytes to `clean * 3` when it emits.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_tile3_neon_( //
-    sz_u8_t const *text, sz_size_t length,         //
+SZ_HELPER_INLINE sz_size_t sz_utf8_rune_tile3_neon_( //
+    sz_u8_t const *text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     if (length < 48 || capacity == 0 || (text[0] & 0xF0) != 0xE0) return 0;
@@ -948,9 +948,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_tile3_neon_( //
  *          surrogate / out-of-range / framing) or truncated-only window declines (`*runes_unpacked == 0`, cursor
  *          unchanged) and the public entry hands the remainder to the serial reference (the U+FFFD oracle).
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
-    sz_cptr_t text, sz_size_t length,               //
-    sz_rune_t *runes, sz_size_t runes_capacity,     //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_rune_t *runes, sz_size_t runes_capacity,       //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 64 ? length : 64;

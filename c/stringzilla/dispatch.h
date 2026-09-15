@@ -13,8 +13,8 @@
  *  wrappers that call through the table. The thin `runtime.c` owns the table definition and the
  *  one-time initialization.
  */
-#ifndef STRINGZILLA_DISPATCH_H_
-#define STRINGZILLA_DISPATCH_H_
+#ifndef SZ_DISPATCH_H_
+#define SZ_DISPATCH_H_
 
 // Overwrite `SZ_DYNAMIC_DISPATCH` before including StringZilla.
 #ifdef SZ_DYNAMIC_DISPATCH
@@ -152,4 +152,4 @@ SZ_MAYBE_UNUSED SZ_C_INLINE sz_bool_t sz_sve_wider_than_neon_(void) { return svc
 #endif
 #endif // SZ_IS_64BIT_ARM_ && (SZ_USE_SVE || SZ_USE_SVE2) && !defined(_MSC_VER)
 
-#endif // STRINGZILLA_DISPATCH_H_
+#endif // SZ_DISPATCH_H_

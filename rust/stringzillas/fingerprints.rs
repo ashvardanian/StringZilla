@@ -707,6 +707,7 @@ impl Fingerprints {
             AnyBytesTape::View64(v) => SzSequenceU64Tape::from(v).count,
             AnyBytesTape::Tape32(t) => SzSequenceU32Tape::from(t).count,
             AnyBytesTape::View32(v) => SzSequenceU32Tape::from(v).count,
+            AnyBytesTape::Slices(s) => s.count(),
         };
         let need = count * dimensions;
         if min_hashes.len() < need || min_counts.len() < need {
@@ -775,6 +776,18 @@ impl Fingerprints {
                     )
                 }
             }
+            AnyBytesTape::Slices(s) => unsafe {
+                szs_fingerprints_sequence(
+                    self.handle,
+                    device.handle,
+                    s as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            },
         };
         match status {
             Status::Success => Ok(()),

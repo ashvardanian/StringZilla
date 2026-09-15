@@ -175,7 +175,31 @@
 #endif
 
 #define SZ_API_COMPTIME SZ_MAYBE_UNUSED SZ_C_INLINE
+
+// A portable scalar helper, inline in whichever translation unit uses it, and `constexpr` from C++20
+// onwards. That qualifier is what lets a caller fold the helper at compile time, and what lets a CUDA
+// kernel call it at all - `--expt-relaxed-constexpr` reaches a host `constexpr` function from device code,
+// so this layer never has to name an execution space of its own.
+//
+// A helper reaching an intrinsic can never be constant-evaluated, and a `constexpr` function with no
+// constant-evaluated path is ill-formed: Clang and MSVC reject the definition, GCC 12 too, and only
+// GCC 13+ softens it to `-Winvalid-constexpr`. Every such helper - the whole of each ISA backend, plus the
+// few portable ones wrapping a builtin or a type-punned load - carries `SZ_HELPER_INLINE` instead, which
+// is why no translation unit needs a `-Wno-` flag to compile this header.
+//
+// C++20 is the floor rather than C++11 because these helpers declare their locals before filling them, and
+// only C++20 permits an uninitialized local in a `constexpr` function. An older dialect - the Python
+// extensions build at C++17 - gets the same plain inline function it had before the qualifier existed.
+//
+// MSVC is the one front end that gets the plain helper: its bit-scan and byte-swap intrinsics are not
+// constant-evaluable, so `sz_u64_ctz` and every helper that reaches one - `sz_size_bit_ceil`, the folded
+// rune iterators, the uncased search - is rejected with C3615, an error no `/wd` can silence. The qualifier
+// buys compile-time folding and `nvcc` reach, and MSVC hosts neither, so nothing is lost by dropping it.
+#if defined(__cplusplus) && __cplusplus >= 202002L && !(defined(_MSC_VER) && !defined(__clang__))
+#define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE constexpr
+#else
 #define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE
+#endif
 
 // Exported symbol under dynamic dispatch or `SZ_EXPORT` (emitted from one amalgamation TU, links like a
 // normal C library — the Rust binding without `dynamic-dispatch`); otherwise a header-inline tier.
@@ -1398,6 +1422,36 @@ typedef struct sz_sequence_t {
 } sz_sequence_t;
 
 /**
+ *  @brief Hardware description of one GPU, as the schedulers size their launches against.
+ *
+ *  The field list the C++ `gpu_specs_t` inherits, so a spec crosses the C boundary by slicing rather
+ *  than by a field-by-field copy that could drift. `sm_code` packs the compute capability as
+ *  `major * 10 + minor`, so 90 is Hopper.
+ */
+typedef struct sz_gpu_specs_t {
+    /** @brief Total device memory, which batch sizing is bounded by. */
+    sz_size_t vram_bytes;
+    /** @brief L2 cache, shared by every multiprocessor, which work-splitting heuristics read. */
+    sz_size_t l2_bytes;
+    /** @brief Constant memory bank size. */
+    sz_size_t constant_memory_bytes;
+    /** @brief Shared memory aggregated over every multiprocessor, not the per-multiprocessor figure. */
+    sz_size_t shared_memory_bytes;
+    /** @brief Multiprocessor count, which the engines size their pair budget against. */
+    sz_size_t streaming_multiprocessors;
+    /** @brief Cores for `f32` and `i32` logic, summed over every multiprocessor. */
+    sz_size_t cuda_cores;
+    /** @brief Shared memory the driver reserves per block for bookkeeping. */
+    sz_size_t reserved_memory_per_block;
+    /** @brief Threads per warp, 32 on practically every GPU. */
+    sz_size_t warp_size;
+    /** @brief Resident block ceiling per multiprocessor. */
+    sz_size_t max_blocks_per_multiprocessor;
+    /** @brief Compute capability as `major * 10 + minor`. */
+    sz_size_t sm_code;
+} sz_gpu_specs_t;
+
+/**
  *  @brief Initiates the sequence structure from a typical C-style strings array, like `char *[]`.
  *  @param start Pointer to the array of strings.
  *  @param count Number of strings in the array.
@@ -1560,21 +1614,21 @@ SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) {
     return (((x + (x >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
 }
 #else
-SZ_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
-SZ_HELPER_AUTO int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
-SZ_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
-SZ_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
-SZ_HELPER_AUTO int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
-SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
+SZ_HELPER_INLINE int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
+SZ_HELPER_INLINE int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
+SZ_HELPER_INLINE int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
+SZ_HELPER_INLINE int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
+SZ_HELPER_INLINE int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
+SZ_HELPER_INLINE int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
 #endif
 /*
  *  Force the byteswap functions to be intrinsics, because when `/Oi-` is given,
  *  these will turn into CRT function calls, which breaks when `SZ_AVOID_LIBC` is given.
  */
 #pragma intrinsic(_byteswap_uint64)
-SZ_HELPER_AUTO sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
+SZ_HELPER_INLINE sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 #pragma intrinsic(_byteswap_ulong)
-SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
+SZ_HELPER_INLINE sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
 SZ_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
 SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
@@ -1727,10 +1781,12 @@ SZ_HELPER_AUTO sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - (
 #pragma GCC push_options
 #pragma GCC target("bmi", "bmi2")
 #endif
-SZ_HELPER_AUTO __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n); }
-SZ_HELPER_AUTO __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n); }
-SZ_HELPER_AUTO __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, (unsigned char)n); }
-SZ_HELPER_AUTO __mmask64 sz_u64_mask_until_(sz_size_t n) {
+SZ_HELPER_INLINE __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n); }
+SZ_HELPER_INLINE __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n); }
+SZ_HELPER_INLINE __mmask32 sz_u32_mask_until_(sz_size_t n) {
+    return (__mmask32)_bzhi_u64(0xFFFFFFFFu, (unsigned char)n);
+}
+SZ_HELPER_INLINE __mmask64 sz_u64_mask_until_(sz_size_t n) {
     return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, (unsigned char)n);
 }
 SZ_HELPER_AUTO __mmask8 sz_u8_clamp_mask_until_(sz_size_t n) { return n < 8 ? sz_u8_mask_until_(n) : 0xFFu; }
@@ -1859,7 +1915,7 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_transpose(sz_u64_t x) {
 
 /** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
+SZ_HELPER_INLINE sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
@@ -1879,7 +1935,7 @@ SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 
 /** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
+SZ_HELPER_INLINE sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
@@ -1901,7 +1957,7 @@ SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 
 /** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_HELPER_AUTO sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
+SZ_HELPER_INLINE sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
@@ -1926,7 +1982,7 @@ SZ_HELPER_AUTO sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 }
 
 /** @brief Store a 16-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_HELPER_AUTO void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
+SZ_HELPER_INLINE void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t vec;
     vec.u16 = value;
@@ -1945,7 +2001,7 @@ SZ_HELPER_AUTO void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
 }
 
 /** @brief Store a 32-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_HELPER_AUTO void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
+SZ_HELPER_INLINE void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t vec;
     vec.u32 = value;
@@ -1966,7 +2022,7 @@ SZ_HELPER_AUTO void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
 }
 
 /** @brief Store a 64-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_HELPER_AUTO void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
+SZ_HELPER_INLINE void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t vec;
     vec.u64 = value;

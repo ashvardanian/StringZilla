@@ -6,11 +6,12 @@
 #ifndef STRINGZILLAS_TYPES_HPP_
 #define STRINGZILLAS_TYPES_HPP_
 
-#include <thread>   // `std::thread::hardware_concurrency`
+#include <cstdlib> // `std::malloc`, `std::free`
+
 #include <atomic>   // `std::atomic`, `std::memory_order`
 #include <concepts> // `std::convertible_to`, `std::same_as`
-#include <cstdlib>  // `std::malloc`, `std::free`
 #include <memory>   // `std::addressof`
+#include <thread>   // `std::thread::hardware_concurrency`
 
 #include <forkunion.h> // `fu_pool_t`, `fu_topology_t`, capability-dispatched parallel loops
 
@@ -192,6 +193,34 @@ class forkunion_executor_t {
 
     size_t threads_count() const noexcept { return fu_pool_threads_count(pool_); }
     mutex_t make_mutex() const noexcept { return {}; }
+
+    /**
+     *  @brief The specs of the machine this executor spawned on, read from its own detected topology.
+     *      Fills the shared-cache volume and core counts; `l1_bytes` and `l2_bytes` keep their conservative
+     *      defaults - the ForkUnion C API exposes no per-core cache-level query. Defaults throughout when
+     *      the pool was never spawned or the platform reports nothing.
+     */
+    cpu_specs_t specs() const noexcept {
+        cpu_specs_t specs;
+        if (!topology_) return specs;
+        // The deepest cache confined to each compute domain - the shared L3 on uniform machines. The
+        // smallest nonzero domain wins so cache-resident chunk sizing never overshoots the tightest cluster.
+        size_t const compute_domains = fu_compute_domains_count(topology_);
+        size_t confined_cache_bytes = 0;
+        for (size_t domain = 0; domain != compute_domains; ++domain) {
+            size_t const domain_cache_bytes = fu_compute_cache_bytes_in(topology_, domain);
+            if (domain_cache_bytes && (confined_cache_bytes == 0 || domain_cache_bytes < confined_cache_bytes))
+                confined_cache_bytes = domain_cache_bytes;
+        }
+        if (confined_cache_bytes) specs.l3_bytes = confined_cache_bytes;
+        size_t const logical_cores = fu_logical_cores_count(topology_);
+        size_t const memory_domains = fu_memory_domains_count(topology_);
+        if (logical_cores) {
+            specs.sockets = memory_domains ? memory_domains : 1;
+            specs.cores_per_socket = sz_max_of_two(logical_cores / specs.sockets, (size_t)1);
+        }
+        return specs;
+    }
 
     /**
      *  @brief Calls the @p function for each index from 0 to @p (n) in such
@@ -456,7 +485,33 @@ concept continuous_like = requires(continuous_type_ container) {
 
 static_assert(continuous_like<span<char>>);
 static_assert(!continuous_like<int>);
+
 #endif
+
+/**
+ *  @brief Whether a container's elements are slices of one contiguous block, addressed by an offsets array.
+ *
+ *  Detects lengths rather than offsets on purpose: the packed and NULL-terminated flavors disagree on what an
+ *  element's length is, and a caller doing its own offset arithmetic would silently get one of them wrong.
+ *
+ *  A trait rather than a concept, so the engines can branch on it at C++17 - which the Python bindings build
+ *  these headers at - without a preprocessor conditional cutting through the control flow that uses it.
+ */
+template <typename tape_type_, typename = void>
+struct is_tape_like {
+    static constexpr bool value = false;
+};
+
+template <typename tape_type_>
+struct is_tape_like<tape_type_, std::void_t<decltype(std::declval<tape_type_ const &>().tape_bytes()),
+                                            decltype(std::declval<tape_type_ const &>().tape_total_bytes()),
+                                            decltype(std::declval<tape_type_ const &>().tape_length_at(size_t {}))>> {
+    static constexpr bool value = true;
+};
+
+static_assert(is_tape_like<arrow_strings_view<char, u32_t>>::value);
+static_assert(is_tape_like<arrow_packed_view<char, u32_t>>::value);
+static_assert(!is_tape_like<span<char>>::value);
 
 /**
  *  @brief A function that takes a range of elements and a @p callback function and groups the elements
@@ -483,6 +538,32 @@ size_t group_by(begin_iterator_type_ const begin, end_iterator_type_ const end, 
 
     return group_count;
 }
+
+/**
+ *  @brief A running, cache-line-padded scratch byte amount, used to lay out an engine's sub-buffers.
+ *
+ *  An engine partitions one flat scratch block into a handful of sub-buffers - score diagonals, a reversed
+ *  copy of the shorter string, an automaton's edge CSR, ... Growing this amount once per sub-buffer keeps
+ *  every offset cache-line aligned and yields the total the engine needs, a single source of truth shared
+ *  by its `layout()` and the code that reads those buffers back. Cache-line width is `>=` any CPU register
+ *  width, so the padding also keeps full-register SIMD over-reads near a buffer's end in bounds.
+ */
+struct scratch_amount_t {
+    // ? Deliberately a poison default (not `SZ_CACHE_LINE_WIDTH`): an instance built without an explicit
+    // ? `cpu_specs_t::cache_line_width` should produce an obviously-broken `total` (huge → `bad_alloc`/ASan),
+    // ? surfacing any place that forgot to propagate the alignment rather than silently assuming 64 bytes.
+    size_t alignment = std::numeric_limits<size_t>::max();
+    size_t total = 0; // ? The accumulated, padded byte count == the next buffer's offset.
+
+    /** @brief Reads the current end of the scratch, i.e. the offset where the next sub-buffer would start. */
+    constexpr operator size_t() const noexcept { return total; }
+
+    /** @brief Reserves @p bytes for the next sub-buffer, padded so the following offset stays aligned. */
+    constexpr scratch_amount_t &operator+=(size_t bytes) noexcept {
+        total += round_up_to_multiple<size_t>(bytes, alignment);
+        return *this;
+    }
+};
 
 /**
  *  @brief Safer alternative to `std::vector`, that avoids exceptions, copy constructors,

@@ -59,7 +59,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, sz_u8_t co
     }
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -106,7 +106,7 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_segment_at_sve2aes_(svuint8_t value_u8x, sz
     return svreinterpret_u8_u64(svtbl_u64(svreinterpret_u64_u8(value_u8x), source_u64x));
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -210,7 +210,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *key, sz_u8
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -434,7 +434,7 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t accumulator_
     return svsel_u8(svptrue_pat_b8(SV_VL16), reduced_u8x, svdup_n_u8(0));
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -481,7 +481,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_sve2aes_(sz_aes256_gcm_state_t *state,
 }
 
 /** @brief Absorbs associated data into the payload both directions share. */
-SZ_HELPER_AUTO void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_size_t const lane_count = svcntb() / 8;
     sz_size_t const group_blocks = sz_ghash_group_blocks_sve2aes_();
@@ -691,7 +691,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *st
  *  @param state The state, left untouched, so a caller may digest and keep streaming.
  *  @param tag Receives the sixteen tag bytes.
  */
-SZ_HELPER_AUTO void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+SZ_HELPER_INLINE void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     svuint8_t const subkey_u8x = sz_ghash_load_sve2aes_(state->key.powers);
@@ -759,7 +759,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_sve2aes(sz_aes256_gcm
                                                                                 : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -792,7 +792,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_sve2aes(sz_aes256_gcm_key_t co
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

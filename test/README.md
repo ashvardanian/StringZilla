@@ -15,8 +15,8 @@ Each C++ translation unit exercises one kernel family, and the Python suite mirr
 
 The Python modules mirror the C++ translation units one-for-one and run under pytest.
 
-- `find.py`, `hash.py`, `sort.py`, `string.py`, `uncased.py`, `cipher.py`, `utf8_*.py`, `doctests.py`, `stringzilla.py`, `stringzillas.py` — per-family tests.
-- `helpers.py` and `utf8_helpers.py` are shared helpers; `conftest.py` holds the pytest configuration.
+- `find.py`, `hash.py`, `sort.py`, `string.py`, `uncased.py`, `cipher.py`, `similarities.py`, `fingerprints.py`, `substrings.py`, `utf8_*.py`, `doctests.py`, `stringzillas.py` — per-family tests.
+- `sz_helpers.py`, `szs_helpers.py`, and `utf8_helpers.py` are shared helpers; `conftest.py` holds the pytest configuration.
 - This directory is a Python package via `__init__.py`, so the prefix-less modules namespace as `test.*` and never shadow stdlib names.
 - Run the suite with `pytest test/`.
 

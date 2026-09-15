@@ -155,7 +155,7 @@ SZ_HELPER_INLINE void sz_sort_haswell_compact_block_into_(           //
  *        left-packs all three comparison kinds together, so each block is loaded once and the equal mask
  *        is derived for free.
  */
-SZ_HELPER_AUTO void sz_sequence_argsort_haswell_3way_partition_(                    //
+SZ_HELPER_INLINE void sz_sequence_argsort_haswell_3way_partition_(                  //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
     sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //

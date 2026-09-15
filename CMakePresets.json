@@ -1,0 +1,108 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build_${presetName}",
+      "cacheVariables": {
+        "STRINGZILLA_BUILD_TEST": "ON",
+        "STRINGZILLA_BUILD_BENCHMARK": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug, no CUDA",
+      "description": "Sanitized host build for iterating on kernels and tests.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "STRINGZILLA_BUILD_CUDA": "OFF",
+        "STRINGZILLA_USE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release, no CUDA",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STRINGZILLA_BUILD_CUDA": "OFF"
+      }
+    },
+    {
+      "name": "cuda",
+      "inherits": "base",
+      "displayName": "Release with CUDA",
+      "description": "NVCC over whichever host compiler it defaults to. A toolkit accepts only a range of host versions, so a machine whose default sits outside its own toolkit's range pins one through CMAKE_CUDA_HOST_COMPILER in CMakeUserPresets.json - the version that fits is a fact about the machine, not about this project.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STRINGZILLA_BUILD_CUDA": "ON"
+      }
+    },
+    {
+      "name": "cuda_clang",
+      "inherits": "cuda",
+      "displayName": "Release with CUDA, Clang host",
+      "description": "NVCC over Clang, and Clang for the C and C++ sources too - the three must agree. Clang mangles a C++20 requires-clause into the symbol name and GCC does not, so a build that compiled .cpp with GCC and .cu with NVCC-over-Clang would give the tree's constrained engine entry points two different symbols and fail to link. GCC also miscompiles the engines' return-by-value in the large benchmark translation units, handing the caller the kernel timing where the status belongs, which is why measured numbers come from here. Each toolkit supports a range of Clang versions and parses that Clang's own headers, so the version that fits belongs in CMakeUserPresets.json; Clang additionally reads its standard library from the newest GCC installed, which -Xcompiler=--gcc-install-dir=<path> redirects when that one is ahead of the toolkit too.",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CUDA_HOST_COMPILER": "clang++"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "cuda"
+    },
+    {
+      "name": "cuda_clang",
+      "configurePreset": "cuda_clang"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "cuda",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cuda_clang",
+      "configurePreset": "cuda_clang",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

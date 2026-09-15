@@ -16,10 +16,11 @@
 #include "stringzillas/types.hpp" // `sz::executor_like`
 
 #include <cstddef>
-#include <limits>   // `std::numeric_limits` for numeric types
-#include <iterator> // `std::iterator_traits` for iterators
-#include <cmath>    // `std::fabsf` for `f32_rolling_hasher`
-#include <numeric>  // `std::gcd` for `choose_coprime_modulo`
+#include <limits>      // `std::numeric_limits` for numeric types
+#include <iterator>    // `std::iterator_traits` for iterators
+#include <cmath>       // `std::fabsf` for `f32_rolling_hasher`
+#include <numeric>     // `std::gcd` for `choose_coprime_modulo`
+#include <type_traits> // `std::is_unsigned` for the rolling hashers' wraparound requirement
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -57,6 +58,10 @@ template <typename hash_type_ = u64_t>
 struct multiplying_rolling_hasher {
     using state_t = hash_type_;
     using hash_t = hash_type_;
+
+    // Wraparound is the modulo here, and only unsigned types define it - a signed state would make every
+    // multiply undefined at the width it is meant to overflow.
+    static_assert(std::is_unsigned<hash_t>::value, "A hash that relies on wraparound must be unsigned");
 
     explicit multiplying_rolling_hasher(size_t window_width, hash_t multiplier = static_cast<hash_t>(257)) noexcept
         : window_width_ {window_width}, multiplier_ {multiplier}, highest_power_ {1} {
@@ -196,6 +201,10 @@ template <typename hash_type_ = u64_t>
 struct buz_rolling_hasher {
     using state_t = hash_type_;
     using hash_t = hash_type_;
+
+    // The rotation shifts both ways, and only unsigned types define either at full width - a signed left
+    // shift shifts a sign bit out, and a signed right shift replicates it instead of feeding in zeros.
+    static_assert(std::is_unsigned<hash_t>::value, "A hash that rotates its state must be unsigned");
 
     constexpr buz_rolling_hasher() noexcept : window_width_ {0}, table_ {} {}
 

@@ -926,6 +926,7 @@ def test_smith_waterman_backend_differential_degenerate_corpus(cost_mode, device
 # region Interop
 
 
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
 @pytest.mark.parametrize(
     "engine_cls, oracle_fn",
     [
@@ -934,24 +935,18 @@ def test_smith_waterman_backend_differential_degenerate_corpus(cost_mode, device
     ],
     ids=["needleman_wunsch", "smith_waterman"],
 )
-def test_alignment_out_buffer_matches_returned_matrix(engine_cls, oracle_fn):
-    """The `out=` output-buffer argument must be filled in place AND be the exact object returned,
-    matching both a fresh call with no `out=` given and the `affine_gaps` oracle."""
+def test_alignment_out_buffer_matches_returned_matrix(engine_cls, oracle_fn, device_name: DeviceName):
+    """On a CPU scope `out=` must be filled in place AND be the exact object returned; on a GPU scope a
+    host `out=` is refused. Either way the scores match the `affine_gaps` oracle."""
 
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
     gap_opening, gap_extension = ag.default_gap_opening, ag.default_gap_extension
     alphabet, byte_to_class, class_costs = protein_substitution_tables()
-    engine = engine_cls(byte_to_class, class_costs, open=gap_opening, extend=gap_extension)
+    engine = engine_cls(byte_to_class, class_costs, open=gap_opening, extend=gap_extension, capabilities=base_caps)
     queries = Strs(DEGENERATE_PROTEIN_STRINGS)
     candidates = Strs(DEGENERATE_PROTEIN_STRINGS)
 
-    direct_matrix = engine(queries, candidates)
-
-    out_buffer = np.full(direct_matrix.shape, -123456, dtype=np.int64)
-    returned_matrix = engine(queries, candidates, out=out_buffer)
-
-    assert returned_matrix is out_buffer, "out= must be returned as-is, not copied into a new array"
-    assert np.array_equal(out_buffer, direct_matrix), "out= buffer must be filled with the same scores as a fresh call"
-
+    direct_matrix = engine(queries, candidates, device=device_scope)
     oracle_matrix = np.array(
         [
             [
@@ -969,7 +964,17 @@ def test_alignment_out_buffer_matches_returned_matrix(engine_cls, oracle_fn):
         ],
         dtype=np.int64,
     )
-    assert np.array_equal(out_buffer, oracle_matrix)
+    assert np.array_equal(direct_matrix, oracle_matrix)
+
+    out_buffer = np.full(direct_matrix.shape, -123456, dtype=np.int64)
+    if device_name == "gpu_device":
+        with pytest.raises(BufferError):
+            engine(queries, candidates, device=device_scope, out=out_buffer)
+        return
+
+    returned_matrix = engine(queries, candidates, device=device_scope, out=out_buffer)
+    assert returned_matrix is out_buffer, "out= must be returned as-is, not copied into a new array"
+    assert np.array_equal(out_buffer, direct_matrix), "out= must be filled with the same scores as a fresh call"
 
 
 def test_levenshtein_distances_pyarrow_input_matches_list_input():

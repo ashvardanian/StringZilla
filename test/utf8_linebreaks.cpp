@@ -1,7 +1,7 @@
 /**
  *  @brief  UAX-14 line-break (linewrap) tests: known-answer goldens, malformed-input safety, and the
  *          serial-vs-ISA differential over hardened corpora.
- *  @file   scripts/test_utf8_linebreaks.cpp
+ *  @file   test/utf8_linebreaks.cpp
  *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
@@ -23,7 +23,7 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `test_stringzilla.hpp`)
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
 #pragma region Unit
 
@@ -116,12 +116,12 @@ static sz::string_view const utf8_linebreaks_motifs[] = {
 static void utf8_linebreaks_dense_mandatory_breaks_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x0061); // 'a'
+        out.append(encoded_rune_(0x0061)); // 'a'
         switch (index & 0x3u) {
-        case 0: out.append("\r\n"); break;              // CRLF
-        case 1: append_codepoint_(out, 0x2028); break;  // LINE SEPARATOR
-        case 2: append_codepoint_(out, 0x2029); break;  // PARAGRAPH SEPARATOR
-        default: append_codepoint_(out, 0x000B); break; // vertical tab (BK)
+        case 0: out.append("\r\n"); break;                 // CRLF
+        case 1: out.append(encoded_rune_(0x2028)); break;  // LINE SEPARATOR
+        case 2: out.append(encoded_rune_(0x2029)); break;  // PARAGRAPH SEPARATOR
+        default: out.append(encoded_rune_(0x000B)); break; // vertical tab (BK)
         }
     }
 }
@@ -140,16 +140,17 @@ static void utf8_linebreaks_dense_numeric_(std::string &out, std::size_t link_co
 }
 
 /** @brief Stream the linewrap family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-static void utf8_linebreaks_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+static void utf8_linebreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
+    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
     utf8_linebreaks_dense_mandatory_breaks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_linebreaks_dense_nesting_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_linebreaks_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief Stream the linewrap family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_linebreaks_straddles_(std::mt19937 & /*rng*/, std::size_t gap, utf8_run_sink_t sink, void *context) {
+static void utf8_linebreaks_straddles_(std::mt19937 & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
+                                       void *context) {
     std::string scratch;
     utf8_linebreaks_dense_mandatory_breaks_(scratch, gap), sink(context, scratch.data(), scratch.size());
     utf8_linebreaks_dense_nesting_(scratch, gap), sink(context, scratch.data(), scratch.size());
@@ -272,8 +273,8 @@ void test_utf8_linebreaks_safety() {
 /** @brief Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
 void test_utf8_linebreaks_all() {
     utf8_segment_corpora_t const corpora = utf8_linebreaks_corpora_();
-    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
-                                   scale_iterations(25)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
+                                    scale_iterations(25)); // This family's share of the suite budget
 }
 
 #pragma endregion // Drivers

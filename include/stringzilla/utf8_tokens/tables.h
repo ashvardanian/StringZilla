@@ -1,6 +1,6 @@
 /**
  *  @brief UTF-8 delimiter membership tables (General_Category Punctuation/Symbol/Separator union White_Space).
- *  @file include/stringzilla/utf8_tokens/delimiters_tables.h
+ *  @file include/stringzilla/utf8_tokens/tables.h
  *  @author Ash Vardanian
  *
  *  A "delimiter" is any codepoint whose Unicode General_Category is one of

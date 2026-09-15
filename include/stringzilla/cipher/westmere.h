@@ -92,7 +92,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_westmere(sz_aes256_key_t *key, sz_u8_t c
     _mm_storeu_si128(schedule_u8x16 + 14, even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
@@ -178,7 +178,7 @@ SZ_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_
     return blocks_vec;
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -258,7 +258,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key, sz_u
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -454,7 +454,7 @@ SZ_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x1
     return sz_ghash_reduce_westmere_(product_low_u8x16, product_middle_u8x16, product_high_u8x16);
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -740,7 +740,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_westmere(sz_aes256_gc
                                                                              : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -774,7 +774,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_westmere(sz_aes256_gcm_key_t c
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop
