@@ -196,6 +196,7 @@ option(STRINGZILLA_INSTALL "Install CMake targets" OFF)
 option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
+option(STRINGZILLA_BUILD_STATIC "Compile a static library with runtime dispatch" OFF)
 option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_DEFAULT_CUDA})
 option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
@@ -488,10 +489,12 @@ if (STRINGZILLA_BUILD_SHARED)
     endif ()
 endif ()
 
-# The dispatch core as an archive. Tests and benchmarks link this rather than the shared library: the
-# cross-compiled runs are `-static` executables, which cannot take a `.so` at all, and the archive fixes the
-# capability set at build time instead of deferring it to a shared library's own runtime detection.
-if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCHMARK)
+# The dispatch core as an archive, for consumers that ship one self-contained artifact. Tests and benchmarks link it
+# too: the cross-compiled runs are `-static` executables, which cannot take a `.so` at all.
+if (STRINGZILLA_BUILD_STATIC
+    OR STRINGZILLA_BUILD_TEST
+    OR STRINGZILLA_BUILD_BENCHMARK
+)
     define_stringzilla_library(stringzilla_static static STATIC)
     target_compile_definitions(stringzilla_static PRIVATE "SZ_AVOID_LIBC=0")
     target_include_directories(stringzilla_static PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
