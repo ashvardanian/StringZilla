@@ -41,7 +41,7 @@
 
 #include "stringzilla/utf8_tokens.h" // `sz_utf8_newlines`, `sz_utf8_whitespaces`, `sz_utf8_delimiters`
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Wrappers
 

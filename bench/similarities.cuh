@@ -15,7 +15,7 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace bench {
 
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::dummy_executor_t;
@@ -79,7 +79,7 @@ using ashvardanian::stringzillas::smith_waterman_hopper_t;
 
 using ashvardanian::stringzillas::strided_rows;
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 using similarities_t = unified_vector<sz_ssize_t>;
 
@@ -887,6 +887,6 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
 #pragma endregion
 
-} // namespace scripts
+} // namespace bench
 } // namespace stringzilla
 } // namespace ashvardanian

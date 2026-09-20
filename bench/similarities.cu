@@ -54,7 +54,7 @@
 #include "stringzilla.hpp" // `log_environment`
 
 namespace szs = ashvardanian::stringzillas;
-using namespace sz::scripts;
+using namespace sz::bench;
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.

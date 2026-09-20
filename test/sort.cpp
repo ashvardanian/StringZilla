@@ -71,7 +71,7 @@
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
 namespace sz = ashvardanian::stringzilla;
-using namespace sz::scripts;
+using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
 
@@ -376,7 +376,7 @@ void test_intersect_equivalence() {
     for (auto experiment : experiments) {
         std::unordered_set<std::string> random_strings;
         while (random_strings.size() < experiment.count_strings)
-            random_strings.insert(sz::scripts::random_string(
+            random_strings.insert(sz::test::random_string(
                 experiment.min_length + generator() % (experiment.max_length - experiment.min_length + 1), //
                 "ab", 2));
 
@@ -416,7 +416,7 @@ void test_sort_reference_equivalence() {
             strs_t dataset;
             dataset.reserve(dataset_size);
             for (std::size_t i = 0; i < dataset_size; ++i)
-                dataset.push_back(sz::scripts::random_string(string_length, "ab", 2));
+                dataset.push_back(sz::test::random_string(string_length, "ab", 2));
 
             for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
                 std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
@@ -431,7 +431,7 @@ void test_sort_reference_equivalence() {
     for (std::size_t dataset_size : dataset_sizes) {
         strs_t dataset;
         dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 6, "ab", 2));
+        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::test::random_string(i % 6, "ab", 2));
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
@@ -448,7 +448,7 @@ void test_sort_reference_equivalence() {
         dataset.reserve(dataset_size);
         constexpr std::size_t min_length = 6;
         for (std::size_t i = 0; i < dataset_size; ++i)
-            dataset.push_back(sz::scripts::random_string(min_length + i % 32, "ab", 2));
+            dataset.push_back(sz::test::random_string(min_length + i % 32, "ab", 2));
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
@@ -463,7 +463,7 @@ void test_sort_reference_equivalence() {
     for (std::size_t dataset_size : dataset_sizes) {
         strs_t dataset;
         dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 32, "ab\0", 3));
+        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::test::random_string(i % 32, "ab\0", 3));
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
@@ -496,7 +496,7 @@ void test_sort_reference_equivalence() {
                                     "straße", "STRASSE", "Straße", "Привет", "привет", "ПРИВЕТ", "",   "a",  "A"};
         for (std::size_t repeat = 0; repeat < 200; ++repeat)
             for (char const *word : seed_words) mixed.push_back(word);
-        for (std::size_t i = 0; i < 4000; ++i) mixed.push_back(sz::scripts::random_string(i % 6, "abc", 3));
+        for (std::size_t i = 0; i < 4000; ++i) mixed.push_back(sz::test::random_string(i % 6, "abc", 3));
         std::shuffle(mixed.begin(), mixed.end(), global_random_generator());
     }
     std::size_t const mixed_count = mixed.size();
@@ -586,10 +586,10 @@ void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size
             // rather than the insertion-sort fallback keeps running.
             std::size_t const count = std::max<std::size_t>(33, full_count);
             strs_t fixed_dups; // Short strings over a tiny alphabet => many exact duplicates (fills the equal region).
-            for (std::size_t i = 0; i < count; ++i) fixed_dups.push_back(sz::scripts::random_string(i % 5, "ab", 2));
+            for (std::size_t i = 0; i < count; ++i) fixed_dups.push_back(sz::test::random_string(i % 5, "ab", 2));
             datasets.push_back(fixed_dups);
             strs_t varied; // Longer, common-prefix strings => deep pgram recursion.
-            for (std::size_t i = 0; i < count; ++i) varied.push_back(sz::scripts::random_string(6 + i % 40, "abc", 3));
+            for (std::size_t i = 0; i < count; ++i) varied.push_back(sz::test::random_string(6 + i % 40, "abc", 3));
             datasets.push_back(varied);
         }
         { // Deterministic mixed-case / multi-script set so the uncased path sees real folds.

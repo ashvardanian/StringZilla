@@ -23,7 +23,7 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace bench {
 
 // Per-symbol: a using-directive re-exports our `memcpy` and nvcc then finds the call ambiguous.
 
@@ -592,6 +592,6 @@ void bench_substrings(environment_t const &env) {
 
 #pragma endregion Sweep
 
-} // namespace scripts
+} // namespace bench
 } // namespace stringzilla
 } // namespace ashvardanian

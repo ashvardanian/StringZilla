@@ -55,7 +55,7 @@
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 /** @brief The query whose window hashes fill the first-level cache, one @c u32 hash per byte. */
 static std::size_t cache_resident_query_bytes(environment_t const &env) {

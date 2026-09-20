@@ -41,7 +41,7 @@
 
 #include "stringzilla/utf8_runes.h" // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Wrappers
 

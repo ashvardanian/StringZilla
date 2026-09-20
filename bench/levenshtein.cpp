@@ -46,7 +46,7 @@
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 /** @brief The query whose match masks fill the first-level cache: 256 symbols' @c u64 masks per query word,
  *         64 symbols to a word. */

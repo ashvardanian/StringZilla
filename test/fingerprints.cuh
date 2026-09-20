@@ -26,7 +26,7 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace test {
 
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::basic_rolling_hashers;
@@ -871,6 +871,6 @@ void test_fingerprints_cuda_memory_safety() {
 
 #pragma endregion // Safety
 
-} // namespace scripts
+} // namespace test
 } // namespace stringzilla
 } // namespace ashvardanian

@@ -15,7 +15,7 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace bench {
 
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::forkunion_executor_t;
@@ -33,7 +33,7 @@ using ashvardanian::stringzillas::gpu_specs_fetch;
 using ashvardanian::stringzillas::unified_alloc_t;
 #endif
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 static constexpr std::size_t default_embedding_dims_k = 64;
 static constexpr std::size_t default_window_width_k = 7;
@@ -311,6 +311,6 @@ void bench_fingerprints(environment_t const &env) {
 
 #pragma endregion // Rolling Fingerprinting
 
-} // namespace scripts
+} // namespace bench
 } // namespace stringzilla
 } // namespace ashvardanian

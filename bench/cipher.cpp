@@ -20,7 +20,7 @@
 
 #include "shared.hpp"
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 /** @brief The message sizes every kernel is measured at, from a short record to a page. */
 static constexpr std::size_t cipher_message_sizes_[] = {256, 1024, 4096, 16384};

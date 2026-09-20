@@ -63,7 +63,7 @@
 #include "utf8.hpp" // `print_utf8_test_bytes_`, `encoded_rune_`
 
 namespace sz = ashvardanian::stringzilla;
-using namespace sz::scripts;
+using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view`
 
 #pragma region Unit

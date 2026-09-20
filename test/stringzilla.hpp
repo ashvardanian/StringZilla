@@ -136,7 +136,7 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace test {
 
 using arrow_strings_view_t = arrow_strings_view<char, sz_size_t>;
 
@@ -719,13 +719,13 @@ inline std::size_t run_test(char const *name, function_type_ &&test_function) no
 
 #pragma endregion - Test Runner
 
-} // namespace scripts
+} // namespace test
 } // namespace stringzilla
 } // namespace ashvardanian
 
 /*  Cross-translation-unit test declarations. These live at global scope to match the TU definitions;
  *  the using-declaration makes `scale_iterations` visible for the default arguments below. */
-using ashvardanian::stringzilla::scripts::scale_iterations;
+using ashvardanian::stringzilla::test::scale_iterations;
 
 #pragma region Basic Utilities
 

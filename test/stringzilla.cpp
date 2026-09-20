@@ -70,7 +70,7 @@
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
 namespace sz = ashvardanian::stringzilla;
-using namespace sz::scripts;
+using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
 

@@ -36,7 +36,7 @@
 #include "similarities.cuh"
 
 namespace sz = ashvardanian::stringzilla;
-using namespace sz::scripts;
+using namespace sz::test;
 
 int main(int argc, char const **argv) {
     sz_unused_(argc && argv);

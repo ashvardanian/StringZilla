@@ -50,7 +50,7 @@
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`, `refusing_allocator_`
 
 namespace sz = ashvardanian::stringzilla;
-using namespace sz::scripts;
+using namespace sz::test;
 
 #pragma region Helpers
 

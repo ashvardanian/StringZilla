@@ -63,7 +63,7 @@
 #include "stringzilla.hpp" // `log_environment`
 #include "stringzilla.hpp" // `global_random_generator`
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 using pgrams_t = std::vector<sz_pgram_t>;
 using strings_t = std::vector<std::string_view>;

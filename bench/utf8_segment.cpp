@@ -45,7 +45,7 @@
 #include "stringzilla/utf8_sentences.h"  // `sz_utf8_sentences`
 #include "stringzilla/utf8_linebreaks.h" // `sz_utf8_linebreaks`
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Wrappers
 

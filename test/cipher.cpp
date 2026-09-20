@@ -30,7 +30,7 @@
 #include "stringzilla.hpp" // `verify`, `randomize_string`, `scale_iterations`
 
 namespace sz = ashvardanian::stringzilla;
-using namespace sz::scripts;
+using namespace sz::test;
 
 #pragma region Helpers
 

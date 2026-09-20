@@ -42,13 +42,13 @@
 #include "stringzilla.hpp" // `global_random_generator`, `scale_iterations`, `for_each_cacheline_offset_`
 
 namespace sz = ashvardanian::stringzilla;
-using sz::scripts::for_each_cacheline_offset_; // alignment sweep used by the safety + differential drivers
-using sz::scripts::global_random_generator;    // shared seeded RNG (honors `SZ_TESTS_SEED`)
-using sz::scripts::global_random_seed;         // the active seed (printed in failure repro)
-using sz::scripts::rotating_index;             // phase-advancing rotation, so crossed sweeps reach every pair
-using sz::scripts::scale_iterations;           // scales fuzz counts by `SZ_TESTS_MULTIPLIER`
-using sz::scripts::span_over;                  // views a C array as a `sz::span`, length attached
-using sz::scripts::sweep_stride;               // scales exhaustive sweeps by `SZ_TESTS_MULTIPLIER`
+using sz::test::for_each_cacheline_offset_; // alignment sweep used by the safety + differential drivers
+using sz::test::global_random_generator;    // shared seeded RNG (honors `SZ_TESTS_SEED`)
+using sz::test::global_random_seed;         // the active seed (printed in failure repro)
+using sz::test::rotating_index;             // phase-advancing rotation, so crossed sweeps reach every pair
+using sz::test::scale_iterations;           // scales fuzz counts by `SZ_TESTS_MULTIPLIER`
+using sz::test::span_over;                  // views a C array as a `sz::span`, length attached
+using sz::test::sweep_stride;               // scales exhaustive sweeps by `SZ_TESTS_MULTIPLIER`
 using sz::literals::operator""_sv;
 
 #pragma region Prose fixtures

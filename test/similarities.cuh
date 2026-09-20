@@ -21,7 +21,7 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace test {
 
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::affine_gap_costs_t;
@@ -2306,6 +2306,6 @@ void test_similarities_cuda_memory_safety() {
 
 #pragma endregion // Drivers
 
-} // namespace scripts
+} // namespace test
 } // namespace stringzilla
 } // namespace ashvardanian

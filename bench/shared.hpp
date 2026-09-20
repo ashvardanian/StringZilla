@@ -76,7 +76,11 @@ namespace stdc = std::chrono;
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace bench {
+
+// The benchmarks run on the test harness: `unified_vector`, `arrow_strings_tape_t`, `read_file` and the
+// randomization helpers all live in `test/stringzilla.hpp`, which every benchmark target carries.
+using namespace ashvardanian::stringzilla::test;
 
 using accurate_clock_t = stdc::high_resolution_clock;
 
@@ -1109,6 +1113,6 @@ struct arrays_equality {
     }
 };
 
-} // namespace scripts
+} // namespace bench
 } // namespace stringzilla
 } // namespace ashvardanian

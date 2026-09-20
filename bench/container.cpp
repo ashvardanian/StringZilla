@@ -42,7 +42,7 @@
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
-using namespace ashvardanian::stringzilla::scripts;
+using namespace ashvardanian::stringzilla::bench;
 
 /**
  *  @brief Helper function-like object to order string-view convertible objects with StringZilla.

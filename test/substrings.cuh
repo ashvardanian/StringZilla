@@ -39,7 +39,7 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace scripts {
+namespace test {
 
 using ashvardanian::stringzillas::dummy_executor_t;
 using ashvardanian::stringzillas::substrings_cased_k;
@@ -2770,6 +2770,6 @@ void test_substrings_safety() {
 
 #pragma endregion // Safety
 
-} // namespace scripts
+} // namespace test
 } // namespace stringzilla
 } // namespace ashvardanian
