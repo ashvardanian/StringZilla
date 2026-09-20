@@ -56,7 +56,7 @@ sz_static_assert(sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) % 64 == 0,
                  sz_levenshtein_utf8_page_table_fills_cache_lines);
 
 /** The class rows behind the page table: 256 classes per row, row zero all zeros. */
-SZ_HELPER_AUTO sz_u32_t const *sz_levenshtein_utf8_class_rows_(sz_levenshtein_query_t const *query) {
+SZ_API_COMPTIME sz_u32_t const *sz_levenshtein_utf8_class_rows_(sz_levenshtein_query_t const *query) {
     return (sz_u32_t const *)(query->page_rows + sz_levenshtein_utf8_pages_k);
 }
 

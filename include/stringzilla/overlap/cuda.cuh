@@ -204,15 +204,27 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_scheduled_cuda(
         device_query.nodes_count = nodes_count;
 
     // The sequence goes to the kernel whole - its accessors are the device's to call, once per candidate.
-    // The block size is clamped to what this kernel's register footprint permits on this device, rather than to
-    // a literal answering for a GPU it has never seen; the measured range above that floor is flat.
+    // The block size comes from this device and this kernel, not from the part it was tuned on: register pressure
+    // and the staged tree both move the residency ceiling, and a launcher that hard-codes one number is answering
+    // for a GPU it has never seen. The walk keeps whichever size lands the most warps per multiprocessor, which
+    // is what the C++ occupancy helper computes and the only shape of it that has a C spelling.
     cudaStream_t const on = (cudaStream_t)stream;
     sz_size_t const staged_bytes = device_query.nodes_count * sizeof(sz_u32_t);
     sz_size_t per_block = sz_overlap_cuda_candidates_per_block_k;
     cudaFuncAttributes attributes;
-    if (cudaFuncGetAttributes(&attributes, (void const *)sz_overlap_cuda_scores_kernel_) == cudaSuccess &&
-        attributes.maxThreadsPerBlock > 0 && (sz_size_t)attributes.maxThreadsPerBlock < per_block)
-        per_block = (sz_size_t)attributes.maxThreadsPerBlock;
+    if (cudaFuncGetAttributes(&attributes, (void const *)sz_overlap_cuda_scores_kernel_) == cudaSuccess) {
+        sz_size_t const ceiling = (sz_size_t)attributes.maxThreadsPerBlock;
+        sz_size_t most_warps = 0, candidate;
+        for (candidate = 64; candidate <= ceiling; candidate *= 2) {
+            int resident_blocks = 0;
+            if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(&resident_blocks,
+                                                             (void const *)sz_overlap_cuda_scores_kernel_,
+                                                             (int)candidate, staged_bytes) != cudaSuccess)
+                continue;
+            sz_size_t const warps = (sz_size_t)resident_blocks * (candidate / 32);
+            if (warps > most_warps) most_warps = warps, per_block = candidate;
+        }
+    }
     sz_size_t const blocks = (candidates->count + per_block - 1) / per_block;
 
     dim3 grid, block;
