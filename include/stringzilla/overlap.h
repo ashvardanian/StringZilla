@@ -107,6 +107,49 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_skylake(sz_cptr_t query, sz_size_t
                                                       sz_f32_t *scores);
 #endif
 
+#if SZ_USE_CUDA
+/**
+ *  @copydoc sz_overlap_scores
+ *  @note Takes the CPU backends' arguments exactly, so it binds wherever they do, and asks nothing of the caller
+ *      about where its memory lives: whatever the device cannot reach is staged into memory it can, scored, and
+ *      read back before returning. A caller already holding its texts and scores on the device pays none of that
+ *      - the round then runs in place - so the staging is a fallback rather than a step.
+ *  @sa sz_overlap_scores_scheduled_cuda to run on a chosen stream, where staging is refused rather than performed.
+ */
+SZ_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_cptr_t query, sz_size_t query_length,
+                                                   sz_sequence_t const *candidates, sz_size_t const *window_widths,
+                                                   sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
+                                                   sz_f32_t *scores);
+
+/**
+ *  @brief Window overlap of @p query with every candidate on one GPU, scheduled on the caller's stream.
+ *
+ *  Nothing crosses the bus: @p candidates ' texts are read where they already are, and @p scores and whatever
+ *  @p alloc hands back are written the same way, so the round costs one launch rather than a round trip. Host
+ *  memory is refused rather than copied - page-locked host memory counts as host memory here.
+ *
+ *  @pre @p candidates carries @b device accessors, as @ref sz_sequence_from_string_views_cuda binds them, because
+ *      the kernel is what calls them - one call per candidate, uniform across the warp. Only the handle can be
+ *      checked from this side, so host accessors reach the device as an invalid address rather than a status.
+ *
+ *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the current device's default one.
+ *      The round is synchronous either way - @p scores is filled before returning - but only this stream is
+ *      waited on, so the caller's other work on the device keeps running.
+ *  @param[in] alloc Where the tree and the per-candidate arrays come from; must itself reach the device, and is
+ *      freed before returning.
+ *  @param[out] scores The @b [candidates,window_widths] shares, each in @c [0,1], row-major.
+ *
+ *  @retval sz_unexpected_dimensions_k for no widths, more than @ref sz_overlap_cuda_widths_max_k of them, or one
+ *      past @ref sz_overlap_cuda_widest_window_k, which is the per-thread ring's compile-time bound.
+ *  @retval sz_device_memory_mismatch_k when the scores, the first candidate, or the scratch is host memory.
+ *  @retval sz_device_code_mismatch_k when the launch itself fails, the stream reporting it at the join.
+ *  @sa sz_overlap_scores_cuda for the same round on the default stream.
+ */
+SZ_API_COMPTIME sz_status_t sz_overlap_scores_scheduled_cuda(
+    sz_cptr_t query, sz_size_t query_length, sz_sequence_t const *candidates, sz_size_t const *window_widths,
+    sz_size_t window_widths_count, sz_memory_allocator_t *alloc, sz_f32_t *scores, void *stream);
+#endif
+
 /** @copydoc sz_overlap_score */
 SZ_API_COMPTIME sz_status_t sz_overlap_score_serial(sz_cptr_t query, sz_size_t query_length, sz_cptr_t candidate,
                                                     sz_size_t candidate_length, sz_size_t const *window_widths,
@@ -129,11 +172,20 @@ SZ_API_COMPTIME sz_status_t sz_overlap_score_skylake(sz_cptr_t query, sz_size_t 
                                                      sz_f32_t *scores);
 #endif
 
+#if SZ_USE_CUDA
+/** @copydoc sz_overlap_score */
+SZ_API_COMPTIME sz_status_t sz_overlap_score_cuda(sz_cptr_t query, sz_size_t query_length, sz_cptr_t candidate,
+                                                  sz_size_t candidate_length, sz_size_t const *window_widths,
+                                                  sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
+                                                  sz_f32_t *scores);
+#endif
+
 #pragma endregion Core API
 
 #include "stringzilla/overlap/serial.h"
 #include "stringzilla/overlap/haswell.h"
 #include "stringzilla/overlap/skylake.h"
+#include "stringzilla/overlap/cuda.cuh"
 
 /*  Pick the right implementation for the window overlap algorithms.
  *  To override this behavior and precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1.
@@ -144,7 +196,9 @@ SZ_API_COMPTIME sz_status_t sz_overlap_score_skylake(sz_cptr_t query, sz_size_t 
 SZ_API_RUNTIME sz_status_t sz_overlap_scores(sz_cptr_t query, sz_size_t query_length, sz_sequence_t const *candidates,
                                              sz_size_t const *window_widths, sz_size_t window_widths_count,
                                              sz_memory_allocator_t *alloc, sz_f32_t *scores) {
-#if SZ_USE_SKYLAKE
+#if SZ_USE_CUDA
+    return sz_overlap_scores_cuda(query, query_length, candidates, window_widths, window_widths_count, alloc, scores);
+#elif SZ_USE_SKYLAKE
     return sz_overlap_scores_skylake(query, query_length, candidates, window_widths, window_widths_count, alloc,
                                      scores);
 #elif SZ_USE_HASWELL
@@ -159,7 +213,10 @@ SZ_API_RUNTIME sz_status_t sz_overlap_score(sz_cptr_t query, sz_size_t query_len
                                             sz_size_t candidate_length, sz_size_t const *window_widths,
                                             sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
                                             sz_f32_t *scores) {
-#if SZ_USE_SKYLAKE
+#if SZ_USE_CUDA
+    return sz_overlap_score_cuda(query, query_length, candidate, candidate_length, window_widths, window_widths_count,
+                                 alloc, scores);
+#elif SZ_USE_SKYLAKE
     return sz_overlap_score_skylake(query, query_length, candidate, candidate_length, window_widths,
                                     window_widths_count, alloc, scores);
 #elif SZ_USE_HASWELL

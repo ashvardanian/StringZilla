@@ -27,6 +27,15 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_update_(sz_capability_t caps) {
         impl->overlap_scores = sz_overlap_scores_skylake;
     }
 #endif
+
+    // Last, so a device outranks every CPU tier: the verbs installed here take the CPU backends' arguments and
+    // stage whatever the device cannot already reach, so a caller holding host memory still gets an answer.
+#if SZ_USE_CUDA
+    if (caps & sz_cap_cuda_k) {
+        impl->overlap_score = sz_overlap_score_cuda;
+        impl->overlap_scores = sz_overlap_scores_cuda;
+    }
+#endif
 }
 
 SZ_API_RUNTIME sz_status_t sz_overlap_score(sz_cptr_t query, sz_size_t query_length, sz_cptr_t candidate,

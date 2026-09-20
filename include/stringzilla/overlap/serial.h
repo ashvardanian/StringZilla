@@ -41,7 +41,7 @@ enum { sz_overlap_interleaved_chains_k = 4 };
 #pragma region Generic Public Helpers
 
 /** @c 256^width mod p, the multiplier that shifts a prefix past a window of @p width bytes. */
-SZ_API_COMPTIME sz_f64_t sz_overlap_window_power(sz_size_t width) {
+SZ_HELPER_AUTO sz_f64_t sz_overlap_window_power(sz_size_t width) {
     sz_u64_t const prime = sz_overlap_modulus_k;
     sz_u64_t result = 1, base = 256ull % prime, exponent = width;
     while (exponent) {
@@ -144,7 +144,7 @@ SZ_API_COMPTIME sz_status_t sz_overlap_btree_prepare(sz_u32_t *nodes, sz_size_t 
 
 /** @p matches over the longer side's window count, zero when both are empty; only the longer side keeps the
  *  share within @c [0, 1]. */
-SZ_API_COMPTIME sz_f32_t sz_overlap_share_(sz_size_t matches, sz_size_t candidate_windows, sz_size_t query_windows) {
+SZ_HELPER_AUTO sz_f32_t sz_overlap_share_(sz_size_t matches, sz_size_t candidate_windows, sz_size_t query_windows) {
     sz_size_t const longer = candidate_windows > query_windows ? candidate_windows : query_windows;
     return longer ? (sz_f32_t)((sz_f64_t)matches / (sz_f64_t)longer) : 0.0f;
 }
@@ -158,7 +158,7 @@ enum { sz_overlap_serial_f64x1_positions_per_step_k = 1 };
 
 /** @c (multiplier · multiplicand + addend) mod p in @c [0, p), exact for every input below 2^32; the product fits
  *  one @c u64, and the remainder by a constant lowers to a multiply-high and a shift. */
-SZ_API_COMPTIME sz_f64_t sz_overlap_serial_multiply_add_(sz_f64_t multiplier, sz_f64_t multiplicand, sz_f64_t addend) {
+SZ_HELPER_AUTO sz_f64_t sz_overlap_serial_multiply_add_(sz_f64_t multiplier, sz_f64_t multiplicand, sz_f64_t addend) {
     sz_u64_t const product = (sz_u64_t)multiplier * (sz_u64_t)multiplicand + (sz_u64_t)addend;
     return (sz_f64_t)(product % (sz_u64_t)sz_overlap_modulus_k);
 }
@@ -182,9 +182,9 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_tail_serial(sz_f64_t 
  *  @brief One position's window hash: @c H(i,w) = P(i+w) - P(i)·b^w, a full-width hash under the modulus.
  *  @param[in] window_power @ref sz_overlap_window_power for this window's width.
  */
-SZ_API_COMPTIME void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *prefix_hashes_at_start,
-                                                              sz_f64_t const *prefix_hashes_at_end,
-                                                              sz_f64_t window_power, sz_u32_t *window_hashes) {
+SZ_HELPER_AUTO void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *prefix_hashes_at_start,
+                                                             sz_f64_t const *prefix_hashes_at_end,
+                                                             sz_f64_t window_power, sz_u32_t *window_hashes) {
     sz_f64_t const shifted = sz_overlap_serial_multiply_add_(prefix_hashes_at_start[0], window_power, 0.0);
     sz_f64_t residue = prefix_hashes_at_end[0] - shifted;
     if (residue < 0.0) residue += (sz_f64_t)sz_overlap_modulus_k;
@@ -228,7 +228,7 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_sort_serial(sz_u32_t *keys, sz_
 }
 
 /** One branch level: the child ordinal a flipped @p key descends into, the count of separators below it. */
-SZ_API_COMPTIME sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, sz_u32_t key) {
+SZ_HELPER_AUTO sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, sz_u32_t key) {
     sz_size_t child = 0;
     for (sz_size_t separator = 0; separator != sz_overlap_keys_per_node_k; ++separator)
         child += (sz_i32_t)node[separator] < (sz_i32_t)key;
@@ -236,7 +236,7 @@ SZ_API_COMPTIME sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, s
 }
 
 /** The leaf compare: one when the flipped @p key sits in this node, zero otherwise. */
-SZ_API_COMPTIME sz_size_t sz_overlap_serial_leaf_step_(sz_u32_t const *node, sz_u32_t key) {
+SZ_HELPER_AUTO sz_size_t sz_overlap_serial_leaf_step_(sz_u32_t const *node, sz_u32_t key) {
     sz_size_t found = 0;
     for (sz_size_t position = 0; position != sz_overlap_keys_per_node_k; ++position) found |= node[position] == key;
     return found;

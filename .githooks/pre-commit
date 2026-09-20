@@ -349,6 +349,28 @@ EOF
   exit 1
 fi
 
+# C++ in a `.cuh` under include/stringzilla. These are CUDA tiers written in the same C every `.h` tier is
+# written in, so they stay linkable from the C dispatch units and readable by anyone who reads the rest of the
+# library. The one construct with no C spelling is the `extern "C"` that grants that linkage. Everything CUDA
+# needs beyond it has a C entry point: launch through `cudaLaunchKernel` with an explicit `dim3` and argument
+# array rather than `<<< >>>`, size a block through `cudaFuncGetAttributes` rather than the occupancy template,
+# and read a device symbol through the five-argument `cudaMemcpyFromSymbol` rather than its `T const &` overload.
+# `include/stringzillas/` is excluded: that library is C++ templates by design, and its `.cuh` files with it.
+cpp_in_cuh=$(git diff --cached --no-color -U0 -- 'include/stringzilla/*.cuh' 'include/stringzilla/*/*.cuh' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E '(^|[^A-Za-z0-9_])(template[[:space:]]*<|class[[:space:]]+[A-Za-z_]|namespace[[:space:]]|auto[[:space:]]+[A-Za-z_*&]|nullptr|new[[:space:]]+[A-Za-z_]|delete[[:space:]]|std::|constexpr[[:space:]]|noexcept|public:|private:|protected:|operator[[:space:]]*[^(])|<<<' \
+  | grep -vE 'extern[[:space:]]+"C"' || true)
+if [ -n "$cpp_in_cuh" ]; then
+  cat >&2 <<EOF
+pre-commit: C++ in a .cuh under include/stringzilla - these tiers are C, like every .h tier beside them.
+Launch with cudaLaunchKernel and an explicit dim3, not <<< >>>; every other CUDA entry point this library
+needs has a C overload beside its template:
+$cpp_in_cuh
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
 # `@copydoc` in a per-ISA backend file. Every backend is declared once in its family header, beside the verb
 # it copies from, and that is where the link belongs. Repeating it at the definition delivers the same sentence
 # twice and tells a reader nothing about the backend in front of them - say what this one does differently, or

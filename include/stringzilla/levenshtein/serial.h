@@ -28,15 +28,15 @@ typedef struct sz_levenshtein_query_t {
 } sz_levenshtein_query_t;
 
 /** Words a query of @p length symbols spans - the mask table holds that many rows of @c classes entries. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_query_words(sz_size_t length) { return (length + 63) / 64; }
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_query_words(sz_size_t length) { return (length + 63) / 64; }
 
 /**
  *  @brief Builds the match masks of the byte string @p text into @p masks and points @p query at them.
  *  @param[out] masks Caller-owned, @c sz_levenshtein_query_words(length) × 256 entries; zeroed here.
  *  @retval sz_unexpected_dimensions_k for an empty query, whose distance is every candidate's length.
  */
-SZ_API_COMPTIME sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
-                                                         sz_levenshtein_query_t *query) {
+SZ_HELPER_AUTO sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
+                                                        sz_levenshtein_query_t *query) {
     if (length == 0) return sz_unexpected_dimensions_k;
     sz_size_t const words = sz_levenshtein_query_words(length);
     for (sz_size_t entry = 0; entry != words * 256; ++entry) masks[entry] = 0;
@@ -239,9 +239,9 @@ typedef struct sz_levenshtein_u64x1_vertical_serial_t {
 } sz_levenshtein_u64x1_vertical_serial_t;
 
 /** Starts one candidate: the score at the query's length, and @p words verticals at the top boundary. */
-SZ_API_COMPTIME void sz_levenshtein_u64x1_init_serial(sz_levenshtein_u64x1_state_serial_t *state,
-                                                      sz_levenshtein_u64x1_vertical_serial_t *verticals,
-                                                      sz_size_t words, sz_levenshtein_query_t const *query) {
+SZ_HELPER_AUTO void sz_levenshtein_u64x1_init_serial(sz_levenshtein_u64x1_state_serial_t *state,
+                                                     sz_levenshtein_u64x1_vertical_serial_t *verticals, sz_size_t words,
+                                                     sz_levenshtein_query_t const *query) {
     state->score = query->length;
     for (sz_size_t word = 0; word != words; ++word)
         verticals[word].positive = ~(sz_u64_t)0, verticals[word].negative = 0;
@@ -257,10 +257,9 @@ SZ_API_COMPTIME void sz_levenshtein_u64x1_init_serial(sz_levenshtein_u64x1_state
  *  @param[in] words Exactly @c sz_levenshtein_query_words(query->length); a constant keeps verticals in registers.
  *  @param[in] class_id The candidate's class at this position, as the stripe emitted it.
  */
-SZ_API_COMPTIME void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1_state_serial_t *state,
-                                                      sz_levenshtein_u64x1_vertical_serial_t *verticals,
-                                                      sz_size_t words, sz_levenshtein_query_t const *query,
-                                                      sz_u32_t class_id) {
+SZ_HELPER_AUTO void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1_state_serial_t *state,
+                                                     sz_levenshtein_u64x1_vertical_serial_t *verticals, sz_size_t words,
+                                                     sz_levenshtein_query_t const *query, sz_u32_t class_id) {
     sz_u64_t const *const masks = query->masks + class_id;
     sz_u64_t const last_symbol_bit = sz_levenshtein_last_symbol_bit_(query->length);
     // The top boundary: the row above the first word is one edit higher than the cell to its left.
@@ -298,8 +297,8 @@ SZ_API_COMPTIME sz_bool_t sz_levenshtein_u64x1_any_active_serial(sz_levenshtein_
 }
 
 /** The running score of @p candidate, read at the position where that candidate's text ends. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x1_score_serial(sz_levenshtein_u64x1_state_serial_t const *state,
-                                                            sz_size_t candidate) {
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_u64x1_score_serial(sz_levenshtein_u64x1_state_serial_t const *state,
+                                                           sz_size_t candidate) {
     return sz_unused_(candidate), state->score;
 }
 

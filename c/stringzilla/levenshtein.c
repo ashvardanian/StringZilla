@@ -29,6 +29,15 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps) 
         impl->levenshtein_distances_utf8 = sz_levenshtein_distances_utf8_icelake;
     }
 #endif
+
+    // Last, so a device outranks every CPU tier. Only the byte verbs: the rune path prepares a page table the
+    // device tier does not build, so a UTF-8 round keeps the widest CPU backend installed above.
+#if SZ_USE_CUDA
+    if (caps & sz_cap_cuda_k) {
+        impl->levenshtein_distance = sz_levenshtein_distance_cuda;
+        impl->levenshtein_distances = sz_levenshtein_distances_cuda;
+    }
+#endif
 }
 
 SZ_API_RUNTIME sz_status_t sz_levenshtein_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
