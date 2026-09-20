@@ -113,12 +113,6 @@ static overlap_backend_t const overlap_backends[] = {
 #endif
 };
 
-/** @brief Reports which backend broke a check, then aborts through the suite's oracle. */
-static void fail_backend_(char const *name, char const *what) noexcept {
-    std::fprintf(stderr, "Backend %s failed: %s\n", name, what);
-    verify(false && "An overlap backend disagreed with its oracle or with serial");
-}
-
 /** @brief The value of @c text[0…end) as a big-endian base-256 number mod p, in exact integer arithmetic. */
 static sz_u32_t overlap_reference_prefix_hash_(std::string const &text, std::size_t end) {
     std::uint64_t const prime = static_cast<std::uint64_t>(sz_overlap_modulus_k);
@@ -427,15 +421,6 @@ void test_overlap_safety() {
 #pragma endregion // Safety
 
 #pragma region Drivers
-
-/** @brief The row named @p name, so a reordering cannot silently hand the differential a new reference. */
-template <typename backend_type_, std::size_t count_>
-static backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], char const *name) {
-    for (std::size_t index = 0; index != count_; ++index)
-        if (std::strcmp(backends[index].name, name) == 0) return backends[index];
-    verify(false && "The backend table must carry the named reference");
-    return backends[0];
-}
 
 /** @brief One backend's step verbs against the oracles over generated corpora: the sort against @c std::sort, the
  *         tree against @c std::binary_search, and the chain and window hashes against integer hashing. */

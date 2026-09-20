@@ -28,6 +28,8 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 - `similarities.cu` — similarity scoring on CUDA GPUs.
 - `fingerprints.cu` — fingerprinting on CUDA GPUs.
 - `substrings.cu` — multi-pattern search on CUDA GPUs.
+- `levenshtein.cu` — one-to-many edit distances on CUDA GPUs.
+- `overlap.cu` — window-overlap scoring on CUDA GPUs.
 
 ## Other Bindings
 

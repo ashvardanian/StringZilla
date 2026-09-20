@@ -25,6 +25,7 @@
 # * stringzilla_test_cpp14: C++14 support with `std::less<std::string>`-like function objects.
 # * stringzilla_test_cpp17: C++17 support with `std::string_view` compatibility.
 # * stringzilla_test_cpp20: C++20 support with `<=>` operator and more `constexpr` features.
+# * stringzilla_test_cu20: The CUDA backends of the core families, against the serial answers.
 #
 # Tests for parallel algorithms:
 #
@@ -50,6 +51,8 @@
 # * stringzilla_bench_utf8_norm_cpp20: A benchmark for the `sz_utf8_norm` normalization family.
 # * stringzilla_bench_levenshtein_cpp20: A benchmark for the `sz_levenshtein_*` edit-distance family.
 # * stringzilla_bench_overlap_cpp20: A benchmark for the `sz_overlap_*` window-overlap family.
+# * stringzilla_bench_levenshtein_cu20: The `sz_levenshtein_*` family on a CUDA GPU.
+# * stringzilla_bench_overlap_cu20: The `sz_overlap_*` family on a CUDA GPU.
 #
 # Parallel Benchmarks:
 #
@@ -282,7 +285,9 @@ if (STRINGZILLA_BUILD_CUDA)
     # implementation for some ops even on sm_90, so it ships both generations; Kepler is superseded by Hopper there
     # and ships sm_80 alone; the DPX tier starts at sm_90 (plain sm_90, not the H100-locked sm_90a). The shared
     # library adds forward PTX on top of these; the static one, built for local testing, runs without any JIT.
-    set(STRINGZILLA_CUDA_ARCHS "80-real;90-real")
+    set(STRINGZILLA_CUDA_ARCHS "80-real;90-real"
+        CACHE STRING "Real SASS tiers every CUDA target carries; override to match the machine at hand"
+    )
     set(STRINGZILLA_KEPLER_ARCHS "80-real")
     set(STRINGZILLA_HOPPER_ARCHS "90-real")
     set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHS})
@@ -776,6 +781,11 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     target_link_libraries(stringzillas_bench_fingerprints_cpp20 PRIVATE stringzilla_static)
     target_link_libraries(stringzillas_bench_substrings_cpp20 PRIVATE stringzilla_static)
     if (STRINGZILLA_BUILD_CUDA)
+        define_gpu_launcher(stringzilla_bench_overlap_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/overlap.cu)
+        define_gpu_launcher(stringzilla_bench_levenshtein_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/levenshtein.cu)
+        # The CPU arms and `log_environment` reach the dispatched verbs, which live in the compiled core.
+        target_link_libraries(stringzilla_bench_overlap_cu20 PRIVATE stringzilla_static)
+        target_link_libraries(stringzilla_bench_levenshtein_cu20 PRIVATE stringzilla_static)
         define_gpu_launcher(stringzillas_bench_similarities_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cu)
         define_gpu_launcher(stringzillas_bench_fingerprints_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/fingerprints.cu)
         define_gpu_launcher(stringzillas_bench_substrings_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/substrings.cu)
@@ -849,6 +859,12 @@ if (STRINGZILLA_BUILD_TEST)
     endif ()
 
     if (STRINGZILLA_BUILD_CUDA)
+        # The core library's own GPU backends: one launcher, one source per family beside its CPU test.
+        define_gpu_launcher(
+            stringzilla_test_cu20 20 "${STRINGZILLA_TARGET_ARCH}" test/stringzilla.cu test/overlap.cu
+            test/levenshtein.cu
+        )
+        target_link_libraries(stringzilla_test_cu20 PRIVATE stringzilla_static)
         define_gpu_launcher(stringzillas_test_cu20 20 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cu)
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_test_cu20 PRIVATE stringzillas_cuda_static)

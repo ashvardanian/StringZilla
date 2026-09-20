@@ -6,27 +6,32 @@ The dispatcher picks the fastest one available on the running CPU.
 
 ## Methodology
 
-Numbers are throughput in windows per second, rendered as Mwin/s, measured with `bench/overlap.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
-One window is one byte offset at the scored width.
+Numbers are throughput in windows per second, rendered as Mwin/s, one window per byte offset at the scored width, measured with `bench/overlap.cpp` over the `xlsum.csv` corpus on one pinned core, reporting the median of repeated runs.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one stage.
-Query length decides whether the B-tree fits L1, so results split into a Short Queries table at the corpus's median token length and a Long Queries table at the query whose keys fill L1.
-The Preparation column is the query's key sort and tree layout, paid once per query; at long queries it dominates a round.
+Token length decides whether the query's B-tree fits L1, so results are split into a Short Words table (tokens averaging 9 bytes) and a Long Lines table (tokens averaging 3 KB).
+Preparation is the query's key sort and tree layout, paid once per query, and Window lookups is a candidate's whole read side — its chain, its window hashes, then the walk over each one — so the probe alone is that column against Window hashes.
+The GPU rows come from `bench/overlap.cu` and score one residency wave of one candidate per thread.
+A `…` cell is genuinely-missing data, on a backend not yet measured on hardware that runs it.
 
-## Short Queries
+## Short Words
 
-| Backend         | `sz_overlap_score` | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | B-tree probe |
-| :-------------- | -----------------: | ------------------: | ------------: | ------------: | ----------: | -----------: |
-| Serial @ Xeon4  |                  … |                   … |             … |             … |           … |            … |
-| Haswell @ Xeon4 |                  … |                   … |             … |             … |           … |            … |
-| Skylake @ Xeon4 |                  … |                   … |             … |             … |           … |            … |
+| Backend         | `sz_overlap_score` | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
+| :-------------- | -----------------: | ------------------: | ------------: | ------------: | ----------: | -------------: |
+| Serial @ Xeon6  |              10.24 |               68.38 |        262.17 |        146.69 |       25.11 |          68.58 |
+| Haswell @ Xeon6 |              33.13 |              121.37 |        279.79 |        156.88 |      214.44 |          98.72 |
+| Skylake @ Xeon6 |              36.52 |              130.03 |        278.57 |        142.03 |      226.19 |          73.95 |
+| CUDA @ SM90     |                  … |                   … |             … |             … |           … |              … |
+| CUDA @ SM120    |                  … |              386.92 |             … |             … |           … |              … |
 
-## Long Queries
+## Long Lines
 
-| Backend         | `sz_overlap_score` | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | B-tree probe |
-| :-------------- | -----------------: | ------------------: | ------------: | ------------: | ----------: | -----------: |
-| Serial @ Xeon4  |                  … |                   … |             … |             … |           … |            … |
-| Haswell @ Xeon4 |                  … |                   … |             … |             … |           … |            … |
-| Skylake @ Xeon4 |                  … |                   … |             … |             … |           … |            … |
+| Backend         | `sz_overlap_score` | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
+| :-------------- | -----------------: | ------------------: | ------------: | ------------: | ----------: | -------------: |
+| Serial @ Xeon6  |              19.58 |               41.65 |        273.26 |        168.11 |       32.33 |          45.26 |
+| Haswell @ Xeon6 |              70.40 |              135.51 |        280.10 |        192.73 |      163.66 |         138.84 |
+| Skylake @ Xeon6 |             103.94 |              219.77 |        522.27 |        321.89 |      178.71 |         242.86 |
+| CUDA @ SM90     |                  … |                   … |             … |             … |           … |              … |
+| CUDA @ SM120    |                  … |              878.99 |             … |             … |           … |              … |
 
 ## Window Hashes
 

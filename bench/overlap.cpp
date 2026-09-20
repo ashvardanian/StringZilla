@@ -13,7 +13,7 @@
  *  - `prefix_hashes` - the prefix hashes alone, one per byte, whatever the width;
  *  - `window_hashes` - the prefix hashes, then their differences at the derived width;
  *  - `window_lookups` - the prefix hashes, the window hashes, then the B-tree walk over every window hash;
- *  - `query_indexing` - the query's key sort and tree layout, once per call, the token ignored - at an 8 KiB query
+ *  - `query_preparation` - the query's key sort and tree layout, once per call, the token ignored - at an 8 KiB query
  *    this is most of a round, so it stands on its own;
  *  - `score` - the one-to-one verb against one token: both chains interleaved, the query's sort and layout, one probe;
  *  - `scores` - the one-to-many verb against the next `STRINGWARS_BATCH` tokens, by default as many median tokens as
@@ -41,7 +41,7 @@
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_overlap_cpp20
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_overlap_cpp20
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines build_release/stringzilla_bench_overlap_cpp20
  *  @endcode
  */
 #include <cmath>   // `std::ceil`, `std::log2`
@@ -56,11 +56,6 @@
 #include "stringzilla.hpp" // `log_environment`
 
 using namespace ashvardanian::stringzilla::bench;
-
-/** @brief The query whose window hashes fill the first-level cache, one @c u32 hash per byte. */
-static std::size_t cache_resident_query_bytes(environment_t const &env) {
-    return env.specs.l1_bytes / sizeof(sz_u32_t);
-}
 
 using overlap_prefix_hash_step_t = sz_f64_t (*)(sz_f64_t, sz_cptr_t, sz_f64_t *);
 using overlap_prefix_hash_step_tail_t = sz_f64_t (*)(sz_f64_t, sz_cptr_t, sz_size_t, sz_f64_t *);
@@ -325,12 +320,12 @@ static void bench_overlap_window_lookups(environment_t const &env, overlap_query
 
 /** @brief The query's sort and tree layout alone, once per call from its raw window hashes; the token is ignored. */
 template <overlap_btree_sort_t btree_sort_>
-struct query_indexing_from_sz {
+struct query_preparation_from_sz {
     overlap_query_t const &query;
     std::vector<sz_u32_t> nodes;
     sz_overlap_btree_t btree {};
 
-    explicit query_indexing_from_sz(overlap_query_t const &query)
+    explicit query_preparation_from_sz(overlap_query_t const &query)
         : query(query), nodes(sz_overlap_btree_entries(query.window_hashes.size())) {}
 
     call_result_t operator()(std::size_t) {
@@ -343,18 +338,18 @@ struct query_indexing_from_sz {
 };
 
 /** @brief The query indexing on every backend, the accelerated arms logged against the serial one. */
-static void bench_overlap_query_indexing(environment_t const &env, overlap_query_t const &query,
+static void bench_overlap_query_preparation(environment_t const &env, overlap_query_t const &query,
                                          std::string const &suffix) {
-    auto validator = query_indexing_from_sz<sz_overlap_u32x1_btree_sort_serial> {query};
-    bench_result_t base = bench_unary(env, "sz_overlap_query_indexing_serial" + suffix, validator).log();
+    auto validator = query_preparation_from_sz<sz_overlap_u32x1_btree_sort_serial> {query};
+    bench_result_t base = bench_unary(env, "sz_overlap_query_preparation_serial" + suffix, validator).log();
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_overlap_query_indexing_haswell" + suffix, validator,
-                query_indexing_from_sz<sz_overlap_u32x8_btree_sort_haswell> {query})
+    bench_unary(env, "sz_overlap_query_preparation_haswell" + suffix, validator,
+                query_preparation_from_sz<sz_overlap_u32x8_btree_sort_haswell> {query})
         .log(base);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_overlap_query_indexing_skylake" + suffix, validator,
-                query_indexing_from_sz<sz_overlap_u32x16_btree_sort_skylake> {query})
+    bench_unary(env, "sz_overlap_query_preparation_skylake" + suffix, validator,
+                query_preparation_from_sz<sz_overlap_u32x16_btree_sort_skylake> {query})
         .log(base);
 #endif
 }
@@ -469,14 +464,13 @@ static void bench_overlap_scores(environment_t const &env, overlap_query_t const
 #pragma endregion
 
 /** @brief Every arm at one query length, the width derived once from the slice and carried in every arm's name. */
-static void bench_overlap_query(environment_t const &env, char const *query_name, std::size_t query_bytes,
-                                std::size_t candidates) {
+static void bench_overlap_query(environment_t const &env, std::size_t query_bytes, std::size_t candidates) {
     overlap_query_t const query(env, query_bytes);
-    std::string const suffix = std::string(":") + query_name + ":w" + std::to_string(query.width);
+    std::string const suffix = ":w" + std::to_string(query.width);
     bench_overlap_prefix_hashes(env, suffix);
     bench_overlap_window_hashes(env, query, suffix);
     bench_overlap_window_lookups(env, query, suffix);
-    bench_overlap_query_indexing(env, query, suffix);
+    bench_overlap_query_preparation(env, query, suffix);
     bench_overlap_score(env, query, suffix);
     bench_overlap_scores(env, query, candidates, suffix);
 }
@@ -489,12 +483,10 @@ int main(int argc, char const **argv) {
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {
         std::printf("Building up the environment...\n");
-        environment_t env = build_environment(argc, argv, "leipzig1M.txt", environment_t::tokenization_t::lines_k,
-                                              compute_bound_slice_bytes_k);
+        environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         std::size_t const candidates = candidates_per_call(env);
         std::printf("Starting window overlap benchmarks...\n");
-        bench_overlap_query(env, "short_query", median_token_bytes(env), candidates);
-        bench_overlap_query(env, "long_query", cache_resident_query_bytes(env), candidates);
+        bench_overlap_query(env, median_token_bytes(env), candidates);
     }
     catch (std::exception const &e) {
         std::fprintf(stderr, "Failed with: %s\n", e.what());

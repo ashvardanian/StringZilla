@@ -152,9 +152,12 @@ fi
 
 # Indexing straight through a call - `owner.view()[index]`, `data()[index]`, a cast-then-index chain.
 # The owning containers carry their own `operator[]`, and anything else deserves a named local: the call
-# names WHAT is indexed, the local names what it MEANS. The `)[` adjacency is the whole signature.
+# names WHAT is indexed, the local names what it MEANS. The `)[` adjacency is the whole signature, with
+# one exception that only looks like one: `T const (&name)[count]` is a reference-to-array PARAMETER, a
+# declaration rather than an index, and the sole spelling C++ has for taking an array without decay.
 call_indexing=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
-  | grep -nE '^\+' | code_only | grep -E '\)\[' || true)
+  | grep -nE '^\+' | code_only | grep -E '\)\[' \
+  | grep -vE '\(&[A-Za-z_][A-Za-z0-9_]*\)\[' || true)
 if [ -n "$call_indexing" ]; then
   cat >&2 <<EOF
 pre-commit: ')[' chain in staged changes - indexing through a call or cast. Index the owning container
@@ -344,6 +347,67 @@ if [ -n "$coverage_assert" ]; then
 pre-commit: coverage assertion over a randomized sweep - a low SZ_TESTS_MULTIPLIER makes this a coin
 flip rather than a test. Walk the pool deterministically, or pin with '// sz-nolint: coverage':
 $coverage_assert
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# Raw CUDA memory management in test/ or bench/. The shared scaffolding already owns every kind of memory
+# these binaries need - `unified_vector` and `arrow_strings_tape_t` for storage both sides address,
+# `device_vector` for what only a kernel touches, `pinned_vector` for page-locked host pages, and
+# `unified_memory_allocator()` for the C verbs that take an `sz_memory_allocator_t`. A hand-rolled
+# cudaMalloc/cudaFree pair reintroduces the ownership a container already carries, and the corpus itself
+# needs no upload at all: `bench/shared.hpp` loads the dataset and its tokens through `unified_alloc`, so
+# a kernel reads `env.tokens` where it already lies. The lone exception is the context primer.
+cuda_raw_memory=$(git diff --cached --no-color -U0 -- 'test/*.cu' 'test/*.cuh' 'bench/*.cu' 'bench/*.cuh' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E '(^|[^A-Za-z0-9_])cuda(Malloc|MallocHost|MallocManaged|HostAlloc|Free|FreeHost|Memcpy|MemcpyAsync)[[:space:]]*\(' \
+  | grep -vE 'cudaFree[[:space:]]*\([[:space:]]*(0|NULL|nullptr)[[:space:]]*\)' || true)
+if [ -n "$cuda_raw_memory" ]; then
+  cat >&2 <<EOF
+pre-commit: raw CUDA memory management in test/ or bench/ - the scaffolding in test/stringzilla.hpp
+already owns it. Use unified_vector / device_vector / pinned_vector / arrow_strings_tape_t for storage
+and unified_memory_allocator() for the C verbs; env.tokens is already device-reachable under CUDA:
+$cuda_raw_memory
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# A destructor that releases, in test/ or bench/. Ownership belongs to a container that already carries
+# copy control; a struct that frees in its destructor and declares nothing else is copyable by default,
+# so the first time one is passed by value - which is exactly how the callables reach `bench_unary` - two
+# objects hold the same pointer and the second release is a double free. Destructors that only report,
+# like the kernel-time lines the similarities and substrings callables print at scope exit, own nothing
+# and are not affected.
+releasing_destructor=$(git diff --cached --no-color -U0 -- 'test/*.cpp' 'test/*.hpp' 'test/*.cu' 'test/*.cuh' \
+  'bench/*.cpp' 'bench/*.hpp' 'bench/*.cu' 'bench/*.cuh' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E '~[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)[^;]*\{.*(cudaFree|cuMemFree|[[:space:]]delete|::free|[[:space:]]free)[[:space:]]*[\(\[]' || true)
+if [ -n "$releasing_destructor" ]; then
+  cat >&2 <<EOF
+pre-commit: a destructor that releases memory in test/ or bench/ - the struct is still copyable, and
+these callables are passed by value into bench_unary(). Hold the storage in a container that carries its
+own copy control instead:
+$releasing_destructor
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# Shared C++ scaffolding lives only in test/stringzilla.hpp, which both the test and the benchmark targets
+# carry on their include path. Redefining one of its aliases or allocator trampolines in a single file is
+# worse than duplication: every one of these binaries does `using namespace ashvardanian::stringzilla::
+# scripts`, so a file-scope `unified_vector` is ambiguous against the one already in scope and the
+# translation unit stops compiling. Extend test/stringzilla.hpp instead.
+redefined_scaffolding=$(git diff --cached --no-color -U0 -- 'test/*' 'bench/*' ':(exclude)test/stringzilla.hpp' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E 'using[[:space:]]+(unified|pinned|device)_vector[[:space:]]*=|using[[:space:]]+arrow_strings_tape_t[[:space:]]*=|(unified|pinned|device)_alloc<[^>]*>[[:space:]]*\{[[:space:]]*\}[[:space:]]*\.[[:space:]]*(allocate|deallocate)' || true)
+if [ -n "$redefined_scaffolding" ]; then
+  cat >&2 <<EOF
+pre-commit: shared test scaffolding redefined outside test/stringzilla.hpp - a file-scope alias is
+ambiguous against the one 'using namespace ...::scripts' already brings in. Extend the shared header:
+$redefined_scaffolding
 Bypass with --no-verify only if intentional.
 EOF
   exit 1

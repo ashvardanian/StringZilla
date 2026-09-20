@@ -254,12 +254,6 @@ static gcm_backend_t const gcm_backends[] = {
 #endif
 };
 
-/** @brief Reports which backend broke a check, then aborts through the suite's oracle. */
-static void fail_backend_(char const *name, char const *what) noexcept {
-    std::fprintf(stderr, "Backend %s failed: %s\n", name, what);
-    verify(false && "A cipher backend disagreed with its published vector or with serial");
-}
-
 #pragma endregion // Helpers
 
 #pragma region Unit
@@ -580,15 +574,6 @@ void test_cipher_safety() {
             sz_aes256_gcm_decrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, forged);
         });
     }
-}
-
-/** @brief The row named @p name, so a reordering cannot silently hand the differential a new reference. */
-template <typename backend_type_, std::size_t count_>
-backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], char const *name) {
-    for (std::size_t index = 0; index != count_; ++index)
-        if (std::strcmp(backends[index].name, name) == 0) return backends[index];
-    verify(false && "The backend table must carry the named reference");
-    return backends[0];
 }
 
 /** @brief Drives the serial-versus-SIMD differential across every cipher backend compiled here. */

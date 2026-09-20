@@ -36,7 +36,7 @@
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cpp20
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_levenshtein_cpp20
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines build_release/stringzilla_bench_levenshtein_cpp20
  *  @endcode
  */
 #include <stdexcept> // `std::runtime_error`
@@ -48,11 +48,6 @@
 
 using namespace ashvardanian::stringzilla::bench;
 
-/** @brief The query whose match masks fill the first-level cache: 256 symbols' @c u64 masks per query word,
- *         64 symbols to a word. */
-static std::size_t cache_resident_query_bytes(environment_t const &env) {
-    return env.specs.l1_bytes / (256 * sizeof(sz_u64_t)) * 64;
-}
 
 #pragma region One to One
 
@@ -172,14 +167,11 @@ int main(int argc, char const **argv) {
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {
         std::printf("Building up the environment...\n");
-        environment_t env = build_environment(argc, argv, "leipzig1M.txt", environment_t::tokenization_t::lines_k,
-                                              compute_bound_slice_bytes_k);
-        std::size_t const median_bytes = median_token_bytes(env);
+        environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         std::size_t const candidates = candidates_per_call(env);
         std::printf("Starting Levenshtein benchmarks...\n");
-        bench_levenshtein_one_to_one(env, median_bytes);
-        bench_levenshtein_one_to_many(env, median_bytes, candidates);
-        bench_levenshtein_one_to_many(env, cache_resident_query_bytes(env), candidates);
+        bench_levenshtein_one_to_one(env, median_token_bytes(env));
+        bench_levenshtein_one_to_many(env, median_token_bytes(env), candidates);
     }
     catch (std::exception const &e) {
         std::fprintf(stderr, "Failed with: %s\n", e.what());

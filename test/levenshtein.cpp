@@ -102,12 +102,6 @@ static levenshtein_backend_t const levenshtein_backends[] = {
 #endif
 };
 
-/** @brief Reports which backend broke a check, then aborts through the suite's oracle. */
-static void fail_backend_(char const *name, char const *what) noexcept {
-    std::fprintf(stderr, "Backend %s failed: %s\n", name, what);
-    verify(false && "A Levenshtein backend disagreed with its known answer, its oracle, or serial");
-}
-
 /** @brief Runs one query against @p candidates through @p distances of @p name, asserting each answer matches
  *         @p expected. */
 static void check_levenshtein_distances_(char const *name, std::string const &query,
@@ -320,15 +314,6 @@ void test_levenshtein_safety() {
 #pragma endregion // Safety
 
 #pragma region Drivers
-
-/** @brief The row named @p name, so a reordering cannot silently hand the differential a new reference. */
-template <typename backend_type_, std::size_t count_>
-static backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], char const *name) {
-    for (std::size_t index = 0; index != count_; ++index)
-        if (std::strcmp(backends[index].name, name) == 0) return backends[index];
-    verify(false && "The backend table must carry the named reference");
-    return backends[0];
-}
 
 /**
  *  @brief Drives the oracle sweeps and the serial-versus-SIMD differential across every backend compiled here: query

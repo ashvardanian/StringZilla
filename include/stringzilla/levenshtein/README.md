@@ -11,33 +11,40 @@ Each backend also exports its building blocks for callers that own the loop nest
 
 ## Methodology
 
-Cells are throughput in billions of cell updates per second, one cell per query symbol per candidate symbol, measured with `bench/levenshtein.cpp` over the lines of the `leipzig1M.txt` corpus on one core pinned away from the scheduler, reporting the median of repeated runs.
+Cells are throughput in cell updates per second, rendered as GCUPS, one cell per query symbol per candidate symbol, measured with `bench/levenshtein.cpp` over the `xlsum.csv` corpus on one pinned core, reporting the median of repeated runs.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
-The Serial row is the reference; there is no Standard row here, since no standard library ships an edit distance.
-The one-to-one columns score a line against its successor, and the one-to-many columns score a line against the 64 lines after it, at two query widths — clamped to 64 bytes, one Myers word, and to 512 bytes, up to eight words.
+There is no Standard row here, since no standard library ships an edit distance, so the Serial row is the reference.
+The one-to-one table is keyed by verb rather than by token length, and reports the Long Lines run.
+Token length matters, so results are split into a Short Words column (tokens averaging 9 bytes) and a Long Lines column (tokens averaging 3 KB), and every query is a token clamped to 1024 bytes — the widest the device's per-thread verticals hold.
+The GPU rows come from `bench/levenshtein.cu`, score one residency wave of one candidate per thread, and carry only the one-to-many columns.
+The CUDA backend holds sixteen Myers words, so it refuses a query past 1024 bytes and its Long Lines cell stays empty until that ceiling rises.
 A `…` cell is genuinely-missing data, on a backend not yet measured on hardware that runs it.
 
 ## One to One
 
 | Backend            | `sz_levenshtein_distance` | `sz_levenshtein_distance_utf8` |
 | :----------------- | ------------------------: | -----------------------------: |
-| Serial @ Xeon4     |                         … |                              … |
+| Serial @ Xeon6     |                     27.91 |                          48.84 |
 | Serial @ Graviton4 |                         … |                              … |
 
 ## One to Many, Byte Strings
 
-| Backend            | 64 B queries | 512 B queries |
-| :----------------- | -----------: | ------------: |
-| Serial @ Xeon4     |            … |             … |
-| Haswell @ Xeon4    |            … |             … |
-| Ice Lake @ Xeon4   |            … |             … |
-| Serial @ Graviton4 |            … |             … |
+| Backend            | Short Words | Long Lines |
+| :----------------- | ----------: | ---------: |
+| Serial @ Xeon6     |        0.99 |      27.62 |
+| Haswell @ Xeon6    |        2.12 |      45.66 |
+| Ice Lake @ Xeon6   |        1.79 |      48.42 |
+| Serial @ Graviton4 |           … |          … |
+| CUDA @ SM90        |           … |          … |
+| CUDA @ SM120       |        3.59 |          … |
 
 ## One to Many, UTF-8 Strings
 
-| Backend            | 64 B queries | 512 B queries |
-| :----------------- | -----------: | ------------: |
-| Serial @ Xeon4     |            … |             … |
-| Haswell @ Xeon4    |            … |             … |
-| Ice Lake @ Xeon4   |            … |             … |
-| Serial @ Graviton4 |            … |             … |
+| Backend            | Short Words | Long Lines |
+| :----------------- | ----------: | ---------: |
+| Serial @ Xeon6     |        0.42 |      39.93 |
+| Haswell @ Xeon6    |        0.45 |      74.86 |
+| Ice Lake @ Xeon6   |        0.59 |      83.99 |
+| Serial @ Graviton4 |           … |          … |
+| CUDA @ SM90        |           … |          … |
+| CUDA @ SM120       |           … |          … |

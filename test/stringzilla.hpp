@@ -134,6 +134,30 @@
 
 #pragma endregion // Assertion Helpers
 
+#pragma region Backend Tables
+
+/**
+ *  @brief Reports which backend broke a check, then aborts through the suite's oracle.
+ *  @param[in] name The row's spelling in its family's backend table.
+ *  @param[in] what What the row disagreed with - its oracle, its known answer, or the reference backend.
+ */
+inline void fail_backend_(char const *name, char const *what) noexcept {
+    std::fprintf(stderr, "Backend %s failed: %s\n", name, what);
+    verify(false && "A backend disagreed with its oracle, its known answer, or the reference");
+}
+
+/** @brief The row named @p name, so a reordering cannot silently hand the differential a new reference. */
+template <typename backend_type_, std::size_t count_>
+backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], char const *name) {
+    for (std::size_t index = 0; index != count_; ++index)
+        if (std::strcmp(backends[index].name, name) == 0) return backends[index];
+    verify(false && "The backend table must carry the named reference");
+    return backends[0];
+}
+
+#pragma endregion // Backend Tables
+
+
 namespace ashvardanian {
 namespace stringzilla {
 namespace test {
@@ -534,27 +558,13 @@ inline char const *status_name(status_t s) noexcept {
 }
 
 inline int log_environment() {
-    std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
-    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
-    std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
-    std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
-    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICELAKE ? "yes" : "no");
-    std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
-    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEONAES ? "yes" : "no");
-    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEONSHA ? "yes" : "no");
-    std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
-    std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2AES ? "yes" : "no");
-    std::printf("- Uses WASM SIMD128: %s \n", SZ_USE_V128 ? "yes" : "no");
-    std::printf("- Uses WASM relaxed SIMD: %s \n", SZ_USE_V128RELAXED ? "yes" : "no");
-    std::printf("- Uses RISC-V RVV: %s \n", SZ_USE_RVV ? "yes" : "no");
-    std::printf("- Uses LoongArch LASX: %s \n", SZ_USE_LASX ? "yes" : "no");
-    std::printf("- Uses Power VSX: %s \n", SZ_USE_POWERVSX ? "yes" : "no");
-    std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
-    std::printf("- Uses Kepler CUDA: %s \n", SZ_USE_KEPLER ? "yes" : "no");
-    std::printf("- Uses Hopper CUDA: %s \n", SZ_USE_HOPPER ? "yes" : "no");
+    // The library already answers both questions; a wall of `SZ_USE_*` echoes only repeats the first one.
+    std::printf("- Compiled for: %s\n", sz_capabilities_to_string(sz_capabilities_comptime()));
+    std::printf("- This machine: %s\n", sz_capabilities_to_string(sz_capabilities()));
 
 #if SZ_USE_CUDA
+    // The device is asked directly rather than through `sz_capabilities`: that verb answers for the library this
+    // binary links, and `define_stringzilla_library` compiles the core without CUDA, so it reports none.
     cudaError_t cuda_error = cudaFree(0); // Force context initialization
     if (cuda_error != cudaSuccess) {
         std::printf("CUDA initialization error: %s\n", cudaGetErrorString(cuda_error));
@@ -566,9 +576,8 @@ inline int log_environment() {
         std::printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
         return 1;
     }
-    std::printf("CUDA device count: %d\n", device_count);
     if (device_count == 0) {
-        std::printf("No CUDA devices found.\n");
+        std::printf("- No CUDA device is visible - the GPU backends have nothing to run on.\n");
         return 1;
     }
     std::printf("- CUDA devices:\n");

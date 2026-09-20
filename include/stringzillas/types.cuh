@@ -90,7 +90,7 @@ inline CUcontext bind_primary_context_(int device_id, CUresult &driver_error) no
         if (driver_error == CUDA_SUCCESS) driver_error = cuDevicePrimaryCtxRetain(&context, device);
         if (driver_error != CUDA_SUCCESS) context = nullptr;
         // A machine with more devices than we provisioned for is reported, never silently aliased onto another.
-        else if (!known_contexts.try_push_back({device_id, context}))
+        else if (failed(known_contexts.push_back({device_id, context})))
             driver_error = CUDA_ERROR_INVALID_DEVICE, context = nullptr;
     }
     known_contexts_mutex.unlock();
