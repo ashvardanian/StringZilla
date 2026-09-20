@@ -46,7 +46,7 @@ extern "C" {
  *  @param[in] window_widths Window widths in bytes; a width past a text scores zero for that pair.
  *  @param[in] window_widths_count Number of widths; each candidate's scores follow that order.
  *  @param[in] alloc Where one round's scratch comes from; freed before returning.
- *  @param[out] scores @c [candidate * window_widths_count + width_index], each a @c [0,1] share.
+ *  @param[out] scores The @b [candidates,window_widths] shares, each in @c [0,1], row-major.
  *
  *  @retval sz_success_k if every score was computed.
  *  @retval sz_unexpected_dimensions_k for zero widths.
@@ -71,7 +71,7 @@ SZ_API_RUNTIME sz_status_t sz_overlap_scores(sz_cptr_t query, sz_size_t query_le
  *  @param[in] window_widths Window widths in bytes; a width past either text scores zero.
  *  @param[in] window_widths_count Number of widths; the scores follow that order.
  *  @param[in] alloc Where one round's scratch comes from; freed before returning.
- *  @param[out] scores One @c [0,1] share per width, in the order @p window_widths lists them.
+ *  @param[out] scores The @b [window_widths] shares, each in @c [0,1], in the order @p window_widths lists them.
  *
  *  @retval sz_success_k if every score was computed.
  *  @retval sz_unexpected_dimensions_k for zero widths.

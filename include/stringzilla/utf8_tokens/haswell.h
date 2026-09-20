@@ -426,7 +426,6 @@ SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_haswell_( //
 
 #pragma region Enumerate delimiters
 
-/** @copydoc sz_utf8_delimiters */
 SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //

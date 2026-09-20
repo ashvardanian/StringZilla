@@ -183,6 +183,21 @@ endif ()
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
 set(STRINGZILLA_IS_MAIN_PROJECT ${PROJECT_IS_TOP_LEVEL})
 
+# Enable the in-repo Git hooks. Git will not auto-run hooks shipped inside a clone (that would let any cloned repo
+# execute code), so point `core.hooksPath` at `.githooks` here - configuring the build arms the `pre-commit` checks.
+# Skipped when built as a subproject or without `.git` (tarball / export builds).
+if (STRINGZILLA_IS_MAIN_PROJECT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND git config core.hooksPath .githooks
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        RESULT_VARIABLE STRINGZILLA_HOOKS_STATUS
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if (STRINGZILLA_HOOKS_STATUS EQUAL 0)
+        message(STATUS "stringzilla: Git hooks enabled (core.hooksPath -> .githooks)")
+    endif ()
+endif ()
+
 # CUDA auto-enables only for top-level builds: a parent project consuming StringZilla for strings
 # should not sprout CUDA targets just because `nvcc` happens to be on the PATH.
 set(STRINGZILLA_DEFAULT_CUDA OFF)

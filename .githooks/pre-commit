@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # StringZilla pre-commit hook - house-style guards over staged C/C++/CUDA (and the public headers).
-# Install once per clone with:  git config core.hooksPath .githooks
+# Configuring the build arms these checks; install by hand with:  git config core.hooksPath .githooks
 # Bypass in a genuine emergency with:  git commit --no-verify
 
 set -u
@@ -344,6 +344,32 @@ if [ -n "$coverage_assert" ]; then
 pre-commit: coverage assertion over a randomized sweep - a low SZ_TESTS_MULTIPLIER makes this a coin
 flip rather than a test. Walk the pool deterministically, or pin with '// sz-nolint: coverage':
 $coverage_assert
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
+# `@copydoc` in a per-ISA backend file. Every backend is declared once in its family header, beside the verb
+# it copies from, and that is where the link belongs. Repeating it at the definition delivers the same sentence
+# twice and tells a reader nothing about the backend in front of them - say what this one does differently, or
+# say nothing and let the declaration speak. Keyed on the filename stem, so a family header never trips it.
+copydoc_backend=$(git diff --cached --name-only --diff-filter=ACM -- 'include/*/*/*.h' 'include/*/*/*.cuh' \
+  | while IFS= read -r file; do
+      case "${file##*/}" in
+      serial.* | westmere.* | goldmont.* | haswell.* | skylake.* | icelake.* | \
+        neon.* | neonaes.* | neonsha.* | sve.* | sve2.* | sve2aes.* | \
+        cuda.* | kepler.* | hopper.* | blackwell.* | rocm.* | cdna.* | \
+        lasx.* | powervsx.* | rvv.* | rvvcrypto.* | v128.* | v128relaxed.*) ;;
+      *) continue ;;
+      esac
+      git diff --cached --no-color -U0 -- "$file" | grep -E '^\+' | grep -vE '^\+\+\+' \
+        | grep -E '@copydoc' | sed "s,^,$file: ," || true
+    done)
+if [ -n "$copydoc_backend" ]; then
+  cat >&2 <<EOF
+pre-commit: @copydoc in a per-ISA backend file - the family header already documents the declaration.
+Leave a note on what this backend does differently, or nothing at all:
+$copydoc_backend
 Bypass with --no-verify only if intentional.
 EOF
   exit 1

@@ -60,7 +60,7 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_window_power(sz_size_t width) {
  *  count is the child ordinal. The leaves lead the arena and every branch level follows, the root last.
  */
 typedef struct sz_overlap_btree_t {
-    sz_u32_t const *nodes; /**< @c [node * sz_overlap_keys_per_node_k + key], leaves first, keys sign-flipped. */
+    sz_u32_t const *nodes; /**< The @b [nodes,keys_per_node] slots, leaves first, keys sign-flipped. */
     sz_size_t levels;      /**< Levels including the leaves. */
     /** First node of each level, the root at index zero; a level holds only the nodes its leaves need. */
     sz_size_t level_bases[sz_overlap_btree_levels_max_k];

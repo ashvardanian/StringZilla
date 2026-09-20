@@ -389,7 +389,6 @@ SZ_HELPER_INLINE __mmask64 sz_delimiter_valid_starts_icelake_( //
 
 #pragma region Forward driver
 
-/** @copydoc sz_utf8_delimiters */
 SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(   //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //

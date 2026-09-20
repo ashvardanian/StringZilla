@@ -279,7 +279,6 @@ SZ_HELPER_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svui
     return svcmpne_n_u8(pg_b8x, svand_u8_x(pg_b8x, bitmap_u8x, bit_mask_u8x), 0);
 }
 
-/** @copydoc sz_utf8_delimiters */
 SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2(      //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
