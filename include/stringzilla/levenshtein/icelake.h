@@ -70,16 +70,17 @@ SZ_API_COMPTIME void sz_levenshtein_u64x8_step_icelake(sz_levenshtein_u64x8_stat
                                                        sz_size_t words, sz_levenshtein_query_t const *query,
                                                        sz_u512_vec_t classes_vec) {
     enum { ternary_xor_or_k = 0xBE, ternary_or_nor_k = 0xF1 };
-    sz_u512_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec;
+    sz_u512_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec, rows_vec;
     last_symbol_bit_vec.zmm = _mm512_set1_epi64((long long)sz_levenshtein_last_symbol_bit_(query->length));
     last_symbol_shift_vec.zmm = _mm512_set1_epi64((long long)sz_levenshtein_last_symbol_shift_(query->length));
     positive_carry_vec.zmm = _mm512_set1_epi64(1);
     negative_carry_vec.zmm = _mm512_setzero_si512();
+    rows_vec.zmm = _mm512_mul_epu32(classes_vec.zmm, _mm512_set1_epi64((long long)query->stride));
     for (sz_size_t word = 0; word != words; ++word) {
         sz_levenshtein_u64x8_vertical_icelake_t *const vertical = verticals + word;
         sz_u512_vec_t equality_vec, vertical_carry_vec, matched_vec, sum_vec, diagonal_vec;
         sz_u512_vec_t horizontal_positive_vec, horizontal_negative_vec, next_positive_vec, next_negative_vec;
-        equality_vec.zmm = _mm512_i64gather_epi64(classes_vec.zmm, query->masks + word * query->classes, 8);
+        equality_vec.zmm = _mm512_i64gather_epi64(rows_vec.zmm, query->masks + word, 8);
         vertical_carry_vec.zmm = _mm512_or_si512(equality_vec.zmm, vertical->negative_vec.zmm);
         matched_vec.zmm = _mm512_or_si512(equality_vec.zmm, negative_carry_vec.zmm);
         sum_vec.zmm = _mm512_add_epi64(_mm512_and_si512(matched_vec.zmm, vertical->positive_vec.zmm),
@@ -132,13 +133,14 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x8_score_icelake(sz_levenshtein_u64x
 }
 
 /** The byte stripe for eight candidates: eight positions per eight loads and three rounds of unpacks while every
- *  candidate has eight bytes left, one byte at a time after that; emits @c sz_u8_t classes. */
+ *  candidate has eight bytes left, one byte at a time after that; emits the @c sz_u8_t class of every byte. */
 SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x8_stripe_icelake(sz_levenshtein_query_t const *query,
                                                              sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                              sz_size_t candidates, sz_size_t *cursors,
                                                              sz_u64_t *symbol_counts, sz_size_t stripe_start,
                                                              sz_size_t positions, void *stripe_classes) {
-    sz_unused_(query), sz_unused_(symbol_counts), sz_unused_(stripe_start), sz_unused_(candidates);
+    sz_unused_(symbol_counts), sz_unused_(stripe_start), sz_unused_(candidates);
+    sz_u8_t const *const byte_to_class = query->byte_to_class;
     sz_u8_t *const classes = (sz_u8_t *)stripe_classes;
     sz_size_t filled = 0;
     for (sz_size_t candidate = 0; candidate != 8; ++candidate)
@@ -152,7 +154,8 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x8_stripe_icelake(sz_levenshtein_quer
         if (!all_full) break;
         sz_u128_vec_t candidates_vec[8], pairs_vec[4], quads_vec[4];
         for (sz_size_t candidate = 0; candidate != 8; ++candidate)
-            candidates_vec[candidate].xmm = _mm_loadl_epi64((__m128i const *)(texts[candidate] + cursors[candidate]));
+            candidates_vec[candidate].xmm = _mm_cvtsi64_si128((long long)sz_levenshtein_octet_classes_(
+                byte_to_class, sz_u64_load(texts[candidate] + cursors[candidate]).u64));
         for (sz_size_t pair = 0; pair != 4; ++pair)
             pairs_vec[pair].xmm = _mm_unpacklo_epi8(candidates_vec[2 * pair].xmm, candidates_vec[2 * pair + 1].xmm);
         quads_vec[0].xmm = _mm_unpacklo_epi16(pairs_vec[0].xmm, pairs_vec[1].xmm);
@@ -171,7 +174,7 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x8_stripe_icelake(sz_levenshtein_quer
     for (; position != filled; ++position)
         for (sz_size_t candidate = 0; candidate != 8; ++candidate)
             classes[position * 8 + candidate] = cursors[candidate] < byte_counts[candidate]
-                                                    ? (sz_u8_t)texts[candidate][cursors[candidate]++]
+                                                    ? byte_to_class[(sz_u8_t)texts[candidate][cursors[candidate]++]]
                                                     : 0;
     return filled;
 }
@@ -260,17 +263,19 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_icelake(sz_cptr_t query_tex
     enum { registers_k = sz_levenshtein_icelake_u64x8_registers_per_position_k };
     if (query_length == 0) return sz_levenshtein_byte_counts_as_distances_(candidates, distances), sz_success_k;
     sz_size_t const words = sz_levenshtein_query_words(query_length);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(query_length);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * 256, 0, registers_k, words, sizeof(sz_levenshtein_u64x8_vertical_icelake_t));
+        mask_entries, sz_levenshtein_byte_classes_k, 0, registers_k, words,
+        sizeof(sz_levenshtein_u64x8_vertical_icelake_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
+    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x8_vertical_icelake_t *const verticals =
-        (sz_levenshtein_u64x8_vertical_icelake_t *)((sz_ptr_t)masks +
-                                                    sz_levenshtein_align64_(words * 256 * sizeof(sz_u64_t)));
+        (sz_levenshtein_u64x8_vertical_icelake_t *)(byte_to_class + sz_levenshtein_byte_classes_k);
 
     sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(query_text, query_length, masks, &query);
+    sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
     sz_levenshtein_icelake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_stripe_icelake,
                                             sz_levenshtein_classes_u8_k, verticals, distances);
     alloc->free(scratch, scratch_bytes, alloc->handle);
@@ -285,12 +290,13 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_icelake(sz_cptr_t quer
     if (runes == 0) return sz_levenshtein_rune_counts_as_distances_(candidates, distances), sz_success_k;
     sz_size_t const words = sz_levenshtein_query_words(runes);
     sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(runes);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries_utf8(runes);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * (runes + 1), pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x8_vertical_icelake_t));
+        mask_entries, 0, pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x8_vertical_icelake_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(words * (runes + 1) * sizeof(sz_u64_t));
+    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x8_vertical_icelake_t *const verticals =
         (sz_levenshtein_u64x8_vertical_icelake_t *)(pages + sz_levenshtein_align64_(pages_bytes));
 

@@ -75,17 +75,17 @@ SZ_API_COMPTIME void sz_levenshtein_u64x4_step_haswell(sz_levenshtein_u64x4_stat
                                                        sz_levenshtein_u64x4_vertical_haswell_t *verticals,
                                                        sz_size_t words, sz_levenshtein_query_t const *query,
                                                        sz_u256_vec_t classes_vec) {
-    sz_u256_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec;
+    sz_u256_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec, rows_vec;
     last_symbol_bit_vec.ymm = _mm256_set1_epi64x((long long)sz_levenshtein_last_symbol_bit_(query->length));
     last_symbol_shift_vec.ymm = _mm256_set1_epi64x((long long)sz_levenshtein_last_symbol_shift_(query->length));
     positive_carry_vec.ymm = _mm256_set1_epi64x(1);
     negative_carry_vec.ymm = _mm256_setzero_si256();
+    rows_vec.ymm = _mm256_mul_epu32(classes_vec.ymm, _mm256_set1_epi64x((long long)query->stride));
     for (sz_size_t word = 0; word != words; ++word) {
         sz_levenshtein_u64x4_vertical_haswell_t *const vertical = verticals + word;
         sz_u256_vec_t equality_vec, vertical_carry_vec, matched_vec, sum_vec, diagonal_vec;
         sz_u256_vec_t horizontal_positive_vec, horizontal_negative_vec, next_positive_vec, next_negative_vec;
-        equality_vec.ymm = _mm256_i64gather_epi64((long long const *)(query->masks + word * query->classes),
-                                                  classes_vec.ymm, 8);
+        equality_vec.ymm = _mm256_i64gather_epi64((long long const *)(query->masks + word), rows_vec.ymm, 8);
         vertical_carry_vec.ymm = _mm256_or_si256(equality_vec.ymm, vertical->negative_vec.ymm);
         matched_vec.ymm = _mm256_or_si256(equality_vec.ymm, negative_carry_vec.ymm);
         sum_vec.ymm = _mm256_add_epi64(_mm256_and_si256(matched_vec.ymm, vertical->positive_vec.ymm),
@@ -137,13 +137,14 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x4_score_haswell(sz_levenshtein_u64x
 }
 
 /** The byte stripe for four candidates: eight positions per four loads and three unpacks while every candidate has
- *  eight bytes left, one byte at a time after that; emits @c sz_u8_t classes. */
+ *  eight bytes left, one byte at a time after that; emits the @c sz_u8_t class of every byte. */
 SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x4_stripe_haswell(sz_levenshtein_query_t const *query,
                                                              sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                              sz_size_t candidates, sz_size_t *cursors,
                                                              sz_u64_t *symbol_counts, sz_size_t stripe_start,
                                                              sz_size_t positions, void *stripe_classes) {
-    sz_unused_(query), sz_unused_(symbol_counts), sz_unused_(stripe_start), sz_unused_(candidates);
+    sz_unused_(symbol_counts), sz_unused_(stripe_start), sz_unused_(candidates);
+    sz_u8_t const *const byte_to_class = query->byte_to_class;
     sz_u8_t *const classes = (sz_u8_t *)stripe_classes;
     sz_size_t filled = 0;
     for (sz_size_t candidate = 0; candidate != 4; ++candidate)
@@ -155,10 +156,14 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x4_stripe_haswell(sz_levenshtein_quer
             cursors[3] + 8 > byte_counts[3])
             break;
         sz_u128_vec_t candidate0_vec, candidate1_vec, candidate2_vec, candidate3_vec, pair01_vec, pair23_vec;
-        candidate0_vec.xmm = _mm_loadl_epi64((__m128i const *)(texts[0] + cursors[0]));
-        candidate1_vec.xmm = _mm_loadl_epi64((__m128i const *)(texts[1] + cursors[1]));
-        candidate2_vec.xmm = _mm_loadl_epi64((__m128i const *)(texts[2] + cursors[2]));
-        candidate3_vec.xmm = _mm_loadl_epi64((__m128i const *)(texts[3] + cursors[3]));
+        candidate0_vec.xmm = _mm_cvtsi64_si128(
+            (long long)sz_levenshtein_octet_classes_(byte_to_class, sz_u64_load(texts[0] + cursors[0]).u64));
+        candidate1_vec.xmm = _mm_cvtsi64_si128(
+            (long long)sz_levenshtein_octet_classes_(byte_to_class, sz_u64_load(texts[1] + cursors[1]).u64));
+        candidate2_vec.xmm = _mm_cvtsi64_si128(
+            (long long)sz_levenshtein_octet_classes_(byte_to_class, sz_u64_load(texts[2] + cursors[2]).u64));
+        candidate3_vec.xmm = _mm_cvtsi64_si128(
+            (long long)sz_levenshtein_octet_classes_(byte_to_class, sz_u64_load(texts[3] + cursors[3]).u64));
         pair01_vec.xmm = _mm_unpacklo_epi8(candidate0_vec.xmm, candidate1_vec.xmm);
         pair23_vec.xmm = _mm_unpacklo_epi8(candidate2_vec.xmm, candidate3_vec.xmm);
         _mm_storeu_si128((__m128i *)(classes + position * 4), _mm_unpacklo_epi16(pair01_vec.xmm, pair23_vec.xmm));
@@ -168,7 +173,7 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x4_stripe_haswell(sz_levenshtein_quer
     for (; position != filled; ++position)
         for (sz_size_t candidate = 0; candidate != 4; ++candidate)
             classes[position * 4 + candidate] = cursors[candidate] < byte_counts[candidate]
-                                                    ? (sz_u8_t)texts[candidate][cursors[candidate]++]
+                                                    ? byte_to_class[(sz_u8_t)texts[candidate][cursors[candidate]++]]
                                                     : 0;
     return filled;
 }
@@ -257,17 +262,19 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_haswell(sz_cptr_t query_tex
     enum { registers_k = sz_levenshtein_haswell_u64x4_registers_per_position_k };
     if (query_length == 0) return sz_levenshtein_byte_counts_as_distances_(candidates, distances), sz_success_k;
     sz_size_t const words = sz_levenshtein_query_words(query_length);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(query_length);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * 256, 0, registers_k, words, sizeof(sz_levenshtein_u64x4_vertical_haswell_t));
+        mask_entries, sz_levenshtein_byte_classes_k, 0, registers_k, words,
+        sizeof(sz_levenshtein_u64x4_vertical_haswell_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
+    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x4_vertical_haswell_t *const verticals =
-        (sz_levenshtein_u64x4_vertical_haswell_t *)((sz_ptr_t)masks +
-                                                    sz_levenshtein_align64_(words * 256 * sizeof(sz_u64_t)));
+        (sz_levenshtein_u64x4_vertical_haswell_t *)(byte_to_class + sz_levenshtein_byte_classes_k);
 
     sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(query_text, query_length, masks, &query);
+    sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
     sz_levenshtein_haswell_u64x4_distances_(&query, candidates, sz_levenshtein_u8x4_stripe_haswell,
                                             sz_levenshtein_classes_u8_k, verticals, distances);
     alloc->free(scratch, scratch_bytes, alloc->handle);
@@ -282,12 +289,13 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_haswell(sz_cptr_t quer
     if (runes == 0) return sz_levenshtein_rune_counts_as_distances_(candidates, distances), sz_success_k;
     sz_size_t const words = sz_levenshtein_query_words(runes);
     sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(runes);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries_utf8(runes);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * (runes + 1), pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x4_vertical_haswell_t));
+        mask_entries, 0, pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x4_vertical_haswell_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(words * (runes + 1) * sizeof(sz_u64_t));
+    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x4_vertical_haswell_t *const verticals =
         (sz_levenshtein_u64x4_vertical_haswell_t *)(pages + sz_levenshtein_align64_(pages_bytes));
 

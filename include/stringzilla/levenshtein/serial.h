@@ -19,32 +19,74 @@ extern "C" {
 #pragma region Generic Public Helpers
 
 /** One query's bit-parallel state, prepared once and read by every candidate: every symbol maps to a class that
- *  indexes the match masks, a view over caller-owned memory of @c words × classes entries with no length ceiling. */
+ *  indexes the match masks, a view over caller-owned memory of @c classes × stride entries with no length ceiling. */
 typedef struct sz_levenshtein_query_t {
-    sz_u64_t const *masks;     /**< Row @c word * classes + class, bit @c i: symbol @c word * 64 + i has that class. */
-    sz_u16_t const *page_rows; /**< UTF-8 only: class row per 256-rune page, zero for a page the query lacks. */
-    sz_size_t classes;         /**< Mask rows per word: 256 for bytes, distinct runes plus one for UTF-8. */
-    sz_size_t length;          /**< In symbols: bytes, or runes for a UTF-8 query. */
+    sz_u64_t const *masks;        /**< Row @c class * stride + word, bit @c i: symbol @c word * 64 + i is that class. */
+    sz_u8_t const *byte_to_class; /**< Bytes only: the mask row each of the 256 byte values reads. */
+    sz_u16_t const *page_rows;    /**< UTF-8 only: class row per 256-rune page, zero for a page the query lacks. */
+    sz_u32_t const *class_rows;   /**< UTF-8 only: the rows the page table indexes, 256 classes each. */
+    sz_size_t classes;            /**< Mask rows: one per distinct symbol, plus the row an absent symbol reads. */
+    sz_size_t stride;             /**< Words from one class's row to the next: the query's words, warp padded. */
+    sz_size_t length;             /**< In symbols: bytes, or runes for a UTF-8 query. */
 } sz_levenshtein_query_t;
 
-/** Words a query of @p length symbols spans - the mask table holds that many rows of @c classes entries. */
+/** Byte values, which is both the byte-to-class map's length and the most classes a byte query can take. */
+enum { sz_levenshtein_byte_classes_k = 256 };
+
+/** Words a class row is padded to: a warp's width, so a lane reading its own word skewed owns its own bank. */
+enum { sz_levenshtein_words_stride_k = 32 };
+
+/** Words a query of @p length symbols spans - every class's row holds that many, one bit per symbol. */
 SZ_HELPER_AUTO sz_size_t sz_levenshtein_query_words(sz_size_t length) { return (length + 63) / 64; }
+
+/** Words from one class's mask row to the next: the query's words, padded to @c sz_levenshtein_words_stride_k. */
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_query_stride(sz_size_t length) {
+    return (sz_levenshtein_query_words(length) + sz_levenshtein_words_stride_k - 1) &
+           ~(sz_size_t)(sz_levenshtein_words_stride_k - 1);
+}
+
+/** Mask entries a byte query of @p length bytes can take: a row per distinct byte, plus the absent byte's row. */
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_query_mask_entries(sz_size_t length) {
+    return sz_min_of_two(length + 1, (sz_size_t)sz_levenshtein_byte_classes_k) * sz_levenshtein_query_stride(length);
+}
+
+/** Mask entries a UTF-8 query of @p runes runes can take: a row per distinct rune, plus the absent rune's row. */
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_query_mask_entries_utf8(sz_size_t runes) {
+    return (runes + 1) * sz_levenshtein_query_stride(runes);
+}
 
 /**
  *  @brief Builds the match masks of the byte string @p text into @p masks and points @p query at them.
- *  @param[out] masks Caller-owned, @c sz_levenshtein_query_words(length) × 256 entries; zeroed here.
+ *  @param[out] masks Caller-owned, @c sz_levenshtein_query_mask_entries(length) entries, of which the first
+ *      @c classes × stride are written.
+ *  @param[out] byte_to_class Caller-owned, @c sz_levenshtein_byte_classes_k entries; the stripes read it.
  *  @retval sz_unexpected_dimensions_k for an empty query, whose distance is every candidate's length.
  */
 SZ_HELPER_AUTO sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
-                                                        sz_levenshtein_query_t *query) {
+                                                        sz_u8_t *byte_to_class, sz_levenshtein_query_t *query) {
     if (length == 0) return sz_unexpected_dimensions_k;
-    sz_size_t const words = sz_levenshtein_query_words(length);
-    for (sz_size_t entry = 0; entry != words * 256; ++entry) masks[entry] = 0;
-    for (sz_size_t position = 0; position != length; ++position)
-        masks[(position >> 6) * 256 + (sz_u8_t)text[position]] |= (sz_u64_t)1 << (position & 63);
+    // First pass: flag the byte values the query holds, then hand them dense classes in byte order. The row past
+    // them is what a byte the query lacks reads, and a query holding all 256 values has no such byte.
+    for (sz_size_t byte = 0; byte != sz_levenshtein_byte_classes_k; ++byte) byte_to_class[byte] = 0;
+    for (sz_size_t position = 0; position != length; ++position) byte_to_class[(sz_u8_t)text[position]] = 1;
+    sz_size_t distinct = 0;
+    for (sz_size_t byte = 0; byte != sz_levenshtein_byte_classes_k; ++byte) distinct += byte_to_class[byte];
+    sz_size_t const classes = sz_min_of_two(distinct + 1, (sz_size_t)sz_levenshtein_byte_classes_k);
+    for (sz_size_t byte = 0, next_class = 0; byte != sz_levenshtein_byte_classes_k; ++byte)
+        byte_to_class[byte] = byte_to_class[byte] ? (sz_u8_t)next_class++ : (sz_u8_t)(classes - 1);
+    // Second pass: the row stride is known, so every byte sets its bit in its class's row.
+    sz_size_t const stride = sz_levenshtein_query_stride(length);
+    for (sz_size_t entry = 0; entry != classes * stride; ++entry) masks[entry] = 0;
+    for (sz_size_t position = 0; position != length; ++position) {
+        sz_u64_t *const row = masks + (sz_size_t)byte_to_class[(sz_u8_t)text[position]] * stride;
+        row[position >> 6] |= (sz_u64_t)1 << (position & 63);
+    }
     query->masks = masks;
+    query->byte_to_class = byte_to_class;
     query->page_rows = SZ_NULL;
-    query->classes = 256;
+    query->class_rows = SZ_NULL;
+    query->classes = classes;
+    query->stride = stride;
     query->length = length;
     return sz_success_k;
 }
@@ -57,12 +99,12 @@ sz_static_assert(sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) % 64 == 0,
 
 /** The class rows behind the page table: 256 classes per row, row zero all zeros. */
 SZ_API_COMPTIME sz_u32_t const *sz_levenshtein_utf8_class_rows_(sz_levenshtein_query_t const *query) {
-    return (sz_u32_t const *)(query->page_rows + sz_levenshtein_utf8_pages_k);
+    return query->class_rows;
 }
 
 /** The class of @p rune under a UTF-8 @p query: two loads through the page table, zero for a rune the query lacks. */
-SZ_API_COMPTIME sz_u32_t sz_levenshtein_utf8_class(sz_levenshtein_query_t const *query, sz_rune_t rune) {
-    return sz_levenshtein_utf8_class_rows_(query)[(sz_size_t)query->page_rows[rune >> 8] * 256 + (rune & 255)];
+SZ_HELPER_AUTO sz_u32_t sz_levenshtein_utf8_class(sz_levenshtein_query_t const *query, sz_rune_t rune) {
+    return query->class_rows[(sz_size_t)query->page_rows[rune >> 8] * 256 + (rune & 255)];
 }
 
 /** Runes in @p text under the decoding the family applies - one @c U+FFFD per ill-formed byte, the grid the
@@ -83,8 +125,8 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_utf8_pages_bytes(sz_size_t runes) {
 /**
  *  @brief Builds the match masks of the UTF-8 string @p text into @p masks, its rune classes into the page
  *      table at @p pages, and points @p query at both. Classes follow first appearance.
- *  @param[out] masks Caller-owned, @c sz_levenshtein_query_words(runes) × (runes + 1) entries for a query of
- *      @c runes runes, of which the first @c words × classes are written.
+ *  @param[out] masks Caller-owned, @c sz_levenshtein_query_mask_entries_utf8(runes) entries for a query of
+ *      @c runes runes, of which the first @c classes × stride are written.
  *  @param[out] pages Caller-owned, @c sz_levenshtein_utf8_pages_bytes(runes) bytes, cache-line aligned.
  *  @retval sz_unexpected_dimensions_k for an empty query, whose distance is every candidate's rune count.
  */
@@ -107,16 +149,20 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_query_prepare_utf8(sz_cptr_t text, sz
         if (*class_slot == 0) *class_slot = (sz_u32_t)classes++;
     }
     query->page_rows = page_rows;
+    query->class_rows = class_rows;
     query->classes = classes;
-    sz_size_t const words = sz_levenshtein_query_words(count);
-    for (sz_size_t entry = 0; entry != words * classes; ++entry) masks[entry] = 0;
+    sz_size_t const stride = sz_levenshtein_query_stride(count);
+    for (sz_size_t entry = 0; entry != classes * stride; ++entry) masks[entry] = 0;
     // Second pass: the row stride is known, so every rune sets its bit in its class's row.
     sz_size_t rune_index = 0;
     for (sz_size_t position = 0; position < length; ++rune_index) {
         sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
-        masks[(rune_index >> 6) * classes + sz_levenshtein_utf8_class(query, rune)] |= (sz_u64_t)1 << (rune_index & 63);
+        sz_u64_t *const row = masks + (sz_size_t)sz_levenshtein_utf8_class(query, rune) * stride;
+        row[rune_index >> 6] |= (sz_u64_t)1 << (rune_index & 63);
     }
     query->masks = masks;
+    query->byte_to_class = SZ_NULL;
+    query->stride = stride;
     query->length = count;
     return sz_success_k;
 }
@@ -147,12 +193,13 @@ typedef sz_size_t (*sz_levenshtein_stripe_t)(sz_levenshtein_query_t const *query
                                              sz_u64_t *symbol_counts, sz_size_t stripe_start, sz_size_t positions,
                                              void *stripe_classes);
 
-/** The byte stripe: every byte is its own class, and the byte count is the symbol count. */
+/** The byte stripe: every byte takes the class the query gave it, and the byte count is the symbol count. */
 SZ_API_COMPTIME sz_size_t sz_levenshtein_stripe(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
                                                 sz_u64_t const *byte_counts, sz_size_t candidates, sz_size_t *cursors,
                                                 sz_u64_t *symbol_counts, sz_size_t stripe_start, sz_size_t positions,
                                                 void *stripe_classes) {
-    sz_unused_(query), sz_unused_(symbol_counts), sz_unused_(stripe_start);
+    sz_unused_(symbol_counts), sz_unused_(stripe_start);
+    sz_u8_t const *const byte_to_class = query->byte_to_class;
     sz_u32_t *const classes = (sz_u32_t *)stripe_classes;
     sz_size_t filled = 0;
     for (sz_size_t candidate = 0; candidate != candidates; ++candidate)
@@ -160,9 +207,10 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_stripe(sz_levenshtein_query_t const *qu
                                sz_min_of_two(positions, (sz_size_t)byte_counts[candidate] - cursors[candidate]));
     for (sz_size_t position = 0; position != filled; ++position)
         for (sz_size_t candidate = 0; candidate != candidates; ++candidate)
-            classes[position * candidates + candidate] = cursors[candidate] < byte_counts[candidate]
-                                                             ? (sz_u8_t)texts[candidate][cursors[candidate]++]
-                                                             : 0;
+            classes[position * candidates + candidate] =
+                cursors[candidate] < byte_counts[candidate]
+                    ? byte_to_class[(sz_u8_t)texts[candidate][cursors[candidate]++]]
+                    : 0;
     return filled;
 }
 
@@ -201,13 +249,22 @@ SZ_HELPER_AUTO sz_size_t sz_levenshtein_last_symbol_shift_(sz_size_t length) { r
 /** Rounds @p bytes up to a cache line, so every scratch area below starts aligned. */
 SZ_HELPER_AUTO sz_size_t sz_levenshtein_align64_(sz_size_t bytes) { return (bytes + 63) & ~(sz_size_t)63; }
 
-/** Scratch one call takes from the allocator: the mask table, the UTF-8 page table if any, then the
- *  verticals, each starting on a cache line. */
-SZ_HELPER_AUTO sz_size_t sz_levenshtein_distances_scratch_bytes_(sz_size_t mask_entries, sz_size_t pages_bytes,
+/** Scratch one call takes from the allocator: the mask table, the byte-class map or the UTF-8 page table,
+ *  then the verticals, each starting on a cache line. */
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_distances_scratch_bytes_(sz_size_t mask_entries, sz_size_t map_bytes,
+                                                                 sz_size_t pages_bytes,
                                                                  sz_size_t registers_per_position, sz_size_t words,
                                                                  sz_size_t vertical_bytes) {
-    return 64 + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t)) + sz_levenshtein_align64_(pages_bytes) +
-           registers_per_position * words * vertical_bytes;
+    return 64 + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t)) + map_bytes +
+           sz_levenshtein_align64_(pages_bytes) + registers_per_position * words * vertical_bytes;
+}
+
+/** Eight bytes as their eight classes, packed the same way, so a stripe's byte transposes stay byte transposes. */
+SZ_HELPER_INLINE sz_u64_t sz_levenshtein_octet_classes_(sz_u8_t const *byte_to_class, sz_u64_t octet) {
+    sz_u64_t classes = 0;
+    for (sz_size_t byte = 0; byte != 8; ++byte)
+        classes |= (sz_u64_t)byte_to_class[(sz_u8_t)(octet >> (byte * 8))] << (byte * 8);
+    return classes;
 }
 
 /** Every candidate's distance to an empty byte query is its byte count. */
@@ -260,13 +317,13 @@ SZ_HELPER_AUTO void sz_levenshtein_u64x1_init_serial(sz_levenshtein_u64x1_state_
 SZ_HELPER_AUTO void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1_state_serial_t *state,
                                                      sz_levenshtein_u64x1_vertical_serial_t *verticals, sz_size_t words,
                                                      sz_levenshtein_query_t const *query, sz_u32_t class_id) {
-    sz_u64_t const *const masks = query->masks + class_id;
+    sz_u64_t const *const masks = query->masks + (sz_size_t)class_id * query->stride;
     sz_u64_t const last_symbol_bit = sz_levenshtein_last_symbol_bit_(query->length);
     // The top boundary: the row above the first word is one edit higher than the cell to its left.
     sz_u64_t positive_carry = 1, negative_carry = 0;
     for (sz_size_t word = 0; word != words; ++word) {
         sz_levenshtein_u64x1_vertical_serial_t *const vertical = verticals + word;
-        sz_u64_t const equality = masks[word * query->classes];
+        sz_u64_t const equality = masks[word];
         sz_u64_t const vertical_carry = equality | vertical->negative;
         sz_u64_t const matched = equality | negative_carry;
         sz_u64_t const diagonal = (((matched & vertical->positive) + vertical->positive) ^ vertical->positive) |
@@ -401,21 +458,22 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_serial(sz_cptr_t a, sz_size_
     }
     if (a_length == 0) return *distance = b_length, sz_success_k;
     sz_size_t const words = sz_levenshtein_query_words(a_length);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(a_length);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * 256, 0, 1, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
+        mask_entries, sz_levenshtein_byte_classes_k, 0, 1, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
+    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x1_vertical_serial_t *const verticals =
-        (sz_levenshtein_u64x1_vertical_serial_t *)((sz_ptr_t)masks +
-                                                   sz_levenshtein_align64_(words * 256 * sizeof(sz_u64_t)));
+        (sz_levenshtein_u64x1_vertical_serial_t *)(byte_to_class + sz_levenshtein_byte_classes_k);
 
     sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(a, a_length, masks, &query);
+    sz_levenshtein_query_prepare(a, a_length, masks, byte_to_class, &query);
     sz_levenshtein_u64x1_state_serial_t state;
     sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
     for (sz_size_t position = 0; position != b_length; ++position)
-        sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, (sz_u8_t)b[position]);
+        sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, byte_to_class[(sz_u8_t)b[position]]);
     *distance = state.score;
     alloc->free(scratch, scratch_bytes, alloc->handle);
     return sz_success_k;
@@ -434,12 +492,13 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_utf8_serial(sz_cptr_t a, sz_
     sz_size_t const a_runes = sz_levenshtein_utf8_runes(a, a_length);
     sz_size_t const words = sz_levenshtein_query_words(a_runes);
     sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(a_runes);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries_utf8(a_runes);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * (a_runes + 1), pages_bytes, 1, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
+        mask_entries, 0, pages_bytes, 1, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(words * (a_runes + 1) * sizeof(sz_u64_t));
+    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x1_vertical_serial_t *const verticals =
         (sz_levenshtein_u64x1_vertical_serial_t *)(pages + sz_levenshtein_align64_(pages_bytes));
 
@@ -461,17 +520,19 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_serial(sz_cptr_t query_text
     enum { registers_k = sz_levenshtein_serial_u64x1_registers_per_position_k };
     if (query_length == 0) return sz_levenshtein_byte_counts_as_distances_(candidates, distances), sz_success_k;
     sz_size_t const words = sz_levenshtein_query_words(query_length);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(query_length);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * 256, 0, registers_k, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
+        mask_entries, sz_levenshtein_byte_classes_k, 0, registers_k, words,
+        sizeof(sz_levenshtein_u64x1_vertical_serial_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
+    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x1_vertical_serial_t *const verticals =
-        (sz_levenshtein_u64x1_vertical_serial_t *)((sz_ptr_t)masks +
-                                                   sz_levenshtein_align64_(words * 256 * sizeof(sz_u64_t)));
+        (sz_levenshtein_u64x1_vertical_serial_t *)(byte_to_class + sz_levenshtein_byte_classes_k);
 
     sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(query_text, query_length, masks, &query);
+    sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
     sz_levenshtein_serial_u64x1_distances_(&query, candidates, sz_levenshtein_stripe, verticals, distances);
     alloc->free(scratch, scratch_bytes, alloc->handle);
     return sz_success_k;
@@ -485,12 +546,13 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_serial(sz_cptr_t query
     if (runes == 0) return sz_levenshtein_rune_counts_as_distances_(candidates, distances), sz_success_k;
     sz_size_t const words = sz_levenshtein_query_words(runes);
     sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(runes);
+    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries_utf8(runes);
     sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        words * (runes + 1), pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
+        mask_entries, 0, pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
     sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
     if (!scratch) return sz_bad_alloc_k;
     sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(words * (runes + 1) * sizeof(sz_u64_t));
+    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
     sz_levenshtein_u64x1_vertical_serial_t *const verticals =
         (sz_levenshtein_u64x1_vertical_serial_t *)(pages + sz_levenshtein_align64_(pages_bytes));
 
