@@ -63,7 +63,8 @@ SZ_API_RUNTIME sz_status_t sz_levenshtein_distance(sz_cptr_t a, sz_size_t a_leng
  *  @retval @c sz_bad_alloc_k if the temporary storage could not be allocated.
  *  @pre The @p distances array must fit at least @c candidates->count entries.
  *  @note Selects the fastest implementation at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
- *  @sa sz_levenshtein_distances_serial, sz_levenshtein_distances_haswell, sz_levenshtein_distances_icelake
+ *  @sa sz_levenshtein_distances_serial, sz_levenshtein_distances_haswell, sz_levenshtein_distances_skylake,
+ *      sz_levenshtein_distances_icelake
  */
 SZ_API_RUNTIME sz_status_t sz_levenshtein_distances(sz_cptr_t query, sz_size_t query_length,
                                                     sz_sequence_t const *candidates, sz_memory_allocator_t *alloc,
@@ -105,7 +106,7 @@ SZ_API_RUNTIME sz_status_t sz_levenshtein_distance_utf8(sz_cptr_t a, sz_size_t a
  *  @pre The @p distances array must fit at least @c candidates->count entries.
  *  @note Selects the fastest implementation at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
  *  @sa sz_levenshtein_distances_utf8_serial, sz_levenshtein_distances_utf8_haswell,
- *      sz_levenshtein_distances_utf8_icelake
+ *      sz_levenshtein_distances_utf8_skylake
  */
 SZ_API_RUNTIME sz_status_t sz_levenshtein_distances_utf8(sz_cptr_t query, sz_size_t query_length,
                                                          sz_sequence_t const *candidates, sz_memory_allocator_t *alloc,
@@ -139,15 +140,22 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_haswell(sz_cptr_t quer
                                                                   sz_memory_allocator_t *alloc, sz_size_t *distances);
 #endif
 
+#if SZ_USE_SKYLAKE
+/** @copydoc sz_levenshtein_distances */
+SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_skylake(sz_cptr_t query, sz_size_t query_length,
+                                                             sz_sequence_t const *candidates,
+                                                             sz_memory_allocator_t *alloc, sz_size_t *distances);
+/** @copydoc sz_levenshtein_distances_utf8 */
+SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_skylake(sz_cptr_t query, sz_size_t query_length,
+                                                                  sz_sequence_t const *candidates,
+                                                                  sz_memory_allocator_t *alloc, sz_size_t *distances);
+#endif
+
 #if SZ_USE_ICELAKE
 /** @copydoc sz_levenshtein_distances */
 SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_icelake(sz_cptr_t query, sz_size_t query_length,
                                                              sz_sequence_t const *candidates,
                                                              sz_memory_allocator_t *alloc, sz_size_t *distances);
-/** @copydoc sz_levenshtein_distances_utf8 */
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_icelake(sz_cptr_t query, sz_size_t query_length,
-                                                                  sz_sequence_t const *candidates,
-                                                                  sz_memory_allocator_t *alloc, sz_size_t *distances);
 #endif
 
 #if SZ_USE_CUDA
@@ -218,6 +226,8 @@ SZ_API_RUNTIME sz_status_t sz_levenshtein_distances(sz_cptr_t query, sz_size_t q
     return sz_levenshtein_distances_cuda(query, query_length, candidates, alloc, distances);
 #elif SZ_USE_ICELAKE
     return sz_levenshtein_distances_icelake(query, query_length, candidates, alloc, distances);
+#elif SZ_USE_SKYLAKE
+    return sz_levenshtein_distances_skylake(query, query_length, candidates, alloc, distances);
 #elif SZ_USE_HASWELL
     return sz_levenshtein_distances_haswell(query, query_length, candidates, alloc, distances);
 #else

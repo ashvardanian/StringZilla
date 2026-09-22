@@ -23,11 +23,16 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps) 
     }
 #endif
 
-#if SZ_USE_ICELAKE
-    if (caps & sz_cap_icelake_k) {
-        impl->levenshtein_distances = sz_levenshtein_distances_icelake;
-        impl->levenshtein_distances_utf8 = sz_levenshtein_distances_utf8_icelake;
+#if SZ_USE_SKYLAKE
+    if (caps & sz_cap_skylake_k) {
+        impl->levenshtein_distances = sz_levenshtein_distances_skylake;
+        impl->levenshtein_distances_utf8 = sz_levenshtein_distances_utf8_skylake;
     }
+#endif
+
+#if SZ_USE_ICELAKE
+    // Runes never reach the byte lanes, so the rune verb stays whatever the Skylake tier bound above.
+    if (caps & sz_cap_icelake_k) { impl->levenshtein_distances = sz_levenshtein_distances_icelake; }
 #endif
 
     // Last, so a device outranks every CPU tier. Only the byte verbs: the rune path prepares a page table the

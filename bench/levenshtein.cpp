@@ -135,6 +135,11 @@ void bench_levenshtein_one_to_many(environment_t const &env, std::size_t query_b
                 levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {env, query_bytes, candidates})
         .log(base);
 #endif
+#if SZ_USE_SKYLAKE
+    bench_unary(env, "sz_levenshtein_distances_skylake" + suffix, validator,
+                levenshtein_distances_from_sz<sz_levenshtein_distances_skylake> {env, query_bytes, candidates})
+        .log(base);
+#endif
 #if SZ_USE_ICELAKE
     bench_unary(env, "sz_levenshtein_distances_icelake" + suffix, validator,
                 levenshtein_distances_from_sz<sz_levenshtein_distances_icelake> {env, query_bytes, candidates})

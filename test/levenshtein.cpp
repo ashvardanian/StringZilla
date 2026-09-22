@@ -97,8 +97,11 @@ static levenshtein_backend_t const levenshtein_backends[] = {
 #if SZ_USE_HASWELL
     {"haswell", sz_levenshtein_distances_haswell, sz_levenshtein_distances_utf8_haswell},
 #endif
+#if SZ_USE_SKYLAKE
+    {"skylake", sz_levenshtein_distances_skylake, sz_levenshtein_distances_utf8_skylake},
+#endif
 #if SZ_USE_ICELAKE
-    {"icelake", sz_levenshtein_distances_icelake, sz_levenshtein_distances_utf8_icelake},
+    {"icelake", sz_levenshtein_distances_icelake, sz_levenshtein_distances_utf8_skylake},
 #endif
 };
 
