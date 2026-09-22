@@ -59,7 +59,7 @@ SZ_HELPER_AUTO sz_size_t sz_levenshtein_query_mask_entries_utf8(sz_size_t runes)
  *  @brief Builds the match masks of the byte string @p text into @p masks and points @p query at them.
  *  @param[out] masks Caller-owned, @c sz_levenshtein_query_mask_entries(length) entries, of which the first
  *      @c classes × stride are written.
- *  @param[out] byte_to_class Caller-owned, @c sz_levenshtein_byte_classes_k entries; the stripes read it.
+ *  @param[out] byte_to_class Caller-owned, @c sz_levenshtein_byte_classes_k entries; the transposes read it.
  *  @retval sz_unexpected_dimensions_k for an empty query, whose distance is every candidate's length.
  */
 SZ_HELPER_AUTO sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
@@ -167,10 +167,10 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_query_prepare_utf8(sz_cptr_t text, sz
     return sz_success_k;
 }
 
-/** Positions one stripe spans: a candidate's classes are emitted this many at a time, transposed. */
-enum { sz_levenshtein_positions_per_stripe_k = 256 };
+/** Positions one transpose spans: a candidate's classes are emitted this many at a time, transposed. */
+enum { sz_levenshtein_positions_per_transpose_k = 256 };
 
-/** @brief How wide a stripe's class ids are: bytes are their own classes and fit a byte, rune classes need four. */
+/** @brief How wide a transpose's class ids are: bytes are their own classes and fit a byte, rune classes need four. */
 typedef enum sz_levenshtein_classes_width_t {
     sz_levenshtein_classes_u8_k = 1,
     sz_levenshtein_classes_u32_k = 4,
@@ -178,29 +178,30 @@ typedef enum sz_levenshtein_classes_width_t {
 
 /**
  *  @brief Emits the next @p positions symbols of each of @p candidates texts as class ids, transposed: the symbol
- *      at stripe position @c p of candidate @c c lands at @c p · candidates + c, and a candidate past its text
+ *      at transpose position @c p of candidate @c c lands at @c p · candidates + c, and a candidate past its text
  *      reads as class zero. Returns the positions filled - below @p positions only once every candidate has run dry.
  *
- *  A candidate that runs dry inside the stripe writes its exact symbol count to @p symbol_counts; until then the
+ *  A candidate that runs dry inside the transpose writes its exact symbol count to @p symbol_counts; until then the
  *  entry keeps the byte count the caller seeded.
  *
  *  @param[inout] cursors Byte offsets into each candidate's text, advanced past what was emitted.
- *  @param[in] stripe_start The absolute position of the stripe's first symbol.
- *  @param[out] stripe_classes @c positions × candidates class ids, @c sz_u32_t for the stripes here.
+ *  @param[in] transpose_start The absolute position of the transpose's first symbol.
+ *  @param[out] transpose_classes @c positions × candidates class ids, @c sz_u32_t for the transposes here.
  */
-typedef sz_size_t (*sz_levenshtein_stripe_t)(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
-                                             sz_u64_t const *byte_counts, sz_size_t candidates, sz_size_t *cursors,
-                                             sz_u64_t *symbol_counts, sz_size_t stripe_start, sz_size_t positions,
-                                             void *stripe_classes);
-
-/** The byte stripe: every byte takes the class the query gave it, and the byte count is the symbol count. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_stripe(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
+typedef sz_size_t (*sz_levenshtein_transpose_t)(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
                                                 sz_u64_t const *byte_counts, sz_size_t candidates, sz_size_t *cursors,
-                                                sz_u64_t *symbol_counts, sz_size_t stripe_start, sz_size_t positions,
-                                                void *stripe_classes) {
-    sz_unused_(symbol_counts), sz_unused_(stripe_start);
+                                                sz_u64_t *symbol_counts, sz_size_t transpose_start, sz_size_t positions,
+                                                void *transpose_classes);
+
+/** The byte transpose: every byte takes the class the query gave it, and the byte count is the symbol count. */
+SZ_API_COMPTIME sz_size_t sz_levenshtein_transpose(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
+                                                   sz_u64_t const *byte_counts, sz_size_t candidates,
+                                                   sz_size_t *cursors, sz_u64_t *symbol_counts,
+                                                   sz_size_t transpose_start, sz_size_t positions,
+                                                   void *transpose_classes) {
+    sz_unused_(symbol_counts), sz_unused_(transpose_start);
     sz_u8_t const *const byte_to_class = query->byte_to_class;
-    sz_u32_t *const classes = (sz_u32_t *)stripe_classes;
+    sz_u32_t *const classes = (sz_u32_t *)transpose_classes;
     sz_size_t filled = 0;
     for (sz_size_t candidate = 0; candidate != candidates; ++candidate)
         filled = sz_max_of_two(filled,
@@ -214,13 +215,13 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_stripe(sz_levenshtein_query_t const *qu
     return filled;
 }
 
-/** The UTF-8 stripe: every rune decodes and takes the class the query gave it. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_stripe_utf8(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
-                                                     sz_u64_t const *byte_counts, sz_size_t candidates,
-                                                     sz_size_t *cursors, sz_u64_t *symbol_counts,
-                                                     sz_size_t stripe_start, sz_size_t positions,
-                                                     void *stripe_classes) {
-    sz_u32_t *const classes = (sz_u32_t *)stripe_classes;
+/** The UTF-8 transpose: every rune decodes and takes the class the query gave it. */
+SZ_API_COMPTIME sz_size_t sz_levenshtein_transpose_utf8(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
+                                                        sz_u64_t const *byte_counts, sz_size_t candidates,
+                                                        sz_size_t *cursors, sz_u64_t *symbol_counts,
+                                                        sz_size_t transpose_start, sz_size_t positions,
+                                                        void *transpose_classes) {
+    sz_u32_t *const classes = (sz_u32_t *)transpose_classes;
     sz_size_t filled = 0;
     for (sz_size_t candidate = 0; candidate != candidates; ++candidate) {
         sz_size_t emitted = 0;
@@ -228,7 +229,7 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_stripe_utf8(sz_levenshtein_query_t cons
             classes[emitted * candidates + candidate] = sz_levenshtein_utf8_class(
                 query, sz_utf8_next_rune_(texts[candidate], byte_counts[candidate], cursors + candidate));
         if (emitted != 0 && cursors[candidate] == byte_counts[candidate])
-            symbol_counts[candidate] = stripe_start + emitted;
+            symbol_counts[candidate] = transpose_start + emitted;
         for (sz_size_t position = emitted; position != positions; ++position)
             classes[position * candidates + candidate] = 0;
         filled = sz_max_of_two(filled, emitted);
@@ -278,7 +279,7 @@ SZ_HELPER_AUTO sz_size_t sz_levenshtein_distances_scratch_bytes_(sz_size_t mask_
            sz_levenshtein_align64_(pages_bytes) + registers_per_position * words * vertical_bytes;
 }
 
-/** Eight bytes as their eight classes, packed the same way, so a stripe's byte transposes stay byte transposes. */
+/** Eight bytes as their eight classes, packed the same way, so a transpose's byte transposes stay byte transposes. */
 SZ_HELPER_INLINE sz_u64_t sz_levenshtein_octet_classes_(sz_u8_t const *byte_to_class, sz_u64_t octet) {
     sz_u64_t classes = 0;
     for (sz_size_t byte = 0; byte != 8; ++byte)
@@ -327,11 +328,11 @@ SZ_HELPER_AUTO void sz_levenshtein_u64x1_init_serial(sz_levenshtein_u64x1_state_
  *  @brief Advances one candidate by one symbol through exactly @p words verticals, chaining the horizontal
  *      deltas from each word into the next; the score moves on the last word.
  *
- *  There is no candidate mask: a candidate past its text keeps stepping whatever class the stripe emits, and its
+ *  There is no candidate mask: a candidate past its text keeps stepping whatever class the transpose emits, and its
  *  score is read where its text ends.
  *
  *  @param[in] words Exactly @c sz_levenshtein_query_words(query->length); a constant keeps verticals in registers.
- *  @param[in] class_id The candidate's class at this position, as the stripe emitted it.
+ *  @param[in] class_id The candidate's class at this position, as the transpose emitted it.
  */
 SZ_HELPER_AUTO void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1_state_serial_t *state,
                                                      sz_levenshtein_u64x1_vertical_serial_t *verticals, sz_size_t words,
@@ -385,18 +386,18 @@ enum {
     sz_levenshtein_serial_u64x1_registers_per_position_k = 8
 };
 
-/** Sweeps up to eight candidates through every stripe with @p words verticals each - a constant keeps a one- or
+/** Sweeps up to eight candidates through every transpose with @p words verticals each - a constant keeps a one- or
  *  two-word query's verticals register-resident. Every score is read at the position where its text ends. */
 SZ_HELPER_INLINE void sz_levenshtein_serial_u64x1_sweep_(sz_levenshtein_query_t const *shared_query,
                                                          sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                          sz_u64_t *symbol_counts, sz_size_t sweep_count,
-                                                         sz_levenshtein_stripe_t stripe,
+                                                         sz_levenshtein_transpose_t transpose,
                                                          sz_levenshtein_u64x1_vertical_serial_t *verticals,
                                                          sz_size_t words, sz_size_t *distances) {
     enum {
         candidates_per_position_k = sz_levenshtein_serial_u64x1_candidates_per_step_k *
                                     sz_levenshtein_serial_u64x1_registers_per_position_k,
-        positions_per_stripe_k = sz_levenshtein_positions_per_stripe_k,
+        positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k,
     };
     // A local copy: nothing stored through the verticals can alias it, so the step keeps its fields in registers.
     sz_levenshtein_query_t const local_query = *shared_query;
@@ -405,38 +406,38 @@ SZ_HELPER_INLINE void sz_levenshtein_serial_u64x1_sweep_(sz_levenshtein_query_t 
     sz_levenshtein_u64x1_state_serial_t states[candidates_per_position_k];
     for (sz_size_t candidate = 0; candidate != candidates_per_position_k; ++candidate)
         sz_levenshtein_u64x1_init_serial(&states[candidate], verticals + candidate * words, words, query);
-    sz_u32_t stripe_classes[positions_per_stripe_k][candidates_per_position_k];
+    sz_u32_t transpose_classes[positions_per_transpose_k][candidates_per_position_k];
     sz_size_t end = 0;
-    for (sz_size_t stripe_start = 0, filled = positions_per_stripe_k; filled == positions_per_stripe_k;
-         stripe_start += filled) {
-        filled = stripe(query, texts, byte_counts, candidates_per_position_k, cursors, symbol_counts, stripe_start,
-                        positions_per_stripe_k, &stripe_classes[0][0]);
-        end = stripe_start + filled;
-        // A local copy: the stripe may refine the counts, and stores into `distances` must not force reloads.
+    for (sz_size_t transpose_start = 0, filled = positions_per_transpose_k; filled == positions_per_transpose_k;
+         transpose_start += filled) {
+        filled = transpose(query, texts, byte_counts, candidates_per_position_k, cursors, symbol_counts,
+                           transpose_start, positions_per_transpose_k, &transpose_classes[0][0]);
+        end = transpose_start + filled;
+        // A local copy: the transpose may refine the counts, and stores into `distances` must not force reloads.
         sz_u64_t counts[candidates_per_position_k];
         for (sz_size_t candidate = 0; candidate != candidates_per_position_k; ++candidate)
             counts[candidate] = symbol_counts[candidate];
         for (sz_size_t position = 0; position != filled; ++position)
             for (sz_size_t candidate = 0; candidate != candidates_per_position_k; ++candidate) {
                 // A candidate past its text skips for free, and the first skipped position is where its score is read.
-                if (stripe_start + position < counts[candidate])
+                if (transpose_start + position < counts[candidate])
                     sz_levenshtein_u64x1_step_serial(&states[candidate], verticals + candidate * words, words, query,
-                                                     stripe_classes[position][candidate]);
-                else if (stripe_start + position == counts[candidate] && candidate < sweep_count)
+                                                     transpose_classes[position][candidate]);
+                else if (transpose_start + position == counts[candidate] && candidate < sweep_count)
                     distances[candidate] = sz_levenshtein_u64x1_score_serial(&states[candidate], 0);
             }
     }
-    // Candidates as long as the sweep itself end at the position the stripes never reached.
+    // Candidates as long as the sweep itself end at the position the transposes never reached.
     for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
         if (symbol_counts[candidate] == end)
             distances[candidate] = sz_levenshtein_u64x1_score_serial(&states[candidate], 0);
 }
 
 /** Streams every candidate through a prepared @p query, @c candidates_per_position_k at a time, with
- *  @p stripe emitting their classes; @p verticals holds enough for a runtime word count. */
+ *  @p transpose emitting their classes; @p verticals holds enough for a runtime word count. */
 SZ_HELPER_INLINE void sz_levenshtein_serial_u64x1_distances_(sz_levenshtein_query_t const *query,
                                                              sz_sequence_t const *candidates,
-                                                             sz_levenshtein_stripe_t stripe,
+                                                             sz_levenshtein_transpose_t transpose,
                                                              sz_levenshtein_u64x1_vertical_serial_t *verticals,
                                                              sz_size_t *distances) {
     enum {
@@ -455,14 +456,14 @@ SZ_HELPER_INLINE void sz_levenshtein_serial_u64x1_distances_(sz_levenshtein_quer
             symbol_counts[candidate] = byte_counts[candidate];
         }
         if (words == 1)
-            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, stripe,
+            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
                                                resident_verticals, 1, distances + sweep_first);
         else if (words == 2)
-            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, stripe,
+            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
                                                resident_verticals, 2, distances + sweep_first);
         else
-            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, stripe, verticals,
-                                               words, distances + sweep_first);
+            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
+                                               verticals, words, distances + sweep_first);
     }
 }
 
@@ -552,7 +553,7 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_serial(sz_cptr_t query_text
 
     sz_levenshtein_query_t query;
     sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
-    sz_levenshtein_serial_u64x1_distances_(&query, candidates, sz_levenshtein_stripe, verticals, distances);
+    sz_levenshtein_serial_u64x1_distances_(&query, candidates, sz_levenshtein_transpose, verticals, distances);
     alloc->free(scratch, scratch_bytes, alloc->handle);
     return sz_success_k;
 }
@@ -577,7 +578,7 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_serial(sz_cptr_t query
 
     sz_levenshtein_query_t query;
     sz_levenshtein_query_prepare_utf8(query_text, query_length, masks, pages, &query);
-    sz_levenshtein_serial_u64x1_distances_(&query, candidates, sz_levenshtein_stripe_utf8, verticals, distances);
+    sz_levenshtein_serial_u64x1_distances_(&query, candidates, sz_levenshtein_transpose_utf8, verticals, distances);
     alloc->free(scratch, scratch_bytes, alloc->handle);
     return sz_success_k;
 }

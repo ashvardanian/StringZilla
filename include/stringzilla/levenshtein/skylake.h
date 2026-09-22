@@ -51,14 +51,14 @@ SZ_API_COMPTIME void sz_levenshtein_u64x8_init_skylake(sz_levenshtein_u64x8_stat
     }
 }
 
-/** Eight byte-wide class ids, as the byte stripe emits them, widened to gather indices. */
+/** Eight byte-wide class ids, as the byte transpose emits them, widened to gather indices. */
 SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u8_skylake(sz_u8_t const *classes) {
     sz_u512_vec_t classes_vec;
     classes_vec.zmm = _mm512_cvtepu8_epi64(_mm_loadl_epi64((__m128i const *)classes));
     return classes_vec;
 }
 
-/** Eight four-byte class ids, as the UTF-8 stripe emits them, widened to gather indices. */
+/** Eight four-byte class ids, as the UTF-8 transpose emits them, widened to gather indices. */
 SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u32_skylake(sz_u32_t const *classes) {
     sz_u512_vec_t classes_vec;
     classes_vec.zmm = _mm512_cvtepu32_epi64(_mm256_loadu_si256((__m256i const *)classes));
@@ -66,7 +66,7 @@ SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u32_skylake(sz_u32_t 
 }
 
 /** Advances eight candidates one symbol through exactly @p words verticals; the score moves on the last word.
- *  A candidate past its text keeps stepping whatever class the stripe emits; its score is read where its text ends. */
+ *  A candidate past its text keeps stepping whatever class the transpose emits; its score is read where its text ends. */
 SZ_API_COMPTIME void sz_levenshtein_u64x8_step_skylake(sz_levenshtein_u64x8_state_skylake_t *state,
                                                        sz_levenshtein_u64x8_vertical_skylake_t *verticals,
                                                        sz_size_t words, sz_levenshtein_query_t const *query,
@@ -134,16 +134,16 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x8_score_skylake(sz_levenshtein_u64x
     return state->scores_vec.u64s[candidate];
 }
 
-/** The byte stripe for eight candidates: eight positions per eight loads and three rounds of unpacks while every
+/** The byte transpose for eight candidates: eight positions per eight loads and three rounds of unpacks while every
  *  candidate has eight bytes left, one byte at a time after that; emits the @c sz_u8_t class of every byte. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x8_stripe_skylake(sz_levenshtein_query_t const *query,
-                                                             sz_cptr_t const *texts, sz_u64_t const *byte_counts,
-                                                             sz_size_t candidates, sz_size_t *cursors,
-                                                             sz_u64_t *symbol_counts, sz_size_t stripe_start,
-                                                             sz_size_t positions, void *stripe_classes) {
-    sz_unused_(symbol_counts), sz_unused_(stripe_start), sz_unused_(candidates);
+SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x8_transpose_skylake(sz_levenshtein_query_t const *query,
+                                                                sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                                sz_size_t candidates, sz_size_t *cursors,
+                                                                sz_u64_t *symbol_counts, sz_size_t transpose_start,
+                                                                sz_size_t positions, void *transpose_classes) {
+    sz_unused_(symbol_counts), sz_unused_(transpose_start), sz_unused_(candidates);
     sz_u8_t const *const byte_to_class = query->byte_to_class;
-    sz_u8_t *const classes = (sz_u8_t *)stripe_classes;
+    sz_u8_t *const classes = (sz_u8_t *)transpose_classes;
     sz_size_t filled = 0;
     for (sz_size_t candidate = 0; candidate != 8; ++candidate)
         filled = sz_max_of_two(filled,
@@ -187,16 +187,16 @@ enum {
     sz_levenshtein_skylake_u64x8_registers_per_position_k = 1
 };
 
-/** Sweeps eight candidates through every stripe; @p words is a constant, keeping short queries' verticals in registers.
- *  A candidate's score is read where its text ends; @p symbol_counts seeds as byte counts, refined by the stripe. */
+/** Sweeps eight candidates through every transpose; @p words is a constant, keeping short queries' verticals in registers.
+ *  A candidate's score is read where its text ends; @p symbol_counts seeds as byte counts, refined by the transpose. */
 SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t const *shared_query,
                                                           sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                           sz_u64_t *symbol_counts, sz_size_t sweep_count,
-                                                          sz_levenshtein_stripe_t stripe,
+                                                          sz_levenshtein_transpose_t transpose,
                                                           sz_levenshtein_classes_width_t width,
                                                           sz_levenshtein_u64x8_vertical_skylake_t *verticals,
                                                           sz_size_t words, sz_size_t *distances) {
-    enum { candidates_per_position_k = 8, positions_per_stripe_k = sz_levenshtein_positions_per_stripe_k };
+    enum { candidates_per_position_k = 8, positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k };
     // A local copy: nothing stored through the verticals can alias it, so the step keeps its fields in registers.
     sz_levenshtein_query_t const local_query = *shared_query;
     sz_levenshtein_query_t const *const query = &local_query;
@@ -204,19 +204,19 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t
     sz_u64_t unread = ((sz_u64_t)1 << sweep_count) - 1;
     sz_levenshtein_u64x8_state_skylake_t state;
     sz_levenshtein_u64x8_init_skylake(&state, verticals, words, query);
-    sz_u32_t stripe_classes[positions_per_stripe_k][candidates_per_position_k];
-    for (sz_size_t stripe_start = 0, filled = positions_per_stripe_k; filled == positions_per_stripe_k;
-         stripe_start += filled) {
-        filled = stripe(query, texts, byte_counts, candidates_per_position_k, cursors, symbol_counts, stripe_start,
-                        positions_per_stripe_k, &stripe_classes[0][0]);
-        // A local copy: the stripe may refine the counts, and stores into `distances` must not force reloads.
+    sz_u32_t transpose_classes[positions_per_transpose_k][candidates_per_position_k];
+    for (sz_size_t transpose_start = 0, filled = positions_per_transpose_k; filled == positions_per_transpose_k;
+         transpose_start += filled) {
+        filled = transpose(query, texts, byte_counts, candidates_per_position_k, cursors, symbol_counts,
+                           transpose_start, positions_per_transpose_k, &transpose_classes[0][0]);
+        // A local copy: the transpose may refine the counts, and stores into `distances` must not force reloads.
         sz_u64_t counts[candidates_per_position_k];
         for (sz_size_t candidate = 0; candidate != candidates_per_position_k; ++candidate)
             counts[candidate] = symbol_counts[candidate];
         // When scores must next be read, and whose, so a position costs one compare and retiring costs no test.
         sz_levenshtein_deadline_t deadline = sz_levenshtein_deadline_(unread, counts);
         for (sz_size_t position = 0; position != filled; ++position) {
-            if (stripe_start + position == deadline.position) {
+            if (transpose_start + position == deadline.position) {
                 // The only read of the scores by lane index, so the sweep keeps them in a register between here.
                 sz_levenshtein_u64x8_state_skylake_t const ended = state;
                 for (sz_u64_t ending = deadline.retiring; ending; ending &= ending - 1) {
@@ -226,15 +226,15 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t
                 unread &= ~deadline.retiring;
                 deadline = sz_levenshtein_deadline_(unread, counts);
             }
-            sz_u512_vec_t const classes_vec = width == sz_levenshtein_classes_u8_k
-                                                  ? sz_levenshtein_u64x8_classes_u8_skylake(
-                                                        (sz_u8_t const *)&stripe_classes[0][0] +
-                                                        position * candidates_per_position_k)
-                                                  : sz_levenshtein_u64x8_classes_u32_skylake(stripe_classes[position]);
+            sz_u512_vec_t const classes_vec =
+                width == sz_levenshtein_classes_u8_k
+                    ? sz_levenshtein_u64x8_classes_u8_skylake((sz_u8_t const *)&transpose_classes[0][0] +
+                                                              position * candidates_per_position_k)
+                    : sz_levenshtein_u64x8_classes_u32_skylake(transpose_classes[position]);
             sz_levenshtein_u64x8_step_skylake(&state, verticals, words, query, classes_vec);
         }
     }
-    // Candidates as long as the sweep itself end at the position the stripes never reached.
+    // Candidates as long as the sweep itself end at the position the transposes never reached.
     sz_levenshtein_u64x8_state_skylake_t const ended = state;
     for (; unread; unread &= unread - 1) {
         sz_size_t const candidate = (sz_size_t)_tzcnt_u32(unread);
@@ -242,10 +242,10 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t
     }
 }
 
-/** Streams every candidate through a prepared @p query, eight at a time, with @p stripe emitting their
+/** Streams every candidate through a prepared @p query, eight at a time, with @p transpose emitting their
  *  classes at @p width; @p verticals holds enough for a runtime word count. */
 SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
-    sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_stripe_t stripe,
+    sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x8_vertical_skylake_t *verticals, sz_size_t *distances) {
     enum { candidates_per_position_k = 8 };
     sz_size_t const words = sz_levenshtein_query_words(query->length);
@@ -260,13 +260,13 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
             symbol_counts[candidate] = byte_counts[candidate];
         }
         if (words == 1)
-            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, stripe, width,
+            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 resident_verticals, 1, distances + sweep_first);
         else if (words == 2)
-            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, stripe, width,
+            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 resident_verticals, 2, distances + sweep_first);
         else
-            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, stripe, width,
+            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 verticals, words, distances + sweep_first);
     }
 }
@@ -290,7 +290,7 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_skylake(sz_cptr_t query_tex
 
     sz_levenshtein_query_t query;
     sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
-    sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_stripe_skylake,
+    sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_transpose_skylake,
                                             sz_levenshtein_classes_u8_k, verticals, distances);
     alloc->free(scratch, scratch_bytes, alloc->handle);
     return sz_success_k;
@@ -316,7 +316,7 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_skylake(sz_cptr_t quer
 
     sz_levenshtein_query_t query;
     sz_levenshtein_query_prepare_utf8(query_text, query_length, masks, pages, &query);
-    sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_stripe_utf8,
+    sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_transpose_utf8,
                                             sz_levenshtein_classes_u32_k, verticals, distances);
     alloc->free(scratch, scratch_bytes, alloc->handle);
     return sz_success_k;

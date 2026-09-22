@@ -76,7 +76,7 @@ SZ_API_COMPTIME void sz_levenshtein_u8x64_init_icelake(sz_levenshtein_u8x64_stat
     vertical->negative_vec.zmm = _mm512_setzero_si512();
 }
 
-/** Sixty-four byte-wide class ids, as the byte stripe emits them, already the indices the mask table takes. */
+/** Sixty-four byte-wide class ids, as the byte transpose emits them, already the indices the mask table takes. */
 SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u8x64_classes_u8_icelake(sz_u8_t const *classes) {
     sz_u512_vec_t classes_vec;
     classes_vec.zmm = _mm512_loadu_si512((void const *)classes);
@@ -84,7 +84,7 @@ SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u8x64_classes_u8_icelake(sz_u8_t co
 }
 
 /** Advances sixty-four candidates one symbol through one byte-wide Myers word, the masks read by a single permute.
- *  A candidate past its text keeps stepping whatever class the stripe emits; its score is read where its text ends. */
+ *  A candidate past its text keeps stepping whatever class the transpose emits; its score is read where its text ends. */
 SZ_API_COMPTIME void sz_levenshtein_u8x64_step_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
                                                        sz_levenshtein_u8x64_vertical_icelake_t *vertical,
                                                        sz_levenshtein_u8x64_query_icelake_t const *packed,
@@ -123,18 +123,18 @@ SZ_API_COMPTIME void sz_levenshtein_u8x64_flush_icelake(sz_levenshtein_u8x64_sta
     state->deltas_vec.zmm = _mm512_setzero_si512();
 }
 
-/** The byte stripe for sixty-four candidates, transposed as every stripe is: position @c p of candidate @c c lands
+/** The byte transpose for sixty-four candidates, transposed as every transpose is: position @c p of candidate @c c lands
  *  at @c p * 64 + c. The bytes are staged first and classed a whole position at a time, so a class id costs a lane
  *  of a permute rather than a scalar load; a lane past its text pads with a zero byte, classed like any other. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x64_stripe_icelake(sz_levenshtein_query_t const *query,
-                                                              sz_cptr_t const *texts, sz_u64_t const *byte_counts,
-                                                              sz_size_t candidates, sz_size_t *cursors,
-                                                              sz_u64_t *symbol_counts, sz_size_t stripe_start,
-                                                              sz_size_t positions, void *stripe_classes) {
+SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x64_transpose_icelake(sz_levenshtein_query_t const *query,
+                                                                 sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                                 sz_size_t candidates, sz_size_t *cursors,
+                                                                 sz_u64_t *symbol_counts, sz_size_t transpose_start,
+                                                                 sz_size_t positions, void *transpose_classes) {
     enum { lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
-    sz_unused_(symbol_counts), sz_unused_(stripe_start), sz_unused_(candidates);
+    sz_unused_(symbol_counts), sz_unused_(transpose_start), sz_unused_(candidates);
     sz_u8_t const *const byte_to_class = query->byte_to_class;
-    sz_u8_t *const classes = (sz_u8_t *)stripe_classes;
+    sz_u8_t *const classes = (sz_u8_t *)transpose_classes;
     sz_size_t filled = 0;
     for (sz_size_t candidate = 0; candidate != lanes_k; ++candidate)
         filled = sz_max_of_two(filled,
@@ -163,17 +163,17 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x64_stripe_icelake(sz_levenshtein_que
     return filled;
 }
 
-/** Sweeps sixty-four candidates of a query of at most eight symbols through every stripe. Between a retirement and
+/** Sweeps sixty-four candidates of a query of at most eight symbols through every transpose. Between a retirement and
  *  a flush the step loop carries no scalar work, so a run of positions costs only its permutes and logic. */
 SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t const *shared_query,
                                                           sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                           sz_size_t sweep_count, sz_size_t *distances) {
     enum {
         candidates_per_position_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k,
-        positions_per_stripe_k = sz_levenshtein_positions_per_stripe_k,
+        positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k,
         positions_per_flush_k = sz_levenshtein_icelake_u8x64_positions_per_flush_k
     };
-    // A local copy: nothing stored through the stripe can alias it, so the step keeps the packed query in registers.
+    // A local copy: nothing stored through the transpose can alias it, so the step keeps the packed query in registers.
     sz_levenshtein_query_t const local_query = *shared_query;
     sz_levenshtein_u8x64_query_icelake_t packed;
     sz_levenshtein_u8x64_pack_icelake(&local_query, &packed);
@@ -187,25 +187,25 @@ SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t
     sz_levenshtein_u8x64_vertical_icelake_t vertical;
     sz_levenshtein_u8x64_init_icelake(&state, &vertical);
     sz_size_t positions_since_flush = 0;
-    sz_u8_t stripe_classes[positions_per_stripe_k][candidates_per_position_k];
-    for (sz_size_t stripe_start = 0, filled = positions_per_stripe_k; filled == positions_per_stripe_k;
-         stripe_start += filled) {
-        filled = sz_levenshtein_u8x64_stripe_icelake(&local_query, texts, byte_counts, candidates_per_position_k,
-                                                     cursors, SZ_NULL, stripe_start, positions_per_stripe_k,
-                                                     &stripe_classes[0][0]);
+    sz_u8_t transpose_classes[positions_per_transpose_k][candidates_per_position_k];
+    for (sz_size_t transpose_start = 0, filled = positions_per_transpose_k; filled == positions_per_transpose_k;
+         transpose_start += filled) {
+        filled = sz_levenshtein_u8x64_transpose_icelake(&local_query, texts, byte_counts, candidates_per_position_k,
+                                                        cursors, SZ_NULL, transpose_start, positions_per_transpose_k,
+                                                        &transpose_classes[0][0]);
         // When scores must next be read, and whose, so a position costs one compare and retiring costs no test.
         sz_levenshtein_deadline_t deadline = sz_levenshtein_deadline_(unread, byte_counts);
         for (sz_size_t position = 0; position != filled;) {
             sz_size_t const run_length = sz_min_of_two(
                 sz_min_of_two(filled - position, positions_per_flush_k - positions_since_flush),
-                deadline.position - (stripe_start + position));
+                deadline.position - (transpose_start + position));
             for (sz_size_t taken = 0; taken != run_length; ++taken, ++position)
                 sz_levenshtein_u8x64_step_icelake(&state, &vertical, &packed,
-                                                  sz_levenshtein_u8x64_classes_u8_icelake(stripe_classes[position]));
+                                                  sz_levenshtein_u8x64_classes_u8_icelake(transpose_classes[position]));
             positions_since_flush += run_length;
-            if (positions_since_flush == positions_per_flush_k || stripe_start + position == deadline.position)
+            if (positions_since_flush == positions_per_flush_k || transpose_start + position == deadline.position)
                 sz_levenshtein_u8x64_flush_icelake(&state, scores), positions_since_flush = 0;
-            if (stripe_start + position != deadline.position) continue;
+            if (transpose_start + position != deadline.position) continue;
             for (sz_u64_t ending = deadline.retiring; ending; ending &= ending - 1) {
                 sz_size_t const candidate = (sz_size_t)_tzcnt_u64(ending);
                 distances[candidate] = scores[candidate];
@@ -214,7 +214,7 @@ SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t
             deadline = sz_levenshtein_deadline_(unread, byte_counts);
         }
     }
-    // Candidates as long as the sweep itself end at the position the stripes never reached.
+    // Candidates as long as the sweep itself end at the position the transposes never reached.
     sz_levenshtein_u8x64_flush_icelake(&state, scores);
     for (; unread; unread &= unread - 1) {
         sz_size_t const candidate = (sz_size_t)_tzcnt_u64(unread);

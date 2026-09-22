@@ -18,7 +18,7 @@
  *  the query lacks it. Strings of any length are accepted on either side.
  *
  *  The building blocks are public as well, for callers that own the loop nest: the query preparation and the
- *  stripes on the query side, and per backend a @c state, a @c vertical, and the @c init / @c step / @c any_active
+ *  transposes on the query side, and per backend a @c state, a @c vertical, and the @c init / @c step / @c any_active
  *  / @c score verbs over them, named by candidates per step - @c sz_levenshtein_u64x4_step_haswell and so on.
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_H_
