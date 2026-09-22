@@ -198,7 +198,7 @@ SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t
     sz_levenshtein_query_t const local_query = *shared_query;
     sz_levenshtein_query_t const *const query = &local_query;
     sz_size_t cursors[candidates_per_position_k] = {0};
-    unsigned unread = (1u << sweep_count) - 1u;
+    sz_u64_t unread = ((sz_u64_t)1 << sweep_count) - 1;
     sz_levenshtein_u64x4_state_haswell_t state;
     sz_levenshtein_u64x4_init_haswell(&state, verticals, words, query);
     sz_u32_t stripe_classes[positions_per_stripe_k][candidates_per_position_k];
@@ -206,12 +206,22 @@ SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t
          stripe_start += filled) {
         filled = stripe(query, texts, byte_counts, candidates_per_position_k, cursors, symbol_counts, stripe_start,
                         positions_per_stripe_k, &stripe_classes[0][0]);
+        // A local copy: the stripe may refine the counts, and stores into `distances` must not force reloads.
+        sz_u64_t counts[candidates_per_position_k];
+        for (sz_size_t candidate = 0; candidate != candidates_per_position_k; ++candidate)
+            counts[candidate] = symbol_counts[candidate];
+        // When scores must next be read, and whose, so a position costs one compare and retiring costs no test.
+        sz_levenshtein_deadline_t deadline = sz_levenshtein_deadline_(unread, counts);
         for (sz_size_t position = 0; position != filled; ++position) {
-            for (unsigned pending = unread; pending; pending &= pending - 1) {
-                sz_size_t const candidate = (sz_size_t)sz_u32_ctz(pending);
-                if (stripe_start + position != symbol_counts[candidate]) continue;
-                distances[candidate] = sz_levenshtein_u64x4_score_haswell(&state, candidate),
-                unread &= ~(1u << candidate);
+            if (stripe_start + position == deadline.position) {
+                // The only read of the scores by lane index, so the sweep keeps them in a register between here.
+                sz_levenshtein_u64x4_state_haswell_t const ended = state;
+                for (sz_u64_t ending = deadline.retiring; ending; ending &= ending - 1) {
+                    sz_size_t const candidate = (sz_size_t)_tzcnt_u64(ending);
+                    distances[candidate] = sz_levenshtein_u64x4_score_haswell(&ended, candidate);
+                }
+                unread &= ~deadline.retiring;
+                deadline = sz_levenshtein_deadline_(unread, counts);
             }
             sz_u256_vec_t const classes_vec = width == sz_levenshtein_classes_u8_k
                                                   ? sz_levenshtein_u64x4_classes_u8_haswell(
@@ -221,9 +231,11 @@ SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t
             sz_levenshtein_u64x4_step_haswell(&state, verticals, words, query, classes_vec);
         }
     }
+    // Candidates as long as the sweep itself end at the position the stripes never reached.
+    sz_levenshtein_u64x4_state_haswell_t const ended = state;
     for (; unread; unread &= unread - 1) {
-        sz_size_t const candidate = (sz_size_t)sz_u32_ctz(unread);
-        distances[candidate] = sz_levenshtein_u64x4_score_haswell(&state, candidate);
+        sz_size_t const candidate = (sz_size_t)_tzcnt_u32(unread);
+        distances[candidate] = sz_levenshtein_u64x4_score_haswell(&ended, candidate);
     }
 }
 

@@ -246,6 +246,25 @@ SZ_HELPER_AUTO sz_u64_t sz_levenshtein_last_symbol_bit_(sz_size_t length) { retu
 /** The shift that turns that bit into a one. */
 SZ_HELPER_AUTO sz_size_t sz_levenshtein_last_symbol_shift_(sz_size_t length) { return (length - 1) & 63; }
 
+/** @brief When a sweep must next read scores, and whose: one compare a position, and a walk with no test. */
+typedef struct sz_levenshtein_deadline_t {
+    sz_size_t position; /**< The earliest position, in the sweep's own coordinates, at which a candidate ends. */
+    sz_u64_t retiring;  /**< The candidates whose text ends at that position, one bit each, at most one per lane. */
+} sz_levenshtein_deadline_t;
+
+/** The next deadline over the candidates still @p unread, whose symbol counts @p counts holds. */
+SZ_HELPER_INLINE sz_levenshtein_deadline_t sz_levenshtein_deadline_(sz_u64_t unread, sz_u64_t const *counts) {
+    sz_levenshtein_deadline_t deadline;
+    deadline.position = SZ_SIZE_MAX, deadline.retiring = 0;
+    for (sz_u64_t pending = unread; pending; pending &= pending - 1) {
+        sz_size_t const candidate = (sz_size_t)sz_u64_ctz(pending);
+        sz_size_t const ends_at = (sz_size_t)counts[candidate];
+        if (ends_at < deadline.position) deadline.position = ends_at, deadline.retiring = (sz_u64_t)1 << candidate;
+        else if (ends_at == deadline.position) deadline.retiring |= (sz_u64_t)1 << candidate;
+    }
+    return deadline;
+}
+
 /** Rounds @p bytes up to a cache line, so every scratch area below starts aligned. */
 SZ_HELPER_AUTO sz_size_t sz_levenshtein_align64_(sz_size_t bytes) { return (bytes + 63) & ~(sz_size_t)63; }
 
