@@ -293,6 +293,11 @@
 #endif
 
 /**
+ *  @brief Largest value that fits into 8 bits.
+ */
+#define SZ_U8_MAX (255u)
+
+/**
  *  @brief Largest value that fits into 16 bits.
  */
 #define SZ_U16_MAX (65535u)
@@ -1270,6 +1275,16 @@ typedef sz_status_t (*sz_overlap_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_si
 /** @brief Signature of `sz_overlap_scores`. */
 typedef sz_status_t (*sz_overlap_scores_t)(sz_cptr_t, sz_size_t, struct sz_sequence_t const *, sz_size_t const *,
                                            sz_size_t, sz_memory_allocator_t *, sz_f32_t *);
+
+/** How matches that share bytes resolve: reported in full, or thinned to a leftmost run. */
+typedef enum sz_substrings_overlap_policy_t {
+    /** Every match of every needle, including ones that share bytes and ones nested in others. */
+    sz_substrings_overlapping_k = 0,
+    /** Matches sharing no bytes: earliest start, then longest span, then lower needle index. */
+    sz_substrings_leftmost_longest_k = 1,
+    /** Matches sharing no bytes: earliest start, then lower needle index, however long the rival. */
+    sz_substrings_leftmost_first_k = 2,
+} sz_substrings_overlap_policy_t;
 
 #pragma endregion
 
