@@ -1558,11 +1558,20 @@ SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views
 #endif
 
 /**
- *  @brief Cache-line width, that will affect the execution of some algorithms,
- *         like equality checks and relative order computing.
+ *  @brief The one cache-line width the library assumes, in bytes: the stride of equality checks and
+ *         relative-order heuristics, and the smallest heap buffer a growing string asks for.
+ *         Derived from the target; define it from outside to override.
  */
-#define SZ_CACHE_LINE_WIDTH (64)   // bytes
-#define SZ_MAX_REGISTER_WIDTH (64) // bytes
+#if !defined(SZ_CACHE_LINE_WIDTH)
+#if defined(__s390x__)
+#define SZ_CACHE_LINE_WIDTH (256) // bytes
+#elif defined(__APPLE__) && defined(__aarch64__)
+#define SZ_CACHE_LINE_WIDTH (128) // bytes - Apple's cores carry a whole 128-byte line
+#else
+#define SZ_CACHE_LINE_WIDTH (64) // bytes
+#endif
+#endif
+
 #define SZ_SIZE_MAX ((sz_size_t)(-1))
 #define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
 #define SZ_SSIZE_MIN ((sz_ssize_t)(-SZ_SSIZE_MAX - 1))

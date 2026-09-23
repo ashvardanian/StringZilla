@@ -426,6 +426,7 @@ SZ_API_COMPTIME sz_ptr_t sz_string_expand( //
     }
     // If we are not lucky, we need to allocate more memory.
     else {
+        // A growing string's first heap buffer is one cache line, so a few appends do not walk the allocator.
         sz_size_t next_planned_size = sz_max_of_two(SZ_CACHE_LINE_WIDTH, string_space * (sz_size_t)2);
         sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);

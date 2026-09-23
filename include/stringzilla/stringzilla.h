@@ -42,8 +42,7 @@
  *  Performance tuning:
  *
  *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level for-loops.
- *  - `SZ_CACHE_LINE_WIDTH=64` - cache-line width that affects the execution of some algorithms.
- *  - `SZ_CACHE_SIZE=1048576` - the combined size of L1d and L2 caches in bytes, affecting temporal loads.
+ *  - `SZ_CACHE_LINE_WIDTH` - cache-line width, derived from the target, that affects some algorithms and the first heap buffer of a growing string.
  *
  *  Different generations of CPUs and SIMD capabilities can be enabled or disabled with the following macros:
  *

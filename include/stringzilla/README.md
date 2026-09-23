@@ -105,15 +105,14 @@ cc main.c $(pkg-config --cflags --libs stringzilla) -o main
 The behavior of the core is controlled entirely by preprocessor macros, so you can tune it without touching the sources.
 The most important ones, mirrored from `stringzilla.h`:
 
-| Macro                     |   Default | Effect                                   |
-| :------------------------ | --------: | :--------------------------------------- |
-| `SZ_DYNAMIC_DISPATCH`     |       `0` | Compile-time vs. runtime backend choice  |
-| `SZ_DEBUG`                |       `0` | Debug assertions and logging             |
-| `SZ_AVOID_LIBC`           |       `0` | Freestanding build, no libc              |
-| `SZ_USE_MISALIGNED_LOADS` |  platform | Unaligned word loads in SWAR fallbacks   |
-| `SZ_SWAR_THRESHOLD`       |      `24` | Length below which scalar loops are used |
-| `SZ_CACHE_LINE_WIDTH`     |      `64` | Cache-line width for heuristics          |
-| `SZ_CACHE_SIZE`           | `1048576` | L1d+L2 size for non-temporal stores      |
+| Macro                     |  Default | Effect                                   |
+| :------------------------ | -------: | :--------------------------------------- |
+| `SZ_DYNAMIC_DISPATCH`     |      `0` | Compile-time vs. runtime backend choice  |
+| `SZ_DEBUG`                |      `0` | Debug assertions and logging             |
+| `SZ_AVOID_LIBC`           |      `0` | Freestanding build, no libc              |
+| `SZ_USE_MISALIGNED_LOADS` | platform | Unaligned word loads in SWAR fallbacks   |
+| `SZ_SWAR_THRESHOLD`       |     `24` | Length below which scalar loops are used |
+| `SZ_CACHE_LINE_WIDTH`     | platform | Cache-line width for heuristics          |
 
 `SZ_DYNAMIC_DISPATCH` controls dispatch: with `0` the best backend is chosen at compile time and every public function is `static`/inline, while `1` compiles all backends and selects one at runtime through a dispatch table — this is how the shared library is built.
 `SZ_AVOID_LIBC` builds freestanding without the C standard library, which disables the default `malloc`-based allocator and the `offsetof` static checks.
