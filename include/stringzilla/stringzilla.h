@@ -1,34 +1,35 @@
 /**
- *  @brief StringZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
- *         It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
- *         On modern CPUs it uses AVX2, AVX-512, NEON, SVE, SVE2, WebAssembly, RISC-V, LoongArch & Power @b SIMD,
- *         with a SWAR fallback for older CPUs.
- *         On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
- *
  *  @file include/stringzilla/stringzilla.h
  *  @author Ash Vardanian
+ *  @date August 14, 2020
+ *  @brief StringZilla is a collection of advanced string algorithms, designed for Big Data.
+ *
+ *  It is generally faster than LibC, and has a broader and cleaner interface for safer
+ *  @b length-bounded strings. On modern CPUs it uses AVX2, AVX-512, NEON, SVE, SVE2, WebAssembly,
+ *  RISC-V, LoongArch and Power @b SIMD, with a SWAR fallback for older CPUs. On @b CUDA-capable
+ *  GPUs it also provides C++ kernels for bulk processing.
  *
  *  @see StringZilla docs: https://github.com/ashvardanian/StringZilla/blob/main/README.md
  *  @see LibC string docs: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
  *
  *  @section sz_introduction Introduction
  *
- *  StringZilla is multi-language project designed for high-throughput string processing, differentiating
- *  the low-level "embeddable" mostly-C core implementation, containing:
+ *  StringZilla is multi-language project designed for high-throughput string processing,
+ *  differentiating the low-level "embeddable" mostly-C core implementation, containing:
  *
- *  - `compare.h` - byte-level comparison functions.
- *  - `memory.h` - copying, moving, and filling raw memory.
- *  - `hash.h` - hash functions and checksum algorithms.
- *  - `cipher.h` - AES-256 encryption in counter and Galois/counter modes.
- *  - `find.h` - searching for substrings and byte sets.
- *  - `sort.h` - single-threaded sorting algorithms.
- *  - `intersect.h` - intersections of unordered string sets.
- *  - `levenshtein.h` - edit distances between batches of queries and candidates, on a CPU or a CUDA device.
- *  - `overlap.h` - window overlap between batches of queries and candidates, on a CPU or a CUDA device.
- *  - `substrings.h` - multi-pattern search over a compiled vocabulary, on a CPU or a CUDA device.
- *  - `small_string.h` - "Small String Optimization" in C 99.
- *  - `stringzilla.h` - umbrella header for the core C API.
- *  - `stringzilla.hpp` - umbrella header for the core C++ API.
+ *  - @c compare.h - byte-level comparison functions.
+ *  - @c memory.h - copying, moving, and filling raw memory.
+ *  - @c hash.h - hash functions and checksum algorithms.
+ *  - @c cipher.h - AES-256 encryption in counter and Galois/counter modes.
+ *  - @c find.h - searching for substrings and byte sets.
+ *  - @c sort.h - single-threaded sorting algorithms.
+ *  - @c intersect.h - intersections of unordered string sets.
+ *  - @c levenshtein.h - edit distances between batches of queries and candidates, on a CPU or GPU.
+ *  - @c overlap.h - window overlap between batches of queries and candidates, on a CPU or GPU.
+ *  - @c substrings.h - multi-pattern search over a compiled vocabulary, on a CPU or a CUDA device.
+ *  - @c small_string.h - "Small String Optimization" in C 99.
+ *  - @c stringzilla.h - umbrella header for the core C API.
+ *  - @c stringzilla.hpp - umbrella header for the core C++ API.
  *
  *  @section sz_compilation_settings Compilation Settings
  *
@@ -36,35 +37,36 @@
  *
  *  - `SZ_DEBUG=0` - whether to enable debug assertions and logging.
  *  - `SZ_AVOID_LIBC=0` - whether to avoid including the standard C library headers.
- *  - `SZ_DYNAMIC_DISPATCH=0` - whether to use runtime dispatching of the most advanced SIMD backend.
+ *  - `SZ_DYNAMIC_DISPATCH=0` - whether to dispatch to the most advanced SIMD backend at runtime.
  *  - `SZ_USE_MISALIGNED_LOADS=0` - whether to use misaligned loads on platforms that support them.
  *
  *  Performance tuning:
  *
- *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level for-loops.
- *  - `SZ_CACHE_LINE_WIDTH` - cache-line width, derived from the target, that affects some algorithms and the first heap buffer of a growing string.
+ *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level loops.
+ *  - `SZ_CACHE_LINE_WIDTH=?` - cache-line width, derived from the target, that affects some
+ *    algorithms and the first heap buffer of a growing string.
  *
- *  Different generations of CPUs and SIMD capabilities can be enabled or disabled with the following macros:
+ *  Different generations of CPUs and SIMD capabilities can be toggled with the following macros:
  *
- *  - `SZ_USE_WESTMERE=?` - whether to use SSE4.2 & AES-NI instructions on x86_64.
+ *  - `SZ_USE_WESTMERE=?` - whether to use SSE4.2 and AES-NI instructions on x86_64.
  *  - `SZ_USE_GOLDMONT=?` - whether to use SHA-NI instructions on x86_64.
  *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
  *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
- *  - `SZ_USE_ICELAKE=?` - whether to use AVX-512 VBMI & wider AES instructions on x86_64.
- *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
- *  - `SZ_USE_NEONAES=?` - whether to use NEON AES instructions on ARM.
- *  - `SZ_USE_NEONSHA=?` - whether to use NEON SHA-2 instructions on ARM.
- *  - `SZ_USE_SVE=?` - whether to use SVE instructions on ARM.
- *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on ARM.
- *  - `SZ_USE_SVE2AES=?` - whether to use SVE2 AES instructions on ARM.
+ *  - `SZ_USE_ICELAKE=?` - whether to use AVX-512 VBMI and wider AES instructions on x86_64.
+ *  - `SZ_USE_NEON=?` - whether to use NEON instructions on Arm.
+ *  - `SZ_USE_NEONAES=?` - whether to use NEON AES instructions on Arm.
+ *  - `SZ_USE_NEONSHA=?` - whether to use NEON SHA-2 instructions on Arm.
+ *  - `SZ_USE_SVE=?` - whether to use SVE instructions on Arm.
+ *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on Arm.
+ *  - `SZ_USE_SVE2AES=?` - whether to use SVE2 AES instructions on Arm.
  *  - `SZ_USE_V128=?` - whether to use WebAssembly SIMD128 instructions.
  *  - `SZ_USE_V128RELAXED=?` - whether to use WebAssembly relaxed-SIMD instructions.
  *  - `SZ_USE_RVV=?` - whether to use RISC-V Vector (RVV 1.0) instructions.
  *  - `SZ_USE_LASX=?` - whether to use LoongArch LASX instructions.
  *  - `SZ_USE_POWERVSX=?` - whether to use IBM Power VSX instructions.
- *  - `SZ_USE_CUDA=?` - whether to use minimal CUDA capabilities on Nvidia GPUs.
- *  - `SZ_USE_KEPLER=?` - whether to use Kepler-level instructions on Nvidia GPUs.
- *  - `SZ_USE_HOPPER=?` - whether to use Hopper-level instructions on Nvidia GPUs.
+ *  - `SZ_USE_CUDA=?` - whether to use minimal CUDA capabilities on NVIDIA GPUs.
+ *  - `SZ_USE_KEPLER=?` - whether to use Kepler-level instructions on NVIDIA GPUs.
+ *  - `SZ_USE_HOPPER=?` - whether to use Hopper-level instructions on NVIDIA GPUs.
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
@@ -109,13 +111,13 @@
 #define SZ_IS_FREEBSD_ 1
 #endif
 
-/* On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API */
+/* On Apple Silicon, @c mrs is not allowed in user-space, so we need to use the @c sysctl API */
 #if defined(SZ_IS_APPLE_)
 #include <sys/sysctl.h>
 #endif
 
 /* On 64-bit RISC-V we probe HWCAP via the auxiliary vector and vector sub-extensions via the
- * Linux `riscv_hwprobe` syscall (FreeBSD lacks it and uses `elf_aux_info` for base RVV only). */
+ * Linux @c riscv_hwprobe syscall; FreeBSD lacks it and uses @c elf_aux_info for base RVV only. */
 #if defined(__riscv) && (__riscv_xlen == 64) && !SZ_AVOID_LIBC
 #if defined(SZ_IS_LINUX_)
 #include <sys/auxv.h>    // `getauxval`, `AT_HWCAP`
@@ -126,7 +128,7 @@
 #endif
 #endif
 
-/* On LoongArch and IBM POWER the SIMD extensions are likewise reported through the auxiliary vector. */
+/* On LoongArch and IBM POWER the SIMD extensions are likewise reported through the aux vector. */
 #if (defined(__loongarch__) || defined(__powerpc64__) || defined(__powerpc__)) && !SZ_AVOID_LIBC
 #if defined(SZ_IS_LINUX_)
 #include <sys/auxv.h> // `getauxval`, `AT_HWCAP`, `AT_HWCAP2`
@@ -135,11 +137,11 @@
 #endif
 #endif
 
-/* Detect POSIX extensions availability for signal handling.
- * POSIX extensions provide `sigaction`, `sigjmp_buf`, and `sigsetjmp` for safe signal handling.
- * These are needed on Linux ARM for safely testing `mrs` instruction availability.
- * `_POSIX_VERSION` only exists after `<unistd.h>` - without this include the check below was always
- * false, the `mrs` path compiled out, and Linux-Arm detection silently degraded to NEON-only. */
+/* Detect POSIX extensions availability for signal handling. POSIX extensions provide
+ * @c sigaction, @c sigjmp_buf, and @c sigsetjmp for safe signal handling, needed on Linux Arm for
+ * safely testing @c mrs instruction availability. @c _POSIX_VERSION only exists after
+ * `<unistd.h>` - without this include the check below is always false, the @c mrs path compiles
+ * out, and Linux Arm detection silently degrades to NEON-only. */
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
 #include <unistd.h>
 #endif
@@ -151,7 +153,7 @@
 #define SZ_HAS_POSIX_EXTENSIONS_ 0
 #endif
 
-/* On Windows ARM, we use IsProcessorFeaturePresent API for capability detection */
+/* On Windows Arm, we use IsProcessorFeaturePresent API for capability detection */
 #if defined(SZ_IS_WINDOWS_) && SZ_IS_64BIT_ARM_
 #define NOMINMAX
 #include <windows.h>
@@ -163,9 +165,10 @@ extern "C" {
 
 /**
  *  @brief Internal helper function to convert SIMD capabilities to an array of string pointers.
- *  @param caps The capabilities bitfield.
- *  @param strings Output array to store string pointers (should have more than `SZ_CAPABILITIES_COUNT` slots).
- *  @param max_count Maximum number of strings to output.
+ *
+ *  @param[in] caps The capabilities bitfield.
+ *  @param[out] strings Output array of string pointers, with over @c SZ_CAPABILITIES_COUNT slots.
+ *  @param[in] max_count Maximum number of strings to output.
  *  @return Number of capability strings written to the array.
  *  @sa sz_capabilities_to_string_implementation_, sz_capabilities
  */
@@ -226,8 +229,9 @@ SZ_HELPER_AUTO sz_bool_t sz_equal_null_terminated_serial(char const *a, char con
 
 /**
  *  @brief Internal helper to map a capability name to its flag.
- *  @param name Capability name, e.g. "serial", "neon", "sve2aes".
- *  @return `sz_caps_none_k` if unknown name, or a valid capability flag.
+ *
+ *  @param[in] name Capability name, e.g. "serial", "neon", "sve2aes".
+ *  @return @c sz_caps_none_k if unknown name, or a valid capability flag.
  */
 SZ_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char const *name) {
 
@@ -265,7 +269,9 @@ SZ_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char co
 
 /**
  *  @brief Writes the comma-separated capability names into @p buffer, always null-terminating.
- *  @return Bytes written, excluding the terminator; the text truncates rather than overflowing @p capacity.
+ *
+ *  @return Bytes written, excluding the terminator; the text truncates rather than overflow
+ *      @p capacity.
  *  @sa sz_capabilities_to_string, sz_capabilities
  */
 SZ_HELPER_AUTO sz_size_t sz_capabilities_to_string_implementation_(sz_capability_t caps, char *buffer,
@@ -288,15 +294,15 @@ SZ_HELPER_AUTO sz_size_t sz_capabilities_to_string_implementation_(sz_capability
     return (sz_size_t)(p - buffer);
 }
 
-/*  The runtime detectors below report the FULL hardware capability set, independent of which `SZ_USE_*`
- *  tiers this build compiled in: `sz_capabilities` ANDs their result with the compile-time mask anyway,
- *  and the executable instructions involved are unconditionally safe - `cpuid` is baseline x86-64 with
- *  `xgetbv` behind the OSXSAVE check, and the Arm `mrs` reads sit behind a SIGILL-guarded probe with the
- *  `ID_AA64ZFR0_EL1` encoding enabled by the `target("+sve")` pragma that already wraps the whole
- *  detector. Keeping detection unconditional lets build-system probes (`probes/run_capabilities.c`)
- *  compile a serial-only translation unit and still learn what this machine runs, so the build can
- *  intersect it with what the toolchain compiles before any kernel is built.
- */
+/*  The runtime detectors below report the full hardware capability set, independent of which
+ *  `SZ_USE_*` tiers this build compiled in: @c sz_capabilities ANDs their result with the
+ *  compile-time mask anyway, and the executable instructions involved are unconditionally safe -
+ *  @c cpuid is baseline x86-64 with @c xgetbv behind the OSXSAVE check, and the Arm @c mrs reads
+ *  sit behind a SIGILL-guarded probe with the @c ID_AA64ZFR0_EL1 encoding enabled by the
+ *  `target("+sve")` pragma that already wraps the whole detector. Keeping detection unconditional
+ *  lets build-system probes, like @c probes/run_capabilities.c, compile a serial-only translation
+ *  unit and still learn what this machine runs, so the build can intersect it with what the
+ *  toolchain compiles before any kernel is built. */
 SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
     return (sz_capability_t)(                         //
         (sz_cap_neon_k * SZ_USE_NEON) |               //
@@ -322,12 +328,10 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
         (sz_cap_serial_k));
 }
 
+/*  Compiling the next section one may get: selected processor does not support system register
+ *  name 'id_aa64zfr0_el1'. Suppressing assembler errors is very complicated, so when dealing with
+ *  older Arm CPUs it's simpler to compile this function targeting newer ones. */
 #if SZ_IS_64BIT_ARM_
-
-/*  Compiling the next section one may get: selected processor does not support system register name 'id_aa64zfr0_el1'.
- *  Suppressing assembler errors is very complicated, so when dealing with older ARM CPUs it's simpler to compile this
- *  function targeting newer ones.
- */
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -336,7 +340,8 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
 #endif
 
 #if SZ_HAS_POSIX_EXTENSIONS_
-/** @brief SIGILL handler for `mrs` instruction testing on Linux ARM */
+
+/** SIGILL handler for @c mrs instruction testing on Linux Arm. */
 static sigjmp_buf sz_mrs_test_jump_buffer_;
 static void sz_mrs_test_sigill_handler_(int sig) {
     sz_unused_(sig);
@@ -345,8 +350,9 @@ static void sz_mrs_test_sigill_handler_(int sig) {
 #endif
 
 /**
- *  @brief Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
- *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ *  @brief Determines the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
+ *
+ *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
 SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
@@ -565,8 +571,9 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
 #if defined(__riscv) && (__riscv_xlen == 64)
 
 /**
- *  @brief Function to determine the SIMD capabilities of the current 64-bit RISC-V machine at @b runtime.
- *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ *  @brief Determines the SIMD capabilities of the current 64-bit RISC-V machine at @b runtime.
+ *
+ *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
 SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
@@ -623,8 +630,9 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
 #if defined(__loongarch__)
 
 /**
- *  @brief Function to determine the SIMD capabilities of the current LoongArch machine at @b runtime.
- *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ *  @brief Determines the SIMD capabilities of the current LoongArch machine at @b runtime.
+ *
+ *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
 SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_loongarch_(void) {
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
@@ -646,8 +654,9 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_loongarch_(void)
 #if defined(__powerpc64__) || defined(__powerpc__)
 
 /**
- *  @brief Function to determine the SIMD capabilities of the current IBM POWER machine at @b runtime.
- *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ *  @brief Determines the SIMD capabilities of the current IBM POWER machine at @b runtime.
+ *
+ *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
 SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
 #if (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && !SZ_AVOID_LIBC
@@ -676,15 +685,15 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
 #endif // defined(__powerpc64__) || defined(__powerpc__)
 
 /**
- *  @brief Whether `sz_capabilities_runtime_cpu_` performs real hardware introspection on this platform,
- *         or merely mirrors the compile-time mask because no portable probe exists.
+ *  @brief Whether @c sz_capabilities_runtime_cpu_ performs real hardware introspection on this
+ *      platform, or merely mirrors the compile-time mask because no portable probe exists.
  *
- *  This is the header-owned source of truth the build systems infer from - the run probe
- *  (`probes/run_capabilities.c`) reports "no answer" when it is 0, and a compile probe
- *  (`probes/runtime_detection.c`) lets cross builds ask the same question without executing anything -
- *  so neither CMake nor `build.rs` hard-codes platform lists that could drift from the detectors here.
- *  WebAssembly stays 0 by nature: a module carrying unsupported SIMD opcodes fails validation at
- *  instantiation, so not even load-time masking is possible there.
+ *  This is the header-owned source of truth the build systems infer from - the run probe,
+ *  @c probes/run_capabilities.c, reports "no answer" when it is 0, and a compile probe,
+ *  @c probes/runtime_detection.c, lets cross builds ask the same question without executing
+ *  anything - so neither CMake nor @c build.rs hard-codes platform lists that could drift from the
+ *  detectors here. WebAssembly stays 0 by nature: a module carrying unsupported SIMD opcodes fails
+ *  validation at instantiation, so not even load-time masking is possible there.
  */
 #if SZ_IS_64BIT_X86_ || SZ_IS_64BIT_ARM_
 #define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
@@ -700,14 +709,15 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
 #endif
 
 /**
- *  @brief The CUDA generations the devices on this machine support, or none when there is no usable device.
+ *  @brief The CUDA generations this machine's devices support, or none without a usable device.
  *
- *  A whole second definition below covers builds that cannot probe, rather than a preprocessor branch inside
- *  one body. The tier is reported by the device's compute capability, and a later generation reports every
- *  earlier tier with it - Blackwell runs the Hopper kernels unchanged, so it reports @c hopper too.
+ *  A whole second definition below covers builds that cannot probe, rather than a preprocessor
+ *  branch inside one body. The tier is reported by the device's compute capability, and a later
+ *  generation reports every earlier tier with it - Blackwell runs the Hopper kernels unchanged, so
+ *  it reports @c hopper too.
  *
- *  @c CUDART_VERSION rather than @c SZ_USE_CUDA gates the probe: a translation unit may declare the CUDA
- *  layer exists and still be compiled as plain C++, where these entry points are not declared.
+ *  @c CUDART_VERSION rather than @c SZ_USE_CUDA gates the probe: a translation unit may declare the
+ *  CUDA layer exists and still be compiled as plain C++, where these entry points are not declared.
  */
 #if SZ_USE_CUDA && defined(CUDART_VERSION)
 SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) {
@@ -727,8 +737,9 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) { re
 #endif
 
 /**
- *  @brief Function to determine the SIMD capabilities of the current CPU at @b runtime.
- *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ *  @brief Determines the SIMD capabilities of the current CPU at @b runtime.
+ *
+ *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  *  @note Excludes parallel-processing capabilities, which are detected separately in StringZillas.
  */
 SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_cpu_(void) {
@@ -752,8 +763,9 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_cpu_(void) {
 }
 
 /**
- *  @brief Function to determine the CPU and GPU capabilities of this machine at @b runtime.
- *  @return A bitmask of the capabilities represented as a `sz_capability_t` enum value.
+ *  @brief Determines the CPU and GPU capabilities of this machine at @b runtime.
+ *
+ *  @return A bitmask of the capabilities represented as a @c sz_capability_t enum value.
  *  @note Excludes parallel-processing capabilities, which are detected separately in StringZillas.
  */
 SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
@@ -775,9 +787,10 @@ SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps);
 
 #else
 
-// These public entry points are `SZ_API_RUNTIME` so they export as external symbols when this header is
-// compiled into the amalgamation TU with `SZ_EXPORT` (compile-time dispatch as a linkable library);
-// for plain header-only inclusion `SZ_API_RUNTIME` is `inline static`, same as the rest of the API.
+/*  These public entry points are @c SZ_API_RUNTIME so they export as external symbols when this
+ *  header is compiled into the amalgamation TU with @c SZ_EXPORT, as a linkable library with
+ *  compile-time dispatch; for plain header-only inclusion @c SZ_API_RUNTIME is `inline static`,
+ *  same as the rest of the API. */
 SZ_API_RUNTIME int sz_dynamic_dispatch(void) { return 0; }
 SZ_API_RUNTIME int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_API_RUNTIME int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
@@ -794,6 +807,7 @@ SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return names;
 }
 SZ_API_RUNTIME void sz_dispatch_cpu_table_init(void) {}
+
 /** No-op in a non-dynamic build, where every verb resolved at compile time. */
 SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) { sz_unused_(caps); }
 

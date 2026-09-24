@@ -1,7 +1,9 @@
 /**
- *  @brief NEON backend for string comparison utilities.
  *  @file include/stringzilla/compare/neon.h
  *  @author Ash Vardanian
+ *  @date October 12, 2024
+ *  @brief NEON backend for string comparison utilities.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_NEON_H_

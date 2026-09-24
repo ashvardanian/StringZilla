@@ -1,9 +1,13 @@
 /**
- *  @brief Ice Lake (AVX-512 VBMI) backend for Levenshtein edit distances: a query of at most eight symbols runs
- *      in byte lanes - sixty-four candidates per ZMM, the match masks read by a @c VPERMB - and every wider query
- *      runs the Skylake eight-wide kernel, which needs nothing above AVX-512F.
  *  @file include/stringzilla/levenshtein/icelake.h
  *  @author Ash Vardanian
+ *  @date September 6, 2023
+ *  @brief Ice Lake (AVX-512 VBMI) backend for Levenshtein edit distances.
+ *
+ *  A query of at most eight symbols runs in byte lanes, sixty-four candidates per ZMM, the match
+ *  masks read by a @c VPERMB; every wider query runs the Skylake eight-wide kernel, which needs
+ *  nothing above AVX-512F.
+ *
  *  @sa include/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_ICELAKE_H_
@@ -33,19 +37,31 @@ extern "C" {
 
 /** Sixty-four candidates' score movement since the last flush, one signed byte per candidate. */
 typedef struct sz_levenshtein_u8x64_state_icelake_t {
-    sz_u512_vec_t deltas_vec; /**< How far each candidate's score has moved since the last flush. */
+
+    /** How far each candidate's score has moved since the last flush. */
+    sz_u512_vec_t deltas_vec;
 } sz_levenshtein_u8x64_state_icelake_t;
 
-/** Sixty-four candidates' Myers state for a query of at most eight symbols - one byte-wide word per candidate. */
+/** Sixty-four candidates' Myers state for a query of at most eight symbols - one byte-wide
+ *  word per candidate. */
 typedef struct sz_levenshtein_u8x64_vertical_icelake_t {
-    sz_u512_vec_t positive_vec; /**< Myers' VP per candidate, the query's symbols in the low bits. */
-    sz_u512_vec_t negative_vec; /**< Myers' VN per candidate, the query's symbols in the low bits. */
+
+    /** Myers' VP per candidate, the query's symbols in the low bits. */
+    sz_u512_vec_t positive_vec;
+
+    /** Myers' VN per candidate, the query's symbols in the low bits. */
+    sz_u512_vec_t negative_vec;
 } sz_levenshtein_u8x64_vertical_icelake_t;
 
-/** A query of at most eight symbols as the byte lanes read it, so a step looks its masks up without a gather. */
+/** A query of at most eight symbols as the byte lanes read it, so a step looks its masks up
+ *  without a gather. */
 typedef struct sz_levenshtein_u8x64_query_icelake_t {
-    sz_u512_vec_t masks_vec;           /**< Class @c c 's match mask at byte @c c, every other byte zero. */
-    sz_u512_vec_t last_symbol_bit_vec; /**< The query's last symbol's bit, repeated in all sixty-four lanes. */
+
+    /** Class @c c 's match mask at byte @c c, every other byte zero. */
+    sz_u512_vec_t masks_vec;
+
+    /** The query's last symbol's bit, repeated in all sixty-four lanes. */
+    sz_u512_vec_t last_symbol_bit_vec;
 } sz_levenshtein_u8x64_query_icelake_t;
 
 /** One ZMM per position, sixty-four candidates in it, and the vertical never leaves a register. */
@@ -54,7 +70,8 @@ enum {
     sz_levenshtein_icelake_u8x64_registers_per_position_k = 1
 };
 
-/** Positions the byte-lane deltas span before a signed byte could wrap: a score moves by at most one per step. */
+/** Positions the byte-lane deltas span before a signed byte could wrap: a score moves by at most
+ *  one per step. */
 enum { sz_levenshtein_icelake_u8x64_positions_per_flush_k = 64 };
 
 /** Packs a query of at most eight symbols into one byte per class, the table @c VPERMB indexes. */
@@ -76,15 +93,17 @@ SZ_API_COMPTIME void sz_levenshtein_u8x64_init_icelake(sz_levenshtein_u8x64_stat
     vertical->negative_vec.zmm = _mm512_setzero_si512();
 }
 
-/** Sixty-four byte-wide class ids, as the byte transpose emits them, already the indices the mask table takes. */
+/** Sixty-four byte-wide class ids, as the byte transpose emits them, already the indices the
+ *  mask table takes. */
 SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u8x64_classes_u8_icelake(sz_u8_t const *classes) {
     sz_u512_vec_t classes_vec;
     classes_vec.zmm = _mm512_loadu_si512((void const *)classes);
     return classes_vec;
 }
 
-/** Advances sixty-four candidates one symbol through one byte-wide Myers word, the masks read by a single permute.
- *  A candidate past its text keeps stepping whatever class the transpose emits; its score is read where its text ends. */
+/** Advances sixty-four candidates one symbol through one byte-wide Myers word, the masks read by a
+ *  single permute. A candidate past its text keeps stepping whatever class the transpose emits; its
+ *  score is read where its text ends. */
 SZ_API_COMPTIME void sz_levenshtein_u8x64_step_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
                                                        sz_levenshtein_u8x64_vertical_icelake_t *vertical,
                                                        sz_levenshtein_u8x64_query_icelake_t const *packed,
@@ -113,7 +132,8 @@ SZ_API_COMPTIME void sz_levenshtein_u8x64_step_icelake(sz_levenshtein_u8x64_stat
     vertical->negative_vec.zmm = _mm512_and_si512(shifted_positive_u8x64, vertical_carry_u8x64);
 }
 
-/** Folds the byte-lane deltas into @p scores and clears them, so every candidate's score is exact again. */
+/** Folds the byte-lane deltas into @p scores and clears them, so every candidate's score
+ *  is exact again. */
 SZ_API_COMPTIME void sz_levenshtein_u8x64_flush_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
                                                         sz_size_t *scores) {
     enum { lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
@@ -123,9 +143,10 @@ SZ_API_COMPTIME void sz_levenshtein_u8x64_flush_icelake(sz_levenshtein_u8x64_sta
     state->deltas_vec.zmm = _mm512_setzero_si512();
 }
 
-/** The byte transpose for sixty-four candidates, transposed as every transpose is: position @c p of candidate @c c lands
- *  at @c p * 64 + c. The bytes are staged first and classed a whole position at a time, so a class id costs a lane
- *  of a permute rather than a scalar load; a lane past its text pads with a zero byte, classed like any other. */
+/** The byte transpose for sixty-four candidates, transposed as every transpose is: position @c p of
+ *  candidate @c c lands at @c p * 64 + c. The bytes are staged first and classed a whole position
+ *  at a time, so a class id costs a lane of a permute rather than a scalar load; a lane past its
+ *  text pads with a zero byte, classed like any other. */
 SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x64_transpose_icelake(sz_levenshtein_query_t const *query,
                                                                  sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                                  sz_size_t candidates, sz_size_t *cursors,
@@ -163,8 +184,9 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x64_transpose_icelake(sz_levenshtein_
     return filled;
 }
 
-/** Sweeps sixty-four candidates of a query of at most eight symbols through every transpose. Between a retirement and
- *  a flush the step loop carries no scalar work, so a run of positions costs only its permutes and logic. */
+/** Sweeps sixty-four candidates of a query of at most eight symbols through every transpose.
+ *  Between a retirement and a flush the step loop carries no scalar work, so a run of positions
+ *  costs only its permutes and logic. */
 SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t const *shared_query,
                                                           sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                           sz_size_t sweep_count, sz_size_t *distances) {
@@ -222,7 +244,8 @@ SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t
     }
 }
 
-/** Streams every candidate through a prepared byte @p query of at most eight symbols, sixty-four at a time. */
+/** Streams every candidate through a prepared byte @p query of at most eight symbols, sixty-four
+ *  at a time. */
 SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_distances_(sz_levenshtein_query_t const *query,
                                                               sz_sequence_t const *candidates, sz_size_t *distances) {
     enum { candidates_per_position_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
@@ -238,13 +261,19 @@ SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_distances_(sz_levenshtein_que
     }
 }
 
-/** How many symbols of a query one Myers lane holds, which is how many candidates a step advances. */
+/** How many symbols of a query one Myers lane holds, which is how many candidates
+ *  a step advances. */
 typedef enum sz_levenshtein_lanes_icelake_t {
-    sz_levenshtein_lanes_u8x64_k, /**< Byte lanes: sixty-four candidates a step, up to an eight-symbol query. */
-    sz_levenshtein_lanes_u64x8_k, /**< Word lanes: eight candidates a step, at any query length. */
+
+    /** Byte lanes: sixty-four candidates a step, up to an eight-symbol query. */
+    sz_levenshtein_lanes_u8x64_k,
+
+    /** Word lanes: eight candidates a step, at any query length. */
+    sz_levenshtein_lanes_u64x8_k,
 } sz_levenshtein_lanes_icelake_t;
 
-/** The narrowest lanes @p length symbols fit, so the shortest queries advance the most candidates per step. */
+/** The narrowest lanes @p length symbols fit, so the shortest queries advance the most
+ *  candidates per step. */
 SZ_HELPER_AUTO sz_levenshtein_lanes_icelake_t sz_levenshtein_lanes_icelake(sz_size_t length) {
     return length <= 8 ? sz_levenshtein_lanes_u8x64_k : sz_levenshtein_lanes_u64x8_k;
 }

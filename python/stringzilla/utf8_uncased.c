@@ -1,14 +1,13 @@
 /**
- *  @brief Case-insensitive UTF-8 search, ordering, and match iteration.
  *  @file python/stringzilla/utf8_uncased.c
  *  @author Ash Vardanian
+ *  @date November 28, 2025
+ *  @brief Case-insensitive UTF-8 search, ordering, and match iteration.
  */
 #include "stringzilla.h"
 
-/**
- *  @brief  Iterator that yields all uncased matches of a needle in a haystack.
- *          Uses `sz_utf8_uncased_search` for Unicode-aware case folding.
- */
+/** Iterator that yields all uncased matches of a needle in a haystack. Uses
+ *  @c sz_utf8_uncased_search for Unicode-aware case folding. */
 typedef struct {
     PyObject ob_base;
 
@@ -32,7 +31,7 @@ char const doc_utf8_uncased_search[] =                                          
     "Find substring using Unicode uncased matching.\n"                                  //
     "\n"                                                                                //
     "Performs a uncased search using Unicode case folding rules,\n"                     //
-    "correctly handling one-to-many expansions (e.g., 'ß' matches 'SS').\n"             //
+    "correctly handling one-to-many expansions, like 'ß' matching 'SS'.\n"              //
     "\n"                                                                                //
     "IMPORTANT - Type-dependent behavior:\n"                                            //
     "  - str input:   start/end are CODEPOINT offsets, returns CODEPOINT offset\n"      //
@@ -41,8 +40,8 @@ char const doc_utf8_uncased_search[] =                                          
     "Args:\n"                                                                           //
     "    haystack (Str or str or bytes): The string to search in.\n"                    //
     "    needle (Str or str or bytes): The substring to find.\n"                        //
-    "    start (int, optional): Starting index (default: 0).\n"                         //
-    "    end (int, optional): Ending index (default: length).\n"                        //
+    "    start (int, optional): Starting index, defaulting to 0.\n"                     //
+    "    end (int, optional): Ending index, defaulting to length.\n"                    //
     "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n" //
     "\n"                                                                                //
     "Returns:\n"                                                                        //
@@ -235,24 +234,24 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
     }
 }
 
-char const doc_utf8_uncased_order[] =                                                   //
-    "Compare two UTF-8 strings uncasedly.\n"                                            //
-    "\n"                                                                                //
-    "Performs lexicographical comparison using Unicode case folding,\n"                 //
-    "correctly handling one-to-many expansions (e.g., 'Straße' equals 'STRASSE').\n"    //
-    "\n"                                                                                //
-    "Args:\n"                                                                           //
-    "    a (Str or str or bytes): First string to compare.\n"                           //
-    "    b (Str or str or bytes): Second string to compare.\n"                          //
-    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n" //
-    "\n"                                                                                //
-    "Returns:\n"                                                                        //
-    "    int: Negative if a < b, zero if equal, positive if a > b.\n"                   //
-    "\n"                                                                                //
-    "Example:\n"                                                                        //
-    "    >>> sz.utf8_uncased_order('hello', 'HELLO')\n"                                 //
-    "    0\n"                                                                           //
-    "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                                //
+char const doc_utf8_uncased_order[] =                                                      //
+    "Compare two UTF-8 strings uncasedly.\n"                                               //
+    "\n"                                                                                   //
+    "Performs lexicographical comparison using Unicode case folding, correctly handling\n" //
+    "one-to-many expansions, like 'Straße' equaling 'STRASSE'.\n"                          //
+    "\n"                                                                                   //
+    "Args:\n"                                                                              //
+    "    a (Str or str or bytes): First string to compare.\n"                              //
+    "    b (Str or str or bytes): Second string to compare.\n"                             //
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"    //
+    "\n"                                                                                   //
+    "Returns:\n"                                                                           //
+    "    int: Negative if a < b, zero if equal, positive if a > b.\n"                      //
+    "\n"                                                                                   //
+    "Example:\n"                                                                           //
+    "    >>> sz.utf8_uncased_order('hello', 'HELLO')\n"                                    //
+    "    0\n"                                                                              //
+    "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                                   //
     "    -1";
 
 PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -312,27 +311,27 @@ PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_
     return PyLong_FromLong((long)order);
 }
 
-char const doc_utf8_uncased_matches[] =                                                      //
-    "utf8_uncased_matches(haystack, needle, /, include_overlapping=False)\n"                 //
-    "\n"                                                                                     //
-    "Iterate over all uncased matches of needle in haystack.\n"                              //
-    "\n"                                                                                     //
-    "This function uses Unicode case folding for proper handling of\n"                       //
-    "international text. The matched region length may differ from the\n"                    //
-    "needle length due to case folding expansions (e.g., 'ß' matches 'SS').\n"               //
-    "\n"                                                                                     //
-    "Args:\n"                                                                                //
-    "    haystack (Str or str or bytes): The string to search in.\n"                         //
-    "    needle (Str or str or bytes): The pattern to find.\n"                               //
-    "    include_overlapping (bool, optional): Allow overlapping matches (default False).\n" //
-    "\n"                                                                                     //
-    "Yields:\n"                                                                              //
-    "    Str: Each matched region as a view into the original haystack.\n"                   //
-    "\n"                                                                                     //
-    "Examples:\n"                                                                            //
-    "    >>> list(sz.utf8_uncased_matches('Hello HELLO hello', 'hello'))\n"                  //
-    "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                              //
-    "    >>> list(sz.utf8_uncased_matches('Straße STRASSE', 'strasse'))\n"                   //
+char const doc_utf8_uncased_matches[] =                                                           //
+    "utf8_uncased_matches(haystack, needle, /, include_overlapping=False)\n"                      //
+    "\n"                                                                                          //
+    "Iterate over all uncased matches of needle in haystack.\n"                                   //
+    "\n"                                                                                          //
+    "This function uses Unicode case folding for proper handling of\n"                            //
+    "international text. The matched region length may differ from the\n"                         //
+    "needle length due to case folding expansions, like 'ß' matching 'SS'.\n"                     //
+    "\n"                                                                                          //
+    "Args:\n"                                                                                     //
+    "    haystack (Str or str or bytes): The string to search in.\n"                              //
+    "    needle (Str or str or bytes): The pattern to find.\n"                                    //
+    "    include_overlapping (bool, optional): Allow overlapping matches, defaulting to False.\n" //
+    "\n"                                                                                          //
+    "Yields:\n"                                                                                   //
+    "    Str: Each matched region as a view into the original haystack.\n"                        //
+    "\n"                                                                                          //
+    "Examples:\n"                                                                                 //
+    "    >>> list(sz.utf8_uncased_matches('Hello HELLO hello', 'hello'))\n"                       //
+    "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                                   //
+    "    >>> list(sz.utf8_uncased_matches('Straße STRASSE', 'strasse'))\n"                        //
     "    [sz.Str('Straße'), sz.Str('STRASSE')]";
 
 PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -473,7 +472,7 @@ static char const doc_Utf8UncasedMatches[] =                                    
     "\n"                                                                        //
     "Each iteration yields a Str view of the matched region in the haystack.\n" //
     "The matched length may differ from needle length due to case folding\n"    //
-    "expansions (e.g., German 'ß' matches 'SS').\n"                             //
+    "expansions, like German 'ß' matching 'SS'.\n"                              //
     "\n"                                                                        //
     "Example:\n"                                                                //
     "  >>> len(list(sz.utf8_uncased_matches('aAaA', 'a')))\n"                   //

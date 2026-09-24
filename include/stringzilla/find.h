@@ -1,20 +1,21 @@
 /**
- *  @brief Hardware-accelerated sub-string and character-set search utilities.
  *  @file include/stringzilla/find.h
  *  @author Ash Vardanian
+ *  @date August 14, 2020
+ *  @brief Hardware-accelerated sub-string and character-set search utilities.
  *
  *  Includes core APIs:
  *
- *  - `sz_find` and reverse-order `sz_rfind`
- *  - `sz_find_byte` and reverse-order `sz_rfind_byte`
- *  - `sz_find_byteset` and reverse-order `sz_rfind_byteset`
+ *  - @c sz_find and reverse-order @c sz_rfind
+ *  - @c sz_find_byte and reverse-order @c sz_rfind_byte
+ *  - @c sz_find_byteset and reverse-order @c sz_rfind_byteset
  *
  *  Convenience functions for character-set matching:
  *
- *  - `sz_find_byte_from` shortcut for `sz_find_byteset`
- *  - `sz_find_byte_not_from` shortcut for `sz_find_byteset` with inverted set
- *  - `sz_rfind_byte_from` shortcut for `sz_rfind_byteset`
- *  - `sz_rfind_byte_not_from` shortcut for `sz_rfind_byteset` with inverted set
+ *  - @c sz_find_byte_from shortcut for @c sz_find_byteset
+ *  - @c sz_find_byte_not_from shortcut for @c sz_find_byteset with inverted set
+ *  - @c sz_rfind_byte_from shortcut for @c sz_rfind_byteset
+ *  - @c sz_rfind_byte_not_from shortcut for @c sz_rfind_byteset with inverted set
  */
 #ifndef STRINGZILLA_FIND_H_
 #define STRINGZILLA_FIND_H_
@@ -30,115 +31,136 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Locates first matching byte in a string. Equivalent to `memchr(haystack, *needle, haystack_length)` in LibC.
+ *  @brief Locates the first byte equal to the one at @p needle in @p haystack, like @c memchr.
  *
- *  @see X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
- *  @see Aarch64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - single-byte substring to find.
+ *  @return Address of the first match, or NULL if not found.
  *
- *  @param haystack Haystack - the string to search in.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle Needle - single-byte substring to find.
- *  @return Address of the first match. NULL if not found.
+ *  @see x86_64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
+ *  @see AArch64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
  */
 SZ_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /**
- *  @brief Locates last matching byte in a string. Equivalent to `memrchr(haystack, *needle, haystack_length)` in LibC.
+ *  @brief Locates the last byte equal to the one at @p needle in @p haystack, like @c memrchr.
  *
- *  @see X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
- *  @see Aarch64 implementation: missing
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - single-byte substring to find.
+ *  @return Address of the last match, or NULL if not found.
  *
- *  @param haystack Haystack - the string to search in.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle Needle - single-byte substring to find.
- *  @return Address of the last match. NULL if not found.
+ *  There is no AArch64 reference implementation to link here.
+ *
+ *  @see x86_64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
  */
 SZ_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 #if SZ_USE_WESTMERE
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_HASWELL
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_SKYLAKE
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_NEON
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_SVE
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_V128RELAXED
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_V128
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_RVV
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_LASX
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_POWERVSX
+
 /** @copydoc sz_find_byte */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+
 /** @copydoc sz_rfind_byte */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 /**
- *  @brief Locates first matching substring.
- *         Equivalent to `memmem(haystack, haystack_length, needle, needle_length)` in LibC.
- *         Similar to `strstr(haystack, needle)` in LibC, but requires known length.
+ *  @brief Locates the first occurrence of @p needle in @p haystack, like @c memmem in LibC, or like
+ *      @c strstr for strings of known length.
  *
- *  @param haystack Haystack - the string to search in.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle Needle - substring to find.
- *  @param needle_length Number of bytes in the needle.
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - substring to find.
+ *  @param[in] needle_length Number of bytes in the needle.
  *  @return Address of the first match.
  */
 SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -147,10 +169,10 @@ SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, 
 /**
  *  @brief Locates the last matching substring.
  *
- *  @param haystack Haystack - the string to search in.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle Needle - substring to find.
- *  @param needle_length Number of bytes in the needle.
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - substring to find.
+ *  @param[in] needle_length Number of bytes in the needle.
  *  @return Address of the last match.
  */
 SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -159,95 +181,116 @@ SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length,
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length);
 
 #if SZ_USE_WESTMERE
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                            sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                             sz_size_t needle_length);
 #endif
 
 #if SZ_USE_HASWELL
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                            sz_size_t needle_length);
 #endif
 
 #if SZ_USE_SKYLAKE
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                            sz_size_t needle_length);
 #endif
 
 #if SZ_USE_NEON
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                        sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                         sz_size_t needle_length);
 #endif
 
 #if SZ_USE_SVE
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                       sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                        sz_size_t needle_length);
 #endif
 
 #if SZ_USE_V128RELAXED
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                               sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                sz_size_t needle_length);
 #endif
 
 #if SZ_USE_V128
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                        sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                         sz_size_t needle_length);
 #endif
 
 #if SZ_USE_RVV
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                       sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                        sz_size_t needle_length);
 #endif
 
 #if SZ_USE_LASX
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                        sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                         sz_size_t needle_length);
 #endif
 
 #if SZ_USE_POWERVSX
+
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                            sz_size_t needle_length);
+
 /** @copydoc sz_rfind */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                             sz_size_t needle_length);
@@ -255,121 +298,143 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haysta
 
 /**
  *  @brief Finds the first character present from the @p set, present in @p text.
- *         Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
- *         May have identical implementation and performance to ::sz_rfind_byteset.
  *
- *  Useful for parsing, when we want to skip a set of characters. Examples:
+ *  @param[in] text String to be scanned.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[in] set Set of relevant characters.
+ *  @return Pointer to the first matching character from @p set.
+ *
+ *  Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC. May have identical
+ *  implementation and performance to @c sz_rfind_byteset. Useful for parsing, when we want to skip
+ *  a set of characters, such as:
+ *
  *  - 6 whitespaces: " \t\n\r\v\f".
  *  - 16 digits forming a float number: "0123456789,.eE+-".
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
- *
- *  @param text String to be scanned.
- *  @param length Number of bytes in the string.
- *  @param set Set of relevant characters.
- *  @return Pointer to the first matching character from @p set.
  */
 SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /**
  *  @brief Finds the last character present from the @p set, present in @p text.
- *         Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
- *         May have identical implementation and performance to ::sz_find_byteset.
  *
- *  Useful for parsing, when we want to skip a set of characters. Examples:
+ *  @param[in] text String to be scanned.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[in] set Set of relevant characters.
+ *  @return Pointer to the last matching character from @p set.
+ *
+ *  Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC. May have identical
+ *  implementation and performance to @c sz_find_byteset. Useful for parsing, when we want to skip a
+ *  set of characters, such as:
+ *
  *  - 6 whitespaces: " \t\n\r\v\f".
  *  - 16 digits forming a float number: "0123456789,.eE+-".
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
- *
- *  @param text String to be scanned.
- *  @param length Number of bytes in the string.
- *  @param set Set of relevant characters.
- *  @return Pointer to the last matching character from @p set.
  */
 SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 #if SZ_USE_HASWELL
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_ICELAKE
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_NEON
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_SVE2
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_V128RELAXED
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_V128
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_RVV
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_LASX
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_POWERVSX
+
 /** @copydoc sz_find_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-/*  `sz_utf8_delimiters` (UTF-8 punctuation/symbol/separator/whitespace enumeration) lives in
+/*  @c sz_utf8_delimiters (UTF-8 punctuation/symbol/separator/whitespace enumeration) lives in
  *  "stringzilla/utf8_tokens.h" alongside its per-ISA backends and property tables. */
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Helper Shortcuts
 
 /**
  *  @brief Finds the first byte in @p haystack that is present in @p needle.
- *  @param haystack String to be scanned.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle String whose bytes form the accepted set.
- *  @param needle_length Number of bytes in the needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the accepted set.
+ *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the first matching byte, or NULL if not found.
  */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -381,11 +446,12 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haysta
 }
 
 /**
- *  @brief Finds the first byte in @p haystack that is NOT present in @p needle.
- *  @param haystack String to be scanned.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle String whose bytes form the rejected set.
- *  @param needle_length Number of bytes in the needle.
+ *  @brief Finds the first byte in @p haystack that is not present in @p needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the rejected set.
+ *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the first non-matching byte, or NULL if not found.
  */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -399,10 +465,11 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t ha
 
 /**
  *  @brief Finds the last byte in @p haystack that is present in @p needle.
- *  @param haystack String to be scanned.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle String whose bytes form the accepted set.
- *  @param needle_length Number of bytes in the needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the accepted set.
+ *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the last matching byte, or NULL if not found.
  */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -414,11 +481,12 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t hayst
 }
 
 /**
- *  @brief Finds the last byte in @p haystack that is NOT present in @p needle.
- *  @param haystack String to be scanned.
- *  @param haystack_length Number of bytes in the haystack.
- *  @param needle String whose bytes form the rejected set.
- *  @param needle_length Number of bytes in the needle.
+ *  @brief Finds the last byte in @p haystack that is not present in @p needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the rejected set.
+ *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the last non-matching byte, or NULL if not found.
  */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -430,7 +498,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t h
     return sz_rfind_byteset(haystack, haystack_length, &set);
 }
 
-#pragma endregion // Helper Shortcuts
+#pragma endregion Helper Shortcuts
 
 #include "stringzilla/find/serial.h"
 #include "stringzilla/find/westmere.h"
@@ -446,9 +514,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t h
 #include "stringzilla/find/lasx.h"
 #include "stringzilla/find/powervsx.h"
 
-/*  Pick the right implementation for the string search algorithms.
- *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
- */
+/*  Pick the right implementation for the string search algorithms. To override this behavior and
+ *  precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
@@ -609,8 +676,8 @@ SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_b
 }
 
 #pragma endregion
-#endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#endif // !SZ_DYNAMIC_DISPATCH
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

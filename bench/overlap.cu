@@ -1,35 +1,43 @@
 /**
  *  @file bench/overlap.cu
- *  @brief Benchmarks window overlap on CUDA GPUs, against the widest CPU backend this build carries.
+ *  @author Ash Vardanian
+ *  @date January 27, 2024
+ *  @brief Benchmarks window overlap on CUDA GPUs against the widest CPU backend this build carries.
  *
- *  Compute-bound: every candidate byte costs a modular multiply-add per width plus a B-tree descent, so a
- *  device-resident corpus of a few tens of megabytes keeps every multiprocessor busy for the whole round.
+ *  Compute-bound: every candidate byte costs a modular multiply-add per width plus a B-tree
+ *  descent, so a device-resident corpus of a few tens of megabytes keeps every multiprocessor busy
+ *  for the whole round.
  *
- *  The environment loads the dataset into unified memory, so the candidates are already device-reachable and
- *  every call scores a wave-sized slice of them in place - which is the regime the GPU backend exists for.
- *  Scoring a handful of candidates per call would time the launch instead, and answer a question nobody is
- *  asking of a GPU.
+ *  The environment loads the dataset into unified memory, so the candidates are already
+ *  device-reachable and every call scores a wave-sized slice of them in place - which is the regime
+ *  the GPU backend exists for. Scoring a handful of candidates per call would time the launch
+ *  instead, and answer a question nobody is asking of a GPU.
  *
- *  The engine is built before the timing on both sides, because that is how it is meant to be used: one forest
- *  per batch of queries, many rounds of candidates against it. What is timed is the round alone.
+ *  The engine is built before the timing on both sides, because that is how it is meant to be used:
+ *  The engine is built before the timing on both sides, because that is how it is meant to be used:
+ *  one forest per batch of queries, many rounds of candidates against it. Only the round is timed.
  *
- *  There is no per-stage breakdown as in `overlap.cpp`: the device runs the prepared query, the chain and the
- *  probes inside one launch, so there is no boundary between them to time.
+ *  There is no per-stage breakdown as in `overlap.cpp`: the device runs the prepared query, the
+ *  chain and the probes inside one launch, so there is no boundary between them to time.
  *
- *  There is no `Standard` row here: the platform ships no stock GPU window-overlap scan to compare against, so
- *  the baseline is the widest CPU backend, which is the comparison a dispatch decision actually turns on.
+ *  There is no Standard row here: the platform ships no stock GPU window-overlap scan to compare
+ *  against, so the baseline is the widest CPU backend, which is the comparison a dispatch decision
+ *  actually turns on.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test the GPU backend against the serial baseline.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
@@ -57,7 +65,8 @@ using namespace ashvardanian::stringzilla::bench;
 using overlap_engine_init_t = sz_status_t (*)(sz_sequence_t const *, sz_size_t const *, sz_size_t,
                                               sz_memory_allocator_t *, sz_overlap_engine_t *);
 
-/** @brief The width the corpus's collision entropy picks for a query of @p query_bytes against a mean candidate. */
+/** The width the corpus's collision entropy picks for a query of @p query_bytes against a mean
+ *  candidate of the corpus. */
 static std::size_t overlap_width_(environment_t const &env, std::size_t query_bytes) {
     double counts[256] = {};
     for (char const byte : env.dataset) counts[static_cast<unsigned char>(byte)] += 1.0;
@@ -74,19 +83,29 @@ static std::size_t overlap_width_(environment_t const &env, std::size_t query_by
 }
 
 /**
- *  @brief The corpus as the device sees it: views over the tokens, and the room for one round's scores.
+ *  @brief The corpus as the device sees it: views over the tokens, and room for one round's scores.
  *
- *  Under CUDA the environment already loads the dataset into unified memory, so the candidates need no upload
- *  and the two sequences differ only in whose accessors they carry.
+ *  Under CUDA the environment already loads the dataset into unified memory, so the candidates need
+ *  no upload and the two sequences differ only in whose accessors they carry.
  */
 struct overlap_cuda_corpus_t {
-    unified_vector<sz_string_view_t> views; /**< One view per candidate; its size is the candidate count. */
-    unified_vector<sz_f32_t> scores;        /**< @b [candidates], read back for the check value. */
-    sz_sequence_t device_candidates {};     /**< Accessors a kernel calls, as the resident path requires. */
-    sz_sequence_t host_candidates {};       /**< Accessors the CPU baseline calls, over the same views. */
-    std::size_t bytes = 0;                  /**< Candidate bytes one round touches, which throughput divides by. */
 
-    /** @brief Windows this corpus offers at @p width, which the reported rate divides by. */
+    /** One view per candidate; its size is the candidate count. */
+    unified_vector<sz_string_view_t> views;
+
+    /** @b [candidates], read back for the check value. */
+    unified_vector<sz_f32_t> scores;
+
+    /** Accessors a kernel calls, as the resident path requires. */
+    sz_sequence_t device_candidates {};
+
+    /** Accessors the CPU baseline calls, over the same views. */
+    sz_sequence_t host_candidates {};
+
+    /** Candidate bytes one round touches, which throughput divides by. */
+    std::size_t bytes = 0;
+
+    /** Windows this corpus offers at @p width, which the reported rate divides by. */
     std::size_t windows_at(std::size_t width) const noexcept {
         std::size_t total = 0;
         for (sz_string_view_t const &view : views) total += width <= view.length ? view.length - width + 1 : 0;
@@ -107,7 +126,7 @@ struct overlap_cuda_corpus_t {
     }
 };
 
-/** @brief The leading token cut to @p query_bytes, which is the one query every arm's engine is built over. */
+/** The leading token cut to @p query_bytes: the one query each arm's engine is built over. */
 static std::string overlap_query_text_(environment_t const &env, std::size_t query_bytes) {
     token_view_t const whole = env.tokens[0];
     return std::string(whole.data(), std::min(whole.size(), query_bytes));
@@ -149,7 +168,7 @@ struct overlap_scores_from_cuda {
     }
 };
 
-/** The same round on the CPU, so the two check values line up under `STRINGWARS_STRESS`. */
+/** The same round on the CPU, so the two check values line up under @c STRINGWARS_STRESS. */
 template <overlap_engine_init_t init_, sz_overlap_scores_t scores_>
 struct overlap_scores_from_sz {
     overlap_cuda_corpus_t &corpus;
@@ -186,7 +205,7 @@ struct overlap_scores_from_sz {
     }
 };
 
-/** @brief Every arm at one query width, the width carried in each arm's name beside the resident count. */
+/** Every arm at one query width, the width carried in each arm's name beside the resident count. */
 static void bench_overlap_scores(environment_t const &env, overlap_cuda_corpus_t &corpus, std::size_t query_bytes) {
     std::size_t const width = overlap_width_(env, query_bytes);
     std::string const suffix = ":w" + std::to_string(width);

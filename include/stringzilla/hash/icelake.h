@@ -1,7 +1,9 @@
 /**
- *  @brief Ice Lake (AVX-512 + VAES) backend for string hashing and checksums.
  *  @file include/stringzilla/hash/icelake.h
  *  @author Ash Vardanian
+ *  @date December 1, 2024
+ *  @brief Ice Lake (AVX-512 + VAES) backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_ICELAKE_H_
@@ -233,8 +235,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, 
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_skylake((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same
+        // deferral the streaming path uses.
         __m512i const order_u8x64 = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             state.ins.zmm = _mm512_loadu_epi8(start + state.ins_length);
@@ -253,7 +256,8 @@ SZ_API_COMPTIME void sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t
     sz_hash_state_init_skylake(state, seed);
 }
 
-/** @brief Loads the packed public state into the aligned twin (one `_mm512_loadu_si512` per 64-byte field). */
+/** Loads the packed public state into the aligned twin (one @c _mm512_loadu_si512
+ *  per 64-byte field). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_icelake_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     state.aes.zmm = _mm512_loadu_si512((__m512i const *)packed->aes);
@@ -264,7 +268,8 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_icelake_(sz_hash_sta
     return state;
 }
 
-/** @brief Stores the aligned twin back into the packed public state (one `_mm512_storeu_si512` per field). */
+/** Stores the aligned twin back into the packed public state (one
+ *  @c _mm512_storeu_si512 per field). */
 SZ_HELPER_INLINE void sz_hash_state_store_icelake_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     _mm512_storeu_si512((__m512i *)packed->aes, state->aes.zmm);
     _mm512_storeu_si512((__m512i *)packed->sum, state->sum.zmm);
@@ -273,7 +278,8 @@ SZ_HELPER_INLINE void sz_hash_state_store_icelake_(sz_hash_state_t *packed, sz_h
     packed->ins_length = state->ins_length;
 }
 
-/** @brief Absorbs the buffered 64-byte block into the aligned state with a single VAES `VAESENC` over four lanes. */
+/** Absorbs the buffered 64-byte block into the aligned state with a single VAES @c VAESENC
+ *  over four lanes. */
 SZ_HELPER_INLINE void sz_hash_state_update_icelake_(sz_hash_state_aligned_t *state) {
     __m512i const order_u8x64 = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
     state->aes.zmm = _mm512_aesenc_epi128(state->aes.zmm, state->ins.zmm);
@@ -304,10 +310,11 @@ SZ_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz
             buffered = 0;
         }
         sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
-        //  Merge `to_copy` incoming bytes into `ins` at lane offset `buffered` WITHOUT a stack round-trip: poking
-        //  individual bytes into the just-written `ins` ZMM stalls on store-forwarding (~12 cy) every cross-call
-        //  merge - the dominant cost for short streamed tokens. `vpermb` slides the masked-loaded bytes to the
-        //  offset and `vpblendmb` drops them into place; bit-identical digest to the per-byte copy.
+        //  Merge `to_copy` incoming bytes into `ins` at lane offset `buffered` without a stack
+        //  round-trip: poking individual bytes into the just-written `ins` ZMM stalls on
+        //  store-forwarding (~12 cy) every cross-call merge - the dominant cost for short streamed
+        //  tokens. `vpermb` slides the masked-loaded bytes to the offset and `vpblendmb` drops them
+        //  into place; bit-identical digest to the per-byte copy.
         __mmask64 const copy_mask_m64 = _cvtu64_mask64(sz_u64_mask_until_(to_copy));
         __m512i const incoming_u8x64 = _mm512_maskz_loadu_epi8(copy_mask_m64, text);
         __m512i const slide_u8x64 = _mm512_sub_epi8(lane_iota_u8x64, _mm512_set1_epi8((char)buffered));
@@ -378,11 +385,9 @@ SZ_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t output, sz_size_t length, s
     }
 }
 
-/**
- *  @brief A wider parallel analog of `sz_hash_state_aligned_for_short_t`, which is not used for computing individual hashes,
- *         but for parallel hashing of @b short 4x separate strings under 16 bytes long.
- *         Useful for higher-level Database and Machine Learning operations.
- */
+/** A wider parallel analog of @c sz_hash_state_aligned_for_short_t, which is not used for computing
+ *  individual hashes, but for parallel hashing of @b short 4x separate strings under 16 bytes long.
+ *  Useful for higher-level Database and Machine Learning operations. */
 typedef struct sz_hash_state_aligned_for_short_x4_t {
     sz_u512_vec_t aes_vec;
     sz_u512_vec_t sum_vec;
@@ -391,8 +396,8 @@ typedef struct sz_hash_state_aligned_for_short_x4_t {
 
 /**
  *  @brief Initializes the 4-wide parallel minimal hash state using VAES and AVX-512 intrinsics.
- *  @param state Pointer to the 4-wide minimal hash state to initialize.
- *  @param seed 64-bit seed XOR-ed with Pi constants replicated across all four 128-bit lanes.
+ *  @param[out] state Pointer to the 4-wide minimal hash state to initialize.
+ *  @param[in] seed 64-bit seed XOR-ed with Pi constants replicated across all four 128-bit lanes.
  */
 SZ_HELPER_INLINE void sz_hash_state_short_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t *state, sz_u64_t seed) {
 
@@ -418,12 +423,13 @@ SZ_HELPER_INLINE void sz_hash_state_short_x4_init_icelake_(sz_hash_state_aligned
 }
 
 /**
- *  @brief Finalizes the 4-wide parallel minimal hash state, returning four 64-bit digests packed in a 256-bit vector.
- *  @param state Pointer to the (const) 4-wide minimal hash state.
- *  @param length0 Total byte count for the first 128-bit lane.
- *  @param length1 Total byte count for the second 128-bit lane.
- *  @param length2 Total byte count for the third 128-bit lane.
- *  @param length3 Total byte count for the fourth 128-bit lane.
+ *  @brief Finalizes the 4-wide parallel minimal hash state, returning four 64-bit digests packed in
+ *      a 256-bit vector.
+ *  @param[in] state Pointer to the (const) 4-wide minimal hash state.
+ *  @param[in] length0 Total byte count for the first 128-bit lane.
+ *  @param[in] length1 Total byte count for the second 128-bit lane.
+ *  @param[in] length2 Total byte count for the third 128-bit lane.
+ *  @param[in] length3 Total byte count for the fourth 128-bit lane.
  *  @return 256-bit vector containing four 64-bit hash values (one per lane).
  */
 SZ_HELPER_INLINE __m256i sz_hash_state_short_x4_finalize_icelake_(sz_hash_state_aligned_for_short_x4_t const *state, //
@@ -446,8 +452,8 @@ SZ_HELPER_INLINE __m256i sz_hash_state_short_x4_finalize_icelake_(sz_hash_state_
 
 /**
  *  @brief Absorbs four 128-bit blocks (one per hash lane) into the 4-wide minimal hash state.
- *  @param state Pointer to the 4-wide minimal hash state.
- *  @param blocks_u8x64 512-bit register containing four 128-bit data blocks, one per lane.
+ *  @param[inout] state Pointer to the 4-wide minimal hash state.
+ *  @param[in] blocks_u8x64 512-bit register containing four 128-bit data blocks, one per lane.
  */
 SZ_HELPER_INLINE void sz_hash_state_short_x4_update_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
                                                              __m512i blocks_u8x64) {
@@ -457,11 +463,13 @@ SZ_HELPER_INLINE void sz_hash_state_short_x4_update_icelake_(sz_hash_state_align
 }
 
 /**
- *  @brief Initializes the 4-wide parallel minimal state with four @b distinct seeds (one per lane).
- *         Unlike `sz_hash_state_short_x4_init_icelake_`, which seeds all four lanes identically to hash
- *         four different strings, this seeds each lane differently to hash one string under four seeds.
- *  @param state Pointer to the 4-wide minimal hash state to initialize.
- *  @param seeds_u64x8 Four seeds spread as `[s0,s0,s1,s1,s2,s2,s3,s3]` across the 512-bit register.
+ *  @brief Initializes the 4-wide parallel minimal state with four @b distinct seeds, one per lane.
+ *
+ *  Unlike @c sz_hash_state_short_x4_init_icelake_, which seeds all four lanes identically to hash
+ *  four different strings, this seeds each lane differently to hash one string under four seeds.
+ *
+ *  @param[out] state Pointer to the 4-wide minimal hash state to initialize.
+ *  @param[in] seeds_u64x8 Four seeds spread as `[s0,s0,s1,s1,s2,s2,s3,s3]` across the register.
  */
 SZ_HELPER_INLINE void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
                                                          __m512i seeds_u64x8) {
@@ -478,10 +486,10 @@ SZ_HELPER_INLINE void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_aligned_f
 
 /**
  *  @brief Finalizes the 4-wide parallel minimal state, folding in the input length.
- *  @param state Pointer to the (const) 4-wide minimal hash state.
- *  @param lengths_u64x8 The length addend broadcast into each seed-lane's key low half, i.e.
- *                 `[0, length, 0, length, 0, length, 0, length]`. Seed-independent, so the caller
- *                 builds it once and reuses it across all seed groups.
+ *  @param[in] state Pointer to the (const) 4-wide minimal hash state.
+ *  @param[in] lengths_u64x8 The length addend broadcast into each seed-lane's key low half, i.e.
+ *      `[0, length, 0, length, 0, length, 0, length]`. Seed-independent, so the caller builds it
+ *      once and reuses it across all seed groups.
  *  @return 256-bit vector with four 64-bit hashes, one per lane.
  */
 SZ_HELPER_INLINE __m256i sz_hash_multiseed_x4_finalize_icelake_(sz_hash_state_aligned_for_short_x4_t const *state,
@@ -510,11 +518,11 @@ SZ_API_COMPTIME void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,
         return;
     }
 
-    // One branchless masked load pulls the whole <= 64 byte input into a single ZMM; its four 128-bit
-    // halves ARE the de-interleaved text-lanes (each up to 16 contiguous, low-justified, zero-padded
-    // bytes), so no scalar normalization is needed. Each text-lane is then broadcast to all four
-    // @b seed-lanes of a ZMM, so a single `VAESENC` advances four seeds at once; the text-lanes are
-    // consumed one after another, never as a single 512-bit value.
+    // One branchless masked load pulls the whole <= 64 byte input into a single ZMM; its four
+    // 128-bit halves are the de-interleaved text-lanes (each up to 16 contiguous, low-justified,
+    // zero-padded bytes), so no scalar normalization is needed. Each text-lane is then broadcast to
+    // all four @b seed-lanes of a ZMM, so a single `VAESENC` advances four seeds at once; the
+    // text-lanes are consumed one after another, never as a single 512-bit value.
     sz_u512_vec_t text_lanes_vec;
     text_lanes_vec.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length), text);
     sz_size_t const text_lanes_count = length <= 16 ? 1 : sz_size_divide_round_up(length, 16);

@@ -1,7 +1,8 @@
 /**
- *  @brief Haswell (AVX2) backend for UTF-8 codepoint mechanics.
  *  @file include/stringzilla/utf8_runes/haswell.h
  *  @author Ash Vardanian
+ *  @date November 19, 2025
+ *  @brief Haswell (AVX2) backend for UTF-8 codepoint mechanics.
  */
 #ifndef STRINGZILLA_UTF8_RUNES_HASWELL_H_
 #define STRINGZILLA_UTF8_RUNES_HASWELL_H_
@@ -21,7 +22,7 @@ extern "C" {
 #pragma GCC target("avx2,bmi,bmi2,popcnt")
 #endif
 
-/** @brief  Mask for `_mm256_maskstore_epi64` selecting the low `count` (0..4) of four 64-bit lanes. */
+/** Mask for @c _mm256_maskstore_epi64 selecting the low @p count (0..4) of four 64-bit lanes. */
 SZ_HELPER_INLINE __m256i sz_mm256_store_mask_epi64_(sz_size_t count) {
     return _mm256_cmpgt_epi64(_mm256_set1_epi64x((long long)count), _mm256_setr_epi64x(0, 1, 2, 3));
 }
@@ -88,40 +89,66 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length,
 
 #pragma region Shared SIMD leaf substrate
 
-/** @brief  The decoded 64-byte window for the AVX2 backend. The 64 bytes live as two `__m256i` halves (`*_lo` =
- *          lanes [0, 32), `*_hi` = lanes [32, 64)); the per-lane byte-domain codepoint halves `high`/`low` share that
- *          shape. Masks are `sz_u64_t` (`vpmovmskb` per half, OR-combined) rather than the Ice Lake `__mmask64`. Field
- *          names and semantics match @ref sz_utf8_rune_window_t so the portable rule algebra is unchanged. */
+/** The decoded 64-byte window for the AVX2 backend. The 64 bytes live as two @c __m256i halves
+ *  (`*_lo` = lanes [0, 32), `*_hi` = lanes [32, 64)); the per-lane byte-domain codepoint halves
+ *  @c high and @c low share that shape. Masks are @c sz_u64_t (one @c vpmovmskb per half,
+ *  OR-combined) rather than the Ice Lake @c __mmask64. Field names and semantics match
+ *  @ref sz_utf8_rune_window_t so the portable rule algebra is unchanged. */
 typedef struct sz_utf8_rune_window_haswell_t {
-    __m256i window_low_u8x32;     /**< Raw input bytes for lanes [0, 32). */
-    __m256i window_high_u8x32;    /**< Raw input bytes for lanes [32, 64). */
-    __m256i high_byte_low_u8x32;  /**< Per-lane `codepoint >> 8` for lanes [0, 32). */
-    __m256i high_byte_high_u8x32; /**< Per-lane `codepoint >> 8` for lanes [32, 64). */
-    __m256i low_byte_low_u8x32;   /**< Per-lane `codepoint & 0xFF` for lanes [0, 32). */
-    __m256i low_byte_high_u8x32;  /**< Per-lane `codepoint & 0xFF` for lanes [32, 64). */
-    sz_u64_t continuation;        /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
-    sz_u64_t codepoint_starts;    /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
-    sz_u64_t two_byte_starts;     /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
-    sz_u64_t three_byte_starts;   /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
-    sz_u64_t four_byte_starts;    /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;             /**< Number of bytes actually loaded (<= 64). */
+
+    /** Raw input bytes for lanes [0, 32). */
+    __m256i window_low_u8x32;
+
+    /** Raw input bytes for lanes [32, 64). */
+    __m256i window_high_u8x32;
+
+    /** Per-lane `codepoint >> 8` for lanes [0, 32). */
+    __m256i high_byte_low_u8x32;
+
+    /** Per-lane `codepoint >> 8` for lanes [32, 64). */
+    __m256i high_byte_high_u8x32;
+
+    /** Per-lane `codepoint & 0xFF` for lanes [0, 32). */
+    __m256i low_byte_low_u8x32;
+
+    /** Per-lane `codepoint & 0xFF` for lanes [32, 64). */
+    __m256i low_byte_high_u8x32;
+
+    /** Bit @c i is set when lane @c i is a continuation byte `10xxxxxx`. */
+    sz_u64_t continuation;
+
+    /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
+    sz_u64_t codepoint_starts;
+
+    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    sz_u64_t two_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    sz_u64_t three_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    sz_u64_t four_byte_starts;
+
+    /** Number of bytes actually loaded (at most 64). */
+    sz_size_t loaded;
 } sz_utf8_rune_window_haswell_t;
 
-/** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the AVX2 twin of `srl8_`. */
+/** Per-byte logical right shift by @p shift keeping the low @p keep bits — the AVX2 twin
+ *  of @c srl8_. */
 SZ_HELPER_INLINE __m256i sz_utf8_srl8_haswell_(__m256i value_u8x32, int shift, sz_u8_t keep) {
     return _mm256_and_si256(_mm256_srli_epi16(value_u8x32, shift), _mm256_set1_epi8((char)keep));
 }
 
-/** @brief  Combine two per-half `vpmovmskb` results into one 64-bit lane mask. */
+/** Combine two per-half @c vpmovmskb results into one 64-bit lane mask. */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32) {
     sz_u64_t const low_bits = (sz_u32_t)_mm256_movemask_epi8(low_half_u8x32);
     sz_u64_t const high_bits = (sz_u32_t)_mm256_movemask_epi8(high_half_u8x32);
     return low_bits | (high_bits << 32);
 }
 
-/** @brief  Masked 64-byte load into two halves; bytes [loaded, 64) read as zero (the AVX2 stand-in for
- *          `_mm512_maskz_loadu_epi8`). A small stack staging union covers the partial tail so we never read past
- *          `text + loaded`. */
+/** Masked 64-byte load into two halves; bytes [loaded, 64) read as zero (the AVX2 stand-in for
+ *  @c _mm512_maskz_loadu_epi8). A small stack staging union covers the partial tail so we never
+ *  read past `text + loaded`. */
 SZ_HELPER_INLINE void sz_utf8_load_window_haswell_( //
     sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32, __m256i *out_high_u8x32) {
     if (loaded >= 64) {
@@ -137,11 +164,12 @@ SZ_HELPER_INLINE void sz_utf8_load_window_haswell_( //
     *out_high_u8x32 = staging_vec.ymms[1];
 }
 
-/** @brief  Forward neighbours `next1[i] = window[i+1]`, `next2[i] = window[i+2]` over all 64 lanes, with the lanes
- *          past the window WRAPPING modulo 64 to match Ice Lake's `_mm512_permutexvar_epi8` (so `next1[63]==window[0]`,
- *          `next2[62]==window[0]`, `next2[63]==window[1]`). AVX2 has no 32-byte byte permute, so each 128-bit lane is
- *          fed its following bytes via `_mm256_permute2x128_si256` (to rotate in the successor 128-bit block, the
- *          window head wrapping in after `window_hi`) then `_mm256_alignr_epi8` to shift across the lane boundary. */
+/** Forward neighbours `next1[i] = window[i+1]`, `next2[i] = window[i+2]` over all 64 lanes, with
+ *  the lanes past the window wrapping modulo 64 to match Ice Lake's @c _mm512_permutexvar_epi8 (so
+ *  `next1[63]==window[0]`, `next2[62]==window[0]`, `next2[63]==window[1]`). AVX2 has no 32-byte
+ *  byte permute, so each 128-bit lane is fed its following bytes via @c _mm256_permute2x128_si256
+ *  (to rotate in the successor 128-bit block, the window head wrapping in after @c window_hi) then
+ *  @c _mm256_alignr_epi8 to shift across the lane boundary. */
 SZ_HELPER_INLINE void sz_utf8_forward_neighbours_haswell_( //
     __m256i window_low_u8x32, __m256i window_high_u8x32,   //
     __m256i *next_byte_1_low_u8x32, __m256i *next_byte_1_high_u8x32, __m256i *next_byte_2_low_u8x32,
@@ -158,9 +186,10 @@ SZ_HELPER_INLINE void sz_utf8_forward_neighbours_haswell_( //
     *next_byte_2_high_u8x32 = _mm256_alignr_epi8(successor_high_u8x32, window_high_u8x32, 2);
 }
 
-/** @brief  Expand a 32-bit lane mask into a 32-byte select vector (byte `i` = 0xFF when bit `i` is set) to drive
- *          `_mm256_blendv_epi8` in place of Ice Lake's `_mm512_mask_blend_epi8`. In-register: broadcast the mask,
- *          route the right mask byte to each output byte via `vpshufb`, isolate the per-lane bit, then `cmpeq`. */
+/** Expand a 32-bit lane mask into a 32-byte select vector (byte @c i = 0xFF when bit @c i is set)
+ *  to drive @c _mm256_blendv_epi8 in place of Ice Lake's @c _mm512_mask_blend_epi8. In-register:
+ *  broadcast the mask, route the right mask byte to each output byte via @c vpshufb, isolate the
+ *  per-lane bit, then @c cmpeq. */
 SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_haswell_(sz_u32_t bits) {
     __m256i const mask_broadcast_u32x8 = _mm256_set1_epi32((int)bits);
     __m256i const byte_router_shuffle_u8x32 = _mm256_setr_epi8( //
@@ -174,8 +203,8 @@ SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_haswell_(sz_u32_t bits) {
     return _mm256_cmpeq_epi8(bit_isolated_u8x32, bit_select_isolation_u8x32);
 }
 
-/** @brief  Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the AVX2 twin of
- *          @ref sz_utf8_rune_decode_window_, bit-identical to it on every lane. */
+/** Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the AVX2 twin
+ *  of @ref sz_utf8_rune_decode_window_, bit-identical to it on every lane. */
 SZ_HELPER_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_( //
     sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_haswell_t result;
@@ -272,14 +301,20 @@ SZ_HELPER_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswel
     return result;
 }
 
-/** @brief  One nibble-cascade stage with a sub-256 selector: `result[lane] = table[selector[lane]*16 + within[lane]]`.
- *          Each of @p tile_count 16-byte rows is one selector value; @p within_u8x32 is the addressing nibble
- *          (caller-masked to `[0,16)`). The AVX2 stand-in for VBMI `vpermi2b`: there is no 32-byte byte permute, so
- *          each resident row is broadcast and shuffled by @p within_u8x32, then blended in for the lanes whose
- *          @p selector_u8x32 picks that row. In-register — only `vbroadcasti128`/`vpshufb`/`vpcmpeqb`/`vpblendvb`.
+/**
+ *  @brief One nibble-cascade stage with a sub-256 selector:
+ *      `result[lane] = table[selector[lane]*16 + within[lane]]`. Each of @p tile_count 16-byte rows
+ *      is one selector value; @p within_u8x32 is the addressing nibble (caller-masked to `[0,16)`).
  *
- *  ! Cost scales with @p tile_count, not with the window: every resident row is shuffled and blended on the shuffle
- *  ! port. The BMP classifiers use @ref sz_utf8_rune_flat_lookup_haswell_ instead for that reason. */
+ *  The AVX2 stand-in for VBMI @c vpermi2b: there is no 32-byte byte permute, so each resident row
+ *  is broadcast and shuffled by @p within_u8x32, then blended in for the lanes whose
+ *  @p selector_u8x32 picks that row. In-register — only @c vbroadcasti128, @c vpshufb, @c vpcmpeqb
+ *  and @c vpblendvb.
+ *
+ *  ! Cost scales with @p tile_count, not with the window: every resident row is shuffled and
+ *  ! blended on the shuffle port. The BMP classifiers use @ref sz_utf8_rune_flat_lookup_haswell_
+ *  ! instead for that reason.
+ */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_haswell_( //
     sz_u8_t const *table, int tile_count, __m256i selector_u8x32, __m256i within_u8x32) {
     __m256i result_u8x32 = _mm256_setzero_si256();
@@ -293,9 +328,10 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_haswell_( //
     return result_u8x32;
 }
 
-/** @brief  256-entry byte LUT addressed by a per-lane byte index in `[0,256)`: `result[lane] = group_base[index[lane]]`.
- *          Two-stage `vpshufb` over 16 resident rows — the low nibble shuffles within a row, the high nibble selects
- *          the row. The AVX2 twin of the substrate `lut256` leaf. */
+/** 256-entry byte LUT at @p group_base addressed by a per-lane byte index in `[0,256)`, each lane
+ *  reading the entry its index names. Two-stage @c vpshufb over 16 resident rows — the low nibble
+ *  shuffles within a row, the high nibble selects the row. The AVX2 twin of the substrate
+ *  @c lut256 leaf. */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
     __m256i const index_within_low_u8x32 = _mm256_and_si256(index_u8x32, _mm256_set1_epi8(0x0F));
     __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index_u8x32, 4),
@@ -303,10 +339,11 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base,
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 16, index_selector_high_u8x32, index_within_low_u8x32);
 }
 
-/** @brief  64-entry byte LUT addressed by a per-lane index in `[0,64)`: a four-row cascade over the 64-byte table.
- *          The bounded twin of @ref sz_utf8_rune_lut256_haswell_ for callers whose table is only four rows wide -
- *          e.g. a 128-entry property table read as two 64-byte halves - so the loads never run past the array, and
- *          only a quarter of the shuffle/blend work is issued. @p group_base must point to at least 64 valid bytes. */
+/** 64-entry byte LUT addressed by a per-lane index in `[0,64)`: a four-row cascade over the 64-byte
+ *  table. The bounded twin of @ref sz_utf8_rune_lut256_haswell_ for callers whose table is only
+ *  four rows wide - e.g. a 128-entry property table read as two 64-byte halves - so the loads never
+ *  run past the array, and only a quarter of the shuffle/blend work is issued. @p group_base must
+ *  point to at least 64 valid bytes. */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
     __m256i const index_within_low_u8x32 = _mm256_and_si256(index_u8x32, _mm256_set1_epi8(0x0F));
     __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index_u8x32, 4),
@@ -314,19 +351,21 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, 
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 4, index_selector_high_u8x32, index_within_low_u8x32);
 }
 
-/** @brief  16-entry byte LUT addressed by a per-lane index in `[0,16)`: one broadcast row and one `vpshufb`, with
- *          no cascade at all, since a single row covers the whole index range. The bounded twin of
- *          @ref sz_utf8_rune_lut256_haswell_ for nibble-wide tables. @p group_base must point to at least 16 valid
- *          bytes, and @p index_u8x32 must have bit 7 clear on every lane or `vpshufb` zeroes that lane. */
+/** 16-entry byte LUT addressed by a per-lane index in `[0,16)`: one broadcast row and one
+ *  @c vpshufb, with no cascade at all, since a single row covers the whole index range. The bounded
+ *  twin of @ref sz_utf8_rune_lut256_haswell_ for nibble-wide tables. @p group_base must point to at
+ *  least 16 valid bytes, and @p index_u8x32 must have bit 7 clear on every lane or @c vpshufb
+ *  zeroes that lane. */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_lut16_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
     __m256i const lut_row_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)group_base));
     return _mm256_shuffle_epi8(lut_row_broadcast_u8x32, index_u8x32);
 }
 
-/** @brief  Narrow four `u32x8` vectors, each carrying one class byte in the low byte of every dword, into a single
- *          `u8x32` in ascending lane order. The companion of the flat-leaf `vpgatherdd`, which resolves eight lanes
- *          per gather and so needs four gathers per 32-lane window. `packus` saturates per 128-bit half, leaving the
- *          dwords interleaved, so a final `vpermd` restores the order. */
+/** Narrow four @c u32x8 vectors, each carrying one class byte in the low byte of every dword,
+ *  into a single @c u8x32 in ascending lane order. The companion of the flat-leaf
+ *  @c vpgatherdd, which resolves eight lanes per gather and so needs four gathers per 32-lane
+ *  window. @c packus saturates per 128-bit half, leaving the dwords interleaved, so a final
+ *  @c vpermd restores the order. */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_pack4_u32_to_u8_haswell_( //
     __m256i first_u32x8, __m256i second_u32x8, __m256i third_u32x8, __m256i fourth_u32x8) {
     __m256i const first_second_u16x16 = _mm256_packus_epi32(first_u32x8, second_u32x8);
@@ -335,11 +374,12 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_pack4_u32_to_u8_haswell_( //
     return _mm256_permutevar8x32_epi32(interleaved_u8x32, _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7));
 }
 
-/** @brief  Class byte per lane from a page-compressed flat table: `page_lut[high]` selects a 256-byte page, then
- *          `flat[page * 256 + low]` is fetched with four `vpgatherdd`. Unlike the nibble cascade this scales with the
- *          window, not the table: the cascade scanned every 16-byte tile of every stage on the shuffle port, while the
- *          gather issues on the load ports and leaves the shuffle port to the decode. @p flat must extend four bytes
- *          past its last index, since the dword gather over-reads three. */
+/** Class byte per lane from a page-compressed flat table: `page_lut[high]` selects a 256-byte
+ *  page, then `flat[page * 256 + low]` is fetched with four @c vpgatherdd. Unlike the nibble
+ *  cascade this scales with the window, not the table: the cascade scanned every 16-byte tile of
+ *  every stage on the shuffle port, while the gather issues on the load ports and leaves the
+ *  shuffle port to the decode. @p flat must extend four bytes past its last index, since the dword
+ *  gather over-reads three. */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_haswell_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, __m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     __m256i const page_indices_u8x32 = sz_utf8_rune_lut256_haswell_(page_lut, high_bytes_u8x32);
@@ -367,10 +407,10 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_haswell_( //
 
 #pragma region Drains
 
-/** @brief  Left-pack the set lane indices (in [0, 64), ascending) of a 64-bit @p mask into @p out[0..popcount).
- *          BMI2 path: `tzcnt` pulls the lowest set bit's index, `blsr` clears it. On Intel Haswell `tzcnt`/`blsr`
- *          are single-uop and beat a `vpshufb` left-pack LUT; the LUT only wins where `pext`/`blsr` is microcoded
- *          (AMD pre-Zen3). */
+/** Left-pack the set lane indices (in [0, 64), ascending) of a 64-bit @p mask into
+ *  @p out[0..popcount). BMI2 path: @c tzcnt pulls the lowest set bit's index, @c blsr clears it. On
+ *  Intel Haswell @c tzcnt and @c blsr are single-uop and beat a @c vpshufb left-pack LUT; the LUT
+ *  only wins where @c pext and @c blsr are microcoded (AMD pre-Zen3). */
 SZ_HELPER_INLINE void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *out) {
     while (mask) {
         *out++ = (sz_u8_t)(int)_tzcnt_u64(mask);
@@ -378,12 +418,12 @@ SZ_HELPER_INLINE void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *ou
     }
 }
 
-/** @brief  AVX2 forward drain — the `vpcompressb`-free twin of @ref sz_utf8_rune_drain_forward_. Emits one
- *          (start, length) per set boundary lane (ascending), honoring @p capacity and the carried previous-boundary
- *          via @p previous_io; bit-exact with the Ice Lake leaf. The set lanes are index-unpacked once (BMI2), then
- *          streamed in waves of four u64 positions (`vpmovzxbq` widen + `base`, segment starts via `vpermq` shift +
- *          `vpblendd` carry-seat, lengths via `vpsubq`), with a scalar tail for the final partial wave (no AVX2
- *          masked store). */
+/** AVX2 forward drain — the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_forward_. Emits one
+ *  (start, length) per set boundary lane (ascending), honoring @p capacity and the carried
+ *  previous-boundary via @p previous_io; bit-exact with the Ice Lake leaf. The set lanes are
+ *  index-unpacked once (BMI2), then streamed in waves of four u64 positions (a @c vpmovzxbq widen +
+ *  @p base, segment starts via @c vpermq shift + @c vpblendd carry-seat, lengths via @c vpsubq),
+ *  with a scalar tail for the final partial wave (no AVX2 masked store). */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
@@ -434,20 +474,19 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
 
 #pragma region Total vectorized decode
 
-/** @brief  Low @p count bits set within a 32-bit lane mask (0 for `count==0`, all-ones for `count>=32`). The 32-bit
- *          twin of @ref sz_u64_mask_until_serial_, used to bound a sub-window of an AVX2 32-byte window. */
+/** Low @p count bits set within a 32-bit lane mask (0 for `count==0`, all-ones for
+ *  `count>=32`). The 32-bit twin of @ref sz_u64_mask_until_serial_, used to bound a sub-window
+ *  of an AVX2 32-byte window. */
 SZ_HELPER_INLINE sz_u32_t sz_u32_mask_until_serial_(sz_size_t count) {
     return count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << count) - 1u);
 }
 
-/**
- *  @brief  Gather one byte per 32-bit lane from a 32-byte window addressed by the 8 per-dword byte @p offsets_u32x8
- *          (each in `[0, 32)`), entirely in-register (NO `vpgatherdd`). The window's two 16-byte halves are each
- *          broadcast into both 128-bit lanes (@p window_dup_lo_u8x32 / @p window_dup_hi_u8x32); a `vpshufb` per half
- *          routes `window[offset & 15]` into the low byte of every dword, and the high offset bit blends the two
- *          halves. Lanes pointing past lane 31 read the wrapped low half, but the caller only consults lanes whose
- *          offset is a real emitted start.
- */
+/** Gather one byte per 32-bit lane from a 32-byte window addressed by the 8 per-dword byte
+ *  @p offsets_u32x8 (each in `[0, 32)`), entirely in-register (NO @c vpgatherdd). The window's two
+ *  16-byte halves are each broadcast into both 128-bit lanes (into @p window_dup_lo_u8x32 and
+ *  @p window_dup_hi_u8x32); a @c vpshufb per half routes `window[offset & 15]` into the low byte of
+ *  every dword, and the high offset bit blends the two halves. Lanes pointing past lane 31 read the
+ *  wrapped low half, but the caller only consults lanes whose offset is a real emitted start. */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
     __m256i window_dup_lo_u8x32, __m256i window_dup_hi_u8x32, __m256i offsets_u32x8) {
     __m256i const offset_within_u32x8 = _mm256_and_si256(offsets_u32x8, _mm256_set1_epi32(0x0F));
@@ -459,10 +498,8 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
     return _mm256_blendv_epi8(window_low_picked_u8x32, window_high_picked_u8x32, offset_high_bit_select_u32x8);
 }
 
-/**
- *  @brief  Ascending set-bit positions of every 8-bit sub-mask, eight bytes per row, keyed by the sub-mask.
- *          Unused slots are 0x80, whose high bit makes `vpshufb` read zero and never store.
- */
+/** Ascending set-bit positions of every 8-bit sub-mask, eight bytes per row, keyed by the sub-mask.
+ *  Unused slots are 0x80, whose high bit makes @c vpshufb read zero and never store. */
 static sz_u8_t const sz_utf8_leftpack8_haswell_[256 * 8] = {
     0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x00
     0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x01
@@ -722,15 +759,13 @@ static sz_u8_t const sz_utf8_leftpack8_haswell_[256 * 8] = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // 0xFF
 };
 
-/**
- *  @brief  Left-pack the set-bit positions of a 32-bit lane @p mask into @p out as a dense, ascending array of
- *          byte-offsets in [0, 32), returning the count - the AVX2 `vpcompressb`-free start-compaction shared with the
- *          NEON / LASX / PowerVSX backends. Replaces a scalar `ctz` walk with a 2 KB shuffle-LUT keyed by each 8-bit
- *          sub-mask: for every 16-lane half the mask splits into a low and a high byte, each `vpshufb` over the LUT row
- *          of its set-bit positions, the high half offset by +8, the two stitched at `popcount(low8)` via a gap-shift
- *          `vpshufb` (no scalar per-lane index walk). The half offset `h*16` is added in vector; one loop over the two
- *          halves.
- */
+/** Left-pack the set-bit positions of a 32-bit lane @p mask into @p out as a dense, ascending array
+ *  of byte-offsets in [0, 32), returning the count - the AVX2 @c vpcompressb-free start-compaction
+ *  shared with the NEON / LASX / PowerVSX backends. Replaces a scalar @c ctz walk with a 2 KB
+ *  shuffle-LUT keyed by each 8-bit sub-mask: for every 16-lane half the mask splits into a low and
+ *  a high byte, each @c vpshufb over the LUT row of its set-bit positions, the high half offset by
+ *  +8, the two stitched at `popcount(low8)` via a gap-shift @c vpshufb (no scalar per-lane index
+ *  walk). The half offset `h*16` is added in vector; one loop over the two halves. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *out) {
     __m128i const lane_iota_u8x16 = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     __m128i const constant_eight_u8x16 = _mm_set1_epi8(8);
@@ -773,15 +808,19 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u
 }
 
 /**
- *  @brief  Decode the dense emitted-start lanes of one classified AVX2 window into sequential UTF-32 runes, the
- *          `vpcompressb`-free twin of @ref sz_utf8_rune_drain_icelake_. The set lanes of @p emit_starts are left-packed
- *          once into a dense ascending byte-offset array (BMI2 `tzcnt`/`blsr`, @ref sz_utf8_unpack_indices_haswell_),
- *          and each block of up to 8 starts loads its offsets to dwords, gathers the lead and trailing bytes from the
- *          in-register window, width-blends 1/2/3/4-byte lanes branchlessly, and — only when @p has_ill — overwrites
- *          ill-formed lanes with U+FFFD (their per-emitted-lane flag gathered with the SAME packed offsets out of
- *          @p ill_formed_lanes_u8x32).
- *  @return Number of runes emitted; sets @p last_off_out to the last emitted start's window byte-offset (the caller
- *          turns it into the resume cursor by adding that lane's maximal-subpart length).
+ *  @brief Decode the dense emitted-start lanes of one classified AVX2 window into sequential UTF-32
+ *      runes, the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_icelake_.
+ *
+ *  The set lanes of @p emit_starts are left-packed once into a dense ascending byte-offset array
+ *  (BMI2 @c tzcnt and @c blsr, @ref sz_utf8_unpack_indices_haswell_), and each block of up to 8
+ *  starts loads its offsets to dwords, gathers the lead and trailing bytes from the in-register
+ *  window, width-blends 1/2/3/4-byte lanes branchlessly, and — only when @p has_ill — overwrites
+ *  ill-formed lanes with U+FFFD (their per-emitted-lane flag gathered with the same packed offsets
+ *  out of @p ill_formed_lanes_u8x32).
+ *
+ *  @return Number of runes emitted; sets @p last_off_out to the last emitted start's window
+ *      byte-offset (the caller turns it into the resume cursor by adding that lane's
+ *      maximal-subpart length).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_haswell_(                         //
     __m256i window_u8x32, __m256i ill_formed_lanes_u8x32, sz_u32_t emit_starts, //
@@ -808,10 +847,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_haswell_(                         
             window_low_broadcast_u8x32, window_high_broadcast_u8x32,
             _mm256_add_epi32(offsets_u32x8, _mm256_set1_epi32(1)));
 
-        // Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the lead byte alone),
-        // so they stay unconditional; the 2-byte form needs only the second byte, also already gathered. The wider
-        // trailing bytes are gathered CONDITIONALLY via two sibling `if`s so a CJK (3-byte-only) window never pays
-        // for the 4th-byte gather + 4-byte assembly, and ASCII/2-byte windows skip both.
+        // Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the
+        // lead byte alone), so they stay unconditional; the 2-byte form needs only the second byte,
+        // also already gathered. The wider trailing bytes are gathered conditionally via two
+        // sibling `if`s so a CJK (3-byte-only) window never pays for the 4th-byte gather + 4-byte
+        // assembly, and ASCII/2-byte windows skip both.
         __m256i const is_greater_equal_0xc0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xC0 - 1));
         __m256i const is_greater_equal_0xe0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xE0 - 1));
         __m256i const is_greater_equal_0xf0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xF0 - 1));
@@ -877,15 +917,14 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_haswell_(                         
     return produced;
 }
 
-/**
- *  @brief  Decode one 32-byte window of @p text into dense UTF-32 @p runes by the uniform "classify → per-lane
- *          well-formed + orphan promotion → compact emitted starts → in-register gather → width-blend → blend
- *          U+FFFD" path - the AVX2 twin of @ref sz_utf8_decode_once_icelake_, bit-exact with the serial
- *          reference (one U+FFFD per maximal ill-formed subpart, Unicode 17.0 §3.9 / W3C). Pure-ASCII windows take
- *          a `vpmovzxbd` widen lane. The step declines (`*runes_unpacked == 0`, cursor unchanged) ONLY when the
- *          first lead's declared sequence crosses the window edge (a boundary truncation), which the public entry
- *          finalizes without a serial re-decode. The decode is TOTAL: no decline-to-serial.
- */
+/** Decode one 32-byte window of @p text into dense UTF-32 @p runes by the uniform "classify →
+ *  per-lane well-formed + orphan promotion → compact emitted starts → in-register gather →
+ *  width-blend → blend U+FFFD" path - the AVX2 twin of @ref sz_utf8_decode_once_icelake_,
+ *  bit-exact with the serial reference (one U+FFFD per maximal ill-formed subpart, Unicode 17.0
+ *  §3.9 / W3C). Pure-ASCII windows take a @c vpmovzxbd widen lane. The step declines
+ *  (`*runes_unpacked == 0`, cursor unchanged) only when the first lead's declared sequence crosses
+ *  the window edge (a boundary truncation), which the public entry finalizes without a serial
+ *  re-decode. The decode is total: no decline-to-serial. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
     sz_cptr_t text, sz_size_t length,                    //
     sz_rune_t *runes, sz_size_t runes_capacity,          //
@@ -1018,8 +1057,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
     sz_u32_t const len_ge_four =
         (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(sequence_lengths_u8x32, _mm256_set1_epi8(3))) & starts_bits;
 
-    // Any start whose declared sequence reaches past the window is deferred: the FIRST overrunning start bounds the
-    // decodable prefix (a malformed lead-in-lead can overrun before the trailing truncation), and its bytes resume.
+    // Any start whose declared sequence reaches past the window is deferred: the first overrunning
+    // start bounds the decodable prefix (a malformed lead-in-lead can overrun before the trailing
+    // truncation), and its bytes resume.
     __m256i const lane_iota_u8x32 = _mm256_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, //
                                                      16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31);
     __m256i const sequence_end_u8x32 = _mm256_add_epi8(lane_iota_u8x32, sequence_lengths_u8x32);
@@ -1133,14 +1173,13 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
     return text + (sz_size_t)last_off + last_length;
 }
 
-/**
- *  @brief  Decode UTF-8 into dense UTF-32 @p runes, TOTAL in-vector over 32-byte AVX2 windows (NO decline-to-serial).
- *          Each window classifies all lanes, promotes orphan continuation bytes, compacts the emitted starts, gathers
- *          their bytes in-register, and width-blends; ill-formed leads/orphans collapse to one U+FFFD per maximal
- *          ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with @ref sz_utf8_decode_serial. A pure-ASCII
- *          window widens with `vpmovzxbd`. Gather-free on the hot path: `vbroadcasti128` + `vpshufb` window reads and
- *          BMI2 `pext`/`tzcnt`/`blsr` compaction, never a `vpgatherdd`.
- */
+/** Decode UTF-8 into dense UTF-32 @p runes, total in-vector over 32-byte AVX2 windows (no
+ *  decline-to-serial). Each window classifies all lanes, promotes orphan continuation bytes,
+ *  compacts the emitted starts, gathers their bytes in-register, and width-blends; ill-formed
+ *  leads/orphans collapse to one U+FFFD per maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C),
+ *  bit-exact with @ref sz_utf8_decode_serial. A pure-ASCII window widens with @c vpmovzxbd.
+ *  Gather-free on the hot path: @c vbroadcasti128 and @c vpshufb window reads and BMI2 @c pext,
+ *  @c tzcnt and @c blsr compaction, never a @c vpgatherdd. */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
     sz_cptr_t text, sz_size_t length,             //
     sz_rune_t *runes, sz_size_t runes_capacity,   //
@@ -1171,10 +1210,11 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
 
 #pragma endregion Total vectorized decode
 
-/*  UAX-29 word boundary detection (vectorized). The same outer walk as the serial reference, but all-ASCII
- *  windows resolve their boundaries with `_mm256_shuffle_epi8` Word_Break classification plus a local pair
- *  decision. Any stateful rule (WB4/6/7/7a/11/12/15/16/3c), non-ASCII, or window-edge position defers to
- *  `sz_utf8_is_word_boundary_serial`, keeping the output byte-exact versus serial. */
+/*  UAX-29 word boundary detection (vectorized). The same outer walk as the serial reference, but
+ *  all-ASCII windows resolve their boundaries with @c _mm256_shuffle_epi8 Word_Break
+ *  classification plus a local pair decision. Any stateful rule (WB4/6/7/7a/11/12/15/16/3c),
+ *  non-ASCII, or window-edge position defers to @c sz_utf8_is_word_boundary_serial, keeping the
+ *  output byte-exact versus serial. */
 
 #if defined(__clang__)
 #pragma clang attribute pop

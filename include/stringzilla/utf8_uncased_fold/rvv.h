@@ -1,7 +1,9 @@
 /**
- *  @brief RISC-V Vector backend for UTF-8 case folding (delegates to serial).
  *  @file include/stringzilla/utf8_uncased_fold/rvv.h
  *  @author Ash Vardanian
+ *  @date June 14, 2026
+ *  @brief RISC-V Vector backend for UTF-8 case folding.
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_RVV_H_
@@ -13,6 +15,17 @@
 extern "C" {
 #endif
 
+/*  Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's low
+ *  6 bits: 0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (route to serial). Identical values
+ *  to the NEON / Ice Lake @c cN_deltas_lut, in ascending index order. Generated from Unicode full
+ *  case folding; verified byte-exact against the serial reference.
+ *
+ *  The C4 / C5 / C6 sub-tables are laid out contiguously in one 192-byte table so a single indexed
+ *  memory load, @c vluxei8, keyed by `family_base + low6`, with 0 / 64 / 128 as the family base for
+ *  C4 / C5 / C6, covers all three families in one gather — the fold handlers below exploit this to
+ *  run a strip at @c e8m8. The three `sz_utf8_fold_latin_c{4,5,6}_deltas_rvv_` names alias the
+ *  matching 64-byte windows so the @c utf8_uncased strips can keep loading a single family with one
+ *  @c vle8. */
 #if SZ_USE_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
@@ -21,16 +34,6 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-/*  Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's low 6 bits:
- *  0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (route to serial). Identical values to the NEON /
- *  Ice Lake `cN_deltas_lut`, in ascending index order. Generated from Unicode full case folding; verified
- *  byte-exact against the serial reference.
- *
- *  The C4 / C5 / C6 sub-tables are laid out contiguously in one 192-byte table so a SINGLE indexed memory
- *  load (`vluxei8`) keyed by `family_base + low6` (family_base = 0 / 64 / 128 for C4 / C5 / C6) covers all
- *  three families in one gather — the fold handlers below exploit this to run a strip at `e8m8`. The three
- *  `sz_utf8_fold_latin_c{4,5,6}_deltas_rvv_` names alias the matching 64-byte windows so the
- *  `utf8_uncased` strips can keep loading a single family with one `vle8`. */
 static sz_u8_t const sz_utf8_fold_latin_c456_deltas_rvv_[192] = {
     // C4 80-BF
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,       //
@@ -51,8 +54,8 @@ static sz_u8_t const *const sz_utf8_fold_latin_c4_deltas_rvv_ = sz_utf8_fold_lat
 static sz_u8_t const *const sz_utf8_fold_latin_c5_deltas_rvv_ = sz_utf8_fold_latin_c456_deltas_rvv_ + 64;
 static sz_u8_t const *const sz_utf8_fold_latin_c6_deltas_rvv_ = sz_utf8_fold_latin_c456_deltas_rvv_ + 128;
 
-/*  Case-fold a strip of ASCII bytes: `c + ((c - 'A' <= 25) * 0x20)`, the vector form of `sz_ascii_fold_`.
- *  Only `[0x41, 0x5A]` shifts by `+0x20`; every other lane passes through unchanged. */
+/*  Case-fold a strip of ASCII bytes: `c + ((c - 'A' <= 25) * 0x20)`, the vector form of
+ *  @c sz_ascii_fold_. Only `[0x41, 0x5A]` shifts by `+0x20`; other lanes pass through unchanged. */
 SZ_HELPER_INLINE vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_size_t vector_length) {
     vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
                                                      vector_length);
@@ -60,9 +63,10 @@ SZ_HELPER_INLINE vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_s
     return __riscv_vmerge_vvm_u8m8(source_u8m8, lowered_u8m8, is_upper_b1, vector_length);
 }
 
-/*  Largest strip length that does not split a trailing multi-byte sequence across strips. On the final strip
- *  (`vector_length == remaining`) the whole input ends here, so nothing is trimmed; otherwise a last codepoint whose
- *  declared length runs past `vector_length` is excluded and reprocessed in the next strip. */
+/*  Largest strip length that does not split a trailing multi-byte sequence across strips. On the
+ *  final strip (`vector_length == remaining`) the whole input ends here, so nothing is trimmed;
+ *  otherwise a last codepoint whose declared length runs past @c vector_length is excluded and
+ *  reprocessed in the next strip. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                          sz_size_t remaining) {
     if (vector_length >= remaining) return vector_length;
@@ -74,18 +78,19 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_p
     return ((boundary - 1) + needed > vector_length) ? (boundary - 1) : vector_length;
 }
 
-/*  Vector-fold one strip of Latin text (ASCII + Latin-1 Supplement C2/C3 + Latin Extended-A/B C4-C6) in
- *  place — the length-preserving working set of most Latin-script languages. Mirrors the NEON latin chunk:
- *  Latin-1 uppercase is `+0x20`, Latin Extended is a `+0` / `+1` parity delta from the `cN` LUTs, and the
- *  length-preserving special cases ß→"ss" and µ→μ are byte replacements. Continuation deltas flagged `0x80`
- *  (expand / shrink / cross-block) and any lead outside C2-C6 are "stops": the consumed prefix ends on the
- *  character boundary before the first stop, and the caller routes that one codepoint to serial.
+/*  Vector-fold one strip of Latin text (ASCII + Latin-1 Supplement C2/C3 + Latin Extended-A/B
+ *  C4-C6) in place — the length-preserving working set of most Latin-script languages. Mirrors the
+ *  NEON latin chunk: Latin-1 uppercase is `+0x20`, Latin Extended is a `+0` / `+1` parity delta
+ *  from the @c cN LUTs, and the length-preserving special cases ß → "ss" and µ → μ are byte
+ *  replacements. Continuation deltas flagged `0x80` (expand / shrink / cross-block) and any lead
+ *  outside C2-C6 are "stops": the consumed prefix ends on the character boundary before the first
+ *  stop, and the caller routes that one codepoint to serial.
  *
- *  Runs at `e8m8`: the per-lane delta is fetched from the contiguous C4/C5/C6 table in memory with a single
- *  `vluxei8` keyed by `family_base + low6`, so the LUT no longer has to share a register group with the
- *  indices (which is what pinned the gather-based form to `e8m4`). Sets `*needs_serial` when it stopped on a
- *  non-handled codepoint (vs. merely trimming a trailing incomplete sequence). Returns the number of bytes
- *  folded and written. */
+ *  Runs at @c e8m8: the per-lane delta is fetched from the contiguous C4/C5/C6 table in memory with
+ *  a single @c vluxei8 keyed by `family_base + low6`, so the LUT need not share a register group
+ *  with the indices, which would pin a gather-based form to @c e8m4. Sets `*needs_serial` when it
+ *  stopped on a non-handled codepoint (vs. merely trimming a trailing incomplete sequence). Returns
+ *  the number of bytes folded and written. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                          sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
@@ -182,14 +187,15 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_p
     return consumed;
 }
 
-/*  Vector-fold one strip of basic Cyrillic (D0/D1 leads) in place. Uppercase sub-ranges are keyed by the
- *  second byte's high nibble — one indexed memory load (`vluxei8`) over a 16-entry table yields the offset
- *  (8→+0x10, 9→+0x20, A→−0x20) — and the D0→D1 lead rewrite is a masked `+1` where the lowercase lives in
- *  the next block. Cyrillic Extended-A (D1 A0+) and any non-D0/D1 lead are stops routed to serial.
+/*  Vector-fold one strip of basic Cyrillic (D0/D1 leads) in place. Uppercase sub-ranges are keyed
+ *  by the second byte's high nibble — one indexed memory load (vluxei8) over a 16-entry table
+ *  yields the offset (8 → +0x10, 9 → +0x20, A → −0x20) — and the D0 → D1 lead rewrite is a masked
+ *  `+1` where the lowercase lives in the next block. Cyrillic Extended-A (D1 A0+) and any non-D0/D1
+ *  lead are stops routed to serial.
  *
- *  Runs at `e8m8`: the offset table is read from memory, so it no longer has to share a register group with
- *  the indices the way a `vrgather` would, lifting the old `e8m4` ceiling. Same stop-and-serial contract as
- *  `sz_utf8_fold_latin_strip_rvv_`. */
+ *  Runs at @c e8m8: the offset table is read from memory, so it need not share a register group
+ *  with the indices the way a @c vrgather would, which avoids the @c e8m4 ceiling. Same
+ *  stop-and-serial contract as @c sz_utf8_fold_latin_strip_rvv_. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                             sz_u8_t *destination_ptr, int *needs_serial) {
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
@@ -253,10 +259,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *sourc
     return consumed;
 }
 
-/*  Vector-fold one strip of basic Greek (CE/CF leads) in place. 'Α'-'Ο' (CE 91-9F) fold `+0x20`; 'Π'-'Ρ'
- *  and 'Σ'-'Ϋ' fold `-0x20` with a CE->CF lead promotion (+1); final sigma 'ς' (CF 82) folds to 'σ' (+1).
- *  Accented uppercase (CE 84-90), the expanding 'ΰ' (CE B0), the CF 8F+ symbols, and any non-CE/CF lead are
- *  stops routed to serial. Same `e8m8` strip / stop-and-serial contract as the other handlers. */
+/*  Vector-fold one strip of basic Greek (CE/CF leads) in place. 'Α'-'Ο' (CE 91-9F) fold `+0x20`;
+ *  'Π'-'Ρ' and 'Σ'-'Ϋ' fold `-0x20` with a CE → CF lead promotion (+1); final sigma 'ς' (CF 82)
+ *  folds to 'σ' (+1). Accented uppercase (CE 84-90), the expanding 'ΰ' (CE B0), the CF 8F+ symbols,
+ *  and any non-CE/CF lead are stops routed to serial. Same @c e8m8 strip / stop-and-serial contract
+ *  as the other handlers. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                          sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
@@ -337,10 +344,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_p
     return consumed;
 }
 
-/*  Vector-fold one strip of Armenian (D4/D5/D6 leads) in place. Disjoint second-byte offsets — D4 B1-BF and
- *  D5 90-96 fold `-0x10`, D5 80-8F folds `+0x30` — plus the lead `+1` rewrites D4->D5 (next B1-BF) and
- *  D5->D6 (next 90-96). The 'և' ligature (D6 87, expands), the D4 Cyrillic-Supplement range (next < B1), and
- *  any non-D4/D5/D6 lead are stops routed to serial. Same `e8m8` strip / stop-and-serial contract. */
+/*  Vector-fold one strip of Armenian (D4/D5/D6 leads) in place. Disjoint second-byte offsets — D4
+ *  B1-BF and D5 90-96 fold `-0x10`, D5 80-8F folds `+0x30` — plus the lead `+1` rewrites D4 → D5
+ *  (next B1-BF) and D5 → D6 (next 90-96). The 'և' ligature (D6 87, expands), the D4
+ *  Cyrillic-Supplement range (next < B1), and any non-D4/D5/D6 lead are stops routed to serial.
+ *  Same @c e8m8 strip / stop-and-serial contract. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                             sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
@@ -417,11 +425,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *sourc
     return consumed;
 }
 
-/*  Vector-fold one strip of Georgian (3-byte E1 82/83 sequences) in place — a uniform 3-byte->3-byte fold
- *  whose uppercase subset is decided by the THIRD byte, so the lead reads two bytes forward and the
- *  uppercase flag is carried one lane to the second-byte rewrite and two lanes to the third-byte offset:
- *  lead E1->E2, second 82/83->B4, third -0x20 (E1 82) or +0x20 (E1 83). Non-Georgian E1 second bytes and
- *  any non-E1 lead are stops routed to serial. Same `e8m8` strip / stop-and-serial contract. */
+/*  Vector-fold one strip of Georgian (3-byte E1 82/83 sequences) in place — a uniform 3-byte →
+ *  3-byte fold whose uppercase subset is decided by the third byte, so the lead reads two bytes
+ *  forward and the uppercase flag is carried one lane to the second-byte rewrite and two lanes to
+ *  the third-byte offset: lead E1 → E2, second 82/83 → B4, third -0x20 (E1 82) or +0x20 (E1 83).
+ *  Non-Georgian E1 second bytes and any non-E1 lead are stops routed to serial. Same @c e8m8 strip
+ *  / stop-and-serial contract. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                             sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
@@ -444,9 +453,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *sourc
     vbool1_t is_foreign_e1_b1 = __riscv_vmandn_mm_b1(
         is_e1_b1, __riscv_vmor_mm_b1(is_82_lead_b1, is_83_lead_b1, vector_length), vector_length);
     // Well-formed E1 82/83 lead (mirrors `sz_rune_decode`): the second byte (82/83) is already a
-    // continuation, so the gate is that the THIRD byte is a continuation too. E1 has no overlong/surrogate
-    // special case. A malformed E1 family lead is treated as foreign so the strip stops before it and serial
-    // copies one byte.
+    // continuation, so the gate is that the third byte is a continuation too. E1 has no
+    // overlong/surrogate special case. A malformed E1 family lead is treated as foreign so the
+    // strip stops before it and serial copies one byte.
     vbool1_t third_is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(
         __riscv_vand_vx_u8m8(next_next_u8m8, 0xC0, vector_length), 0x80, vector_length);
     vbool1_t malformed_family_lead_b1 = __riscv_vmandn_mm_b1(
@@ -508,11 +517,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *sourc
     return consumed;
 }
 
-/*  Byte-for-byte equivalent to `sz_utf8_uncased_fold_serial`. Maximal ASCII runs are folded at `e8m8`, Latin /
- *  Cyrillic / Greek / Armenian / Georgian text are folded in place by their `_strip_rvv_` handlers
- *  (dispatched on the lead byte), and any other script / length-changing fold is handled by the value-exact
- *  serial decode/fold/encode for that one codepoint before re-entering the vector path. These folds are 1:1
- *  in length, so the destination tracks the source for those runs. */
+/*  Byte-for-byte equivalent to @c sz_utf8_uncased_fold_serial. Maximal ASCII runs are folded at
+ *  @c e8m8, Latin / Cyrillic / Greek / Armenian / Georgian text are folded in place by their
+ *  @c _strip_rvv_ handlers (dispatched on the lead byte), and any other script / length-changing
+ *  fold is handled by the value-exact serial decode/fold/encode for that one codepoint before
+ *  re-entering the vector path. These folds are 1:1 in length, so the destination tracks the source
+ *  for those runs. */
 SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;

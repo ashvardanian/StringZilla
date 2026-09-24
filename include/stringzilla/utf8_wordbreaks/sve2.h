@@ -1,28 +1,31 @@
 /**
- *  @brief SVE2 backend for UAX-29 word boundaries.
  *  @file include/stringzilla/utf8_wordbreaks/sve2.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief SVE2 backend for UAX-29 word boundaries.
  *
- *  Full-width SVE2 UAX-29 word-break kernel `sz_utf8_wordbreaks_sve2`, assembled from three validated leaves
- *  (in-register classifier + decode/classify + rule engine) plus the `build_frame` lowering leaf, the
- *  single-`svcompact_u32` drain, and the advancing driver. The SVE2 twin of the AVX2 (Haswell) / Ice Lake /
- *  NEON kernels: no path scalar-walks codepoints or spills a vector to call the serial oracle. The BMP
- *  classifier deliberately DOES issue a gather: it reads the page-compressed flat leaf via
- *  `svld1ub_gather_u32offset_u32` (see @ref sz_utf8_rune_flat_lookup_sve2_) rather than walking a nibble
- *  cascade of `svtbl_u8` chunks: cross-lane shuffles contend for the single shuffle pipe while gathers issue
- *  on the load pipes, and SVE2, unlike NEON, has a real hardware gather, so it takes the flat path directly.
+ *  Full-width SVE2 UAX-29 word-break kernel @c sz_utf8_wordbreaks_sve2, assembled from three
+ *  validated leaves (in-register classifier + decode/classify + rule engine) plus the
+ *  @c build_frame lowering leaf, the single-svcompact_u32 drain, and the advancing driver. The SVE2
+ *  twin of the AVX2 (Haswell) / Ice Lake / NEON kernels: no path scalar-walks codepoints or spills
+ *  a vector to call the serial oracle. The BMP classifier deliberately does issue a gather: it
+ *  reads the page-compressed flat leaf via @c svld1ub_gather_u32offset_u32 (see
+ *  @ref sz_utf8_rune_flat_lookup_sve2_) rather than walking a nibble cascade of @c svtbl_u8 chunks:
+ *  cross-lane shuffles contend for the single shuffle pipe while gathers issue on the load pipes,
+ *  and SVE2, unlike NEON, has a real hardware gather, so it takes the flat path directly.
  *
- *  The engine and decode leaves were validated bit-exact vs `sz_utf8_wordbreaks_serial` (streaming-cursor:
- *  clamped capacity + `bytes_consumed` resume) over the regression cases, a capacity x alignment sweep, and
- *  >=2,000,000 random valid/malformed inputs at `svcntb()==64` (so one window == one 64-bit lane-mask domain) -
- *  but that campaign predates the flat BMP leaf and must be re-run on Arm hardware to cover it. The flat table
- *  is bit-exact with the cascade by construction (see `sz_utf8_word_break_flat_bmp_`), and the flat leaf's
- *  throughput on Arm is likewise unmeasured to date.
+ *  The engine and decode leaves were validated bit-exact vs @c sz_utf8_wordbreaks_serial
+ *  (streaming-cursor: clamped capacity + @c bytes_consumed resume) over the regression cases, a
+ *  capacity × alignment sweep, and ≥ 2,000,000 random valid/malformed inputs at `svcntb()==64` (so
+ *  one window == one 64-bit lane-mask domain) - but that campaign predates the flat BMP leaf and
+ *  must be re-run on Arm hardware to cover it. The flat table is bit-exact with the cascade by
+ *  construction (see @c sz_utf8_word_break_flat_bmp_), and the flat leaf's throughput on Arm is
+ *  likewise unmeasured to date.
  *
- *  Implementation note: the engine's `<<k` / `>>1` lane algebra is realized with `svext`-based shift macros
- *  (`sz_utf8_word_break_lane_up_sve2_(v, k)` / `sz_utf8_word_break_lane_dn_sve2_(v, k)`) so the shift amount
- *  stays an integer-constant expression and the whole file compiles as both C99 and C++, matching the
- *  sibling kernels.
+ *  Implementation note: the engine's `<<k` / `>>1` lane algebra is realized with @c svext-based
+ *  shift macros (`sz_utf8_word_break_lane_up_sve2_(v, k)` /
+ *  `sz_utf8_word_break_lane_dn_sve2_(v, k)`) so the shift amount stays an integer-constant
+ *  expression and the whole file compiles as both C99 and C++, matching the sibling kernels.
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
 #define STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
@@ -36,6 +39,8 @@
 extern "C" {
 #endif
 
+/*  In-register SVE2 Word_Break classifier core: flat-table BMP classify + astral nibble cascade +
+ *  the predicate/lane-mask bridge. The substrate LUT readers live in `utf8_runes/sve2.h`. */
 #if SZ_USE_SVE2
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
@@ -44,16 +49,14 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-/*  In-register SVE2 Word_Break classifier core: flat-table BMP classify + astral nibble cascade + the
- *  predicate/lane-mask bridge. The substrate LUT readers live in `utf8_runes/sve2.h`. */
-
-/** @brief  Word_Break class byte for sixteen-bit-wide BMP codepoints (per-lane high = cp>>8, low = cp&0xFF). */
+/** Word_Break class byte for sixteen-bit-wide BMP codepoints (per-lane high = cp>>8, low =
+ *  cp&0xFF). */
 SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_bmp_class_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
     return sz_utf8_rune_flat_lookup_sve2_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_, high_u8x,
                                           low_u8x);
 }
 
-/** @brief  Word_Break class byte for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000. */
+/** Word_Break class byte for sixteen astral codepoints over the 20-bit offset = cp - 0x10000. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t plane_off_u8x, svuint8_t high_u8x,
                                                                  svuint8_t low_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
@@ -86,9 +89,10 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t plane
     return result_u8x;
 }
 
-/** @brief  Predicate -> 64-bit lane mask bridge: each active lane raises bit `lane & 7` inside its byte, the byte
- *          groups OR-fold within every 64-bit element (bit sets are disjoint, so shifts never carry), and the
- *          per-element mask bytes recombine through one shifted `svaddv` — no stack round-trip, no lane loop. */
+/** Predicate → 64-bit lane mask bridge: each active lane raises bit `lane & 7` inside its byte,
+ *  the byte groups OR-fold within every 64-bit element (bit sets are disjoint, so shifts never
+ *  carry), and the per-element mask bytes recombine through one shifted @c svaddv — no stack
+ *  round-trip, no lane loop. */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t loaded) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t const pg_b64x = svptrue_b64();
@@ -104,8 +108,9 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t lo
     return (sz_u64_t)svaddv_u64(pg_b64x, svlsl_u64_x(pg_b64x, folded_u64x, svindex_u64(0, 8)));
 }
 
-/** @brief  64-bit lane mask -> predicate bridge, the inverse of @ref sz_utf8_pred_to_u64_sve2_: each lane reads its
- *          mask byte via `svtbl` over the broadcast mask and tests bit `lane & 7` — no stack round-trip. */
+/** 64-bit lane mask → predicate bridge, the inverse of @ref sz_utf8_pred_to_u64_sve2_: each lane
+ *  reads its mask byte via @c svtbl over the broadcast mask and tests bit `lane & 7`, with no
+ *  round-trip through the stack. */
 SZ_HELPER_INLINE svbool_t sz_utf8_u64_to_pred_sve2_(sz_u64_t mask, sz_size_t loaded) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t const iota_u8x = svindex_u8(0, 1);
@@ -115,14 +120,15 @@ SZ_HELPER_INLINE svbool_t sz_utf8_u64_to_pred_sve2_(sz_u64_t mask, sz_size_t loa
     return svcmpne_n_u8(svwhilelt_b8_u64(0, (sz_u64_t)loaded), svand_u8_x(pg_b8x, mask_bytes_u8x, lane_bit_u8x), 0);
 }
 
-/** @brief Decode + classify one window. */
+/** Decode + classify one window. */
 typedef struct sz_utf8_word_window_sve2_t {
     sz_utf8_word_break_partition_t partition;
     sz_u64_t four_byte_starts;
     sz_size_t loaded;
 } sz_utf8_word_window_sve2_t;
 
-/** @brief  Decode one window into per-lane (high, low, plane_off) substrate bytes + the codepoint partition. */
+/** Decode one window into per-lane (high, low, plane_off) substrate bytes + the codepoint
+ *  partition. */
 SZ_HELPER_INLINE sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_sve2_( //
     sz_u8_t const *text, sz_size_t available, int at_end_of_text,             //
     sz_u8_t *high_out, sz_u8_t *low_out, sz_u8_t *plane_off_out) {
@@ -203,7 +209,8 @@ SZ_HELPER_INLINE sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_sve2_( //
     return result;
 }
 
-/** @brief  Classify each lane of one window into its Word_Break class byte (ASCII/BMP/astral, forced-Other). */
+/** Classify each lane of one window into its Word_Break class byte (ASCII/BMP/astral,
+ *  forced-Other). */
 SZ_HELPER_INLINE void sz_utf8_word_classify_window_sve2_(              //
     sz_u8_t const *high, sz_u8_t const *low, sz_u8_t const *plane_off, //
     sz_u64_t four_byte_starts, sz_u64_t forced_other, sz_size_t loaded, sz_u8_t *out) {
@@ -224,17 +231,19 @@ SZ_HELPER_INLINE void sz_utf8_word_classify_window_sve2_(              //
     svst1_u8(loaded_b8x, out, classes_u8x);
 }
 
-/** @brief Full-width SVE2 rule engine; the portable `sz_u64_t` engine's `<<k` / `>>1` lane algebra is realized on
- *         per-lane 0/1 vectors via `svext`-based lane shifts (so it scales beyond a 64-bit movemask). */
+/** Full-width SVE2 rule engine; the portable @c sz_u64_t engine's `<<k` / `>>1` lane
+ *  algebra is realized on per-lane 0/1 vectors via @c svext-based lane shifts, which scale
+ *  beyond a 64-bit movemask. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a_u8x) { return svinsr_n_u8(a_u8x, 0); }
 SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a_u8x) {
     return svext_u8(a_u8x, svdup_n_u8(0), 1);
 }
-// The `svext` lane-shift amount must be an integer-constant expression, so the variable-`k` helpers are
-// function-like macros rather than functions: the literal `k` at each call site reaches the intrinsic
-// unchanged. Macros also keep this header a single code path for C99 and C++ — this file is compiled into
-// the C99 library (`c/stringzilla/utf8_wordbreaks.c`), where the earlier `template <int K>` helpers with
-// their `extern "C++"` island could not parse.
+
+/** The @c svext lane-shift amount must be an integer-constant expression, so the variable-k helpers
+ *  are function-like macros rather than functions: the literal k at each call site reaches the
+ *  intrinsic unchanged. Macros also keep this header a single code path for C99 and C++, as it is
+ *  compiled into the C99 library (`c/stringzilla/utf8_wordbreaks.c`), which cannot parse C++
+ *  templates or an `extern "C++"` island. */
 #define sz_utf8_word_break_lane_up_sve2_(v, k) svrev_u8(svext_u8(svrev_u8((v)), svdup_n_u8(0), (k)))
 #define sz_utf8_word_break_lane_dn_sve2_(v, k) svext_u8((v), svdup_n_u8(0), (k))
 
@@ -685,10 +694,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_word_break_decide_window_sve2_(              
     return resolved;
 }
 
-/** @brief  Per-lane u16 (=(high<<8)|low) membership in any sorted [lo,hi] range -> 0/1 byte mask; mirrors
- *          `sz_utf8_word_break_range16_one_neon_` (not-below: high greater, or equal-high with low at least lo;
- *          symmetric for not-above). Used by the WSegSpace / Extended_Pictographic scans inside @ref
- *          sz_utf8_word_break_resolve_window_sve2_. */
+/** Per-lane u16 (=(high<<8)|low) membership in any sorted [lo,hi] range → 0/1 byte mask; mirrors
+ *  @c sz_utf8_word_break_range16_one_neon_ (not-below: high greater, or equal-high with low at
+ *  least lo; symmetric for not-above). Used by the WSegSpace / Extended_Pictographic scans inside
+ *  @ref sz_utf8_word_break_resolve_window_sve2_. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t const *lo_t,
                                                             sz_u16_t const *hi_t, int count) {
     svbool_t const pg_b8x = svptrue_b8();
@@ -707,10 +716,11 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, 
     return svdup_u8_z(acc_b8x, 1);
 }
 
-/** @brief  Lower one window to the engine's lane masks (held as `svuint8_t` locals, no spill) and run the rule
- *          engine. Builds the 15 Word_Break class masks + WSegSpace / Extended_Pictographic / quote bytes +
- *          partition masks, then decides for @p complete_limit and re-resolves the carry to @p adv when an open
- *          bridge is still undecided at the edge -- the two-edge carry logic that mirrors the NEON driver. */
+/** Lower one window to the engine's lane masks (held as @c svuint8_t locals, no spill) and run
+ *  the rule engine. Builds the 15 Word_Break class masks + WSegSpace / Extended_Pictographic /
+ *  quote bytes + partition masks, then decides for @p complete_limit and re-resolves the carry to
+ *  @p adv when an open bridge is still undecided at the edge - the two-edge carry logic mirroring
+ *  the NEON driver. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(                                                //
     sz_u8_t const *raw, sz_u8_t const *high_a, sz_u8_t const *low_a, sz_u8_t const *plane_a, sz_u8_t const *cls_a, //
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,                    //
@@ -775,9 +785,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(             
     svuint8_t const low_u8x = svld1_u8(loaded_b8x, low_a);
 
     svuint8_t const non_ascii_u8x = svand_u8_x(pg_b8x, svdup_u8_z(svcmpge_n_u8(pg_b8x, raw_u8x, 0x80), 1), validv_u8x);
-    // Astral (4-byte) lanes carry the SMP low-16 in high/low (the astral classifier needs it). All WSegSpace and
-    // all BMP-table pictographic ranges live in the BMP, so the BMP (high,low) range scans must EXCLUDE 4-byte
-    // lanes or an astral codepoint whose low-16 lands in a BMP range (e.g. U+42009 -> 0x2009) false-matches.
+    // Astral (4-byte) lanes carry the SMP low-16 in high/low (the astral classifier needs it). All
+    // WSegSpace and all BMP-table pictographic ranges live in the BMP, so the BMP (high,low) range
+    // scans must exclude 4-byte lanes or an astral codepoint whose low-16 lands in a BMP range
+    // (e.g. U+42009 → 0x2009) false-matches.
     svuint8_t const four_u8x = svdup_u8_z(sz_utf8_u64_to_pred_sve2_(four_byte_starts & valid, loaded), 1);
     svuint8_t const bmp_lane_u8x = svand_u8_x(pg_b8x, non_ascii_u8x, sveor_n_u8_x(pg_b8x, four_u8x, 1));
     svuint8_t const double_quote_byte_u8x = svand_u8_x(pg_b8x, svdup_u8_z(svcmpeq_n_u8(pg_b8x, raw_u8x, 0x22), 1),
@@ -855,9 +866,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(             
     return adv;
 }
 
-/** @brief In-register boundary drain over a full byte-vector of lanes: each 32-bit quarter of @p boundary_b8x is
- *         compacted, widened to absolute 64-bit positions, and chained through the carried open `word_start` with an
- *         `svinsr` shift-in, so consecutive boundaries become (start, length) pairs without a stack round-trip. */
+/** In-register boundary drain over a full byte-vector of lanes: each 32-bit quarter of
+ *  @p boundary_b8x is compacted, widened to absolute 64-bit positions, and chained through the
+ *  carried open @c word_start with an @c svinsr shift-in, so consecutive boundaries become (start,
+ *  length) pairs without a stack round-trip. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *starts,
                                                     sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
                                                     sz_size_t *word_start_io) {
@@ -899,10 +911,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_si
     return produced;
 }
 
-/** @brief Forward UAX-29 word segmentation (SVE2), mirroring `sz_utf8_wordbreaks_neon` step for step. Each
- *         iteration commits at most `svcntb()` bytes (one byte-vector of engine lanes); the carry mechanism
- *         re-decodes the deferred tail, so the windowed result is bit-exact with serial regardless of the
- *         per-iteration ceiling. */
+/** Forward UAX-29 word segmentation (SVE2), mirroring @c sz_utf8_wordbreaks_neon step for step.
+ *  Each iteration commits at most `svcntb()` bytes (one byte-vector of engine lanes); the carry
+ *  mechanism re-decodes the deferred tail, so the windowed result is bit-exact with serial
+ *  regardless of the per-iteration ceiling. */
 SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2(   //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //

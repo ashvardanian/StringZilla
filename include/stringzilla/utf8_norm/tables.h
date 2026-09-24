@@ -1,18 +1,19 @@
 /**
  *  @file include/stringzilla/utf8_norm/tables.h
- *  @brief Generated unified Unicode normalization tables for the single-pass `utf8_norm` engine.
  *  @author Ash Vardanian
+ *  @date June 14, 2026
+ *  @brief Generated unified Unicode normalization tables for the single-pass @c utf8_norm engine.
  *
- *  Only the @b array @b contents below are generated - the `sz_utf8_norm_*_[]` initializer lists are
- *  derived from Unicode 17.0.0 and must not be hand-edited; regenerate them instead. The rest of the
- *  file is ordinary hand-written code - include guards, the `sz_utf8_norm_props_t` declaration, and
- *  every comment - and may be edited freely. One record per code-point drives both APIs; composition
- *  is partner-indexed (#3); Hangul is algorithmic and absent here. The recipe below (Python 3, stdlib
- *  only) derives those array contents from the UCD; it emits table data, never this file:
+ *  Only the @b array @b contents below are generated: the `sz_utf8_norm_*_[]` initializer lists are
+ *  derived from Unicode 17.0.0 and must not be hand-edited; regenerate them instead. The rest of
+ *  the file is ordinary hand-written code - include guards, the @c sz_utf8_norm_props_t
+ *  declaration, and every comment - and may be edited freely. One record per code-point drives both
+ *  APIs; composition is partner-indexed (#3); Hangul is algorithmic and absent here. The recipe
+ *  below, Python 3 with the standard library only, derives those array contents from the UCD files
+ *  unpacked into `ucd/`; it emits table data, never this file:
  *
  *  @code{.py}
  *  import urllib.request
- *  V = "17.0.0"
  *  def ucd(n): return urllib.request.urlopen(f"https://www.unicode.org/Public/{V}/ucd/{n}").read().decode()
  *
  *  # Combining class and one-step canonical/compatibility decompositions:
@@ -44,6 +45,8 @@
  *  # 0xD800 escape), reached by a 3-stage trie. A separate u8-palette trie holds the scan value
  *  # (qc_flags << 8 | ccc), paired with a 64-entry lead LUT and a flat 2-byte table for the SIMD scanner.
  *  @endcode
+ *
+ *  @see Unicode Character Database 17.0.0: https://www.unicode.org/Public/17.0.0/ucd/
  */
 #ifndef STRINGZILLA_UTF8_NORM_TABLES_H_
 #define STRINGZILLA_UTF8_NORM_TABLES_H_
@@ -54,30 +57,42 @@
 extern "C" {
 #endif
 
-/** @brief Per-codepoint normalization properties (one entry per distinct combination). */
+/** Per-codepoint normalization properties, one entry per distinct combination. */
 typedef struct sz_utf8_norm_props_t {
-    sz_u8_t canonical_combining_class; /**< Canonical_Combining_Class (0 = starter). */
-    sz_u8_t quick_check;               /**< bit0 NFC_QC=No, bit1 NFC_QC=Maybe, bit2 NFKC_QC=No, bit3 NFKC_QC=Maybe. */
-    sz_u16_t nfd;                      /**< Index into sz_utf8_norm_decomp_; 0 = no canonical decomposition. */
-    sz_u16_t nfkd;                     /**< Index into sz_utf8_norm_decomp_; 0 = no compatibility decomposition. */
-    sz_u16_t
-        partner; /**< Dense compose-mark id if the code-point is the SECOND element of a primary composite, else 0xFFFF. */
-    sz_u16_t
-        starter; /**< Index into sz_utf8_norm_compose_starters_ if the code-point begins >=1 primary composite, else 0xFFFF. */
+
+    /** Canonical_Combining_Class, 0 for a starter. */
+    sz_u8_t canonical_combining_class;
+
+    /** Bit 0 NFC_QC=No, bit 1 NFC_QC=Maybe, bit 2 NFKC_QC=No, bit 3 NFKC_QC=Maybe. */
+    sz_u8_t quick_check;
+
+    /** Index into @c sz_utf8_norm_decomp_, or 0 for no canonical decomposition. */
+    sz_u16_t nfd;
+
+    /** Index into @c sz_utf8_norm_decomp_, or 0 for no compatibility decomposition. */
+    sz_u16_t nfkd;
+
+    /** Dense compose-mark id if the code-point is the second element of a primary
+     *  composite, else 0xFFFF. */
+    sz_u16_t partner;
+
+    /** Index into @c sz_utf8_norm_compose_starters_ if the code-point begins ≥ 1 primary
+     *  composite, else 0xFFFF. */
+    sz_u16_t starter;
 } sz_utf8_norm_props_t;
 
-/** @brief A decomposition sequence as an (offset, length) slice of sz_utf8_norm_pool_. */
+/** A decomposition sequence as an offset and length slice of @c sz_utf8_norm_pool_. */
 typedef struct sz_utf8_norm_decomp_t {
     sz_u16_t offset;
     sz_u16_t length;
 } sz_utf8_norm_decomp_t;
 
-/** @brief Per-starter slice (offset, count) into sz_utf8_norm_compose_partner_/sz_utf8_norm_compose_value_. */
+/** Per-starter offset and count slice into @c sz_utf8_norm_compose_partner_ and
+ *  @c sz_utf8_norm_compose_value_. */
 typedef struct sz_utf8_norm_compose_starter_t {
     sz_u16_t offset;
     sz_u16_t count;
 } sz_utf8_norm_compose_starter_t;
-
 static sz_u16_t const sz_utf8_norm_stage1_[768] = {
     0,  1,  2,  3,  4,   5,   6,   7,  8,  9,  10, 11,  12,  13, 14, 15, 16, 17, 18, 19, 18, 18,  18, 20, 21, 22, 23,
     24, 25, 26, 27, 28,  29,  30,  31, 32, 33, 18, 18,  18,  18, 18, 34, 18, 35, 36, 37, 38, 39,  40, 41, 42, 18, 18,
@@ -3462,13 +3477,15 @@ static sz_rune_t const sz_utf8_norm_compose_value_[961] = {
     0x1134C, 0x11383, 0x11385, 0x1138E, 0x11391, 0x113C7, 0x113C5, 0x113C8, 0x114BC, 0x114BB, 0x114BE, 0x115BA, 0x115BB,
     0x11938, 0x16121, 0x16123, 0x16125, 0x16122, 0x16126, 0x16128, 0x16127, 0x16124, 0x16D69, 0x16D68, 0x16D6A};
 
-/* Hot-path lead classifier; index = lead_byte & 0x3F, bits = `sz_utf8_norm_quick_check_*_k` possibly present. */
+/** Hot-path lead classifier: index = lead_byte & 0x3F, bits = the `sz_utf8_norm_quick_check_*_k`
+ *  flags possibly present. */
 static sz_u8_t const sz_utf8_norm_lead_lut_[64] = {
     0x0, 0x0, 0xA, 0xC, 0xE, 0xE, 0xC, 0xE, 0xC, 0x0, 0xA, 0xA, 0xF, 0xF, 0xF, 0xE, 0xC, 0xC, 0xF, 0xC, 0x0, 0x0,
     0xF, 0xF, 0xF, 0xF, 0x0, 0xF, 0xF, 0xF, 0x0, 0xF, 0xF, 0xF, 0xF, 0xF, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xF, 0xC,
     0xC, 0xC, 0x0, 0xF, 0xF, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
 
-/* Cold-loop flat 2-byte lookup (U+0000-07FF): value = (quick_check_flags << 8) | canonical_combining_class. */
+/** Cold-loop flat 2-byte lookup for U+0000-07FF, each value holding
+ *  `(quick_check_flags << 8) | canonical_combining_class`. */
 static sz_u16_t const sz_utf8_norm_twobyte_[2048] = {
     0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,
     0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,

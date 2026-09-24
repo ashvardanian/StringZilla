@@ -1,21 +1,24 @@
 /**
- *  @brief Shared definitions for the StringZilla C++ library.
  *  @file include/stringzilla/types.hpp
  *  @author Ash Vardanian
+ *  @date March 28, 2025
+ *  @brief Shared definitions for the StringZilla C++ library.
  *
- *  The goal for this header is to provide absolutely-minimal set of types and forward-declarations for
- *  CPU and GPU backends of higher-level complex templated algorithms implemented outside of the C layer.
- *  It includes the following primitive type aliases for the @b "types.h" header:
+ *  The goal for this header is to provide an absolutely-minimal set of types and
+ *  forward-declarations for CPU and GPU backends of higher-level complex templated algorithms
+ *  implemented outside of the C layer. It includes the following primitive type aliases for
+ *  the `types.h` header:
  *
- *  - `u8_t`, `u16_t`, `u32_t`, `u64_t`, `i8_t`, `i16_t`, `i32_t`, `i64_t` - sized integers.
- *  - `size_t`, `ssize_t`, `ptr_t`, `cptr_t` - address-related types.
- *  - `status_t`, `bool_t`, `ordering_t`, `rune_t`, `rune_length_t`, `error_cost_t` - for logic.
+ *  - @c u8_t, @c u16_t, @c u32_t, @c u64_t, @c i8_t, @c i16_t, @c i32_t, @c i64_t - sized integers.
+ *  - @c size_t, @c ssize_t, @c ptr_t, @c cptr_t - address-related types.
+ *  - @c status_t, @c bool_t, @c ordering_t, @c rune_t, @c rune_length_t, @c error_cost_t - logic.
  *
  *  The library also defines the following higher-level structures:
  *
- *  - `span<value_type>` - a view to a contiguous memory block of `value_type` elements.
- *  - `dummy_alloc<value_type>` - a dummy memory allocator that resembles the `std::allocator` interface.
- *  - `arrow_strings_tape<char_type, offset_type>` - a tape data-structure to efficiently store a sequence strings.
+ *  - `span<value_type>` - a view to a contiguous memory block of @c value_type elements.
+ *  - `dummy_alloc<value_type>` - a dummy memory allocator shaped like @c std::allocator.
+ *  - `arrow_strings_tape<char_type, offset_type>` - a tape data-structure to efficiently store a
+ *    sequence of strings.
  */
 #ifndef STRINGZILLA_TYPES_HPP_
 #define STRINGZILLA_TYPES_HPP_
@@ -25,15 +28,14 @@
 #include "stringzilla/types.cuh" // `sz_cuda_device_t`, the three allocators
 #endif
 
-/**
- *  @brief When set to 1, the library will include the C++ STL headers and implement
- *      automatic conversion from and to `std::string_view` and `std::basic_string<any_allocator>`.
- */
+/** When set to 1, the library will include the C++ STL headers and implement automatic conversion
+ *  from and to @c std::string_view and `std::basic_string<any_allocator>`. */
 #ifndef SZ_AVOID_STL
 #define SZ_AVOID_STL (0) // true or false
 #endif
 
-/*  MSVC pins `__cplusplus` at 199711L unless `/Zc:__cplusplus` is passed, so read `_MSVC_LANG` there. */
+/*  MSVC pins @c __cplusplus at 199711L unless `/Zc:__cplusplus` is passed, so read
+ *  @c _MSVC_LANG there. */
 #if (defined(_MSVC_LANG) ? _MSVC_LANG : __cplusplus) < 202002L
 #error "StringZilla's C++ interface requires C++20; the C interface in `stringzilla.h` has no such floor."
 #endif
@@ -54,13 +56,12 @@
 #define SZ_NOINLINE
 #endif
 
-/**
- *  `noipa` disables interprocedural optimization across the function boundary - strictly stronger than
- *  `noinline`, which only forbids inlining. It is the durable guard against GCC's `-O3` miscompile of a
- *  by-value return that gets folded into a same-TU caller (observed: a `status_t` engine return read back as
- *  garbage when the callee is folded into a large benchmark TU). clang has no such miscompile and no `noipa`
- *  attribute, and nvcc rejects it on device code, so both fall back to `noinline`.
- */
+/** @c noipa disables interprocedural optimization across the function boundary - strictly stronger
+ *  than @c noinline, which only forbids inlining. It is the durable guard against GCC's @c -O3
+ *  miscompile of a by-value return that gets folded into a same-TU caller, where a @c status_t
+ *  engine return reads back as garbage when the callee is folded into a large benchmark TU. Clang
+ *  has no such miscompile and no @c noipa attribute, and NVCC rejects it on device code, so both
+ *  fall back to @c noinline. */
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDACC__)
 #define SZ_NOIPA __attribute__((noipa))
 #else
@@ -79,13 +80,15 @@ namespace ashvardanian {
 namespace stringzilla {
 
 /**
- *  @brief Forces the compiler to materialize @p value rather than fold or elide it across an optimization
- *         boundary - the read-side companion to `SZ_NOIPA`. Mirrors Google Benchmark's `DoNotOptimize`; use
- *         it on a status/result just before returning it from a `SZ_NOIPA` public entry point so the value
- *         survives a same-TU caller's interprocedural rewrite.
+ *  @brief Forces the compiler to materialize @p value rather than fold or elide it across an
+ *      optimization boundary - the read-side companion to @c SZ_NOIPA.
  *
- *  @sa sz_keep_alive_ in `types.h`, the C-callable sibling that pins stores to a buffer rather than a value.
- *      Reach for that one from the C headers, which cannot instantiate a template.
+ *  Mirrors Google Benchmark's @c DoNotOptimize; use it on a status/result just before
+ *  returning it from a @c SZ_NOIPA public entry point so the value survives a same-TU
+ *  caller's interprocedural rewrite.
+ *
+ *  @sa sz_keep_alive_ in `types.h`, the C-callable sibling that pins stores to a buffer rather than
+ *      a value, for the C headers, which cannot instantiate a template.
  */
 template <typename value_type_>
 SZ_INLINE void sz_do_not_optimize(value_type_ &value) noexcept {
@@ -114,10 +117,9 @@ using rune_t = sz_rune_t;
 using size_t = sz_size_t;
 using ssize_t = sz_ssize_t;
 
-/**
- *  @brief A size or offset deliberately held in 32 bits, where the narrower arithmetic is cheaper - GPU
- *         address math above all. Every use pairs with a range check at the site that establishes the bound.
- */
+/** A size or offset deliberately held in 32 bits, where the narrower arithmetic is cheaper -
+ *  GPU address math above all. Every use pairs with a range check at the site that
+ *  establishes the bound. */
 using small_size_t = sz_u32_t;
 
 using f32_t = float;
@@ -161,7 +163,9 @@ struct expected {
 };
 
 /**
- *  @brief A trivial function object for uniform character substitution costs in Levenshtein-like similarity algorithms.
+ *  @brief A trivial function object for uniform character substitution costs in
+ *      Levenshtein-like similarity algorithms.
+ *
  *  @sa error_costs_32x32_t
  */
 struct error_costs_unary_t {
@@ -263,7 +267,8 @@ struct span<value_type_, SZ_SIZE_MAX> {
         return span(data_ + offset, count);
     }
 
-    /** @brief Returns the i-th equal slice when this span is divided into n parts. Last part absorbs remainder. */
+    /** Returns the i-th of @p n equal slices of this span, where the last one
+     *  absorbs the remainder. */
     constexpr span part_i_of_n(size_type i, size_type n) const noexcept {
         size_type const slice = size_ / n;
         size_type const offset = i * slice;
@@ -271,7 +276,7 @@ struct span<value_type_, SZ_SIZE_MAX> {
         return span(data_ + offset, count);
     }
 
-    /** @brief Lexicographic equality comparison for STL compatibility. */
+    /** Lexicographic equality comparison for STL compatibility. */
     constexpr bool operator==(span const &other) const noexcept {
         if (size_ != other.size_) return false;
         for (size_type i = 0; i < size_; ++i)
@@ -279,10 +284,10 @@ struct span<value_type_, SZ_SIZE_MAX> {
         return true;
     }
 
-    /** @brief Lexicographic inequality comparison for STL compatibility. */
+    /** Lexicographic inequality comparison for STL compatibility. */
     constexpr bool operator!=(span const &other) const noexcept { return !(*this == other); }
 
-    /** @brief Lexicographic less-than comparison for STL compatibility. */
+    /** Lexicographic less-than comparison for STL compatibility. */
     constexpr bool operator<(span const &other) const noexcept {
         size_type const min_size = size_ < other.size_ ? size_ : other.size_;
         for (size_type i = 0; i < min_size; ++i) {
@@ -349,7 +354,9 @@ using dummy_alloc_t = dummy_alloc<char>;
 
 /**
  *  @brief Random access iterator for any immutable container with indexed element lookup support.
- *  @note Designed for `arrow_strings_tape` and `arrow_strings_view` compatibility with STL algorithms and ranges.
+ *
+ *  @note Designed for @c arrow_strings_tape and @c arrow_strings_view compatibility with STL
+ *      algorithms and ranges.
  */
 template <typename container_type_>
 struct indexed_container_iterator {
@@ -461,25 +468,31 @@ struct indexed_container_iterator {
     }
 };
 
-/** @brief  Length convention for @ref arrow_strings_view element spans. */
+/** Length convention for @ref arrow_strings_view element spans. */
 enum class arrow_termination_t {
-    /** Matches @ref arrow_strings_tape : a trailing @c '\0' is excluded, so elements read as C-strings. */
+
+    /** Matches @ref arrow_strings_tape: a trailing @c '\0' is excluded, so elements
+     *  read as C-strings. */
     nul_terminated_k,
-    /** Raw Apache Arrow / cuDF / Parquet: the full @c [offsets[i],offsets[i+1]) span, no terminator. */
+
+    /** Raw Apache Arrow / cuDF / Parquet: the full `[offsets[i], offsets[i+1])`
+     *  span, no terminator. */
     packed_k,
 };
 
 /**
- *  @brief Apache @b Arrow-compatible view over back-to-back variable-length byte spans in one buffer,
- *      delimited by a @c count+1 offsets array. Doesn't own the memory.
- *  @tparam char_type_ Buffer element type: @c char , @c std::byte , or a wider unit.
- *  @tparam offset_type_ Offset type into @p buffer_ , typically @c int32_t or @c int64_t .
- *  @tparam termination_ Length convention, see @ref arrow_termination_t . Default @c nul_terminated_k
- *      (matching @ref arrow_strings_tape ) excludes the trailing NUL, so element @c i spans
- *      @c offsets[i] to @c offsets[i+1]-1 and reads as a C-string; @c packed_k spans the full
- *      @c offsets[i] to @c offsets[i+1] . A device-resident cuDF string / list<uint8> column is thus
- *      @c arrow_strings_view<std::byte,int64_t,arrow_termination_t::packed_k> .
+ *  @brief Apache @b Arrow-compatible view over back-to-back variable-length byte spans in one
+ *      buffer, delimited by a `count + 1` offsets array. Doesn't own the memory.
+ *
+ *  @tparam char_type_ Buffer element type: @c char, @c std::byte, or a wider unit.
+ *  @tparam offset_type_ Offset type into the buffer, typically @c int32_t or @c int64_t.
+ *  @tparam termination_ Length convention, see @ref arrow_termination_t.
  *  @sa arrow_strings_tape
+ *
+ *  The default @c nul_terminated_k, matching @ref arrow_strings_tape, excludes the trailing NUL, so
+ *  element @c i spans `offsets[i]` to `offsets[i+1] - 1` and reads as a C-string; @c packed_k spans
+ *  the full `offsets[i]` to `offsets[i+1]`. A device-resident cuDF string or `list<uint8>` column
+ *  is thus `arrow_strings_view<std::byte, int64_t, arrow_termination_t::packed_k>`.
  */
 template <typename char_type_, typename offset_type_,
           arrow_termination_t termination_ = arrow_termination_t::nul_terminated_k>
@@ -493,8 +506,8 @@ struct arrow_strings_view {
     using iterator_t = indexed_container_iterator<self_t>;
     using iterator = iterator_t; // ? For STL compatibility
 
-    /** @brief Bytes excluded from every element's length — one for the NULL terminator, zero for the
-     *      terminator-free Apache Arrow / cuDF convention. */
+    /** Bytes excluded from every element's length — one for the NULL terminator, zero for the
+     *  terminator-free Apache Arrow / cuDF convention. */
     static constexpr size_t terminator_width_k = termination_ == arrow_termination_t::nul_terminated_k ? 1u : 0u;
 
     span<char_t const> buffer_;
@@ -510,7 +523,9 @@ struct arrow_strings_view {
     }
 
     /**
-     *  @brief The contiguous block the elements slice, from the first element's start to the last one's end.
+     *  @brief The contiguous block the elements slice, from the first element's start to the
+     *      last one's end.
+     *
      *  @note Starts at `offsets_[0]`, which a tape that is a slice of a wider one leaves non-zero.
      */
     constexpr span<char_t const> tape_bytes() const noexcept {
@@ -521,7 +536,9 @@ struct arrow_strings_view {
 
     /**
      *  @brief Every element's length summed, terminators excluded, without walking the elements.
-     *  @note Returns the tape's own offset width, so a 32-bit tape stays 32-bit until a caller needs more.
+     *
+     *  @note Returns the tape's own offset width, so a 32-bit tape stays 32-bit until a
+     *      caller needs more.
      */
     constexpr offset_t tape_total_bytes() const noexcept {
         return size() == 0 ? offset_t {}
@@ -529,7 +546,7 @@ struct arrow_strings_view {
                                                    static_cast<offset_t>(size()) * terminator_width_k);
     }
 
-    /** @brief One element's length, terminator excluded, in the tape's own offset width. */
+    /** One element's length, terminator excluded, in the tape's own offset width. */
     constexpr offset_t tape_length_at(size_t i) const noexcept {
         return static_cast<offset_t>(offsets_[i + 1] - offsets_[i] - terminator_width_k);
     }
@@ -540,15 +557,17 @@ struct arrow_strings_view {
     constexpr iterator_t cend() const noexcept { return end(); }
 };
 
-/** @brief The terminator-free Apache Arrow / cuDF / Parquet flavor of @ref arrow_strings_view : element
- *      @c i is the full @c [offsets[i],offsets[i+1]) span, no NULL excluded. */
+/** The terminator-free Apache Arrow / cuDF / Parquet flavor of @ref arrow_strings_view: element
+ *  @c i is the full `[offsets[i], offsets[i+1])` span, no NULL excluded. */
 template <typename char_type_, typename offset_type_>
 using arrow_packed_view = arrow_strings_view<char_type_, offset_type_, arrow_termination_t::packed_k>;
 
 /**
- *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
- *      Each string is appended to a contiguous memory block, delimited by the NULL character.
- *      Provides @b ~O(1) access to each string by storing the offsets of each string in a separate array.
+ *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of
+ *      variable length strings.
+ *
+ *  Each string is appended to a contiguous memory block, delimited by the NULL character. Provides
+ *  @b ~O(1) access to each string by storing the offsets of each string in a separate array.
  */
 template <typename char_type_, typename offset_type_, typename allocator_type_>
 struct arrow_strings_tape {
@@ -566,7 +585,7 @@ struct arrow_strings_tape {
     using char_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<char_t>;
     using offset_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<offset_t>;
 
-    /** @brief Largest byte offset the tape can address, past which an `offset_t` would wrap around. */
+    /** Largest byte offset the tape can address, past which an @c offset_t would wrap around. */
     static constexpr size_t max_offset_k = static_cast<size_t>((std::numeric_limits<offset_t>::max)());
 
   private:
@@ -721,9 +740,7 @@ struct arrow_strings_tape {
     constexpr span<offset_t> const &offsets() const noexcept { return offsets_; }
 };
 
-/**
- *  @brief Similar to `thrust::constant_iterator`, always returning the same value.
- */
+/** Similar to @c thrust::constant_iterator, always returning the same value. */
 template <typename value_type_>
 struct constant_iterator {
 
@@ -856,8 +873,9 @@ struct cpu_specs_t {
 
 /**
  *  @brief Specifications of a typical NVIDIA GPU, such as A100 or H100.
- *  @sa pack_sm_code, cores_per_multiprocessor helpers.
- *  @note We recommend compiling the code for the 90a compute capability, the newest with specialized optimizations.
+ *  @note We recommend compiling the code for the 90a compute capability, the newest
+ *      with specialized optimizations.
+ *  @sa pack_sm_code, cores_per_multiprocessor
  */
 struct gpu_specs_t {
     size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
@@ -890,9 +908,9 @@ struct gpu_specs_t {
     }
 
     /**
-     *  @brief Looks up hardware specs for a given compute capability (major, minor).
-     *  @param sm The compute capability code obtained from `pack_sm_code(major, minor)`.
-     *  @sa Used to populate the `cuda_cores` property.
+     *  @brief Looks up hardware specs for a given compute capability (major, minor), used to
+     *      populate the @c cuda_cores property.
+     *  @param[in] sm The compute capability code obtained from `pack_sm_code(major, minor)`.
      */
     inline static size_t cores_per_multiprocessor(size_t sm) noexcept {
         typedef struct {
@@ -950,7 +968,8 @@ struct gpu_specs_t {
 };
 
 /**
- *  @brief Divides the @p x by @p divisor and rounds up to the nearest integer.
+ *  @brief Divides @p x by @p divisor and rounds up to the nearest integer.
+ *
  *  @note This is equivalent to `ceil(x / divisor)`, but avoids floating-point arithmetic.
  */
 template <typename scalar_type_>
@@ -959,9 +978,7 @@ constexpr scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
     return (x + divisor - 1) / divisor;
 }
 
-/**
- *  @brief Rounds @p x up to the nearest multiple of @p divisor.
- */
+/** Rounds @p x up to the nearest multiple of @p divisor. */
 template <typename scalar_type_>
 constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
     sz_assert_(divisor > 0 && "Divisor must be positive");
@@ -971,9 +988,11 @@ constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor
 /**
  *  @brief The number of significant bits in @p x, or zero when @p x is zero.
  *
- *  Widens to `u64_t` first, so one body serves every unsigned width - shifting a 32-bit value by 32 would be
- *  undefined even on a branch that never runs.
- *  @note Unrolled rather than delegating to `sz_u64_clz`, which is an intrinsic wrapper and not `constexpr`.
+ *  Widens to @c u64_t first, so one body serves every unsigned width - shifting a 32-bit value by
+ *  32 would be undefined even on a branch that never runs.
+ *
+ *  @note Unrolled rather than delegating to @c sz_u64_clz, which is an intrinsic wrapper and
+ *      not @c constexpr.
  */
 template <typename scalar_type_>
 constexpr int bit_width(scalar_type_ x) noexcept {
@@ -990,12 +1009,12 @@ constexpr int bit_width(scalar_type_ x) noexcept {
 }
 
 /**
- *  @brief Exact `floor(sqrt(x))` over integers, without floating-point arithmetic and without a loop.
+ *  @brief Exact ⌊√x⌋ over integers, without floating-point arithmetic and without a loop.
  *
- *  Seeds a power of two at or above the root, then runs five Newton steps: each doubles the count of correct bits,
- *  and a 64-bit input has a 32-bit root, so 1 → 2 → 4 → 8 → 16 → 32 covers every width. Newton converges
- *  from above, so one clamp lands on the floor. `constexpr` keeps it callable from CUDA device code, unlike
- *  `std::sqrt`.
+ *  Seeds a power of two at or above the root, then runs five Newton steps: each doubles the count
+ *  of correct bits, and a 64-bit input has a 32-bit root, so 1 → 2 → 4 → 8 → 16 → 32 covers every
+ *  width. Newton converges from above, so one clamp lands on the floor. Unlike @c std::sqrt, it is
+ *  @c constexpr, which keeps it callable from CUDA device code.
  */
 template <typename scalar_type_>
 constexpr scalar_type_ integer_square_root(scalar_type_ x) noexcept {
@@ -1012,9 +1031,7 @@ constexpr scalar_type_ integer_square_root(scalar_type_ x) noexcept {
     return (scalar_type_)(guess > wide / guess ? guess - 1 : guess);
 }
 
-/**
- *  @brief Equivalent to `(condition ? value : 0)`, but avoids branching.
- */
+/** Equivalent to `(condition ? value : 0)`, but avoids branching. */
 template <typename value_type_>
 constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
     static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
@@ -1022,9 +1039,7 @@ constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noex
     return value * condition;
 }
 
-/**
- *  @brief Analog to `std::swap` from `<utility>`, but generates also device code, unlike STL.
- */
+/** Analog to @c std::swap from `<utility>`, but also generates device code, unlike STL. */
 template <typename value_type_>
 constexpr void trivial_swap(value_type_ &x, value_type_ &y) noexcept {
     static_assert(std::is_trivially_copyable<value_type_>::value, "Value type must be trivially copyable");
@@ -1033,10 +1048,8 @@ constexpr void trivial_swap(value_type_ &x, value_type_ &y) noexcept {
     y = temp;
 }
 
-/**
- *  @brief Helper structure for dividing a range of data into three parts: head, body, and tail,
- *      generally used to minimize misaligned (split) stores and operate on aligned pages.
- */
+/** Helper structure for dividing a range of data into three parts: head, body, and tail, generally
+ *  used to minimize misaligned (split) stores and operate on aligned pages. */
 struct head_body_tail_t {
     size_t head = 0;
     size_t body = 0;
@@ -1072,10 +1085,8 @@ constexpr head_body_tail_t head_body_tail(element_type_ *first_address, size_t t
     return head_body_tail_t {elements_in_head, elements_in_body, elements_in_tail};
 }
 
-/**
- *  @brief Safer alternative to `std::vector`, that avoids exceptions, copy constructors,
- *      and provides alternative `try_push_back` and `try_reserve` for faulty memory allocations.
- */
+/** Safer alternative to @c std::vector, that avoids exceptions, copy constructors, and provides
+ *  alternative @c try_push_back and @c try_reserve for faulty memory allocations. */
 template <typename value_type_, typename allocator_type_>
 class safe_vector {
   public:
@@ -1097,12 +1108,13 @@ class safe_vector {
     allocator_type alloc_;
 
     /**
-     *  @brief Whether the host may dereference what @ref allocator_type hands out, which growing requires.
+     *  @brief Whether the host may dereference what @ref allocator_type hands out,
+     *      which growing requires.
      *
-     *  Growth moves live elements on the host, so an allocator over memory the host cannot touch opts out with
-     *  `static constexpr bool host_accessible_k = false` and gets a build error here instead of a segmentation fault
-     *  (see @ref device_alloc ). Allocators that say nothing - `std::allocator` included -
-     *  are assumed reachable, so nothing else needs changing.
+     *  Growth moves live elements on the host, so an allocator over memory the host cannot touch
+     *  opts out with `static constexpr bool host_accessible_k = false` and gets a build error here
+     *  instead of a segmentation fault, as @ref device_alloc does. Allocators that say nothing -
+     *  @c std::allocator included - are assumed reachable, so nothing else needs changing.
      */
     static constexpr bool allocator_reachable_from_host_() noexcept {
         if constexpr (requires { allocator_type::host_accessible_k; }) return allocator_type::host_accessible_k;
@@ -1128,9 +1140,10 @@ class safe_vector {
         capacity_ = 0;
     }
 
-    /** @warning Use `try_assign` instead to handle out-of-memory failures. */
+    /** @warning Use @c try_assign instead to handle out-of-memory failures. */
     safe_vector(safe_vector const &other) = delete;
-    /** @warning Use `try_assign` instead to handle out-of-memory failures. */
+
+    /** @warning Use @c try_assign instead to handle out-of-memory failures. */
     safe_vector &operator=(safe_vector const &other) = delete;
 
     safe_vector(safe_vector &&other) noexcept
@@ -1215,10 +1228,12 @@ class safe_vector {
     }
 
     /**
-     *  @brief Resizes WITHOUT constructing, destroying, or moving any element - the caller guarantees to overwrite
-     *         every live element before reading it. On growth it allocates fresh storage and discards the old
-     *         contents (no element move), so it is safe even when the storage lives in @b device memory the host
-     *         cannot dereference (e.g. a `device_alloc`-backed task array). Requires a trivially-destructible type.
+     *  @brief Resizes without constructing, destroying, or moving any element - the caller
+     *      guarantees to overwrite every live element before reading it.
+     *
+     *  On growth it allocates fresh storage and discards the old contents, with no element move, so
+     *  it is safe even when the storage lives in @b device memory the host cannot dereference, like
+     *  a task array backed by @ref device_alloc. Requires a trivially-destructible type.
      */
     status_t try_resize_uninitialized(size_type new_size) noexcept {
         static_assert(std::is_trivially_destructible<value_type>::value,
@@ -1308,9 +1323,9 @@ class safe_vector {
 /**
  *  @brief Allocator over CUDA @b unified memory, which both the host and every device address.
  *
- *  Standard-allocator shaped, so `std::vector`, @ref arrow_strings_tape and @ref safe_vector all take it. The
- *  @c device it binds is the caller's, never a hidden one; a default-constructed allocator uses whatever
- *  context the calling thread already has current.
+ *  Standard-allocator shaped, so @c std::vector, @ref arrow_strings_tape and @ref safe_vector all
+ *  take it. The @c device it binds is the caller's, never a hidden one; a default-constructed
+ *  allocator uses whatever context the calling thread already has current.
  */
 template <typename value_type_>
 struct unified_alloc {
@@ -1321,7 +1336,8 @@ struct unified_alloc {
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
 
-    /** The device every allocation binds before touching the driver, or `nullptr` for the current context. */
+    /** The device every allocation binds before touching the driver, or @c nullptr for
+     *  the current context. */
     sz_cuda_device_t *device = nullptr;
 
     template <typename other_value_type_>
@@ -1354,9 +1370,10 @@ struct unified_alloc {
 /**
  *  @brief Allocator over plain CUDA @b device memory, which no host code may dereference.
  *
- *  For scratch that only a kernel ever reads or writes, where unified memory would pay page migration on every
- *  access from the wrong side. @ref safe_vector is the only container that grows it, through
- *  @c try_resize_uninitialized, because moving elements on the host is exactly what @c host_accessible_k forbids.
+ *  For scratch that only a kernel ever reads or writes, where unified memory would pay page
+ *  migration on every access from the wrong side. @ref safe_vector is the only container that grows
+ *  it, through @c try_resize_uninitialized, because moving elements on the host is exactly what
+ *  @c host_accessible_k forbids.
  */
 template <typename value_type_>
 struct device_alloc {
@@ -1367,10 +1384,11 @@ struct device_alloc {
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
 
-    /** Plain device memory: a container must not move elements through it on the host while growing. */
+    /** Plain device memory: a container must not move elements through it on the host to grow. */
     static constexpr bool host_accessible_k = false;
 
-    /** The device every allocation binds before touching the driver, or `nullptr` for the current context. */
+    /** The device every allocation binds before touching the driver, or @c nullptr for
+     *  the current context. */
     sz_cuda_device_t *device = nullptr;
 
     template <typename other_value_type_>
@@ -1401,10 +1419,11 @@ struct device_alloc {
 };
 
 /**
- *  @brief Allocator over CUDA @b pinned page-locked host memory, which the driver copies at the bus rate.
+ *  @brief Allocator over CUDA @b pinned page-locked host memory, which the driver copies at
+ *      the bus rate.
  *
- *  A kernel cannot address what this hands back - @ref sz_memory_reaches_device answers false for it - so it is
- *  the staging side of a transfer rather than anything a launch reads.
+ *  A kernel cannot address what this hands back - @ref sz_memory_reaches_device answers false for
+ *  it - so it is the staging side of a transfer rather than anything a launch reads.
  */
 template <typename value_type_>
 struct pinned_alloc {
@@ -1415,7 +1434,8 @@ struct pinned_alloc {
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
 
-    /** The device every allocation binds before touching the driver, or `nullptr` for the current context. */
+    /** The device every allocation binds before touching the driver, or @c nullptr for
+     *  the current context. */
     sz_cuda_device_t *device = nullptr;
 
     template <typename other_value_type_>

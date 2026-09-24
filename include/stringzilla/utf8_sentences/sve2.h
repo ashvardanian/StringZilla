@@ -1,7 +1,8 @@
 /**
- *  @brief SVE2 (AArch64 scalable) backend for UAX-29 sentence boundaries.
  *  @file include/stringzilla/utf8_sentences/sve2.h
  *  @author Ash Vardanian
+ *  @date July 17, 2026
+ *  @brief SVE2 backend for UAX-29 sentence boundaries on scalable AArch64 vectors.
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_SVE2_H_
 #define STRINGZILLA_UTF8_SENTENCES_SVE2_H_
@@ -25,10 +26,11 @@ extern "C" {
 
 #pragma region UAX 29 Sentence Boundaries forward kernel
 
-/** @brief  Sentence_Break class byte for one chunk of ASTRAL codepoints over the 20-bit offset = cp - 0x10000
- *          (5-nibble cascade), the SVE2 twin of @ref sz_utf8_sentence_break_astral_class_neon_. Per-lane bytes:
- *          @p plane = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
- *          Bit-exact with `sz_rune_sentence_break_property` over all astral planes. */
+/** Sentence_Break class byte for one chunk of astral codepoints over the 20-bit offset = cp -
+ *  0x10000 with a 5-nibble cascade, the SVE2 twin of
+ *  @ref sz_utf8_sentence_break_astral_class_neon_. Per-lane bytes: @p plane = (offset >> 16) &
+ *  0xFF with only the low nibble meaningful, @p high = (offset >> 8) & 0xFF, @p low = offset &
+ *  0xFF. Bit-exact with @c sz_rune_sentence_break_property over all astral planes. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
                                                                      svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -63,12 +65,16 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t p
     return result_u8x;
 }
 
-/** @brief  Per-byte-lane Sentence_Break class for ONE window chunk, fully in-register - the SVE2 twin of
- *          @ref sz_utf8_sentence_break_classify_quarter_neon_. Raw lanes (ASCII, continuation bytes, `>= 0xF8`)
- *          keep `low = raw, high = 0` exactly like serial's blind decode; 2-/3-byte leads rebuild the BMP
- *          (high, low) pair from the peeked neighbours; 4-byte leads split by their blind plane between the BMP
- *          cascade (plane 0, overlong encodings), the astral cascade (planes 1..16), and class Other (planes over
- *          16, e.g. `F5..F7` leads). The class on non-start lanes is irrelevant - only start lanes compact. */
+/**
+ *  @brief Per-byte-lane Sentence_Break class for one window chunk, fully in-register: the SVE2 twin
+ *      of @ref sz_utf8_sentence_break_classify_quarter_neon_.
+ *
+ *  Raw lanes, ASCII, continuation bytes, and `>= 0xF8`, keep `low = raw, high = 0` exactly like the
+ *  serial blind decode; 2- and 3-byte leads rebuild the BMP high and low pair from the peeked
+ *  neighbours; 4-byte leads split by their blind plane between the BMP cascade for plane 0 and
+ *  overlong encodings, the astral cascade for planes 1..16, and class Other for planes over 16,
+ *  such as `F5..F7` leads. The class on non-start lanes is irrelevant, as only start lanes compact.
+ */
 SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(                 //
     svuint8_t bytes_u8x, svuint8_t next1_u8x, svuint8_t next2_u8x, svuint8_t next3_u8x, //
     svbool_t two_b8x, svbool_t three_b8x, svbool_t four_b8x) {
@@ -121,9 +127,10 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(         
                                                       sz_utf8_sentence_break_flat_bmp_, bytes_u8x, high_u8x, low_u8x);
 }
 
-/** @brief  Build the per-class membership frame from the dense class byte stream via its four bit-planes: each
- *          plane lowers to a u64 with the shared predicate bridge, and the fifteen class masks assemble from the
- *          planes with scalar mask algebra - 4 predicate compares per dense vector instead of 15. */
+/** Builds the per-class membership frame from the dense class byte stream via its four
+ *  bit-planes: each plane lowers to a u64 with the shared predicate bridge, and the fifteen
+ *  class masks assemble from the planes with scalar mask algebra, 4 predicate compares per dense
+ *  vector instead of 15. */
 SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_sve2_(sz_u8_t const *dense_classes,
                                                                                    sz_size_t count) {
     sz_size_t const vector_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -153,15 +160,18 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_sve
 }
 
 /**
- *  @brief  Forward UAX-29 sentence segmentation kernel (SVE2, vector-length agnostic). Bit-exact with
- *          `sz_utf8_sentences_serial` and the other ISA fronts: a chunked-window classify + dense-compaction
- *          front-end feeds the shared portable rule engine @ref sz_utf8_sentence_break_decide_block_, whose dense
- *          break bits map back to byte positions in one walk over the codepoint-start lanes.
+ *  @brief Forward UAX-29 sentence segmentation kernel, SVE2 and vector-length agnostic.
  *
- *  Each 64-byte window streams as `64 / svcntb()` register chunks with one peeked vector ahead: `svext` supplies
- *  the classifier's forward neighbours across chunk edges, and the per-chunk start-lane classes compact straight
- *  into the dense class stream the engine consumes (one `svcompact_u32` + truncating store per 32-bit quarter),
- *  so the only memory the window touches is that stream - the shared engine's own input format.
+ *  Bit-exact with @c sz_utf8_sentences_serial and the other ISA fronts: a chunked-window classify
+ *  and dense-compaction front-end feeds the shared portable rule engine
+ *  @ref sz_utf8_sentence_break_decide_block_, whose dense break bits map back to byte positions in
+ *  one walk over the codepoint-start lanes.
+ *
+ *  Each 64-byte window streams as `64 / svcntb()` register chunks with one peeked vector ahead:
+ *  @c svext supplies the classifier's forward neighbours across chunk edges, and the per-chunk
+ *  start-lane classes compact straight into the dense class stream the engine consumes, one
+ *  @c svcompact_u32 and a truncating store per 32-bit quarter, so the only memory the window
+ *  touches is that stream, the shared engine's own input format.
  */
 SZ_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(            //
     sz_cptr_t text, sz_size_t length,                        //

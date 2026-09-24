@@ -1,29 +1,38 @@
 /**
  *  @file bench/find.cpp
+ *  @author Ash Vardanian
+ *  @date January 4, 2024
  *  @brief Benchmarks for bidirectional string search operations.
- *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *         validating the SIMD-accelerated backends against the serial baselines.
  *
- *  Memory-bound: substring search is bandwidth-limited, so it reads the whole file by default and a larger haystack measures throughput truer; shrink the read with `STRINGWARS_DATASET_LIMIT` only when needed.
+ *  The program accepts a file path to a dataset, tokenizes it, and benchmarks the search
+ *  operations, validating the SIMD-accelerated backends against the serial baselines.
+ *
+ *  Memory-bound: substring search is bandwidth-limited, so it reads the whole file by default and a
+ *  larger haystack measures throughput truer; shrink the read with @c STRINGWARS_DATASET_LIMIT only
+ *  when it has to be smaller.
  *
  *  Benchmarks include:
  *  - Substring search: find all inclusions of a token in the dataset - @b find & @b rfind.
- *  - Byte search: find a specific byte value in each token (word, line, or file) - @b find_byte & @b rfind_byte.
- *  - Byteset search: find any byte value from a set in each token (line or file) - @b find_byteset & @b rfind_byteset.
+ *  - Byte search: find a byte value in each word, line, or file - @b find_byte & @b rfind_byte.
+ *  - Byteset search: any byte of a set in each line or file - @b find_byteset & @b rfind_byteset.
  *
- *  For substring search, the number of operations per second are reported as the number of character-level comparisons
- *  happening in the worst case in the naive algorithm, meaning O(N*M) for N characters in the haystack and M in the
- *  needle. In byteset search, the number of operations per second is computed the same way and the following character
- *  sets are tested against each scanned token:
+ *  For substring search, the number of operations per second are reported as the number of
+ *  character-level comparisons happening in the worst case in the naive algorithm, meaning O(N*M)
+ *  for N characters in the haystack and M in the needle. In byteset search, the number of
+ *  operations per second is computed the same way and the following character sets are tested
+ *  against each scanned token:
  *
  *  - "\n\r\v\f": 4 tabs
  *  - "</>&'\"=[]": 9 html
  *  - "0123456789": 10 digits
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -32,7 +41,7 @@
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -42,9 +51,9 @@
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzilla_bench_find_cpp20
  *  @endcode
  *
- *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
- *  like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes (exactly 1 cache line),
- *  your last command may look like:
+ *  Alternatively, if you really want to stress-test a very specific function on a certain size
+ *  inputs, like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes
+ *  (exactly 1 cache line), your last command may look like:
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
@@ -52,8 +61,8 @@
  *  build_release/stringzilla_bench_find_cpp20
  *  @endcode
  *
- *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `sequence.cpp`, `token.cpp`, and `memory.cpp`.
+ *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
+ *  Google Benchmark. This file is the sibling of `sequence.cpp`, `token.cpp`, and `memory.cpp`.
  */
 #include <functional> // `std::boyer_moore_searcher`
 
@@ -66,10 +75,8 @@ using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Substring Search
 
-/**
- *  @brief Wraps an individual hardware-specific search backend into something similar
- *         to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps an individual hardware-specific search backend into something similar to
+ *  @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 template <sz_find_t find_func_>
 struct matcher_from_sz_find {
     using size_type = std::size_t;
@@ -88,10 +95,8 @@ struct matcher_from_sz_find {
 
 static std::string strstr_needle_copy_ {}; //! Reuse the same memory for all needles, potentially causing allocations
 
-/**
- *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string into
+ *  something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 struct matcher_strstr_t {
     using size_type = std::size_t;
 
@@ -107,10 +112,9 @@ struct matcher_strstr_t {
 };
 
 #if defined(_GNU_SOURCE)
-/**
- *  @brief Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+
+/** Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer into
+ *  something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 struct matcher_memmem_t {
     using size_type = std::size_t;
     std::string_view needle_;
@@ -128,11 +132,13 @@ struct matcher_memmem_t {
 #endif
 
 #if __cpp_lib_boyer_moore_searcher
+
 /**
  *  @brief Wraps the C++20 @b Boyer-Moore algorithms for finding the next occurrence of a string
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- *  @tparam searcher_type_ Can be `std::boyer_moore_searcher` or `std::boyer_moore_horspool_searcher`.
- *          Both should be instantiated with the `std::string_view::const_iterator` type.
+ *      into something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view.
+ *  @tparam searcher_type_ Can be @c std::boyer_moore_searcher or
+ *      @c std::boyer_moore_horspool_searcher. Both should be instantiated with the
+ *      @c std::string_view::const_iterator type.
  */
 template <typename searcher_type_>
 struct matcher_from_std_search {
@@ -192,9 +198,7 @@ auto callable_for_substring_search(environment_t const &env) {
     };
 }
 
-/**
- *  @brief Find all inclusions of each given token in the dataset, using various search backends.
- */
+/** Find all inclusions of each given token in the dataset, using various search backends. */
 void bench_substring_search(environment_t const &env) {
 
     // First, benchmark the serial function
@@ -323,14 +327,12 @@ void bench_substring_search(environment_t const &env) {
 #endif
 }
 
-#pragma endregion // Substring Search
+#pragma endregion Substring Search
 
 #pragma region Byte Search
 
-/**
- *  @brief Wraps an individual hardware-specific search backend into something similar
- *         to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps an individual hardware-specific search backend into something similar to
+ *  @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 template <sz_find_byte_t find_func_>
 struct matcher_from_sz_find_byte {
     using size_type = std::size_t;
@@ -347,10 +349,8 @@ struct matcher_from_sz_find_byte {
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
-/**
- *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string into
+ *  something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 struct matcher_strchr_t {
     using size_type = std::size_t;
     char needle_;
@@ -366,10 +366,8 @@ struct matcher_strchr_t {
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
-/**
- *  @brief Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer into
+ *  something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 struct matcher_memchr_t {
     using size_type = std::size_t;
     char needle_;
@@ -385,10 +383,8 @@ struct matcher_memchr_t {
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
-/**
- *  @brief Wraps the @b `std::find` algorithms for finding the next occurrence of a string
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps the @c std::find algorithms for finding the next occurrence of a string into something
+ *  similar to @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 struct matcher_from_std_find {
     using size_type = std::size_t;
     char needle_;
@@ -421,8 +417,9 @@ auto callable_for_byte_search(environment_t const &env) {
 }
 
 /**
- *  @brief Find all inclusions of a certain byte value in each token, be it a word, line, or the whole file.
- *  @warning Notice, the roles differ from `bench_substring_search`: each individual token is now treated as a haystack.
+ *  @brief Find all inclusions of a byte value in each token: a word, a line, or the whole file.
+ *  @warning Notice, the roles differ from @c bench_substring_search: each individual token is now
+ *      treated as a haystack.
  */
 void bench_byte_search(environment_t const &env) {
     // First, benchmark the serial function
@@ -536,14 +533,12 @@ void bench_byte_search(environment_t const &env) {
         .log(base);
 }
 
-#pragma endregion // Byte Search
+#pragma endregion Byte Search
 
 #pragma region Byteset Search
 
-/**
- *  @brief Wraps an individual hardware-specific search backend into something similar
- *         to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps an individual hardware-specific search backend into something similar to
+ *  @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 template <sz_find_byteset_t find_func_>
 struct matcher_from_sz_find_byteset {
     using size_type = std::size_t;
@@ -560,10 +555,8 @@ struct matcher_from_sz_find_byteset {
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
-/**
- *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string into
+ *  something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view. */
 struct matcher_strcspn_t {
     using size_type = std::size_t;
     std::string_view needles_;
@@ -579,10 +572,9 @@ struct matcher_strcspn_t {
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
-/**
- *  @brief Wraps the @b `std::string_view::find_first_of` algorithms for finding the next occurrence of a string
- *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
- */
+/** Wraps the @c std::string_view::find_first_of algorithms for finding the next occurrence of a
+ *  string into something similar to @c sz::matcher_find and compatible with the
+ *  @c sz::find_matches_view range. */
 struct matcher_std_string_first_of_t {
     using size_type = std::size_t;
     std::string_view needles_;
@@ -593,10 +585,9 @@ struct matcher_std_string_first_of_t {
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
-/**
- *  @brief Wraps the @b `std::string_view::find_last_of` algorithms for finding the next occurrence of a string
- *         into something similar to @b `sz::matcher_rfind` and compatible with @b `sz::rfind_matches_view`.
- */
+/** Wraps the @c std::string_view::find_last_of algorithms for finding the next occurrence of a
+ *  string into something similar to @c sz::matcher_rfind and compatible with the
+ *  @c sz::rfind_matches_view range. */
 struct matcher_std_string_last_of_t {
     using size_type = std::size_t;
     std::string_view needles_;
@@ -629,8 +620,9 @@ auto callable_for_byteset_search(environment_t const &env) {
 }
 
 /**
- *  @brief Find all inclusions of any byte from a set in each token, be it a word, line, or the whole file.
- *  @warning Notice, the roles differ from `bench_substring_search`: each individual token is now treated as a haystack.
+ *  @brief Find all inclusions of any byte from a set in each token: a word, a line, or a file.
+ *  @warning Notice, the roles differ from @c bench_substring_search: each individual token is now
+ *      treated as a haystack.
  */
 void bench_byteset_search(environment_t const &env) {
 
@@ -769,7 +761,7 @@ void bench_byteset_search(environment_t const &env) {
         .log(base_reverse);
 }
 
-#pragma endregion // Byteset Search
+#pragma endregion Byteset Search
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.

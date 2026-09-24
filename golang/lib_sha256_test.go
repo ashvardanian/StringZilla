@@ -1,3 +1,6 @@
+// File: golang/lib_sha256_test.go
+// Author: Ash Vardanian
+
 //go:build !no_sha256
 // +build !no_sha256
 

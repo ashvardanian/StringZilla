@@ -1,20 +1,24 @@
 /**
- *  @brief RISC-V Vector (RVV 1.0) backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/rvv.h
  *  @author Ash Vardanian
+ *  @date June 15, 2026
+ *  @brief RISC-V Vector 1.0 backend for the single-pass normalizer, NFD / NFC / NFKD / NFKC.
+ *
+ *  Like every other backend, this overrides exactly one point of the shared engine: the scan
+ *  primitive @c sz_utf8_norm_classify_rvv_, which locates the first non-inert byte for a form. The
+ *  two public entry points, @c sz_utf8_norm_rvv and @c sz_utf8_find_denormalized_rvv, reuse the
+ *  force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  that devirtualizes the call.
+ *
+ *  RVV is the cleanest backend of the family: the 64-entry lead lookup @c sz_utf8_norm_lead_lut_
+ *  needs no table split, neither a @c vpshufb 16-lane window nor a @c vqtbl4q register quad. A
+ *  single indexed @c vluxei8 gather over `byte & 0x3F` reads the family bits straight from memory
+ *  at any @c VLEN, the same idiom the word-break classifier in `utf8_wordbreaks/rvv.h` uses for its
+ *  ASCII property table. A per-strip ASCII gate, @c vmsgtu for the high bit reduced with @c vfirst,
+ *  keeps the dominant inert case off the LUT entirely, and any strip that survives the gate is
+ *  handed to the shared scalar verify.
+ *
  *  @sa include/stringzilla/utf8_norm.h
- *
- *  Like every other backend, this overrides exactly one point of the shared engine: the scan primitive
- *  `sz_utf8_norm_classify_rvv_`, which locates the first non-inert byte for a form. The two public entry
- *  points (`sz_utf8_norm_rvv` / `sz_utf8_find_denormalized_rvv`) reuse the force-inlined engines from
- *  `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
- *
- *  RVV is the cleanest backend of the family: the 64-entry lead lookup `sz_utf8_norm_lead_lut_` needs no
- *  table split (no `vpshufb` 16-lane window, no `vqtbl4q` register quad). A single indexed gather
- *  (`vluxei8`) over `byte & 0x3F` reads the family bits straight from memory at any `VLEN`, the same
- *  idiom the word-break classifier in `utf8_wordbreaks/rvv.h` uses for its ASCII property table. A per-strip
- *  ASCII gate (`vmsgtu` for the high bit, reduced with `vfirst`) keeps the dominant inert case off the
- *  LUT entirely, and any strip that survives the gate is handed to the shared scalar verify.
  */
 #ifndef STRINGZILLA_UTF8_NORM_RVV_H_
 #define STRINGZILLA_UTF8_NORM_RVV_H_
@@ -35,13 +39,16 @@ extern "C" {
 #endif
 
 /**
- *  @brief Scan primitive (RVV): first byte that begins a non-inert codepoint for @p form, else NULL.
+ *  @brief RVV scan primitive: finds the first byte starting a non-inert codepoint for @p form.
  *
- *  Matches `sz_utf8_norm_classify_serial_` semantics. The hot loop classifies whole `e8m8` strips: a
- *  `vfirst` over the high-bit mask skips all-ASCII strips with zero LUT work, and a `vluxei8` gather over
- *  `sz_utf8_norm_lead_lut_[byte & 0x3F]` masked by the form flag identifies any candidate-non-inert lead.
- *  The cold per-codepoint verify (`sz_utf8_norm_verify_block_`) carries the combining class across strips
- *  and reports order / quick-check violations exactly, including the partial final strip.
+ *  Matches @c sz_utf8_norm_classify_serial_ semantics. The hot loop classifies whole @c e8m8
+ *  strips: a @c vfirst over the high-bit mask skips all-ASCII strips with zero LUT work, and a
+ *  @c vluxei8 gather over `sz_utf8_norm_lead_lut_[byte & 0x3F]` masked by the form flag identifies
+ *  any candidate non-inert lead. The cold per-codepoint verify, @c sz_utf8_norm_verify_block_,
+ *  carries the combining class across strips and reports order and quick-check violations exactly,
+ *  including in the partial final strip.
+ *
+ *  @return The first such byte, or NULL.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_rvv_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;

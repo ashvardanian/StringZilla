@@ -1,20 +1,24 @@
 //! Newline, whitespace, and delimiter segmentation of UTF-8 text.
 //!
 //! Also home to the generic iterators the segmenters share.
+//!
+//! File: rust/stringzilla/utf8_tokens.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
 use core::marker::PhantomData;
 
-/// A zero-sized UTF-8 segmentation kernel selector. Each implementor binds one FFI segmenter, so the shared
-/// [`Utf8Split`] / [`Utf8Segments`] iterators monomorphize to a direct, branch-free call (no function pointer).
+/// A zero-sized UTF-8 segmentation kernel selector. Each implementor binds one FFI segmenter, so
+/// the shared [`Utf8Split`] / [`Utf8Segments`] iterators monomorphize to a direct, branch-free call
+/// rather than a function pointer.
 pub trait SegmenterKernel {
-    /// Reports up to `capacity` segments of `text` into `offsets` / `lengths`, returning the count and writing
-    /// the number of consumed bytes to `consumed`.
+    /// Reports up to `capacity` segments of `text` into `offsets` / `lengths`, returning the count
+    /// and writing the number of consumed bytes to `consumed`.
     ///
     /// # Safety
-    /// `offsets` and `lengths` must each point to at least `capacity` writable `usize` slots, and `text` to
-    /// `length` readable bytes.
+    /// `offsets` and `lengths` must each point to at least `capacity` writable `usize` slots, and
+    /// `text` to `length` readable bytes.
     unsafe fn segment(
         text: *const c_void,
         length: usize,
@@ -49,15 +53,16 @@ impl SegmenterKernel for Delimiters {
     }
 }
 
-/// Which parts a [`Utf8Split`] yields, as a compile-time `(FIRST, STRIDE)` over the span boundaries:
-/// the segments BETWEEN separators, the SEPARATORS themselves, or BOTH interleaved (lossless).
+/// Which parts a [`Utf8Split`] yields, as a compile-time `(FIRST, STRIDE)` over the
+/// span boundaries: the segments between separators, the separators themselves, or
+/// both interleaved losslessly.
 pub trait SplitParts {
     /// First boundary index to visit (0 for between/both, 1 for separators).
     const FIRST: usize;
     /// Step between visited boundaries (2 for between/separators, 1 for both).
     const STRIDE: usize;
 }
-/// Yields the segments between separators (the default).
+/// Yields the segments between separators, the default.
 pub struct Between;
 impl SplitParts for Between {
     const FIRST: usize = 0;
@@ -69,19 +74,21 @@ impl SplitParts for Separators {
     const FIRST: usize = 1;
     const STRIDE: usize = 2;
 }
-/// Yields segments and separators interleaved (concatenating them reproduces the input).
+/// Yields segments and separators interleaved, so concatenating them reproduces the input.
 pub struct Both;
 impl SplitParts for Both {
     const FIRST: usize = 0;
     const STRIDE: usize = 1;
 }
 
-/// A range over UTF-8 text split on the separators a kernel reports, selecting which parts to yield.
+/// A range over UTF-8 text split on the separators a kernel reports, selecting which
+/// parts to yield.
 ///
-/// The kernel's separator endpoints are the span boundaries `{0, s0.start, s0.end, ..., [len]}`; span `k` is
-/// `bound(k)..bound(k+1)`, and `P` reduces the mode to a `(FIRST, STRIDE)` walk over them - so the hot path is one
-/// formula for all three modes. Rust stable cannot size `[usize; 2*STEPS+2]`, so the raw separator spans are kept and
-/// each boundary is computed on the fly rather than materialized into an array.
+/// The kernel's separator endpoints are the span boundaries `{0, s0.start, s0.end, ..., [len]}`;
+/// span `k` is `bound(k)..bound(k+1)`, and `P` reduces the mode to a `(FIRST, STRIDE)` walk over
+/// them - so the hot path is one formula for all three modes. Rust stable cannot size an array of
+/// 2 × STEPS + 2 bounds, so the raw separator spans are kept and each boundary is computed on the
+/// fly rather than materialized into an array.
 pub struct Utf8Split<
     'a,
     Kernel: SegmenterKernel,
@@ -133,7 +140,8 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const
         splits
     }
 
-    /// The `boundary`-th span boundary relative to `suffix`: `{0, s0.start, s0.end, s1.start, ..., [region]}`.
+    /// The `boundary`-th span boundary relative to `suffix`:
+    /// `{0, s0.start, s0.end, s1.start, ..., [region]}`.
     #[inline]
     fn bound(&self, boundary: usize) -> usize {
         if boundary == 0 {
@@ -148,7 +156,8 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const
         }
     }
 
-    /// Refill from `suffix`: fetch a separator batch; boundaries are derived lazily by [`Self::bound`].
+    /// Refill from `suffix`: fetch a separator batch; boundaries are derived
+    /// lazily by [`Self::bound`].
     fn refill(&mut self) {
         self.region = self.text.len() - self.suffix;
         let mut consumed = 0usize;
@@ -176,9 +185,9 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const
                 && (s == 0 || self.starts[s] >= self.starts[s - 1] + self.lengths[s - 1])),
             "separator spans run past the region, overlap, or are out of order"
         );
-        // A batch cut short by `STEPS` must resume exactly at the end of its last separator: the bytes between
-        // that separator and wherever the kernel's own scan stopped belong to the next segment, and a resume
-        // offset past them drops them from the output.
+        // A batch cut short by `STEPS` must resume exactly at the end of its last separator: the
+        // bytes between that separator and wherever the kernel's own scan stopped belong to the
+        // next segment, and a resume offset past them drops them from the output.
         debug_assert!(
             self.separators < STEPS || consumed == self.starts[self.separators - 1] + self.lengths[self.separators - 1],
             "segmenter resumed past the end of its last emitted separator"
@@ -190,8 +199,9 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const
         self.index = Parts::FIRST;
     }
 
-    /// Position `index` on the next yieldable span, refilling and (when `Empty::SKIP`) skipping empty spans.
-    /// `Empty::SKIP` is a const, so the skip loop folds away entirely for the default keep-empties (`KeepEmpty`) case.
+    /// Position `index` on the next yieldable span, refilling, and skipping empty spans when
+    /// `Empty::SKIP` is set. `Empty::SKIP` is a const, so the skip loop folds away entirely for the
+    /// default keep-empties case, `KeepEmpty`.
     fn settle(&mut self) {
         loop {
             if Empty::SKIP {
@@ -215,8 +225,8 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const
 impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, const STEPS: usize>
     Utf8Split<'a, Kernel, Parts, KeepEmpty, STEPS>
 {
-    /// Skips zero-length spans, returning the `SkipEmpty` variant. A compile-time policy rather than a
-    /// runtime flag, so the keep-empties default stays branchless.
+    /// Skips zero-length spans, returning the `SkipEmpty` variant. A compile-time policy rather
+    /// than a runtime flag, so the keep-empties default stays branchless.
     pub fn skip_empty(self) -> Utf8Split<'a, Kernel, Parts, SkipEmpty, STEPS> {
         Utf8Split::with_steps(self.text)
     }
@@ -225,9 +235,9 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, const STEPS: usize>
 impl<'a, Kernel: SegmenterKernel, Empty: EmptySegments, const STEPS: usize>
     Utf8Split<'a, Kernel, Between, Empty, STEPS>
 {
-    /// The same split yielding segments **and** separators interleaved. Lossless (concatenation reproduces the
-    /// input) only when empties are kept; the `Empty` policy carries through the type, so `.skip_empty()` and
-    /// `.with_separators()` compose in either order.
+    /// The same split yielding segments __and__ separators interleaved. Lossless (concatenation
+    /// reproduces the input) only when empties are kept; the `Empty` policy carries through the
+    /// type, so `.skip_empty()` and `.with_separators()` compose in either order.
     pub fn with_separators(self) -> Utf8Split<'a, Kernel, Both, Empty, STEPS> {
         Utf8Split::with_steps(self.text)
     }
@@ -268,15 +278,15 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const
 pub type Utf8SplitNewlines<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
     Utf8Split<'a, Newlines, Between, KeepEmpty, STEPS>;
 
-/// An iterator over the newline runs themselves (the separators), in order.
+/// An iterator over the newline runs themselves, the separators, in order.
 pub type Utf8Newlines<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
     Utf8Split<'a, Newlines, Separators, KeepEmpty, STEPS>;
 
 /// An iterator over segments of UTF-8 text split by whitespace characters.
 ///
-/// Splits on all 25 Unicode "White_Space" characters; N whitespace delimiters yield N+1 segments. By
-/// default empty segments are **kept** (matching `str::split`), so runs of
-/// whitespace and leading/trailing whitespace produce empty slices. Call [`Self::skip_empty`] for the
+/// Splits on all 25 Unicode "White_Space" characters; N whitespace delimiters yield N+1 segments.
+/// By default empty segments are __kept__, matching `str::split`, so runs of whitespace and
+/// leading/trailing whitespace produce empty slices. Call [`Self::skip_empty`] for the
 /// `str::split_whitespace`-style behavior that drops empties and yields only non-empty tokens.
 ///
 /// # Examples
@@ -296,15 +306,16 @@ pub type Utf8Newlines<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
 pub type Utf8SplitWhitespaces<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
     Utf8Split<'a, Whitespaces, Between, KeepEmpty, STEPS>;
 
-/// An iterator over the whitespace runs themselves (the separators), in order.
+/// An iterator over the whitespace runs themselves, the separators, in order.
 pub type Utf8Whitespaces<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
     Utf8Split<'a, Whitespaces, Separators, KeepEmpty, STEPS>;
 
 /// An iterator over segments of UTF-8 text split by any Unicode delimiter codepoint.
 ///
-/// Splits on every codepoint whose Unicode general category is punctuation (`P*`), symbol (`S*`), or
-/// separator/whitespace (`Z*`) — the superset of [`Utf8SplitWhitespaces`]. N delimiters yield N+1 segments; empty
-/// segments are **kept** by default (call [`Self::skip_empty`] to drop them for token-style splitting).
+/// Splits on every codepoint whose Unicode general category is punctuation (`P*`), symbol (`S*`),
+/// or separator/whitespace (`Z*`) — the superset of [`Utf8SplitWhitespaces`]. N delimiters yield
+/// N+1 segments; empty segments are __kept__ by default (call [`Self::skip_empty`] to drop them
+/// for token-style splitting).
 ///
 /// # Examples
 ///
@@ -318,7 +329,7 @@ pub type Utf8Whitespaces<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
 pub type Utf8SplitDelimiters<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
     Utf8Split<'a, Delimiters, Between, KeepEmpty, STEPS>;
 
-/// An iterator over the delimiter runs themselves (the separators), in order.
+/// An iterator over the delimiter runs themselves, the separators, in order.
 pub type Utf8Delimiters<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
     Utf8Split<'a, Delimiters, Separators, KeepEmpty, STEPS>;
 
@@ -382,7 +393,8 @@ impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Iterator for Utf8Segments<
             if self.count == 0 {
                 return None; // Empty input or fully drained.
             }
-            // Batch drained: advance past the last word (a UAX-29 boundary) and refill from the remaining suffix.
+            // Batch drained: advance past the last word, a UAX-29 boundary, and refill from
+            // the remaining suffix.
             self.suffix += self.starts[self.count - 1] + self.lengths[self.count - 1];
             self.fill();
             if self.count == 0 {
@@ -406,8 +418,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::sz::*;
 
-    /// Segments tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
-    /// a tiny batch (STEPS == 1) exercises the refill seam on every boundary the kernel reports.
+    /// Segments tile the input, so the yielded segments must match regardless of the batch
+    /// size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every boundary
+    /// the kernel reports.
     pub(crate) fn assert_steps_invariant<Kernel: SegmenterKernel>(text: &[u8]) {
         let forward: Vec<&[u8]> = Utf8Segments::<Kernel, ITERATORS_DEFAULT_STEPS>::new(text).collect();
         assert_eq!(Utf8Segments::<Kernel, 1>::with_steps(text).collect::<Vec<_>>(), forward);
@@ -420,7 +433,8 @@ pub(crate) mod tests {
 
     #[test]
     fn utf8_delimiters() {
-        // `split_delimiters` yields the content BETWEEN ',', ' ', U+2014; skip_empty drops the empties.
+        // `split_delimiters` yields the content between ',', ' ', U+2014; skip_empty
+        // drops the empties.
         let toks: Vec<&[u8]> = "Hi, world\u{2014}foo"
             .as_bytes()
             .sz_utf8_split_delimiters()
@@ -434,9 +448,10 @@ pub(crate) mod tests {
 
     #[test]
     fn utf8_split_delimiters_sparse_batches() {
-        // Sparse delimiters with long undelimited runs: each batch fills on the last delimiter its vector window
-        // holds, and the letters between that delimiter and the window edge must survive into the next segment.
-        // Dense inputs cannot reach this path, since a filled batch there always leaves hits behind in the window.
+        // Sparse delimiters with long undelimited runs: each batch fills on the last delimiter its
+        // vector window holds, and the letters between that delimiter and the window edge must
+        // survive into the next segment. Dense inputs cannot reach this path, since a filled batch
+        // there always leaves hits behind in the window.
         for run in [16usize, 31, 62, 63, 64, 100] {
             let text = format!("a {} c", "b".repeat(run));
             let expected: Vec<&[u8]> = vec![b"a", text.as_bytes()[2..2 + run].as_ref(), b"c"];
@@ -474,8 +489,9 @@ pub(crate) mod tests {
         // Empty input still yields one empty segment (matches C++ `[""]`).
         let empty: Vec<&[u8]> = "".as_bytes().sz_utf8_split_whitespaces().collect();
         assert_eq!(empty, vec![&b""[..]]);
-        // Small batch size must agree with the default across ALL modes (exercises refill boundaries for
-        // separators and both, not just between - the paths where a trailing gap straddles a batch).
+        // Small batch size must agree with the default across all modes (exercises refill
+        // boundaries for separators and both, not just between - the paths where a trailing gap
+        // straddles a batch).
         let many = "w ".repeat(50) + "end";
         let between_small: Vec<&[u8]> = Utf8SplitWhitespaces::<2>::with_steps(many.as_bytes()).collect();
         assert_eq!(
@@ -503,7 +519,7 @@ pub(crate) mod tests {
             .with_separators()
             .collect();
         assert!(dropped.iter().all(|s| !s.is_empty()));
-        // `utf8_wordbreaks` tiles into all UAX-29 segments (words and the separators between them).
+        // `utf8_wordbreaks` tiles into all UAX-29 segments: words and the separators between them.
         let segs: Vec<&[u8]> = "Hello, world!".as_bytes().sz_utf8_wordbreaks().collect();
         assert_eq!(segs.concat(), &b"Hello, world!"[..]);
         assert_eq!(segs.len(), 5);
@@ -551,7 +567,8 @@ pub(crate) mod tests {
 
     #[test]
     fn iter_whitespace_utf8_splits_keep_default() {
-        // The simple example from the doc comment: KEEP yields the surrounding empties, skip_empty drops them.
+        // The simple example from the doc comment: KEEP yields the surrounding empties,
+        // skip_empty drops them.
         let text = b"  hi  ";
         let kept: Vec<_> = Utf8SplitWhitespaces::new(text).collect();
         assert_eq!(kept, vec![&b""[..], &b""[..], b"hi", &b""[..], &b""[..]]);

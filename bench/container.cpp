@@ -1,19 +1,26 @@
 /**
  *  @file bench/container.cpp
- *  @brief Benchmarks STL associative containers with @b `std::string_view`-compatible keys.
- *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the lookup operations.
+ *  @author Ash Vardanian
+ *  @date January 4, 2024
+ *  @brief Benchmarks STL associative containers with @c std::string_view-compatible keys.
  *
- *  Memory-bound: associative build and probe are latency-limited over the whole key set, so it reads the whole file by default.
+ *  The program accepts a file path to a dataset, tokenizes it, and benchmarks lookups.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Memory-bound: associative build and probe are latency-limited over the whole key set, so it
+ *  reads the whole file by default.
+ *
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -23,17 +30,17 @@
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_container_cpp20
  *  @endcode
  *
- *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
- *  like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes (exactly 1 cache line),
- *  your last command may look like:
+ *  Alternatively, if you really want to stress-test a very specific function on a certain size
+ *  inputs, like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes
+ *  (exactly 1 cache line), your last command may look like:
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  build_release/stringzilla_bench_container_cpp20
  *  @endcode
  *
- *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `sequence.cpp`, `find.cpp`, `token.cpp`, and `memory.cpp`.
+ *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
+ *  Google Benchmark. Its siblings are `sequence.cpp`, `find.cpp`, `token.cpp`, and `memory.cpp`.
  */
 #include <map>           // `std::map`
 #include <unordered_map> // `std::unordered_map`
@@ -48,7 +55,7 @@ using namespace ashvardanian::stringzilla::bench;
 /**
  *  @brief Helper function-like object to order string-view convertible objects with StringZilla.
  *  @see Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
- *  @note Unlike the `sz::less`, the structure below supports different hardware backends.
+ *  @note Unlike the @c sz::less, the structure below supports different hardware backends.
  */
 template <sz_order_t order_>
 struct less_from_sz {
@@ -58,9 +65,9 @@ struct less_from_sz {
 };
 
 /**
- *  @brief Helper function-like object to check equality between string-view convertible objects with StringZilla.
+ *  @brief Helper function-like object comparing string-view convertible objects with StringZilla.
  *  @see Similar to `std::equal_to<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/equal_to
- *  @note Unlike the `sz::equal_to`, the structure below supports different hardware backends.
+ *  @note Unlike the @c sz::equal_to, the structure below supports different hardware backends.
  */
 template <sz_equal_t equal_>
 struct equal_to_from_sz {
@@ -71,8 +78,8 @@ struct equal_to_from_sz {
 
 /**
  *  @brief Helper function-like object to hash string-view convertible objects with StringZilla.
- *  @see Similar to `hash_through_std_t`: https://en.cppreference.com/w/cpp/utility/functional/hash
- *  @note Unlike the `sz::hash`, the structure below supports different hardware backends.
+ *  @see Similar to @c hash_through_std_t: https://en.cppreference.com/w/cpp/utility/functional/hash
+ *  @note Unlike the @c sz::hash, the structure below supports different hardware backends.
  */
 template <sz_hash_t hash_>
 struct hash_from_sz {
@@ -91,12 +98,12 @@ struct callable_for_associative_lookups {
         for (std::string_view const &key : env.tokens) container[to_str<key_type>(key)]++;
     }
 
-    /** @brief Helper API to produce a delayed construction lambda. */
+    /** Helper API to produce a delayed construction lambda. */
     inline auto preprocessor() {
         return [this] { preprocess(); };
     }
 
-    /** @brief The actual lookup operation to be benchmarked. */
+    /** The actual lookup operation to be benchmarked. */
     call_result_t operator()(std::size_t token_index) const {
         std::string_view key = env.tokens[token_index];
         auto counter = container.find(key)->second;
@@ -104,9 +111,7 @@ struct callable_for_associative_lookups {
     }
 };
 
-/**
- *  @brief Find all inclusions of each given token in the dataset, using various search backends.
- */
+/** Find all inclusions of each given token in the dataset, using various search backends. */
 void bench_associative_lookups_with_different_simd_backends(environment_t const &env) {
 
     // First, benchmark the default STL equality comparison and hashes

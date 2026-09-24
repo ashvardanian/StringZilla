@@ -14,6 +14,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/string.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/string.py -q
+
+File: test/string.py
+Author: Ash Vardanian
+Date: September 16, 2023
 """
 
 import os
@@ -43,7 +47,7 @@ from test.sz_helpers import (
     unaligned_views,
 )
 
-# NumPy and PyArrow are optional; the naked `except` also catches PyPy's non-ImportError on a missing import.
+# NumPy and PyArrow are optional; the naked `except` also catches PyPy's non-ImportError on import.
 try:
     import numpy as np
 except:  # noqa: E722
@@ -57,9 +61,9 @@ except:  # noqa: E722
 
 # region Unit
 
-# `maxsplit` values spanning "no limit" (-1), "no splits" (0), a couple of partial splits, and
-# a limit far beyond the number of separators, reused to check lazy/eager split parity.
 SPLIT_PARITY_MAXSPLITS = [-1, 0, 1, 2, 99]
+"""`maxsplit` values spanning "no limit" (-1), "no splits" (0), a couple of partial splits, and a limit
+far beyond the number of separators, reused to check lazy/eager split parity."""
 
 
 SPLITLINES_CASES = ["", "a", "a\n", "\n", "\n\n", "a\nb", "a\n\nb", "a\nb\n"]
@@ -745,19 +749,19 @@ def test_decoding_valid_strings(byte_string, encoding, expected):
 
 # region Corner cases
 
-# Degenerate [start, end) windows: start > end, far out of range, an inverted negative pair,
-# and a non-empty-but-zero-length window. Shared by every slicing-style degenerate test.
 DEGENERATE_WINDOWS = [(3, 1), (100, 200), (-1, -3), (2, 2)]
+"""Degenerate [start, end) windows: start > end, far out of range, an inverted negative pair, and a
+non-empty-but-zero-length window. Shared by every slicing-style degenerate test."""
 
 
-# Indices that overflow a signed/unsigned `ssize_t`/`size_t`, used to confirm huge integers
-# raise a catchable Python exception instead of leaking a `SystemError`.
 OUT_OF_SSIZE_T_INDICES = [2**63, 2**64, -(2**63) - 1]
+"""Indices that overflow a signed/unsigned `ssize_t`/`size_t`, used to confirm huge integers raise a
+catchable Python exception instead of leaking a `SystemError`."""
 
 
-# Seeds that overflow the C `unsigned long`/`unsigned int` nonce parameters accepted by
-# `sample`/`shuffled`, which must raise a catchable exception rather than abort the interpreter.
 OUT_OF_RANGE_SEEDS = [-1, 2**70]
+"""Seeds that overflow the C `unsigned long`/`unsigned int` nonce parameters accepted by
+`sample`/`shuffled`, which must raise a catchable exception rather than abort the interpreter."""
 
 
 STARTSWITH_ENDSWITH_BOUNDS = [-10, -2, 0, 2, 5, 6, 10**7, -(10**7)]
@@ -1462,9 +1466,9 @@ def lookup_table_oracle(data: bytes, table: bytes) -> bytes:
 UINT32_MAX = 2**32 - 1  # ! Many of the 32/64-bit algo corner cases happen at this input size
 
 
-# Fixed 256-byte lookup tables reused by every translate differential test: the identity (no-op), a full
-# inversion, and an arbitrary fixed bijection-ish permutation that scrambles every byte differently.
 _TRANSLATE_IDENTITY_TABLE = bytes(range(256))
+"""Fixed 256-byte lookup tables reused by every translate differential test: the no-op identity, a
+full inversion, and an arbitrary fixed bijection-ish permutation that scrambles every byte differently."""
 _TRANSLATE_INVERT_TABLE = bytes(255 - value for value in range(256))
 _TRANSLATE_SCRAMBLE_TABLE = bytes((value * 167 + 41) % 256 for value in range(256))
 TRANSLATE_TABLES = (_TRANSLATE_IDENTITY_TABLE, _TRANSLATE_INVERT_TABLE, _TRANSLATE_SCRAMBLE_TABLE)

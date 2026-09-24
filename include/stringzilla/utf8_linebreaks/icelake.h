@@ -1,7 +1,8 @@
 /**
- *  @brief Ice Lake backend for UAX-14 line break boundaries.
  *  @file include/stringzilla/utf8_linebreaks/icelake.h
  *  @author Ash Vardanian
+ *  @date June 23, 2026
+ *  @brief Ice Lake backend for UAX-14 line break boundaries.
  */
 #ifndef STRINGZILLA_UTF8_LINEBREAKS_ICELAKE_H_
 #define STRINGZILLA_UTF8_LINEBREAKS_ICELAKE_H_
@@ -30,31 +31,37 @@ extern "C" {
                    "popcnt")
 #endif
 
+/*  The classifier resolves a contiguous run of codepoints to per-codepoint class, side and dotted
+ *  bytes with no per-lane scalar loop and no serial @c sz_rune_line_break_property deferral. It
+ *  processes sixteen 32-bit codepoint lanes per pass: the whole BMP is mapped to a flat-palette
+ *  index by one indexed lookup - `bmp_page_lut_[cp >> 8]` selects one of 67 distinct 256-byte
+ *  pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is fetched by @c vpgatherdd - while the astral
+ *  planes still resolve through the 8/4/4/4 trie in the 62-entry cascade palette's index space. The
+ *  descriptor is then unpacked to the LB1-resolved class byte and the engine side byte by
+ *  in-register compares and masked moves.
+ *
+ *  The flat table is chosen for port pressure rather than instruction count. The @c vpermb and
+ *  @c vpermi2b cross-lane shuffles are port-5-only, so any dependent shuffle cascade saturates that
+ *  single port, while @c vpgatherdd issues on the load ports and leaves the shuffle port to the
+ *  decode. Gathers pay off on multi-KB tables in general, as less_slow.cpp v0.3.0 "Gather and
+ *  Scatter" shows: https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0
+ *
+ *  The line leaf holds a @c flat_palette_ index, not the 62-entry cascade palette index, because
+ *  the Line_Break descriptor is 16-bit and the leaf must stay one byte per codepoint. The two index
+ *  spaces do not mix. */
+
 #pragma region UAX 14 Line Boundaries forward kernel
 
 #pragma region In register vectorized classifier
 
-/*  The classifier resolves a contiguous run of codepoints to per-codepoint (class, side, dotted) with ZERO
- *  per-lane scalar loop and NO serial `sz_rune_line_break_property` deferral. It processes sixteen 32-bit codepoint
- *  lanes per pass: the whole BMP is mapped to a flat-palette index by ONE indexed lookup - `bmp_page_lut_[cp >> 8]`
- *  selects one of 67 distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]`, fetched by `vpgatherdd` -
- *  while the astral planes still resolve through the 8/4/4/4 trie in the 62-entry cascade palette's index space. The
- *  descriptor is then unpacked to the LB1-resolved class byte and the engine side byte by in-register compares and
- *  masked moves.
+/**
+ *  @brief Palette index for sixteen astral codepoints, at or above 0x10000, via a
+ *      register-resident 8/4/4/4 trie.
  *
- *  Design note: the flat table is chosen for port pressure rather than instruction count. `vpermb`/`vpermi2b`
- *  cross-lane shuffles are port-5-only, so any dependent shuffle cascade saturates that single port, while
- *  `vpgatherdd` issues on the load ports and leaves the shuffle port to the decode. Gathers pay off on multi-KB
- *  tables in general - see less_slow.cpp v0.3.0 "Gather and Scatter":
- *  https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0
- *
- *  ! The line leaf holds a `flat_palette_` index, NOT the 62-entry cascade palette index, because the Line_Break
- *  ! descriptor is 16-bit and the leaf must stay one byte per codepoint. The two index spaces do not mix. */
-
-/** @brief Palette index for sixteen astral (>=0x10000) codepoints via a register-resident 8/4/4/4 trie over
- *         offset = codepoint - 0x10000 (s0 -> s1 -> s2 -> leaf). Re-init-free: every tile is read straight from
- *         aligned .rodata through the substrate permute256_/lut_cascade_ helpers. Bit-exact with
- *         `sz_rune_line_break_property` over the astral planes. */
+ *  The trie runs over offset = codepoint - 0x10000, walking s0 → s1 → s2 → leaf. Re-init-free:
+ *  every tile is read straight from aligned .rodata through the substrate @c permute256_ and
+ *  @c lut_cascade_ helpers. Bit-exact with @c sz_rune_line_break_property over the astral planes.
+ */
 SZ_HELPER_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
     __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
     __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
@@ -75,21 +82,28 @@ SZ_HELPER_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m512i codepo
                                              (int)sz_utf8_line_break_astral_leaf_tiles_k, class_index_u32x16);
 }
 
-/** @brief Flat-palette index for sixteen BMP byte-lanes, read straight from the page-compressed flat leaf: one
- *         `vpermb` over `bmp_page_lut_` picks the 256-byte page, one `vpgatherdd` fetches
- *         `flat_bmp_[page * 256 + (cp & 0xFF)]`. The leaf byte is an index into
- *         `sz_utf8_line_break_flat_palette_`, NOT the 62-entry cascade palette. Only the low byte of each u32 lane
- *         is the index; the caller truncates with `vpmovdb`. */
+/**
+ *  @brief Flat-palette index for sixteen BMP byte-lanes, read straight from the
+ *      page-compressed flat leaf.
+ *
+ *  One @c vpermb over @c bmp_page_lut_ picks the 256-byte page, and one @c vpgatherdd fetches
+ *  `flat_bmp_[page * 256 + (cp & 0xFF)]`. The leaf byte is an index into
+ *  @c sz_utf8_line_break_flat_palette_, not the 62-entry cascade palette. Only the low byte of each
+ *  u32 lane is the index; the caller truncates with @c vpmovdb.
+ */
 SZ_HELPER_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
     return sz_utf8_rune_flat_lookup_icelake_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
                                              codepoints_u32x16);
 }
 
-/** @brief All-64-lane flat-palette index for `cp < 0x10000` (`cp = (high << 8) | low`): four sixteen-lane
- *         `vpgatherdd` leaves resolve the whole window on the load ports, leaving the cross-lane shuffle port to
- *         the decode. Lanes whose codepoint is >= 0x10000 are
- *         undefined (the caller blends the astral path over them). The sixteen-lane groups are unrolled because
- *         `vextracti32x4` / `vinserti32x4` take an immediate lane selector. */
+/**
+ *  @brief All-64-lane flat-palette index for `cp < 0x10000`, where `cp = (high << 8) | low`.
+ *
+ *  Four sixteen-lane @c vpgatherdd leaves resolve the whole window on the load ports, leaving the
+ *  cross-lane shuffle port to the decode. Lanes whose codepoint is ≥ 0x10000 are undefined, as the
+ *  caller blends the astral path over them. The sixteen-lane groups are unrolled because
+ *  @c vextracti32x4 and @c vinserti32x4 take an immediate lane selector.
+ */
 SZ_HELPER_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64, __m512i low_bytes_u8x64) {
     __m512i palette_indices_u8x64 = _mm512_setzero_si512();
     __m512i high_u32x16, low_u32x16, codepoints_u32x16, group_indices_u32x16;
@@ -107,10 +121,15 @@ SZ_HELPER_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_byte
     return palette_indices_u8x64;
 }
 
-/** @brief Unpack thirty-two 16-bit palette descriptors (one half of the 64-byte block) to the LB1-resolved class and
- *         the engine side byte, both as 16-bit lanes, plus the per-lane DottedCircle predicate. Applies the serial
- *         resolution aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); Pi/Pf/EAW/Cn|Ext side bits come from descriptor
- *         bits 6/7/8/9; RI/ZWJ side from the raw class; CM|ZWJ -> mark side bit; DottedCircle from bit 13. */
+/**
+ *  @brief Unpack thirty-two 16-bit palette descriptors, one half of the 64-byte block, to
+ *      the LB1-resolved class and the engine side byte, both as 16-bit lanes, plus the
+ *      per-lane DottedCircle predicate.
+ *
+ *  Applies the serial resolution aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS). The Pi, Pf, EAW and
+ *  Cn|Ext side bits come from descriptor bits 6, 7, 8 and 9; the RI and ZWJ side bits from the raw
+ *  class; CM or ZWJ sets the mark side bit; DottedCircle comes from bit 13.
+ */
 SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i descriptors_u16x32,
                                                                     __m512i *classes_out_u16x32,
                                                                     __m512i *side_out_u16x32,
@@ -160,13 +179,17 @@ SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i desc
     *dotted_out_m32 = _mm512_test_epi16_mask(descriptors_u16x32, _mm512_set1_epi16(1 << 13));
 }
 
-/** @brief Expand sixty-four flat-palette indices to the LB1-resolved class byte, the engine side byte and the
- *         DottedCircle lane mask. The 56-entry `flat_palette_` of 16-bit descriptors is padded to 64 words = two
- *         aligned ZMM tiles, so ONE `vpermi2w` per 32-lane half resolves every index (the permute consumes the low
- *         six index bits, exactly the padded palette's span); the descriptor halves then feed the shared
- *         @ref sz_line_break_descriptor_unpack_half_icelake_ and narrow back to bytes with `vpmovwb`. Bit-identical
- *         to the cascade's `palette_class_` / `_side_` / `_dotted_` byte-table permutes, which carry the same
- *         resolution baked in. */
+/**
+ *  @brief Expand sixty-four flat-palette indices to the LB1-resolved class byte, the engine side
+ *      byte and the DottedCircle lane mask.
+ *
+ *  The 56-entry @c flat_palette_ of 16-bit descriptors is padded to 64 words, two aligned ZMM
+ *  tiles, so one @c vpermi2w per 32-lane half resolves every index: the permute consumes the low
+ *  six index bits, exactly the padded palette's span. The descriptor halves then feed the shared
+ *  @ref sz_line_break_descriptor_unpack_half_icelake_ and narrow back to bytes with @c vpmovwb.
+ *  Bit-identical to the cascade's class, side and dotted byte-table permutes, @c palette_class_ and
+ *  its siblings, which carry the same resolution baked in.
+ */
 SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
                                                                  __m512i *classes_out_u8x64, __m512i *side_out_u8x64,
                                                                  sz_u64_t *dotted_out) {
@@ -192,23 +215,40 @@ SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_icelake_(__m512i palette
     *dotted_out = (sz_u64_t)_cvtmask32_u32(dotted_low_m32) | ((sz_u64_t)_cvtmask32_u32(dotted_high_m32) << 32);
 }
 
-/** @brief Per-window byte-lane classification: class/side per lane, plus the effective-start and U+FFFD masks. */
+/** Per-window byte-lane classification: class and side per lane, plus the effective-start
+ *  and U+FFFD masks. */
 typedef struct sz_line_break_classified_t {
-    __m512i classes_u8x64; /**< Per-byte-lane Line_Break class (valid only on `starts` lanes). */
-    __m512i side_u8x64;    /**< Per-byte-lane engine side byte. */
-    sz_u64_t dotted;       /**< Bit i set => lane i is DottedCircle U+25CC. */
-    sz_u64_t starts;       /**< Effective codepoint starts: valid leads (at their lane) + 1-byte U+FFFD units. */
-    sz_u64_t replacement;  /**< Effective-start lanes that are ill-formed (decoded as U+FFFD, class AL). */
-    sz_u64_t non_start;    /**< Bytes that are NOT effective starts (consumed continuations) within `loaded`. */
-    sz_size_t loaded;      /**< Bytes loaded into this window (<= 64). */
+
+    /** Per-byte-lane Line_Break class (valid only on @c starts lanes). */
+    __m512i classes_u8x64;
+
+    /** Per-byte-lane engine side byte. */
+    __m512i side_u8x64;
+
+    /** Bit i set => lane i is DottedCircle U+25CC. */
+    sz_u64_t dotted;
+
+    /** Effective codepoint starts: valid leads (at their lane) + 1-byte U+FFFD units. */
+    sz_u64_t starts;
+
+    /** Effective-start lanes that are ill-formed (decoded as U+FFFD, class AL). */
+    sz_u64_t replacement;
+
+    /** Bytes that are not effective starts (consumed continuations) within @c loaded. */
+    sz_u64_t non_start;
+
+    /** Bytes loaded into this window (<= 64). */
+    sz_size_t loaded;
 } sz_line_break_classified_t;
 
 /**
- *  @brief  Classify a decoded 64-byte window onto byte-start lanes, fully in-register and zero-scalar. Reproduces
- *          the serial `sz_utf8_next_rune_` "consume-1 U+FFFD" policy: an invalid lead, a short/stray continuation, an
- *          overlong / surrogate / out-of-range lead each become a single-byte U+FFFD unit (class AL), so serial and
- *          icelake agree on malformed input. Valid leads classify by decoded VALUE (page / trie / big / astral),
- *          matching the serial resolution precedence. The BMP trie uses the shared substrate `trie_walk_icelake_`.
+ *  @brief Classify a decoded 64-byte window onto byte-start lanes, in-register and zero-scalar.
+ *
+ *  Reproduces the serial @c sz_utf8_next_rune_ "consume-1 U+FFFD" policy: an invalid lead, a short
+ *  or stray continuation, and an overlong, surrogate or out-of-range lead each become a single-byte
+ *  U+FFFD unit of class AL, so serial and icelake agree on malformed input. Valid leads classify by
+ *  decoded value - page, trie, big or astral - matching the serial resolution precedence. The BMP
+ *  trie uses the shared substrate @c trie_walk_icelake_.
  */
 SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
                                                                                    __m512i lane_identity_u8x64) {
@@ -225,11 +265,12 @@ SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelak
     sz_u64_t const next1_continuation = continuation >> 1, next2_continuation = continuation >> 2,
                    next3_continuation = continuation >> 3;
 
-    //  Ill-formed-lead gate (LEVER B): the overlong / surrogate / out-of-range value checks only fire on the lead
-    //  bytes C0/C1 (overlong-2), E0/ED (overlong-3 / surrogate-3) and F0/F4/>=F5 (overlong-4 / above-range-4). Real
-    //  text never carries those, so detect their presence with ONE `raw`-only test and, when absent, take the cheap
-    //  "lead + enough continuations" validity path. The gated branch runs the exact same overlong/surrogate/above
-    //  algebra as before, so the result is bit-identical regardless of which side fires.
+    //  Ill-formed-lead gate (LEVER B): the overlong / surrogate / out-of-range value checks only
+    //  fire on the lead bytes C0/C1 (overlong-2), E0/ED (overlong-3 / surrogate-3) and F0/F4/>=F5
+    //  (overlong-4 / above-range-4). Real text never carries those, so detect their presence with
+    //  one `raw`-only test and, when absent, take the cheap "lead + enough continuations" validity
+    //  path. The gated branch runs the full overlong/surrogate/above algebra, so the result is
+    //  bit-identical regardless of which side fires.
     sz_u64_t const lead_c0_c1 = _cvtmask64_u64(
         _kand_mask64(_mm512_cmp_epu8_mask(raw_u8x64, _mm512_set1_epi8((char)0xC0), _MM_CMPINT_NLT),
                      _mm512_cmp_epu8_mask(raw_u8x64, _mm512_set1_epi8((char)0xC1), _MM_CMPINT_LE)));
@@ -296,7 +337,8 @@ SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelak
     high_fixed_u8x64 = _mm512_mask_mov_epi8(high_fixed_u8x64, _cvtu64_mask64(four_byte), high_four_u8x64);
 
     sz_u64_t const valid_start = true_ascii | valid2 | valid3 | valid4;
-    //  Continuation bytes consumed by a valid multibyte lead's body (so they are NOT independent units).
+    //  Continuation bytes consumed by the body of a valid multibyte lead, which therefore do not
+    //  count as independent units.
     sz_u64_t const consumed = (((valid2 | valid3 | valid4) << 1) | ((valid3 | valid4) << 2) | (valid4 << 3)) &
                               continuation & loaded_mask;
     sz_u64_t const starts = loaded_mask & ~consumed;
@@ -309,13 +351,15 @@ SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelak
         sz_utf8_srl8_icelake_(next1_u8x64, 4, 0x03));
     __m512i const previous_cluster_lane_u8x64 = _mm512_maskz_mov_epi8(_cvtu64_mask64(four_byte), plane_all_u8x64);
 
-    //  Build the 64-lane flat-palette-index byte vector in ONE pass: the whole BMP (cp < 0x10000) resolves through
-    //  the page-compressed flat leaf, four `vpgatherdd` on the load ports replacing the three-level trie walk and its
-    //  page-LUT fast paths. Replacement lanes are forced to U+FFFD's index (U+FFFD is itself BMP, so it shares this
-    //  index space) to match the serial U+FFFD policy. Astral lanes cannot join here: the astral trie still speaks the
-    //  62-entry cascade palette, a DIFFERENT index space, so they are blended after the expansion, on class/side bytes.
-    //  Only VALID 4-byte starts join that late blend: an invalid 4-byte lead is a replacement lane whose U+FFFD
-    //  resolution must survive it, so `valid4`, not `four_byte`, gates the blend.
+    //  Build the 64-lane flat-palette-index byte vector in one pass: the whole BMP (cp < 0x10000)
+    //  resolves through the page-compressed flat leaf, four `vpgatherdd` on the load ports
+    //  replacing the three-level trie walk and its page-LUT fast paths. Replacement lanes are
+    //  forced to U+FFFD's index (U+FFFD is itself BMP, so it shares this index space) to match the
+    //  serial U+FFFD policy. Astral lanes cannot join here: the astral trie still speaks the
+    //  62-entry cascade palette, a different index space, so they are blended after the expansion,
+    //  on class/side bytes. Only valid 4-byte starts join that late blend: an invalid 4-byte lead
+    //  is a replacement lane whose U+FFFD resolution must survive it, so `valid4`, not `four_byte`,
+    //  gates the blend.
     sz_u64_t const is_astral = valid4 & loaded_mask;
     __m512i palette_indices_u8x64 = sz_line_break_bmp_flat_index_icelake_(high_fixed_u8x64, low_fixed_u8x64);
     if (replacement) {
@@ -365,10 +409,11 @@ SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelak
         group_index_u32x16 = sz_line_break_classify_astral16_icelake_(codepoints_u32x16);
         astral_index_u8x64 = _mm512_inserti32x4(astral_index_u8x64, _mm512_cvtepi32_epi8(group_index_u32x16), 3);
 
-        //  The astral index addresses the 62-entry cascade palette, whose `palette_class_` / `_side_` / `_dotted_`
-        //  byte tables carry the very same LB1 resolution the flat descriptor unpack applies (verified entry by
-        //  entry), so blending the RESOLVED bytes over the astral lanes matches blending indices in a single
-        //  shared space, which the two palettes do not form.
+        //  The astral index addresses the 62-entry cascade palette, whose `palette_class_` /
+        //  `_side_` / `_dotted_` byte tables carry the very same LB1 resolution the flat descriptor
+        //  unpack applies (verified entry by entry). Blending the resolved bytes over the astral
+        //  lanes thus matches what blending indices would give if the two palettes formed one
+        //  shared space, which they do not.
         __mmask64 const astral_m64 = _cvtu64_mask64(is_astral);
         classes_u8x64 = _mm512_mask_permutexvar_epi8(
             classes_u8x64, astral_m64, astral_index_u8x64,
@@ -397,41 +442,57 @@ SZ_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelak
 
 #pragma region Mask algebra rule engine
 
-/** @brief Build a 64-bit "lane class == @p cls" mask with one `vpcmpeqb` -> kmask. */
+/** Build a 64-bit "lane class == @p cls" mask with one @c vpcmpeqb into a kmask. */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_class_mask_icelake_(__m512i classes_u8x64, sz_u8_t cls) {
     return _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes_u8x64, _mm512_set1_epi8((char)cls)));
 }
 
-/** @brief The class/side byte held at lane @p lane, extracted in-register by a single byte permute (no scalar loop). */
+/** The class or side byte held at lane @p lane, extracted in-register by a single byte permute,
+ *  with no scalar loop. */
 SZ_HELPER_INLINE sz_u8_t sz_line_break_byte_at_icelake_(__m512i lanes_u8x64, sz_size_t lane) {
     __m512i const broadcast_u8x64 = _mm512_permutexvar_epi8(_mm512_set1_epi8((char)lane), lanes_u8x64);
     return (sz_u8_t)_mm_cvtsi128_si32(_mm512_castsi512_si128(broadcast_u8x64));
 }
 
-/** @brief Build a 64-bit "lane (side & @p bit) != 0" mask with one `vptestmb` -> kmask. */
+/** Build a 64-bit "lane (side & @p bit) ≠ 0" mask with one @c vptestmb into a kmask. */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_side_mask_icelake_(__m512i side_lo_u8x64, sz_u8_t bit) {
     __m512i const masked_u8x64 = _mm512_and_si512(side_lo_u8x64, _mm512_set1_epi8((char)bit));
     return _cvtmask64_u64(_mm512_test_epi8_mask(masked_u8x64, masked_u8x64));
 }
 
-/** @brief Build a 64-bit "lane class is in the inclusive byte range [@p lo, @p hi]" mask with two `vpcmpub` -> kmask.
- *         Used as a cheap combined presence test that gates the rarely-fired script blocks (Hangul, Brahmic) without
- *         extracting each individual per-class mask on the common Latin/CJK path. */
+/**
+ *  @brief Build a 64-bit mask of lanes whose class lies between @p lo and @p hi inclusive, using
+ *      two @c vpcmpub into a kmask.
+ *
+ *  Used as a cheap combined presence test that gates the rarely-fired script blocks, Hangul and
+ *  Brahmic, without extracting each individual per-class mask on the common Latin and CJK path.
+ */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_class_range_mask_icelake_(__m512i classes_u8x64, sz_u8_t lo, sz_u8_t hi) {
     __mmask64 const ge_m64 = _mm512_cmp_epu8_mask(classes_u8x64, _mm512_set1_epi8((char)lo), _MM_CMPINT_NLT);
     __mmask64 const le_m64 = _mm512_cmp_epu8_mask(classes_u8x64, _mm512_set1_epi8((char)hi), _MM_CMPINT_LE);
     return _cvtmask64_u64(_kand_mask64(ge_m64, le_m64));
 }
 
-/** @brief Byte-lane gate/base derivation for the byte-level rule engine: identifies cluster bases, the transparent
- *         gate (continuations + attached combining marks), and reclassifies lone marks (LB10) to AL in @p classes. */
+/** Byte-lane gate and base derivation for the byte-level rule engine: identifies cluster bases and
+ *  the transparent gate of continuations and attached combining marks, and reclassifies LB10 lone
+ *  marks to AL in @p classes. */
 typedef struct sz_line_break_byte_frame_t {
-    __m512i classes_u8x64; /**< Class per lane with lone marks reclassified to AL (LB10). */
-    sz_u64_t base;         /**< Cluster-base lanes (every effective start except an attached CM/ZWJ). */
-    sz_u64_t gate;         /**< Transparent lanes for neighbour fills: continuations + attached-mark starts. */
-    sz_u64_t attached;     /**< Attached CM/ZWJ start lanes (LB9). */
-    sz_u64_t
-        lone_mark; /**< LB10 lone marks reclassified to AL; their side bits must be cleared (serial zeros the descriptor). */
+
+    /** Class per lane with lone marks reclassified to AL (LB10). */
+    __m512i classes_u8x64;
+
+    /** Cluster-base lanes (every effective start except an attached CM/ZWJ). */
+    sz_u64_t base;
+
+    /** Transparent lanes for neighbour fills: continuations + attached-mark starts. */
+    sz_u64_t gate;
+
+    /** Attached CM/ZWJ start lanes (LB9). */
+    sz_u64_t attached;
+
+    /** LB10 lone marks reclassified to AL; their side bits must be cleared, as serial
+     *  zeros the descriptor. */
+    sz_u64_t lone_mark;
 } sz_line_break_byte_frame_t;
 
 SZ_HELPER_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line_break_classified_t classified) {
@@ -465,11 +526,12 @@ SZ_HELPER_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz
 }
 
 /**
- *  @brief  Per-ISA extractor: lower one classified 64-byte window to the portable @ref sz_line_break_frame_t. Builds
- *          the byte-level cluster frame (LB9/LB10), then materializes per-class membership (after the LB10 lone-mark
- *          -> AL reclassify), the raw ZWJ mask, the five side-bit masks, and the per-lane class/side bytes for the
- *          carry-out reads. All `__m512i` -> `sz_u64_t` work lives here; the rule engine that consumes the frame is
- *          fully portable.
+ *  @brief Lowers one classified 64-byte window to the portable @ref sz_line_break_frame_t.
+ *
+ *  A per-ISA extractor. Builds the byte-level cluster frame for LB9 and LB10, then materializes
+ *  per-class membership after the LB10 lone-mark → AL reclassify, the raw ZWJ mask, the five
+ *  side-bit masks, and the per-lane class and side bytes for the carry-out reads. All @c __m512i →
+ *  @c sz_u64_t work lives here, so the rule engine that consumes the frame stays fully portable.
  */
 SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_line_break_classified_t classified,
                                                                           sz_u8_t *effective_class_byte_out,
@@ -510,11 +572,9 @@ SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_lin
     return frame;
 }
 
-/**
- *  @brief  Byte-level UAX-14 rule engine, Ice Lake entry: extract the portable frame in-register, then delegate every
- *          LB1-LB31 decision to the portable @ref sz_line_break_decide_window_. Kept as the driver's call target so the
- *          forward driver is unchanged.
- */
+/** Byte-level UAX-14 rule engine, Ice Lake entry: extract the portable frame in-register, then
+ *  delegate every LB1-LB31 decision to the portable @ref sz_line_break_decide_window_. Kept as the
+ *  driver's call target so the forward driver is unchanged. */
 SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_break_classified_t classified,
                                                                              sz_line_break_carry_t carry,
                                                                              sz_line_break_carry_t *carry_out,
@@ -531,9 +591,11 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_
 #pragma region Forward driver
 
 /**
- *  @brief  Largest byte prefix of the window whose codepoints are all fully loaded (no multi-byte lead straddles the
- *          64-byte edge). Mirrors the word kernel's complete-limit: a declared-length lead whose span exceeds `loaded`
- *          ends the trusted region just before it; with no more text the whole window is complete. Never below 1.
+ *  @brief Largest byte prefix of the window whose codepoints are all fully loaded, never below 1.
+ *
+ *  No multi-byte lead may straddle the 64-byte edge. Mirrors the word kernel's complete-limit: a
+ *  declared-length lead whose span exceeds @c loaded ends the trusted region just before it; with
+ *  no more text the whole window is complete.
  */
 SZ_HELPER_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
@@ -554,12 +616,15 @@ SZ_HELPER_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t w
 }
 
 /**
- *  @brief  Byte-level zero-scalar forward UAX-14 kernel: an overlap-free advancing driver. Each iteration decodes one
- *          64-byte window at the codepoint-aligned `position`, classifies it in-register, decides the break-before mask
- *          over the complete-codepoint region with a carry-aware rule engine, drains the trusted band below the trust
- *          horizon, and advances by `win.resolved` with the small register carry threaded forward. There is NO byte
- *          re-read (no `start_at_or_before_`, no left-context back-walk): the carry alone supplies lane-0 left context.
- *          `bytes_consumed` is always a confirmed break (`line_start`), so resume is bit-identical and capacity-free.
+ *  @brief Byte-level zero-scalar forward UAX-14 kernel: an overlap-free advancing driver.
+ *
+ *  Each iteration decodes one 64-byte window at the codepoint-aligned @c position, classifies it
+ *  in-register, decides the break-before mask over the complete-codepoint region with a carry-aware
+ *  rule engine, drains the trusted band below the trust horizon, and advances by `win.resolved`
+ *  with the small register carry threaded forward. No byte is re-read - there is no
+ *  @c start_at_or_before_ and no left-context back-walk - because the carry alone supplies lane-0
+ *  left context. @c bytes_consumed is always a confirmed break, a @c line_start, so resume is
+ *  bit-identical and capacity-free.
  */
 SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
     sz_cptr_t text, sz_size_t length,                        //
@@ -612,13 +677,14 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
 }
 
 /**
- *  @brief  Forward UAX-14 line-break-opportunity kernel (Ice Lake AVX-512).
+ *  @brief Forward UAX-14 line-break-opportunity kernel for Ice Lake AVX-512.
  *
- *  Bit-exact with `sz_utf8_linebreaks_serial`. Emits every UAX-14 break opportunity (no per-segment
- *  mandatory flag). The classifier and rule engine are fully vectorized (no per-lane scalar loop, no
- *  serial-oracle deferral); the 64-codepoint block engine threads cross-block state through a register carry
- *  (no halo back-scan), so throughput is flat in run length. Emits at most @p capacity segments; sets
- *  *@p bytes_consumed to the resume.
+ *  Bit-exact with @c sz_utf8_linebreaks_serial. Emits every UAX-14 break opportunity, with no
+ *  per-segment mandatory flag. The classifier and rule engine are fully vectorized, with no
+ *  per-lane scalar loop and no serial-oracle deferral; the 64-codepoint block engine threads
+ *  cross-block state through a register carry rather than a halo back-scan, so throughput is
+ *  flat in run length. Emits at most @p capacity segments and stores the resume offset
+ *  through @p bytes_consumed.
  */
 SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake( //
     sz_cptr_t text, sz_size_t length,                 //

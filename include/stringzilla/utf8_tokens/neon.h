@@ -1,7 +1,8 @@
 /**
- *  @brief NEON backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/neon.h
  *  @author Ash Vardanian
+ *  @date November 18, 2025
+ *  @brief NEON backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_NEON_H_
 #define STRINGZILLA_UTF8_TOKENS_NEON_H_
@@ -25,10 +26,8 @@ extern "C" {
 
 #pragma region Multistep newline and whitespace iteration
 
-/**
- *  @brief Left-packs the @p submask -selected lanes of one 4-lane sub-block to the @p out_offsets / @p out_lengths
- *         cursors in lane order via a `vqtbl2q_u8` table; returns how many lanes were written.
- */
+/** Left-packs the @p submask -selected lanes of a 4-lane sub-block to @p out_offsets and
+ *  @p out_lengths in lane order via a @c vqtbl2q_u8 table; returns the count of lanes written. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_compact4_neon_(                  //
     uint8x16x2_t const offsets_u8x16x2, uint8x16x2_t const lengths_u8x16x2, //
     sz_u32_t const submask, sz_size_t *const out_offsets, sz_size_t *const out_lengths) {
@@ -66,10 +65,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_compact4_neon_(                  //
     return popcount_lut[submask];
 }
 
-/**
- *  @brief  Peel the tile's first @p emit_count matches by SIMD left-pack over four 4-lane sub-blocks into a
- *          fixed-width stack scratch, then copy the surviving prefix to the caller (no `ctz`, no per-match branch).
- */
+/** Peels the tile's first @p emit_count matches by SIMD left-pack over four 4-lane sub-blocks into
+ *  a fixed-width stack scratch, then copies the surviving prefix to the caller, with no @c ctz and
+ *  no per-match branch. */
 SZ_HELPER_INLINE void sz_utf8_iterate_peel_neon_(          //
     sz_u64_t start_bits, uint8x16_t length_per_lane_u8x16, //
     sz_size_t emit_count, sz_size_t position,              //
@@ -306,7 +304,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
 
 #pragma region Membership
 
-/** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one quarter, returned as 0x00/0xFF lanes. */
+/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one quarter, returned as 0x00/0xFF
+ *  lanes. */
 SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte_u8x16, uint8x16_t low_u8x16) {
     static sz_u8_t const bit_for_low3[16] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
     uint8x16_t const bit_table_u8x16 = vld1q_u8(bit_for_low3);
@@ -315,15 +314,16 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte_u
 }
 
 /**
- *  @brief  BMP (codepoint < 0x10000) delimiter membership for one quarter, in-register; returns 0x00/0xFF lanes.
+ *  @brief BMP (codepoint < 0x10000) delimiter membership for one quarter, as 0x00/0xFF lanes.
  *
- *  The decode window only reconstructs `high`/`low` for 2-/3-byte leads; ASCII lanes (top bit clear) carry their
- *  codepoint in the raw byte itself, so override them with (high=0, low=byte) before addressing the BMP tables.
- *  Lanes below U+0100 read bitmap row 0 directly; the rest survive a 256-bit pre-filter over `high` only if
- *  their 256-codepoint block holds ANY delimiter (row 1 - most of the plane, including all CJK letters - is the
- *  unique empty row), and the survivors resolve one DISTINCT high byte at a time: running text shares one to
- *  three highs per quarter, and each round loads that block's 32-byte row into a `vqtbl2q_u8` pair and settles
- *  every lane carrying it - no per-lane scalar walk.
+ *  The decode window only reconstructs @c high and @c low for 2-/3-byte leads; ASCII lanes (top bit
+ *  clear) carry their codepoint in the raw byte itself, so override them with `high = 0` and
+ *  `low = byte` before addressing the BMP tables. Lanes below U+0100 read bitmap row 0 directly;
+ *  the rest survive a 256-bit pre-filter over @c high only if their 256-codepoint block holds any
+ *  delimiter (row 1 - most of the plane, including all CJK letters - is the unique empty row), and
+ *  the survivors resolve one distinct high byte at a time: running text shares one to three highs
+ *  per quarter, and each round loads that block's 32-byte row into a @c vqtbl2q_u8 pair and settles
+ *  every lane carrying it, with no per-lane scalar walk.
  */
 SZ_HELPER_INLINE uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_u8x16, uint8x16_t high_in_u8x16,
                                                               uint8x16_t low_in_u8x16) {
@@ -357,13 +357,14 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_
 }
 
 /**
- *  @brief  Astral (codepoint >= 0x10000) delimiter membership for one quarter, in-register; returns 0x00/0xFF lanes.
+ *  @brief Astral (codepoint ≥ 0x10000) delimiter membership for one quarter, as 0x00/0xFF lanes.
  *
- *  Reconstructs the byte-domain components of `offset = cp - 0x10000` directly per lane (no 32-bit-lane widening):
- *  with `cp = b0<<18 | b1<<12 | b2<<6 | b3` (b0 = lead & 7, b1..b3 = continuation & 0x3F) and `offset = cp - 0x10000`,
- *  the parts are `super = (cp >> 16) - 1` (no borrow: subtracting exactly 1<<16), `sub = (cp >> 8) & 0xFF`,
- *  `low8 = cp & 0xFF`. The `super` (0..15) selects an L1 group; `group*256 + sub` selects a bitmap row id (group < 2,
- *  so the two 256-entry halves of the L2 table are read and blended by the group bit); the bit `(low8 & 7)` is tested.
+ *  Reconstructs the byte-domain components of `offset = cp - 0x10000` directly per lane, with no
+ *  32-bit-lane widening. With `cp = b0 << 18 | b1 << 12 | b2 << 6 | b3`, where b0 = lead & 7 and
+ *  b1..b3 = continuation & 0x3F, the parts are `super = (cp >> 16) - 1` (no borrow, as it subtracts
+ *  exactly 1 << 16), `sub = (cp >> 8) & 0xFF`, and `low8 = cp & 0xFF`. The @c super value (0..15)
+ *  selects an L1 group; group × 256 + sub selects a bitmap row id (group < 2, so the two 256-entry
+ *  halves of the L2 table are read and blended by the group bit); the bit `(low8 & 7)` is tested.
  */
 SZ_HELPER_INLINE uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window_u8x16, uint8x16_t next1_u8x16,
                                                                  uint8x16_t next2_u8x16, uint8x16_t next3_u8x16) {
@@ -406,11 +407,13 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t wind
 }
 
 /**
- *  @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
- *          valid only when its continuation bytes are well-formed and it is not overlong, a surrogate, or beyond
- *          U+10FFFF. Returned as one 64-bit lane mask. Span-clamping (so a lead near the loaded edge whose
- *          continuation bytes wrap is rejected) is applied by the caller via `byte_span`; here the substrate masks are
- *          already loaded-clamped. An invalid lead is never reported (serial advances one byte and re-syncs).
+ *  @brief Per-lane UTF-8 validity for codepoint-start lanes, mirroring @ref sz_rune_decode exactly.
+ *
+ *  A 2/3/4-byte lead is valid only when its continuation bytes are well-formed and it is not
+ *  overlong, a surrogate, or beyond U+10FFFF. Returned as one 64-bit lane mask. Span-clamping,
+ *  which rejects a lead near the loaded edge whose continuation bytes wrap, is applied by the
+ *  caller via @c byte_span; here the substrate masks are already loaded-clamped. An invalid lead is
+ *  never reported, as serial advances one byte and re-syncs.
  */
 SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded,
                                                           uint8x16_t const *next1_u8x16, uint8x16_t const *next2_u8x16,

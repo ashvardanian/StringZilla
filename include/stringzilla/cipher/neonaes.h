@@ -1,10 +1,13 @@
 /**
- *  @brief Arm NEON crypto-extension backend for AES-256 in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/neonaes.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief Arm NEON crypto-extension backend for AES-256 in counter and Galois/counter modes.
  *
- *  The fourteen rounds are written out rather than looped, for the reason `cipher/icelake.h` spells out.
+ *  The fourteen rounds are written out rather than looped, for the reason
+ *  `cipher/icelake.h` spells out.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_NEONAES_H_
 #define STRINGZILLA_CIPHER_NEONAES_H_
@@ -16,6 +19,24 @@
 extern "C" {
 #endif
 
+/*  Arm splits the round function where x86 does not, and this file is written against Arm's
+ *  split rather than a translation of the other one. @c AESE adds the round key first and then
+ *  substitutes and shifts rows, while x86's @c AESENC substitutes, shifts, mixes columns and
+ *  adds the key last. A full round is therefore `AESMC(AESE(state, round_key))` carrying the key
+ *  of the round the state is entering, the thirteen mixing rounds run over keys zero through
+ *  twelve, the fourteenth drops the column mixing, and the last round key is folded in
+ *  afterwards with a plain exclusive-or.
+ *
+ *  There is also no key-generation assist. The substitution a schedule word needs comes out of
+ *  @c AESE against a zero round key on a block holding four copies of that word: the row shift
+ *  only ever moves a byte between columns, so four identical columns pass through it untouched and
+ *  what returns is the substituted word, four times over. Rotation is then a byte rotate of the
+ *  same broadcast register.
+ *
+ *  Both wide paths run eight blocks deep. That is what the eight subkey powers in
+ *  @c sz_aes256_gcm_key_t were derived for, and it matches the round instruction's throughput:
+ *  @c AESE and @c AESMC fuse into a single operation of about three cycles' latency on every core
+ *  that has them, so a chain shorter than eight leaves the pipe half idle. */
 #if SZ_USE_NEONAES
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
@@ -24,29 +45,11 @@ extern "C" {
 #pragma GCC target("+simd+crypto+aes")
 #endif
 
-/*  Arm splits the round function where x86 does not, and this file is written against Arm's split rather
- *  than a translation of the other one. `AESE` adds the round key first and then substitutes and shifts
- *  rows, while x86's `AESENC` substitutes, shifts, mixes columns and adds the key last. A full round is
- *  therefore `AESMC(AESE(state, round_key))` carrying the key of the round the state is entering, the
- *  thirteen mixing rounds run over keys zero through twelve, the fourteenth drops the column mixing, and
- *  the last round key is folded in afterwards with a plain exclusive-or.
- *
- *  There is also no key-generation assist. The substitution a schedule word needs comes out of `AESE`
- *  against a zero round key on a block holding four copies of that word: the row shift only ever moves a
- *  byte between columns, so four identical columns pass through it untouched and what returns is the
- *  substituted word, four times over. Rotation is then a byte rotate of the same broadcast register.
- *
- *  Both wide paths run eight blocks deep. That is what the eight subkey powers in `sz_aes256_gcm_key_t`
- *  were derived for, and it matches the round instruction's throughput: `AESE` and `AESMC` fuse into a
- *  single operation of about three cycles' latency on every core that has them, so a chain shorter than
- *  eight leaves the pipe half idle.
- */
-
 #pragma region Key Schedule
 
 /**
  *  @brief Broadcasts the last word of a round key across all four lanes.
- *  @param round_key_u8x16 The round key.
+ *  @param[in] round_key_u8x16 The round key.
  *  @return Its fourth word in every lane.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_key_broadcast_neonaes_(uint8x16_t round_key_u8x16) {
@@ -54,12 +57,12 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_broadcast_neonaes_(uint8x16_t round_ke
 }
 
 /**
- *  @brief Rotates a broadcast word so `(a0, a1, a2, a3)` becomes `(a1, a2, a3, a0)` in every lane.
- *  @param broadcast_u8x16 The word to rotate, repeated in every lane.
+ *  @brief Rotates a broadcast word so @b (a0,a1,a2,a3) becomes @b (a1,a2,a3,a0) in every lane.
+ *  @param[in] broadcast_u8x16 The word to rotate, repeated in every lane.
  *  @return The rotated word, repeated in every lane.
  *
- *  A broadcast register repeats with a period of four bytes, so rotating the word inside each lane and
- *  rotating the whole register by one byte are the same permutation.
+ *  A broadcast register repeats with a period of four bytes, so rotating the word inside each lane
+ *  and rotating the whole register by one byte are the same permutation.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotate_neonaes_(uint8x16_t broadcast_u8x16) {
     return vextq_u8(broadcast_u8x16, broadcast_u8x16, 1);
@@ -67,20 +70,21 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotate_neonaes_(uint8x16_t broadcast_u
 
 /**
  *  @brief Substitutes a schedule word broadcast across all four lanes.
- *  @param broadcast_u8x16 The word to substitute, repeated in every lane.
+ *  @param[in] broadcast_u8x16 The word to substitute, repeated in every lane.
  *  @return The substituted word, repeated in every lane.
  *
- *  Against a zero round key `AESE` is exactly `ShiftRows(SubBytes(state))`, and the row shift permutes bytes
- *  between columns only.
+ *  Against a zero round key @c AESE is exactly `ShiftRows(SubBytes(state))`, and the row shift
+ *  permutes bytes between columns only.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_key_substitute_neonaes_(uint8x16_t broadcast_u8x16) {
     return vaeseq_u8(broadcast_u8x16, vdupq_n_u8(0));
 }
 
 /**
- *  @brief Derives the word an even round key folds in: rotate, substitute, then add the round constant.
- *  @param round_key_u8x16 The round key whose last word feeds the next one.
- *  @param round_constant The round constant for this step.
+ *  @brief Derives the word an even round key folds in: rotate, substitute, then add
+ *      the round constant.
+ *  @param[in] round_key_u8x16 The round key whose last word feeds the next one.
+ *  @param[in] round_constant The round constant for this step.
  *  @return The derived word, broadcast across every lane.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotated_word_neonaes_(uint8x16_t round_key_u8x16, sz_u32_t round_constant) {
@@ -91,7 +95,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotated_word_neonaes_(uint8x16_t round
 
 /**
  *  @brief Derives the word an odd round key folds in: substitute the previous key's last word.
- *  @param round_key_u8x16 The round key whose last word feeds the next one.
+ *  @param[in] round_key_u8x16 The round key whose last word feeds the next one.
  *  @return The derived word, broadcast across every lane.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_key_plain_word_neonaes_(uint8x16_t round_key_u8x16) {
@@ -99,9 +103,10 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_plain_word_neonaes_(uint8x16_t round_k
 }
 
 /**
- *  @brief Folds a substituted schedule word into the round key four words back, producing the next one.
- *  @param previous_u8x16 The round key four words back, all four of its words in one register.
- *  @param substituted_u8x16 The substituted word, already broadcast across every lane.
+ *  @brief Folds a substituted schedule word into the round key four words back, producing
+ *      the next one.
+ *  @param[in] previous_u8x16 The round key four words back, all four of its words in one register.
+ *  @param[in] substituted_u8x16 The substituted word, already broadcast across every lane.
  *  @return The next round key.
  *
  *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it.
@@ -165,14 +170,14 @@ SZ_API_COMPTIME void sz_aes256_key_init_neonaes(sz_aes256_key_t *key, sz_u8_t co
     vst1q_u8(schedule + 14 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
 /**
  *  @brief Reads one round key out of an expanded schedule.
- *  @param key The expanded schedule.
- *  @param round_index Which of the fifteen round keys to read, zero through fourteen.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] round_index Which of the fifteen round keys to read, zero through fourteen.
  *  @return The round key.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_round_key_neonaes_(sz_aes256_key_t const *key, sz_size_t round_index) {
@@ -181,8 +186,8 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_round_key_neonaes_(sz_aes256_key_t const *
 
 /**
  *  @brief Encrypts one block with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param block_u8x16 The plaintext block.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_block_encrypt_neonaes_(sz_aes256_key_t const *key, uint8x16_t block_u8x16) {
@@ -203,7 +208,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_block_encrypt_neonaes_(sz_aes256_key_t con
     return veorq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 14));
 }
 
-/** @brief Applies one fused round to all eight chains, so the eight issue back to back. */
+/** Applies one fused round to all eight chains, so the eight issue back to back. */
 SZ_HELPER_INLINE void sz_aes256_blocks_round_neonaes_(uint8x16_t *blocks_u8x16, uint8x16_t round_key_u8x16) {
     blocks_u8x16[0] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[0], round_key_u8x16));
     blocks_u8x16[1] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[1], round_key_u8x16));
@@ -217,11 +222,11 @@ SZ_HELPER_INLINE void sz_aes256_blocks_round_neonaes_(uint8x16_t *blocks_u8x16, 
 
 /**
  *  @brief Encrypts eight blocks with the expanded schedule, in place.
- *  @param key The expanded schedule.
- *  @param blocks_u8x16 Eight plaintext blocks, replaced by their ciphertext.
+ *  @param[in] key The expanded schedule.
+ *  @param[inout] blocks_u8x16 Eight plaintext blocks, replaced by their ciphertext.
  *
- *  The fused round instruction has several cycles of latency and issues every cycle, so a single chain of
- *  fourteen dependent rounds leaves most of that throughput idle.
+ *  The fused round instruction has several cycles of latency and issues every cycle, so a single
+ *  chain of fourteen dependent rounds leaves most of that throughput idle.
  */
 SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *key, uint8x16_t *blocks_u8x16) {
     uint8x16_t round_key_u8x16;
@@ -263,13 +268,13 @@ SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *k
     blocks_u8x16[7] = veorq_u8(blocks_u8x16[7], round_key_u8x16);
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
 /**
  *  @brief Places the twelve nonce bytes in a counter block whose trailing index word is zero.
- *  @param nonce The twelve nonce bytes.
+ *  @param[in] nonce The twelve nonce bytes.
  *  @return The counter block for index zero.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_counter_base_neonaes_(sz_u8_t const *nonce) {
@@ -281,8 +286,8 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_counter_base_neonaes_(sz_u8_t const *nonce
 
 /**
  *  @brief Completes a counter block with a big-endian block index in its trailing word.
- *  @param base_u8x16 A counter block carrying the nonce, whose trailing word is overwritten.
- *  @param block_index The block index.
+ *  @param[in] base_u8x16 A counter block carrying the nonce, whose trailing word is overwritten.
+ *  @param[in] block_index The block index.
  *  @return The counter block for that index.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_counter_block_neonaes_(uint8x16_t base_u8x16, sz_u32_t block_index) {
@@ -346,17 +351,17 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *key, sz_u8
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
 /**
  *  @brief Reverses a hash block between the tag's byte order and the multiplier's, its own inverse.
- *  @param block_u8x16 The block in either order.
+ *  @param[in] block_u8x16 The block in either order.
  *  @return The same block in the other order.
  *
- *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient, which is the
- *  opposite of how a carry-less multiply reads its operands.
+ *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient,
+ *  which is the opposite of how a carry-less multiply reads its operands.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_reflect_neonaes_(uint8x16_t block_u8x16) {
     uint8x16_t const halves_u8x16 = vrev64q_u8(block_u8x16);
@@ -365,7 +370,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_reflect_neonaes_(uint8x16_t block_u8x16) {
 
 /**
  *  @brief Loads a hash block from the tag's byte order into the multiplier's.
- *  @param block The sixteen block bytes.
+ *  @param[in] block The sixteen block bytes.
  *  @return The reflected block.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_load_neonaes_(sz_u8_t const *block) {
@@ -375,8 +380,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_load_neonaes_(sz_u8_t const *block) {
 /**
  *  @brief Loads a pending block with everything past @p buffered forced to zero.
  *
- *  A lane-identity compare rather than a byte loop, which the compilers lowered to branchy scalar stores and a
- *  store-forwarding stall.
+ *  A lane-identity compare rather than a byte loop, which the compilers lowered to branchy scalar
+ *  stores and a store-forwarding stall.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_load_padded_neonaes_(sz_u8_t const *block, sz_size_t buffered) {
     uint8x16_t const lane_ids_u8x16 = vcombine_u8(vcreate_u8(0x0706050403020100ull), //
@@ -385,7 +390,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_load_padded_neonaes_(sz_u8_t const *block, 
     return sz_ghash_reflect_neonaes_(vandq_u8(vld1q_u8(block), keep_u8x16));
 }
 
-/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+/** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_neonaes_(sz_u8_t const *first, sz_u8_t const *second) {
     uint8x16_t const matching_u8x16 = vceqq_u8(vld1q_u8(first), vld1q_u8(second));
     return vminvq_u8(matching_u8x16) == 0xFF ? sz_true_k : sz_false_k;
@@ -393,8 +398,8 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_neonaes_(sz_u8_t const *first, sz
 
 /**
  *  @brief Stores a hash block back in the tag's byte order.
- *  @param value_u8x16 The reflected block.
- *  @param block Receives the sixteen bytes.
+ *  @param[in] value_u8x16 The reflected block.
+ *  @param[out] block Receives the sixteen bytes.
  */
 SZ_HELPER_INLINE void sz_ghash_store_neonaes_(uint8x16_t value_u8x16, sz_u8_t *block) {
     vst1q_u8(block, sz_ghash_reflect_neonaes_(value_u8x16));
@@ -402,13 +407,13 @@ SZ_HELPER_INLINE void sz_ghash_store_neonaes_(uint8x16_t value_u8x16, sz_u8_t *b
 
 /**
  *  @brief Carry-less product of two 64-bit halves already isolated in their own vectors.
- *  @param multiplicand_p64x1 One half.
- *  @param multiplier_p64x1 The other half.
+ *  @param[in] multiplicand_p64x1 One half.
+ *  @param[in] multiplier_p64x1 The other half.
  *  @return Their 128-bit product.
  *
- *  The operands arrive as vectors rather than scalars because that is the only spelling both dialects accept:
- *  MSVC lowers `vmull_p64` straight onto `neon_pmull_64`, which takes `__n64` lanes, while the ACLE prototype
- *  on GCC and Clang takes `poly64_t` scalars.
+ *  The operands arrive as vectors rather than scalars because that is the only spelling both
+ *  dialects accept: MSVC lowers @c vmull_p64 straight onto @c neon_pmull_64, which takes @c __n64
+ *  lanes, while the ACLE prototype on GCC and Clang takes @c poly64_t scalars.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_halves_neonaes_(poly64x1_t multiplicand_p64x1,
                                                              poly64x1_t multiplier_p64x1) {
@@ -421,8 +426,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_halves_neonaes_(poly64x1_t multipli
 
 /**
  *  @brief Carry-less product of the low halves of two reflected blocks.
- *  @param multiplicand_u8x16 One reflected operand.
- *  @param multiplier_u8x16 The other reflected operand.
+ *  @param[in] multiplicand_u8x16 One reflected operand.
+ *  @param[in] multiplier_u8x16 The other reflected operand.
  *  @return Their 128-bit product.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_low_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16) {
@@ -432,8 +437,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_low_neonaes_(uint8x16_t multiplican
 
 /**
  *  @brief Carry-less product of the high halves of two reflected blocks.
- *  @param multiplicand_u8x16 One reflected operand.
- *  @param multiplier_u8x16 The other reflected operand.
+ *  @param[in] multiplicand_u8x16 One reflected operand.
+ *  @param[in] multiplier_u8x16 The other reflected operand.
  *  @return Their 128-bit product.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_high_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16) {
@@ -443,8 +448,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_high_neonaes_(uint8x16_t multiplica
 
 /**
  *  @brief Carry-less product of one reflected block's low half with the other's high half.
- *  @param low_u8x16 The operand contributing its low half.
- *  @param high_u8x16 The operand contributing its high half.
+ *  @param[in] low_u8x16 The operand contributing its low half.
+ *  @param[in] high_u8x16 The operand contributing its high half.
  *  @return Their 128-bit product.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_cross_neonaes_(uint8x16_t low_u8x16, uint8x16_t high_u8x16) {
@@ -454,12 +459,12 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_cross_neonaes_(uint8x16_t low_u8x16
 
 /**
  *  @brief Multiplies the low half of a value by the field's reduction polynomial.
- *  @param value_u8x16 The value whose low half is folded.
+ *  @param[in] value_u8x16 The value whose low half is folded.
  *  @return The 128-bit product.
  *
- *  In the reflected representation the polynomial `x^128 + x^7 + x^2 + x + 1` collapses to the single 64-bit
- *  constant below, which is what lets the reduction run as two multiplies rather than a chain of shifts: the
- *  same instruction that produced the product also closes it.
+ *  In the reflected representation the polynomial x¹²⁸ + x⁷ + x² + x + 1 collapses to the single
+ *  64-bit constant below, which is what lets the reduction run as two multiplies rather than a
+ *  chain of shifts: the same instruction that produced the product also closes it.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_polynomial_neonaes_(uint8x16_t value_u8x16) {
     poly64x1_t const polynomial_p64x1 = vcreate_p64(0xC200000000000000ull);
@@ -468,14 +473,15 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_polynomial_neonaes_(uint8x16_t valu
 
 /**
  *  @brief Accumulates the 256-bit carry-less product of two reflected blocks into a running triple.
- *  @param multiplicand_u8x16 One reflected operand.
- *  @param multiplier_u8x16 The other reflected operand.
- *  @param low_u8x16 Accumulates the product of the two low halves.
- *  @param middle_u8x16 Accumulates both cross products.
- *  @param high_u8x16 Accumulates the product of the two high halves.
+ *  @param[in] multiplicand_u8x16 One reflected operand.
+ *  @param[in] multiplier_u8x16 The other reflected operand.
+ *  @param[inout] low_u8x16 Accumulates the product of the two low halves.
+ *  @param[inout] middle_u8x16 Accumulates both cross products.
+ *  @param[inout] high_u8x16 Accumulates the product of the two high halves.
  *
- *  Splitting the schoolbook product from its reduction is what lets several blocks share one reduction: the
- *  field is linear, so the partial products of a whole group may be summed before folding once.
+ *  Splitting the schoolbook product from its reduction is what lets several blocks share one
+ *  reduction: the field is linear, so the partial products of a whole group may be summed
+ *  before folding once.
  */
 SZ_HELPER_INLINE void sz_ghash_accumulate_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16,
                                                    uint8x16_t *low_u8x16, uint8x16_t *middle_u8x16,
@@ -488,9 +494,9 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_neonaes_(uint8x16_t multiplicand_u8x16
 
 /**
  *  @brief Folds an accumulated triple into one reflected block.
- *  @param product_low_u8x16 The accumulated low halves.
- *  @param product_middle_u8x16 The accumulated cross products.
- *  @param product_high_u8x16 The accumulated high halves.
+ *  @param[in] product_low_u8x16 The accumulated low halves.
+ *  @param[in] product_middle_u8x16 The accumulated cross products.
+ *  @param[in] product_high_u8x16 The accumulated high halves.
  *  @return The reduced product, reflected.
  *
  *  The cross products straddle the halves, so they are split and merged first.
@@ -519,8 +525,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_reduce_neonaes_(uint8x16_t product_low_u8x1
 
 /**
  *  @brief Multiplies two reflected blocks in the Galois field the tag is built over.
- *  @param multiplicand_u8x16 One reflected operand.
- *  @param multiplier_u8x16 The other reflected operand.
+ *  @param[in] multiplicand_u8x16 One reflected operand.
+ *  @param[in] multiplier_u8x16 The other reflected operand.
  *  @return The reduced product, reflected.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_multiply_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16) {
@@ -533,9 +539,9 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_multiply_neonaes_(uint8x16_t multiplicand_u
 
 /**
  *  @brief Absorbs one reflected block into the running hash.
- *  @param accumulator_u8x16 The running hash, reflected.
- *  @param block_u8x16 The reflected block to absorb.
- *  @param subkey_u8x16 The reflected hash subkey.
+ *  @param[in] accumulator_u8x16 The running hash, reflected.
+ *  @param[in] block_u8x16 The reflected block to absorb.
+ *  @param[in] subkey_u8x16 The reflected hash subkey.
  *  @return The updated running hash, reflected.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_absorb_neonaes_(uint8x16_t accumulator_u8x16, uint8x16_t block_u8x16,
@@ -558,9 +564,9 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_neonaes(sz_aes256_gcm_key_t *key, sz
 }
 
 /**
- *  @brief Loads the eight subkey powers descending, so power `j` pairs with block `j` of a group.
- *  @param powers The eight subkey powers in the tag's byte order, ascending.
- *  @param powers_u8x16 Receives the reflected powers `H^8` down to `H^1`.
+ *  @brief Loads the eight subkey powers descending, so power @c j pairs with block @c j of a group.
+ *  @param[in] powers The eight subkey powers in the tag's byte order, ascending.
+ *  @param[out] powers_u8x16 Receives the reflected powers H⁸ down to H¹.
  */
 SZ_HELPER_INLINE void sz_ghash_descending_powers_neonaes_(sz_u8_t const *powers, uint8x16_t *powers_u8x16) {
     powers_u8x16[0] = sz_ghash_load_neonaes_(powers + 7 * SZ_AES_BLOCK_LENGTH);
@@ -575,13 +581,13 @@ SZ_HELPER_INLINE void sz_ghash_descending_powers_neonaes_(sz_u8_t const *powers,
 
 /**
  *  @brief Absorbs eight reflected blocks into the running hash with a single field reduction.
- *  @param accumulator_u8x16 The running hash, reflected.
- *  @param blocks_u8x16 The eight reflected blocks, in the order they arrived.
- *  @param powers_u8x16 The reflected powers `H^8` through `H^1`.
+ *  @param[in] accumulator_u8x16 The running hash, reflected.
+ *  @param[in] blocks_u8x16 The eight reflected blocks, in the order they arrived.
+ *  @param[in] powers_u8x16 The reflected powers H⁸ through H¹.
  *  @return The updated running hash, reflected.
  *
- *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of one multiply
- *  per block.
+ *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of
+ *  one multiply per block.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_absorb_eight_neonaes_(uint8x16_t accumulator_u8x16, uint8x16_t const *blocks_u8x16,
                                                            uint8x16_t const *powers_u8x16) {
@@ -606,15 +612,15 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_absorb_eight_neonaes_(uint8x16_t accumulato
     return sz_ghash_reduce_neonaes_(product_low_u8x16, product_middle_u8x16, product_high_u8x16);
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time, so this is a straight-line run of whole-register stores rather than a
- *  length-driven loop.
+ *  The size is known at compile time, so this is a straight-line run of whole-register stores
+ *  rather than a length-driven loop.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_neonaes_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -626,7 +632,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_neonaes_(sz_aes256_gcm_state_t *
     sz_keep_alive_(state);
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_neonaes_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
     uint8x16_t initial_u8x16;
@@ -648,7 +654,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_neonaes_(sz_aes256_gcm_state_t *state,
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
@@ -698,17 +704,18 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *st
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param state The state, whose two sixteen-byte counters advance together here.
- *  @param input The bytes to transform.
- *  @param output Receives the transformed bytes.
- *  @param count Bytes to consume, never more than the keystream block has left.
- *  @param accumulator_u8x16 The running hash, reflected.
- *  @param subkey_u8x16 The reflected hash subkey.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in] input The bytes to transform.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] count Bytes to consume, never more than the keystream block has left.
+ *  @param[in] accumulator_u8x16 The running hash, reflected.
+ *  @param[in] subkey_u8x16 The reflected hash subkey.
+ *  @param[in] direction Which buffer the hash absorbs.
  *  @return The updated running hash, reflected.
  *
- *  Through the message the keystream offset and the hash offset are the same number, because every byte spends
- *  one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
+ *  Through the message the keystream offset and the hash offset are the same number, because
+ *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
+ *  this resumes both.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
                                                          sz_u8_t *output, sz_size_t count, uint8x16_t accumulator_u8x16,
@@ -736,15 +743,16 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t *
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which buffer the hash absorbs.
  *
- *  Four passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
- *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole blocks
- *  eight at a time, then any remaining whole blocks, then a trailing block the next chunk resumes.
+ *  Four passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes
+ *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
+ *  block, then whole blocks eight at a time, then any remaining whole blocks, then a trailing block
+ *  the next chunk resumes.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                        sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -834,11 +842,11 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
 
 /**
  *  @brief Closes the running hash in registers and unmasks it, leaving the state untouched.
- *  @param state The state, read only.
- *  @param tag Receives the sixteen tag bytes.
+ *  @param[in] state The state, read only.
+ *  @param[out] tag Receives the sixteen tag bytes.
  *
- *  The pending block and the length block are absorbed in registers rather than into the state, so a caller
- *  may take an intermediate tag and keep streaming.
+ *  The pending block and the length block are absorbed in registers rather than into the state, so
+ *  a caller may take an intermediate tag and keep streaming.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_neonaes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
@@ -904,7 +912,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_neonaes(sz_aes256_gcm
     return sz_aes256_tag_equal_neonaes_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -937,7 +945,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_neonaes(sz_aes256_gcm_key_t co
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

@@ -1,31 +1,40 @@
 /**
  *  @file bench/overlap.cpp
+ *  @author Ash Vardanian
+ *  @date January 27, 2024
  *  @brief Benchmarks for window overlap built from the `sz_overlap_*` step verbs.
- *         The program accepts a file path to a dataset, tokenizes it, prepares the leading tokens as the query
- *         B-tree, and scores every other token against it on every backend, validating SIMD backends against serial.
  *
- *  Compute-bound: the prefix hashes are one pass over a candidate and the window hashes one more, so a 64 MiB
- *  slice exercises every path.
+ *  The program accepts a file path to a dataset, tokenizes it, prepares the leading tokens as the
+ *  query B-tree, and scores every other token against it on every backend, validating SIMD backends
+ *  against the serial one.
  *
- *  Five arms are measured per backend, each reporting the windows it touched as `operations`, so the
- *  ops-per-second column reads as windows per second. The first three nest, so a stage's own cost is the
- *  difference between neighbouring arms:
- *  - `prefix_hashes` - the prefix hashes alone, one per byte, whatever the width;
- *  - `window_hashes` - the prefix hashes, then their differences at the derived width;
- *  - `window_lookups` - the prefix hashes, the window hashes, then the B-tree walk over every window hash;
- *  - `query_preparation` - the query's key sort and tree layout, once per call, the token ignored - at an 8 KiB query
- *    this is most of a round, so it stands on its own;
- *  - `scores` - the engine's round against the next `STRINGWARS_BATCH` tokens, by default as many median tokens as
- *    fill a 32 KiB L1: the forest built once before the timing, four chains interleaved inside it.
+ *  Compute-bound: the prefix hashes are one pass over a candidate and the window hashes one more,
+ *  so a 64 MiB slice exercises every path.
  *
- *  Two query lengths run: the slice's median token length, and the byte count whose window hashes fill a 32 KiB L1.
- *  The window width is derived from the slice rather than fixed - `ceil(log2(query bytes · mean candidate bytes)
- *  / H2)`, with `H2` the byte collision entropy of the slice - and every arm's name carries it, as `:w6`.
+ *  Five arms are measured per backend, each reporting the windows it touched as @c operations, so
+ *  the ops-per-second column reads as windows per second. The first three nest, so a stage's own
+ *  cost is the difference between neighbouring arms:
+ *  - @c prefix_hashes - the prefix hashes alone, one per byte, whatever the width;
+ *  - @c window_hashes - the prefix hashes, then their differences at the derived width;
+ *  - @c window_lookups - the prefix hashes, the window hashes, then the B-tree walk over them all;
+ *  - @c query_preparation - the query's key sort and tree layout, once per call, the token ignored
+ *    - at an 8 KiB query this is most of a round, so it stands on its own;
+ *  - @c scores - the engine's round against the next @c STRINGWARS_BATCH tokens, by default as many
+ *    median tokens as fill a 32 KiB L1: the forest built once before the timing, four chains
+ *    interleaved inside it.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or an integer [1:200] for N-grams).
+ *  Two query lengths run: the slice's median token length, and the byte count whose window hashes
+ *  fill a 32 KiB L1. The window width is derived from the slice rather than fixed, and every arm's
+ *  name carries it, as `:w6`. With H₂ the byte collision entropy of the slice, the width is
+ *  ⌈log₂(query bytes × mean candidate bytes) / H₂⌉.
+ *
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or an integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -34,8 +43,8 @@
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names, e.g.
- *    `window_lookups.*skylake`.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names,
+ *    e.g. `window_lookups.*skylake`.
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
@@ -67,7 +76,7 @@ using overlap_btree_probe_t = sz_size_t (*)(sz_overlap_btree_t const *, sz_u32_t
 using overlap_engine_init_t = sz_status_t (*)(sz_sequence_t const *, sz_size_t const *, sz_size_t,
                                               sz_memory_allocator_t *, sz_overlap_engine_t *);
 
-/** @brief The chain over @p text, one prefix hash per byte after the empty one at @p prefix_hashes[0]. */
+/** The chain over @p text, one prefix hash per byte after the empty one at @p prefix_hashes[0]. */
 template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
           overlap_prefix_hash_step_tail_t prefix_hash_step_tail_>
 static void overlap_prefix_hashes_(std::string_view text, sz_f64_t *prefix_hashes) {
@@ -80,7 +89,7 @@ static void overlap_prefix_hashes_(std::string_view text, sz_f64_t *prefix_hashe
         prefix_hash_step_tail_(prior, text.data() + position, text.size() - position, prefix_hashes + position + 1);
 }
 
-/** @brief The prefix differences at @p width over a chain of @p bytes positions, answering the windows extracted. */
+/** Prefix differences at @p width over a chain of @p bytes positions; returns the window count. */
 template <sz_size_t positions_per_step_, overlap_window_hash_step_t window_hash_step_,
           overlap_window_hash_step_tail_t window_hash_step_tail_>
 static std::size_t overlap_window_hashes_(sz_f64_t const *prefix_hashes, std::size_t bytes, std::size_t width,
@@ -97,7 +106,7 @@ static std::size_t overlap_window_hashes_(sz_f64_t const *prefix_hashes, std::si
     return windows;
 }
 
-/** @brief The longest token in the slice, so every per-candidate arm sizes its scratch once. */
+/** The longest token in the slice, so every per-candidate arm sizes its scratch once. */
 static std::size_t overlap_longest_token_(environment_t const &env) {
     std::size_t longest = 0;
     for (std::string_view const token : env.tokens) longest = std::max(longest, token.size());
@@ -105,8 +114,12 @@ static std::size_t overlap_longest_token_(environment_t const &env) {
 }
 
 /**
- *  @brief The window width at which a random query window and a random candidate window collide about once per query:
- *         @c ceil(log2(query_bytes · mean candidate bytes) / H2), with @c H2 the slice's byte collision entropy.
+ *  @brief The window width at which a random query window and a random candidate window collide
+ *      about once per query, with H₂ the byte collision entropy of the slice:
+ *
+ *  @verbatim
+ *  width = ⌈log₂(query_bytes × mean candidate bytes) / H₂⌉
+ *  @endverbatim
  */
 static std::size_t overlap_width_(environment_t const &env, std::size_t query_bytes) {
     double counts[256] = {};
@@ -123,13 +136,17 @@ static std::size_t overlap_width_(environment_t const &env, std::size_t query_by
     return width > 1.0 ? static_cast<std::size_t>(width) : 1;
 }
 
-/** @brief One query length's fixed input: the leading tokens concatenated, and their raw window hashes at @c width. */
+/** One query length's fixed input: the leading tokens concatenated, and their raw window hashes at
+ *  the given @c width. */
 struct overlap_query_t {
-    /** @brief The window width every arm extracts and scores at. */
+
+    /** The window width every arm extracts and scores at. */
     std::size_t width;
-    /** @brief The dataset's leading tokens, concatenated up to the requested byte count. */
+
+    /** The dataset's leading tokens, concatenated up to the requested byte count. */
     std::string text;
-    /** @brief The raw window hashes of @c text, what every sort and tree layout starts from. */
+
+    /** The raw window hashes of @c text, what every sort and tree layout starts from. */
     std::vector<sz_u32_t> window_hashes;
 
     overlap_query_t(environment_t const &env, std::size_t query_bytes) : width(overlap_width_(env, query_bytes)) {
@@ -150,7 +167,7 @@ struct overlap_query_t {
 
 #pragma region Prefix Hashes
 
-/** @brief The prefix hashes alone over one token, one per byte however many widths follow them. */
+/** The prefix hashes alone over one token, one per byte however many widths follow them. */
 template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
           overlap_prefix_hash_step_tail_t prefix_hash_step_tail_>
 struct prefix_hashes_from_sz {
@@ -168,7 +185,7 @@ struct prefix_hashes_from_sz {
     }
 };
 
-/** @brief The chain on every backend, the accelerated arms logged against the serial one. */
+/** The chain on every backend, the accelerated arms logged against the serial one. */
 static void bench_overlap_prefix_hashes(environment_t const &env, std::string const &suffix) {
     auto validator =
         prefix_hashes_from_sz<sz_overlap_serial_f64x1_positions_per_step_k, sz_overlap_f64x1_prefix_hash_step_serial,
@@ -194,7 +211,7 @@ static void bench_overlap_prefix_hashes(environment_t const &env, std::string co
 
 #pragma region Window Hashes
 
-/** @brief The chain, then the window hashing over it at the query's width. */
+/** The chain, then the window hashing over it at the query's width. */
 template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
           overlap_prefix_hash_step_tail_t prefix_hash_step_tail_, overlap_window_hash_step_t window_hash_step_,
           overlap_window_hash_step_tail_t window_hash_step_tail_>
@@ -222,7 +239,7 @@ struct window_hashes_from_sz {
     }
 };
 
-/** @brief The chain and the window hashes on every backend, the accelerated arms logged against the serial one. */
+/** The chain and the window hashes on every backend, accelerated arms logged against serial. */
 static void bench_overlap_window_hashes(environment_t const &env, overlap_query_t const &query,
                                         std::string const &suffix) {
     auto validator =
@@ -252,7 +269,7 @@ static void bench_overlap_window_hashes(environment_t const &env, overlap_query_
 
 #pragma region Window Lookups
 
-/** @brief The chain, the window hashes, then the membership test of every one against the query's tree. */
+/** The chain, the window hashes, then the membership test of every one against the query's tree. */
 template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
           overlap_prefix_hash_step_tail_t prefix_hash_step_tail_, overlap_window_hash_step_t window_hash_step_,
           overlap_window_hash_step_tail_t window_hash_step_tail_, overlap_btree_sort_t btree_sort_,
@@ -285,8 +302,8 @@ struct window_lookups_from_sz {
     }
 };
 
-/** @brief The chain, the window hashes and the lookups on every backend, the accelerated arms logged against the
- *         serial one. */
+/** The chain, the window hashes and the lookups on every backend, the accelerated arms logged
+ *  against the serial one. */
 static void bench_overlap_window_lookups(environment_t const &env, overlap_query_t const &query,
                                          std::string const &suffix) {
     auto validator =
@@ -321,7 +338,7 @@ static void bench_overlap_window_lookups(environment_t const &env, overlap_query
 
 #pragma region Query Indexing
 
-/** @brief The query's sort and tree layout alone, once per call from its raw window hashes; the token is ignored. */
+/** The query's sort and tree layout alone, once per call from its raw window hashes. */
 template <overlap_btree_sort_t btree_sort_>
 struct query_preparation_from_sz {
     overlap_query_t const &query;
@@ -340,7 +357,7 @@ struct query_preparation_from_sz {
     }
 };
 
-/** @brief The query indexing on every backend, the accelerated arms logged against the serial one. */
+/** The query indexing on every backend, the accelerated arms logged against the serial one. */
 static void bench_overlap_query_preparation(environment_t const &env, overlap_query_t const &query,
                                             std::string const &suffix) {
     auto validator = query_preparation_from_sz<sz_overlap_u32x1_btree_sort_serial> {query};
@@ -361,7 +378,7 @@ static void bench_overlap_query_preparation(environment_t const &env, overlap_qu
 
 #pragma region One to Many
 
-/** @brief The engine's round over the next @c candidates tokens, its forest prepared once in the constructor. */
+/** The engine's round over the next @c candidates tokens, its forest prepared at construction. */
 template <overlap_engine_init_t init_, sz_overlap_scores_t scores_>
 struct scores_from_sz {
     environment_t const &env;
@@ -411,7 +428,7 @@ struct scores_from_sz {
     }
 };
 
-/** @brief The engine's round on every backend, the accelerated arms logged against the serial one. */
+/** The engine's round on every backend, the accelerated arms logged against the serial one. */
 static void bench_overlap_scores(environment_t const &env, overlap_query_t const &query, std::size_t candidates,
                                  std::string const &suffix) {
     auto validator = scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {env, query, candidates};
@@ -430,7 +447,7 @@ static void bench_overlap_scores(environment_t const &env, overlap_query_t const
 
 #pragma endregion
 
-/** @brief Every arm at one query length, the width derived once from the slice and carried in every arm's name. */
+/** Every arm at one query length, its width derived once from the slice and carried in its name. */
 static void bench_overlap_query(environment_t const &env, std::size_t query_bytes, std::size_t candidates) {
     overlap_query_t const query(env, query_bytes);
     std::string const suffix = ":w" + std::to_string(query.width);

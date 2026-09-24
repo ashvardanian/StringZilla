@@ -1,7 +1,8 @@
 /**
- *  @brief Serial backend for UAX-29 sentence boundaries.
  *  @file include/stringzilla/utf8_sentences/serial.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Serial backend for UAX-29 sentence boundaries.
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_SERIAL_H_
 #define STRINGZILLA_UTF8_SENTENCES_SERIAL_H_
@@ -16,7 +17,7 @@ extern "C" {
 
 #pragma region UAX 29 Sentence Boundaries
 
-/** @brief Returns the UAX-29 Sentence_Break property (0-14) for a codepoint. */
+/** Returns the UAX-29 Sentence_Break property, 0-14, for a codepoint. */
 SZ_API_COMPTIME sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_sentence_break_big_oletter_count_k; ++range)
         if (rune >= sz_utf8_sentence_break_big_oletter_lo_[range] &&
@@ -44,30 +45,36 @@ SZ_API_COMPTIME sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
     return sz_sentence_break_other_k;
 }
 
-/** @brief True for a Sentence_Break ParaSep (Sep, CR, or LF). */
+/** True for a Sentence_Break ParaSep: Sep, CR, or LF. */
 SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_parasep_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sep_k || property == sz_sentence_break_cr_k ||
                        property == sz_sentence_break_lf_k);
 }
-/** @brief True for a Sentence_Break SATerm (STerm or ATerm). */
+
+/** True for a Sentence_Break SATerm: STerm or ATerm. */
 SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sterm_k || property == sz_sentence_break_aterm_k);
 }
-/** @brief True for an SB5-transparent character (Extend or Format). */
+
+/** True for an SB5-transparent character: Extend or Format. */
 SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_extend_k || property == sz_sentence_break_format_k);
 }
-/** @brief SB8 stop set excluding Lower: OLetter, Upper, ParaSep, or SATerm — a significant class that ends the
- *         ATerm neutral run and confirms the deferred SB11 break (a Lower in the run suppresses it instead). */
+
+/** SB8 stop set excluding Lower: OLetter, Upper, ParaSep, or SATerm, a significant class that
+ *  ends the ATerm neutral run and confirms the deferred SB11 break, while a Lower in the run
+ *  suppresses it instead. */
 SZ_HELPER_AUTO sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_oletter_k || property == sz_sentence_break_upper_k ||
                        sz_sentence_break_is_parasep_(property) || sz_sentence_break_is_saterm_(property));
 }
 
 /**
- *  @brief Start offset of the codepoint after @p position: the next non-continuation byte, or @p length.
- *         Mirrors the SIMD `sz_utf8_rune_decode_window_` codepoint-start convention so the serial and
- *         Ice Lake backends segment malformed input identically (UAX-29 leaves ill-formed bytes undefined).
+ *  @brief Start offset of the codepoint after @p position: the next non-continuation byte,
+ *      or @p length.
+ *
+ *  Mirrors the SIMD @c sz_utf8_rune_decode_window_ codepoint-start convention so the serial and Ice
+ *  Lake backends segment malformed input identically, as UAX-29 leaves ill-formed bytes undefined.
  */
 SZ_HELPER_AUTO sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_size_t next = position + 1;
@@ -76,11 +83,13 @@ SZ_HELPER_AUTO sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t
 }
 
 /**
- *  @brief Sentence_Break property of the codepoint starting at `start`, decoded BLINDLY to mirror the SIMD
- *         `sz_utf8_rune_decode_window_`: the lead's strict length class (2-byte `110xxxxx`, 3-byte
- *         `1110xxxx`, 4-byte `11110xxx`; everything else single-byte) selects how many following bytes are
- *         folded in with no continuation/overlong/surrogate validation, missing trailing bytes read as zero.
- *         Valid UTF-8 decodes identically to the checked path; only ill-formed input differs, by design.
+ *  @brief Sentence_Break property of the codepoint starting at @p start, decoded blindly to mirror
+ *      the SIMD @c sz_utf8_rune_decode_window_.
+ *
+ *  The lead's strict length class, 2-byte @c 110xxxxx, 3-byte @c 1110xxxx, 4-byte @c 11110xxx, and
+ *  everything else single-byte, selects how many following bytes are folded in with no
+ *  continuation, overlong, or surrogate validation; missing trailing bytes read as zero. Valid
+ *  UTF-8 decodes identically to the checked path; only ill-formed input differs, by design.
  */
 SZ_HELPER_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
@@ -105,30 +114,41 @@ SZ_HELPER_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_
 }
 
 /**
- *  @brief Forward run-state carried across codepoints by the bulk segmenter so the SB3..SB11 rules resolve in O(1)
- *         per codepoint — the scalar twin of the Ice Lake register carry, mirroring `sz_grapheme_serial_state_t`.
- *         The trailing `SATerm Close* Sp*` context and the Extend/Format-transparent significant chain are tracked
- *         forward here, so the bulk driver decodes each codepoint once with no backward re-scan.
+ *  @brief Forward run-state carried across codepoints by the bulk segmenter so the SB3..SB11 rules
+ *      resolve in O(1) per codepoint.
+ *
+ *  The scalar twin of the Ice Lake register carry, mirroring @c sz_grapheme_serial_state_t.
+ *  The trailing `SATerm Close* Sp*` context and the Extend- and Format-transparent
+ *  significant chain are tracked forward here, so the bulk driver decodes each codepoint once
+ *  with no backward re-scan.
  */
 typedef struct sz_sentence_serial_state_t {
+
     /** Raw SB property of the immediately previous codepoint (SB3 CR x LF, SB4). */
     sz_u8_t previous_property;
-    /** SB property of the last non-Extend/Format codepoint (the SB6 / SB7 `eff_before`). */
+
+    /** SB property of the last non-Extend/Format codepoint, the SB6 and SB7 @c eff_before. */
     sz_u8_t previous_significant;
-    /** The significant codepoint before `previous_significant` (SB7). */
+
+    /** The significant codepoint before @c previous_significant, for SB7. */
     sz_u8_t before_significant;
+
     /** Open `SATerm Close* Sp*` context terminator (ATerm / STerm), else Other = none. */
     sz_u8_t terminator;
+
     /** A Close followed the terminator (before any Sp). */
     sz_bool_t terminator_saw_close;
+
     /** An Sp followed the terminator (and the Close* run). */
     sz_bool_t terminator_saw_space;
+
     /** A codepoint has been processed. */
     sz_bool_t has_previous;
 } sz_sentence_serial_state_t;
 
-/** @brief Advance @p state by the @p current codepoint property: update the significant chain and the
- *         `SATerm Close* Sp*` terminator context (Extend / Format are transparent and leave both unchanged). */
+/** Advances @p state by the @p current codepoint property, updating the significant chain
+ *  and the `SATerm Close* Sp*` terminator context; Extend and Format are transparent and
+ *  leave both unchanged. */
 SZ_HELPER_AUTO void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
     if (!sz_sentence_break_is_transparent_(current)) {
         state->before_significant = state->previous_significant;
@@ -151,17 +171,19 @@ SZ_HELPER_AUTO void sz_sentence_serial_advance_(sz_sentence_serial_state_t *stat
     state->has_previous = sz_true_k;
 }
 
-/** @brief A boundary verdict between two codepoints. SB8's Lower-lookahead cannot be resolved against `after` alone, so
- *         the ATerm-neutral case yields `pending`: the driver carries it forward and resolves it at the next
- *         significant codepoint (a Lower suppresses, an SB8 stop confirms), settling as a break at end-of-text. */
+/** A boundary verdict between two codepoints. SB8's Lower-lookahead cannot be resolved against
+ *  @c after alone, so the ATerm-neutral case yields @c pending: the driver carries it forward
+ *  and resolves it at the next significant codepoint, where a Lower suppresses and an SB8 stop
+ *  confirms, settling as a break at end-of-text. */
 typedef enum sz_sentence_decision_t {
     sz_sentence_decision_no_break_k = 0,
     sz_sentence_decision_break_k = 1,
     sz_sentence_decision_pending_k = 2,
 } sz_sentence_decision_t;
 
-/** @brief Boundary decision (SB3..SB998) between @p state's previous codepoint and the @p after codepoint, in O(1) with
- *         no forward re-scan: SB8's Lower-lookahead is deferred as `pending` and resolved forward by the driver. */
+/** Boundary decision, SB3..SB998, between @p state's previous codepoint and the @p after
+ *  codepoint, in O(1) with no forward re-scan: SB8's Lower-lookahead is deferred as @c pending
+ *  and resolved forward by the driver. */
 SZ_HELPER_AUTO sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t const *state,
                                                                    sz_u8_t after) {
     sz_u8_t const before = state->previous_property;
@@ -197,8 +219,9 @@ SZ_HELPER_AUTO sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sentence_s
     return sz_sentence_decision_no_break_k; // SB998
 }
 
-/** @brief Append the sentence ending at @p boundary to the output arrays and re-anchor the running start. Returns
- *         sz_false_k when the capacity is exhausted (no room): the caller stops and reports the emitted prefix. */
+/** Appends the sentence ending at @p boundary to the output arrays and re-anchors the running
+ *  start. Returns @c sz_false_k when the capacity is exhausted: the caller stops and reports
+ *  the emitted prefix. */
 SZ_HELPER_AUTO sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t *sentence_starts,
                                                   sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
                                                   sz_size_t *sentences, sz_size_t *sentence_start) {
@@ -210,11 +233,9 @@ SZ_HELPER_AUTO sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t 
     return sz_true_k;
 }
 
-/**
- *  @brief Plural UAX-29 sentence segmentation: ONE forward sweep emits every sentence into parallel
- *         `sentence_starts` / `sentence_lengths`, carrying the SB run-state so each codepoint is decoded once (O(n),
- *         no backward re-walks).
- */
+/** Plural UAX-29 sentence segmentation: one forward sweep emits every sentence into parallel
+ *  @p sentence_starts and @p sentence_lengths, carrying the SB run-state so each codepoint is
+ *  decoded once, O(n) with no backward re-walks. */
 SZ_API_COMPTIME sz_size_t sz_utf8_sentences_serial(          //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
@@ -289,56 +310,81 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_serial(          //
     return sentences;
 }
 
-#pragma endregion // UAX 29 Sentence Boundaries
+#pragma endregion UAX 29 Sentence Boundaries
 
 #pragma region Portable dense rule engine
 
 /**
- *  @brief  Cross-window register carry: the open `SATerm Close* Sp*` shadow run-state, the trailing significant /
- *          raw classes the bounded-lookback rules (SB3/SB4/SB6/SB7) need at the next block head, plus the SB8
- *          "neutral chain awaiting a Lower verdict" pending state that threads an unbounded right context across
- *          windows without any serial re-walk or oracle call. The portable engine carry, shared verbatim by every
- *          ISA backend (the icelake and haswell extractors only build the dense class stream that feeds it).
+ *  @brief Cross-window register carry: the portable engine carry, shared verbatim by
+ *      every ISA backend.
+ *
+ *  Holds the open `SATerm Close* Sp*` shadow run-state, the trailing significant and raw classes
+ *  the bounded-lookback rules SB3, SB4, SB6, and SB7 need at the next block head, plus the SB8
+ *  "neutral chain awaiting a Lower verdict" pending state that threads an unbounded right context
+ *  across windows without any serial re-walk or oracle call. The Ice Lake and Haswell extractors
+ *  only build the dense class stream that feeds it.
  */
 typedef struct sz_utf8_sentence_break_carry_t {
+
     /** A SATerm has opened a shadow that is still open at the previous block's edge. */
     sz_u8_t in_shadow;
+
     /** The opening terminator was ATerm (matters for SB8). */
     sz_u8_t shadow_aterm;
+
     /** At least one Sp seen since the terminator (SB9 vs SB10). */
     sz_u8_t shadow_saw_sp;
+
     /** False only at the very start of the text (SB1). */
     sz_u8_t have_prev;
+
     /** Class of the last significant codepoint of the previous block. */
     sz_u8_t prev_eff;
+
     /** Class of the second-last significant codepoint. */
     sz_u8_t prev_prev_eff;
+
     /** Class of the last raw codepoint of the previous block (SB3/SB4 raw-before). */
     sz_u8_t prev_raw;
-    /** An ATerm SB8 boundary deferred because its neutral right-context (no Close/Sp shadow) ran past the block edge;
-     *  the awaited Lower-vs-stop verdict threads here across blocks. */
+
+    /** An ATerm SB8 boundary deferred because its neutral right-context, with no Close
+     *  or Sp shadow, ran past the block edge; the awaited Lower-vs-stop verdict threads
+     *  here across blocks. */
     sz_u8_t sb8_pending;
 } sz_utf8_sentence_break_carry_t;
 
-/** @brief  One classified block resolved into per-dense-codepoint break bits plus the metadata the driver stitches. */
+/** One classified block resolved into per-dense-codepoint break bits plus the metadata
+ *  the driver stitches. */
 typedef struct sz_utf8_sentence_break_window_t {
-    /** Bit `i` set => a boundary begins before dense codepoint `i` (scattered to byte lanes by the driver). */
+
+    /** Bit i set → a boundary begins before dense codepoint i, scattered to byte lanes
+     *  by the driver. */
     sz_u64_t breaks;
-    /** Exclusive upper bound, in dense codepoints, on lanes whose break bit is fully trusted (SB8 edge). */
+
+    /** Exclusive upper bound, in dense codepoints, on lanes whose break bit is fully trusted:
+     *  the SB8 edge. */
     sz_size_t resolved;
+
     /** Verdict for an entering `carry->sb8_pending`: 0 still pending, 1 break, 2 no break. */
     sz_u8_t sb8_resolution;
 } sz_utf8_sentence_break_window_t;
 
-/** @brief  Per-class membership masks of the dense codepoint stream: bit `i` of `by_class[c]` set when dense lane `i`
- *          (in @p valid) carries Sentence_Break class `c`. The ISA-independent dense frame the rule engine consumes;
- *          built in ONE pass over @p dense_classes (a backend may instead fill it with vector compares - the engine
- *          only reads `by_class[...]`). 15 Sentence_Break classes (0..14). */
+/**
+ *  @brief Per-class membership masks of the dense codepoint stream, the ISA-independent dense frame
+ *      the rule engine consumes.
+ *
+ *  Bit i of `by_class[c]` is set when dense lane i, in @c valid, carries Sentence_Break class c,
+ *  one of the 15 classes 0..14. Built in one pass over @c dense_classes; a backend may instead fill
+ *  it with vector compares, as the engine only reads `by_class[...]`.
+ */
 typedef struct sz_utf8_sentence_break_frame_t {
-    sz_u64_t by_class[15]; /**< by_class[c] = lanes whose class == c, restricted to valid. */
+
+    /** Lanes whose class is c, restricted to @c valid, in `by_class[c]`. */
+    sz_u64_t by_class[15];
 } sz_utf8_sentence_break_frame_t;
 
-/** @brief  Build @ref sz_utf8_sentence_break_frame_t from the dense class byte stream in one forward pass. */
+/** Builds @ref sz_utf8_sentence_break_frame_t from the dense class byte stream in
+ *  one forward pass. */
 SZ_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_from_dense_(sz_u8_t const *dense_classes,
                                                                                        sz_u64_t valid) {
     sz_utf8_sentence_break_frame_t frame;
@@ -353,22 +399,27 @@ SZ_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_from_
 }
 
 /**
- *  @brief  Resolve a block of @p count dense classified codepoints (lanes `0..count-1` in @p dense_classes, the open
- *          shadow and left context arriving in @p carry) into dense per-codepoint sentence-break bits. The ISA driver
- *          compacts the byte-lane classes to this dense stream and scatters the result back to byte lanes.
+ *  @brief Resolves a block of @p count dense classified codepoints into dense
+ *      per-codepoint sentence-break bits.
  *
- *  All of SB3-SB998 are pure 64-bit bit algebra over the per-class lane masks: the two-phase `SATerm Close* Sp*`
- *  shadow (`close_phase` then `shadow`), the SB8 in-window lower-ahead (`fill_left` of Lower through neutral via
- *  the shared substrate), the SB6/SB7 effective-previous chains across Extend/Format (the `flow` gate hops only the
- *  remaining ignorable codepoints, no continuation bytes), and the SB3/SB4 raw-before (a single `<< 1` on the dense
- *  stream). @p carry is updated with the trailing run-state. `breaks` bit 0 is the inter-block boundary (only
- *  meaningful when `have_prev`).
+ *  The lanes `0..count-1` sit in @p dense_classes, with the open shadow and left context arriving
+ *  in @p carry. The ISA driver compacts the byte-lane classes to this dense stream and scatters the
+ *  result back to byte lanes.
  *
- *  SB8's right context is unbounded; the in-window `fill_left` is exact unless a trailing neutral run reaches the
- *  block edge (the Lower may lie in the next block). `resolved` is clamped before such an undecided lane so the
- *  driver re-anchors the next window with full forward context - a register carry only, never a scalar re-walk or
- *  oracle call. Intrinsic-free: the only ISA-specific work (decode, classify, dense compaction, byte-lane scatter)
- *  lives in the backend extractor; this engine is shared by serial / icelake / haswell verbatim.
+ *  All of SB3-SB998 are pure 64-bit bit algebra over the per-class lane masks: the two-phase
+ *  `SATerm Close* Sp*` shadow, @c close_phase then @c shadow; the SB8 in-window lower-ahead, a
+ *  @c fill_left of Lower through neutral via the shared substrate; the SB6 and SB7
+ *  effective-previous chains across Extend and Format, where the @c flow gate hops only the
+ *  remaining ignorable codepoints and no continuation bytes; and the SB3 and SB4 raw-before, a
+ *  single `<< 1` on the dense stream. @p carry is updated with the trailing run-state. Bit 0 of
+ *  @c breaks is the inter-block boundary, only meaningful when @c have_prev is set.
+ *
+ *  SB8's right context is unbounded; the in-window @c fill_left is exact unless a trailing neutral
+ *  run reaches the block edge, as the Lower may lie in the next block. @c resolved is clamped
+ *  before such an undecided lane so the driver re-anchors the next window with full forward
+ *  context, a register carry only, never a scalar re-walk or oracle call. Intrinsic-free: the only
+ *  ISA-specific work, decode, classify, dense compaction, and byte-lane scatter, lives in the
+ *  backend extractor; this engine is shared by serial, Ice Lake, and Haswell verbatim.
  */
 SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_block_( //
     sz_utf8_sentence_break_frame_t const *frame, sz_u8_t const *dense_classes, sz_size_t count,
@@ -543,9 +594,10 @@ SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_blo
     return result;
 }
 
-/** @brief  Largest byte prefix of a decode window whose codepoints are all fully loaded, from the plain u64 lane
- *          masks - the mask-domain twin of the per-ISA `complete_limit` helpers, shared by back-ends that carry
- *          their window state as scalars. Never below 1 when the window is non-empty. */
+/** Largest byte prefix of a decode window whose codepoints are all fully loaded, from the
+ *  plain u64 lane masks: the mask-domain twin of the per-ISA @c complete_limit helpers,
+ *  shared by backends that carry their window state as scalars. Never below 1 when the
+ *  window is non-empty. */
 SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
     sz_size_t loaded, sz_u64_t start_bytes, sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
     sz_u64_t four_byte_starts, sz_u8_t byte_after, sz_bool_t more_text) {
@@ -561,13 +613,18 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
     return limit > 0 ? limit : loaded;
 }
 
-/** @brief  Emit the resolved dense sentence boundaries as `(start, length)` segments, walking the codepoint-start
- *          lanes once: dense index `j` maps to the `j`-th set bit of @p start_lanes, a set bit of @p dense_breaks
- *          below @p dense_limit closes the running segment at that byte, and the walk also reports the byte lane
- *          of the `dense_limit`-th start (the resume position of a partially resolved window). Honors @p capacity
- *          and the carried previous boundary exactly like @ref sz_utf8_rune_drain_forward_.
- *  @return Number of segments produced; sets @p advance_lane_out to the byte lane of start @p dense_limit, or
- *          @p loaded when every start resolved. */
+/**
+ *  @brief Emits the resolved dense sentence boundaries as @b (start,length) segments, walking the
+ *      codepoint-start lanes once.
+ *
+ *  Dense index j maps to the j-th set bit of @p start_lanes, a set bit of @p dense_breaks below
+ *  @p dense_limit closes the running segment at that byte, and the walk also reports the byte lane
+ *  of the start numbered @p dense_limit, the resume position of a partially resolved window. Honors
+ *  @p capacity and the carried previous boundary exactly like @ref sz_utf8_rune_drain_forward_.
+ *
+ *  @return Number of segments produced; sets @p advance_lane_out to the byte lane of start
+ *      @p dense_limit, or @p loaded when every start resolved.
+ */
 SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_emit_dense_serial_(                                     //
     sz_u64_t start_lanes, sz_u64_t dense_breaks, sz_size_t dense_limit, sz_size_t base, int skip_lane0, //
     sz_size_t loaded, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
@@ -595,8 +652,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_emit_dense_serial_(             
     return produced;
 }
 
-/** @brief  Convenience entry for backends without vector class compares: build the dense frame in one pass, then run
- *          @ref sz_utf8_sentence_break_decide_block_. The vector backends build the frame with `vpcmpeqb` instead. */
+/** Convenience entry for backends without vector class compares: builds the dense frame in one
+ *  pass, then runs @ref sz_utf8_sentence_break_decide_block_. The vector backends build the
+ *  frame with @c vpcmpeqb instead. */
 SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_( //
     sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);

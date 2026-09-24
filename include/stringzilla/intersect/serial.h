@@ -1,7 +1,9 @@
 /**
- *  @brief Serial backend for set intersection.
  *  @file include/stringzilla/intersect/serial.h
  *  @author Ash Vardanian
+ *  @date March 7, 2025
+ *  @brief Serial backend for set intersection.
+ *
  *  @sa include/stringzilla/intersect.h
  */
 #ifndef STRINGZILLA_INTERSECT_SERIAL_H_
@@ -58,8 +60,9 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                       
     sz_u64_t *const table_hashes = (sz_u64_t *)(table_positions + hash_table_slots);
     sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
     // Empty-slot sentinel for the 64-bit `table_hashes`: the `0xFF` fill makes every slot all-ones.
-    // It must be a 64-bit constant, NOT `SZ_SIZE_MAX` - on 32-bit targets (e.g. wasm32) `sz_size_t` is
-    // 32-bit, so `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe loop spins forever.
+    // It must be a 64-bit constant, not `SZ_SIZE_MAX` - on 32-bit targets (e.g. wasm32) `sz_size_t`
+    // is 32-bit, so `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill, and the probe loop
+    // would never terminate.
     sz_u64_t const empty_slot = ~(sz_u64_t)0;
     // The top bit of a stored position marks a slot whose (distinct) value has already produced a pair,
     // so duplicate keys on either sequence don't emit again, keeping the result a set whose size never

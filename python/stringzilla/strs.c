@@ -1,7 +1,8 @@
 /**
- *  @brief The `Strs` collection - tape and fragmented layouts, batch operations.
  *  @file python/stringzilla/strs.c
  *  @author Ash Vardanian
+ *  @date September 17, 2023
+ *  @brief The @c Strs collection - tape and fragmented layouts, batch operations.
  */
 #include "stringzilla.h"
 
@@ -62,9 +63,7 @@ sz_size_t Strs_get_length_(void const *handle, sz_size_t i) {
     return 0;
 }
 
-/**
- *  @brief  Helper function to export a `Strs` or similar sequence objects into a `sz_sequence_t`.
- */
+/** Helper function to export a @c Strs or similar sequence objects into a @c sz_sequence_t. */
 sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence) {
     if (!sequence) return sz_false_k;
 
@@ -84,9 +83,7 @@ sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequ
     return sz_false_k;
 }
 
-/**
- *  @brief  Helper function to export a `Strs` object into `sz_sequence_u32tape_t` components.
- */
+/** Helper function to export a @c Strs object into @c sz_sequence_u32tape_t components. */
 sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
                                           sz_size_t *count) {
 
@@ -109,9 +106,7 @@ sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_
     else { return sz_false_k; }
 }
 
-/**
- *  @brief  Helper function to export a `Strs` object into `sz_sequence_u64tape_t` components.
- */
+/** Helper function to export a @c Strs object into @c sz_sequence_u64tape_t components. */
 sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
                                           sz_size_t *count) {
 
@@ -278,7 +273,7 @@ static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_all
     return sz_true_k;
 }
 
-/** @brief  Consolidates a fragmented `Strs` into a single tape under a new allocator. */
+/** Consolidates a fragmented @c Strs into a single tape under a new allocator. */
 static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_allocator_t *old_allocator,
                                                     sz_memory_allocator_t *allocator) {
     struct fragmented_t *fragmented = &strs->data.fragmented;
@@ -375,15 +370,15 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
 }
 
 /**
- *  @brief  Helper function to replace the memory allocator in a `Strs` object.
- *          This reallocates existing string data using the new allocator.
+ *  @brief Helper function to replace the memory allocator in a @c Strs object. This reallocates
+ *      existing string data using the new allocator.
  *
- *  This may change the layout of the `Strs` layout:
- *  - `STRS_U32_TAPE_VIEW` becomes `STRS_U32_TAPE`.
- *  - `STRS_U64_TAPE_VIEW` becomes `STRS_U64_TAPE`.
- *  - `STRS_U32_TAPE` remains, if the allocator is different.
- *  - `STRS_U64_TAPE` remains, if the allocator is different.
- *  - `STRS_FRAGMENTED` becomes a `STRS_U32_TAPE` or `STRS_U64_TAPE` depending on the content size.
+ *  This may change the layout of the @c Strs layout:
+ *  - @c STRS_U32_TAPE_VIEW becomes @c STRS_U32_TAPE.
+ *  - @c STRS_U64_TAPE_VIEW becomes @c STRS_U64_TAPE.
+ *  - @c STRS_U32_TAPE remains, if the allocator is different.
+ *  - @c STRS_U64_TAPE remains, if the allocator is different.
+ *  - @c STRS_FRAGMENTED becomes a @c STRS_U32_TAPE or @c STRS_U64_TAPE, depending on content size.
  */
 sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator) {
     if (!object || !allocator) return sz_false_k;
@@ -498,9 +493,8 @@ static get_string_at_offset_t str_at_offset_getter(Strs *strs) {
 }
 
 /**
- *  @brief  Ensures the Strs is in a tape layout (not fragmented).
- *          Converts FRAGMENTED to TAPE if necessary.
- *  @return 1 on success, 0 on failure (sets Python exception).
+ *  @brief Ensures the @c Strs is in a tape layout, converting a fragmented one if necessary.
+ *  @return 1 on success, 0 on failure with a Python exception set.
  */
 static int Strs_ensure_tape_layout(Strs *self) {
     if (self->layout != STRS_FRAGMENTED) return 1; // Already in tape layout
@@ -678,12 +672,13 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
 }
 
 /**
- *  This returns a `Strs` object of a potentially different layout:
- *  - `STRS_U32_TAPE_VIEW` input yields a `STRS_U32_TAPE_VIEW` for `step=1`, `STRS_FRAGMENTED` otherwise.
- *  - `STRS_U64_TAPE_VIEW` input yields a `STRS_U64_TAPE_VIEW` for `step=1`, `STRS_FRAGMENTED` otherwise.
- *  - `STRS_U32_TAPE` input yields a `STRS_U32_TAPE_VIEW`  for `step=1`, `STRS_FRAGMENTED` otherwise.
- *  - `STRS_U64_TAPE` input yields a `STRS_U64_TAPE_VIEW`  for `step=1`, `STRS_FRAGMENTED` otherwise.
- *  - `STRS_FRAGMENTED` input yields a `STRS_FRAGMENTED` output.
+ *  @brief Returns a @c Strs object of a potentially different layout.
+ *
+ *  For `step=1`, each tape input yields a view of the same width, and any other step yields
+ *  @c STRS_FRAGMENTED:
+ *  - @c STRS_U32_TAPE_VIEW and @c STRS_U32_TAPE inputs yield a @c STRS_U32_TAPE_VIEW.
+ *  - @c STRS_U64_TAPE_VIEW and @c STRS_U64_TAPE inputs yield a @c STRS_U64_TAPE_VIEW.
+ *  - @c STRS_FRAGMENTED input always yields a @c STRS_FRAGMENTED output.
  */
 static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
@@ -828,9 +823,9 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 }
 
 /**
- *  @brief  Will be called by the `PySequence_Contains` to check the presence of a string in array.
+ *  @brief Will be called by the @c PySequence_Contains to check the presence of a string in array.
  *  @return 1 if the string is present, 0 if it is not, -1 in case of error.
- *  @see    Docs: https://docs.python.org/3/c-api/sequence.html#c.PySequence_Contains
+ *  @see Docs: https://docs.python.org/3/c-api/sequence.html#c.PySequence_Contains
  */
 static int Strs_in(Str *self, PyObject *needle_obj) {
 
@@ -1026,14 +1021,15 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
 }
 
 /**
- *  @brief Shuffles the parts of a `Strs` object.
+ *  @brief Shuffles the parts of a @c Strs object.
  *
- *  This accepts a `Strs` object and potentially produces a new `Strs` object of a different layout:
- *  - `STRS_U32_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_U64_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_U32_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_U64_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_FRAGMENTED` returns a copy of itself, with the parts shuffled.
+ *  This accepts a @c Strs object and potentially produces a new @c Strs object of a different
+ *  layout:
+ *  - @c STRS_U32_TAPE_VIEW becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_U64_TAPE_VIEW becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_U32_TAPE becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_U64_TAPE becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_FRAGMENTED returns a copy of itself, with the parts shuffled.
  */
 static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                PyObject *args_names_tuple) {
@@ -1154,31 +1150,32 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     return result;
 }
 
-static char const doc_sorted[] =                                                               //
-    "sorted(*, reverse=False, uncased=False, top=None) -> Strs\n"                              //
-    "\n"                                                                                       //
-    "Return a new, stably sorted Strs; the original is unchanged.\n"                           //
-    "\n"                                                                                       //
-    "Args:\n"                                                                                  //
-    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"               //
-    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"          //
-    "  top (int, optional): Keep only the `top` smallest (or largest, if reversed) elements. " //
-    "Defaults to None (all).\n"                                                                //
-    "Returns:\n"                                                                               //
-    "  Strs: A new, sorted collection.\n"                                                      //
-    "Example:\n"                                                                               //
-    "  >>> list(map(str, sz.Strs(['banana', 'apple', 'cherry']).sorted()))\n"                  //
+static char const doc_sorted[] =                                                             //
+    "sorted(*, reverse=False, uncased=False, top=None) -> Strs\n"                            //
+    "\n"                                                                                     //
+    "Return a new, stably sorted Strs; the original is unchanged.\n"                         //
+    "\n"                                                                                     //
+    "Args:\n"                                                                                //
+    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"             //
+    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"        //
+    "  top (int, optional): Keep only the `top` smallest elements, or largest if reversed. " //
+    "Defaults to None, keeping all.\n"                                                       //
+    "Returns:\n"                                                                             //
+    "  Strs: A new, sorted collection.\n"                                                    //
+    "Example:\n"                                                                             //
+    "  >>> list(map(str, sz.Strs(['banana', 'apple', 'cherry']).sorted()))\n"                //
     "  ['apple', 'banana', 'cherry']";
 
 /**
- *  @brief Sorts the parts of a `Strs` object.
+ *  @brief Sorts the parts of a @c Strs object.
  *
- *  This accepts a `Strs` object and potentially produces a new `Strs` object of a different layout:
- *  - `STRS_U32_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_U64_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_U32_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_U64_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
- *  - `STRS_FRAGMENTED` returns a copy of itself, with the parts sorted.
+ *  This accepts a @c Strs object and potentially produces a new @c Strs object of a different
+ *  layout:
+ *  - @c STRS_U32_TAPE_VIEW becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_U64_TAPE_VIEW becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_U32_TAPE becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_U64_TAPE becomes @c STRS_FRAGMENTED, and keeps a link to the old as a parent.
+ *  - @c STRS_FRAGMENTED returns a copy of itself, with the parts sorted.
  */
 static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple) {
@@ -1473,8 +1470,9 @@ static PyObject *Strs_get_layout(Strs *self, void *Py_UNUSED(closure)) {
  *  @param[in] cstr_length The length of the input string.
  *  @param[out] buffer The output buffer to write to.
  *  @param[in] buffer_length The size of the output buffer.
- *  @param[out] did_fit Populated with 1 if the string is fully exported, 0 if it didn't fit, -1 if invalid UTF-8.
- *  @return Pointer to the end of the written data in the buffer, or buffer position where error occurred.
+ *  @param[out] did_fit Set to 1 if the string is fully exported, 0 if it didn't fit, or -1 if it is
+ *      not valid UTF-8.
+ *  @return Pointer to the end of the written data in the buffer, or to the position of the error.
  */
 static sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_length,    //
                                                         sz_ptr_t buffer, sz_size_t buffer_length, //
@@ -1572,11 +1570,8 @@ static sz_cptr_t export_escaped_unquoted_to_binary_buffer(sz_cptr_t data, sz_siz
     return buffer_ptr;
 }
 
-/**
- *  @brief  Formats an array of strings, similar to the `repr` method of Python lists.
- *          Will output an object that looks like `sz.Str(['item1', 'item2... ])`, potentially
- *          dropping the last few entries.
- */
+/** Formats an array of strings, similar to the @c repr method of Python lists. Outputs an object
+ *  that looks like `sz.Str(['item1', 'item2... ])`, potentially dropping the last few entries. */
 static PyObject *Strs_repr(Strs *self) {
     get_string_at_offset_t getter = str_at_offset_getter(self);
     if (!getter) {
@@ -1632,11 +1627,8 @@ static PyObject *Strs_repr(Strs *self) {
     return PyUnicode_FromStringAndSize(repr_buffer, repr_buffer_ptr - repr_buffer);
 }
 
-/**
- *  @brief  Array to string conversion method, that concatenates all the strings in the array.
- *          Will output an object that looks like `['item1', 'item2', 'item3']`, containing all
- *          the strings.
- */
+/** Array to string conversion method, that concatenates all the strings in the array. Will output
+ *  an object that looks like `['item1', 'item2', 'item3']`, containing all the strings. */
 static PyObject *Strs_str(Strs *self) {
     get_string_at_offset_t getter = str_at_offset_getter(self);
     if (!getter) {
@@ -1739,7 +1731,7 @@ static char const doc_Strs_tape_address[] = //
     "Memory address of the first byte of the contiguous tape buffer, as an integer.";
 
 static char const doc_Strs_tape_nbytes[] = //
-    "Total length of the tape (all string bytes) in bytes.";
+    "Total length of the tape in bytes, across all strings.";
 
 static char const doc_Strs_offsets_address[] = //
     "Memory address of the first byte of the offsets array, as an integer.";
@@ -1748,10 +1740,10 @@ static char const doc_Strs_offsets_nbytes[] = //
     "Length of the offsets array in bytes.";
 
 static char const doc_Strs_offsets_are_large[] = //
-    "True if 64-bit offsets are needed to address the tape (vs. 32-bit) for Arrow export.";
+    "True if Arrow export needs 64-bit rather than 32-bit offsets to address the tape.";
 
 static char const doc_Strs_layout[] = //
-    "Debug string describing the internal storage layout (TAPE, TAPE_VIEW, or FRAGMENTED).";
+    "Debug string describing the internal storage layout: TAPE, TAPE_VIEW, or FRAGMENTED.";
 
 static PyGetSetDef Strs_getsetters[] = {
     // Compatibility with PyArrow
@@ -1765,7 +1757,7 @@ static PyGetSetDef Strs_getsetters[] = {
     {NULL}                                                                                             // Sentinel
 };
 
-// The efficient `Strs_init` path initializing from PyArrow array capsules.
+/** The efficient @c Strs_init path initializing from PyArrow array capsules. */
 static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) {
     // Handle Arrow array
     PyObject *capsules = PyObject_CallMethod(sequence_obj, "__arrow_c_array__", NULL);
@@ -1913,7 +1905,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
     return 0;
 }
 
-// The less efficient `Strs_init` path initializing from a Pythonic tuple of strings.
+/** The less efficient @c Strs_init path initializing from a Pythonic tuple of strings. */
 static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
     Py_ssize_t count = PyTuple_GET_SIZE(sequence_obj);
 
@@ -2053,15 +2045,15 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 }
 
 /**
- *  @brief The inefficient `Strs_init` path initializing from a Pythonic list of strings.
+ *  @brief The inefficient @c Strs_init path initializing from a Pythonic list of strings.
  *
- *  A list is walked through a tuple snapshot rather than directly. Two things follow from that, and the
- *  list path needs both: a tuple cannot be resized, so no concurrent `del`/`append` can leave the walk
- *  indexing past the end, and a tuple holds a strong reference to every item, so the spans that `view`
- *  mode exports keep pointing at live strings even after the caller empties the list it passed in.
- *  Holding the list itself pins the container while its contents are free to go.
+ *  A list is walked through a tuple snapshot rather than directly. Two things follow from that, and
+ *  the list path needs both: a tuple cannot be resized, so no concurrent @c del or @c append can
+ *  leave the walk indexing past the end, and a tuple holds a strong reference to every item, so the
+ *  spans that @p view mode exports keep pointing at live strings even after the caller empties the
+ *  list it passed in. Holding the list itself pins the container while its contents are free to go.
  *
- *  The snapshot copies one pointer per element, never the string data, so `view` mode stays zero-copy.
+ *  The snapshot copies one pointer per element, never string data, so @p view mode stays zero-copy.
  */
 static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
     PyObject *snapshot = PySequence_Tuple(sequence_obj);
@@ -2071,7 +2063,7 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
     return result;
 }
 
-// The inefficient `Strs_init` path initializing from a Pythonic iterable of strings.
+/** The inefficient @c Strs_init path initializing from a Pythonic iterable of strings. */
 static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view) {
     // Get an iterator from the object
     PyObject *iterator = PyObject_GetIter(sequence_obj);
@@ -2347,10 +2339,8 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
     return 0;
 }
 
-/**
- *  @brief  Frees the owned data/offsets/spans and releases the parent reference held by a `Strs`,
- *          per its layout. Shared by `Strs_dealloc` and the `Strs_init` re-initialization guard.
- */
+/** Frees the owned data/offsets/spans and releases the parent reference held by a @c Strs, per its
+ *  layout. Shared by @c Strs_dealloc and the @c Strs_init re-initialization guard. */
 static void Strs_release_(Strs *self) {
     switch (self->layout) {
     case STRS_U32_TAPE:
@@ -2437,7 +2427,7 @@ static char const doc_Strs_shuffled[] =                                         
 static char const doc_Strs_sample[] =                                                      //
     "sample(size, seed=None) -> Strs\n"                                                    //
     "\n"                                                                                   //
-    "Return a new Strs with `size` elements drawn at random (with replacement).\n"         //
+    "Return a new Strs with `size` elements drawn at random with replacement.\n"           //
     "\n"                                                                                   //
     "Args:\n"                                                                              //
     "  size (int): Number of elements to draw.\n"                                          //
@@ -2469,7 +2459,7 @@ static char const doc_Strs[] =                                                  
     "  view (bool): If True, create a view into the original data instead of copying it.\n"      //
     "\n"                                                                                         //
     "Storage Layouts:\n"                                                                         //
-    "  - TAPE: Owns contiguous data buffer with offset array (StringTape compatible)\n"          //
+    "  - TAPE: Owns contiguous data buffer with offset array, StringTape-compatible\n"           //
     "  - TAPE_VIEW: Zero-copy view into existing data (Arrow/StringTape slice)\n"                //
     "  - FRAGMENTED: Non-contiguous strings with individual pointers\n"                          //
     "\n"                                                                                         //

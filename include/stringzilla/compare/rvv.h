@@ -1,7 +1,9 @@
 /**
- *  @brief RISC-V Vector (RVV 1.0) backend for compare.
  *  @file include/stringzilla/compare/rvv.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief RISC-V Vector (RVV 1.0) backend for compare.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_RVV_H_

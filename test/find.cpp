@@ -1,43 +1,35 @@
 /**
- *  @brief  Comparisons, search/find_all/split, misaligned-repetition search, and replacement tests.
- *  @file   test/find.cpp
+ *  @file test/find.cpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date December 21, 2023
+ *  @brief Comparisons, search/find_all/split, misaligned-repetition search, and replacement tests.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development, to validate different ISA-specific backends:
+ *
+ *      #define SZ_USE_WESTMERE 0
+ *      #define SZ_USE_HASWELL 0
+ *      #define SZ_USE_GOLDMONT 0
+ *      #define SZ_USE_SKYLAKE 0
+ *      #define SZ_USE_ICELAKE 0
+ *      #define SZ_USE_NEON 0
+ *      #define SZ_USE_SVE 0
+ *      #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Include the StringZilla headers before anything else, to intercept missing @c #include
+ *  directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -69,20 +61,19 @@ using namespace std::literals; // for ""sv
 #pragma region Helpers
 
 /**
- *  @brief Runs one substring-search known-answer case through the dispatched `sz_find`/`sz_rfind`,
- *         every natively-compiled backend kernel, and the C++ `sz::string_view_t` wrapper.
+ *  @brief Runs one substring-search known-answer case through the dispatched @c sz_find and
+ *      @c sz_rfind, every native backend kernel, and the C++ @c sz::string_view_t wrapper.
+ *  @param[in] haystack The text to search within.
+ *  @param[in] haystack_length The number of bytes in @p haystack.
+ *  @param[in] needle The substring to search for.
+ *  @param[in] needle_length The number of bytes in @p needle.
+ *  @param[in] forward_offset Expected offset of the first occurrence, or @c SZ_SIZE_MAX if absent.
+ *  @param[in] backward_offset Expected offset of the last occurrence, or @c SZ_SIZE_MAX if absent.
  *
  *  Asserts each backend resolves the @p needle to the expected offset within @p haystack, or to
- *  `SZ_NULL_CHAR` when @p expected_offset is `SZ_SIZE_MAX` (the not-found sentinel). The forward
- *  search is checked against `sz_find`, the backward search against `sz_rfind`, so the caller passes
- *  the forward and backward expectations independently.
- *
- *  @param haystack           The text to search within.
- *  @param haystack_length    The number of bytes in @p haystack.
- *  @param needle             The substring to search for.
- *  @param needle_length      The number of bytes in @p needle.
- *  @param forward_offset     The expected offset of the first occurrence, or `SZ_SIZE_MAX` if absent.
- *  @param backward_offset    The expected offset of the last occurrence, or `SZ_SIZE_MAX` if absent.
+ *  @c SZ_NULL_CHAR when that offset is the @c SZ_SIZE_MAX not-found sentinel. The forward search is
+ *  checked against @c sz_find, the backward search against @c sz_rfind, so the caller passes the
+ *  forward and backward expectations independently.
  */
 static void check_find_unit_(                      //
     sz_cptr_t haystack, sz_size_t haystack_length, //
@@ -130,16 +121,16 @@ static void check_find_unit_(                      //
            "sz::string_view_t::rfind must agree with the C API's backward offset");
 }
 
-/** @brief Lengths every comparison and byte-scan size ladder switches at, plus one either side of each. */
+/** Lengths every comparison and byte-scan size ladder switches at, plus one either side of each. */
 static sz_size_t const backend_ladder_lengths_[] = {1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255};
 
 /**
  *  @brief Drives one comparison backend across the lengths its size ladder switches at.
  *
- *  Every backend delegates to serial below its vector width, so the three-byte literals above never reach the
- *  vectorized body at all. The overlapping-load boundaries at 8, 16, 32 and 64 are where these ladders break,
- *  and a mismatch is placed at the front, the middle and the last byte of each length to catch a tail that
- *  reads one byte too few or one too many.
+ *  Every backend delegates to serial below its vector width, so the three-byte literals above never
+ *  reach the vectorized body at all. The overlapping-load boundaries at 8, 16, 32 and 64 are where
+ *  these ladders break, and a mismatch is placed at the front, the middle and the last byte of each
+ *  length to catch a tail that reads one byte too few or one too many.
  */
 static void check_compare_unit_(char const *name, sz_equal_t equal, sz_order_t order) {
     std::string left, right;
@@ -171,11 +162,11 @@ static void check_compare_unit_(char const *name, sz_equal_t equal, sz_order_t o
 }
 
 /**
- *  @brief Drives one byte-scanner pair across the same ladder, with the match at both ends and absent.
+ *  @brief Drives one byte-scanner pair across the same ladder, with a match at either end or none.
  *
- *  The reverse scanners are the risky half: each backend reaches "last match" differently - predicate
- *  reversal, gather-reversal, or a leading-zero count with a hand-written offset correction - and all of it
- *  is index arithmetic that an eleven-byte literal never exercises.
+ *  The reverse scanners are the risky half: each backend reaches "last match" differently -
+ *  predicate reversal, gather-reversal, or a leading-zero count with a hand-written offset
+ *  correction - and all of it is index arithmetic that an eleven-byte literal never exercises.
  */
 static void check_find_byte_unit_(char const *name, sz_find_byte_t find_byte, sz_find_byte_t rfind_byte) {
     std::string haystack;
@@ -212,24 +203,25 @@ static void check_find_byte_unit_(char const *name, sz_find_byte_t find_byte, sz
     }
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
 /**
- *  @brief Known-answer + coverage for the search & comparison family on simple, hand-verifiable inputs.
+ *  @brief Known-answer and coverage tests for the search and comparison family on simple inputs.
  *
- *  Begins with known-answer vectors exercising each function through the dispatched C API
- *  (automatic kernel resolution), through the natively-compiled backend kernels directly (manual
- *  propagation to a specific kernel), and - where it applies - through the C++ `sz::string_view_t`
- *  wrappers, so a regression that the serial-vs-SIMD agreement tests would miss - because both share a
- *  wrong constant - is still caught against an external ground truth. The remainder covers the string
- *  class search methods (`find`, `find_first_of`, `find_all`, `split`, …) over haystacks and needles of
- *  different lengths and character-sets.
+ *  Begins with known-answer vectors exercising each function through the dispatched C API with
+ *  automatic kernel resolution, through the natively-compiled backend kernels directly with manual
+ *  propagation to a specific kernel, and - where it applies - through the C++ @c sz::string_view_t
+ *  wrappers, so a regression that the serial-vs-SIMD agreement tests would miss - because both
+ *  share a wrong constant - is still caught against an external ground truth. The remainder covers
+ *  the string class search methods, like @c find, @c find_first_of, @c find_all and @c split, over
+ *  haystacks and needles of different lengths and character-sets.
  *
- *  The exact-substring `sz_find`/`sz_rfind` and the single-byte `sz_find_byte`/`sz_rfind_byte` ship serial,
- *  westmere, haswell, and skylake backends (no icelake). The byteset search ships serial, haswell, and
- *  icelake backends. The comparison family `sz_order`/`sz_equal` ships serial, haswell, and skylake.
+ *  The exact-substring @c sz_find and @c sz_rfind and the single-byte @c sz_find_byte and
+ *  @c sz_rfind_byte ship serial, westmere, haswell, and skylake backends, but no icelake. The
+ *  byteset search ships serial, haswell, and icelake backends. The comparison family of @c sz_order
+ *  and @c sz_equal ships serial, haswell, and skylake.
  */
 void test_find_unit() {
     fmt::println("  - testing search & comparison known-answer vectors...");
@@ -312,12 +304,13 @@ void test_find_unit() {
     verify(sz_find_byteset(hello, hello_length, &digits) == SZ_NULL_CHAR);        // No digit present
     verify(sz_find_byteset_serial(hello, hello_length, &digits) == SZ_NULL_CHAR); // No digit present
 
-    // `sz_find_byte_from` / `sz_find_byte_not_from` / `sz_rfind_byte_from` / `sz_rfind_byte_not_from`:
-    // the `_from` family takes the needle bytes as the accepted set (the byteset built out of them), and
-    // the `_not_from` family inverts that set, so they are the byteset family above spelled with a needle
-    // string in place of an `sz_byteset_t`. Against "hello world" and the needle "helo" (accepts h, e, l, o):
-    // the first accepted byte is 'h' at offset 0 and the last is 'l' at offset 9; the first byte NOT in the
-    // set is ' ' at offset 5, and the last byte not in the set is 'd' at offset 10.
+    // `sz_find_byte_from` / `sz_find_byte_not_from` / `sz_rfind_byte_from` /
+    // `sz_rfind_byte_not_from`: the `_from` family takes the needle bytes as the accepted set (the
+    // byteset built out of them), and the `_not_from` family inverts that set, so they are the
+    // byteset family above spelled with a needle string in place of an `sz_byteset_t`. Against
+    // "hello world" and the needle "helo" (accepts h, e, l, o): the first accepted byte is 'h' at
+    // offset 0 and the last is 'l' at offset 9; the first byte not in the set is ' ' at offset 5,
+    // and the last byte not in the set is 'd' at offset 10.
     verify(sz_find_byte_from(hello, hello_length, "helo", 4) == hello + 0);       // First accepted: 'h'
     verify(sz_rfind_byte_from(hello, hello_length, "helo", 4) == hello + 9);      // Last accepted: 'l'
     verify(sz_find_byte_not_from(hello, hello_length, "helo", 4) == hello + 5);   // First rejected: ' '
@@ -379,9 +372,7 @@ void test_find_unit() {
 #endif
 }
 
-/**
- *  @brief Tests the correctness of the string class comparison methods, such as `compare` and `operator==`.
- */
+/** Tests the string class comparison methods, such as @c compare and `operator==`. */
 void test_compare_unit() {
     // Comparing relative order of the strings
     verify("a"_sv.compare("a") == 0);
@@ -402,14 +393,12 @@ void test_compare_unit() {
     verify("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
-/**
- *  @brief One substring-search backend (find or rfind), stored by pointer so the differential driver can iterate a
- *         table. `reference(haystack, hlen, needle, nlen)` invokes the kernel via `operator()`.
- */
+/** One find or rfind substring-search backend, stored by pointer so the differential driver can
+ *  iterate a table. Its `operator()` passes a haystack, a needle and both lengths to the kernel. */
 struct find_backend_t {
     char const *name;
     sz_find_t kernel;
@@ -419,10 +408,8 @@ struct find_backend_t {
     }
 };
 
-/**
- *  @brief One byteset-search backend (find or rfind), stored by pointer; `reference(haystack, hlen, byteset)`
- *         invokes the kernel via `operator()`.
- */
+/** One byteset-search backend (find or rfind), stored by pointer;
+ *  `reference(haystack, hlen, byteset)` invokes the kernel via `operator()`. */
 struct byteset_backend_t {
     char const *name;
     sz_find_byteset_t kernel;
@@ -432,12 +419,12 @@ struct byteset_backend_t {
 };
 
 /**
- *  @brief Cross-checks two substring-search backends of the @b same operation (both forward or both
- *         backward) against each other on random and hand-picked edge-case inputs.
+ *  @brief Cross-checks two substring-search backends of the @b same operation, both forward or both
+ *      backward, against each other on random and hand-picked edge-case inputs.
  *
- *  The candidate must resolve every needle to the identical pointer the reference does, or both must
- *  return `SZ_NULL`. Each haystack is replayed at every sub-cacheline alignment via
- *  `for_each_cacheline_offset_`, so a needle straddling a 64-byte boundary is always exercised.
+ *  The candidate must resolve every needle to the identical pointer the reference does, or both
+ *  must return @c SZ_NULL. Each haystack is replayed at every sub-cacheline alignment via
+ *  @c for_each_cacheline_offset_, so a needle straddling a 64-byte boundary is always exercised.
  */
 template <typename reference_, typename candidate_>
 void check_find_search_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -486,12 +473,12 @@ void check_find_search_equivalence_(reference_ reference, candidate_ candidate, 
 }
 
 /**
- *  @brief Cross-checks two byteset-search backends of the @b same operation (both forward or both
- *         backward) against each other on random and hand-picked edge-case inputs.
+ *  @brief Cross-checks two byteset-search backends of the @b same operation, both forward or both
+ *      backward, against each other on random and hand-picked edge-case inputs.
  *
- *  The candidate must resolve every byteset to the identical pointer the reference does, or both must
- *  return `SZ_NULL`. Each haystack is replayed at every sub-cacheline alignment via
- *  `for_each_cacheline_offset_`, so a match straddling a 64-byte boundary is always exercised.
+ *  The candidate must resolve every byteset to the identical pointer the reference does, or both
+ *  must return @c SZ_NULL. Each haystack is replayed at every sub-cacheline alignment via
+ *  @c for_each_cacheline_offset_, so a match straddling a 64-byte boundary is always exercised.
  */
 template <typename reference_, typename candidate_>
 void check_byteset_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -549,15 +536,13 @@ void check_byteset_equivalence_(reference_ reference, candidate_ candidate, sz_s
     }
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
-/**
- *  @brief Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl
- *         in a haystack formed of @p haystack_pattern repeated from one to `max_repeats` times,
- *         misaligned by @p misalignment bytes within the cacheline.
- */
+/** Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl
+ *  in a haystack formed of @p haystack_pattern repeated from one to @c max_repeats times,
+ *  misaligned by @p misalignment bytes within the cacheline. */
 template <typename stl_matcher_, typename sz_matcher_>
 void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
     // Each repetition re-scans the whole growing haystack, so the work is quadratic in this count, and it is
@@ -640,10 +625,9 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
     }
 }
 
-/**
- *  @brief Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl,
- *         as a substring, as a set of allowed characters, or as a set of disallowed characters, in a haystack.
- */
+/** Evaluates the correctness of a "matcher", searching for all the occurrences of the
+ *  @p needle_stl, as a substring, as a set of allowed characters, or as a set of disallowed
+ *  characters, in a haystack. */
 void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
 
     check_find_misaligned_<                                                             //
@@ -677,7 +661,7 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
         haystack_pattern, needle_stl, misalignment);
 }
 
-/** @brief Replays the misaligned-repetition search across a fixed sweep of intra-cacheline offsets. */
+/** Replays the misaligned-repetition search across a fixed sweep of intra-cacheline offsets. */
 void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl) {
     check_find_misaligned_(haystack_pattern, needle_stl, 0);
     check_find_misaligned_(haystack_pattern, needle_stl, 1);
@@ -688,10 +672,8 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
     check_find_misaligned_(haystack_pattern, needle_stl, 33);
 }
 
-/**
- *  @brief Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
- *         Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
- */
+/** Extensively tests the string class search methods, such as @c find and @c find_first_of,
+ *  covering alignment cases within a cache line, repetitive patterns, and overlapping matches. */
 void test_find_misaligned_equivalence() {
     // When haystack is only formed of needles:
     check_find_misaligned_("a", "a");
@@ -741,7 +723,7 @@ void test_find_misaligned_equivalence() {
     check_find_misaligned_("axabbcxcaaabbccc", "aaabbccc");
 }
 
-/** @brief Evaluates the correctness of look-up table transforms using random lookup tables. */
+/** Evaluates the correctness of look-up table transforms using random lookup tables. */
 void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
 
     std::size_t const body_length = 1024 * 1024;
@@ -769,12 +751,12 @@ void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slice
 }
 
 /**
- *  @brief Degenerate and boundary shapes for the search family, asserting survival and in-bounds results.
+ *  @brief Degenerate and boundary shapes for the search family, asserting survival and bounds.
  *
- *  Answers are not the subject here - a needle longer than its haystack, a zero length, or an empty byteset
- *  each has one defensible reply, and what matters is that every backend gives it without reading a byte it
- *  was not handed. The scanners run at every sub-cache-line alignment, since a misaligned tail is where an
- *  overlapping load reaches past the end.
+ *  Answers are not the subject here - a needle longer than its haystack, a zero length, or an empty
+ *  byteset each has one defensible reply, and what matters is that every backend gives it without
+ *  reading a byte it was not handed. The scanners run at every sub-cache-line alignment, since a
+ *  misaligned tail is where an overlapping load reaches past the end.
  */
 void test_find_safety() {
     fmt::println("  - testing degenerate and boundary inputs of the search kernels...");
@@ -859,11 +841,11 @@ void test_find_safety() {
     fmt::println("    boundary-input safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/** @brief Forward substring-search (`sz_find`) backends; `dispatched` first keeps the table non-empty on baseline. */
+/** Forward @c sz_find backends; @c dispatched first keeps the table non-empty on baseline. */
 static find_backend_t const find_backends[] = {
     {"dispatched", sz_find},
 #if SZ_USE_WESTMERE
@@ -898,7 +880,7 @@ static find_backend_t const find_backends[] = {
 #endif
 };
 
-/** @brief Backward substring-search (`sz_rfind`) backends; same tiers as forward. */
+/** Backward substring-search backends of @c sz_rfind, with the same tiers as forward. */
 static find_backend_t const rfind_backends[] = {
     {"dispatched", sz_rfind},
 #if SZ_USE_SVE
@@ -933,7 +915,7 @@ static find_backend_t const rfind_backends[] = {
 #endif
 };
 
-/** @brief Forward byteset-search (`sz_find_byteset`) backends; no Westmere/Skylake/SVE tiers. */
+/** Forward byteset-search backends of @c sz_find_byteset, with no Westmere, Skylake or SVE. */
 static byteset_backend_t const find_byteset_backends[] = {
     {"dispatched", sz_find_byteset},
 #if SZ_USE_HASWELL
@@ -965,7 +947,7 @@ static byteset_backend_t const find_byteset_backends[] = {
 #endif
 };
 
-/** @brief Backward byteset-search (`sz_rfind_byteset`) backends; identical tiers to the forward byteset table. */
+/** Backward @c sz_rfind_byteset backends, with the same tiers as the forward byteset table. */
 static byteset_backend_t const rfind_byteset_backends[] = {
     {"dispatched", sz_rfind_byteset},
 #if SZ_USE_HASWELL
@@ -997,11 +979,9 @@ static byteset_backend_t const rfind_byteset_backends[] = {
 #endif
 };
 
-/**
- *  @brief Drives the serial-vs-SIMD substring-search and byteset-search differential tests across every search
- *         backend compiled on this target (dispatched first). The serial kernel is the reference; four tables run
- *         back to back — forward/backward substring search and forward/backward byteset search.
- */
+/** Drives the serial-vs-SIMD substring-search and byteset-search differential tests across every
+ *  search backend compiled on this target, dispatched first. The serial kernel is the reference;
+ *  four tables run back to back: substring and byteset search, each forward and backward. */
 void test_find_all() {
     find_backend_t const find_serial {"serial", sz_find_serial};
     for (find_backend_t const &backend : find_backends) check_find_search_equivalence_(find_serial, backend, 200);
@@ -1018,4 +998,4 @@ void test_find_all() {
         check_byteset_equivalence_(rfind_byteset_serial, backend, 200);
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

@@ -1,17 +1,18 @@
 /**
- *  @brief Hardware-accelerated non-cryptographic string hashing and checksums.
  *  @file include/stringzilla/hash.h
  *  @author Ash Vardanian
+ *  @date December 1, 2024
+ *  @brief Hardware-accelerated non-cryptographic string hashing and checksums.
  *
  *  Includes core APIs with hardware-specific backends:
  *
- *  - `sz_bytesum` - for byte-level 64-bit unsigned byte-level checksums.
- *  - `sz_hash` - for 64-bit single-shot hashing using AES instructions.
- *  - `sz_hash_state_init`, `sz_hash_state_update`, `sz_hash_state_digest` - for incremental hashing.
- *  - `sz_fill_random` - for populating buffers with pseudo-random noise using AES instructions.
+ *  - @c sz_bytesum - for byte-level 64-bit unsigned checksums.
+ *  - @c sz_hash - for 64-bit single-shot hashing using AES instructions.
+ *  - @c sz_hash_state_init, @c sz_hash_state_update, @c sz_hash_state_digest - incremental hashing.
+ *  - @c sz_fill_random - for populating buffers with pseudo-random noise using AES instructions.
  *
- *  Why the hell do we need a yet another hashing library?!
- *  Turns out, most existing libraries have noticeable constraints. Try finding a library that:
+ *  Why the hell do we need a yet another hashing library?! Turns out, most existing libraries have
+ *  noticeable constraints. Try finding a library that:
  *
  *  - Outputs 64-bit or 128-bit hashes and passes the @b SMHasher `--extra` tests.
  *  - Is fast for both short @b (velocity) and long strings @b (throughput).
@@ -21,56 +22,61 @@
  *  - Uses @b SIMD, including not just AVX2 & NEON, but also masking AVX-512 & predicated SVE2.
  *  - Documents its logic and @b guarantees the same output across different platforms.
  *
- *  This includes projects like "MurmurHash", "CityHash", "SpookyHash", "FarmHash", "MetroHash", "HighwayHash", etc.
- *  There are 2 libraries that are close to meeting these requirements: "xxHash" in C++ and "aHash" in Rust:
+ *  This includes projects like "MurmurHash", "CityHash", "SpookyHash", "FarmHash", "MetroHash",
+ *  "HighwayHash", etc. There are 2 libraries that are close to meeting these requirements: "xxHash"
+ *  in C++ and "aHash" in Rust:
  *
- *  - "aHash" is fast, but written in Rust, has no dynamic dispatch, and lacks AVX-512 and SVE2 support.
- *    It also does not adhere to a fixed output, and can't be used in applications like computing packet checksums
- *    in network traffic or implementing persistent data structures.
+ *  - "aHash" is fast, but written in Rust, has no dynamic dispatch, and lacks AVX-512 and SVE2
+ *    support. It also does not adhere to a fixed output, and can't be used in applications like
+ *    computing packet checksums in network traffic or implementing persistent data structures.
+ *  - "xxHash" is implemented in C, has an extremely wide set of third-party language bindings, and
+ *    provides 32-, 64-, and 128-bit hashes. It is fast, but its dynamic dispatch is limited to x86
+ *    with `xxh_x86dispatch.c`.
  *
- *  - "xxHash" is implemented in C, has an extremely wide set of third-party language bindings, and provides both
- *    32-, 64-, and 128-bit hashes. It is fast, but its dynamic dispatch is limited to x86 with `xxh_x86dispatch.c`.
+ *  StringZilla uses a scheme more similar to "aHash" and "GxHash", utilizing the AES extensions,
+ *  that provide a remarkable level of "mixing per cycle" and are broadly available on modern CPUs.
+ *  Similar to "aHash", they are combined with "shuffle & add" instructions to provide a high level
+ *  of entropy in the output. That operation is practically free, as many modern CPUs will dispatch
+ *  them on different ports. On x86, for example:
  *
- *  StringZilla uses a scheme more similar to "aHash" and "GxHash", utilizing the AES extensions, that provide
- *  a remarkable level of "mixing per cycle" and are broadly available on modern CPUs. Similar to "aHash", they
- *  are combined with "shuffle & add" instructions to provide a high level of entropy in the output. That operation
- *  is practically free, as many modern CPUs will dispatch them on different ports. On x86, for example:
+ *  @verbatim
+ *  Instruction                     Intel Ice Lake          AMD Zen4
+ *  VAESENC (ZMM, ZMM, ZMM)         5 cycles on port 0      4 cycles on ports 0 or 1
+ *  VAESDEC (ZMM, ZMM, ZMM)         5 cycles on port 0      4 cycles on ports 0 or 1
+ *  VPSHUFB_Z (ZMM, K, ZMM, ZMM)    3 cycles on port 5      2 cycles on ports 1 or 2
+ *  VPADDQ (ZMM, ZMM, ZMM)          1 cycle on ports 0, 5   1 cycle on ports 0, 1, 2, 3
+ *  @endverbatim
  *
- *  - `VAESENC (ZMM, ZMM, ZMM)` and `VAESDEC (ZMM, ZMM, ZMM)`:
- *    - on Intel Ice Lake: 5 cycles on port 0.
- *    - On AMD Zen4: 4 cycles on ports 0 or 1.
- *  - `VPSHUFB_Z (ZMM, K, ZMM, ZMM)`
- *    - on Intel Ice Lake: 3 cycles on port 5.
- *    - On AMD Zen4: 2 cycles on ports 1 or 2.
- *  - `VPADDQ (ZMM, ZMM, ZMM)`:
- *    - on Intel Ice Lake: 1 cycle on ports 0 or 5.
- *    - On AMD Zen4: 1 cycle on ports 0, 1, 2, 3.
+ *  But there are several key differences.
  *
- *  But there several key differences:
+ *  @b Wider @b state. A larger state and a larger block size is used for inputs over 64 bytes long,
+ *  benefiting from wider registers on current CPUs. Like many other hash functions, the state is
+ *  initialized with the seed and a set of Pi constants. Unlike others, we pull more Pi bits (1024),
+ *  but only 64 bits of the seed, to keep the API sane.
  *
- *  - A larger state and a larger block size is used for inputs over 64 bytes longs, benefiting from wider registers
- *    on current CPUs. Like many other hash functions, the state is initialized with the seed and a set of Pi constants.
- *    Unlike others, we pull more Pi bits (1024), but only 64-bits of the seed, to keep the API sane.
- *  - The length of the input is not mixed into the AES block at the start to allow incremental construction,
- *    when the final length is not known in advance.
- *  - The vector-loads are not interleaved, meaning that each byte of input has exactly the same weight in the hash.
- *    On the implementation side it require some extra shuffling on older platforms, but on newer platforms it
- *    can be done with "masked" loads in AVX-512 and "predicated" instructions in SVE2.
+ *  @b Streaming. The length of the input is not mixed into the AES block at the start to allow
+ *  incremental construction, when the final length is not known in advance.
+ *
+ *  @b Uniform @b loads. The vector-loads are not interleaved, meaning that each byte of input has
+ *  exactly the same weight in the hash. On the implementation side it requires some extra shuffling
+ *  on older platforms, but on newer platforms it can be done with "masked" loads in AVX-512 and
+ *  "predicated" instructions in SVE2.
+ *
+ *  Moreover, the same AES primitives are reused to implement a fast Pseudo-Random Number Generator
+ *  @b (PRNG) that is consistent between different implementation backends and has reproducible
+ *  output with the same "nonce". The PRNG produces random byte sequences, and combining it with
+ *  @c sz_lookup produces random strings with a given byteset.
+ *
+ *  Other helpers include:
+ *
+ *  - @c sz_fill_alphabet - fills buffers with random ASCII characters, combining @c sz_fill_random
+ *    and @c sz_lookup.
+ *  - @c sz_fill_alphabet_utf8 - does the same with random UTF-8 characters.
  *
  *  @see Reini Urban's more active fork of SMHasher by Austin Appleby: https://github.com/rurban/smhasher
  *  @see The serial AES routines are based on Morten Jensen's "tiny-AES-c": https://github.com/kokke/tiny-AES-c
  *  @see The "xxHash" C implementation by Yann Collet: https://github.com/Cyan4973/xxHash
  *  @see The "aHash" Rust implementation by Tom Kaitchuck: https://github.com/tkaitchuck/aHash
- *
- *  Moreover, the same AES primitives are reused to implement a fast Pseudo-Random Number Generator @b (PRNG) that
- *  is consistent between different implementation backends and has reproducible output with the same "nonce".
- *  Originally, the PRNG was designed to produce random byte sequences, but combining it with @b `sz_lookup`,
- *  one can produce random strings with a given byteset.
- *
- *  Other helpers include:
- *
- *  - `sz_fill_alphabet` - combines `sz_fill_random` & `sz_lookup` to fill buffers with random ASCII characters.
- *  - `sz_fill_alphabet_utf8` - combines `sz_fill_random` & `sz_lookup` to fill buffers with random UTF-8 characters.
  */
 #ifndef STRINGZILLA_HASH_H_
 #define STRINGZILLA_HASH_H_
@@ -86,14 +92,14 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Computes the 64-bit check-sum of bytes in a string.
- *         Similar to `std::ranges::accumulate`.
+ *  @brief Computes the 64-bit check-sum of bytes in a string, similar to
+ *      @c std::ranges::accumulate.
  *
- *  @param text String to aggregate.
- *  @param length Number of bytes in the text.
+ *  @param[in] text String to aggregate.
+ *  @param[in] length Number of bytes in the text.
  *  @return 64-bit unsigned value.
  *
- *  Example usage:
+ *  Summing the bytes of "hi", 104 + 105:
  *
  *  @code{.c}
  *      #include <stringzilla/hash.h>
@@ -102,25 +108,26 @@ extern "C" {
  *      }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_bytesum_serial, sz_bytesum_haswell, sz_bytesum_skylake, sz_bytesum_icelake, sz_bytesum_neon,
- *      sz_bytesum_sve, sz_bytesum_sve2, sz_bytesum_v128, sz_bytesum_v128relaxed, sz_bytesum_rvv, sz_bytesum_lasx,
- *      sz_bytesum_powervsx
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @sa sz_bytesum_serial, sz_bytesum_haswell, sz_bytesum_skylake, sz_bytesum_icelake,
+ *      sz_bytesum_neon, sz_bytesum_sve, sz_bytesum_sve2, sz_bytesum_v128, sz_bytesum_v128relaxed,
+ *      sz_bytesum_rvv, sz_bytesum_lasx, sz_bytesum_powervsx
  */
 SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
 
 /**
- *  @brief Computes the 64-bit unsigned hash of a string similar to @b `std::hash` in C++.
- *         It's not cryptographically secure, but it's fast and provides a good distribution.
- *         It passes the SMHasher suite by Austin Appleby with no collisions, even with `--extra` flag.
- *  @see HASH.md for a detailed explanation of the algorithm.
+ *  @brief Computes the 64-bit unsigned hash of a string, similar to @c std::hash in C++.
  *
- *  @param text String to hash.
- *  @param length Number of bytes in the text.
- *  @param seed 64-bit unsigned seed for the hash.
+ *  @param[in] text String to hash.
+ *  @param[in] length Number of bytes in the text.
+ *  @param[in] seed 64-bit unsigned seed for the hash.
  *  @return 64-bit hash value.
  *
- *  Example usage:
+ *  It's not cryptographically secure, but it's fast and provides a good distribution. It passes the
+ *  SMHasher suite by Austin Appleby with no collisions, even with the `--extra` flag. HASH.md
+ *  explains the algorithm in detail.
+ *
+ *  Telling two different strings apart:
  *
  *  @code{.c}
  *      #include <stringzilla/hash.h>
@@ -129,33 +136,33 @@ SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *      }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_hash_serial, sz_hash_westmere, sz_hash_skylake, sz_hash_icelake, sz_hash_neonaes, sz_hash_sve2aes,
- *      sz_hash_v128, sz_hash_rvv, sz_hash_lasx, sz_hash_powervsx
- *
- *  @note The algorithm must provide the same output on all platforms in both single-shot and incremental modes.
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note The output is the same on all platforms, in both single-shot and incremental modes.
+ *  @sa sz_hash_serial, sz_hash_westmere, sz_hash_skylake, sz_hash_icelake, sz_hash_neonaes,
+ *      sz_hash_sve2aes, sz_hash_v128, sz_hash_rvv, sz_hash_lasx, sz_hash_powervsx
  *  @sa sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
  */
 SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /**
  *  @brief Hashes one string under @b many seeds at once, the "multi-seed" hash.
- *         Equivalent to calling `sz_hash(text, length, seeds[i])` for each seed, but normalizes the
- *         input into AES blocks @b once and replays the cheap per-seed rounds over that prepared form.
  *
- *  @param text String to hash.
- *  @param length Number of bytes in the text.
- *  @param seeds Array of @p seeds_count 64-bit seeds.
- *  @param seeds_count Number of seeds, and the number of hashes written to @p hashes.
- *  @param hashes Caller-allocated output buffer of @p seeds_count 64-bit hashes.
+ *  @param[in] text String to hash.
+ *  @param[in] length Number of bytes in the text.
+ *  @param[in] seeds Array of @p seeds_count 64-bit seeds.
+ *  @param[in] seeds_count Number of seeds, and the number of hashes written to @p hashes.
+ *  @param[out] hashes Caller-allocated output buffer of @p seeds_count 64-bit hashes.
+ *
+ *  Equivalent to calling `sz_hash(text, length, seeds[i])` for each seed, but normalizes the input
+ *  into AES blocks @b once and replays the cheap per-seed rounds over that prepared form.
  *
  *  Designed for workloads that need several independent hashes of the same (often short) key:
  *  feature-hashing & Count-Min sketches for BM25/TF-IDF, Bloom filters, cuckoo hashing, MinHash /
  *  SimHash / LSH banding, and rendezvous (HRW) hashing. Two effects make it faster than a loop of
- *  `sz_hash`: the branch-heavy load & de-interleave of variable-length short strings is amortized
+ *  @c sz_hash: the branch-heavy load & de-interleave of variable-length short strings is amortized
  *  across all seeds, and AES-capable backends advance multiple seed-lanes per instruction.
  *
- *  Example usage:
+ *  Three seeds, the first matching a plain @c sz_hash call:
  *
  *  @code{.c}
  *      #include <stringzilla/hash.h>
@@ -166,9 +173,10 @@ SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed)
  *      }
  *  @endcode
  *
- *  @note Biggest speedups are for `length <= 64`; above that only the input load is shared.
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake, sz_hash_multiseed_neonaes
+ *  @note Biggest speedups are for @p length ≤ 64; above that only the input load is shared.
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake,
+ *      sz_hash_multiseed_neonaes
  */
 SZ_API_RUNTIME void sz_hash_multiseed(            //
     sz_cptr_t text, sz_size_t length,             //
@@ -176,23 +184,24 @@ SZ_API_RUNTIME void sz_hash_multiseed(            //
     sz_u64_t *hashes);
 
 /**
- *  @brief A Pseudorandom Number Generator (PRNG), inspired the AES-CTR-128 algorithm,
- *         but using only one round of AES mixing as opposed to "NIST SP 800-90A".
+ *  @brief A Pseudorandom Number Generator (PRNG), inspired by the AES-CTR-128 algorithm, but using
+ *      only one round of AES mixing as opposed to "NIST SP 800-90A".
  *
- *  CTR_DRBG (CounTeR mode Deterministic Random Bit Generator) appears secure and indistinguishable from a
- *  true random source when AES is used as the underlying block cipher and 112 bits are taken from this PRNG.
- *  When AES is used as the underlying block cipher and 128 bits are taken from each instantiation,
- *  the required security level is delivered with the caveat that a 128-bit cipher's output in
- *  counter mode can be distinguished from a true RNG.
+ *  CTR_DRBG (CounTeR mode Deterministic Random Bit Generator) appears secure and indistinguishable
+ *  from a true random source when AES is used as the underlying block cipher and 112 bits are taken
+ *  from this PRNG. When AES is used as the underlying block cipher and 128 bits are taken from each
+ *  instantiation, the required security level is delivered with the caveat that a 128-bit cipher's
+ *  output in counter mode can be distinguished from a true RNG.
  *
- *  In this case, it doesn't apply, as we only use one round of AES mixing. We also don't expose a separate "key",
- *  only a "nonce", to keep the API simple, but we mix it with 512 bits of Pi constants to increase randomness.
+ *  In this case, it doesn't apply, as we only use one round of AES mixing. We also don't expose a
+ *  separate "key", only a "nonce", to keep the API simple, but we mix it with 512 bits of Pi
+ *  constants to increase randomness.
  *
- *  @param text Output string buffer to be populated.
- *  @param length Number of bytes in the string.
- *  @param nonce "Number used ONCE" to ensure uniqueness of produced blocks.
+ *  @param[out] text Output string buffer to be populated.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[in] nonce "Number used once" to ensure uniqueness of produced blocks.
  *
- *  Example usage:
+ *  Filling two buffers under the same nonce:
  *
  *  @code{.c}
  *      #include <stringzilla/hash.h>
@@ -204,20 +213,20 @@ SZ_API_RUNTIME void sz_hash_multiseed(            //
  *      }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_fill_random_serial, sz_fill_random_westmere, sz_fill_random_skylake, sz_fill_random_icelake,
- *      sz_fill_random_neonaes, sz_fill_random_sve2aes, sz_fill_random_v128, sz_fill_random_rvv, sz_fill_random_lasx,
- *      sz_fill_random_powervsx
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @sa sz_fill_random_serial, sz_fill_random_westmere, sz_fill_random_skylake,
+ *      sz_fill_random_icelake, sz_fill_random_neonaes, sz_fill_random_sve2aes, sz_fill_random_v128,
+ *      sz_fill_random_rvv, sz_fill_random_lasx, sz_fill_random_powervsx
  */
 SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /**
  *  @brief The state for incremental construction of a hash.
- *  @see sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest.
+ *  @sa sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
  *
- *  @note Uses `packed` attribute to allow placement at arbitrary addresses without UBSAN warnings.
- *        This struct uses plain byte arrays to avoid implicit alignment requirements from SIMD types.
- *        The layout matches sz_hash_state_aligned_t for safe casting between them.
+ *  @note Uses the @c packed attribute to allow placement at arbitrary addresses without UBSAN
+ *      warnings, and plain byte arrays to avoid implicit alignment requirements from SIMD types.
+ *      The layout matches @c sz_hash_state_aligned_t for safe casting between them.
  */
 #if defined(_MSC_VER)
 #pragma pack(push, 1)
@@ -239,56 +248,68 @@ typedef struct __attribute__((packed)) sz_hash_state_t {
 } sz_hash_state_t;
 #endif
 
-/** @brief Bytes in a SHA256 digest, fixed by FIPS 180-4. */
+/** Bytes in a SHA256 digest, fixed by FIPS 180-4. */
 #define SZ_SHA256_DIGEST_LENGTH (32)
 
 /**
  *  @brief Bytes in a SHA256 message block, fixed by FIPS 180-4.
- *  @note Coincides with `SZ_CACHE_LINE_WIDTH` and the ZMM width, which are unrelated reasons for the same 64.
+ *  @note Coincides with @c SZ_CACHE_LINE_WIDTH and the ZMM width, which are unrelated reasons for
+ *      the same 64.
  */
 #define SZ_SHA256_BLOCK_LENGTH (64)
 
 /**
  *  @brief The state for incremental construction of a SHA256 hash.
- *  @see sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest.
+ *  @sa sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest
  */
 typedef struct sz_sha256_state_t {
-    sz_u8_t block[SZ_SHA256_BLOCK_LENGTH]; ///< Message block buffer
-    sz_u32_t hash[8];                      ///< Current hash state: 8x 32-bit values
-    sz_u64_t total_length;                 ///< Total message length in bytes
-    sz_u8_t block_length;                  ///< Current bytes in block (0-63)
-    sz_u8_t padding_[23];                  ///< Rounds the state to 128 bytes
+
+    /** Message block buffer. */
+    sz_u8_t block[SZ_SHA256_BLOCK_LENGTH];
+
+    /** Current hash state: 8x 32-bit values. */
+    sz_u32_t hash[8];
+
+    /** Total message length in bytes. */
+    sz_u64_t total_length;
+
+    /** Current bytes in block (0-63). */
+    sz_u8_t block_length;
+
+    /** Rounds the state to 128 bytes. */
+    sz_u8_t padding_[23];
 } sz_sha256_state_t;
 
-/*  The batched kernels walk an array of these, so the layout is load-bearing rather than incidental. A
- *  power-of-two stride turns lane indexing into a shift, and putting `block` first gives every lane the same
- *  cache-line phase as the array itself — at 112 bytes the phase rotated per lane, splitting the 64-byte
- *  block read across two lines for most of them. `block_length` is a byte because it never exceeds 63, which
- *  also makes the struct identical on 32- and 64-bit builds. Alignment stays natural on purpose: `malloc`
- *  only promises 16 bytes, so demanding 64 would under-align every heap-allocated batch. */
+/*  The batched kernels walk an array of these, so the layout is load-bearing rather than
+ *  incidental. A power-of-two stride turns lane indexing into a shift, and putting @c block first
+ *  gives every lane the same cache-line phase as the array itself — at 112 bytes the phase rotated
+ *  per lane, splitting the 64-byte block read across two lines for most of them. @c block_length is
+ *  a byte because it never exceeds 63, which also makes the struct identical on 32- and 64-bit
+ *  builds. Alignment stays natural on purpose: @c malloc only promises 16 bytes, so demanding 64
+ *  would under-align every heap-allocated batch. */
 sz_static_assert(sizeof(sz_sha256_state_t) == 128, sha256_state_is_two_cache_lines);
 
 /**
  *  @brief Initializes the state for incremental construction of a hash.
  *
- *  @param state The state to initialize.
- *  @param seed The 64-bit unsigned seed for the hash.
+ *  @param[out] state The state to initialize.
+ *  @param[in] seed The 64-bit unsigned seed for the hash.
  */
 SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
 
 /**
  *  @brief Updates the state with new data.
  *
- *  @param state The state to stream.
- *  @param text The new data to include in the hash.
- *  @param length The number of bytes in the new data.
+ *  @param[inout] state The state to stream.
+ *  @param[in] text The new data to include in the hash.
+ *  @param[in] length The number of bytes in the new data.
  */
 SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Finalizes the immutable state and returns the hash.
  *
- *  @param state The state to fold.
+ *  @param[in] state The state to fold.
  *  @return The 64-bit hash value.
  */
 SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
@@ -296,24 +317,24 @@ SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
 /**
  *  @brief Initializes the state for incremental SHA256 hashing.
  *
- *  @param state The state to initialize.
+ *  @param[out] state The state to initialize.
  */
 SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state);
 
 /**
  *  @brief Updates the SHA256 state with new data.
  *
- *  @param state The state to update.
- *  @param data The new data to hash.
- *  @param length The number of bytes in the new data.
+ *  @param[inout] state The state to update.
+ *  @param[in] data The new data to hash.
+ *  @param[in] length The number of bytes in the new data.
  */
 SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
 
 /**
- *  @brief Finalizes the SHA256 state and returns the digest, leaving the state able to accept more data.
+ *  @brief Finalizes the SHA256 state and returns the digest, leaving the state open to more data.
  *
- *  @param state The state to finalize.
- *  @param digest Output buffer for the 32-byte (256-bit) digest.
+ *  @param[in] state The state to finalize.
+ *  @param[out] digest Output buffer for the 32-byte (256-bit) digest.
  */
 SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
                                            sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]);
@@ -321,17 +342,18 @@ SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
 /**
  *  @brief Advances many independent SHA256 states, one message per lane.
  *
- *  @param states Array of at least `texts->count` states, each initialized with `sz_sha256_state_init`.
- *  @param texts Sequence supplying the next chunk of each lane's message; its `count` sets the lane count.
+ *  @param[inout] states Array of at least `texts->count` states, each initialized with
+ *      @c sz_sha256_state_init.
+ *  @param[in] texts Sequence supplying the next chunk of each lane's message, with @c count lanes.
  *
- *  Hashing one message is a serial dependency chain, so a wider instruction set cannot accelerate it.
- *  Independent messages compress in parallel lanes, which is what this does: sixteen at a time on AVX-512,
- *  eight on AVX2. Supply at least a few kilobytes per lane per call so the lane transposition is amortized;
- *  below one 64-byte block per lane it degrades to the single-message path.
+ *  Hashing one message is a serial dependency chain, so a wider instruction set cannot accelerate
+ *  it. Independent messages compress in parallel lanes, which is what this does: sixteen at a time
+ *  on AVX-512, eight on AVX2. Supply at least a few kilobytes per lane per call so the lane
+ *  transposition is amortized; below one 64-byte block per lane it degrades to the single-message
+ *  path. A zero-length chunk is a no-op for that lane. The states must be distinct, while the
+ *  chunks may overlap.
  *
- *  A zero-length chunk is a no-op for that lane. The states must be distinct; the chunks may overlap.
- *
- *  Example usage:
+ *  Advancing two lanes by one chunk each, then taking both digests:
  *
  *  @code{.c}
  *      #include <stringzilla/hash.h>
@@ -348,24 +370,26 @@ SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
  *      }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @note Lanes are grouped by vector width and a group advances in lockstep, so it costs as much as its
- *        longest member. Every lane is correct whatever its length, but throughput is best when inputs
- *        arrive sorted by length, which puts similar lengths in the same group - `sz_sequence_argsort` gives
- *        that ordering.
- *  @sa sz_sha256_multistate_update_serial, sz_sha256_multistate_update_haswell, sz_sha256_multistate_update_skylake
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Every lane is correct whatever its length, but throughput is best sorted by length.
+ *  @sa sz_sha256_multistate_update_serial, sz_sha256_multistate_update_haswell,
+ *      sz_sha256_multistate_update_skylake
+ *
+ *  Lanes are grouped by vector width and a group advances in lockstep, so it costs as much as its
+ *  longest member. Inputs sorted by length put similar lengths in the same group, and
+ *  @c sz_sequence_argsort gives that ordering.
  */
 SZ_API_RUNTIME void sz_sha256_multistate_update(sz_sha256_state_t *states, sz_sequence_t const *texts);
 
 /**
  *  @brief Finalizes many independent SHA256 states, one digest per lane.
  *
- *  @param states Array of @p states_count states.
- *  @param states_count Number of states to finalize, which is the lane count.
- *  @param digests Output buffer of `states_count * SZ_SHA256_DIGEST_LENGTH` bytes, one big-endian
- *                 digest per lane, in lane order.
+ *  @param[in] states Array of @p states_count states.
+ *  @param[in] states_count Number of states to finalize, which is the lane count.
+ *  @param[out] digests Output buffer of `states_count * SZ_SHA256_DIGEST_LENGTH` bytes, one
+ *      big-endian digest per lane, in lane order.
  *
- *  Leaves every state unmodified, so a streaming caller can take an interim digest and keep appending.
+ *  Leaves every state unmodified, so a streaming caller can take an interim digest and append more.
  *
  *  @sa sz_sha256_state_digest, sz_sha256_multistate_update
  */
@@ -601,13 +625,13 @@ SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *sta
 
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Helper Methods
 
 /**
  *  @brief Compares the state of two running hashes.
- *  @note The current content of the `ins` buffer and its length is ignored.
+ *  @note The current content of the @c ins buffer and its length is ignored.
  */
 SZ_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs) {
     // Compare byte-by-byte using sz_equal (safe for packed struct)
@@ -617,7 +641,7 @@ SZ_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_has
     return sz_true_k;
 }
 
-#pragma endregion // Helper Methods
+#pragma endregion Helper Methods
 
 #include "stringzilla/hash/serial.h"
 #include "stringzilla/hash/westmere.h"
@@ -638,9 +662,8 @@ SZ_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_has
 #include "stringzilla/hash/lasx.h"
 #include "stringzilla/hash/powervsx.h"
 
-/*  Pick the right implementation for the string search algorithms.
- *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
- */
+/*  Pick the right implementation for the hashing and checksum kernels. To override this behavior
+ *  and precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
@@ -916,8 +939,8 @@ SZ_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states,
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#endif // !SZ_DYNAMIC_DISPATCH
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

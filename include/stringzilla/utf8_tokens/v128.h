@@ -1,7 +1,8 @@
 /**
- *  @brief WebAssembly SIMD128 backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/v128.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly SIMD128 backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_V128_H_
 #define STRINGZILLA_UTF8_TOKENS_V128_H_
@@ -27,14 +28,16 @@ SZ_HELPER_INLINE v128_t sz_utf8_rotate2_v128_(v128_t bytes_u8x16) {
     return wasm_i8x16_shuffle(bytes_u8x16, bytes_u8x16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1);
 }
 
-#pragma region Multistep newline / whitespace iteration
+#pragma region Multistep newline and whitespace iteration
 
 /**
- *  @brief  Peel the tile's first @p emit_count matches with a `wasm_i8x16_swizzle` left-pack, 4 lanes per block.
+ *  @brief Peels the tile's first @p emit_count matches with a @c wasm_i8x16_swizzle left-pack, 4
+ *      lanes per block.
  *
- *  Walks the 16-lane @p start_bits mask in four ascending 4-lane sub-blocks, gathering each block's set
- *  `(position+lane, length)` pairs to the front of a 16-wide stack scratch via one swizzle from `compact_lut`,
- *  then copies the low @p emit_count entries out - ascending lane order, byte-exact, no per-match `ctz`.
+ *  Walks the 16-lane @p start_bits mask in four ascending 4-lane sub-blocks, gathering each block's
+ *  set `(position + lane, length)` pairs to the front of a 16-wide stack scratch via one swizzle
+ *  from @c compact_lut, then copies the low @p emit_count entries out in ascending lane order,
+ *  byte-exact, with no per-match @c ctz.
  */
 SZ_HELPER_INLINE void sz_utf8_iterate_peel_v128_(                              //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
@@ -264,7 +267,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128(     //
     return count;
 }
 
-#pragma endregion // Multistep newline / whitespace iteration
+#pragma endregion Multistep newline and whitespace iteration
 
 #if defined(__clang__)
 #pragma clang attribute pop

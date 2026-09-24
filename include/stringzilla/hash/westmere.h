@@ -1,7 +1,9 @@
 /**
- *  @brief Westmere (SSE4.2 + AES-NI) backend for string hashing and checksums.
  *  @file include/stringzilla/hash/westmere.h
  *  @author Ash Vardanian
+ *  @date February 20, 2025
+ *  @brief Westmere (SSE4.2 + AES-NI) backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_WESTMERE_H_
@@ -24,10 +26,10 @@ extern "C" {
 #endif
 
 /**
- *  @brief Initializes the minimal single-lane AES hash state using SSE2/AES-NI intrinsics.
- *         Requires the @p state to be 16-byte aligned.
- *  @param state Pointer to the aligned minimal hash state to initialize.
- *  @param seed 64-bit seed value XOR-ed with Pi constants to form the initial state.
+ *  @brief Initializes the minimal single-lane AES hash state using SSE2/AES-NI intrinsics. Requires
+ *      the @p state to be 16-byte aligned.
+ *  @param[out] state Pointer to the aligned minimal hash state to initialize.
+ *  @param[in] seed 64-bit seed value XOR-ed with Pi constants to form the initial state.
  */
 SZ_HELPER_INLINE void sz_hash_state_short_init_westmere_aligned_(sz_hash_state_aligned_for_short_t *state,
                                                                  sz_u64_t seed) {
@@ -50,9 +52,10 @@ SZ_HELPER_INLINE void sz_hash_state_short_init_westmere_aligned_(sz_hash_state_a
 
 /**
  *  @brief Absorbs one 128-bit block into the minimal hash state using AES-NI and SSSE3 intrinsics.
- *  @param state_ptr Pointer to the aligned minimal hash state.
- *  @param block_u8x16 128-bit data block to absorb.
- *  @param order_u8x16 Shuffle permutation for the additive accumulator lane (loaded from `sz_hash_u8x16x4_shuffle_`).
+ *  @param[inout] state_ptr Pointer to the aligned minimal hash state.
+ *  @param[in] block_u8x16 128-bit data block to absorb.
+ *  @param[in] order_u8x16 Shuffle permutation for the additive accumulator lane (loaded
+ *      from @c sz_hash_u8x16x4_shuffle_).
  */
 SZ_HELPER_INLINE void sz_hash_state_short_update_westmere_aligned_(sz_hash_state_aligned_for_short_t *state_ptr,
                                                                    __m128i block_u8x16, __m128i order_u8x16) {
@@ -62,8 +65,8 @@ SZ_HELPER_INLINE void sz_hash_state_short_update_westmere_aligned_(sz_hash_state
 
 /**
  *  @brief Finalizes the minimal AES hash state using AES-NI and returns a 64-bit digest.
- *  @param state Pointer to the (const) aligned minimal hash state.
- *  @param length Total number of bytes hashed, mixed into the key for length sensitivity.
+ *  @param[in] state Pointer to the (const) aligned minimal hash state.
+ *  @param[in] length Total number of bytes hashed, mixed into the key for length sensitivity.
  *  @return 64-bit hash value.
  */
 SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_westmere_aligned_(sz_hash_state_aligned_for_short_t const *state,
@@ -106,9 +109,8 @@ SZ_API_COMPTIME void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_
     state->ins_length = 0;
 }
 
-/**
- *  @brief Loads the packed public state into the aligned internal twin (4x `_mm_lddqu_si128` per 64-byte field).
- */
+/** Loads the packed public state into the aligned internal twin (4x @c _mm_lddqu_si128
+ *  per 64-byte field). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_westmere_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
@@ -121,7 +123,8 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_westmere_(sz_hash_st
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state (4x `_mm_storeu_si128` per field). */
+/** Stores the aligned internal twin back into the packed public state (4x
+ *  @c _mm_storeu_si128 per field). */
 SZ_HELPER_INLINE void sz_hash_state_store_westmere_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         _mm_storeu_si128((__m128i *)&packed->aes[lane_index * 16], state->aes.xmms[lane_index]);
@@ -134,7 +137,7 @@ SZ_HELPER_INLINE void sz_hash_state_store_westmere_(sz_hash_state_t *packed, sz_
 
 /**
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
- *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
+ *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
 SZ_HELPER_INLINE void sz_hash_state_update_westmere_(sz_hash_state_aligned_t *state) {
     __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
@@ -150,7 +153,7 @@ SZ_HELPER_INLINE void sz_hash_state_update_westmere_(sz_hash_state_aligned_t *st
 
 /**
  *  @brief Finalizes the full 512-bit AES hash state using AES-NI and returns a 64-bit digest.
- *  @param state Pointer to the (const) aligned hash state; lanes are read directly.
+ *  @param[in] state Pointer to the (const) aligned hash state; lanes are read directly.
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
 SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_aligned_t const *state) {
@@ -269,8 +272,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start,
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_westmere((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same
+        // deferral the streaming path uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             state.ins.xmms[0] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 0));
             state.ins.xmms[1] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 16));
@@ -290,10 +294,12 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start,
 }
 
 /**
- *  @brief Splits a short (<= 64B) input into up to four 128-bit text-lanes using SSE loads.
- *         Mirrors the loading ladder of `sz_hash_westmere`: full `lddqu` loads for complete lanes
- *         and one overlapping load + in-register shift for the partial tail; byte-by-byte only for
- *         the `< 16` case, where a 16-byte SSE load could read past the input.
+ *  @brief Splits an input of up to 64 bytes into up to four 128-bit text-lanes using SSE loads.
+ *
+ *  Mirrors the loading ladder of @c sz_hash_westmere: full @c lddqu loads for complete lanes and
+ *  one overlapping load plus an in-register shift for the partial tail; byte-by-byte only below 16
+ *  bytes, where a 16-byte SSE load could read past the input.
+ *
  *  @return The number of populated text-lanes (1..4).
  */
 SZ_HELPER_INLINE sz_size_t sz_hash_multiseed_prepare_westmere_(sz_cptr_t text, sz_size_t length,

@@ -1,4 +1,7 @@
 //! Shared value types, status codes, and library introspection.
+//!
+//! File: rust/stringzilla/types.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::{c_char, c_void, CStr};
@@ -15,20 +18,20 @@ pub struct SemVer {
 #[repr(C)]
 #[derive(Debug, PartialEq)]
 pub enum Status {
-    /// For algorithms that return a status, this status indicates that the operation was successful.
-    /// Corresponds to `sz_success_k = 0` in C.
+    /// For algorithms that return a status, this status indicates that the operation was
+    /// successful. Corresponds to `sz_success_k = 0` in C.
     Success = 0,
-    /// For algorithms that require memory allocation, this status indicates that the allocation failed.
-    /// Corresponds to `sz_bad_alloc_k = -10` in C.
+    /// For algorithms that require memory allocation, this status indicates that the allocation
+    /// failed. Corresponds to `sz_bad_alloc_k = -10` in C.
     BadAlloc = -10,
     /// For algorithms that require UTF8 input, this status indicates that the input is invalid.
     /// Corresponds to `sz_invalid_utf8_k = -12` in C.
     InvalidUtf8 = -12,
-    /// For algorithms that take collections of unique elements, this status indicates presence of duplicates.
-    /// Corresponds to `sz_contains_duplicates_k = -13` in C.
+    /// For algorithms that take collections of unique elements, this status indicates presence of
+    /// duplicates. Corresponds to `sz_contains_duplicates_k = -13` in C.
     ContainsDuplicates = -13,
-    /// For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types.
-    /// Corresponds to `sz_overflow_risk_k = -14` in C.
+    /// For algorithms dealing with large inputs, this error reports the need to upcast the logic to
+    /// larger types. Corresponds to `sz_overflow_risk_k = -14` in C.
     OverflowRisk = -14,
     /// For algorithms with multi-stage pipelines indicates input/output size mismatch.
     /// Corresponds to `sz_unexpected_dimensions_k = -15` in C.
@@ -162,7 +165,7 @@ pub struct _SzSequence {
 }
 
 impl Byteset {
-    /// Initializes a bit-set to an empty collection (all characters banned).
+    /// Initializes a bit-set to an empty collection, banning all characters.
     #[inline]
     pub const fn new() -> Self {
         Self { bits: [0; 4] }
@@ -265,7 +268,7 @@ pub fn version() -> SemVer {
 }
 
 /// A fixed-size, compile-time known C-string buffer type.
-/// It keeps track of the number of written bytes (excluding the null terminator).
+/// It keeps track of the number of written bytes, excluding the null terminator.
 pub struct FixedCString<const CAPACITY: usize> {
     buf: [u8; CAPACITY],
     len: usize,
@@ -350,9 +353,9 @@ pub fn capabilities() -> SmallCString {
 
 /// Type-punned wrapper for the slice lookup view.
 ///
-/// Carries a mapper closure which, given an index, returns the corresponding byte-slice representation,
-/// alongside the monomorphized accessor that recovers the closure's concrete type. Callers write closures
-/// like `|i| data[i].as_ref()` or `|i| people[i].name.as_bytes()`.
+/// Carries a mapper closure which, given an index, returns the corresponding byte-slice
+/// representation, alongside the monomorphized accessor that recovers the closure's concrete type.
+/// Callers write closures like `|i| data[i].as_ref()` or `|i| people[i].name.as_bytes()`.
 pub(crate) struct _PunnedSliceLookupView {
     pub(crate) get_slice: unsafe fn(*const c_void, usize) -> &'static [u8],
     pub(crate) data: *const c_void,
@@ -385,35 +388,37 @@ where
     get_slice_impl::<Mapper>
 }
 
-/// Compile-time policy for whether a split keeps or drops empty (zero-length) segments.
+/// Compile-time policy for whether a split keeps or drops empty, zero-length segments.
 ///
-/// A named marker type rather than a raw `bool`, so the choice is branchless and readable at call sites.
+/// A named marker type rather than a raw `bool`, so the choice is branchless and readable
+/// at call sites.
 pub trait EmptySegments {
     /// Whether zero-length segments are skipped.
     const SKIP: bool;
 }
-/// Keep empty segments (the default).
+/// Keep empty segments, the default.
 pub struct KeepEmpty;
 impl EmptySegments for KeepEmpty {
     const SKIP: bool = false;
 }
-/// Drop empty segments (via `.skip_empty()`).
+/// Drop empty segments, via `.skip_empty()`.
 pub struct SkipEmpty;
 impl EmptySegments for SkipEmpty {
     const SKIP: bool = true;
 }
 
-/// Compile-time policy for whether overlapping matches are reported - a named marker, not a raw `bool`.
+/// Compile-time policy for whether overlapping matches are reported - a named marker, not
+/// a raw `bool`.
 pub trait Overlaps {
     /// Whether overlapping matches are included.
     const OVERLAP: bool;
 }
-/// Report only non-overlapping matches (the default; like `str::matches`).
+/// Report only non-overlapping matches, the default, like `str::matches`.
 pub struct NonOverlapping;
 impl Overlaps for NonOverlapping {
     const OVERLAP: bool = false;
 }
-/// Report overlapping matches too (via `.overlapping()`).
+/// Report overlapping matches too, via `.overlapping()`.
 pub struct Overlapping;
 impl Overlaps for Overlapping {
     const OVERLAP: bool = true;
@@ -432,7 +437,7 @@ mod tests {
 
     #[test]
     fn metadata() {
-        // Runtime dispatch is on with the `dynamic-dispatch` feature (default) and off for the
+        // Runtime dispatch is on with the `dynamic-dispatch` feature, a default, and off for the
         // compile-time-dispatch build, where the best ISA tier is baked in instead of table-routed.
         assert_eq!(sz::dynamic_dispatch(), cfg!(feature = "dynamic-dispatch"));
         assert!(sz::capabilities().as_str().len() > 0);
@@ -440,7 +445,8 @@ mod tests {
 
     #[test]
     fn const_apis() {
-        // Each constant is built at compile time, so dropping a `const fn` breaks the build, not this run.
+        // Each constant is built at compile time, so dropping a `const fn` breaks the build,
+        // not this run.
         const SPAN: sz::IndexSpan = sz::IndexSpan::new(6, 5);
         const WHITESPACE: sz::Byteset = sz::Byteset::from_bytes(b" \t\r\n");
         const NEEDLE: sz::Utf8UncasedNeedle = sz::Utf8UncasedNeedle::new(b"hello");

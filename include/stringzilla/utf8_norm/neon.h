@@ -1,17 +1,21 @@
 /**
- *  @brief NEON backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/neon.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 14, 2026
+ *  @brief NEON backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
- *  `sz_utf8_norm_classify_neon_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_neon` / `sz_utf8_find_denormalized_neon`) reuse the force-inlined engines
- *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
+ *  @c sz_utf8_norm_classify_neon_, which locates the first non-inert byte for a form. The two
+ *  public entry points, @c sz_utf8_norm_neon and @c sz_utf8_find_denormalized_neon, reuse the
+ *  force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  that devirtualizes the call.
  *
- *  The scanner is a clean port of the proven `utf8_tokens/sz_utf8_find_denormalized_neon` hot loop -
- *  a `vqtbl4q_u8` lead-classify behind a 64-byte ASCII/inert gate, with a cold per-codepoint exact
- *  verify - reading the unified `utf8_norm/tables.h` record set instead of the legacy denorm tables.
+ *  The scanner is a clean port of the proven `utf8_tokens/sz_utf8_find_denormalized_neon` hot loop,
+ *  a @c vqtbl4q_u8 lead-classify behind a 64-byte ASCII/inert gate with a cold per-codepoint exact
+ *  verify, reading the unified `utf8_norm/tables.h` record set in place of the legacy
+ *  denormalization tables.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_NEON_H_
 #define STRINGZILLA_UTF8_NORM_NEON_H_
@@ -31,7 +35,16 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-/** @brief Per-16B classify: nonzero lanes mark lead bytes that are candidate-non-inert for the form. */
+/**
+ *  @brief NEON scan primitive: finds the first byte starting a non-inert codepoint for @p form.
+ *
+ *  Matches @c sz_utf8_norm_classify_serial_ semantics, computed from the unified props trie. The
+ *  hot loop uses a 64-byte superchunk gate plus a @c vqtbl4q_u8 lead-classify; the cold
+ *  per-codepoint verify carries the combining class across chunks and reports each order or
+ *  quick-check violation exactly.
+ *
+ *  @return The first such byte, or NULL.
+ */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v_u8x16, uint8x16x4_t lut_u8x16x4,
                                                              uint8x16_t flag_vec_u8x16) {
     uint8x16_t non_ascii_u8x16 = vcgeq_u8(v_u8x16, vdupq_n_u8(0x80));
@@ -42,11 +55,14 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v_u8x16,
 }
 
 /**
- *  @brief Scan primitive (NEON): first byte that begins a non-inert codepoint for @p form, else NULL.
+ *  @brief NEON scan primitive: finds the first byte starting a non-inert codepoint for @p form.
  *
- *  Matches `sz_utf8_norm_classify_serial_` semantics, computed from the unified props trie. The hot loop
- *  uses a 64-byte superchunk gate plus a `vqtbl4q_u8` lead-classify; the cold per-codepoint verify
- *  carries the combining class across chunks and reports order or QC violations exactly.
+ *  Matches @c sz_utf8_norm_classify_serial_ semantics, computed from the unified props trie. The
+ *  hot loop uses a 64-byte superchunk gate plus a @c vqtbl4q_u8 lead-classify, and the cold
+ *  per-codepoint verify carries the combining class across chunks, reporting any order or
+ *  quick-check violation exactly.
+ *
+ *  @return The first such byte, or NULL.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;

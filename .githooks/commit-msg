@@ -1,21 +1,53 @@
 #!/usr/bin/env bash
+# StringZilla commit-msg: enforce the commit-message contract.
 #
-# StringZilla commit-msg hook - keeps commit messages free of tool attributions and session links.
-# Install once per clone with:  git config core.hooksPath .githooks
-# Bypass in a genuine emergency with:  git commit --no-verify
+#   1. The subject starts with an approved verb prefix - Add / Break / Build / Chore / Docs / Fix /
+#      Improve / Make - followed by a capitalized summary, so the history reads as a consistent
+#      changelog. `Merge:` and `Release:` are exempt: Git writes the first, TinySemVer the second,
+#      and neither capitalizes what follows.
+#   2. No AI-assistant attribution: no `Co-authored-by` bot trailer, no "Generated with/by <assistant>",
+#      no assistant name / vendor URL, no robot emoji. Authorship is the human who committed.
+#
+# Bypass knowingly (you almost never should) with: git commit --no-verify
 
 set -u
 
 message_file="$1"
 
-attributions=$(grep -inE \
-    '(co-authored-by:.*(claude|anthropic|copilot|chatgpt|openai|gemini|cursor)|generated (with|by).*(claude|copilot|chatgpt|gpt|gemini|cursor|ai)|claude-session|noreply@anthropic\.com|noreply@openai\.com)' \
-    "$message_file" || true)
-if [ -n "$attributions" ]; then
-    echo "commit-msg: tool attributions and session links do not belong in commit messages:" >&2
-    echo "$attributions" >&2
-    echo "Remove the line(s), or bypass with --no-verify only if intentional." >&2
-    exit 1
+# Comment lines (git's `#` scissors and helptext) never reach the final message - ignore them.
+payload=$(grep -v '^#' "$message_file")
+# The subject is the first non-blank line of what remains.
+subject=$(printf '%s\n' "$payload" | grep -vE '^[[:space:]]*$' | head -1)
+
+failed=0
+
+# 1. Verb prefix. `Merge:` and `Release:` subjects are written by Git and by TinySemVer.
+case "$subject" in
+Merge* | Release:*) ;;
+*)
+    if ! printf '%s\n' "$subject" |
+        grep -qE '^(Add|Break|Build|Chore|Docs|Fix|Improve|Make): [A-Z]'; then
+        echo "commit-msg: the subject must be '<Verb>: <Capitalized summary>' with an approved verb -"
+        echo "            Add Break Build Chore Docs Fix Improve Make."
+        echo "            Got: ${subject:-<empty>}"
+        failed=1
+    fi
+    ;;
+esac
+
+# 2. AI-assistant attribution - matched generically across assistants and vendors, not one product.
+offenders=$(printf '%s\n' "$payload" | grep -inE \
+    'co-authored-by:.*(\[bot\]|\bbot\b|claude|chatgpt|gpt-[0-9]|openai|copilot|gemini|\bbard\b|cursor|codeium|devin)|generated (with|by).*\b(ai|llm|claude|chatgpt|gpt|copilot|gemini|cursor|anthropic|openai)\b|\b(anthropic|openai)\.com|claude\.ai|chatgpt\.com|claude-session|🤖' || true)
+if [ -n "$offenders" ]; then
+    echo "commit-msg: this message carries AI-assistant attribution - StringZilla history stays human-authored."
+    echo "            Offending lines:"
+    printf '%s\n' "$offenders" | head -8
+    failed=1
 fi
 
+if [ "$failed" -ne 0 ]; then
+    echo ""
+    echo "Fix the subject / trailer and commit again. Bypass knowingly with: git commit --no-verify"
+    exit 1
+fi
 exit 0

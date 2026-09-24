@@ -1,7 +1,8 @@
 /**
- *  @brief Unicode case folding of UTF-8 text.
  *  @file python/stringzilla/utf8_uncased_fold.c
  *  @author Ash Vardanian
+ *  @date November 24, 2025
+ *  @brief Unicode case folding of UTF-8 text.
  */
 #include "stringzilla.h"
 
@@ -9,7 +10,7 @@ char const doc_utf8_uncased_fold[] =                                            
     "Apply Unicode case folding to a UTF-8 string.\n"                                   //
     "\n"                                                                                //
     "Case folding normalizes text for uncased comparisons,\n"                           //
-    "handling one-to-many expansions (e.g., German sharp S to 'ss').\n"                 //
+    "handling one-to-many expansions, like German sharp S to 'ss'.\n"                   //
     "\n"                                                                                //
     "Args:\n"                                                                           //
     "    text (Str or str or bytes): The input UTF-8 string.\n"                         //

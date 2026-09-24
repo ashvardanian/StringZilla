@@ -1,7 +1,8 @@
 /**
- *  @brief Byte-level equality and ordering.
  *  @file python/stringzilla/compare.c
  *  @author Ash Vardanian
+ *  @date September 16, 2023
+ *  @brief Byte-level equality and ordering.
  */
 #include "stringzilla.h"
 

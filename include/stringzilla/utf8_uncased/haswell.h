@@ -1,15 +1,17 @@
 /**
- *  @brief Haswell (AVX2) uncased UTF-8 search, comparison & invariance backend.
  *  @file include/stringzilla/utf8_uncased/haswell.h
  *  @author Ash Vardanian
+ *  @date June 12, 2026
+ *  @brief Haswell (AVX2) uncased UTF-8 search, comparison & invariance backend.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  *
  *  Ports the Ice Lake architecture to 32-byte YMM chunks: the needle classification, match
- *  verification, and danger-zone scanning stay ISA-independent in `serial.h`; per-script
- *  `fold`/`alarm` helpers become YMM functions; and the shared force-inlined `scripted_` driver
- *  walks the haystack in 32-byte steps. AVX-512 k-mask algebra maps onto two AVX2 domains:
- *  byte-mask vectors (for folds, which must feed masked adds) and 32-bit `VPMOVMSKB` integers
- *  (for alarms and probe filters, where scalar shifts replace k-mask shifts bit-for-bit).
+ *  verification, and danger-zone scanning stay ISA-independent in `serial.h`; per-script fold and
+ *  alarm helpers become YMM functions; and the shared force-inlined @c scripted_ driver walks the
+ *  haystack in 32-byte steps. AVX-512 k-mask algebra maps onto two AVX2 domains: byte-mask vectors
+ *  for folds, which must feed masked adds, and 32-bit @c VPMOVMSKB integers for alarms and probe
+ *  filters, where scalar shifts replace k-mask shifts bit-for-bit.
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_HASWELL_H_
 #define STRINGZILLA_UTF8_UNCASED_HASWELL_H_
@@ -32,11 +34,12 @@ extern "C" {
 #pragma region Shared AVX2 Helpers
 
 /**
- *  @brief Detects bytes in the unsigned range [range_start, range_start + range_length).
- *      AVX2 has no unsigned byte compares, so `(x − start) ≤ limit` is realized as
- *      `min_epu8(x − start, limit) == x − start`: the wrap-around subtraction maps the range
- *      onto [0, limit] and `VPMINUB` + `VPCMPEQB` realize the unsigned `≤` in two single-uop
- *      instructions - cheaper and clearer than the sign-flip `VPXOR` + `VPCMPGTB` alternative.
+ *  @brief Detects bytes in the unsigned range of @p range_length values starting at @p range_start.
+ *
+ *  The identity `min_epu8(x − start, limit) == x − start` realizes `(x − start) ≤ limit`, as AVX2
+ *  has no unsigned byte compares: the wrap-around subtraction maps the range onto `[0, limit]` and
+ *  @c VPMINUB with @c VPCMPEQB realize the unsigned ≤ in two single-uop instructions - cheaper and
+ *  clearer than the sign-flip @c VPXOR and @c VPCMPGTB alternative.
  */
 SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_in_byte_range_(__m256i values_u8x32, sz_u8_t range_start,
                                                                 sz_u8_t range_length) {
@@ -45,49 +48,44 @@ SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_in_byte_range_(__m256i values_u
 }
 
 /**
- *  @brief Shifts the 32 source bytes right by one lane, so lane `i` holds byte `i − 1`; lane 0
- *      receives zero. This is the vector-domain equivalent of Ice Lake's `k-mask << 1` idiom:
- *      a continuation byte at lane 0 whose lead sits in the previous chunk stays unfolded in
- *      BOTH ports, and such positions can never start a match anyway (the needle's folded
- *      window always begins with a full rune, never a continuation byte).
- *      AVX2 `VPALIGNR` works per 128-bit lane, so a `VPERM2I128` first materializes the carry.
+ *  @brief Shifts the 32 source bytes right by one lane, so lane @c i holds byte i − 1.
+ *
+ *  Lane 0 receives zero. This is the vector-domain equivalent of Ice Lake's `k-mask << 1` idiom: a
+ *  continuation byte at lane 0 whose lead sits in the previous chunk stays unfolded in both ports,
+ *  and such positions can never start a match anyway, as the needle's folded window always begins
+ *  with a full rune, never a continuation byte. AVX2 @c VPALIGNR works per 128-bit lane, so a
+ *  @c VPERM2I128 first materializes the carry.
  */
 SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_previous_bytes_(__m256i source_u8x32) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x08); // [zero, source.low]
     return _mm256_alignr_epi8(source_u8x32, carry_u8x32, 15);
 }
 
-/**
- *  @brief Shifts the 32 source bytes left by one lane, so lane `i` holds byte `i + 1`; lane 31
- *      receives zero. Vector-domain equivalent of Ice Lake's `k-mask >> 1`.
- */
+/** Shifts the 32 source bytes left by one lane, so lane @c i holds byte i + 1; lane 31 receives
+ *  zero. Vector-domain equivalent of Ice Lake's `k-mask >> 1`. */
 SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_next_bytes_(__m256i source_u8x32) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x81); // [source.high, zero]
     return _mm256_alignr_epi8(carry_u8x32, source_u8x32, 1);
 }
 
-/** @brief First N bits set; BZHI keeps `n == 32` defined, unlike the `(1 << n) − 1` idiom. */
+/** First N bits set; BZHI keeps `n == 32` defined, unlike the `(1 << n) − 1` idiom. */
 SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_haswell_mask_until_(sz_size_t n) {
     return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n);
 }
 
-/**
- *  @brief Loads up to 32 bytes through a zeroed stack buffer, never touching memory past
- *      `source + length`. The zero padding mirrors Ice Lake's `maskz` loads: zero bytes match
- *      no probe inside a valid window and trip no alarm, so tail chunks reuse the main-loop
- *      logic unchanged instead of branching into a separate epilogue.
- */
+/** Loads up to 32 bytes through a zeroed stack buffer, never touching memory past @p source +
+ *  @p length. The zero padding mirrors Ice Lake's @c maskz loads: zero bytes match no probe inside
+ *  a valid window and trip no alarm, so tail chunks reuse the main-loop logic unchanged instead of
+ *  branching into a separate epilogue. */
 SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_load_padded_ymm_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t buffer[32] = {0};
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return _mm256_lddqu_si256((__m256i const *)buffer);
 }
 
-/**
- *  @brief Loads up to 16 bytes for candidate-window verification without over-reading the
- *      haystack: the fast full load is taken whenever 16 bytes remain, and only the last few
- *      candidates near the haystack end pay for the zero-padded stack copy.
- */
+/** Loads up to 16 bytes for candidate-window verification without over-reading the haystack: the
+ *  fast full load is taken whenever 16 bytes remain, and only the last few candidates near the
+ *  haystack end pay for the zero-padded stack copy. */
 SZ_HELPER_INLINE __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t source, sz_size_t available) {
     if (available >= 16) return _mm_lddqu_si128((__m128i const *)source);
     sz_u8_t buffer[16] = {0};
@@ -96,7 +94,7 @@ SZ_HELPER_INLINE __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t sour
     return _mm_lddqu_si128((__m128i const *)buffer);
 }
 
-#pragma endregion // Shared AVX2 Helpers
+#pragma endregion Shared AVX2 Helpers
 
 #pragma region ASCII Uncased Find
 
@@ -113,11 +111,11 @@ SZ_HELPER_INLINE __m256i sz_utf8_uncased_search_haswell_ascii_fold_ymm_(__m256i 
 /**
  *  @brief 3-probe ASCII uncased search over 32-byte chunks.
  *
- *  For needles with folded_slice_length ≤ 3, probes at positions 0, mid, last cover ALL bytes
- *  of the window, so no candidate-window verification is needed - candidates go straight to
- *  head/tail validation. Unlike the Ice Lake shifted-loads variant, the chunk is folded ONCE
- *  and the probe equality masks are shifted as 32-bit `VPMOVMSKB` integers: with windows ≤ 16
- *  bytes every chunk still exposes ≥ 17 valid start positions per iteration.
+ *  For needles with @c folded_slice_length ≤ 3, probes at positions 0, mid, and last cover all
+ *  bytes of the window, so no candidate-window verification is needed - candidates go straight to
+ *  head/tail validation. Unlike the Ice Lake shifted-loads variant, the chunk is folded once and
+ *  the probe equality masks are shifted as 32-bit @c VPMOVMSKB integers: with windows ≤ 16 bytes
+ *  every chunk still exposes ≥ 17 valid start positions per iteration.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
@@ -128,7 +126,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
 
-    // For ≤3 bytes: positions 0, mid, last cover ALL positions
+    // For ≤3 bytes: positions 0, mid, last cover all positions
     // 1-byte: 0=last, 2-byte: 0,1, 3-byte: 0,1,2
     sz_size_t const offset_second = folded_window_length / 2;
     sz_size_t const offset_last = folded_window_length - 1;
@@ -174,39 +172,38 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // ASCII Uncased Find
+#pragma endregion ASCII Uncased Find
 
 #pragma region Scripted Uncased Find
 
-/** @brief Folds one YMM register of haystack text using script-specific rules. */
+/** Folds one YMM register of haystack text using script-specific rules. */
 typedef __m256i (*sz_utf8_uncased_fold_ymm_t)(__m256i text_u8x32);
 
 /**
  *  @brief Flags positions of "danger" characters that fold to a different byte width.
- *  @param load_mask Bitmask of the bytes actually loaded from the haystack, for tail-safe range checks.
+ *  @param[in] load_mask Bitmask of the bytes loaded from the haystack, for tail-safe range checks.
  */
 typedef sz_u32_t (*sz_utf8_uncased_alarm_ymm_t)(__m256i text_u8x32, sz_u32_t load_mask);
 
 /**
  *  @brief Shared scan loop behind all script-specific uncased searches.
  *
- *  Scans the entire haystack from byte 0, looking for the folded window pattern.
- *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
- *  comparison to handle variable-width folding correctly.
+ *  Scans the entire haystack from byte 0, looking for the folded window pattern. When found,
+ *  verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint comparison to
+ *  handle variable-width folding correctly.
  *
- *  Every per-script kernel is a thin wrapper passing its own @p fold and @p alarm callbacks.
- *  The driver is force-inlined into each wrapper, so the callbacks resolve to direct calls
- *  with no indirect branches in the emitted code.
+ *  Every per-script kernel is a thin wrapper passing its own @p fold and @p alarm callbacks. The
+ *  driver is force-inlined into each wrapper, so the callbacks resolve to direct calls with no
+ *  indirect branches in the emitted code.
  *
- *  Tail chunks shorter than 32 bytes are zero-padded through a stack buffer, so they take the
- *  exact main-loop path; and like on Ice Lake, two danger-scan rules preserve correctness for
- *  expanding folds ('ẞ' → "ss"): an alarmed chunk is danger-scanned in FULL (not just its valid
- *  start positions), and once fewer than `folded_window_length` bytes remain, the leftover tail
- *  gets a final danger scan - a haystack span SHORTER than the folded window can still hide a
- *  real match there.
+ *  Tail chunks shorter than 32 bytes are zero-padded through a stack buffer, so they take the exact
+ *  main-loop path; and like on Ice Lake, two danger-scan rules preserve correctness for expanding
+ *  folds ('ẞ' → "ss"): an alarmed chunk is danger-scanned in full, not just its valid start
+ *  positions, and once fewer than @c folded_window_length bytes remain, the leftover tail gets a
+ *  final danger scan - a span shorter than the folded window can still hide a real match.
  *
- *  @param fold Script-specific YMM case-folding callback.
- *  @param alarm Script-specific danger detection callback, or NULL if the script has no
+ *  @param[in] fold Script-specific YMM case-folding callback.
+ *  @param[in] alarm Script-specific danger detection callback, or @c NULL if the script has no
  *      danger characters: the danger branch disappears and the full step is used.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
@@ -225,7 +222,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
     sz_assert_(folded_window_length <= 16 && "expect folded needle part to fit in XMM registers");
 
     // Pre-load folded window into XMM; the byte-mask vector replicates Ice Lake's `maskz` window
-    // load: bytes past the window are zeroed BEFORE folding, so a lead byte at the window edge
+    // load: bytes past the window are zeroed before folding, so a lead byte at the window edge
     // never borrows fold context from haystack bytes outside the window
     sz_u32_t const folded_window_mask = sz_utf8_uncased_haswell_mask_until_(folded_window_length);
     __m128i const needle_window_u8x16 = _mm_lddqu_si128((__m128i const *)needle_metadata->folded_slice);
@@ -270,7 +267,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
             if (danger_mask) {
                 // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
                 // The whole chunk is scanned, not just `valid_starts` positions: an expanding danger
-                // character makes the haystack span SHORTER than the folded window, so a real match
+                // character makes the haystack span shorter than the folded window, so a real match
                 // can start within the window's length of the chunk end.
                 sz_cptr_t match = sz_utf8_uncased_search_in_danger_zone_( //
                     haystack, haystack_length,                            //
@@ -321,7 +318,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
         haystack_ptr += step;
     }
 
-    // Expanding danger characters ('ᾳ' folding to "αι") make the haystack span SHORTER than the
+    // Expanding danger characters ('ᾳ' folding to "αι") make the haystack span shorter than the
     // folded needle window, so a match can still start in the sub-window tail the loop never
     // probes. The tail is shorter than the 16-byte window, so the serial scan costs nothing.
     if (alarm && haystack_ptr < haystack_end) {
@@ -338,11 +335,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
     return SZ_NULL_CHAR;
 }
 
-/**
- *  @brief 4-probe ASCII uncased search: the shared scripted driver with the ASCII fold
- *      and no alarm - ASCII never changes byte width when folded, so the danger machinery
- *      compiles away entirely and the step covers every valid start position.
- */
+/** 4-probe ASCII uncased search: the shared scripted driver with the ASCII fold and no alarm -
+ *  ASCII never changes byte width when folded, so the danger machinery compiles away entirely and
+ *  the step covers every valid start position. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
     sz_cptr_t needle, sz_size_t needle_length,                           //
@@ -354,7 +349,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Scripted Uncased Find
+#pragma endregion Scripted Uncased Find
 
 #pragma region Western European Uncased Find
 
@@ -363,7 +358,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  *
  *  Handles ASCII A-Z, the Latin-1 Supplement uppercase range 'À'-'Þ' (C3 80-9E → +0x20,
- *  excluding the caseless '×' C3 97), and 'ß' (U+00DF, C3 9F) → "ss" where BOTH bytes of the
+ *  excluding the caseless '×' C3 97), and 'ß' (U+00DF, C3 9F) → "ss" where both bytes of the
  *  pair become 's' so the folded image matches the needle's "ss".
  */
 SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_western_europe_fold_ymm_(__m256i text_u8x32) {
@@ -394,19 +389,21 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_western_europe_fold_ym
  *  @brief Alarm function for Western Europe danger zone detection.
  *
  *  Detects positions where danger characters occur that require special handling:
- *  - E1 BA 96-9E: 'ẖ'-'ẞ' all expand to ASCII-led sequences when folded; the third-byte
- *    qualification matters because the rest of E1 BA covers Vietnamese letters that fold
- *    in place - flagging them blanket-style would send dense Vietnamese text into the
- *    serial danger-zone scanner on every chunk
+ *
+ *  - E1 BA 96-9E: 'ẖ'-'ẞ' all expand to ASCII-led sequences when folded
  *  - E2 84 AA/AB: 'K' (U+212A) → 'k' and 'Å' (U+212B) → 'å' (3 bytes → 1-2 bytes)
  *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
  *  - C5 BF: 'ſ' (U+017F) → 's' (2 bytes → 1 byte)
  *  - C5 B8: 'Ÿ' (U+0178) → 'ÿ' (C3 BF), crosses lead bytes
  *  - C3 9F: 'ß' (U+00DF) → "ss" (1 rune → 2 runes)
  *
- *  All pair tests run as scalar shift+AND over the compare movemasks - the same bit algebra
- *  as Ice Lake's k-masks, including the boundary behavior where a lead at lane 31 defers to
- *  the next (overlapping) chunk.
+ *  The E1 BA third-byte qualification matters because the rest of E1 BA covers Vietnamese letters
+ *  that fold in place - flagging them blanket-style would send dense Vietnamese text into the
+ *  serial danger-zone scanner on every chunk.
+ *
+ *  All pair tests run as scalar shift+AND over the compare movemasks - the same bit algebra as Ice
+ *  Lake's k-masks, including the boundary behavior where a lead at lane 31 defers to the next
+ *  chunk, which overlaps this one.
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_western_europe_alarm_ymm_(__m256i text_u8x32,
                                                                                      sz_u32_t load_mask) {
@@ -462,7 +459,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_western_europe_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Western European Uncased Find
+#pragma endregion Western European Uncased Find
 
 #pragma region Central European Uncased Find
 
@@ -470,14 +467,17 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_western_europe_( //
  *  @brief Fold a YMM register using Central European case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  *
- *  Latin-1 Supplement folds with +0x20 (C3 80-9E, except '×' C3 97); Latin Extended-A folds
- *  with +1 on a parity pattern that flips across sub-ranges:
- *  - C4 80-B7 (U+0100-U+0137): uppercase = EVEN second bytes
- *  - C4 B9-BD (U+0139-U+013D): uppercase = ODD ('Ĺ','Ļ','Ľ'); 'ĸ' (C4 B8) is caseless and
- *    'Ŀ' (C4 BF) folds across leads to 'ŀ' (C5 80), so it is routed through the alarm instead
- *  - C5 81-87 (U+0141-U+0147): uppercase = ODD ('Ł','Ń','Ņ','Ň')
- *  - C5 8A-B6 (U+014A-U+0176): uppercase = EVEN ('Ŋ'-'Ŷ')
- *  - C5 B9-BD (U+0179-U+017D): uppercase = ODD ('Ź','Ż','Ž')
+ *  Latin-1 Supplement folds with +0x20 (C3 80-9E, except '×' C3 97); Latin Extended-A folds with
+ *  +1 on a parity pattern that flips across sub-ranges:
+ *
+ *  - C4 80-B7 (U+0100-U+0137): uppercase = even second bytes
+ *  - C4 B9-BD (U+0139-U+013D): uppercase = odd ('Ĺ','Ļ','Ľ')
+ *  - C5 81-87 (U+0141-U+0147): uppercase = odd ('Ł','Ń','Ņ','Ň')
+ *  - C5 8A-B6 (U+014A-U+0176): uppercase = even ('Ŋ'-'Ŷ')
+ *  - C5 B9-BD (U+0179-U+017D): uppercase = odd ('Ź','Ż','Ž')
+ *
+ *  In the C4 B9-BD sub-range, 'ĸ' (C4 B8) is caseless and 'Ŀ' (C4 BF) folds across leads to 'ŀ' (C5
+ *  80), so it is routed through the alarm instead.
  */
 SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_central_europe_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
@@ -568,7 +568,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_central_europe_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Central European Uncased Find
+#pragma endregion Central European Uncased Find
 
 #pragma region Cyrillic Uncased Find
 
@@ -577,11 +577,15 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_central_europe_( //
  *  @sa sz_utf8_uncased_rune_safe_cyrillic_k
  *
  *  Basic Cyrillic has a clean high-nibble pattern on the second byte after a D0 lead:
- *  8x → +0x10 ('Ѐ'-'Џ' land in the D1 block), 9x → +0x20 ('А'-'П' stay under D0),
- *  Ax → −0x20 ('Р'-'Я' land in the D1 block), Bx → 0 (already lowercase). One `VPSHUFB`
- *  lookup replaces 3 range comparisons + 3 masked adds; the table is mirrored into both
- *  128-bit lanes since `VPSHUFB` works per lane. Extended Cyrillic (D2/D3) needles are
- *  BANNED at classification time, so only D0 continuations need folding.
+ *
+ *  - 8x → +0x10 ('Ѐ'-'Џ' land in the D1 block)
+ *  - 9x → +0x20 ('А'-'П' stay under D0)
+ *  - Ax → −0x20 ('Р'-'Я' land in the D1 block)
+ *  - Bx → 0 (already lowercase)
+ *
+ *  One @c VPSHUFB lookup replaces 3 range comparisons and 3 masked adds; the table is mirrored into
+ *  both 128-bit lanes since @c VPSHUFB works per lane. Extended Cyrillic (D2/D3) needles are banned
+ *  at classification time, so only the D0 continuations need any folding.
  */
 SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
@@ -610,13 +614,12 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_(__m
 /**
  *  @brief Alarm function for Cyrillic danger zone detection.
  *
- *  Basic Cyrillic itself never changes byte width when folded, and Extended Cyrillic needles
- *  (D2/D3 leads) are banned at needle-analysis time. The one haystack-side hazard is Cyrillic
- *  Extended-C: 'ᲀ'-'ᲈ' (U+1C80-1C88, E1 B2 80-88) fold INTO basic 2-byte Cyrillic letters
- *  ('в', 'д', 'о', 'с', 'т', 'ъ', 'ѣ'), so a 3-byte haystack character can match a 2-byte
- *  needle character and must go through the serial danger-zone scanner. The E1 B2 pair is
- *  absent from virtually all real Cyrillic text, so the third-byte refinement hides behind
- *  a branch and the hot path is two compares.
+ *  Basic Cyrillic itself never changes byte width when folded, and Extended Cyrillic needles (D2/D3
+ *  leads) are banned at needle-analysis time. The one haystack-side hazard is Cyrillic Extended-C:
+ *  'ᲀ'-'ᲈ' (U+1C80-1C88, E1 B2 80-88) fold into basic 2-byte Cyrillic letters ('в', 'д', 'о', 'с',
+ *  'т', 'ъ', 'ѣ'), so a 3-byte haystack character can match a 2-byte needle character and must go
+ *  through the serial danger-zone scanner. The E1 B2 pair is absent from nearly all real Cyrillic
+ *  text, so the third-byte refinement hides behind a branch and the hot path is two compares.
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_cyrillic_alarm_ymm_(__m256i text_u8x32, sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
@@ -646,7 +649,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_cyrillic_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Cyrillic Uncased Find
+#pragma endregion Cyrillic Uncased Find
 
 #pragma region Armenian Uncased Find
 
@@ -655,14 +658,15 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_cyrillic_( //
  *  @sa sz_utf8_uncased_rune_safe_armenian_k
  *
  *  Armenian uppercase spans two lead bytes and folds into three target blocks:
+ *
  *  - D4 B1-BF: 'Ա'-'Ձ' → D5 A1-AF 'ա'-'ձ' (second −0x10, lead D4 → D5)
  *  - D5 80-8F: 'Ղ'-'Տ' → D5 B0-BF 'ղ'-'տ' (second +0x30, lead unchanged)
  *  - D5 90-96: 'Ր'-'Ֆ' → D6 80-86 'ր'-'ֆ' (second −0x10, lead D5 → D6)
  *
- *  Both lead rewrites are a +1 increment (D4 → D5, D5 → D6), so the second-byte flags
- *  propagate one lane back through `next_bytes` and join the single merged offset add -
- *  all rule masks flag disjoint byte positions. The D4 range checks only the lower bound,
- *  mirroring the Ice Lake reference: valid continuation bytes never exceed BF.
+ *  Both lead rewrites are a +1 increment (D4 → D5, D5 → D6), so the second-byte flags propagate one
+ *  lane back through @c next_bytes and join the single merged offset add - all rule masks flag
+ *  disjoint byte positions. The D4 range checks only the lower bound, mirroring the Ice Lake
+ *  reference: valid continuation bytes never exceed BF.
  */
 SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_armenian_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
@@ -682,7 +686,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_armenian_fold_ymm_(__m
     __m256i is_minus_10_u8x32 = _mm256_or_si256(is_d4_upper_u8x32, is_d5_high_u8x32);
     __m256i lead_plus_one_u8x32 = sz_utf8_uncased_haswell_next_bytes_(is_minus_10_u8x32);
 
-    // Disjoint positions merge into ONE offset vector and a single add
+    // Disjoint positions merge into one offset vector and a single add
     __m256i offsets_u8x32 = _mm256_and_si256(is_minus_10_u8x32, _mm256_set1_epi8((char)0xF0));
     offsets_u8x32 = _mm256_or_si256(offsets_u8x32, _mm256_and_si256(is_d5_low_u8x32, _mm256_set1_epi8(0x30)));
     offsets_u8x32 = _mm256_or_si256(offsets_u8x32, _mm256_and_si256(lead_plus_one_u8x32, _mm256_set1_epi8(0x01)));
@@ -731,7 +735,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Armenian Uncased Find
+#pragma endregion Armenian Uncased Find
 
 #pragma region Greek Uncased Find
 
@@ -740,6 +744,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  *
  *  Monotonic Greek folds entirely on the byte after a CE/CF/C2 lead:
+ *
  *  - CE 91-9F: 'Α'-'Ο' → CE B1-BF 'α'-'ο' (second +0x20)
  *  - CE A0-A9: 'Π'-'Ω' → CF 80-89 'π'-'ω' (second −0x20, lead CE → CF)
  *  - CE 86: 'Ά' → CE AC 'ά' (second +0x26)
@@ -750,10 +755,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
  *  - CF 82: 'ς' → CF 83 'σ' (final sigma, +1)
  *  - C2 B5: 'µ' → CE BC 'μ' (micro sign joins Greek mu: lead +0x0C, second +0x07)
  *
- *  Every rule hits DISJOINT byte positions, so the per-rule deltas merge into one offset
- *  vector with AND/OR ops and a single add applies them all. All CE → CF lead rewrites are
- *  a +1 increment, propagated back from the second-byte flags through `next_bytes` like
- *  the Eszett rewrite in the Western European fold.
+ *  Every rule hits disjoint byte positions, so the per-rule deltas merge into one offset vector
+ *  with AND/OR ops and a single add applies them all. All CE → CF lead rewrites are a +1 increment,
+ *  propagated back from the second-byte flags through @c next_bytes like the Eszett rewrite in the
+ *  Western European fold.
  */
 SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_greek_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
@@ -790,7 +795,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_greek_fold_ymm_(__m256
         _mm256_or_si256(is_basic2_u8x32, is_dialytika_u8x32), _mm256_or_si256(is_8c_u8x32, is_8e_8f_u8x32)));
     __m256i micro_lead_u8x32 = sz_utf8_uncased_haswell_next_bytes_(is_micro_second_u8x32);
 
-    // Disjoint positions merge into ONE offset vector and a single add
+    // Disjoint positions merge into one offset vector and a single add
     __m256i is_minus_20_u8x32 = _mm256_or_si256(is_basic2_u8x32, is_dialytika_u8x32);
     __m256i is_plus_one_u8x32 = _mm256_or_si256(is_final_sigma_u8x32, promote_lead_u8x32);
     __m256i offsets_u8x32 = _mm256_and_si256(is_basic1_u8x32, _mm256_set1_epi8(0x20));
@@ -864,7 +869,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_greek_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Greek Uncased Find
+#pragma endregion Greek Uncased Find
 
 #pragma region Vietnamese Uncased Find
 
@@ -873,15 +878,18 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_greek_( //
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  *
  *  Vietnamese letters spread across four Latin blocks, all folding in place:
- *  - C3 80-9E: Latin-1 Supplement uppercase → +0x20, except the caseless '×' (C3 97)
- *  - C4/C5: Latin Extended-A folds with +1 keyed on continuation parity - the codepoint's
- *    low bit equals the byte's low bit. Most of the block folds EVEN seconds; the
- *    sub-ranges C4 B9-BE ('Ĺ'-'ľ') and C5 80-88 ('ŀ'-'ň') invert and fold ODD seconds
- *  - C6 A0 / C6 AF: 'Ơ' → 'ơ' and 'Ư' → 'ư' (+1)
- *  - E1 B8-BB: Latin Extended Additional folds EVEN third bytes with +1, except the
- *    expanding E1 BA 96-9F block ('ẖ'-'ẟ'), which the alarm routes to the serial scanner
  *
- *  The third-byte rule needs the byte TWO lanes back, so a second `previous_bytes` pass
+ *  - C3 80-9E: Latin-1 Supplement uppercase → +0x20, except the caseless '×' (C3 97)
+ *  - C4/C5: Latin Extended-A folds with +1 keyed on continuation parity
+ *  - C6 A0 / C6 AF: 'Ơ' → 'ơ' and 'Ư' → 'ư' (+1)
+ *  - E1 B8-BB: Latin Extended Additional folds even third bytes with +1
+ *
+ *  For C4/C5, the codepoint's low bit equals the byte's low bit. Most of the block folds even
+ *  seconds; the sub-ranges C4 B9-BE ('Ĺ'-'ľ') and C5 80-88 ('ŀ'-'ň') invert and fold odd seconds.
+ *  For E1 B8-BB, the expanding E1 BA 96-9F block ('ẖ'-'ẟ') is excluded, and the alarm routes it to
+ *  the serial scanner.
+ *
+ *  The third-byte rule needs the byte two lanes back, so a second @c previous_bytes pass
  *  materializes it; all rule masks flag disjoint positions and merge into one offset add.
  */
 SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(__m256i text_u8x32) {
@@ -898,8 +906,8 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(_
         is_after_c3_u8x32, _mm256_andnot_si256(_mm256_cmpeq_epi8(text_u8x32, _mm256_set1_epi8((char)0x97)),
                                                sz_utf8_uncased_haswell_in_byte_range_(text_u8x32, 0x80, 0x1F)));
 
-    // 2. Latin Extended-A: +1 on EVEN seconds, except the inverted sub-ranges C4 B9-BE and
-    //    C5 00-88 (the unsigned `≤ 88` bound mirrors the Ice Lake reference) which fold ODD
+    // 2. Latin Extended-A: +1 on even seconds, except the inverted sub-ranges C4 B9-BE and
+    //    C5 00-88 (the unsigned `≤ 88` bound mirrors the Ice Lake reference) which fold odd
     __m256i is_odd_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(text_u8x32, _mm256_set1_epi8(0x01)),
                                              _mm256_set1_epi8(0x01));
     __m256i is_inverted_u8x32 = _mm256_or_si256(
@@ -915,7 +923,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(_
         is_after_c6_u8x32, _mm256_or_si256(_mm256_cmpeq_epi8(text_u8x32, _mm256_set1_epi8((char)0xA0)),
                                            _mm256_cmpeq_epi8(text_u8x32, _mm256_set1_epi8((char)0xAF))));
 
-    // 4. Latin Extended Additional: EVEN third bytes after an E1 B8-BB pair → +1,
+    // 4. Latin Extended Additional: even third bytes after an E1 B8-BB pair → +1,
     //    except the expanding E1 BA 96-9F block
     __m256i is_after_e1_pair_u8x32 = _mm256_and_si256(
         _mm256_cmpeq_epi8(previous2_bytes_u8x32, _mm256_set1_epi8((char)0xE1)),
@@ -926,7 +934,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(_
     __m256i fold_e1_u8x32 = _mm256_andnot_si256(is_odd_u8x32,
                                                 _mm256_andnot_si256(is_excluded_third_u8x32, is_after_e1_pair_u8x32));
 
-    // Disjoint positions merge into ONE offset vector and a single add
+    // Disjoint positions merge into one offset vector and a single add
     __m256i is_plus_one_u8x32 = _mm256_or_si256(fold_extended_u8x32,
                                                 _mm256_or_si256(is_c6_target_u8x32, fold_e1_u8x32));
     __m256i offsets_u8x32 = _mm256_or_si256(_mm256_and_si256(is_c3_target_u8x32, _mm256_set1_epi8(0x20)),
@@ -938,20 +946,21 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(_
  *  @brief Alarm function for Vietnamese danger zone detection.
  *
  *  Detects positions where danger characters occur that require special handling:
- *  - E1 BA 96-9F: 'ẖ'-'ẟ' expand to ASCII-led sequences when folded ('ẞ' → "ss"); the
- *    third-byte qualification matters because the rest of E1 BA covers Vietnamese letters
- *    that fold in place - flagging them blanket-style would send dense Vietnamese text
- *    into the serial danger-zone scanner on every chunk
+ *
+ *  - E1 BA 96-9F: 'ẖ'-'ẟ' expand to ASCII-led sequences when folded ('ẞ' → "ss")
  *  - C3 9F: 'ß' (U+00DF) → "ss" (1 rune → 2 runes)
  *  - C5 BF: 'ſ' (U+017F) → 's' (2 bytes → 1 byte)
  *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
  *  - E2 84 AA: 'K' Kelvin sign (3 bytes → 1 byte)
  *
- *  Ice Lake qualifies the third-byte range compare with the load mask; here the driver's
- *  padded loads already zero every absent byte, and zero never lands inside [96, 9F], so
- *  the unqualified compare is exactly as safe-negative on tail chunks. Unlike the other
- *  alarms, the result is shifted back to the SEQUENCE-START positions, mirroring the
- *  Ice Lake reference bit-for-bit.
+ *  The E1 BA third-byte qualification matters because the rest of E1 BA covers Vietnamese letters
+ *  that fold in place - flagging them blanket-style would send dense Vietnamese text into the
+ *  serial danger-zone scanner on every chunk.
+ *
+ *  Ice Lake qualifies the third-byte range compare with the load mask; here the driver's padded
+ *  loads already zero every absent byte, and zero never lands inside [96, 9F], so the unqualified
+ *  compare is exactly as safe-negative on tail chunks. Unlike the other alarms, the result is
+ *  shifted back to the sequence-start positions, mirroring the Ice Lake reference bit-for-bit.
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_vietnamese_alarm_ymm_(__m256i text_u8x32,
                                                                                  sz_u32_t load_mask) {
@@ -1004,24 +1013,25 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_vietnamese_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Vietnamese Uncased Find
+#pragma endregion Vietnamese Uncased Find
 
 #pragma region Georgian Uncased Find
 
 /**
  *  @brief Alarm function for Georgian danger zone detection.
  *
- *  Georgian Mkhedruli (E1 83 xx and the tail of E1 82) is caseless, so the haystack-side
- *  hazards are the OTHER Georgian scripts, which all fold across blocks:
+ *  Georgian Mkhedruli (E1 83 xx and the tail of E1 82) is caseless, so the haystack-side hazards
+ *  are the other Georgian scripts, which all fold across blocks:
+ *
  *  - E1 B2 xx: Mtavruli uppercase, folds to Mkhedruli
  *  - E1 82 A0-E5: Asomtavruli historical uppercase, folds to Nuskhuri
  *  - E2 B4 xx: Nuskhuri, target of Asomtavruli folds
  *
- *  Modern Georgian is E1 83 leads, so neither second-byte pair matches and the kernel
- *  almost never alarms. The Asomtavruli third-byte range compare is unqualified by the
- *  load mask: the driver's padded loads zero absent bytes, and zero never lands inside
- *  [A0, E5], so tail chunks stay safe-negative. The result is shifted back to the
- *  SEQUENCE-START positions, mirroring the Ice Lake reference bit-for-bit.
+ *  Modern Georgian is E1 83 leads, so neither second-byte pair matches and the kernel almost never
+ *  alarms. The Asomtavruli third-byte range compare is unqualified by the load mask: the driver's
+ *  padded loads zero absent bytes, and zero never lands inside [A0, E5], so tail chunks stay
+ *  safe-negative. The result is shifted back to the sequence-start positions, mirroring the Ice
+ *  Lake reference bit-for-bit.
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_georgian_alarm_ymm_(__m256i text_u8x32, sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
@@ -1064,7 +1074,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_georgian_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Georgian Uncased Find
+#pragma endregion Georgian Uncased Find
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_haswell( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
@@ -1208,9 +1218,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
                 }
 
                 // Note: CA 80-BF includes both IPA Extensions (U+0280-02AF) and Spacing Modifier Letters
-                // (U+02B0-02BF). Spacing Modifier Letters CAN appear in case fold expansions:
+                // (U+02B0-02BF). Spacing Modifier Letters can appear in case fold expansions:
                 // e.g., ẚ (U+1E9A) folds to [a, ʾ] where ʾ = U+02BE is a Spacing Modifier Letter.
-                // So we must NOT exclude this range from the bicameral check.
+                // So we must not exclude this range from the bicameral check.
                 if (is_bicameral_mask & is_two_mask) return sz_utf8_find_cased_serial(text_cursor, length);
             }
 

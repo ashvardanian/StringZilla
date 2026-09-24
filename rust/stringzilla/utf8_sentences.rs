@@ -1,4 +1,7 @@
 //! UAX-29 sentence segmentation of UTF-8 text.
+//!
+//! File: rust/stringzilla/utf8_sentences.rs
+//! Author: Ash Vardanian
 
 use super::*;
 
@@ -33,7 +36,8 @@ mod tests {
     use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
     use crate::sz::*;
 
-    // A CR-LF pair and a U+2028 line separator: both Sep (force sentence and line breaks); CR-LF is one grapheme.
+    // A CR-LF pair and a U+2028 line separator: both Sep, forcing sentence and line breaks; CR-LF
+    // is one grapheme.
     const PROSE_MICRO_HARDBREAKS: &str = "A.\u{d}\u{a}B.\u{2028}C.";
 
     #[test]

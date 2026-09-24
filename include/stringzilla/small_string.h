@@ -1,25 +1,29 @@
 /**
- *  @brief Small String Optimization implemented as a C 99 structure.
  *  @file include/stringzilla/small_string.h
  *  @author Ash Vardanian
+ *  @date December 30, 2023
+ *  @brief Small String Optimization implemented as a C 99 structure.
  *
  *  Includes core APIs:
- *  - `sz_string_init`
- *  - `sz_string_init_length`
- *  - `sz_string_free`
+ *
+ *  - @c sz_string_init
+ *  - @c sz_string_init_length
+ *  - @c sz_string_free
  *
  *  Accessing the underlying string:
- *  - `sz_string_is_on_stack`
- *  - `sz_string_unpack`
- *  - `sz_string_range`
- *  - `sz_string_equal`
- *  - `sz_string_order`
+ *
+ *  - @c sz_string_is_on_stack
+ *  - @c sz_string_unpack
+ *  - @c sz_string_range
+ *  - @c sz_string_equal
+ *  - @c sz_string_order
  *
  *  Modifying the string:
- *  - `sz_string_reserve`
- *  - `sz_string_expand`
- *  - `sz_string_erase`
- *  - `sz_string_shrink_to_fit`
+ *
+ *  - @c sz_string_reserve
+ *  - @c sz_string_expand
+ *  - @c sz_string_erase
+ *  - @c sz_string_shrink_to_fit
  */
 #ifndef STRINGZILLA_SMALL_STRING_H_
 #define STRINGZILLA_SMALL_STRING_H_
@@ -35,10 +39,8 @@ extern "C" {
 
 #pragma region Core Structure
 
-/**
- *  @brief The number of bytes a stack-allocated string can hold, including the SZ_NULL termination character.
- *         ! This can't be changed from outside. Don't use the `#error` as it may already be included and set.
- */
+/** The number of bytes a stack-allocated string can hold, including the @c SZ_NULL terminator. It
+ *  can't be changed from outside, yet an `#error` is avoided, as it may already be set. */
 #ifdef SZ_STRING_INTERNAL_SPACE
 #undef SZ_STRING_INTERNAL_SPACE
 #endif
@@ -46,16 +48,17 @@ extern "C" {
 
 /**
  *  @brief Tiny memory-owning string structure with a Small String Optimization (SSO).
- *         Differs in layout from Folly, Clang, GCC, and probably most other implementations.
- *         It's designed to avoid any branches on read-only operations, and can store up
- *         to 22 characters on stack on 64-bit machines, followed by the SZ_NULL-termination character.
+ *
+ *  Differs in layout from Folly, Clang, GCC, and probably most other implementations. It's designed
+ *  to avoid any branches on read-only operations, and can store up to 22 characters on stack on
+ *  64-bit machines, followed by the @c SZ_NULL terminator.
  *
  *  @section small_string_changing_length Changing Length
  *
- *  One nice thing about this design, is that you can, in many cases, change the length of the string
- *  without any branches, invoking a `+=` or `-=` on the 64-bit `length` field. If the string is on heap,
- *  the solution is obvious. If it's on stack, inplace decrement wouldn't affect the top bytes of the string,
- *  only changing the last byte containing the length.
+ *  One nice thing about this design, is that you can, in many cases, change the length of the
+ *  string without any branches, invoking a `+=` or `-=` on the 64-bit @c length field. If the
+ *  string is on heap, the solution is obvious. If it's on stack, inplace decrement wouldn't affect
+ *  the top bytes of the string, only changing the last byte containing the length.
  */
 typedef union sz_string_t {
 
@@ -95,13 +98,10 @@ typedef union sz_string_t {
 
 } sz_string_t;
 
-/*
- *  Verify structure layout for branchless length extraction.
- *  On little-endian 64-bit: internal.length (8-bit) overlaps with LSB of external.length at offset 8.
- *  On little-endian 32-bit: internal.length (8-bit) overlaps with LSB of external.length at offset 4.
- *  On big-endian 64-bit: internal.length is at offset 31, external.length at offset 24.
- *  On big-endian 32-bit: internal.length is at offset 15, external.length at offset 12.
- */
+/*  Verify structure layout for branchless length extraction. On little-endian targets the 8-bit
+ *  internal.length overlaps the LSB of external.length, at offset 8 on 64-bit and 4 on 32-bit. On
+ *  big-endian 64-bit, internal.length is at offset 31 and external.length at 24; on big-endian
+ *  32-bit, at 15 and 12. */
 #if !SZ_AVOID_LIBC // `offsetof` comes from `stddef.h`, which is part of the C standard library.
 sz_static_assert(offsetof(sz_string_t, internal.start) == offsetof(sz_string_t, external.start),
                  Alignment_confusion_between_internal_and_external_storage);
@@ -124,114 +124,105 @@ sz_static_assert(offsetof(sz_string_t, external.length) == 12, External_length_o
 #endif
 #endif
 
-#pragma endregion // Core Structure
+#pragma endregion Core Structure
 
 #pragma region Core API
 
-/**
- *  @brief Initializes a string class instance to an empty value.
- */
+/** Initializes a string class instance to an empty value. */
 SZ_API_COMPTIME void sz_string_init(sz_string_t *string);
 
-/**
- *  @brief Convenience function checking if the provided string is stored inside of the ::string instance itself,
- *         alternative being - allocated in a remote region of the heap.
- */
+/** Checks if @p string is stored inside of the instance itself, rather than on the heap. */
 SZ_API_COMPTIME sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
 
 /**
- *  @brief Unpacks the opaque instance of a string class into its components.
- *         Recommended to use only in read-only operations.
+ *  @brief Unpacks the opaque instance of a string class into its components, best used only in
+ *      read-only operations.
  *
- *  @param string       String to unpack.
- *  @param start        Pointer to the start of the string.
- *  @param length       Number of bytes in the string, before the SZ_NULL character.
- *  @param space        Number of bytes allocated for the string (heap or stack), including the SZ_NULL character.
- *  @param is_external  Whether the string is allocated on the heap externally, or fits within ::string instance.
+ *  @param[in] string String to unpack.
+ *  @param[out] start Pointer to the start of the string.
+ *  @param[out] length Number of bytes in the string, before the @c SZ_NULL character.
+ *  @param[out] space Number of bytes allocated on heap or stack, including the @c SZ_NULL byte.
+ *  @param[out] is_external Whether the string is on the heap, or fits within the @p string itself.
  */
 SZ_API_COMPTIME void sz_string_unpack( //
     sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space, sz_bool_t *is_external);
 
 /**
- *  @brief Unpacks only the start and length of the string.
- *         Recommended to use only in read-only operations.
+ *  @brief Unpacks only the start and length of the string, best used in read-only operations.
  *
- * @param string       String to unpack.
- * @param start        Pointer to the start of the string.
- * @param length       Number of bytes in the string, before the SZ_NULL character.
+ *  @param[in] string String to unpack.
+ *  @param[out] start Pointer to the start of the string.
+ *  @param[out] length Number of bytes in the string, before the @c SZ_NULL character.
  */
 SZ_API_COMPTIME void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
 
-/**
- *  @brief Returns the length of the string in a branchless manner.
- */
+/** Returns the length of the string in a branchless manner. */
 SZ_API_COMPTIME sz_size_t sz_string_length(sz_string_t const *string);
 
 /**
- *  @brief Constructs a string of a given ::length with noisy contents.
- *         Use the returned character pointer to populate the string.
+ *  @brief Constructs a string of a given @p length with noisy contents. Use the returned character
+ *      pointer to populate the string.
  *
- *  @param string       String to initialize.
- *  @param length       Number of bytes in the string, before the SZ_NULL character.
- *  @param allocator    Memory allocator to use for the allocation.
- *  @return SZ_NULL if the operation failed, pointer to the start of the string otherwise.
+ *  @param[out] string String to initialize.
+ *  @param[in] length Number of bytes in the string, before the @c SZ_NULL character.
+ *  @param[in] allocator Memory allocator to use for the allocation.
+ *  @return @c SZ_NULL if the operation failed, pointer to the start of the string otherwise.
  */
 SZ_API_COMPTIME sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator);
 
 /**
- *  @brief Doesn't change the contents or the length of the string, but grows the available memory capacity.
- *         This is beneficial, if several insertions are expected, and we want to minimize allocations.
- *         Reserving less than the current capacity is a harmless no-op, like `std::string::reserve`.
+ *  @brief Grows the available memory capacity, without changing the contents or the length.
  *
- *  @param string       String to grow.
- *  @param new_capacity The number of characters to reserve space for, including existing ones.
- *  @param allocator    Memory allocator to use for the allocation.
- *  @return SZ_NULL if the operation failed, pointer to the new start of the string otherwise.
+ *  This is beneficial, if several insertions are expected, and we want to minimize allocations.
+ *  Reserving less than the current capacity is a harmless no-op, like @c std::string::reserve.
+ *
+ *  @param[inout] string String to grow.
+ *  @param[in] new_capacity The number of characters to reserve space for, including existing ones.
+ *  @param[in] allocator Memory allocator to use for the allocation.
+ *  @return @c SZ_NULL if the operation failed, pointer to the new start of the string otherwise.
  */
 SZ_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity,
                                            sz_memory_allocator_t *allocator);
 
 /**
- *  @brief Grows the string by adding an uninitialized region of ::added_length at the given ::offset.
- *         Would often be used in conjunction with one or more `sz_copy` calls to populate the allocated region.
- *         Similar to `sz_string_reserve`, but changes the length of the ::string.
+ *  @brief Grows the string by adding an uninitialized region of @p added_length at the given
+ *      @p offset.
  *
- *  @param string       String to grow.
- *  @param offset       Offset of the first byte to reserve space for.
- *                      If provided offset is larger than the length, it will be capped.
- *  @param added_length The number of new characters to reserve space for.
- *  @param allocator    Memory allocator to use for the allocation.
- *  @return SZ_NULL if the operation failed, pointer to the new start of the string otherwise.
+ *  Would often be used in conjunction with one or more @c sz_copy calls to populate the allocated
+ *  region. Similar to @c sz_string_reserve, but changes the length of the @p string.
+ *
+ *  @param[inout] string String to grow.
+ *  @param[in] offset Offset of the first byte to reserve space for, capped at the length.
+ *  @param[in] added_length The number of new characters to reserve space for.
+ *  @param[in] allocator Memory allocator to use for the allocation.
+ *  @return @c SZ_NULL if the operation failed, pointer to the new start of the string otherwise.
  */
 SZ_API_COMPTIME sz_ptr_t sz_string_expand( //
     sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator);
 
 /**
- *  @brief Removes a range from a string. Changes the length, but not the capacity.
- *         Performs no allocations or deallocations and can't fail.
+ *  @brief Removes a range from a string. Changes the length, but not the capacity. Performs no
+ *      allocations or deallocations and can't fail.
  *
- *  @param string       String to clean.
- *  @param offset       Offset of the first byte to remove. If >= length, no bytes are removed.
- *  @param length       Number of bytes to remove. Out-of-bound ranges will be capped.
- *  @return Number of bytes removed (0 if offset >= string length).
+ *  @param[inout] string String to clean.
+ *  @param[in] offset Offset of the first byte to remove; at or past the length, nothing is removed.
+ *  @param[in] length Number of bytes to remove. Out-of-bound ranges will be capped.
+ *  @return Number of bytes removed, zero if @p offset ≥ the string length.
  */
 SZ_API_COMPTIME sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
 
 /**
- *  @brief Shrinks the string to fit the current length, if it's allocated on the heap.
- *         It's the reverse operation of ::sz_string_reserve.
+ *  @brief Shrinks the string to fit the current length, if it's allocated on the heap. It's the
+ *      reverse operation of @ref sz_string_reserve.
  *
- *  @param string       String to shrink.
- *  @param allocator    Memory allocator to use for the allocation.
- *  @return Whether the operation was successful. The only failures can come from the allocator.
- *          On failure, the string will remain unchanged.
+ *  @param[inout] string String to shrink.
+ *  @param[in] allocator Memory allocator to use for the allocation.
+ *  @return Whether the operation was successful. The only failures can come from the allocator, and
+ *      leave the string unchanged.
  */
 SZ_API_COMPTIME sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
 
-/**
- *  @brief Frees the string, if it's allocated on the heap.
- *         If the string is on the stack, the function clears/resets the state.
- */
+/** Frees the string, if it's allocated on the heap, and resets its state either way. */
 SZ_API_COMPTIME void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
 
 #pragma endregion
@@ -484,7 +475,7 @@ SZ_API_COMPTIME void sz_string_free(sz_string_t *string, sz_memory_allocator_t *
     sz_string_init(string);
 }
 
-#pragma endregion // Serial Implementation
+#pragma endregion Serial Implementation
 
 #ifdef __cplusplus
 }

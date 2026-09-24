@@ -1,43 +1,40 @@
 /**
- *  @brief  Helper structures and functions for C++ unit- and stress-tests.
- *  @file   test/stringzilla.hpp
+ *  @file test/stringzilla.hpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date January 7, 2024
+ *  @brief Helper structures and functions for C++ unit- and stress-tests.
  *
  *  @section test_environment_variables Environment Variables
  *
- *  The test infrastructure supports the following environment variables for reproducible
- *  stress testing and fuzzing:
+ *  The test infrastructure supports the following environment variables for reproducible stress
+ *  testing and fuzzing:
  *
- *  - `SZ_TESTS_SEED` : Seed for the random number generator. If not set, a random seed is
- *    generated using `std::random_device`. The actual seed used is always
- *    printed at startup for reproducibility.
- *  - `SZ_TESTS_MULTIPLIER` : Multiplier for stress-test iteration counts. Defaults to 1.0.
- *    Each test has its own baseline iteration count tuned for its
- *    operation complexity. This multiplier scales all baselines
- *    proportionally (e.g., 0.1 for quick smoke tests, 10 for
- *    thorough CI fuzzing).
- *  - `SZ_TESTS_FILTER` : ECMAScript regex matched against test names; only matching tests run
- *    (e.g. `SZ_TESTS_FILTER=utf8`). Unset or empty runs everything. Honored by `run_test`.
+ *  - @c SZ_TESTS_SEED : Seed for the random number generator. If not set, a random seed is
+ *    generated using @c std::random_device. The seed used is always printed at startup, so any
+ *    run can be reproduced.
+ *  - @c SZ_TESTS_MULTIPLIER : Multiplier for stress-test iteration counts, 1.0 by default. It
+ *    scales each test's own baseline, e.g. 0.1 for quick smoke tests, 10 for thorough CI fuzzing.
+ *  - @c SZ_TESTS_FILTER : ECMAScript regex matched against test names; only matching tests run,
+ *    e.g. `SZ_TESTS_FILTER=utf8`. Unset or empty runs everything. Honored by @c run_test.
  *
  *  @section test_driver_tiers Driver Tiers
  *
  *  A driver's suffix states what it costs and what it may assume, so the name answers both without
- *  reading the body. A family names its drivers `test_<family>_<tier>`, or `test_<family>_<operation>_<tier>`
- *  where one family covers several operations - `substrings` counts, finds, rewrites and scores, and each
- *  wants its own tiers. Helpers that are not drivers take a `check_` prefix and a trailing underscore, and
- *  are never registered in a `main`.
+ *  reading the body. A family names its drivers `test_<family>_<tier>`, or
+ *  `test_<family>_<operation>_<tier>` where one family covers several operations - @c substrings
+ *  counts, finds, rewrites and scores, and each wants its own tiers. Helpers that are not drivers
+ *  take a @c check_ prefix and a trailing underscore, and are never registered in a @c main.
  *
- *  - `_unit`        Known-answer vectors against an external ground truth. Fixed cost: it must run
- *                   identically at every `SZ_TESTS_MULTIPLIER`, so no randomness and no sweeps.
- *  - `_equivalence` A reference against a candidate over generated corpora - serial against each compiled
- *                   backend, or the library against `std::`. This tier owns randomness.
- *  - `_safety`      Malformed, adversarial and boundary inputs. Asserts survival, bounds and stated
- *                   refusals - never answers, since a wrong answer is not what is under test here.
- *                   Scales with `SZ_TESTS_MULTIPLIER` alongside `_equivalence`; only `_unit` is pinned.
- *  - `_all`         Walks the family's backend table and drives the tiers above. Holds no assertions
- *                   of its own; a literal here belongs in `_unit`.
- *  - `_rules`       Annex rule coverage, where a family transcribes a published spec (UAX-29, UAX-14).
+ *  - @c _unit : Known-answer vectors against an external ground truth. Fixed cost: it must run
+ *    identically at every @c SZ_TESTS_MULTIPLIER, so no randomness and no sweeps.
+ *  - @c _equivalence : A reference against a candidate over generated corpora - serial against
+ *    each compiled backend, or the library against `std::`. This tier owns randomness.
+ *  - @c _safety : Malformed, adversarial and boundary inputs. Asserts survival, bounds and stated
+ *    refusals - never answers, since a wrong answer is not what is under test here. Scales with
+ *    @c SZ_TESTS_MULTIPLIER alongside @c _equivalence; only @c _unit is pinned.
+ *  - @c _all : Walks the family's backend table and drives the tiers above. Holds no assertions
+ *    of its own; a literal here belongs in @c _unit.
+ *  - @c _rules : Annex rule coverage, where a family transcribes a published spec: UAX-29, UAX-14.
  *
  *  @section test_example_usage Example Usage
  *
@@ -93,7 +90,8 @@ namespace ashvardanian {
 namespace stringzilla {
 namespace test {
 
-/** One operand of a failed comparison, cut at a few hundred bytes so a megabyte string cannot drown the report. */
+/** One operand of a failed comparison, cut at a few hundred bytes so a megabyte string cannot drown
+ *  the report printed on failure. */
 template <typename value_type_>
 std::string render_operand(value_type_ const &value) {
     std::string rendered;
@@ -114,10 +112,10 @@ std::string render_operand(value_type_ const &value) {
     return rendered;
 }
 
-/** The bytes of @p text, space-separated, printing a hex dump under `{:02X}`. */
+/** The bytes of @p text, space-separated, printing a hex dump under @c {:02X}. */
 inline auto hex_bytes(std::string_view text) noexcept { return fmt::join(std::as_bytes(std::span(text)), " "); }
 
-/** The state of one `verify`: the operands of its leftmost comparison, rendered only if that comparison fails. */
+/** The state of one @c verify: its leftmost comparison's operands, rendered only if it fails. */
 struct assertion_t {
     std::string expansion;
 
@@ -128,7 +126,7 @@ struct assertion_t {
     }
 };
 
-/** The left operand of a `verify` condition, awaiting the comparison that decides whether it is worth rendering. */
+/** Left operand of a @c verify, awaiting the comparison that decides whether to render it. */
 template <typename left_type_>
 struct left_operand {
     assertion_t &assertion;
@@ -176,7 +174,7 @@ struct left_operand {
 #endif
 };
 
-/** Binds tighter than every comparison, so `assertion <= a == b` captures `a` before `==` sees it. */
+/** Binds tighter than any comparison, so `assertion <= a == b` captures @c a before @c == runs. */
 template <typename left_type_>
 left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &value) noexcept {
     return {assertion, value};
@@ -186,11 +184,9 @@ left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &va
 } // namespace stringzilla
 } // namespace ashvardanian
 
-/**
- *  @brief Test-suite verification - always active, regardless of `NDEBUG` or `SZ_DEBUG`. Unlike `sz_assert_`,
- *         which is a debug-only invariant check for the library, a test's oracle must never be a no-op.
- *         A failing comparison prints both of its operands.
- */
+/** Test-suite verification - always active, regardless of @c NDEBUG or @c SZ_DEBUG. Unlike
+ *  @c sz_assert_, a debug-only invariant check for the library, a test's oracle must never be a
+ *  no-op. A failing comparison prints both of its operands. */
 #define verify(condition)                                                                      \
     do {                                                                                       \
         ::ashvardanian::stringzilla::test::assertion_t sz_assertion_;                          \
@@ -200,8 +196,8 @@ left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &va
 /**
  *  @brief One case whose subject has to be named before it can be asserted on, scoped to the case.
  *
- *  Prefer it wherever a bare `verify` would need a preceding declaration that outlives its one use:
- *  a run of these reads as a table of cases, where the same run written longhand reads as prose.
+ *  Prefer it wherever a bare @c verify would need a preceding declaration that outlives its one
+ *  use: a run of these reads as a table of cases, the same run written longhand as prose.
  */
 #define let_verify(init, condition) \
     do {                            \
@@ -209,8 +205,8 @@ left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &va
         verify(condition);          \
     } while (0)
 
-/** @brief As `let_verify`, when the subject must also be acted on before the assertion holds - a mutation
- *         whose result is the subject itself, so there is nothing for the condition to bind. */
+/** As @c let_verify, when the subject must also be acted on before the assertion holds - a mutation
+ *  whose result is the subject itself, so there is nothing for the condition to bind. */
 #define scope_verify(init, operation, condition) \
     do {                                         \
         init;                                    \
@@ -218,8 +214,8 @@ left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &va
         verify(condition);                       \
     } while (0)
 
-/** @brief That @p expression throws @p exception_type. The only assertion whose subject is the failure,
- *         so a passing call - or one that throws something else - is the defect it reports. */
+/** That @p expression throws @p exception_type. The only assertion whose subject is the failure,
+ *  so a passing call - or one that throws something else - is the defect it reports. */
 #define throws_verify(expression, exception_type) \
     do {                                          \
         bool threw = false;                       \
@@ -232,21 +228,21 @@ left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &va
         verify(threw);                            \
     } while (0)
 
-#pragma endregion // Assertion Helpers
+#pragma endregion Assertion Helpers
 
 #pragma region Backend Tables
 
 /**
  *  @brief Reports which backend broke a check, then aborts through the suite's oracle.
  *  @param[in] name The row's spelling in its family's backend table.
- *  @param[in] what What the row disagreed with - its oracle, its known answer, or the reference backend.
+ *  @param[in] what What the row disagreed with: its oracle, known answer, or reference backend.
  */
 inline void fail_backend_(char const *name, char const *what) noexcept {
     fmt::println(stderr, "Backend {} failed: {}", name, what);
     verify(false && "A backend disagreed with its oracle, its known answer, or the reference");
 }
 
-/** @brief The row named @p name, so a reordering cannot silently hand the differential a new reference. */
+/** The row named @p name, so a reordering cannot silently hand the differential a new reference. */
 template <typename backend_type_, std::size_t count_>
 backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], char const *name) {
     for (std::size_t index = 0; index != count_; ++index)
@@ -255,7 +251,7 @@ backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], cha
     return backends[0];
 }
 
-#pragma endregion // Backend Tables
+#pragma endregion Backend Tables
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -274,10 +270,11 @@ using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 #endif
 
 #if SZ_USE_CUDA
+
 /**
- *  @brief Page-locked host memory, which the driver reports as host and every engine therefore refuses.
+ *  @brief Page-locked host memory, which the driver reports as host and every engine refuses.
  *
- *  A third memory kind beside unified and device, and the one a caller is most likely to expect to work.
+ *  A third memory kind beside unified and device, and the one a caller most expects to work.
  */
 template <typename value_type_>
 using pinned_vector = std::vector<value_type_, pinned_alloc<value_type_>>;
@@ -285,15 +282,15 @@ using pinned_vector = std::vector<value_type_, pinned_alloc<value_type_>>;
 /**
  *  @brief Plain device memory a kernel can write and the host cannot touch.
  *
- *  `safe_vector` is what the engines already store device-resident scratch in, and its
- *  `try_resize_uninitialized` is the only growth a non-host-accessible allocator admits.
+ *  @c safe_vector is what the engines already store device-resident scratch in, and its
+ *  @c try_resize_uninitialized is the only growth a non-host-accessible allocator admits.
  */
 template <typename value_type_>
 using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
 
 /**
- *  @brief Drains a device-resident buffer into @p destination, forwarding whatever the driver reported.
- *  @param[out] destination At least as many elements as @p source holds; only that prefix is written.
+ *  @brief Drains a device-resident buffer into @p destination, forwarding the driver's status.
+ *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
  */
 template <typename value_type_>
 inline CUresult copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
@@ -306,7 +303,7 @@ inline CUresult copy_device_to_host(device_vector<value_type_> const &source, sp
 /**
  *  @brief Copies @p texts into unified memory a CUDA kernel can reach, as one span per string.
  *
- *  Owns the bytes the spans point into, so it has to outlive every call that reads `view()`.
+ *  Owns the bytes the spans point into, so it has to outlive every call that reads @c view().
  */
 struct unified_texts_t {
     std::vector<unified_vector<char>> storage;
@@ -322,10 +319,8 @@ struct unified_texts_t {
     span<span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
 };
 
-/**
- *  @brief Reads a file into a string via LibC `<cstdio>`. A non-zero @p max_bytes stops the read after
- *         that many bytes, so the file tail is never touched.
- */
+/** Reads a file into a string via LibC @c <cstdio>. A non-zero @p max_bytes stops the read after
+ *  that many bytes, so the file tail is never touched. */
 inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexcept(false) {
     std::FILE *file = std::fopen(path.c_str(), "rb");
     if (!file) throw std::runtime_error("Failed to open file: " + path);
@@ -346,8 +341,8 @@ inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexce
 /**
  *  @brief Returns the seed used for the global random number generator.
  *
- *  If `SZ_TESTS_SEED` is set, returns its value. Otherwise, generates a random seed
- *  using `std::random_device`. The seed is cached after the first call.
+ *  If @c SZ_TESTS_SEED is set, returns its value. Otherwise, generates a random seed using
+ *  @c std::random_device. The seed is cached after the first call.
  */
 inline std::mt19937::result_type global_random_seed() noexcept {
     static std::mt19937::result_type seed = []() {
@@ -360,7 +355,7 @@ inline std::mt19937::result_type global_random_seed() noexcept {
     return seed;
 }
 
-/** @brief Returns true if the seed was set via environment variable. */
+/** Returns true if the seed was set via environment variable. */
 inline bool global_random_seed_from_env() noexcept {
     char const *seed_env = std::getenv("SZ_TESTS_SEED");
     return seed_env && seed_env[0] != '\0';
@@ -369,8 +364,8 @@ inline bool global_random_seed_from_env() noexcept {
 /**
  *  @brief Returns a reference to the global random number generator.
  *
- *  The generator is seeded once using `global_random_seed()`, which respects the
- *  `SZ_TESTS_SEED` environment variable for reproducible testing.
+ *  The generator is seeded once using @c global_random_seed(), which respects the @c SZ_TESTS_SEED
+ *  environment variable for reproducible testing.
  */
 inline std::mt19937 &global_random_generator() noexcept {
     static std::mt19937 generator(global_random_seed());
@@ -380,8 +375,8 @@ inline std::mt19937 &global_random_generator() noexcept {
 /**
  *  @brief Returns the multiplier for stress-test iteration counts.
  *
- *  Reads from the `SZ_TESTS_MULTIPLIER` environment variable. Defaults to 1.0.
- *  Use values < 1.0 for quick smoke tests, > 1.0 for thorough stress testing in CI.
+ *  Reads from the @c SZ_TESTS_MULTIPLIER environment variable. Defaults to 1.0. Use values < 1.0
+ *  for quick smoke tests, > 1.0 for thorough stress testing in CI.
  */
 inline double get_iterations_multiplier() noexcept {
     static double multiplier = []() {
@@ -399,11 +394,12 @@ inline double get_iterations_multiplier() noexcept {
  *  @brief Scales a baseline iteration count by the global multiplier.
  *
  *  Use this to wrap hardcoded iteration counts in stress tests, e.g.:
+ *
  *  @code{.cpp}
  *  for (std::size_t i = 0; i < scale_iterations(1000); ++i) { ... }
  *  @endcode
  *
- *  @param baseline The default number of iterations for this test.
+ *  @param[in] baseline The default number of iterations for this test.
  *  @return The scaled iteration count, guaranteed to be at least 1.
  */
 inline std::size_t scale_iterations(std::size_t baseline) noexcept {
@@ -411,10 +407,8 @@ inline std::size_t scale_iterations(std::size_t baseline) noexcept {
     return scaled < 1.0 ? 1 : static_cast<std::size_t>(scaled);
 }
 
-/**
- *  @brief Baseline for a loop whose work grows with the square of its trip count - a sweep over lengths that
- *         re-scans a growing buffer, say - so that doubling the multiplier doubles the work, not quadruples it.
- */
+/** Baseline for a loop whose work grows with the square of its trip count, like a sweep over
+ *  lengths that re-scans a growing buffer, so doubling the multiplier only doubles the work. */
 inline std::size_t scale_iterations_quadratic(std::size_t baseline) noexcept {
     std::size_t const work = scale_iterations(baseline * baseline);
     std::size_t bound = 1;
@@ -422,26 +416,24 @@ inline std::size_t scale_iterations_quadratic(std::size_t baseline) noexcept {
     return bound;
 }
 
-/**
- *  @brief The @p step -th value of a rotation over @p count items that also advances a phase each full turn, so
- *         crossing it with another rotation of the same length still reaches every pair.
- */
+/** The @p step -th value of a rotation over @p count items that also advances a phase each full
+ *  turn, so crossing it with another rotation of the same length still reaches every pair. */
 inline std::size_t rotating_index(std::size_t step, std::size_t count) noexcept {
     return count ? (step + step / count) % count : 0;
 }
 
-/** @brief Views a C array as a `sz::span`, so tables pass as one argument and keep their length attached. */
+/** Views a C array as a @c sz::span, so tables pass as one argument with their length. */
 template <typename value_type_, std::size_t count_>
 constexpr span<value_type_ const> span_over(value_type_ const (&array)[count_]) noexcept {
     return span<value_type_ const>(array, count_);
 }
 
 /**
- *  @brief Step for walking an exhaustive space, so `SZ_TESTS_MULTIPLIER` dials sweeps as well as loops.
+ *  @brief Step for walking an exhaustive space, so the multiplier dials sweeps as well as loops.
  *
- *  Striding rather than truncating keeps the far end of the space - where the window-edge cases live -
- *  reachable at a low multiplier. The sweep becomes complete at the `10x` stress point rather than at the
- *  default, so a default run samples every space and a stress run covers them.
+ *  Striding rather than truncating keeps the far end of the space - where the window-edge cases
+ *  live - reachable at a low multiplier. The sweep becomes complete at the 10× stress point rather
+ *  than at the default, so a default run samples every space and a stress run covers them.
  */
 inline std::size_t sweep_stride(std::size_t complete) noexcept {
     double const coverage = get_iterations_multiplier() / 10.0;
@@ -456,12 +448,12 @@ inline string_type_ to_str(other_string_type_ const &other) noexcept {
 }
 
 /**
- *  @brief A uniform distribution of characters, with a given alphabet size.
- *         The alphabet size is the number of distinct characters in the distribution.
+ *  @brief A uniform distribution of characters, with a given alphabet size: the number of distinct
+ *      characters in the distribution.
  *
- *  We can't use `std::uniform_int_distribution<char>` because `char` overload is not supported by some platforms.
- *  MSVC, for example, requires one of `short`, `int`, `long`, `long long`, `unsigned short`, `unsigned int`,
- *  `unsigned long`, or `unsigned long long`.
+ *  We can't use `std::uniform_int_distribution<char>` because the @c char overload is not supported
+ *  by some platforms. MSVC, for example, requires one of @c short, @c int, @c long, `long long`,
+ *  `unsigned short`, `unsigned int`, `unsigned long`, or `unsigned long long`.
  */
 struct uniform_u8_distribution_t {
     std::uniform_int_distribution<std::uint32_t> distribution;
@@ -501,7 +493,7 @@ inline std::string repeat(std::string const &patten, std::size_t count) noexcept
 
 /**
  *  @brief Randomly slices a string into consecutive parts and passes those to @p slice_callback.
- *  @warning Is @b single-threaded in nature, as it depends on the `global_random_generator`.
+ *  @warning Is @b single-threaded in nature, as it depends on the @c global_random_generator.
  */
 template <typename slice_callback_type_>
 inline void iterate_in_random_slices(std::string const &text, slice_callback_type_ &&slice_callback) noexcept {
@@ -516,9 +508,10 @@ inline void iterate_in_random_slices(std::string const &text, slice_callback_typ
 
 /**
  *  @brief Invokes @p body with a writable buffer placed at each of a representative spread of
- *         sub-cache-line byte offsets, so SIMD kernels are exercised at every alignment.
- *  @param usable_length Minimum number of writable bytes guaranteed past the passed pointer.
- *  @param body Callable as `body(sz_ptr_t pointer, std::size_t offset)`; the buffer is zero-filled per offset.
+ *      sub-cache-line byte offsets, so SIMD kernels are exercised at every alignment.
+ *  @param[in] usable_length Minimum number of writable bytes guaranteed past the passed pointer.
+ *  @param[in] body Callable as `body(sz_ptr_t pointer, std::size_t offset)`; the buffer is
+ *      zero-filled per offset.
  */
 template <typename body_type_>
 inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&body) noexcept {
@@ -533,10 +526,11 @@ inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&b
 }
 
 /**
- *  @brief Runs @p body on a @p length -byte writable buffer flanked by canary bytes on both sides, then
- *         asserts the guards are intact - catching out-of-bounds writes from a kernel under adversarial input.
- *  @param length Number of usable bytes handed to @p body.
- *  @param body Callable as `body(sz_ptr_t pointer, std::size_t length)`; the buffer is canary-filled per call.
+ *  @brief Runs @p body on a @p length -byte buffer flanked by canary bytes on both sides, then
+ *      asserts the guards are intact, catching out-of-bounds writes on adversarial inputs.
+ *  @param[in] length Number of usable bytes handed to @p body.
+ *  @param[in] body Callable as `body(sz_ptr_t pointer, std::size_t length)`; the buffer is
+ *      canary-filled per call.
  */
 template <typename body_type_>
 inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) noexcept {
@@ -551,8 +545,8 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) noexcept
     }
 }
 
-/** @brief An allocator refusing every request, for asserting a kernel reports `sz_bad_alloc_k` and leaves its
- *         outputs alone. */
+/** An allocator refusing every request, for asserting a kernel reports @c sz_bad_alloc_k and leaves
+ *  its outputs alone. */
 inline sz_memory_allocator_t refusing_allocator_() noexcept {
     sz_memory_allocator_t refusing;
     refusing.allocate = +[](sz_size_t, void *) -> void * { return nullptr; };
@@ -562,10 +556,10 @@ inline sz_memory_allocator_t refusing_allocator_() noexcept {
 }
 
 /**
- *  @brief Splits @p alphabet into its UTF-8 characters, so a multi-byte alphabet still generates valid text.
+ *  @brief Splits @p alphabet into its UTF-8 characters, so a multi-byte alphabet yields valid text.
  *
- *  A character runs from a lead byte to the last continuation byte after it, which needs no decoder and leaves
- *  an ASCII alphabet one character per byte.
+ *  A character runs from a lead byte to the last continuation byte after it, which needs no decoder
+ *  and leaves an ASCII alphabet one character per byte.
  */
 inline std::vector<std::string> alphabet_characters(std::string const &alphabet) noexcept(false) {
     auto const continues_character = [&](std::size_t offset) {
@@ -581,7 +575,7 @@ inline std::vector<std::string> alphabet_characters(std::string const &alphabet)
     return characters;
 }
 
-/** @brief Concatenates @p length characters drawn uniformly from @p characters. */
+/** Concatenates @p length characters drawn uniformly from @p characters. */
 inline std::string random_string(std::size_t length, std::vector<std::string> const &characters) noexcept(false) {
     std::uniform_int_distribution<std::size_t> distribution(0, characters.size() - 1);
     std::string result;
@@ -589,17 +583,17 @@ inline std::string random_string(std::size_t length, std::vector<std::string> co
     return result;
 }
 
-/** @brief Reads the start of a member string, for `sz_sequence_t` views over a `std::vector<std::string>`. */
+/** Reads a member string start, for @c sz_sequence_t views over a `std::vector<std::string>`. */
 inline sz_cptr_t sequence_get_start_(void const *handle, sz_sorted_idx_t index) {
     return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].data();
 }
 
-/** @brief Reads the length of a member string, for `sz_sequence_t` views over a `std::vector<std::string>`. */
+/** Reads a member string length, for @c sz_sequence_t views over a `std::vector<std::string>`. */
 inline sz_size_t sequence_get_length_(void const *handle, sz_sorted_idx_t index) {
     return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].size();
 }
 
-/** @brief Fills an `sz_sequence_t` view over a `std::vector<std::string>` via the shared accessor helpers. */
+/** Fills an @c sz_sequence_t view over a `std::vector<std::string>` via the shared accessors. */
 inline sz_sequence_t sequence_from_(std::vector<std::string> const &strings) {
     sz_sequence_t sequence;
     sequence.handle = &strings;
@@ -718,10 +712,10 @@ inline int log_environment() {
 }
 
 /**
- *  @brief Prints test environment configuration (seed and multiplier).
+ *  @brief Prints test environment configuration: seed and multiplier.
  *
- *  Call this at the start of main() to display test configuration alongside
- *  other environment info. Format matches capability flags style.
+ *  Call this at the start of @c main() to display test configuration alongside other environment
+ *  info. Format matches capability flags style.
  */
 inline void print_test_environment() noexcept {
     auto seed = global_random_seed();
@@ -732,12 +726,10 @@ inline void print_test_environment() noexcept {
     std::fflush(stdout); // Ensure output is visible even on crash
 }
 
-#pragma region - Test Runner
+#pragma region Test Runner
 
-/**
- *  @brief Prints a backtrace on a fatal signal, so a crashing/aborting kernel self-localizes
- *         instead of dying silently - especially under output redirection in CI.
- */
+/** Prints a backtrace on a fatal signal, so a crashing/aborting kernel self-localizes instead of
+ *  dying silently - especially under output redirection in CI. */
 inline void test_fatal_signal_handler(int signal_number) noexcept {
     fmt::println(stderr, "\n*** Fatal signal {} - backtrace follows ***", signal_number);
 #if defined(__linux__) && defined(__GLIBC__)
@@ -749,10 +741,8 @@ inline void test_fatal_signal_handler(int signal_number) noexcept {
     std::raise(signal_number);
 }
 
-/**
- *  @brief Installs SIGSEGV/SIGABRT backtrace handlers and line-buffers stdout.
- *         Shared by the serial (`.cpp`) and CUDA (`.cu`) test entry points; call once from `main`.
- */
+/** Installs SIGSEGV/SIGABRT backtrace handlers and line-buffers stdout. Shared by the serial
+ *  @c .cpp and CUDA @c .cu test entry points; call once from @c main. */
 inline void install_test_signal_handlers() noexcept {
     // Line-buffer, so progress survives a crash under output redirection.
     // Size must be nonzero: Windows ucrt fast-fails on a zero-sized buffering mode.
@@ -762,11 +752,11 @@ inline void install_test_signal_handlers() noexcept {
 }
 
 /**
- *  @brief Returns true if a test named @p name should run, honoring the `SZ_TESTS_FILTER` regex.
+ *  @brief Returns true if a test named @p name should run, honoring the @c SZ_TESTS_FILTER regex.
  *
- *  `SZ_TESTS_FILTER` is an ECMAScript regular expression matched against the test name (e.g.
+ *  @c SZ_TESTS_FILTER is an ECMAScript regular expression matched against the test name, e.g.
  *  `SZ_TESTS_FILTER=fingerprint` runs only the rolling-hasher tests, skipping the slower similarity
- *  suite). An empty or unset filter runs everything; an invalid pattern runs everything rather than
+ *  suite. An empty or unset filter runs everything; an invalid pattern runs everything rather than
  *  silently skipping the whole suite.
  */
 inline bool test_should_run(char const *name) noexcept {
@@ -786,9 +776,10 @@ inline bool test_should_run(char const *name) noexcept {
 /**
  *  @brief Reseeds the global generator from the global seed and a test name.
  *
- *  Mixing happens in `std::seed_seq`, whose output the standard specifies exactly, rather than in `sz_hash` or
- *  `std::hash`. The harness must not draw its inputs through the kernels it validates, and it must land on the
- *  same stream everywhere, or `SZ_TESTS_SEED=7` stops meaning the same bytes on Arm as it does on x86.
+ *  Mixing happens in @c std::seed_seq, whose output the standard specifies exactly, rather than in
+ *  @c sz_hash or @c std::hash. The harness must not draw its inputs through the kernels it
+ *  validates, and it must land on the same stream everywhere, or `SZ_TESTS_SEED=7` stops meaning
+ *  the same bytes on Arm as it does on x86.
  */
 inline void seed_generator_for_test(char const *name) noexcept {
     std::vector<std::uint32_t> entropy {static_cast<std::uint32_t>(global_random_seed())};
@@ -799,12 +790,12 @@ inline void seed_generator_for_test(char const *name) noexcept {
 }
 
 /**
- *  @brief Runs one named test: honors `SZ_TESTS_FILTER`, wall-clock times it, and reports the outcome.
- *  @return The number of failures (0 on success or when skipped, 1 on a thrown exception).
+ *  @brief Runs one named test: honors @c SZ_TESTS_FILTER, times it, and reports the outcome.
+ *  @return The number of failures: 0 on success or when skipped, 1 on a thrown exception.
  *
- *  Hard failures via `sz_assert_` abort the process (and self-localize through the installed signal
- *  handler); this wrapper additionally turns thrown exceptions into a localized, named failure instead
- *  of a bare `what()` at the top of `main`, and surfaces per-test durations so slow tests are obvious.
+ *  Hard failures via @c sz_assert_ abort the process and self-localize through the installed signal
+ *  handler; this wrapper also turns thrown exceptions into a localized, named failure instead of a
+ *  bare @c what() at the top of @c main, and surfaces per-test durations to expose slow tests.
  */
 template <typename function_type_>
 inline std::size_t run_test(char const *name, function_type_ &&test_function) noexcept {
@@ -832,14 +823,14 @@ inline std::size_t run_test(char const *name, function_type_ &&test_function) no
     return 0;
 }
 
-#pragma endregion - Test Runner
+#pragma endregion Test Runner
 
 } // namespace test
 } // namespace stringzilla
 } // namespace ashvardanian
 
-/*  Cross-translation-unit test declarations. These live at global scope to match the TU definitions;
- *  the using-declaration makes `scale_iterations` visible for the default arguments below. */
+/*  Cross-translation-unit test declarations. These live at global scope to match the TU
+ *  definitions; the using-declaration exposes @c scale_iterations to the default arguments. */
 using ashvardanian::stringzilla::test::scale_iterations;
 
 #pragma region Basic Utilities
@@ -851,7 +842,7 @@ void test_strings_tape_overflow_unit();
 void test_allocator_unit();
 void test_byteset_unit();
 
-#pragma endregion // Basic Utilities
+#pragma endregion Basic Utilities
 
 #pragma region Hashing
 
@@ -860,7 +851,7 @@ void test_hash_safety();
 void test_hash_all();
 void test_hash_multiseed_all();
 
-#pragma endregion // Hashing
+#pragma endregion Hashing
 
 #pragma region Ciphers
 
@@ -868,9 +859,9 @@ void test_cipher_unit();
 void test_cipher_safety();
 void test_cipher_all();
 
-#pragma endregion // Ciphers
+#pragma endregion Ciphers
 
-#pragma region UTF-8
+#pragma region UTF8
 
 void test_utf8_runes_unit();
 void test_utf8_runes_scripts_unit();
@@ -903,9 +894,9 @@ void test_utf8_delimiters_unit();
 void test_utf8_delimiters_safety();
 void test_utf8_delimiters_all();
 
-#pragma endregion // UTF-8
+#pragma endregion UTF8
 
-#pragma region Uncased UTF-8
+#pragma region Uncased UTF8
 
 void test_uncased_unit();
 void test_uncased_scripts_unit();
@@ -913,7 +904,7 @@ void test_uncased_regressions_unit();
 void test_uncased_all();
 void test_uncased_safety();
 
-#pragma endregion // Uncased UTF-8
+#pragma endregion Uncased UTF8
 
 #pragma region String Class and STL Compatibility
 
@@ -943,7 +934,7 @@ void test_string_reserve_unit();
 void test_memory_stability_equivalence(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100));
 void test_string_updates_equivalence(std::size_t repetitions = 1024);
 
-#pragma endregion // String Class and STL Compatibility
+#pragma endregion String Class and STL Compatibility
 
 #pragma region Search and Comparison
 
@@ -955,7 +946,7 @@ void test_find_all();
 void test_find_misaligned_equivalence();
 void test_lookup_equivalence(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
 
-#pragma endregion // Search and Comparison
+#pragma endregion Search and Comparison
 
 #pragma region Sequence Algorithms
 
@@ -975,4 +966,4 @@ void test_substrings_unit();
 void test_substrings_all();
 void test_substrings_safety();
 
-#pragma endregion // Sequence Algorithms
+#pragma endregion Sequence Algorithms

@@ -1,7 +1,9 @@
 /**
- *  @brief Haswell (AVX2) backend for UTF-8 case folding.
  *  @file include/stringzilla/utf8_uncased_fold/haswell.h
  *  @author Ash Vardanian
+ *  @date June 12, 2026
+ *  @brief Haswell (AVX2) backend for UTF-8 case folding.
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_HASWELL_H_
@@ -22,28 +24,30 @@ extern "C" {
 #endif
 
 /**
- *  @brief Detects bytes in the unsigned range [range_start, range_start + range_length).
- *      AVX2 has no unsigned byte compares, so `(x − start) ≤ limit` is realized as
- *      `min_epu8(x − start, limit) == x − start`: the wrap-around subtraction maps the range
- *      onto [0, limit] and `VPMINUB` + `VPCMPEQB` realize the unsigned `≤` in two single-uop
- *      instructions - cheaper and clearer than the sign-flip `VPXOR` + `VPCMPGTB` alternative.
+ *  @brief Detects bytes at most @p range_length − 1 above @p range_start, compared unsigned.
+ *
+ *  AVX2 has no unsigned byte compares, so `(x − start) ≤ limit` is realized as
+ *  `min(x − start, limit) = x − start`: the wrap-around subtraction maps the range onto [0, limit],
+ *  and the @c VPMINUB and @c VPCMPEQB pair realizes the unsigned ≤ in two single-uop instructions,
+ *  cheaper and clearer than the sign-flip pair of @c VPXOR and @c VPCMPGTB.
  */
 SZ_HELPER_INLINE __m256i sz_haswell_in_byte_range_(__m256i values_u8x32, sz_u8_t range_start, sz_u8_t range_length) {
     __m256i offsets_u8x32 = _mm256_sub_epi8(values_u8x32, _mm256_set1_epi8((char)range_start));
     return _mm256_cmpeq_epi8(_mm256_min_epu8(offsets_u8x32, _mm256_set1_epi8((char)(range_length - 1))), offsets_u8x32);
 }
 
-/** @brief Folds ASCII A-Z to a-z across the whole vector via a masked +0x20 (no `VPBLENDVB` needed). */
+/** Folds ASCII A-Z to a-z across the whole vector via a masked +0x20, with no @c VPBLENDVB. */
 SZ_HELPER_INLINE __m256i sz_haswell_fold_ascii_(__m256i source_u8x32) {
     __m256i is_ascii_upper_u8x32 = sz_haswell_in_byte_range_(source_u8x32, 'A', 26);
     return _mm256_add_epi8(source_u8x32, _mm256_and_si256(is_ascii_upper_u8x32, _mm256_set1_epi8(0x20)));
 }
 
 /**
- *  @brief Shifts the 32 source bytes right by @p byte_offset lanes, so lane `i` holds byte `i − offset`.
- *      Positions before the chunk receive zeros - safe, because the main loop always advances by whole
- *      characters, so a chunk never starts with a continuation byte that would need its true predecessor.
- *      AVX2 `VPALIGNR` works per 128-bit lane, so a `VPERM2I128` first materializes the cross-lane carry.
+ *  @brief Shifts the source bytes right by @p byte_offset lanes, so lane i holds byte i − offset.
+ *
+ *  Positions before the chunk receive zeros - safe, because the main loop always advances by whole
+ *  characters, so a chunk never starts with a continuation byte that needs its true predecessor.
+ *  AVX2 @c VPALIGNR works per 128-bit lane, so a @c VPERM2I128 first builds the cross-lane carry.
  */
 SZ_HELPER_INLINE __m256i sz_haswell_previous_bytes_(__m256i source_u8x32, int byte_offset) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x08); // [zero, source.low]
@@ -51,28 +55,27 @@ SZ_HELPER_INLINE __m256i sz_haswell_previous_bytes_(__m256i source_u8x32, int by
                             : _mm256_alignr_epi8(source_u8x32, carry_u8x32, 14);
 }
 
-/**
- *  @brief Shifts the 32 source bytes left by one lane, so lane `i` holds byte `i + 1`.
- *      Lane 31 receives zero; any 2-byte lead there is trimmed as incomplete before folding anyway.
- */
+/** Shifts the 32 source bytes left by one lane, so lane i holds byte i + 1. Lane 31 receives zero;
+ *  any 2-byte lead there is trimmed as incomplete before folding anyway. */
 SZ_HELPER_INLINE __m256i sz_haswell_next_bytes_(__m256i source_u8x32) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x81); // [source.high, zero]
     return _mm256_alignr_epi8(carry_u8x32, source_u8x32, 1);
 }
 
-/** @brief First N bits set; BZHI keeps `n == 32` defined, unlike the `(1 << n) − 1` idiom. */
+/** First @p n bits set; BZHI keeps n = 32 defined, unlike the `(1 << n) − 1` idiom. */
 SZ_HELPER_INLINE sz_u32_t sz_haswell_mask_until_(sz_size_t n) { return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n); }
 
 /**
  *  @brief Folds a 32-byte chunk of caseless multi-byte scripts mixed with ASCII.
- *      Folds ASCII A-Z in place and copies everything else, truncating before the first lead of
- *      a case-aware family and trimming incomplete trailing sequences. Stores a full 32-byte
- *      vector and reports how many bytes were consumed: the destination is contractually ≥ 3×
- *      the source, so the overshoot is always in bounds and the next chunk's store (or the
- *      serial tail) overwrites it.
- *  @param is_foreign_lead_mask Lead bytes outside the caseless family: the chunk is truncated
- *      before the first such lead, so Hebrew or CJK text with an embedded Latin or Cyrillic
- *      word still copies its longest caseless prefix vectorized.
+ *
+ *  Folds ASCII A-Z in place and copies everything else, truncating before the first lead of a
+ *  case-aware family and trimming incomplete trailing sequences. Stores a full 32-byte vector and
+ *  reports how many bytes were consumed: the destination is contractually ≥ 3× the source, so the
+ *  overshoot is always in bounds and the next chunk's store (or the serial tail) overwrites it.
+ *
+ *  @param[in] is_foreign_lead_mask Lead bytes outside the caseless family: the chunk is truncated
+ *      before the first such lead, so Hebrew or CJK text with an embedded Latin or Cyrillic word
+ *      still copies its longest caseless prefix vectorized.
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
@@ -94,29 +97,29 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
 }
 
 /**
- *  @brief Folds a 32-byte chunk of Latin text in place: ASCII, Latin-1 Supplement (C2-C3),
- *      Latin Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set
- *      of German, Czech, Vietnamese, and most other Latin-script languages.
+ *  @brief Folds a 32-byte chunk of Latin text in place: ASCII, Latin-1 Supplement (C2-C3), Latin
+ *      Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set of German,
+ *      Czech, Vietnamese, and most other Latin-script languages.
  *
- *  Latin Extended folding is parity-based: uppercase codepoints fold to the adjacent codepoint,
- *  and the codepoint's low bit lives in the last byte of its UTF-8 sequence, so the fold is an
- *  in-place masked +1. Where Ice Lake reads per-codepoint deltas from `VPERMB` tables, AVX2
- *  re-derives them arithmetically: within C4 and C5 the foldable continuations form a few
- *  contiguous even-parity or odd-parity runs, so two or three range compares per lead replace the
- *  table. C6 (Latin Ext-B 'ƀ'-'ƿ') is too fragmented for ranges - 16 scattered +1 pairs and 20
- *  irregulars - so its two 64-entry membership bitsets are decomposed into 16-entry `VPSHUFB`
- *  nibble lookups: `bitmap[low_nibble] & (1 << high_quadrant)` tests membership in five ops,
- *  versus ~12 compares for the explicit ranges. Irregular codepoints (those that expand, shrink,
- *  or fold across lead bytes) and foreign E1 sub-families (Georgian, Greek Extended) truncate the
- *  chunk before the character's lead and route one rune to the serial fallback.
+ *  Latin Extended folding is parity-based: uppercase codepoints fold to the adjacent codepoint, and
+ *  the codepoint's low bit lives in the last byte of its UTF-8 sequence, so the fold is an in-place
+ *  masked +1. Where Ice Lake reads per-codepoint deltas from @c VPERMB tables, AVX2 re-derives them
+ *  arithmetically: within C4 and C5 the foldable continuations form a few contiguous even-parity or
+ *  odd-parity runs, so two or three range compares per lead replace the table. C6 (Latin Ext-B
+ *  'ƀ'-'ƿ') is too fragmented for ranges - 16 scattered +1 pairs and 20 irregulars - so its two
+ *  64-entry membership bitsets are decomposed into 16-entry @c VPSHUFB nibble lookups:
+ *  `bitmap[low_nibble] & (1 << high_quadrant)` tests membership in five ops, versus ~12 compares
+ *  for the explicit ranges. Irregular codepoints (those that expand, shrink, or fold across lead
+ *  bytes) and foreign E1 sub-families (Georgian, Greek Extended) truncate the chunk before the
+ *  character's lead and route one rune to the serial fallback.
  *
  *  All folds are applied across the full vector and a full 32-byte store is issued; lanes at or
  *  beyond the consumed length hold garbage that the next chunk's store overwrites (the destination
  *  is contractually ≥ 3× the source, so the overshoot stays in bounds).
  *
- *  @param is_foreign_lead_mask Lead bytes outside this handler's families: the chunk is truncated
- *      before the first such lead, so mixed-script chunks still fold their longest pure prefix
- *      vectorized instead of degrading to one-rune serial steps per chunk.
+ *  @param[in] is_foreign_lead_mask Lead bytes outside this handler's families: the chunk is
+ *      truncated before the first such lead, so mixed-script chunks still fold their longest pure
+ *      prefix vectorized instead of degrading to one-rune serial steps per chunk.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
@@ -274,26 +277,28 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
 }
 
 /**
- *  @brief Folds a 32-byte chunk of basic Cyrillic (D0/D1 leads, U+0400-045F) mixed with ASCII -
- *      the working set of Russian, Ukrainian, Bulgarian, and Serbian text.
+ *  @brief Folds a 32-byte chunk of basic Cyrillic (D0/D1 leads, U+0400-045F) mixed with ASCII - the
+ *      working set of Russian, Ukrainian, Bulgarian, and Serbian text.
  *
- *  The uppercase block maps onto the lowercase block with offsets keyed purely by the second
- *  byte's high nibble, so one `VPSHUFB` over a 16-entry table replaces three range compares
- *  plus three masked adds:
+ *  The uppercase block maps onto the lowercase block with offsets keyed purely by the second byte's
+ *  high nibble, so one @c VPSHUFB over a 16-entry table replaces what would otherwise take three
+ *  range compares plus three masked adds:
  *
- *  Input Range | Codepoints        | Output           | Transform
- *  D0 80-8F    | Ѐ-Џ (U+0400-040F) | D1 90-9F (ѐ-џ)   | second +0x10, lead D0 → D1
- *  D0 90-9F    | А-П (U+0410-041F) | D0 B0-BF (а-п)   | second +0x20
- *  D0 A0-AF    | Р-Я (U+0420-042F) | D1 80-8F (р-я)   | second −0x20, lead D0 → D1
- *  D0 B0-BF    | а-п lowercase     | unchanged        | high nibble B → offset 0
- *  D1 80-9F    | р-џ lowercase     | unchanged        | only after-D0 lanes take offsets
- *  D1 A0+      | Ext-A (U+0460+)   | → serial         | +1 parity folds, not modeled here
+ *  @verbatim
+ *  Input Range  Codepoints         Output          Transform
+ *  D0 80-8F     Ѐ-Џ (U+0400-040F)  D1 90-9F (ѐ-џ)  second +0x10, lead D0 → D1
+ *  D0 90-9F     А-П (U+0410-041F)  D0 B0-BF (а-п)  second +0x20
+ *  D0 A0-AF     Р-Я (U+0420-042F)  D1 80-8F (р-я)  second −0x20, lead D0 → D1
+ *  D0 B0-BF     а-п lowercase      unchanged       high nibble B → offset 0
+ *  D1 80-9F     р-џ lowercase      unchanged       only after-D0 lanes take offsets
+ *  D1 A0+       Ext-A (U+0460+)    → serial        +1 parity folds, not modeled here
+ *  @endverbatim
  *
- *  The D0 → D1 lead fixup is a masked +1 (D0 + 1 = D1), keeping the no-`VPBLENDVB` discipline.
- *  Cyrillic Extended-A and foreign-family leads (Russian quotes «» are C2, dashes are E2)
- *  truncate the chunk before the offending lead, so mixed chunks still fold their longest
- *  pure prefix vectorized. A full 32-byte store is issued; lanes at or beyond the consumed
- *  length are overwritten by the next chunk's store (the destination is ≥ 3× the source).
+ *  The D0 → D1 lead fixup is a masked +1 (D0 + 1 = D1), keeping the discipline of no @c VPBLENDVB.
+ *  Cyrillic Extended-A and foreign-family leads (Russian quotes «» are C2, dashes are E2) truncate
+ *  the chunk before the offending lead, so mixed chunks still fold their longest pure prefix
+ *  vectorized. A full 32-byte store is issued; lanes at or beyond the consumed length are
+ *  overwritten by the next chunk's store (the destination is ≥ 3× the source).
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
@@ -349,16 +354,18 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
  *
  *  Greek CE/CF uppercase → lowercase transformations:
  *
- *  Input Range  | Codepoints        | Output           | Transform
- *  CE 91-9F     | Α-Ο (U+0391-039F) | CE B1-BF (α-ο)   | second +0x20
- *  CE A0-A1     | Π-Ρ (U+03A0-03A1) | CF 80-81 (π-ρ)   | second −0x20, lead CE → CF
- *  CE A3-AB     | Σ-Ϋ (U+03A3-03AB) | CF 83-8B (σ-ϋ)   | second −0x20, lead CE → CF
- *  CE B1-BF     | α-ο lowercase     | unchanged        | —
- *  CF 80-8B     | π-ϋ lowercase     | unchanged        | —
- *  CF 82        | ς final sigma     | CF 83 (σ)        | second +1
+ *  @verbatim
+ *  Input Range  Codepoints         Output          Transform
+ *  CE 91-9F     Α-Ο (U+0391-039F)  CE B1-BF (α-ο)  second +0x20
+ *  CE A0-A1     Π-Ρ (U+03A0-03A1)  CF 80-81 (π-ρ)  second −0x20, lead CE → CF
+ *  CE A3-AB     Σ-Ϋ (U+03A3-03AB)  CF 83-8B (σ-ϋ)  second −0x20, lead CE → CF
+ *  CE B1-BF     α-ο lowercase      unchanged       —
+ *  CF 80-8B     π-ϋ lowercase      unchanged       —
+ *  CF 82        ς final sigma      CF 83 (σ)       second +1
+ *  @endverbatim
  *
  *  CE A2 (U+03A2, unassigned) is deliberately neither folded nor flagged. The fold-side
- *  exclusion set is narrower than the finder's: only sequences whose FOLD is irregular leave
+ *  exclusion set is narrower than the finder's: only sequences whose fold is irregular leave
  *  the fast path - CE 80-90 (tonos and accented capitals with non-uniform offsets), CE B0
  *  ('ΰ', which expands to three codepoints), and CF 8C+ (accented lowercase and archaic
  *  symbols like 'ϐ'/'ϑ' that fold onto basic letters) and foreign-family leads truncate the
@@ -425,32 +432,33 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
 }
 
 /**
- *  @brief Folds a 32-byte chunk of Georgian (E1 82/83 leads, U+10A0-10FF) mixed with ASCII -
- *      the working set of Georgian text.
+ *  @brief Folds a 32-byte chunk of Georgian (E1 82/83 leads, U+10A0-10FF) mixed with ASCII - the
+ *      working set of Georgian text.
  *
- *  Georgian uppercase (Mtavruli/Asomtavruli) lives in two E1 82/83 ranges that fold by
- *  rewriting all three bytes; the lowercase Mkhedruli letters under E1 82/83 are identity-folding
- *  and copy through unchanged:
+ *  Georgian uppercase (Mtavruli/Asomtavruli) lives in two E1 82/83 ranges that fold by rewriting
+ *  all three bytes, while lowercase Mkhedruli letters under E1 82/83 fold to themselves:
  *
- *  Input Range  | Codepoints           | Output             | Transform
- *  E1 82 A0-BF  | Ⴀ-Ⴟ (U+10A0-10BF)    | E2 B4 80-9F (ⴀ-ⴟ)  | lead E1 → E2, second 82 → B4, third −0x20
- *  E1 83 80-85  | Ⴠ-Ⴥ (U+10C0-10C5)    | E2 B4 A0-A5 (ⴠ-ⴥ)  | lead E1 → E2, second 83 → B4, third +0x20
- *  E1 83 87     | Ⴧ (U+10C7)           | E2 B4 A7 (ⴧ)       | lead E1 → E2, second 83 → B4, third +0x20
- *  E1 83 8D     | Ⴭ (U+10CD)           | E2 B4 AD (ⴭ)       | lead E1 → E2, second 83 → B4, third +0x20
- *  E1 82/83 …   | Mkhedruli lowercase  | unchanged          | —
+ *  @verbatim
+ *  Input Range  Codepoints           Output             Transform
+ *  E1 82 A0-BF  Ⴀ-Ⴟ (U+10A0-10BF)    E2 B4 80-9F (ⴀ-ⴟ)  lead E1 → E2, second 82 → B4, third −0x20
+ *  E1 83 80-85  Ⴠ-Ⴥ (U+10C0-10C5)    E2 B4 A0-A5 (ⴠ-ⴥ)  lead E1 → E2, second 83 → B4, third +0x20
+ *  E1 83 87     Ⴧ (U+10C7)           E2 B4 A7 (ⴧ)       lead E1 → E2, second 83 → B4, third +0x20
+ *  E1 83 8D     Ⴭ (U+10CD)           E2 B4 AD (ⴭ)       lead E1 → E2, second 83 → B4, third +0x20
+ *  E1 82/83 …   Mkhedruli lowercase  unchanged          —
+ *  @endverbatim
  *
  *  Every fold is a 3-byte → 3-byte rewrite, so it stays in place. The uppercase classification
- *  lives at the third byte, so the masked deltas are derived there and propagated one and two
- *  lanes back (via `next_bytes`) to the second and lead bytes - mirroring the Armenian finder's
- *  `next_bytes` flag propagation. The lead rewrite E1 → E2 is a masked +1; the second rewrites
- *  82 → B4 (+0x32) and 83 → B4 (+0x31) are masked adds, keeping the no-`VPBLENDVB` discipline.
+ *  lives at the third byte, so the masked deltas are derived there and propagated one and two lanes
+ *  back (via @c next_bytes) to the second and lead bytes - mirroring the Armenian finder's @c
+ *  next_bytes flag propagation. The lead rewrite E1 → E2 is a masked +1; the second rewrites 82 →
+ *  B4 (+0x32) and 83 → B4 (+0x31) are masked adds, keeping the discipline of no @c VPBLENDVB.
  *
- *  This handler runs AFTER the Latin handler, which already consumes E1 B8-BB (Latin Extended
- *  Additional). Non-Georgian E1 sub-families - Greek Extended (E1 BC-BF) and any other E1
- *  second byte - and foreign-family leads truncate the chunk before the offending lead, so a
- *  mixed chunk still folds its longest pure Georgian prefix vectorized. A full 32-byte store is
- *  issued; lanes at or beyond the consumed length are overwritten by the next chunk's store
- *  (the destination is ≥ 3× the source).
+ *  This handler runs after the Latin handler, which already consumes E1 B8-BB (Latin Extended
+ *  Additional). Non-Georgian E1 sub-families - Greek Extended (E1 BC-BF) and any other E1 second
+ *  byte - and foreign-family leads truncate the chunk before the offending lead, so a mixed chunk
+ *  still folds its longest pure Georgian prefix vectorized. A full 32-byte store is issued; lanes
+ *  at or beyond the consumed length are overwritten by the next chunk's store, since the
+ *  destination holds at least 3× the source.
  *
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
@@ -516,18 +524,19 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
 }
 
 /**
- *  @brief Folds a 32-byte chunk mixing ASCII with caseless and guarded 3-byte scripts -
- *      CJK with E2 punctuation, German quotes („…“), Korean, and similar real-world blends.
+ *  @brief Folds a 32-byte chunk mixing ASCII with caseless and guarded 3-byte scripts - CJK with E2
+ *      punctuation, German quotes („…“), Korean, and similar real-world blends.
  *
- *  The guarded leads (E2, EA) are case-aware only for specific second bytes, so the chunk
- *  is a fold-ASCII-and-copy as long as every guarded sequence is provably caseless:
- *    - E2 is safe for seconds 80-83 (General Punctuation - quotes, dashes, ellipses);
- *      other E2 blocks (84 Letterlike Kelvin/Angstrom, B0-B3 Glagolitic/Coptic, …) fold;
- *    - EA is safe except seconds 99-9F (Cyrillic Ext-B, Latin Ext-D) and AD-AE (Cherokee
- *      Supplement) - Hangul (EA B0+) passes untouched;
- *    - EF is never safe: fullwidth A-Z lives under EF BC and folds by +0x20.
- *  The first unsafe or foreign-family lead truncates the chunk in place - no walk-back
- *  needed, the flagged lane IS the lead - and one rune goes to the serial fallback.
+ *  The guarded leads (E2, EA) are case-aware only for specific second bytes, so the chunk is a
+ *  fold-ASCII-and-copy as long as every guarded sequence is provably caseless:
+ *  - E2 is safe for seconds 80-83 (General Punctuation - quotes, dashes, ellipses); other E2 blocks
+ *    (84 Letterlike Kelvin/Angstrom, B0-B3 Glagolitic/Coptic, …) fold;
+ *  - EA is safe except seconds 99-9F (Cyrillic Ext-B, Latin Ext-D) and AD-AE (Cherokee Supplement),
+ *    while Hangul (EA B0+) passes untouched;
+ *  - EF is never safe: fullwidth A-Z lives under EF BC and folds by +0x20.
+ *
+ *  The first unsafe or foreign-family lead truncates the chunk in place - no walk-back needed, the
+ *  flagged lane IS the lead - and one rune goes to the serial fallback.
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
@@ -571,22 +580,25 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
  *  Armenian uppercase spans two lead bytes and folds into three target blocks, and the D4 lead
  *  additionally carries the Cyrillic Supplement, whose uppercase folds by +1 parity:
  *
- *  Input Range  | Codepoints           | Output             | Transform
- *  D4 80-AF     | Ԁ-ԯ (U+0500-052F)    | even +1 (Ԁ→ԁ …)    | even second byte +1 (Cyrillic Supplement)
- *  D4 B1-BF     | Ա-Ձ (U+0531-0541)    | D5 A1-AF (ա-ձ)     | second −0x10, lead D4 → D5
- *  D5 80-8F     | Ղ-Տ (U+0542-054F)    | D5 B0-BF (ղ-տ)     | second +0x30, lead unchanged
- *  D5 90-96     | Ր-Ֆ (U+0550-0556)    | D6 80-86 (ր-ֆ)     | second −0x10, lead D5 → D6
- *  D6 87        | և (U+0587)           | → serial           | folds to "եւ" (4 bytes) - expands
+ *  @verbatim
+ *  Input Range  Codepoints         Output             Transform
+ *  D4 80-AF     Ԁ-ԯ (U+0500-052F)  even +1 (Ԁ → ԁ …)  even second byte +1 (Cyrillic Supplement)
+ *  D4 B1-BF     Ա-Ձ (U+0531-0541)  D5 A1-AF (ա-ձ)     second −0x10, lead D4 → D5
+ *  D5 80-8F     Ղ-Տ (U+0542-054F)  D5 B0-BF (ղ-տ)     second +0x30, lead unchanged
+ *  D5 90-96     Ր-Ֆ (U+0550-0556)  D6 80-86 (ր-ֆ)     second −0x10, lead D5 → D6
+ *  D6 87        և (U+0587)         → serial           folds to "եւ" (4 bytes) - expands
+ *  @endverbatim
  *
- *  Both −0x10 classes also bump their lead by one block (D4 → D5, D5 → D6), realized as a masked
- *  +1; the +0x30 class leaves its lead unchanged. The Armenian classification lives at the second
- *  byte, so the lead +1 flag propagates one lane back via `next_bytes`, mirroring the case-
- *  insensitive Armenian finder's `..._armenian_fold_ymm_`. The Ech-Yiwn ligature 'և' (D6 87) is
- *  the only D4-D6 codepoint whose fold changes byte length, so its lead truncates the chunk and
+ *  Both −0x10 classes also bump their lead by one block (D4 → D5, D5 → D6), through a masked +1,
+ *  while the +0x30 class leaves its lead unchanged. The Armenian classification lives at the second
+ *  byte, so the lead +1 flag propagates one lane back via @c next_bytes, mirroring the
+ *  case-insensitive Armenian finder's `..._armenian_fold_ymm_`. The Ech-Yiwn ligature 'և' (D6 87)
+ *  is the only D4-D6 codepoint whose fold changes byte length, so its lead truncates the chunk and
  *  routes one rune to the serial fallback. Non-Armenian complex leads (Cyrillic Extension D2-D3,
  *  IPA/Ext-B C7-CD, 4-byte F0+) and foreign-family leads truncate before their lead, so a mixed
  *  chunk still folds its longest pure prefix vectorized. A full 32-byte store is issued; lanes at
- *  or beyond the consumed length are overwritten by the next chunk's store (destination ≥ 3× source).
+ *  or beyond the consumed length are overwritten by the next chunk's store, since the destination
+ *  holds at least 3× the source.
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
@@ -652,7 +664,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
  *  @brief Folds a 32-byte chunk of supplementary-plane 4-byte sequences (F0-F4 leads) mixed
  *      with ASCII - emoji-rich text and historic scripts.
  *
- *  Every supplementary-plane codepoint WITH case folding (Deseret, Osage, Warang Citi, Adlam,
+ *  Every supplementary-plane codepoint with case folding (Deseret, Osage, Warang Citi, Adlam,
  *  Garay, Medefaidrin, archaic Latin/Greek extensions, …) lives below U+1F000, i.e. its UTF-8
  *  second byte is < 0x9F under an F0 lead. Sequences whose second byte is ≥ 0x9F - all emoji
  *  and everything in planes 2+ - are caseless and copy through unchanged, with only the mixed
@@ -687,11 +699,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
     return fold_length;
 }
 
-/**
- *  @brief Per-chunk lead-byte classification: the family-presence flags plus every per-family and
- *      per-width lead mask the handler dispatch consumes, kept in one struct so the entrypoint loop
- *      reads as a single classify-then-dispatch step instead of an inlined compare tree.
- */
+/** Per-chunk lead-byte classification: the family-presence flags plus every per-family and
+ *  per-width lead mask the handler dispatch consumes, kept in one struct so the entrypoint loop
+ *  reads as a single classify-then-dispatch step instead of an inlined compare tree. */
 typedef struct sz_utf8_uncased_fold_haswell_leads_t {
     sz_u8_t lead_families;
     sz_u32_t is_lead_mask;
@@ -713,9 +723,10 @@ typedef struct sz_utf8_uncased_fold_haswell_leads_t {
 
 /**
  *  @brief Classifies the lead bytes of a non-ASCII 32-byte chunk into folding families.
- *      One range compare per family, each reduced via `VPMOVMSKB`, then OR-folded into the same
- *      flag byte the Ice Lake `VPERMB` LUT produces. The caseless family merges D7-DF and E0 into
- *      one contiguous D7-E0 span.
+ *
+ *  One range compare per family, each reduced via @c VPMOVMSKB, then OR-folded into the same flag
+ *  byte the Ice Lake @c VPERMB LUT produces. The caseless family merges D7-DF and E0 into one
+ *  contiguous D7-E0 span.
  */
 SZ_HELPER_INLINE sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell_classify_leads_(
     __m256i source_u8x32, sz_u32_t is_non_ascii_mask) {
@@ -758,16 +769,17 @@ SZ_HELPER_INLINE sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswe
         ((leads.is_greek_lead_mask != 0) << 4) | ((leads.is_e1_lead_mask != 0) << 5) |
         ((leads.is_guarded_lead_mask != 0) << 6) | ((leads.is_complex_lead_mask != 0) << 7));
 
-    // Well-formedness mirror of `sz_rune_decode`, computed branchlessly so the family handlers
-    // can treat overlong, surrogate, truncated, and out-of-range leads as foreign and resync one byte
+    // Well-formedness mirror of `sz_rune_decode`, computed branchlessly so the family handlers can
+    // treat overlong, surrogate, truncated, and out-of-range leads as foreign and resync one byte
     // at a time - byte-for-byte with the serial reference. A lead is well-formed iff its declared
     // continuations follow (the continuation mask shifted down by 1/2/3 and ANDed with the matching
-    // width mask) AND it is not in the bad-special set: C0/C1, F5..FF, E0 with 2nd < 0xA0 (overlong),
-    // ED with 2nd >= 0xA0 (surrogate), F0 with 2nd < 0x90 (overlong), F4 with 2nd >= 0x90 (> U+10FFFF).
-    // C0/C1 and F5..FF carry no width bit, so they never enter the width-keyed accept set and need no
-    // explicit subtraction. At the chunk boundary the down-shift reads zeros past lane 31, so a
-    // multi-byte lead whose continuations spill into the next chunk reads as malformed; this coincides
-    // exactly with the existing incomplete-sequence trim, so valid output is unchanged.
+    // width mask) and it is not in the bad-special set: C0/C1, F5..FF, E0 with 2nd < 0xA0
+    // (overlong), ED with 2nd ≥ 0xA0 (surrogate), F0 with 2nd < 0x90 (overlong), F4 with 2nd ≥ 0x90
+    // (> U+10FFFF). C0/C1 and F5..FF carry no width bit, so they never enter the width-keyed accept
+    // set and need no explicit subtraction. At the chunk boundary the down-shift reads zeros past
+    // lane 31, so a multi-byte lead whose continuations spill into the next chunk reads as
+    // malformed; this coincides exactly with the existing incomplete-sequence trim, so valid output
+    // stays exactly the same.
     __m256i second_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
     sz_u32_t e0_bad_second_mask = (sz_u32_t)_mm256_movemask_epi8(
         _mm256_and_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xE0)),
@@ -796,12 +808,13 @@ SZ_HELPER_INLINE sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswe
 
 /**
  *  @brief Routes a classified 32-byte chunk through the family handlers and stores the fold.
- *      Dispatch triggers on family PRESENCE, not exclusivity: every handler truncates at the first
- *      lead outside its families, so a mixed chunk still folds its longest matching prefix
- *      vectorized. Without this, one foreign byte - a « quote in Russian, an — dash in German -
- *      poisons ~16 consecutive windows into one-rune serial steps, halving real-corpus throughput.
- *      A handler that cannot fold even the first character returns zero and falls through to the
- *      next family.
+ *
+ *  Dispatch triggers on family presence, not exclusivity: every handler truncates at the first lead
+ *  outside its families, so a mixed chunk still folds its longest matching prefix vectorized.
+ *  Without this, one foreign byte - a « quote in Russian, an — dash in German - poisons ~16
+ *  consecutive windows into one-rune serial steps, halving real-corpus throughput. A handler that
+ *  cannot fold even its first character returns zero and falls through to the next family.
+ *
  *  @return Bytes consumed and written, or zero if every handler declined the chunk.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
@@ -862,12 +875,14 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
 
 /**
  *  @brief Folds a single rune from @p source into @p target for chunks no handler accepted.
- *      With ≥ 32 source bytes still available, a complete (≤ 4-byte) sequence is guaranteed.
- *      Validates with `sz_rune_decode` so a malformed lead - the only reason the vector
- *      handlers decline a multi-byte sequence - copies one byte through unchanged and resyncs,
- *      byte-for-byte with the serial reference.
- *  @param source_end Pointer one past the last readable source byte.
- *  @param rune_length Receives the number of source bytes consumed.
+ *
+ *  With ≥ 32 source bytes still available, a complete (≤ 4-byte) sequence is guaranteed. Validates
+ *  with @c sz_rune_decode so a malformed lead - the only reason the vector handlers decline a
+ *  multi-byte sequence - copies one byte through unchanged and resyncs, byte-for-byte with the
+ *  serial reference implementation.
+ *
+ *  @param[in] source_end Pointer one past the last readable source byte.
+ *  @param[out] rune_length Receives the number of source bytes consumed.
  *  @return Bytes written to @p target (Unicode case folding produces at most 3 runes).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cptr_t source, sz_cptr_t source_end,
@@ -903,7 +918,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_size
         __m256i source_u8x32 = _mm256_lddqu_si256((__m256i const *)source);
         sz_u32_t is_non_ascii_mask = (sz_u32_t)_mm256_movemask_epi8(source_u8x32);
 
-        // FAST PATH: pure ASCII chunks - the most common case for English and many other
+        // Fast path: pure ASCII chunks - the most common case for English and many other
         // Latin-script texts - skip all classification work
         if (is_non_ascii_mask == 0) {
             _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));

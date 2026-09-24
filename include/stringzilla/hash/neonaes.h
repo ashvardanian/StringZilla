@@ -1,7 +1,9 @@
 /**
- *  @brief NEON + AES backend for string hashing and checksums.
  *  @file include/stringzilla/hash/neonaes.h
  *  @author Ash Vardanian
+ *  @date March 9, 2025
+ *  @brief NEON + AES backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_NEONAES_H_
@@ -24,19 +26,19 @@ extern "C" {
 #endif
 
 /**
- *  @brief Emulates the Intel's AES-NI `AESENC` instruction on Arm NEON.
- *  @see "Emulating x86 AES Intrinsics on ARMv8-A" by Michael Brase:
- *       https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
+ *  @brief Emulates the Intel's AES-NI @c AESENC instruction on Arm NEON.
+ *  @see Emulating x86 AES Intrinsics on ARMv8-A by Michael Brase: https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
  */
 SZ_HELPER_INLINE uint8x16_t sz_emulate_aesenc_u8x16_neon_(uint8x16_t state_u8x16, uint8x16_t round_key_u8x16) {
     return veorq_u8(vaesmcq_u8(vaeseq_u8(state_u8x16, vdupq_n_u8(0))), round_key_u8x16);
 }
 
 /**
- *  @brief Emulates the Intel's AES-NI `AESENC` instruction on Arm NEON, operating on u64x2 registers.
+ *  @brief Emulates the Intel's AES-NI @c AESENC instruction on Arm NEON, operating
+ *      on u64x2 registers.
  *
- *  @param state_u64x2 128-bit AES state represented as two 64-bit lanes.
- *  @param round_key_u64x2 128-bit round key represented as two 64-bit lanes.
+ *  @param[in] state_u64x2 128-bit AES state represented as two 64-bit lanes.
+ *  @param[in] round_key_u64x2 128-bit round key represented as two 64-bit lanes.
  *  @return AES-encrypted 128-bit result as two 64-bit lanes.
  */
 SZ_HELPER_INLINE uint64x2_t sz_emulate_aesenc_u64x2_neon_(uint64x2_t state_u64x2, uint64x2_t round_key_u64x2) {
@@ -49,8 +51,8 @@ SZ_HELPER_INLINE uint64x2_t sz_emulate_aesenc_u64x2_neon_(uint64x2_t state_u64x2
 /**
  *  @brief Initializes the minimal hash state using NEON with the given seed.
  *
- *  @param state Pointer to the minimal hash state to initialize.
- *  @param seed 64-bit seed value for the hash.
+ *  @param[out] state Pointer to the minimal hash state to initialize.
+ *  @param[in] seed 64-bit seed value for the hash.
  */
 SZ_HELPER_INLINE void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
 
@@ -73,8 +75,8 @@ SZ_HELPER_INLINE void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_s
 /**
  *  @brief Finalizes the minimal hash state and returns a 64-bit digest.
  *
- *  @param state Pointer to the minimal hash state to finalize.
- *  @param length Total number of bytes that were hashed.
+ *  @param[in] state Pointer to the minimal hash state to finalize.
+ *  @param[in] length Total number of bytes that were hashed.
  *  @return 64-bit hash digest.
  */
 SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_aligned_for_short_t const *state,
@@ -94,8 +96,8 @@ SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_align
 /**
  *  @brief Feeds one 16-byte block into the minimal hash state.
  *
- *  @param state Pointer to the minimal hash state to update.
- *  @param block_u8x16 16-byte input block as a NEON register.
+ *  @param[inout] state Pointer to the minimal hash state to update.
+ *  @param[in] block_u8x16 16-byte input block as a NEON register.
  */
 SZ_HELPER_INLINE void sz_hash_state_short_update_neon_(sz_hash_state_aligned_for_short_t *state,
                                                        uint8x16_t block_u8x16) {
@@ -125,7 +127,8 @@ SZ_API_COMPTIME void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t
     state->ins_length = 0;
 }
 
-/** @brief Loads the packed public state into the aligned internal twin (NEON: 4x `vld1q_u8` per 64-byte field). */
+/** Loads the packed public state into the aligned internal twin (NEON: 4x @c vld1q_u8
+ *  per 64-byte field). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
@@ -138,7 +141,8 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz_hash_sta
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state (NEON: 4x `vst1q_u8` per field). */
+/** Stores the aligned internal twin back into the packed public state (NEON: 4x
+ *  @c vst1q_u8 per field). */
 SZ_HELPER_INLINE void sz_hash_state_store_neonaes_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         vst1q_u8(packed->aes + lane_index * 16, state->aes.u8x16s[lane_index]);
@@ -151,7 +155,7 @@ SZ_HELPER_INLINE void sz_hash_state_store_neonaes_(sz_hash_state_t *packed, sz_h
 
 /**
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
- *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
+ *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
 SZ_HELPER_INLINE void sz_hash_state_update_neonaes_(sz_hash_state_aligned_t *state) {
     uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
@@ -172,7 +176,7 @@ SZ_HELPER_INLINE void sz_hash_state_update_neonaes_(sz_hash_state_aligned_t *sta
 /**
  *  @brief Finalizes the full internal hash state and returns a 64-bit digest.
  *
- *  @param state The internal hash state to finalize.
+ *  @param[in] state The internal hash state to finalize.
  *  @return 64-bit hash digest.
  */
 SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_neonaes_(sz_hash_state_aligned_t state) {
@@ -219,9 +223,10 @@ SZ_API_COMPTIME void sz_hash_state_update_neonaes(sz_hash_state_t *packed, sz_cp
     uint8x16_t const zeros_u8x16 = vdupq_n_u8(0);
     while (length) {
         sz_size_t progress_in_block = state.ins_length % 64;
-        // A full block from an earlier fill is still buffered: its absorption is DEFERRED so `digest` can choose
-        // the same minimal (<=64) / full (>64) path the one-shot `sz_hash` would, keyed on the total length. Now
-        // that more bytes have arrived, that block is interior - flush it and clear the buffer.
+        // A full block from an earlier fill is still buffered: its absorption is deferred so
+        // `digest` can choose the same minimal (<=64) / full (>64) path the one-shot `sz_hash`
+        // would, keyed on the total length. Now that more bytes have arrived, that block is
+        // interior - flush it and clear the buffer.
         if (progress_in_block == 0 && state.ins_length != 0) {
             sz_hash_state_update_neonaes_(&state);
             for (int lane_index = 0; lane_index < 4; ++lane_index) state.ins.u8x16s[lane_index] = zeros_u8x16;
@@ -339,8 +344,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, s
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_neonaes((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_neonaes_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_neonaes_` to fold - the same
+        // deferral the streaming path uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 0));
             state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 16));
@@ -362,10 +368,12 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, s
 }
 
 /**
- *  @brief Splits a short (<= 64B) input into up to four 128-bit text-lanes using NEON loads.
- *         Mirrors the loading ladder of `sz_hash_neonaes`: full `vld1q_u8` loads for complete lanes
- *         and one overlapping load + in-register shift for the partial tail; byte-by-byte only for
- *         the `< 16` case, where a 16-byte NEON load could read past the input.
+ *  @brief Splits an input of up to 64 bytes into up to four 128-bit text-lanes using NEON loads.
+ *
+ *  Mirrors the loading ladder of @c sz_hash_neonaes: full @c vld1q_u8 loads for complete lanes and
+ *  one overlapping load plus an in-register shift for the partial tail; byte-by-byte only below 16
+ *  bytes, where a 16-byte NEON load could read past the input.
+ *
  *  @return The number of populated text-lanes (1..4).
  */
 SZ_HELPER_INLINE sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,

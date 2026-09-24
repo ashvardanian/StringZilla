@@ -15,6 +15,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/uncased.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/uncased.py -q
+
+File: test/uncased.py
+Author: Ash Vardanian
+Date: November 24, 2025
 """
 
 from random import randint
@@ -34,9 +38,9 @@ from test.sz_helpers import (
     malformed_utf8_corpus,
 )
 
-# Both haystacks below are 6 codepoints long, so a single bound list covers boundary offsets
-# (0, 1, just past the end, and far out of range) for the degenerate-offset sweep.
 UNCASED_DEGENERATE_HAYSTACKS = ["abcabc", "Straße"]
+"""Both haystacks are 6 codepoints long, so a single bound list covers boundary offsets: 0, 1, just
+past the end, and far out of range for the degenerate-offset sweep."""
 UNCASED_DEGENERATE_BOUNDS = [-11, -2, 0, 2, 6, 7]
 
 
@@ -73,14 +77,14 @@ def test_unit_utf8_uncased_fold():
         ("hello", "HELLO", 0),
         ("HeLLo WoRLd", "world", 6),
         ("abcdef", "CD", 2),
-        # Latin1 accented characters (C3 lead byte range)
+        # Latin1 accented characters, the C3 lead byte range
         ("Über allen Gipfeln", "ÜBER", 0),
         ("ÜBER", "über", 0),
         ("Das schöne Mädchen", "SCHÖNE", 4),
         ("Café au lait", "CAFÉ", 0),
         ("naïve approach", "NAÏVE", 0),
         ("El niño juega", "NIÑO", 3),
-        # German Eszett: ß ↔ ss (bidirectional)
+        # German Eszett: ß ↔ ss, in both directions
         ("Straße", "STRASSE", 0),
         ("STRASSE", "straße", 0),
         ("die Straße", "STRASSE", 4),

@@ -1,7 +1,8 @@
 /**
- *  @brief SVE2 (AArch64 scalable) backend for UAX-29 grapheme clusters.
  *  @file include/stringzilla/utf8_graphemes/sve2.h
  *  @author Ash Vardanian
+ *  @date July 17, 2026
+ *  @brief SVE2 backend for UAX-29 grapheme clusters on scalable AArch64 vectors.
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_SVE2_H_
 #define STRINGZILLA_UTF8_GRAPHEMES_SVE2_H_
@@ -25,9 +26,10 @@ extern "C" {
 
 #pragma region Grapheme Cluster Break classifier
 
-/** @brief  Packed descriptor byte for one chunk of ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade),
- *          the SVE2 twin of @ref sz_grapheme_astral_descriptor_neon_. Per-lane bytes: @p plane = (offset>>16)&0xFF
- *          (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Bit-exact. */
+/** Packed descriptor byte for one chunk of astral codepoints over offset = cp - 0x10000 with a
+ *  5-nibble cascade, the SVE2 twin of @ref sz_grapheme_astral_descriptor_neon_. Per-lane bytes:
+ *  @p plane = (offset >> 16) & 0xFF with only the low nibble meaningful, @p high = (offset >> 8)
+ *  & 0xFF, @p low = offset & 0xFF. Bit-exact. */
 SZ_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
                                                                svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -62,8 +64,8 @@ SZ_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u
     return result_u8x;
 }
 
-/** @brief  Predicate of lanes whose BMP codepoint `(high << 8) | low` lies in the inclusive range [@p lo, @p hi] -
- *          the SVE2 twin of @ref sz_grapheme_cp_in_range_neon_ confined to one chunk. */
+/** Predicate of lanes whose BMP codepoint `(high << 8) | low` lies in the inclusive range from
+ *  @p lo to @p hi, the SVE2 twin of @ref sz_grapheme_cp_in_range_neon_ confined to one chunk. */
 SZ_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t lo,
                                                         sz_u16_t hi) {
     svbool_t const all_b8x = svptrue_b8();
@@ -80,8 +82,9 @@ SZ_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svui
     return svand_b_z(all_b8x, ge_low_b8x, le_high_b8x);
 }
 
-/** @brief  Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK / Kana arithmetic ranges - the
- *          SVE2 twin of @ref sz_grapheme_cjk_other_neon_. Such lanes need no cold cascade (descriptor 0). */
+/** Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK and Kana arithmetic
+ *  ranges, the SVE2 twin of @ref sz_grapheme_cjk_other_neon_. Such lanes need no cold cascade,
+ *  as their descriptor is 0. */
 SZ_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const run_a_b8x = sz_grapheme_cp_in_range_sve2_(high_u8x, low_u8x, 0x3000, 0xA66E);
@@ -102,19 +105,22 @@ SZ_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint
 #pragma region Grapheme forward driver
 
 /**
- *  @brief  Forward UAX-29 grapheme-cluster kernel (SVE2, vector-length agnostic). Bit-exact with
- *          `sz_utf8_graphemes_serial` and the other ISA fronts: a chunked-window classify feeds the shared
- *          portable engine @ref sz_grapheme_window_boundaries_ through the shared bit-route compaction.
+ *  @brief Forward UAX-29 grapheme-cluster kernel, SVE2 and vector-length agnostic.
  *
- *  Each window streams as `64 / svcntb()` register chunks with one peeked vector ahead; every byte lane
- *  classifies BLINDLY (matching the family's malformed-input policy) to the packed descriptor
- *  `gcb | incb << 4 | extpict << 6`, whose seven bits lower to window-wide bit-planes through the predicate
- *  bridge. The planes compact to the codepoint-dense domain with ONE shared bit-route built from the start
- *  lanes - seven gathers instead of eighteen - and the per-class masks assemble from the dense planes with
- *  scalar algebra. Clusters are DENSE (a boundary every 1-4 codepoints) and callers stream small capacities,
- *  so the window clamps to the remaining-capacity budget whenever the clamped edge is structurally clean
- *  (every continuation byte inside is claimed by a lead's declared length), retrying unclamped otherwise -
- *  classify work stays proportional to what the caller can consume.
+ *  Bit-exact with @c sz_utf8_graphemes_serial and the other ISA fronts: a chunked-window
+ *  classify feeds the shared portable engine @ref sz_grapheme_window_boundaries_ through the
+ *  shared bit-route compaction.
+ *
+ *  Each window streams as `64 / svcntb()` register chunks with one peeked vector ahead; every byte
+ *  lane classifies blindly, matching the family's malformed-input policy, to the packed descriptor
+ *  `gcb | incb << 4 | extpict << 6`, whose seven bits lower to window-wide bit-planes through the
+ *  predicate bridge. The planes compact to the codepoint-dense domain with one shared bit-route
+ *  built from the start lanes - seven gathers instead of eighteen - and the per-class masks
+ *  assemble from the dense planes with scalar algebra. Clusters are dense, a boundary every 1-4
+ *  codepoints, and callers stream small capacities, so the window clamps to the remaining-capacity
+ *  budget whenever the clamped edge is structurally clean, with every continuation byte inside
+ *  claimed by a lead's declared length, retrying unclamped otherwise: classify work stays
+ *  proportional to what the caller can consume.
  */
 SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2(          //
     sz_cptr_t text, sz_size_t length,                      //
@@ -269,8 +275,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2(          //
                 start_lanes &= sz_u64_mask_until_serial_(byte_span);
             }
 
-            // ONE shared bit-route compacts the seven descriptor planes to the codepoint-dense domain; the class,
-            // InCB, and Extended_Pictographic masks then assemble from the dense planes with scalar algebra.
+            // One shared bit-route compacts the seven descriptor planes to the codepoint-dense
+            // domain; the class, InCB, and Extended_Pictographic masks then assemble from the dense
+            // planes with scalar algebra.
             sz_grapheme_bit_route_t const route = sz_grapheme_bit_route_build_(start_lanes);
             sz_u64_t const dense_ones = sz_grapheme_bit_gather_(start_lanes, &route);
             if (!dense_ones) {

@@ -1,20 +1,24 @@
 /**
- *  @brief IBM Power VSX (128-bit) backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/powervsx.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 15, 2026
+ *  @brief IBM Power VSX 128-bit backend for the single-pass normalizer, NFD / NFC / NFKD / NFKC.
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
- *  `sz_utf8_norm_classify_powervsx_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_powervsx` / `sz_utf8_find_denormalized_powervsx`) reuse the force-inlined
- *  engines from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
+ *  @c sz_utf8_norm_classify_powervsx_, which locates the first non-inert byte for a form. The two
+ *  public entry points, @c sz_utf8_norm_powervsx and @c sz_utf8_find_denormalized_powervsx, reuse
+ *  the force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  that devirtualizes the call.
  *
- *  The scanner mirrors the NEON and Skylake scanners over a 16-byte window: an all-ASCII gate behind one
- *  horizontal reduction, a lead-byte classify over the shared `sz_utf8_norm_lead_lut_`, then the shared cold
- *  per-codepoint verify (`sz_utf8_norm_verify_block_`) on any block that survives the gate. VSX has no
- *  256-entry shuffle, so the 64-entry lookup is covered by two `vec_perm` selections (lut[0..31] and
- *  lut[32..63]) merged with `vec_sel` on the index's bit 5. The LUT bytes load naturally; ppc64le is
- *  little-endian and `vec_xl` handles the load, so no endian fixups are needed for the table or the window.
+ *  The scanner mirrors the NEON and Skylake scanners over a 16-byte window: an all-ASCII gate
+ *  behind one horizontal reduction, a lead-byte classify over the shared @c sz_utf8_norm_lead_lut_,
+ *  then the shared cold per-codepoint verify, @c sz_utf8_norm_verify_block_, on any block that
+ *  survives the gate. VSX has no 256-entry shuffle, so the 64-entry lookup is covered by two
+ *  @c vec_perm selections, over lut[0..31] and lut[32..63], merged with @c vec_sel on bit 5 of the
+ *  index. The LUT bytes load naturally: ppc64le is little-endian and @c vec_xl handles the load, so
+ *  neither the table nor the window needs endian fixups.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_POWERVSX_H_
 #define STRINGZILLA_UTF8_NORM_POWERVSX_H_
@@ -35,11 +39,14 @@ extern "C" {
 #endif
 
 /**
- *  @brief Scan primitive (Power VSX): first byte that begins a non-inert codepoint for @p form, else NULL.
+ *  @brief Power VSX scan primitive: the first byte starting a non-inert codepoint for @p form.
  *
- *  Matches `sz_utf8_norm_classify_serial_` semantics, computed from the unified props trie. The hot loop
- *  uses a 16-byte all-ASCII gate plus a `vec_perm` lead-classify; the cold per-codepoint verify carries the
- *  combining class across chunks and reports order or quick-check violations exactly.
+ *  Matches @c sz_utf8_norm_classify_serial_ semantics, computed from the unified props trie. The
+ *  hot loop uses a 16-byte all-ASCII gate plus a @c vec_perm lead-classify, and the cold
+ *  per-codepoint verify carries the combining class across chunks, reporting any order or
+ *  quick-check violation exactly.
+ *
+ *  @return The first such byte, or NULL.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;

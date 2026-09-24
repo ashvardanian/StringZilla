@@ -1,7 +1,9 @@
 /**
- *  @brief RISC-V Vector (RVV 1.0) uncased UTF-8 search, comparison & invariance backend.
  *  @file include/stringzilla/utf8_uncased/rvv.h
  *  @author Ash Vardanian
+ *  @date June 14, 2026
+ *  @brief RISC-V Vector (RVV 1.0) uncased UTF-8 search, comparison & invariance backend.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_RVV_H_
@@ -15,6 +17,11 @@
 extern "C" {
 #endif
 
+/*  The per-script fold and alarm strips are invoked through constant function pointers from the
+ *  force-inlined driver; GCC 14 devirtualizes and inlines them and miscompiles the result, silently
+ *  dropping matches, so they are @c SZ_HELPER_NOINLINE to keep their out-of-line shape. Toolchain
+ *  artifact: -O1 still drops matches even out-of-line; -O0, -O2, and -O3 are byte-exact with
+ *  serial, and StringZilla ships -O2 or -O3. */
 #if SZ_USE_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
@@ -23,50 +30,48 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-/*  The per-script fold/alarm strips are invoked through constant function pointers from the force-inlined
- *  driver; GCC 14 devirtualizes and inlines them and miscompiles the result (silently dropping matches), so
- *  they are `SZ_HELPER_NOINLINE` to keep their out-of-line shape. Toolchain artifact: -O1 still drops
- *  matches even out-of-line; -O0/-O2/-O3 are byte-exact with serial (StringZilla ships -O2/-O3). */
-
-/*  Forward declaration: the substring dispatcher uses the invariance check (defined further below) to take
- *  the exact-search fast path for case-less needles, matching `sz_utf8_uncased_search_serial`. */
+/*  Forward declaration: the substring dispatcher uses the invariance check, defined further below,
+ *  to take the exact-search fast path for case-less needles, matching
+ *  @ref sz_utf8_uncased_search_serial. */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length);
 
-#pragma region Substring Search
-
-/*  The RVV substring port mirrors the NEON architecture: a shared, force-inlined "scripted" driver walks the
- *  haystack in `e8m8` strips; each per-script kernel supplies two callbacks: a `fold_strip` that case-folds a
- *  length-preserving strip of haystack in place (so a folded haystack byte aligns one-to-one with its source
- *  byte), and an `alarm_strip` that flags length-CHANGING folds (ß→ss, ligatures, Kelvin/Angstrom, …). The
- *  fold logic itself is lifted verbatim from `utf8_uncased_fold/rvv.h`'s `_strip_rvv_` handlers, but trimmed of
- *  the "stop and serial" machinery: in a clean (un-alarmed) region every fold is one-to-one, so the strip is
+/*  The RVV substring port mirrors the NEON architecture: a shared, force-inlined "scripted" driver
+ *  walks the haystack in @c e8m8 strips; each per-script kernel supplies two callbacks: a
+ *  @c fold_strip that case-folds a length-preserving strip of haystack in place, so a folded
+ *  haystack byte aligns one-to-one with its source byte, and an @c alarm_strip that flags
+ *  length-changing folds (ß → ss, ligatures, Kelvin/Angstrom, …). The fold logic itself is lifted
+ *  verbatim from the @c _strip_rvv_ handlers of `utf8_uncased_fold/rvv.h`, but trimmed of the "stop
+ *  and serial" machinery: in a clean, un-alarmed region every fold is one-to-one, so the strip is
  *  folded whole and the probe filter runs straight on it.
  *
- *  Candidate filtering reuses the `sz_find_rvv` idiom: four probe bytes (first / probe_second / probe_third /
- *  last of the folded needle window) are broadcast and compared against the matching offset views of the
- *  folded haystack strip, AND-ed into one predicate, then walked low-to-high with `vfirst`/`vmsif`/`vmandn`.
- *  Every surviving candidate re-folds its <=16-byte window, compares it byte-exact against the needle window,
- *  and defers to the value-exact serial `sz_utf8_uncased_verify_match_`. Alarmed strips and the
- *  sub-window tail are handed to the serial `sz_utf8_uncased_search_in_danger_zone_`. The result
- *  (pointer AND `*matched_length`) is therefore byte-identical to `sz_utf8_uncased_search_serial`. */
+ *  Candidate filtering reuses the @c sz_find_rvv idiom: four probe bytes, the first,
+ *  @c probe_second, @c probe_third, and last of the folded needle window, are broadcast and
+ *  compared against the matching offset views of the folded haystack strip, AND-ed into one
+ *  predicate, then walked low-to-high with @c vfirst, @c vmsif, and @c vmandn. Every surviving
+ *  candidate re-folds its ≤ 16-byte window, compares it byte-exact against the needle window, and
+ *  defers to the value-exact serial @ref sz_utf8_uncased_verify_match_. Alarmed strips and the
+ *  sub-window tail are handed to the serial @ref sz_utf8_uncased_search_in_danger_zone_. The
+ *  result, both the pointer and `*matched_length`, is therefore byte-identical to
+ *  @ref sz_utf8_uncased_search_serial. */
+#pragma region Substring Search
 
-/** @brief Folds a length-preserving strip of haystack bytes in place using script-specific rules. */
+/** Folds a length-preserving strip of haystack bytes in place using script-specific rules. */
 typedef void (*sz_utf8_uncased_fold_strip_rvv_t)(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                  sz_u8_t *destination_ptr);
 
-/** @brief Scans a strip for length-changing fold characters; returns the offset of the first, or -1. */
+/** Scans a strip for length-changing fold characters; returns the offset of the first, or -1. */
 typedef long (*sz_utf8_uncased_alarm_strip_rvv_t)(sz_u8_t const *source_ptr, sz_size_t vector_length);
 
+/*  Each @c _fold_strip_rvv_ folds exactly @c vector_length bytes from @c source_ptr into
+ *  @c destination_ptr, one-to-one. They are only ever called on regions the matching alarm has
+ *  cleared of length-changing folds, so the irregular continuation bytes the case-fold strips
+ *  routed to serial never appear here; the fold math is the length-preserving subset of
+ *  `utf8_uncased_fold/rvv.h`. Slides fill lane 0's predecessor with zero, matching the "zero
+ *  predecessor" convention the candidate re-fold uses, so both agree at every match. */
 #pragma region Per Script Fold Strips
 
-/*  Each `_fold_strip_rvv_` folds exactly `vector_length` bytes from `source_ptr` into `destination_ptr`, one-to-one.
- *  They are only ever called on regions the matching alarm has cleared of length-changing folds, so the
- *  irregular continuation bytes the case-fold strips routed to serial never appear here; the fold math is
- *  the length-preserving subset of `utf8_uncased_fold/rvv.h`. Slides fill lane 0's predecessor with zero,
- *  matching the "zero predecessor" convention the candidate re-fold uses, so both agree at every match. */
-
-/*  ASCII: `c + ((c - 'A' <= 25) * 0x20)`. Pure ASCII never changes byte width, so this is also the
- *  Georgian-Mkhedruli fold (Mkhedruli is caseless). */
+/** ASCII: `c + ((c - 'A' <= 25) * 0x20)`. Pure ASCII never changes byte width, so this is also the
+ *  Georgian-Mkhedruli fold, as Mkhedruli is caseless. */
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                               sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
@@ -79,8 +84,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *sou
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-/*  Western Europe: ASCII A-Z, Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' 0x97) +0x20, and the
- *  in-place ß→"ss" (both bytes of C3 9F become 's'). Length-changing folds are routed to the alarm. */
+/** Western Europe: ASCII A-Z, Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' 0x97) +0x20, and
+ *  the in-place ß → "ss" where both bytes of C3 9F become 's'. Length-changing folds are routed to
+ *  the alarm instead. */
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
                                                                        sz_size_t vector_length,
                                                                        sz_u8_t *destination_ptr) {
@@ -115,8 +121,8 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t c
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-/*  Central Europe: Latin-1 Supplement +0x20 (C3 80-9E, except '×' 0x97) and Latin Extended-A +1 parity
- *  deltas from the C4/C5 LUTs. Irregulars ('İ', 'ŉ', 'Ŀ', 'Ÿ', 'ſ', …) are alarm-routed. */
+/** Central Europe: Latin-1 Supplement +0x20 (C3 80-9E, except '×' 0x97) and Latin Extended-A +1
+ *  parity deltas from the C4/C5 LUTs. Irregulars ('İ', 'ŉ', 'Ŀ', 'Ÿ', 'ſ', …) are alarm-routed. */
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
                                                                        sz_size_t vector_length,
                                                                        sz_u8_t *destination_ptr) {
@@ -160,8 +166,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t c
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-/*  Cyrillic: basic D0/D1. Second-byte offset by high nibble after a D0 lead (8→+0x10, 9→+0x20, A→−0x20)
- *  plus the masked D0→D1 (+1) lead rewrite. Extended Cyrillic is banned at needle-analysis time. */
+/** Cyrillic: basic D0/D1. Second-byte offset by high nibble after a D0 lead (8 → +0x10, 9 → +0x20,
+ *  A → −0x20) plus the masked D0 → D1 (+1) lead rewrite. Extended Cyrillic needles are banned at
+ *  needle-analysis time. */
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                                  sz_u8_t *destination_ptr) {
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
@@ -196,15 +203,19 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t const *
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-/*  Monotonic-Greek second-byte fold metadata after a CE lead, indexed by `text & 0x3F` (same values the NEON
- *  Greek fold uses). The DELTA window (offset 0) and the CE→CF lead-PROMOTE window (offset 64) are laid out
- *  contiguously in one 128-byte table so a SINGLE indexed memory load (`vluxei8`) keyed by `family_base +
- *  low6` (family_base = 0 for the delta, 64 for the promote flag) covers both in one gather.
+/**
+ *  @brief Monotonic-Greek second-byte fold metadata after a CE lead, indexed by `text & 0x3F`.
+ *
+ *  The values match the NEON Greek fold. The delta window at offset 0 and the CE → CF lead-promote
+ *  window at offset 64 are laid out contiguously in one 128-byte table, so a single indexed memory
+ *  load, @c vluxei8 keyed by `family_base + low6` with a @c family_base of 0 for the delta and 64
+ *  for the promote flag, covers both in one gather.
  *
  *  Deltas: 'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A) +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20,
- *  'Π'-'Ω'/'Ϊ'/'Ϋ' (A0-AB) −0x20. 'Ό' (8C) keeps its byte (lead-only change).
- *  Promote flags (CE→CF +1) for the classes whose lowercase lands in the CF block: 'Ό' (8C),
- *  'Ύ'/'Ώ' (8E-8F), 'Π'-'Ω'/'Ϊ'/'Ϋ' (A0-AB). 'Α'-'Ο' (91-9F) stay under CE. */
+ *  'Π'-'Ω'/'Ϊ'/'Ϋ' (A0-AB) −0x20. 'Ό' (8C) keeps its byte, as only its lead changes. Promote flags
+ *  (CE → CF +1) mark the classes whose lowercase lands in the CF block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F),
+ *  'Π'-'Ω'/'Ϊ'/'Ϋ' (A0-AB). 'Α'-'Ο' (91-9F) stay under CE.
+ */
 static sz_u8_t const sz_utf8_uncased_greek_ce_table_rvv_[128] = {
     0,    0,    0,    0,    0,    0,    0x26, 0,
     0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
@@ -224,10 +235,10 @@ static sz_u8_t const sz_utf8_uncased_greek_ce_table_rvv_[128] = {
     0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF
 };
 
-/*  Greek: monotonic CE/CF + micro sign. Second-byte deltas after CE come from the combined CE table (one
- *  indexed load over the delta window), the CE→CF lead promotion from the same table's promote window carried
- *  one lane back, final sigma 'ς' (CF 82) +1, and 'µ' (C2 B5)→'μ' (CE BC). Accented 'ΐ'/'ΰ', symbols,
- *  polytonic & archaic are alarm-routed. */
+/** Greek: monotonic CE/CF and the micro sign. Second-byte deltas after CE come from the combined CE
+ *  table, one indexed load over the delta window; the CE → CF lead promotion comes from the same
+ *  table's promote window carried one lane back; final sigma 'ς' (CF 82) gets +1, and 'µ' (C2 B5) →
+ *  'μ' (CE BC). Accented 'ΐ'/'ΰ', symbols, polytonic and archaic letters are alarm-routed. */
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                               sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
@@ -279,8 +290,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *sou
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-/*  Armenian: D4/D5/D6. Disjoint second-byte offsets (D4 B1-BF and D5 90-96 fold −0x10, D5 80-8F folds
- *  +0x30) plus the lead +1 rewrites D4→D5 (next B1-BF) and D5→D6 (next 90-96). 'և' is alarm-routed. */
+/** Armenian: D4/D5/D6. Disjoint second-byte offsets (D4 B1-BF and D5 90-96 fold −0x10, D5 80-8F
+ *  folds +0x30) plus the lead +1 rewrites D4 → D5 (next B1-BF) and D5 → D6 (next 90-96). The 'և'
+ *  ligature is alarm-routed. */
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                                  sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
@@ -323,9 +335,10 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-/*  Vietnamese: Latin-1 Supplement +0x20, Latin Extended-A parity, 'Ơ'/'Ư' (C6 A0/AF) +1, and Latin
- *  Extended Additional (E1 B8-BB) even-third +1, all length-preserving. Expanding folds are alarm-routed.
- *  Reuses the C4/C5/C6 delta LUTs from `utf8_uncased_fold/rvv.h`, masked to the +1 bit. */
+/** Vietnamese: Latin-1 Supplement +0x20, Latin Extended-A parity, 'Ơ'/'Ư' (C6 A0/AF) +1, and Latin
+ *  Extended Additional (E1 B8-BB) even-third +1, all length-preserving, with expanding folds
+ *  alarm-routed. Reuses the C4/C5/C6 delta LUTs from `utf8_uncased_fold/rvv.h`, masked to the +1
+ *  bit of each entry. */
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                                    sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
@@ -380,20 +393,22 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-#pragma endregion // Per Script Fold Strips
+#pragma endregion Per Script Fold Strips
 
+/*  Each @c _alarm_strip_rvv_ returns the lane offset of the first length-changing fold character in
+ *  the strip, or -1 if the strip is clean. Anchored at the second byte of each multi-byte pattern,
+ *  with the lead read from the @c previous slide and the third byte from the @c next slide, then
+ *  @c vslide1up carries the flag back one lane onto the lead, so the returned offset is the
+ *  sequence start, which is where the danger-zone handler expects to begin scanning. The slides
+ *  zero-fill the strip edges, and padded loads keep range compares on @c next safe-negative past
+ *  the real data.
+ *
+ *  Danger lanes accumulate as a 0/1 byte vector, one @c vor per rule, keeping the rule algebra free
+ *  of the nested mask-intrinsic arity that the mask-domain form invites. The @c eq helper builds a
+ *  0/1 byte from a byte compare; @c _to_lead_ shifts the second-byte danger flags back one lane
+ *  onto the lead and reports the first set. */
 #pragma region Per Script Alarm Strips
 
-/*  Each `_alarm_strip_rvv_` returns the lane offset of the FIRST length-changing fold character in the
- *  strip, or -1 if the strip is clean. Anchored at the SECOND byte of each multi-byte pattern (lead read
- *  from the `previous` slide, third byte from the `next` slide), then `vslide1up` carries the flag back
- *  one lane onto the lead so the returned offset is the sequence START — matching how the danger-zone
- *  handler expects to begin scanning. The slides zero-fill the strip edges; padded loads keep range
- *  compares on `next` safe-negative past the real data. */
-
-/*  Danger lanes accumulate as a 0/1 byte vector (one `vor` per rule), keeping the rule algebra free of the
- *  nested mask-intrinsic arity that the mask-domain form invites. `eq` builds a 0/1 byte from a byte compare;
- *  `_to_lead_` shifts the second-byte danger flags back one lane onto the lead and reports the first set. */
 SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_eq_byte_(vuint8m8_t bytes_u8m8, sz_u8_t value, sz_size_t vector_length) {
     return __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1,
                                    __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, value, vector_length), vector_length);
@@ -408,7 +423,7 @@ SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_in_range_byte_(vuint8m8_t bytes_u8m8
 
 SZ_HELPER_INLINE long sz_utf8_uncased_alarm_to_lead_(vuint8m8_t danger_at_second_u8m8, sz_size_t vector_length) {
     // Carry the second-byte flags back one lane onto the lead (the lower index), then report the first set
-    // lane. The lead precedes its second byte, so this is a slide-DOWN (`dst[i] = src[i+1]`).
+    // lane. The lead precedes its second byte, so this is a slide-down (`dst[i] = src[i+1]`).
     vuint8m8_t flag_at_lead_u8m8 = __riscv_vslide1down_vx_u8m8(danger_at_second_u8m8, 0, vector_length);
     return __riscv_vfirst_m_b1(__riscv_vmsne_vx_u8m8_b1(flag_at_lead_u8m8, 0, vector_length), vector_length);
 }
@@ -630,12 +645,13 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t cons
         __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x84, vector_length),
                              sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE2, vector_length), vector_length),
         vector_length);
-    // Cross-block Latin Extended folds the in-place strip can't do (e.g. 'Ŀ' C4 BF -> C5 80, 'Ÿ' C5 B8 ->
-    // C3 BF, and many C6 letters): the shared C4/C5/C6 delta LUTs flag those continuation bytes with 0x80.
-    // Such characters are still Vietnamese-SAFE per the needle classifier, so the haystack must route them
-    // to the serial scanner instead of folding them wrong. Anchored at the second byte like the rest.
-    // After a C4/C5/C6 lead: the previous byte is in [0xC4, 0xC6]; the family base is `(prev - 0xC4) * 64`.
-    // One indexed load over the combined C4/C5/C6 table replaces the three per-family gathers.
+    // The in-place strip can't do cross-block Latin Extended folds, such as 'Ŀ' (C4 BF → C5 80),
+    // 'Ÿ' (C5 B8 → C3 BF) and many C6 letters, so the shared C4/C5/C6 delta LUTs flag those
+    // continuation bytes with 0x80. Such characters are still Vietnamese-safe per the needle
+    // classifier, so the haystack must route them to the serial scanner instead of folding them
+    // wrong. Anchored at the second byte like the rest. After a C4/C5/C6 lead: the previous byte is
+    // in [0xC4, 0xC6]; the family base is `(prev - 0xC4) * 64`. One indexed load over the combined
+    // C4/C5/C6 table replaces the three per-family gathers.
     vbool1_t after_c456_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 2,
                                                        vector_length);
     vuint8m8_t low6_u8m8 = __riscv_vand_vx_u8m8(source_u8m8, 0x3F, vector_length);
@@ -678,13 +694,14 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const 
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-#pragma endregion // Per Script Alarm Strips
+#pragma endregion Per Script Alarm Strips
 
 #pragma region Scripted Driver
 
-/*  Loads up to `length` bytes from `source` into a zeroed 64-byte scratch buffer, returning a pointer into a
- *  caller-provided buffer whose first `length` bytes are the data and the rest zero. The padding lets the
- *  fold/alarm strips read `source_ptr[vector_length]` for their `next` carry and keeps range compares safe-negative. */
+/** Loads up to @p length bytes from @p source into a zeroed 64-byte scratch buffer, returning a
+ *  pointer into a caller-provided buffer whose first @p length bytes are the data and the rest
+ *  zero. The padding lets the fold and alarm strips read `source_ptr[vector_length]` for their
+ *  @c next carry and keeps range compares safe-negative. */
 SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
                                                                  sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
@@ -692,11 +709,12 @@ SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t sourc
     return buffer;
 }
 
-/*  Shared scan loop behind every script-specific uncased search, mirroring the NEON driver.
- *  Walks the haystack in `e8m8` strips; the `fold`/`alarm` callbacks resolve to direct calls because the
- *  driver is force-inlined into each thin wrapper. Alarmed strips and the sub-window tail go to the serial
- *  danger-zone handler; clean strips are folded and probe-filtered, with each survivor re-folded, byte-
- *  compared against the needle window, and verified by `sz_utf8_uncased_verify_match_`. */
+/** Shared scan loop behind every script-specific uncased search, mirroring the NEON driver. Walks
+ *  the haystack in @c e8m8 strips; the fold and alarm callbacks resolve to direct calls because the
+ *  driver is force-inlined into each thin wrapper. Alarmed strips and the sub-window tail go to the
+ *  serial danger-zone handler; clean strips are folded and probe-filtered, with each survivor
+ *  re-folded, byte-compared against the needle window, and verified by
+ *  @ref sz_utf8_uncased_verify_match_. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
     sz_utf8_uncased_fold_strip_rvv_t fold,                       //
     sz_utf8_uncased_alarm_strip_rvv_t alarm,                     //
@@ -736,7 +754,8 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
         sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
         if (available < folded_window_length) break;
 
-        // A strip covers `chunk_size` bytes but only its first `valid_starts` are candidate START positions.
+        // A strip covers `chunk_size` bytes, but only the first `valid_starts` of them are
+        // candidate start positions.
         sz_size_t chunk_request = available < strip_capacity_k ? available : strip_capacity_k;
         sz_size_t chunk_size = __riscv_vsetvl_e8m8(chunk_request);
         sz_size_t const valid_starts = chunk_size - folded_window_length + 1;
@@ -753,8 +772,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
         if (alarm) {
             long danger_offset = alarm(source, chunk_size);
             if (danger_offset >= 0) {
-                // Scan the WHOLE strip serially: an expanding fold makes the haystack span shorter than the
-                // folded window, so a real match can begin within the window's length of the strip's end.
+                // Scan the whole strip serially: an expanding fold makes the haystack span shorter
+                // than the folded window, so a real match can begin within the window's length of
+                // the strip's end.
                 sz_cptr_t match = sz_utf8_uncased_search_in_danger_zone_( //
                     haystack, haystack_length,                            //
                     needle, needle_length,                                //
@@ -771,8 +791,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
         // Fold the clean strip in place (one-to-one), then run the 4-probe filter over candidate starts.
         fold(source, chunk_size, folded_buffer);
 
-        // The probe filter runs at the SAME LMUL (e8m8) as the fold/alarm strips and the `chunk_size`
-        // configuration above, keeping one consistent vector config across the whole driver body.
+        // The probe filter runs at the same LMUL (e8m8) as the fold/alarm strips and the
+        // `chunk_size` configuration above, keeping one consistent vector config across the
+        // entire body of the driver.
         sz_size_t position = 0;
         while (position < valid_starts) {
             sz_size_t vector_length = __riscv_vsetvl_e8m8(valid_starts - position);
@@ -837,7 +858,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Scripted Driver
+#pragma endregion Scripted Driver
 
 #pragma region Per Script Kernels
 
@@ -914,7 +935,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Per Script Kernels
+#pragma endregion Per Script Kernels
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
     sz_cptr_t haystack, sz_size_t haystack_length,    //
@@ -978,14 +999,15 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
                                          matched_length);
 }
 
-#pragma endregion // Substring Search
+#pragma endregion Substring Search
 
-/*  Byte-for-byte equivalent to `sz_utf8_find_cased_serial`. A string is NOT case-invariant the moment it
- *  contains a case-participating character. ASCII letters (`A`-`Z`, `a`-`z`) occupy `0x41-0x7A`, byte values
- *  that can never appear inside a multi-byte sequence, so a vector scan for "ASCII letter OR any non-ASCII
- *  byte" is exact: an ASCII-letter hit means not invariant; a non-ASCII hit (always a lead, since the scan
- *  starts on a codepoint boundary) is decoded and checked by the value-exact serial `sz_rune_is_uncased_`.
- *  Caseless ASCII (digits, punctuation, control) is skipped a whole vector strip at a time. */
+/** Byte-for-byte equivalent to @ref sz_utf8_find_cased_serial. A string is not case-invariant the
+ *  moment it contains a case-participating character. ASCII letters (A-Z, a-z) occupy 0x41-0x7A,
+ *  byte values that can never appear inside a multi-byte sequence, so a vector scan for "ASCII
+ *  letter or any non-ASCII byte" is exact: an ASCII-letter hit means not invariant; a non-ASCII
+ *  hit, always a lead since the scan starts on a codepoint boundary, is decoded and checked by the
+ *  value-exact serial @ref sz_rune_is_uncased_. Caseless ASCII (digits, punctuation, control) is
+ *  skipped a whole vector strip at a time. */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *cursor = (sz_u8_t const *)str;
     sz_u8_t const *end = cursor + length;

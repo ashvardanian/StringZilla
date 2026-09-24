@@ -1,11 +1,12 @@
 /**
- *  @brief Argument-sorting of string sequences.
  *  @file python/stringzilla/sort.c
  *  @author Ash Vardanian
+ *  @date September 23, 2023
+ *  @brief Argument-sorting of string sequences.
  */
 #include "stringzilla.h"
 
-/** @brief Dispatches to the byte-wise or Unicode case-folded argsort backend. */
+/** Dispatches to the byte-wise or Unicode case-folded argsort backend. */
 sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order, sz_size_t top,
                               sz_bool_t reverse) {
     return uncased ? sz_sequence_argsort_uncased(sequence, NULL, order, top, reverse)
@@ -20,9 +21,9 @@ char const doc_argsort[] =                                                      
     "Args:\n"                                                                                      //
     "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"                   //
     "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"              //
-    "  top (int, optional): Keep only the `top` leading indices. Defaults to None (all).\n"        //
+    "  top (int, optional): Keep only the `top` leading indices. Defaults to None, keeping all.\n" //
     "  out (buffer, optional): Writable, C-contiguous buffer of pointer-width unsigned integers "  //
-    "(e.g. numpy.uintp) to receive the indices with zero allocation. "                             //
+    "like numpy.uintp to receive the indices with zero allocation. "                               //
     "Defaults to None.\n"                                                                          //
     "Returns:\n"                                                                                   //
     "  tuple[int, ...]: The sorting permutation, or `out` itself when an `out` buffer is given.\n" //
@@ -30,10 +31,8 @@ char const doc_argsort[] =                                                      
     "  >>> sz.Strs(['banana', 'apple', 'cherry']).argsort()\n"                                     //
     "  (1, 0, 2)";
 
-/**
- *  @brief Returns the tuple of indices permuting a `Strs` object into sorted order.
- *         With `top=k`, returns just the `k` leading indices (top-K).
- */
+/** Returns the tuple of indices permuting a @c Strs object into sorted order. With `top=k`, returns
+ *  just the @c k leading indices (top-K). */
 PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                        PyObject *args_names_tuple) {
 

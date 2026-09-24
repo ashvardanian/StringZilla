@@ -17,6 +17,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/find.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/find.py -q
+
+File: test/find.py
+Author: Ash Vardanian
+Date: June 18, 2023
 """
 
 from random import randint
@@ -479,15 +483,15 @@ def needle_for_strategy(haystack: str, alphabet: str, strategy: str) -> str:
     raise ValueError(strategy)
 
 
-# Byte offsets straddling the 16-byte SIMD lane boundary and its 32/64-byte multiples, the positions
-# most likely to split a needle (or a single marker byte) across a vector register edge.
 LANE_STRADDLE_OFFSETS = list(range(14, 19)) + list(range(30, 35)) + list(range(62, 67))
+"""Byte offsets straddling the 16-byte SIMD lane boundary and its 32/64-byte multiples, the positions
+most likely to split a needle, or a single marker byte, across a vector register edge."""
 NEEDLE_LENGTHS = [1, 2, 3, 4, 5]
 LANE_HAYSTACK_LENGTH = 80  # comfortably covers every offset in LANE_STRADDLE_OFFSETS + the longest needle
 
-# Two alphabets: a periodic two-symbol tiling ("ab") and the degenerate all-same-character case ("a"),
-# both reused across VECTOR_WIDTH_LENGTHS so tail handling is exercised right at the SIMD register edges.
 HAYSTACK_ALPHABETS = ["ab", "a"]
+"""Two alphabets: a periodic two-symbol tiling, "ab", and the degenerate all-same-character case, "a",
+both reused across VECTOR_WIDTH_LENGTHS so tail handling is exercised right at the SIMD register edges."""
 BOUNDARY_HAYSTACKS_BY_ALPHABET = {
     alphabet: dict(zip(VECTOR_WIDTH_LENGTHS, boundary_strings(alphabet))) for alphabet in HAYSTACK_ALPHABETS
 }

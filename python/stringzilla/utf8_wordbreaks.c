@@ -1,7 +1,8 @@
 /**
- *  @brief UAX-29 word segmentation of UTF-8 text.
  *  @file python/stringzilla/utf8_wordbreaks.c
  *  @author Ash Vardanian
+ *  @date November 30, 2025
+ *  @brief UAX-29 word segmentation of UTF-8 text.
  */
 #include "stringzilla.h"
 
@@ -34,24 +35,24 @@ PyObject *Str_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssi
     return Utf8Boundaries_make_(&Utf8WordbreaksType, args[0], sz_utf8_wordbreaks);
 }
 
-static char const doc_Utf8Wordbreaks[] =                                  //
-    "Utf8Wordbreaks(string, ...)\n"                                       //
-    "\n"                                                                  //
-    "UTF-8 aware word boundary iterator per Unicode UAX-29 algorithm.\n"  //
-    "Yields words (text segments between consecutive word boundaries).\n" //
-    "\n"                                                                  //
-    "Created by:\n"                                                       //
-    "  - Str.utf8_wordbreaks()\n"                                         //
-    "  - sz.utf8_wordbreaks()\n"                                          //
-    "\n"                                                                  //
-    "UAX-29 Word_Break rules implemented:\n"                              //
-    "  - WB3: CR x LF (no break)\n"                                       //
-    "  - WB4: Ignore Extend/Format/ZWJ\n"                                 //
-    "  - WB5-WB13: Letter, number, punctuation rules\n"                   //
-    "  - WB15-WB16: Regional Indicator pairs\n\n"                         //
-    "\n"                                                                  //
-    "Example:\n"                                                          //
-    "  >>> len(list(sz.utf8_wordbreaks('Hi there'))) >= 2\n"              //
+static char const doc_Utf8Wordbreaks[] =                                     //
+    "Utf8Wordbreaks(string, ...)\n"                                          //
+    "\n"                                                                     //
+    "UTF-8 aware word boundary iterator per Unicode UAX-29 algorithm.\n"     //
+    "Yields words, the text segments between consecutive word boundaries.\n" //
+    "\n"                                                                     //
+    "Created by:\n"                                                          //
+    "  - Str.utf8_wordbreaks()\n"                                            //
+    "  - sz.utf8_wordbreaks()\n"                                             //
+    "\n"                                                                     //
+    "UAX-29 Word_Break rules implemented:\n"                                 //
+    "  - WB3: CR x LF, no break\n"                                           //
+    "  - WB4: Ignore Extend/Format/ZWJ\n"                                    //
+    "  - WB5-WB13: Letter, number, punctuation rules\n"                      //
+    "  - WB15-WB16: Regional Indicator pairs\n\n"                            //
+    "\n"                                                                     //
+    "Example:\n"                                                             //
+    "  >>> len(list(sz.utf8_wordbreaks('Hi there'))) >= 2\n"                 //
     "  True";
 
 PyTypeObject Utf8WordbreaksType = {

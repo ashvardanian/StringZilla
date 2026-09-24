@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly relaxed-SIMD backend for hash (level above SIMD128).
  *  @file include/stringzilla/hash/v128relaxed.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly relaxed-SIMD backend for hash (level above SIMD128).
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_V128RELAXED_H_
@@ -15,27 +17,28 @@
 extern "C" {
 #endif
 
+/*  @c sz_bytesum_v128relaxed uses the relaxed integer dot-product
+ *  `wasm_i32x4_relaxed_dot_i8x16_i7x16_add(a, b, c)`: it forms pairwise products of @c a (signed
+ *  i8) and @c b (i7, range 0..127), accumulating them in-lane into the i32x4 @c c. With @c b set to
+ *  all-ones, the loop folds 16 raw bytes into a 4-lane i32 accumulator using a single relaxed-dot
+ *  per block — no per-block widening/extadd chain like the baseline @c sz_bytesum_v128.
+ *
+ *  Correctness vs serial: the dot treats each byte as a SIGNED i8, so a byte `>= 128` contributes
+ *  `byte - 256` instead of @c byte. We therefore count the bytes with bit 7 set (a u8 per-lane
+ *  counter, flushed before it could overflow at 255 blocks) and add `256 *` that count back at the
+ *  end. The i32 lane sum stays in range: with at most 255 blocks per flush each lane folds 255*2
+ *  signed bytes in `[-128, 127]`, i.e. |lane| ≤ 510 × 128 < 2³¹. The result is byte-for-byte
+ *  identical to @c sz_bytesum_serial.
+ *
+ *  Runtime caveat: some engines (node/wasmtime on x86) currently lower the i8 relaxed-dot through a
+ *  multi-instruction sequence and may be SLOWER than the baseline @c extadd path; native
+ *  relaxed-simd engines lower it to a single MAC and win. The level is exposed regardless;
+ *  correctness is exact. */
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-/*  `sz_bytesum_v128relaxed` uses the relaxed integer dot-product
- *  `wasm_i32x4_relaxed_dot_i8x16_i7x16_add(a, b, c)`: it forms pairwise products of `a` (signed i8)
- *  and `b` (i7, range 0..127), accumulating them in-lane into the i32x4 `c`. With `b` = all-ones the
- *  loop folds 16 raw bytes into a 4-lane i32 accumulator using a SINGLE relaxed-dot per block — no
- *  per-block widening/extadd chain like the baseline `sz_bytesum_v128`.
- *
- *  Correctness vs serial: the dot treats each byte as a SIGNED i8, so a byte `>= 128` contributes
- *  `byte - 256` instead of `byte`. We therefore count the bytes with bit 7 set (a u8 per-lane
- *  counter, flushed before it could overflow at 255 blocks) and add `256 *` that count back at the
- *  end. The i32 lane sum stays in range: with at most 255 blocks per flush each lane folds 255*2
- *  signed bytes in `[-128, 127]`, i.e. `|lane| <= 510 * 128 < 2^31`. The result is byte-for-byte
- *  identical to `sz_bytesum_serial`.
- *
- *  Runtime caveat: some engines (node/wasmtime on x86) currently lower the i8 relaxed-dot through a
- *  multi-instruction sequence and may be SLOWER than the baseline `extadd` path; native relaxed-simd
- *  engines lower it to a single MAC and win. The level is exposed regardless; correctness is exact. */
 SZ_API_COMPTIME sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length) {
     v128_t const ones_u8x16 = wasm_i8x16_splat(1);
     v128_t const bit7_u8x16 = wasm_i8x16_splat((sz_i8_t)0x80);
@@ -77,16 +80,16 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length
     return sum;
 }
 
+/*  The vpaes tower-field AES emulation is dominated by byte-table lookups, and every index it feeds
+ *  to @c wasm_i8x16_swizzle is a nibble or otherwise in [0, 15], across the change-of-basis,
+ *  affine, GF(2⁴) log/antilog, ShiftRows and column-rotate tables. The strict swizzle is therefore
+ *  already in range, but engines must still emit the out-of-range clamp because they can't prove
+ *  it; @c relaxed_swizzle drops that clamp. Indices being in range, the result is bit-identical to
+ *  the strict path and hence to @c sz_emulate_aesenc_si128_serial_, so these relaxed kernels match
+ *  the serial reference exactly. */
 #pragma region Hash with relaxed SIMD AES
 
-/*  The vpaes tower-field AES emulation is dominated by byte-table lookups, and EVERY index it feeds to
- *  `wasm_i8x16_swizzle` is a nibble or otherwise in `[0, 15]` (the change-of-basis, affine, GF(2^4)
- *  log/antilog, ShiftRows and column-rotate tables). The strict swizzle is therefore already in range,
- *  but engines must still emit the out-of-range clamp because they can't prove it; `relaxed_swizzle`
- *  drops that clamp. Indices being in range, the result is bit-identical to the strict path (and hence
- *  to `sz_emulate_aesenc_si128_serial_`), so these relaxed kernels match the serial reference exactly. */
-
-/** @brief `relaxed_swizzle` counterpart of `sz_aes_linear_v128_`. */
+/** The @c relaxed_swizzle counterpart of @c sz_aes_linear_v128_. */
 SZ_HELPER_INLINE v128_t sz_aes_linear_v128relaxed_(v128_t low_table_u8x16, v128_t high_table_u8x16, v128_t x_u8x16) {
     v128_t low_nibbles_u8x16 = wasm_v128_and(x_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
     v128_t high_nibbles_u8x16 = wasm_u8x16_shr(x_u8x16, 4);
@@ -94,7 +97,7 @@ SZ_HELPER_INLINE v128_t sz_aes_linear_v128relaxed_(v128_t low_table_u8x16, v128_
                          wasm_i8x16_relaxed_swizzle(high_table_u8x16, high_nibbles_u8x16));
 }
 
-/** @brief `relaxed_swizzle` counterpart of `sz_aes_gf4_mul_v128_`. */
+/** The @c relaxed_swizzle counterpart of @c sz_aes_gf4_mul_v128_. */
 SZ_HELPER_INLINE v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a_u8x16, v128_t b_u8x16) {
     static sz_align_(16) sz_u8_t const log_table[16] = {0x00, 0x00, 0x01, 0x04, 0x02, 0x08, 0x05, 0x0a,
                                                         0x03, 0x0e, 0x09, 0x07, 0x06, 0x0d, 0x0b, 0x0c};
@@ -107,11 +110,12 @@ SZ_HELPER_INLINE v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a_u8x16, v128_t b_u8x
     v128_t exp_hi_u8x16 = wasm_v128_load(exp_hi_table);
     v128_t zero_u8x16 = wasm_i8x16_splat(0);
 
-    // `a` and `b` are GF(2^4) values in [0, 15], so the two `log` lookups are in range -> relaxed.
+    // `a` and `b` are GF(2⁴) values in [0, 15], so the two `log` lookups are in range → relaxed.
     v128_t sum_u8x16 = wasm_i8x16_add(wasm_i8x16_relaxed_swizzle(log_u8x16, a_u8x16),
                                       wasm_i8x16_relaxed_swizzle(log_u8x16, b_u8x16));
-    // `sum` ranges over 0..28 and the antilog split DELIBERATELY relies on strict out-of-range zeroing
-    // (low table for 0..15, high table fed `sum - 16` for 16..28), so these MUST stay strict swizzles.
+    // `sum` ranges over 0..28 and the antilog split deliberately relies on strict out-of-range
+    // zeroing (low table for 0..15, high table fed `sum - 16` for 16..28), so both of these must
+    // stay strict, not relaxed, swizzles.
     v128_t product_u8x16 = wasm_v128_xor(
         wasm_i8x16_swizzle(exp_lo_u8x16, sum_u8x16),
         wasm_i8x16_swizzle(exp_hi_u8x16, wasm_i8x16_sub(sum_u8x16, wasm_i8x16_splat(16))));
@@ -119,7 +123,7 @@ SZ_HELPER_INLINE v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a_u8x16, v128_t b_u8x
     return wasm_v128_andnot(product_u8x16, any_zero_u8x16);
 }
 
-/** @brief `relaxed_swizzle` counterpart of `sz_emulate_aesenc_v128_` (bit-exact with the serial round). */
+/** The @c relaxed_swizzle counterpart of @c sz_emulate_aesenc_v128_, bit-exact with serial. */
 SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     static sz_align_(16) sz_u8_t const fwd_lo[16] = {0x00, 0x01, 0x20, 0x21, 0x46, 0x47, 0x66, 0x67,
                                                      0x4c, 0x4d, 0x6c, 0x6d, 0x0a, 0x0b, 0x2a, 0x2b};
@@ -186,7 +190,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t stat
     return result_vec;
 }
 
-/** @brief `relaxed_swizzle` counterpart of `sz_emulate_shuffle_epi8_v128_` (order indices are in [0,15]). */
+/** The @c relaxed_swizzle counterpart of @c sz_emulate_shuffle_epi8_v128_, indices in [0, 15]. */
 SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_shuffle_epi8_v128relaxed_(sz_u128_vec_t state_vec, v128_t order_u8x16) {
     sz_u128_vec_t result_vec;
     result_vec.v128 = wasm_i8x16_relaxed_swizzle(state_vec.v128, order_u8x16);
@@ -211,7 +215,8 @@ SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_v128relaxed_(sz_hash_stat
     return mixed_in_register_vec.u64s[0];
 }
 
-/** @brief Loads the packed public state into the aligned internal twin (4x `wasm_v128_load` per 64-byte field). */
+/** Loads the packed public state into the aligned internal twin (4x @c wasm_v128_load
+ *  per 64-byte field). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_v128relaxed_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
@@ -225,7 +230,7 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_v128relaxed_(sz_hash
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state. */
+/** Stores the aligned internal twin back into the packed public state. */
 SZ_HELPER_INLINE void sz_hash_state_store_v128relaxed_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -339,8 +344,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128relaxed(sz_cptr_t sta
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_v128relaxed_` to fold - the same deferral the streaming uses.
+        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_v128relaxed_` to fold - the
+        // same deferral the streaming uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
                 state.ins.u128s[lane_index].v128 = wasm_v128_load(start + state.ins_length + lane_index * 16);
@@ -440,7 +446,8 @@ SZ_API_COMPTIME void sz_fill_random_v128relaxed(sz_ptr_t text, sz_size_t length,
 
 /**
  *  @brief Replays prepared text-lanes through the relaxed-SIMD minimal AES state for a single seed.
- *  @return 64-bit hash, bit-identical to `sz_hash_v128relaxed(text, length, seed)` (hence to serial).
+ *  @return 64-bit hash, bit-identical to `sz_hash_v128relaxed(text, length, seed)`
+ *      (hence to serial).
  */
 SZ_HELPER_INLINE sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *text_lanes_vec,
                                                                 sz_size_t text_lanes_count, sz_size_t length,
@@ -473,7 +480,7 @@ SZ_API_COMPTIME void sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t len
     }
 }
 
-#pragma endregion // Hash with relaxed SIMD AES
+#pragma endregion Hash with relaxed SIMD AES
 
 #if defined(__clang__)
 #pragma clang attribute pop

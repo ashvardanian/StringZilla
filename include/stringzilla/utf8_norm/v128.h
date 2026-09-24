@@ -1,19 +1,23 @@
 /**
- *  @brief WebAssembly SIMD128 backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/v128.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 15, 2026
+ *  @brief WebAssembly SIMD128 backend for the single-pass normalizer, NFD / NFC / NFKD / NFKC.
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
- *  `sz_utf8_norm_classify_v128_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_v128` / `sz_utf8_find_denormalized_v128`) reuse the force-inlined engines
- *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
+ *  @c sz_utf8_norm_classify_v128_, which locates the first non-inert byte for a form. The two
+ *  public entry points, @c sz_utf8_norm_v128 and @c sz_utf8_find_denormalized_v128, reuse the
+ *  force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  that devirtualizes the call.
  *
- *  WASM SIMD128 is 16 bytes wide like NEON, but it has only a 16-entry `wasm_i8x16_swizzle`, so the
- *  64-entry `sz_utf8_norm_lead_lut_` is split into 4x16 sub-tables selected by the index's high two
- *  bits - the `sz_utf8_gather64_v128_` helper that the case-folding backend already uses. The hot loop
- *  runs an all-ASCII gate plus this lead-classify over one 16-byte window; any window that survives the
- *  gate is resolved by the shared cold per-codepoint verify (`sz_utf8_norm_verify_block_`).
+ *  WASM SIMD128 is 16 bytes wide like NEON, but it has only a 16-entry @c wasm_i8x16_swizzle, so
+ *  the 64-entry @c sz_utf8_norm_lead_lut_ is split into 4x16 sub-tables selected by the high two
+ *  bits of the index, via the @c sz_utf8_gather64_v128_ helper that the case-folding backend
+ *  already uses. The hot loop runs an all-ASCII gate plus this lead-classify over one 16-byte
+ *  window; any window that survives the gate is resolved by the shared cold per-codepoint verify,
+ *  @c sz_utf8_norm_verify_block_.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_V128_H_
 #define STRINGZILLA_UTF8_NORM_V128_H_
@@ -34,11 +38,14 @@ extern "C" {
 #pragma region simd128
 
 /**
- *  @brief Scan primitive (SIMD128): first byte that begins a non-inert codepoint for @p form, else NULL.
+ *  @brief SIMD128 scan primitive: finds the first byte starting a non-inert codepoint for @p form.
  *
- *  Matches `sz_utf8_norm_classify_serial_` semantics, computed from the unified props trie. The hot loop
- *  uses a 16-byte all-ASCII gate plus a 4x16-swizzle lead-classify; the cold per-codepoint verify
- *  carries the canonical combining class across windows and reports order or quick-check violations exactly.
+ *  Matches @c sz_utf8_norm_classify_serial_ semantics, computed from the unified props trie. The
+ *  hot loop uses a 16-byte all-ASCII gate plus a 4x16-swizzle lead-classify; the cold
+ *  per-codepoint verify carries the canonical combining class across windows and reports order or
+ *  quick-check violations exactly.
+ *
+ *  @return The first such byte, or NULL.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;

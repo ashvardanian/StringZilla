@@ -1,27 +1,34 @@
 /**
  *  @file bench/utf8_traverse.cpp
- *  @brief Benchmarks the @b `sz_utf8_*` traversal/transcode family (the `utf8_runes` unit) against the serial
- *         baselines. Every kernel is benchmarked across all available SIMD backends side-by-side, and each
- *         backend's result is validated (via a per-call checksum) against the serial reference — so this file
- *         doubles as a differential correctness harness.
+ *  @author Ash Vardanian
+ *  @date November 19, 2025
+ *  @brief Benchmarks the @b sz_utf8_* traversal/transcode family (the @c utf8_runes unit) against
+ *      the serial baselines.
+ *
+ *  Every kernel is benchmarked across all available SIMD backends side-by-side, and each backend's
+ *  result is validated (via a per-call checksum) against the serial reference — so this file
+ *  doubles as a differential correctness harness.
  *
  *  Compute-bound: codepoint iteration is branch-heavy, so a 64 MiB slice exercises every path.
  *
  *  Benchmarks include:
  *  - Codepoint counting - @b utf8_count.
  *  - Nth-codepoint location - @b utf8_seek (the BMI/PDEP "Nth set bit" kernel on x86).
- *  - UTF-8 -> UTF-32 transcoding - @b utf8_decode.
+ *  - UTF-8 → UTF-32 transcoding - @b utf8_decode.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for N-grams).
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for
+ *    N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -47,7 +54,7 @@ using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Wrappers
 
-/** @brief  Counts the codepoints of each token; checksum = codepoint count. */
+/** Counts the codepoints of each token; checksum = codepoint count. */
 template <auto func_>
 struct utf8_count_from_sz {
     environment_t const &env;
@@ -60,7 +67,7 @@ struct utf8_count_from_sz {
     }
 };
 
-/** @brief  Locates the middle codepoint of each token; checksum = byte offset of the located codepoint. */
+/** Locates the middle codepoint of each token; checksum = byte offset of the located codepoint. */
 template <auto func_>
 struct utf8_seek_from_sz {
     environment_t const &env;
@@ -80,7 +87,7 @@ struct utf8_seek_from_sz {
     }
 };
 
-/** @brief  Transcodes each token UTF-8 -> UTF-32 chunk by chunk; checksum = number of runes produced. */
+/** Transcodes each token UTF-8 → UTF-32 chunk by chunk; checksum = number of runes produced. */
 template <auto func_>
 struct utf8_unpack_from_sz {
     environment_t const &env;

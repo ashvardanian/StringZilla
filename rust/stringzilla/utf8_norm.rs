@@ -1,4 +1,7 @@
 //! Unicode normalization of UTF-8 text — NFC, NFD, NFKC, and NFKD.
+//!
+//! File: rust/stringzilla/utf8_norm.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
@@ -6,15 +9,15 @@ use core::ffi::c_void;
 /// Normalizes a UTF-8 string to the requested Unicode Normal Form, writing the result to a
 /// destination buffer.
 ///
-/// Covers all four standard forms: NFD, NFC, NFKD, and NFKC. NFC is the most common form on
-/// the web; NFD is useful for collation. Compatibility forms (NFKD/NFKC) additionally decompose
+/// Covers all four standard forms: NFD, NFC, NFKD, and NFKC. NFC is the most common form on the
+/// web; NFD is useful for collation. Compatibility forms (NFKD/NFKC) additionally decompose
 /// ligatures and compatibility characters (e.g., U+FB03 ﬃ → "ffi").
 ///
 /// # Arguments
 ///
-/// * `source`: The UTF-8 string to normalize.
-/// * `form`: The target Unicode normalization form.
-/// * `destination`: The destination buffer to write the normalized string.
+/// - `source`: The UTF-8 string to normalize.
+/// - `form`: The target Unicode normalization form.
+/// - `destination`: The destination buffer to write the normalized string.
 ///
 /// # Returns
 ///
@@ -23,7 +26,7 @@ use core::ffi::c_void;
 /// # Safety
 ///
 /// The caller must ensure the destination buffer is large enough.
-/// Use `source.len() * 18` bytes for worst-case expansion (canonical decomposition).
+/// Use `source.len() * 18` bytes for the worst-case expansion of canonical decomposition.
 ///
 /// # Examples
 ///
@@ -62,13 +65,13 @@ where
 ///
 /// # Arguments
 ///
-/// * `source`: The UTF-8 string to inspect.
-/// * `form`: The normalization form to check against.
+/// - `source`: The UTF-8 string to inspect.
+/// - `form`: The normalization form to check against.
 ///
 /// # Returns
 ///
-/// * `None` if `source` already conforms to `form`.
-/// * `Some(offset)` with the byte offset of the first offending byte otherwise.
+/// - `None` if `source` already conforms to `form`.
+/// - `Some(offset)` with the byte offset of the first offending byte otherwise.
 ///
 /// # Examples
 ///
@@ -104,7 +107,7 @@ mod tests {
     use super::*;
     use crate::sz::{self, *};
 
-    // "cafe": precomposed e-acute (U+00E9, NFC) vs. base 'e' + combining acute U+0301 (NFD) - the
+    // "cafe": precomposed e-acute U+00E9 in NFC vs. base 'e' + combining acute U+0301 in NFD - the
     // shared NFC/NFD fixture pair for the UTF-8 normalization tests.
     const CAFE_NFC: &str = "caf\u{00E9}";
     const CAFE_NFD: &str = "cafe\u{0301}";
@@ -124,7 +127,7 @@ mod tests {
             assert_eq!(&dest[..len], source.as_bytes(), "ASCII unchanged under {:?}", form);
         }
 
-        // CAFE_NFC has precomposed é (U+00E9); NFC → NFC is a no-op (same bytes out).
+        // CAFE_NFC has precomposed é, U+00E9; NFC → NFC is a no-op, emitting the same bytes.
         {
             let mut dest = vec![0u8; CAFE_NFC.len() * 18];
             let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfc, &mut dest);
@@ -182,10 +185,10 @@ mod tests {
         );
 
         // NFD string: decomposed e + combining acute U+0301.
-        // The combining mark violates NFC (it should be composed with the preceding base).
+        // The combining mark violates NFC: it should be composed with the preceding base.
         let violation = sz::utf8_find_denormalized(CAFE_NFD, Utf8NormalForm::Nfc);
         assert!(violation.is_some(), "NFD string must report an NFC violation");
-        // The violation may point to the base 'e' (byte 3) or to the combining mark (byte 4);
+        // The violation may point to the base 'e' at byte 3 or to the combining mark at byte 4;
         // either is within the suffix that must change during composition.
         assert!(
             violation.unwrap() >= 3,

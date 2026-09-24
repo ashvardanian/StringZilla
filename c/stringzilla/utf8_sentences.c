@@ -1,7 +1,8 @@
 /**
  *  @file c/stringzilla/utf8_sentences.c
- *  @brief Per-domain dispatch shim for UAX-29 sentence segmentation.
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Per-domain dispatch shim for UAX-29 sentence segmentation.
  */
 #include <stringzilla/utf8_sentences.h>
 

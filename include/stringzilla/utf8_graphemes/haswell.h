@@ -1,14 +1,16 @@
 /**
- *  @file   include/stringzilla/utf8_graphemes/haswell.h
+ *  @file include/stringzilla/utf8_graphemes/haswell.h
  *  @author Ash Vardanian
- *  @brief  Haswell (AVX2) backend for UAX-29 extended grapheme cluster boundaries, fully vectorized end-to-end.
+ *  @date June 24, 2026
+ *  @brief Haswell AVX2 backend for UAX-29 extended grapheme clusters, vectorized end-to-end.
  *
- *  The AVX2 twin of the Ice Lake grapheme kernel. Each 64-byte window lives as two `__m256i` halves; every lane is
- *  decoded through the shared codepoint substrate (`sz_utf8_rune_decode_window_haswell_`), classified
- *  into one packed Grapheme_Cluster_Break descriptor per lane by a register-resident `vpshufb` nibble cascade (the AVX2
- *  twin of the VBMI BMP trie + 4-stage astral trie), compacted to a codepoint-dense descriptor byte buffer, and
- *  resolved by the SHARED portable boundary engine (`sz_grapheme_window_boundaries_`). No `vpermb` /
- *  `vpcompressb` (AVX2 lacks them), no per-lane scalar rule loop, no serial deferral.
+ *  The AVX2 twin of the Ice Lake grapheme kernel. Each 64-byte window lives as two @c __m256i
+ *  halves; every lane is decoded through the shared codepoint substrate,
+ *  @c sz_utf8_rune_decode_window_haswell_, classified into one packed Grapheme_Cluster_Break
+ *  descriptor per lane by a register-resident @c vpshufb nibble cascade, the AVX2 twin of the VBMI
+ *  BMP trie and 4-stage astral trie, compacted to a codepoint-dense descriptor byte buffer, and
+ *  resolved by the shared portable boundary engine, @c sz_grapheme_window_boundaries_. AVX2 lacks
+ *  @c vpermb and @c vpcompressb; there is no per-lane scalar rule loop and no serial deferral.
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_HASWELL_H_
 #define STRINGZILLA_UTF8_GRAPHEMES_HASWELL_H_
@@ -32,18 +34,20 @@ extern "C" {
 
 #pragma region Grapheme_Cluster_Break classifier
 
-/** @brief  Packed descriptor byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the
- *          `bmp_page_lut_` page LUT selects one of the 54 distinct 256-byte pages, then `flat_bmp_` is fetched by
- *          `vpgatherdd`. The leaf carries the descriptor directly (the serial `id_to_desc` permute is folded in).
- *          Bit-exact with `sz_rune_grapheme_break_property` over the whole BMP (Hangul included, no separate formula). */
+/** Packed descriptor byte for thirty-two BMP codepoints, with per-lane high = cp >> 8 and low =
+ *  cp & 0xFF. The @c bmp_page_lut_ page LUT selects one of the 54 distinct 256-byte pages, then
+ *  @c flat_bmp_ is fetched by @c vpgatherdd. The leaf carries the descriptor directly, folding
+ *  in the serial @c id_to_desc permute. Bit-exact with @c sz_rune_grapheme_break_property over
+ *  the whole BMP, Hangul included, with no separate formula. */
 SZ_HELPER_INLINE __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_grapheme_break_bmp_page_lut_, sz_utf8_grapheme_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
 
-/** @brief  Packed descriptor byte for thirty-two ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade), the
- *          AVX2 twin of the icelake astral trie. Per-lane bytes: @p plane = (offset>>16)&0xFF (low nibble meaningful),
- *          @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Gather-free; bit-exact. */
+/** Packed descriptor byte for thirty-two astral codepoints over offset = cp - 0x10000 with a
+ *  5-nibble cascade, the AVX2 twin of the Ice Lake astral trie. Per-lane bytes: @p plane = (offset
+ *  >> 16) & 0xFF with only the low nibble meaningful, @p high = (offset >> 8) & 0xFF,
+ *  @p low = offset & 0xFF. Gather-free and bit-exact. */
 SZ_HELPER_INLINE __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
                                                                 __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
@@ -81,14 +85,16 @@ SZ_HELPER_INLINE __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_u8
     return result_u8x32;
 }
 
-/** @brief  Per-half unsigned `value >= bound` mask (AVX2 lacks unsigned byte compare): `max_epu8(value,bound)==value`. */
+/** Per-half unsigned `value >= bound` mask, as AVX2 lacks an unsigned byte compare:
+ *  `max_epu8(value, bound) == value`. */
 SZ_HELPER_INLINE __m256i sz_grapheme_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
-/** @brief  64-bit unsigned `low <= cp <= high` mask over reconstructed BMP codepoints carried in @p high_byte /
- *          @p low_byte halves. cp = (high<<8)|low, so the inclusive 16-bit range test is: high in (lo_hi,hi_hi)
- *          unconditionally, or on the boundary high bytes the low byte within bound. Two halves, branchless. */
+/** 64-bit unsigned `low ≤ cp ≤ high` mask over reconstructed BMP codepoints carried in
+ *  @p high_byte and @p low_byte halves. With cp = (high << 8) | low, the inclusive 16-bit range
+ *  test passes a high byte strictly between the bounds unconditionally, and on the boundary high
+ *  bytes checks the low byte against its bound. Two halves, branchless. */
 SZ_HELPER_INLINE sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
                                                            __m256i high_hi_u8x32, __m256i low_hi_u8x32, sz_u16_t lo,
                                                            sz_u16_t hi) {
@@ -121,9 +127,10 @@ SZ_HELPER_INLINE sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32
                                          _mm256_and_si256(ge_low_hi_u8x32, le_high_hi_u8x32));
 }
 
-/** @brief  Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK / Kana arithmetic ranges (the AVX2
- *          twin of `sz_grapheme_cjk_other_icelake_`): `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the interior Extend /
- *          enclosed exceptions. Such lanes need no cold cascade (their descriptor is 0). */
+/** Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK and Kana arithmetic
+ *  ranges, the AVX2 twin of @c sz_grapheme_cjk_other_icelake_:
+ *  `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the interior Extend and enclosed exceptions. Such
+ *  lanes need no cold cascade, as their descriptor is 0. */
 SZ_HELPER_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
                                                          __m256i high_hi_u8x32, __m256i low_hi_u8x32) {
     sz_u64_t const run_a = sz_grapheme_cp_in_range_haswell_(high_lo_u8x32, low_lo_u8x32, high_hi_u8x32, low_hi_u8x32,
@@ -143,8 +150,9 @@ SZ_HELPER_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, 
     return (run_a | run_b) & ~(exc_a | exc_b | exc_c | exc_d | exc_e);
 }
 
-/** @brief  Compute `next3[i] = window[i+3]` over all 64 lanes (mod-64 wrap), the AVX2 twin of icelake's
- *          `_mm512_permutexvar_epi8(lane_identity+3)` (same idiom as the substrate forward-neighbours). */
+/** Computes `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the AVX2 twin
+ *  of the Ice Lake `_mm512_permutexvar_epi8(lane_identity+3)`, the idiom of the
+ *  substrate forward neighbours. */
 SZ_HELPER_INLINE void sz_grapheme_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
                                                  __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
     __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
@@ -153,21 +161,30 @@ SZ_HELPER_INLINE void sz_grapheme_next3_haswell_(__m256i window_lo_u8x32, __m256
     *next3_hi_u8x32 = _mm256_alignr_epi8(high_successor_u8x32, window_hi_u8x32, 3);
 }
 
-/** @brief  Per-window per-lane descriptors as two `__m256i` halves, plus the codepoint-start lane mask and geometry.
- *          The AVX2 twin of the icelake `sz_grapheme_classify_window_full_icelake_` outputs. */
+/** Per-window per-lane descriptors as two @c __m256i halves, plus the codepoint-start lane mask
+ *  and geometry: the AVX2 twin of the @c sz_grapheme_classify_window_full_icelake_ outputs. */
 typedef struct sz_grapheme_classified_haswell_t {
-    __m256i descriptors_low_u8x32;  /**< Packed descriptor per byte-lane, lanes [0,32) (valid only on start lanes). */
-    __m256i descriptors_high_u8x32; /**< Packed descriptor per byte-lane, lanes [32,64). */
-    sz_u64_t start_lanes;           /**< Codepoint-start lanes within the effective span (trimmed to `byte_span`). */
-    sz_size_t codepoint_count;      /**< Number of codepoint starts resolved (<= 64). */
-    sz_size_t byte_span;            /**< Bytes consumed by the resolved codepoints (offset of the next start). */
+
+    /** Packed descriptor per byte-lane for lanes [0,32), valid only on start lanes. */
+    __m256i descriptors_low_u8x32;
+
+    /** Packed descriptor per byte-lane for lanes [32,64). */
+    __m256i descriptors_high_u8x32;
+
+    /** Codepoint-start lanes within the effective span, trimmed to @c byte_span. */
+    sz_u64_t start_lanes;
+
+    /** Number of codepoint starts resolved, at most 64. */
+    sz_size_t codepoint_count;
+
+    /** Bytes consumed by the resolved codepoints, the offset of the next start. */
+    sz_size_t byte_span;
 } sz_grapheme_classified_haswell_t;
 
-/**
- *  @brief  Decode a 64-byte window, classify every lane to a packed descriptor, and emit the per-lane
- *          descriptor halves with the trimmed codepoint-start geometry. Mirrors the icelake decode/classify path
- *          (value-based blind reconstruction so malformed input agrees byte-for-byte) without `vpermb`/`vpgather`.
- */
+/** Decodes a 64-byte window, classifies every lane to a packed descriptor, and emits the
+ *  per-lane descriptor halves with the trimmed codepoint-start geometry. Mirrors the Ice Lake
+ *  decode and classify path, a value-based blind reconstruction so malformed input agrees
+ *  byte-for-byte, without @c vpermb or @c vpgather. */
 SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell_( //
     sz_u8_t const *text, sz_size_t length, sz_size_t base) {
 
@@ -196,10 +213,11 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
                                         &next2_hi_u8x32);
     sz_grapheme_next3_haswell_(raw_lo_u8x32, raw_hi_u8x32, &next3_lo_u8x32, &next3_hi_u8x32);
 
-    // Zero each `next k` lane whose source byte index reaches `loaded` (short final window only), matching the icelake
-    // maskz neighbour fetch / serial blind decode that pads out-of-window continuation bytes with 0. On a FULL window
-    // (`loaded == 64`) `loaded_mask` is all-ones so this is inert and the only touched lanes (truncated edge leads) are
-    // already deferred by the effective-window trim — so skip the six `vpshufb` mask builds entirely on the hot path.
+    // Zero each `next k` lane whose source byte index reaches `loaded` (short final window only),
+    // matching the icelake maskz neighbour fetch / serial blind decode that pads out-of-window
+    // continuation bytes with 0. On a full window (`loaded == 64`) `loaded_mask` is all-ones so
+    // this is inert and the only touched lanes (truncated edge leads) are already deferred by the
+    // effective-window trim — so skip the six `vpshufb` mask builds entirely on the hot path.
     __m256i next1_lo_p_u8x32 = next1_lo_u8x32, next1_hi_p_u8x32 = next1_hi_u8x32, next2_lo_p_u8x32 = next2_lo_u8x32,
             next2_hi_p_u8x32 = next2_hi_u8x32, next3_lo_p_u8x32 = next3_lo_u8x32, next3_hi_p_u8x32 = next3_hi_u8x32;
     if (loaded < 64) {
@@ -217,8 +235,9 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
                                             sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)((loaded_mask >> 3) >> 32)));
     }
 
-    // Reconstruct per-lane high/low (BMP) and plane/mid/low (astral) BLINDLY from the raw lead + zeroed neighbours,
-    // mirroring `sz_grapheme_classify_window_icelake_` byte-for-byte. ASCII lanes take identity (high=0, low=raw).
+    // Reconstruct per-lane high/low (BMP) and plane/mid/low (astral) blindly from the raw lead and
+    // its zeroed neighbours, mirroring `sz_grapheme_classify_window_icelake_` byte-for-byte. ASCII
+    // lanes take identity (high=0, low=raw).
     __m256i const c03_u8x32 = _mm256_set1_epi8(0x03), c07_u8x32 = _mm256_set1_epi8(0x07),
                   c0f_u8x32 = _mm256_set1_epi8(0x0F), c1f_u8x32 = _mm256_set1_epi8(0x1F),
                   c3f_u8x32 = _mm256_set1_epi8(0x3F);
@@ -277,12 +296,13 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
     __m256i const alo_hi_u8x32 = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi_p_u8x32, c03_u8x32), 6),
                                                  _mm256_and_si256(next3_hi_p_u8x32, c3f_u8x32));
 
-    // A 4-byte lead's blind codepoint is `(plane << 16) | (mid << 8) | alo` (NOT the 2-byte fold the
-    // non-ASCII high/low computed above). Override its BMP high/low halves to `mid`/`alo` so an overlong
-    // 4-byte lead whose blind plane is 0 (e.g. `F0 80 8D A9` -> U+0369) resolves on the BMP path exactly as
-    // serial/icelake do — those backends carry the full 21-bit value and split BMP-vs-astral on `cp < 0x10000`,
-    // so a plane-0 4-byte lane is a BMP codepoint, not an astral one. (The astral overwrite below is then
-    // gated on a non-zero in-range plane, mirroring icelake's `is_astral`.)
+    // A 4-byte lead's blind codepoint is `(plane << 16) | (mid << 8) | alo` (not the 2-byte fold
+    // the non-ASCII high/low computed above). Override its BMP high/low halves to `mid`/`alo` so an
+    // overlong 4-byte lead whose blind plane is 0 (e.g. `F0 80 8D A9` → U+0369) resolves on the BMP
+    // path exactly as serial/icelake do — those backends carry the full 21-bit value and split
+    // BMP-vs-astral on `cp < 0x10000`, so a plane-0 4-byte lane is a BMP codepoint, not an astral
+    // one. (The astral overwrite below is then gated on a non-zero in-range plane, mirroring
+    // icelake's `is_astral`.)
     {
         __m256i const four_sel_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)decoded.four_byte_starts);
         __m256i const four_sel_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_(
@@ -316,9 +336,10 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
         desc_hi_u8x32 = _mm256_andnot_si256(cjk_sel_hi_u8x32, desc_hi_u8x32);
     }
     if (cold) {
-        // A cold (non-ASCII, non-CJK-other) lane is present: resolve EVERY lane through the full-BMP cascade
-        // (Hangul / 2-byte / 3-byte), overwriting the ASCII fast path. ASCII and CJK-other lanes resolve
-        // identically (the cascade reproduces 0 for the carved CJK ranges), so the blend below is exact.
+        // A cold (non-ASCII, non-CJK-other) lane is present: resolve every lane through the
+        // full-BMP cascade (Hangul / 2-byte / 3-byte), overwriting the ASCII fast path. ASCII and
+        // CJK-other lanes resolve identically (the cascade reproduces 0 for the carved CJK ranges),
+        // so the blend below is exact.
         __m256i const bmp_lo_u8x32 = sz_grapheme_bmp_descriptor_haswell_(high_lo_u8x32, low_lo_u8x32);
         __m256i const bmp_hi_u8x32 = sz_grapheme_bmp_descriptor_haswell_(high_hi_u8x32, low_hi_u8x32);
         __m256i const ascii_sel2_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)ascii);
@@ -388,13 +409,12 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
 
 #pragma region Boundary algebra extractor
 
-/**
- *  @brief  Build the codepoint-dense per-class window masks from the per-lane descriptor halves at the codepoint-start
- *          lanes — the AVX2 twin of `sz_grapheme_build_masks_icelake_` feeding the SAME portable engine. Each per-class
- *          membership mask is built in the BYTE-lane domain (`vpcmpeqb` halves -> `mask_combine`), then compacted to
- *          the codepoint-dense domain by a single `_pext_u64` over the start lanes (the `vpcompressb`-free analogue of
- *          icelake's per-class `& valid` after the dense compress). No scalar loop and no rule control flow.
- */
+/** Builds the codepoint-dense per-class window masks from the per-lane descriptor halves at the
+ *  codepoint-start lanes, the AVX2 twin of @c sz_grapheme_build_masks_icelake_ feeding the same
+ *  portable engine. Each per-class membership mask is built in the byte-lane domain, from
+ *  @c vpcmpeqb halves into @c mask_combine, then compacted to the codepoint-dense domain by a
+ *  single @c _pext_u64 over the start lanes, the analogue without @c vpcompressb of the Ice Lake
+ *  per-class `& valid` after the dense compress. No scalar loop and no rule control flow. */
 SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_haswell_(
     sz_grapheme_classified_haswell_t classified, sz_u64_t valid) {
     sz_u64_t const starts = classified.start_lanes;

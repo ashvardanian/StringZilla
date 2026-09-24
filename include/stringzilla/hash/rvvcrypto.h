@@ -1,14 +1,16 @@
 /**
- *  @brief RISC-V Vector Crypto (Zvk) backend for hash: hardware AES & SHA-256.
  *  @file include/stringzilla/hash/rvvcrypto.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/hash.h
+ *  @date June 14, 2026
+ *  @brief RISC-V Vector Crypto (Zvk) backend for hash: hardware AES & SHA-256.
  *
- *  This backend replaces the two emulated primitives of the base RVV 1.0 path (`hash/rvv.h`):
- *    - the tower-field vector-permute AES round (`sz_emulate_aesenc_rvv_`) is swapped for a single
- *      `Zvkned` `vaesem.vv` instruction, and
- *    - the serial SHA-256 block is swapped for the `Zvknhb` `vsha2cl/vsha2ch/vsha2ms` instructions.
- *  Both produce byte/bit-identical results to the serial reference, so digests are interchangeable.
+ *  This backend replaces the two emulated primitives of the base RVV 1.0 path in `hash/rvv.h`: the
+ *  tower-field vector-permute AES round, @c sz_emulate_aesenc_rvv_, is swapped for a single
+ *  @c Zvkned `vaesem.vv` instruction, and the serial SHA-256 block for the @c Zvknhb @c vsha2cl,
+ *  @c vsha2ch and @c vsha2ms instructions. Both produce byte- and bit-identical results to the
+ *  serial reference, so digests are interchangeable.
+ *
+ *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_RVVCRYPTO_H_
 #define STRINGZILLA_HASH_RVVCRYPTO_H_
@@ -32,16 +34,17 @@ extern "C" {
 #pragma GCC target("arch=+v,+zvkned,+zvknhb")
 #endif
 
-#pragma region RVV Crypto AES Round (Zvkned)
+#pragma region RVV Crypto AES Round via Zvkned
 
 /**
- *  @brief Bit-exact `Zvkned` implementation of a single `_mm_aesenc_si128` round.
+ *  @brief Bit-exact @c Zvkned implementation of a single @c _mm_aesenc_si128 round.
  *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to
- *          `sz_emulate_aesenc_si128_serial_` and to `sz_emulate_aesenc_rvv_`.
+ *      @c sz_emulate_aesenc_si128_serial_ and to @c sz_emulate_aesenc_rvv_.
  *
  *  RISC-V's `vaesem.vv vd, vs2` computes `vd = MixColumns(SubBytes(ShiftRows(vd))) ^ vs2`, which is
- *  exactly the AES-NI `AESENC` operation: the state in `vd`, the round key in `vs2`. A single 128-bit
- *  AES block is one element group (`EGW = 128`), so the operation runs with `vector_length = 4` 32-bit lanes.
+ *  exactly the AES-NI @c AESENC operation: the state in @c vd, the round key in @c vs2. A single
+ *  128-bit AES block is one element group, EGW = 128, so the operation runs with a vector length of
+ *  four 32-bit lanes.
  */
 SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     sz_size_t vector_length = __riscv_vsetvl_e32m1(4); // one 128-bit AES block = 4x u32 lanes
@@ -53,13 +56,12 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_
     return result_vec;
 }
 
-#pragma endregion // RVV Crypto AES Round
+#pragma endregion RVV Crypto AES Round via Zvkned
 
+/*  These drivers mirror the serial and base RVV ones exactly, substituting
+ *  @c sz_emulate_aesenc_rvvcrypto_ for the AES round. Every non-AES step reuses the shared serial
+ *  helpers, so the digests are guaranteed value-identical to @c sz_hash_serial. */
 #pragma region RVV Crypto Hash Drivers
-
-/*  These drivers mirror the serial / base-RVV ones exactly, substituting `sz_emulate_aesenc_rvvcrypto_`
- *  for the AES round. Every non-AES step reuses the shared serial helpers, so the digests are
- *  guaranteed value-identical to `sz_hash_serial`. */
 
 SZ_HELPER_INLINE void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_for_short_t *state,
                                                             sz_u128_vec_t block_vec) {
@@ -126,23 +128,24 @@ SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_aligne
     return mixed_in_register_vec.u64s[0];
 }
 
-/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target_vec->u8s`,
- *          replacing a scalar byte loop. `source` must have a full block of readable bytes. */
+/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source into
+ *  `target_vec->u8s`, replacing a scalar byte loop. @p source must have a full block
+ *  of readable bytes. */
 SZ_HELPER_INLINE void sz_hash_load_block_rvvcrypto_(sz_u128_vec_t *target_vec, sz_cptr_t source) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target_vec->u8s));
     __riscv_vse8_v_u8m1(target_vec->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
 }
 
-/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source_vec` to `target`, the store
- *          counterpart of `sz_hash_load_block_rvvcrypto_`. `target` must have a full block of writable bytes. */
+/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source_vec to
+ *  @p target, the store counterpart of @c sz_hash_load_block_rvvcrypto_. @p target must have a
+ *  full block of writable bytes. */
 SZ_HELPER_INLINE void sz_hash_store_block_rvvcrypto_(sz_ptr_t target, sz_u128_vec_t source_vec) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(source_vec.u8s));
     __riscv_vse8_v_u8m1((sz_u8_t *)target, __riscv_vle8_v_u8m1(source_vec.u8s, vector_length), vector_length);
 }
 
-/**
- *  @brief Loads the packed public state into the aligned internal twin (one `vle8` block per 16-byte lane).
- */
+/** Loads the packed public state into the aligned internal twin (one @c vle8 block
+ *  per 16-byte lane). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
@@ -156,7 +159,8 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_s
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state (one `vse8` block per 16-byte lane). */
+/** Stores the aligned internal twin back into the packed public state (one @c vse8 block
+ *  per 16-byte lane). */
 SZ_HELPER_INLINE void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -227,8 +231,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start
         sz_size_t const window = sizeof(state.ins.u8s); // the 64-byte hashing window
         sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte window EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_rvvcrypto_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte window except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_rvvcrypto_` to fold - the same
+        // deferral the streaming path uses.
         for (; state.ins_length + window < length; state.ins_length += window) {
             sz_size_t vector_length = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
             __riscv_vse8_v_u8m8(state.ins.u8s,
@@ -331,26 +336,27 @@ SZ_API_COMPTIME void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t length, s
     }
 }
 
-#pragma endregion // RVV Crypto Hash Drivers
+#pragma endregion RVV Crypto Hash Drivers
 
-#pragma region RVV Crypto SHA 256 (Zvknhb)
+#pragma region RVV Crypto SHA 256 via Zvknhb
 
 /**
- *  @brief Process a single 512-bit (64-byte) block of data using SHA-256 via `Zvknhb`.
- *  @param hash Pointer to 8x 32-bit hash values {a,b,c,d,e,f,g,h}, modified in place.
- *  @param block Pointer to a 64-byte message block.
+ *  @brief Process a single 512-bit, 64-byte block of data using SHA-256 via @c Zvknhb.
+ *  @param[inout] hash Pointer to 8x 32-bit hash values {a,b,c,d,e,f,g,h}, modified in place.
+ *  @param[in] block Pointer to a 64-byte message block.
  *
- *  The `Zvknh` state is held in two 128-bit element groups, each four 32-bit lanes. Per the RISC-V
- *  Vector Crypto spec, `vsha2c[hl].vv` reads `vs2 = {a,b,e,f}` and `vd = {c,d,g,h}` (where `{x@y@z@w}`
- *  packs `w` into lane 0 and `x` into lane 3, little-endian), and writes the next `{a,b,e,f}` back to
- *  `vd`. Each instruction performs two compression rounds (`cl` consumes the low two W+K words of the
- *  group, `ch` the high two). `vsha2ms.vv` expands four message-schedule words per call.
+ *  The @c Zvknh state is held in two 128-bit element groups, each four 32-bit lanes. Per the RISC-V
+ *  Vector Crypto spec, `vsha2c[hl].vv` reads `vs2 = {a,b,e,f}` and `vd = {c,d,g,h}`, where
+ *  `{x@y@z@w}` packs @c w into lane 0 and @c x into lane 3, little-endian, and writes the next
+ *  `{a,b,e,f}` back to @c vd. Each instruction performs two compression rounds: @c cl consumes the
+ *  low two W+K words of the group, @c ch the high two. `vsha2ms.vv` expands four message-schedule
+ *  words per call.
  *
- *  The intrinsic argument order (matching OpenSSL's `sha256_block_data_order_zvkb_zvknha_or_zvknhb`):
- *    - `cdgh = vsha2cl(cdgh, abef, k_plus_w)` then `abef = vsha2ch(abef, cdgh, k_plus_w)` per quad-round,
- *    - `wN = vsha2ms(wN, vmerge(w_older, w_newer, mask_lane0), w_newest)` to roll the schedule forward.
- *  SHA-256 words are big-endian; we load them with a scalar byte-swap so this path needs only the
- *  `Zvknhb` extension (no `Zvbb`/`Zvkb` `vrev8`).
+ *  The intrinsic argument order matches @c sha256_block_data_order_zvkb_zvknha_or_zvknhb of
+ *  OpenSSL: `cdgh = vsha2cl(cdgh, abef, k_plus_w)` then `abef = vsha2ch(abef, cdgh, k_plus_w)` per
+ *  quad-round, and `wN = vsha2ms(wN, vmerge(w_older, w_newer, mask_lane0), w_newest)` to roll the
+ *  schedule forward. SHA-256 words are big-endian; we load them with a scalar byte-swap so this
+ *  path needs only the @c Zvknhb extension, not the @c vrev8 of @c Zvbb or @c Zvkb.
  */
 SZ_HELPER_INLINE void sz_sha256_process_block_rvvcrypto_(sz_u32_t hash[sz_at_least_(8)],
                                                          sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
@@ -549,7 +555,7 @@ SZ_API_COMPTIME void sz_sha256_state_digest_rvvcrypto(sz_sha256_state_t const *s
     }
 }
 
-#pragma endregion // RVV Crypto SHA 256
+#pragma endregion RVV Crypto SHA 256 via Zvknhb
 
 #if defined(__clang__)
 #pragma clang attribute pop

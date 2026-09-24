@@ -1,7 +1,9 @@
 /**
- *  @brief SVE backend for substring & byte-set search.
  *  @file include/stringzilla/find/sve.h
  *  @author Ash Vardanian
+ *  @date October 3, 2024
+ *  @brief SVE backend for substring & byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SVE_H_
@@ -16,8 +18,7 @@ extern "C" {
 #endif
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
- *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs.
- */
+ *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs. */
 #if SZ_USE_SVE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
@@ -171,8 +172,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_le
     sz_u8_t const n_mid = ((sz_u8_t *)needle)[offset_mid];
     sz_u8_t const n_last = ((sz_u8_t *)needle)[offset_last];
 
-    // Walk candidate blocks from the end; within a block the matches are consumed in REVERSED lane order, so
-    // the candidate loop is the forward `sz_find_sve` loop over the reversed match predicate.
+    // Walk candidate blocks from the end and consume the matches of a block in reversed lane order,
+    // so that the candidate loop is the forward `sz_find_sve` loop over a reversed match predicate.
     sz_size_t const vector_bytes = svcntb();
     sz_size_t const candidates = haystack_length - needle_length + 1;
     sz_size_t progress = 0;

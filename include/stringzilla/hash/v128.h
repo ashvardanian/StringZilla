@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly SIMD128 backend for hash.
  *  @file include/stringzilla/hash/v128.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly SIMD128 backend for hash.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_V128_H_
@@ -27,7 +29,7 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length) {
     // there are NO widening/extend/64-bit-add reductions inside the loop. Each u16 lane sums two
     // byte columns, so after `k` iterations a lane holds at most `2 * k * 255`; it stays below
     // 65535 for `k <= 128`. We therefore flush the u16 accumulator into a wide u64 accumulator
-    // every 128 iterations (2 KiB), and do ONE horizontal reduction at the very end.
+    // every 128 iterations (2 KiB), and do one horizontal reduction at the very end.
     sz_u128_vec_t sum16_vec, sum64_vec;
     sum16_vec.v128 = wasm_u64x2_splat(0); // 8x u16 partials
     sum64_vec.v128 = wasm_u64x2_splat(0); // 2x u64 partials
@@ -55,7 +57,8 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
-/** @brief Evaluate a GF(2)-linear byte map `x -> low_table[x&0xF] ^ high_table[x>>4]` across all 16 lanes. */
+/** Evaluate a GF(2)-linear byte map `x -> low_table[x&0xF] ^ high_table[x>>4]` across
+ *  all 16 lanes. */
 SZ_HELPER_INLINE v128_t sz_aes_linear_v128_(v128_t low_table_u8x16, v128_t high_table_u8x16, v128_t x_u8x16) {
     v128_t low_nibbles_u8x16 = wasm_v128_and(x_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
     v128_t high_nibbles_u8x16 = wasm_u8x16_shr(x_u8x16, 4);
@@ -63,7 +66,7 @@ SZ_HELPER_INLINE v128_t sz_aes_linear_v128_(v128_t low_table_u8x16, v128_t high_
                          wasm_i8x16_swizzle(high_table_u8x16, high_nibbles_u8x16));
 }
 
-/** @brief GF(2^4) (modulus `x^4+x+1`) lane-wise multiply via log/antilog swizzles with zero masking. */
+/** GF(2⁴) (modulus x⁴+x+1) lane-wise multiply via log/antilog swizzles with zero masking. */
 SZ_HELPER_INLINE v128_t sz_aes_gf4_mul_v128_(v128_t a_u8x16, v128_t b_u8x16) {
     static sz_align_(16) sz_u8_t const log_table[16] = {0x00, 0x00, 0x01, 0x04, 0x02, 0x08, 0x05, 0x0a,
                                                         0x03, 0x0e, 0x09, 0x07, 0x06, 0x0d, 0x0b, 0x0c};
@@ -88,11 +91,13 @@ SZ_HELPER_INLINE v128_t sz_aes_gf4_mul_v128_(v128_t a_u8x16, v128_t b_u8x16) {
 }
 
 /**
- *  @brief Bit-exact `_mm_aesenc_si128` for one round, identical to `sz_emulate_aesenc_si128_serial_`.
- *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, computed with the vpaes tower field.
+ *  @brief Bit-exact @c _mm_aesenc_si128 for one round, identical
+ *      to @c sz_emulate_aesenc_si128_serial_.
+ *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, computed with the
+ *      vpaes tower field.
  */
 SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
-    // GF(2^8) <-> GF(2^4)^2 change-of-basis (forward `M` and inverse `M^-1`), as linear nibble tables.
+    // GF(2⁸) ↔ GF(2⁴)² change-of-basis (forward `M` and inverse `M^-1`), as linear nibble tables.
     static sz_align_(16) sz_u8_t const fwd_lo[16] = {0x00, 0x01, 0x20, 0x21, 0x46, 0x47, 0x66, 0x67,
                                                      0x4c, 0x4d, 0x6c, 0x6d, 0x0a, 0x0b, 0x2a, 0x2b};
     static sz_align_(16) sz_u8_t const fwd_hi[16] = {0x00, 0x3c, 0xd5, 0xe9, 0x34, 0x08, 0xe1, 0xdd,
@@ -106,7 +111,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, 
                                                      0x9b, 0x84, 0xa5, 0xba, 0xe7, 0xf8, 0xd9, 0xc6};
     static sz_align_(16) sz_u8_t const aff_hi[16] = {0x00, 0xf1, 0xe3, 0x12, 0xc7, 0x36, 0x24, 0xd5,
                                                      0x8f, 0x7e, 0x6c, 0x9d, 0x48, 0xb9, 0xab, 0x5a};
-    // GF(2^4) inverse, square, and `square * N` (N = 8) nibble tables.
+    // GF(2⁴) inverse, square, and `square * N` (N = 8) nibble tables.
     static sz_align_(16) sz_u8_t const gf4_inv[16] = {0x00, 0x01, 0x09, 0x0e, 0x0d, 0x0b, 0x07, 0x06,
                                                       0x0f, 0x02, 0x0c, 0x05, 0x0a, 0x04, 0x03, 0x08};
     static sz_align_(16) sz_u8_t const gf4_sqr[16] = {0x00, 0x01, 0x04, 0x05, 0x03, 0x02, 0x07, 0x06,
@@ -122,12 +127,12 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, 
     v128_t state_u8x16 = state_vec.v128;
     v128_t low_nibble_mask_u8x16 = wasm_i8x16_splat((sz_i8_t)0x0F);
 
-    // SubBytes: inverse in GF(2^8) via the tower field, then the AES affine map.
+    // SubBytes: inverse in GF(2⁸) via the tower field, then the AES affine map.
     v128_t mapped_u8x16 = sz_aes_linear_v128_(wasm_v128_load(fwd_lo), wasm_v128_load(fwd_hi), state_u8x16);
     v128_t high_nibble_u8x16 = wasm_u8x16_shr(mapped_u8x16, 4);                   // high nibble = `a_hi`
     v128_t low_nibble_u8x16 = wasm_v128_and(mapped_u8x16, low_nibble_mask_u8x16); // low nibble  = `a_lo`
 
-    // d = a_hi^2 * N  ^  a_hi * a_lo  ^  a_lo^2   (all in GF(2^4))
+    // d = a_hi^2 * N  ^  a_hi * a_lo  ^  a_lo^2   (all in GF(2⁴))
     v128_t high_sqr_n_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr_n), high_nibble_u8x16);
     v128_t high_low_product_u8x16 = sz_aes_gf4_mul_v128_(high_nibble_u8x16, low_nibble_u8x16);
     v128_t low_sqr_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr), low_nibble_u8x16);
@@ -166,7 +171,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, 
     return result_vec;
 }
 
-/** @brief Vectorized counterpart of `sz_emulate_shuffle_epi8_serial_` using one `wasm_i8x16_swizzle`. */
+/** Vectorized counterpart of @c sz_emulate_shuffle_epi8_serial_ using one @c wasm_i8x16_swizzle. */
 SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_shuffle_epi8_v128_(sz_u128_vec_t state_vec, v128_t order_u8x16) {
     sz_u128_vec_t result_vec;
     result_vec.v128 = wasm_i8x16_swizzle(state_vec.v128, order_u8x16);
@@ -197,7 +202,8 @@ SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_v128_(sz_hash_state_align
     return mixed_in_register_vec.u64s[0];
 }
 
-/** @brief Loads the packed public state into the aligned internal twin (4x `wasm_v128_load` per 64-byte field). */
+/** Loads the packed public state into the aligned internal twin (4x @c wasm_v128_load
+ *  per 64-byte field). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_v128_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
@@ -211,7 +217,7 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_v128_(sz_hash_state_
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state. */
+/** Stores the aligned internal twin back into the packed public state. */
 SZ_HELPER_INLINE void sz_hash_state_store_v128_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -324,8 +330,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128(sz_cptr_t start, sz_
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_v128_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_v128_` to fold - the same
+        // deferral the streaming path uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
                 state.ins.u128s[lane_index].v128 = wasm_v128_load(start + state.ins_length + lane_index * 16);
@@ -442,13 +449,15 @@ SZ_HELPER_INLINE sz_u64_t sz_hash_multiseed_replay_v128_(sz_u512_vec_t const *te
 }
 
 /**
- *  @brief Hashes one `text` under many `seeds`, sharing a single normalization pass for short inputs.
+ *  @brief Hashes one @c text under many @c seeds, sharing a single normalization pass
+ *      for short inputs.
  *
- *  The branchy load + de-interleave of a `<= 64` byte input depends only on `(text, length)`, so it is
- *  done exactly once (`sz_hash_multiseed_prepare_serial_`) and replayed through the cheap SIMD128 AES
- *  rounds per seed — amortizing the input-load/tail cost that dominates short-string hashing. On a
- *  128-bit register each seed's minimal state is a full vector, so seeds are not lane-packed; the win is
- *  the shared normalization plus the faster v128 AES emulation. Bit-identical to `sz_hash_multiseed_serial`.
+ *  The branchy load + de-interleave of a `<= 64` byte input depends only on @b (text,length), so it
+ *  is done exactly once, by @c sz_hash_multiseed_prepare_serial_, and replayed through the cheap
+ *  SIMD128 AES rounds per seed — amortizing the input-load/tail cost that dominates short-string
+ *  hashing. On a 128-bit register each seed's minimal state is a full vector, so seeds are not
+ *  lane-packed; the win is the shared normalization plus the faster v128 AES emulation.
+ *  Bit-identical to @c sz_hash_multiseed_serial.
  */
 SZ_API_COMPTIME void sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length,             //
                                             sz_u64_t const *seeds, sz_size_t seeds_count, //
@@ -471,32 +480,36 @@ SZ_API_COMPTIME void sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length,   
     }
 }
 
-#pragma endregion // Multi Seed Hashing
+#pragma endregion Multi Seed Hashing
 
-#pragma endregion // Hash with SIMD128 AES
+#pragma endregion Hash with SIMD128 AES
 
-/** @brief 32-bit lane-wise rotate-right (no native WASM rotate; built from two shifts and an OR). */
+/** 32-bit lane-wise rotate-right (no native WASM rotate; built from two shifts and an OR). */
 SZ_HELPER_INLINE v128_t sz_sha256_rotr_v128_(v128_t x_u32x4, int count) {
     return wasm_v128_or(wasm_u32x4_shr(x_u32x4, count), wasm_i32x4_shl(x_u32x4, 32 - count));
 }
-/** @brief 4-wide `sigma0` of the message schedule: ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3). */
+
+/** 4-wide @c sigma0 of the message schedule: ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3). */
 SZ_HELPER_INLINE v128_t sz_sha256_sigma0_lower_v128_(v128_t x_u32x4) {
     return wasm_v128_xor(wasm_v128_xor(sz_sha256_rotr_v128_(x_u32x4, 7), sz_sha256_rotr_v128_(x_u32x4, 18)),
                          wasm_u32x4_shr(x_u32x4, 3));
 }
-/** @brief 4-wide `sigma1` of the message schedule: ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10). */
+
+/** 4-wide @c sigma1 of the message schedule: ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10). */
 SZ_HELPER_INLINE v128_t sz_sha256_sigma1_lower_v128_(v128_t x_u32x4) {
     return wasm_v128_xor(wasm_v128_xor(sz_sha256_rotr_v128_(x_u32x4, 17), sz_sha256_rotr_v128_(x_u32x4, 19)),
                          wasm_u32x4_shr(x_u32x4, 10));
 }
 
 /**
- *  @brief Process one 64-byte block with a SIMD message schedule, bit-exact with the serial reference.
+ *  @brief Process one 64-byte block with a SIMD message schedule, bit-exact with
+ *      the serial reference.
  *
  *  The 64-round compression is sequential in `a..h`, so it stays scalar; the gain is the message
- *  schedule, computed four words per `i32x4` (the Gueron-Krasnov layout). `W[i]` needs `sigma1(W[i-2])`,
- *  so within a group of four the upper two lanes depend on the lower two just computed — handled with a
- *  two-phase `sigma1` and a final lane blend. The input words are loaded big-endian via one shuffle.
+ *  schedule, computed four words per @c i32x4 (the Gueron-Krasnov layout). `W[i]` needs
+ *  `sigma1(W[i-2])`, so within a group of four the upper two lanes depend on the lower two just
+ *  computed — handled with a two-phase @c sigma1 and a final lane blend. The input words are loaded
+ *  big-endian via one shuffle.
  */
 SZ_HELPER_INLINE void sz_sha256_process_block_v128_(sz_u32_t hash[sz_at_least_(8)],
                                                     sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
@@ -504,8 +517,8 @@ SZ_HELPER_INLINE void sz_sha256_process_block_v128_(sz_u32_t hash[sz_at_least_(8
     sz_align_(16) sz_u32_t w[64];
 
     // Load the first 16 words big-endian: reverse the 4 bytes of each 32-bit word. This is a
-    // compile-time-CONSTANT permutation, so `wasm_i8x16_shuffle` (a fixed lane shuffle) is optimal —
-    // there is no data-dependent table here, hence nothing for `relaxed_swizzle` to accelerate.
+    // compile-time-constant permutation, so `wasm_i8x16_shuffle` (a fixed lane shuffle) is optimal
+    // — there is no data-dependent table here, hence nothing for `relaxed_swizzle` to accelerate.
     for (sz_size_t group_index = 0; group_index < 4; ++group_index) {
         v128_t loaded_u8x16 = wasm_v128_load(block + group_index * 16);
         wasm_v128_store(&w[group_index * 4], wasm_i8x16_shuffle(loaded_u8x16, loaded_u8x16, 3, 2, 1, 0, 7, 6, 5, 4, 11,

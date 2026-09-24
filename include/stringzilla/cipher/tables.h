@@ -1,12 +1,14 @@
 /**
- *  @brief Constant tables shared by every AES backend, and by the AES-derived hash.
  *  @file include/stringzilla/cipher/tables.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date February 25, 2025
+ *  @brief Constant tables shared by every AES backend, and by the AES-derived hash.
  *
- *  The substitution box of FIPS 197 is needed in two places that are otherwise unrelated: the cipher's
- *  software round function, and the software emulation of `AESENC` that `sz_hash` falls back to where no round
- *  instruction exists.
+ *  The substitution box of FIPS 197 is needed in two places that are otherwise unrelated: the
+ *  cipher's software round function, and the software emulation of @c AESENC that @c sz_hash falls
+ *  back to where no round instruction exists.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_TABLES_H_
 #define STRINGZILLA_CIPHER_TABLES_H_
@@ -19,7 +21,8 @@ extern "C" {
 
 /**
  *  @brief The AES substitution box of FIPS 197.
- *  @return A 256-entry table, 64-byte aligned so a vector backend can load it without crossing a line.
+ *  @return A 256-entry table, 64-byte aligned so a vector backend can load it without
+ *      crossing a line.
  */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes_sbox_(void) {
     static sz_align_(64) sz_u8_t const sbox[256] = {

@@ -1,7 +1,8 @@
 /**
- *  @brief RISC-V Vector backend for UTF-8 codepoint mechanics.
  *  @file include/stringzilla/utf8_runes/rvv.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief RISC-V Vector backend for UTF-8 codepoint mechanics.
  */
 #ifndef STRINGZILLA_UTF8_RUNES_RVV_H_
 #define STRINGZILLA_UTF8_RUNES_RVV_H_
@@ -21,13 +22,7 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-/**
- *  @brief Decode UTF-8 to UTF-32 codepoints, byte-for-byte equivalent to `sz_utf8_decode_serial`.
- *
- *  Vector-classifies the maximal ASCII prefix of each strip (`vmsgtu` high bit, `vfirst`) and widens it
- *  straight into the rune output; any non-ASCII byte takes a single serial `sz_rune_decode` step.
- */
-/** @brief Widen `count` ASCII bytes (u8 -> u16 -> u32) and store them as runes. */
+/** Widen @p count ASCII bytes (u8 → u16 → u32) and store them as runes. */
 SZ_HELPER_INLINE void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_t const *src, sz_size_t count) {
     sz_size_t done = 0;
     while (done < count) {
@@ -41,21 +36,24 @@ SZ_HELPER_INLINE void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_
 }
 
 /**
- *  @brief  Decode a maximal run of well-formed 2-byte sequences (Latin-1/Cyrillic/Greek/Hebrew/Arabic ranges) with
- *          ZERO gather, the 2-byte sibling of @ref sz_utf8_decode_ascii_run_rvv_.
+ *  @brief Decode a maximal run of well-formed 2-byte sequences
+ *      (Latin-1/Cyrillic/Greek/Hebrew/Arabic ranges) with zero gather, the 2-byte sibling of
+ *      @ref sz_utf8_decode_ascii_run_rvv_.
  *
- *  `vlseg2e8` deinterleaves the byte stream into a lead lane and a continuation lane in two registers; the run is
- *  validated entirely in-register (every lead in `[0xC2, 0xDF]` rejecting the `C0/C1` overlongs, every continuation in
- *  `[0x80, 0xBF]`) and a `vfirst` over the fault mask bounds the maximal good prefix. The kept prefix decodes by
- *  `((lead & 0x1F) << 6) | (cont & 0x3F)`, widens to `u32`, and stores densely; whatever follows (a non-2-byte lead, a
- *  bad pair, or a half pair at the edge) is handed back to the general window path. Reads only whole pairs, so it never
- *  over-reads the input.
+ *  @c vlseg2e8 deinterleaves the byte stream into a lead lane and a continuation
+ *  lane in two registers; the run is validated entirely in-register (every lead
+ *  in `[0xC2, 0xDF]` rejecting the `C0/C1` overlongs, every continuation in
+ *  `[0x80, 0xBF]`) and a @c vfirst over the fault mask bounds the maximal good
+ *  prefix. The kept prefix decodes by `((lead & 0x1F) << 6) | (cont & 0x3F)`,
+ *  widens to @c u32, and stores densely; whatever follows (a non-2-byte lead, a
+ *  bad pair, or a half pair at the edge) is handed back to the general window
+ *  path. Reads only whole pairs, so it never over-reads the input.
  *
- *  @param  text            Cursor positioned at a 2-byte lead.
- *  @param  length          Bytes remaining from @p text.
- *  @param  runes           Output buffer.
- *  @param  capacity        Remaining rune capacity.
- *  @param  consumed_bytes  Set to `2 * runes_emitted` (the byte span of the decoded prefix).
+ *  @param[in] text Cursor positioned at a 2-byte lead.
+ *  @param[in] length Bytes remaining from @p text.
+ *  @param[out] runes Output buffer.
+ *  @param[in] capacity Remaining rune capacity.
+ *  @param[out] consumed_bytes Set to `2 * runes_emitted` (the byte span of the decoded prefix).
  *  @return Number of runes emitted (0 if the very first pair is not a well-formed 2-byte sequence).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
@@ -100,19 +98,21 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
 }
 
 /**
- *  @brief  Decode a maximal run of well-formed 3-byte sequences (CJK, Hangul, Devanagari, Thai ranges) with ZERO
- *          gather, the 3-byte sibling of @ref sz_utf8_decode_two_byte_run_rvv_ and the RVV analogue of the Arm
- *          `svld3`/`vld3` decode tiles.
+ *  @brief Decode a maximal run of well-formed 3-byte sequences (CJK, Hangul, Devanagari, Thai
+ *      ranges) with zero gather, the 3-byte sibling of @ref sz_utf8_decode_two_byte_run_rvv_ and
+ *      the RVV analogue of the Arm @c svld3 and @c vld3 decode tiles.
  *
- *  `vlseg3e8` deinterleaves the byte stream into a lead lane and two continuation lanes in three registers; each
- *  triple is validated entirely in-register (lead in `[0xE0, 0xEF]`, both continuations in `[0x80, 0xBF]`, and the
- *  first-continuation range tightened for the `E0` overlong and `ED` surrogate leads) and a `vfirst` over the fault
- *  mask bounds the maximal good prefix. The kept prefix decodes by `((lead&0x0F)<<12)|((c1&0x3F)<<6)|(c2&0x3F)`,
- *  widens to `u32`, and stores densely; whatever follows is handed back to the general window path. Reads only whole
- *  triples, so it never over-reads the input.
+ *  @c vlseg3e8 deinterleaves the byte stream into a lead lane and two continuation lanes in three
+ *  registers; each triple is validated entirely in-register (lead in `[0xE0, 0xEF]`, both
+ *  continuations in `[0x80, 0xBF]`, and the first-continuation range tightened for the @c E0
+ *  overlong and @c ED surrogate leads) and a @c vfirst over the fault mask bounds the maximal good
+ *  prefix. The kept prefix decodes by `((lead&0x0F)<<12)|((c1&0x3F)<<6)|(c2&0x3F)`, widens to
+ *  @c u32, and stores densely; whatever follows is handed back to the general window path. Reads
+ *  only whole triples, so it never over-reads the input.
  *
- *  @param  consumed_bytes  Set to `3 * runes_emitted` (the byte span of the decoded prefix).
- *  @return Number of runes emitted (0 if the very first triple is not a well-formed 3-byte sequence).
+ *  @param[out] consumed_bytes Set to `3 * runes_emitted` (the byte span of the decoded prefix).
+ *  @return Number of runes emitted (0 if the very first triple is not a
+ *      well-formed 3-byte sequence).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_decode_three_byte_run_rvv_( //
     sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
@@ -173,30 +173,37 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_decode_three_byte_run_rvv_( //
 }
 
 /**
- *  @brief  Decode the dense set of EMITTED-start lanes of one classified window into sequential UTF-32 runes,
- *          the RVV sibling of @ref sz_utf8_rune_drain_icelake_.
+ *  @brief Decode the dense set of EMITTED-start lanes of one classified window into sequential
+ *      UTF-32 runes, the RVV sibling of @ref sz_utf8_rune_drain_icelake_.
  *
- *  Decodes EVERY lane in place: three constant-stride `vslidedown` passes (stride 1/2/3) bring each lane its three
- *  forward neighbours with fixed latency, a branchless width-blend (1/2/3/4-byte) assembles a value at full `u32`
- *  width on every lane, and ONE `vcompress` over @p emit_mask packs the emitted-start lanes to the low lanes for a
- *  dense store. This replaces the four per-codepoint `vrgather` passes (the throughput bottleneck on every real RVV
- *  core) with cheap fixed-stride slides, mirroring the slide-not-gather decode of the Ice Lake window kernel.
+ *  Decodes every lane in place: three constant-stride @c vslidedown passes (stride 1/2/3) bring
+ *  each lane its three forward neighbours with fixed latency, a branchless width-blend
+ *  (1/2/3/4-byte) assembles a value at full @c u32 width on every lane, and one @c vcompress over
+ *  @p emit_mask packs the emitted-start lanes to the low lanes for a dense store. This replaces the
+ *  four per-codepoint @c vrgather passes (the throughput bottleneck on every real RVV core) with
+ *  cheap fixed-stride slides, mirroring the slide-not-gather decode of the Ice Lake window kernel.
  *
- *  TOTAL decode: @p emit_mask also covers promoted orphan continuation bytes, and @p ill_mask marks every emitted
- *  lane whose maximal ill-formed subpart must collapse to a single U+FFFD (Unicode 17.0 §3.9 / W3C). The width-blend
- *  assembles the (for ill-formed lanes, garbage) values, then those lanes are overwritten with U+FFFD before the
- *  `vcompress`. The resume cursor reads the per-lane @p consumed_length (the maximal-subpart length, in window order)
- *  at the last emitted lane, so an ill-formed trailing lane never skips bytes that owe their own next U+FFFD.
+ *  Total decode: @p emit_mask also covers promoted orphan continuation bytes, and @p ill_mask marks
+ *  every emitted lane whose maximal ill-formed subpart must collapse to a single U+FFFD (Unicode
+ *  17.0 §3.9 / W3C). The width-blend assembles the (for ill-formed lanes, garbage) values, then
+ *  those lanes are overwritten with U+FFFD before the @c vcompress. The resume cursor reads the
+ *  per-lane @p consumed_length (the maximal-subpart length, in window order) at the last emitted
+ *  lane, so an ill-formed trailing lane never skips bytes that owe their own next U+FFFD.
  *
- *  @param  window_bytes_u8m1   The raw window bytes loaded at `e8m1` (lanes `[0, window)` valid).
- *  @param  emit_mask_b8        Mask of decodable emitted-start lanes (true leads + promoted orphan continuations).
- *  @param  ill_mask_b8         Mask of emitted lanes that must collapse to one U+FFFD (subset of @p emit_mask_b8).
- *  @param  consumed_length_u8m1  Per-lane maximal-subpart byte length (1-4) for each emitted lane (window order).
- *  @param  decodable         Population count of @p emit_mask_b8 (number of runes to emit, before capping).
- *  @param  vector_length     The active `e8m1` vector length of this window.
- *  @param  runes             Output buffer; at most @p capacity runes are written.
- *  @param  capacity          Remaining rune capacity.
- *  @param  consumed_bytes    Set to the byte span the emitted runes cover (the resume-cursor delta).
+ *  @param[in] window_bytes_u8m1 The raw window bytes loaded at @c e8m1 (lanes `[0, window)` valid).
+ *  @param[in] emit_mask_b8 Mask of decodable emitted-start lanes (true leads + promoted
+ *      orphan continuations).
+ *  @param[in] ill_mask_b8 Mask of emitted lanes that must collapse to one U+FFFD (subset
+ *      of @p emit_mask_b8).
+ *  @param[in] consumed_length_u8m1 Per-lane maximal-subpart byte length (1-4) for each emitted
+ *      lane (window order).
+ *  @param[in] decodable Population count of @p emit_mask_b8 (number of runes to
+ *      emit, before capping).
+ *  @param[in] vector_length The active @c e8m1 vector length of this window.
+ *  @param[out] runes Output buffer; at most @p capacity runes are written.
+ *  @param[in] capacity Remaining rune capacity.
+ *  @param[out] consumed_bytes Set to the byte span the emitted runes cover (the
+ *      resume-cursor delta).
  *  @return Number of runes emitted.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_rvv_( //
@@ -259,7 +266,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_rvv_( //
     codepoints_u32m4 = __riscv_vmerge_vxm_u32m4(codepoints_u32m4, (sz_rune_t)sz_rune_replacement_k, ill_mask_b8,
                                                 vector_length);
 
-    // ONE compress packs the values at the emitted-start lanes down to a dense run; store the kept prefix.
+    // One compress packs the values at the emitted-start lanes down to a dense run, and we store
+    // the prefix it keeps.
     vuint32m4_t const packed_u32m4 = __riscv_vcompress_vm_u32m4(codepoints_u32m4, emit_mask_b8, vector_length);
     __riscv_vse32_v_u32m4(runes, packed_u32m4, want);
 
@@ -279,15 +287,14 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_rvv_( //
     return want;
 }
 
-/**
- *  @brief  Decode one `e8m1` window of @p text into dense UTF-32 @p runes by the uniform TOTAL "classify -> per-lane
- *          well-formed + orphan promotion -> compress emitted starts -> slide-gather -> width-blend -> merge U+FFFD"
- *          path, the RVV sibling of @ref sz_utf8_decode_once_icelake_. The decode is TOTAL: well-formed leads,
- *          ill-formed leads and orphan continuation bytes are all handled in-vector, one U+FFFD per maximal ill-formed
- *          subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial reference. The step declines
- *          (`*runes_unpacked == 0`, cursor unchanged) ONLY when the first lead's declared sequence crosses the window
- *          edge (a boundary truncation), which the public entry finalizes without a serial re-decode.
- */
+/** Decode one @c e8m1 window of @p text into dense UTF-32 @p runes by the uniform total "classify →
+ *  per-lane well-formed + orphan promotion → compress emitted starts → slide-gather → width-blend →
+ *  merge U+FFFD" path, the RVV sibling of @ref sz_utf8_decode_once_icelake_. The decode is total:
+ *  well-formed leads, ill-formed leads and orphan continuation bytes are all handled in-vector, one
+ *  U+FFFD per maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial
+ *  reference. The step declines (`*runes_unpacked == 0`, cursor unchanged) only when the first
+ *  lead's declared sequence crosses the window edge (a boundary truncation), which the public entry
+ *  finalizes without a serial re-decode. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
     sz_cptr_t text, sz_size_t length,                //
     sz_rune_t *runes, sz_size_t runes_capacity,      //
@@ -314,9 +321,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
     vbool8_t const continuations_b8 = __riscv_vmseq_vx_u8m1_b8(top_two_u8m1, 0x80, vector_length);
     vbool8_t const starts_b8 = __riscv_vmnot_m_b8(continuations_b8, vector_length);
 
-    // Defer every start whose declared sequence would reach past the window: well-formed text has only the trailing
-    // one (a resumable truncation), but a malformed lead-in-lead (e.g. `E0 C0`) can overrun earlier - the FIRST
-    // overrunning start bounds the decodable prefix, and its bytes resume next window or via serial.
+    // Defer every start whose declared sequence would reach past the window: well-formed text has
+    // only the trailing one (a resumable truncation), but a malformed lead-in-lead (e.g. `E0 C0`)
+    // can overrun earlier - the first overrunning start bounds the decodable prefix, and its bytes
+    // resume next window or via serial.
     vuint8m1_t const sequence_end_u8m1 = __riscv_vadd_vv_u8m1(__riscv_vid_v_u8m1(vector_length), lengths_u8m1,
                                                               vector_length);
     vbool8_t const overruns_b8 = __riscv_vmand_mm_b8(
@@ -324,18 +332,20 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
     long const first_overrun = __riscv_vfirst_m_b8(overruns_b8, vector_length);
     sz_size_t const decodable_end = first_overrun < 0 ? window : (sz_size_t)first_overrun;
 
-    // The decodable span `[0, decodable_end)` bounds every emitted start. A decodable 3/4-byte lead near the edge may
-    // read trailing bytes at lanes up to `decodable_end + 2` (still inside the window, since only a WINDOW overrun
-    // bounds `decodable_end`), and those trailing slots are read in-lane below by `vslidedown` of the byte stream.
+    // The decodable span `[0, decodable_end)` bounds every emitted start. A decodable 3/4-byte lead
+    // near the edge may read trailing bytes at lanes up to `decodable_end + 2` (still inside the
+    // window, since only a window overrun bounds `decodable_end`), and those trailing slots are
+    // read in-lane below by `vslidedown` of the byte stream.
     vuint8m1_t const lane_identity_u8m1 = __riscv_vid_v_u8m1(vector_length);
     vbool8_t const within_decodable_b8 = __riscv_vmsltu_vx_u8m1_b8(lane_identity_u8m1, (sz_u8_t)decodable_end,
                                                                    vector_length);
 
-    // TOTAL per-lane classification (no decline). Mirrors `sz_utf8_decode_once_icelake_`: every start lane is a
-    // candidate, well-formed leads decode to their value, ill-formed leads and orphan continuation bytes each collapse
-    // to one U+FFFD over their maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C). The bit algebra is carried in the
-    // lane domain: each lead-lane predicate is a 0/1 byte vector, "shift toward continuations" is `vslideup`, and the
-    // lead lane reads its trailing continuation slots via `vslidedown` of the continuation flags.
+    // Total per-lane classification (no decline). Mirrors `sz_utf8_decode_once_icelake_`: every
+    // start lane is a candidate, well-formed leads decode to their value, ill-formed leads and
+    // orphan continuation bytes each collapse to one U+FFFD over their maximal ill-formed subpart
+    // (Unicode 17.0 §3.9 / W3C). The bit algebra is carried in the lane domain: each lead-lane
+    // predicate is a 0/1 byte vector, "shift toward continuations" is `vslideup`, and the lead lane
+    // reads its trailing continuation slots via `vslidedown` of the continuation flags.
     vbool8_t const len_ge_two_b8 = __riscv_vmsgeu_vx_u8m1_b8(lengths_u8m1, 2, vector_length);
     vbool8_t const len_ge_three_b8 = __riscv_vmsgeu_vx_u8m1_b8(lengths_u8m1, 3, vector_length);
     vbool8_t const len_eq_four_b8 = __riscv_vmseq_vx_u8m1_b8(lengths_u8m1, 4, vector_length);
@@ -416,18 +426,20 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
                                                            vector_length);
     vbool8_t const well_formed_b8 = __riscv_vmand_mm_b8(well_formed_all_b8, within_decodable_b8, vector_length);
 
-    // Per-lane maximal-subpart steps (mirror of `sz_utf8_maximal_subpart_`): a lead extends across each continuation
-    // slot a well-formed sequence would still accept. step2/3/4 are LEAD-lane flags marking that the 2nd/3rd/4th byte
-    // is consumed by this lead's maximal subpart (well-formed OR the bytes an ill-formed lead's single U+FFFD covers).
+    // Per-lane maximal-subpart steps (mirror of `sz_utf8_maximal_subpart_`): a lead extends across
+    // each continuation slot a well-formed sequence would still accept. step2/3/4 are lead-lane
+    // flags marking that the 2nd/3rd/4th byte is consumed by this lead's maximal subpart
+    // (well-formed OR the bytes an ill-formed lead's single U+FFFD covers).
     vbool8_t const step2_b8 = __riscv_vmand_mm_b8(start_len_ge_two_b8, first_ok_b8, vector_length);
     vbool8_t const step3_b8 = __riscv_vmand_mm_b8(__riscv_vmand_mm_b8(step2_b8, start_len_ge_three_b8, vector_length),
                                                   cont2_b8, vector_length);
     vbool8_t const step4_b8 = __riscv_vmand_mm_b8(__riscv_vmand_mm_b8(step3_b8, start_len_ge_four_b8, vector_length),
                                                   cont3_b8, vector_length);
 
-    // Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span becomes its own 1-byte
-    // U+FFFD. The covered slots are the step2/3/4 lead flags smeared forward by 1/2/3 lanes (toward the continuation
-    // they consume), restricted to the decodable span. `vslideup` shifts toward higher lanes (off-window reads 0).
+    // Orphan promotion: a continuation byte not covered by any lead's maximal-subpart span becomes
+    // its own 1-byte U+FFFD. The covered slots are the step2/3/4 lead flags smeared forward by
+    // 1/2/3 lanes (toward the continuation they consume), restricted to the decodable span.
+    // `vslideup` shifts toward higher lanes (off-window reads 0).
     vbool8_t const step2_dec_b8 = __riscv_vmand_mm_b8(step2_b8, within_decodable_b8, vector_length);
     vbool8_t const step3_dec_b8 = __riscv_vmand_mm_b8(step3_b8, within_decodable_b8, vector_length);
     vbool8_t const step4_dec_b8 = __riscv_vmand_mm_b8(step4_b8, within_decodable_b8, vector_length);
@@ -455,8 +467,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
     if (emit_count == 0) { return *runes_unpacked = 0, text; } // Nothing decodable -> window-edge finalize in driver.
     vbool8_t const ill_formed_b8 = __riscv_vmandn_mm_b8(emit_starts_b8, well_formed_b8, vector_length);
 
-    // Per-lane maximal-subpart length = 1 + step2 + step3 + step4 (added at the LEAD lane). For an orphan/bad lead this
-    // stays 1; for a partial 3/4-byte subpart it is 2 or 3; for a well-formed lane it equals the declared rune length.
+    // Per-lane maximal-subpart length = 1 + step2 + step3 + step4 (added at the lead lane). For an
+    // orphan/bad lead this stays 1; for a partial 3/4-byte subpart it is 2 or 3; for a well-formed
+    // lane it equals the declared rune length.
     vuint8m1_t consumed_length_u8m1 = __riscv_vmv_v_x_u8m1(1, vector_length);
     consumed_length_u8m1 = __riscv_vadd_vx_u8m1_mu(step2_b8, consumed_length_u8m1, consumed_length_u8m1, 1,
                                                    vector_length);
@@ -474,14 +487,16 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
 }
 
 /**
- *  @brief  Decode UTF-8 to UTF-32 codepoints, byte-for-byte equivalent to `sz_utf8_decode_serial`.
+ *  @brief Decode UTF-8 to UTF-32 codepoints, byte-for-byte equivalent to @c sz_utf8_decode_serial.
  *
- *  Vector-classifies the maximal ASCII prefix of each strip (`vmsgtu` high bit, `vfirst`) and widens it straight
- *  into the rune output; non-ASCII regions are decoded a whole `e8m1` window at a time via the uniform TOTAL
- *  classify/gate/compress/gather/width-blend path (@ref sz_utf8_decode_once_rvv_) - clean and dirty bytes alike
- *  handled in-vector, one U+FFFD per maximal ill-formed subpart. The step declines (`step_unpacked == 0`) only when the
- *  very first lead declares a sequence crossing the window edge (a boundary truncation), which the public entry
- *  finalizes with a single bounded `sz_utf8_maximal_subpart_` step - never a per-codepoint serial re-decode.
+ *  Vector-classifies the maximal ASCII prefix of each strip (via the @c vmsgtu high bit and
+ *  @c vfirst) and widens it straight into the rune output; non-ASCII regions are decoded a whole
+ *  @c e8m1 window at a time via the uniform total classify/gate/compress/gather/width-blend path
+ *  (see @ref sz_utf8_decode_once_rvv_) - clean and dirty bytes alike handled in-vector, one U+FFFD
+ *  per maximal ill-formed subpart. The step declines (`step_unpacked == 0`) only when the very
+ *  first lead declares a sequence crossing the window edge (a boundary truncation), which the
+ *  public entry finalizes with a single bounded @c sz_utf8_maximal_subpart_ step - never a
+ *  per-codepoint serial re-decode.
  */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv(   //
     sz_cptr_t text, sz_size_t length,           //
@@ -568,7 +583,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv(   //
     return (sz_cptr_t)text_cursor;
 }
 
-/** @brief Count UTF-8 codepoints: `vcpop` the leading (non-continuation) bytes per strip. */
+/** Count UTF-8 codepoints: @c vcpop the leading (non-continuation) bytes per strip. */
 SZ_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t count = 0;
@@ -587,9 +602,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
 /**
  *  @brief Locate the start of the n-th codepoint, byte-for-byte equivalent to the serial baseline.
  *
- *  Skips whole strips by `vcpop` of leading bytes, then locates the wanted lead in-register with `viota`
- *  (the lane that is a lead and whose prefix count equals the target). Runs at `e8m4` so the `vbool2`
- *  lead mask pairs with a `u16m8` iota whose lane count never overflows the prefix counts.
+ *  Skips whole strips by @c vcpop of leading bytes, then locates the wanted lead in-register
+ *  with @c viota (the lane that is a lead and whose prefix count equals the target). Runs at
+ *  @c e8m4 so the @c vbool2 lead mask pairs with a @c u16m8 iota whose lane count never
+ *  overflows the prefix counts.
  */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -615,64 +631,83 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_
 
 /*  Multistep newline / whitespace iteration (RVV 1.0).
  *
- *  Fully masked / streaming: each iteration loads `vl = vsetvl_e8m4(length - position)` lanes, so the final
- *  iteration is the masked tail (carry bytes past `length` read as 0, so a truncated delimiter at EOF never
- *  matches) — no serial tail call. A small per-set classifier builds the per-lane byte-length vector; one
- *  shared driver (`sz_utf8_iterate_multistep_rvv_`) handles the window/carry/trusted-lane/peel scaffolding. */
+ *  Fully masked / streaming: each iteration loads `vl = vsetvl_e8m4(length - position)` lanes, so
+ *  the final iteration is the masked tail (carry bytes past @c length read as 0, so a truncated
+ *  delimiter at EOF never matches) — no serial tail call. A small per-set classifier builds the
+ *  per-lane byte-length vector; one shared driver (namely @c sz_utf8_iterate_multistep_rvv_)
+ *  handles the window/carry/trusted-lane/peel scaffolding. */
 
+/*  The 64-byte windowed-engine substrate (RVV 1.0). Everything below runs at @c e8m4, the one
+ *  SEW/LMUL pair that works at every vector length: VLEN=128 gives VLMAX = exactly the 64 lanes the
+ *  shared rule engine consumes, and wider machines clamp @c vl to 64 with idle upper lanes.
+ *  @c e8m4 is also the maximum data LMUL that admits the 16-bit indexed @c vluxei16 byte gather
+ *  (index EMUL = 2x data LMUL; @c m8 data would need an illegal EMUL=16). Discipline: every
+ *  window-domain operation runs at `vl = 64` over a zero-padded window, while the @c loaded clamp
+ *  never becomes a vector @c vl: it lives only in the @c sz_u64_t mask domain, applied as
+ *  `& sz_u64_mask_until_serial_(loaded)` to each window mask. */
 #pragma region Shared SIMD leaf substrate
 
-/*  The 64-byte windowed-engine substrate (RVV 1.0). Everything below runs at `e8m4`, the one SEW/LMUL pair that
- *  works at every vector length: VLEN=128 gives VLMAX = exactly the 64 lanes the shared rule engine consumes, and
- *  wider machines clamp `vl` to 64 with idle upper lanes. `e8m4` is also the MAXIMUM data LMUL that admits the
- *  16-bit indexed `vluxei16` byte gather (index EMUL = 2x data LMUL; `m8` data would need an illegal EMUL=16).
- *  Discipline: every window-domain operation runs at `vl = 64` over a zero-padded window; the `loaded` clamp
- *  lives ONLY in the `sz_u64_t` mask domain (`& sz_u64_mask_until_serial_(loaded)`), never as a vector `vl`. */
-
-/** @brief  The decoded 64-byte window for the RVV backend, mirroring @ref sz_utf8_rune_window_neon_t in spirit.
- *          RVV vector registers are sizeless and cannot live in a struct, so ONLY the scalar lane masks are
- *          carried here; the raw window vector is materialized once by the driver and threaded through the leaves
- *          by value, and the BMP codepoint halves are recomputed in-leaf via @ref sz_utf8_rune_bmp_halves_rvv_. */
+/** The decoded 64-byte window for the RVV backend, mirroring @ref sz_utf8_rune_window_neon_t in
+ *  spirit. RVV vector registers are sizeless and cannot live in a struct, so only the scalar lane
+ *  masks are carried here; the raw window vector is materialized once by the driver and threaded
+ *  through the leaves by value, and the BMP codepoint halves are recomputed in-leaf via
+ *  @ref sz_utf8_rune_bmp_halves_rvv_. */
 typedef struct sz_utf8_rune_window_rvv_t {
-    sz_u64_t continuation;      /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
-    sz_u64_t codepoint_starts;  /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
-    sz_u64_t two_byte_starts;   /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
-    sz_u64_t three_byte_starts; /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
-    sz_u64_t four_byte_starts;  /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;           /**< Number of bytes actually loaded (<= 64). */
+
+    /** Bit @c i is set when lane @c i is a continuation byte `10xxxxxx`. */
+    sz_u64_t continuation;
+
+    /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
+    sz_u64_t codepoint_starts;
+
+    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    sz_u64_t two_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    sz_u64_t three_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    sz_u64_t four_byte_starts;
+
+    /** Number of bytes actually loaded (at most 64). */
+    sz_size_t loaded;
 } sz_utf8_rune_window_rvv_t;
 
-/** @brief  Load up to 64 window bytes with a guaranteed-zero tail: a zero splat at VLMAX then a tail-undisturbed
- *          `vle8`, so `vslidedown` neighbour reads past the window are deterministic zeros at any VLEN. */
+/** Load up to 64 window bytes with a guaranteed-zero tail: a zero splat at VLMAX then a
+ *  tail-undisturbed @c vle8, so @c vslidedown neighbour reads past the window are deterministic
+ *  zeros at any VLEN. */
 SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_load64_rvv_(sz_u8_t const *bytes, sz_size_t loaded) {
     vuint8m4_t const zero_u8m4 = __riscv_vmv_v_x_u8m4(0, __riscv_vsetvlmax_e8m4());
     return __riscv_vle8_v_u8m4_tu(zero_u8m4, bytes, loaded);
 }
 
-/** @brief  Lower a 64-lane `vbool2_t` mask to the engine's `sz_u64_t`, bit `i` <=> lane `i`, in ONE register move:
- *          the mask register's low 64 bits reinterpret as a `u64` element and `vmv.x.s` reads it — no memory, no
- *          `vsm.v` stack staging. This is the one-way bridge OUT of the vector domain at every genuine engine
- *          boundary (the window struct fields, the frame's per-class masks). The producing compare must have run
- *          at `vl = 64` so all 64 bits are defined; the mask register's tail bits past lane 63 are never read. */
+/** Lower a 64-lane @c vbool2_t mask to the engine's @c sz_u64_t, bit @c i ↔ lane @c i, in one
+ *  register move: the mask register's low 64 bits reinterpret as a @c u64 element and `vmv.x.s`
+ *  reads it — no memory, no `vsm.v` stack staging. This is the one-way bridge out of the vector
+ *  domain at every genuine engine boundary (the window struct fields, the frame's per-class masks).
+ *  The producing compare must have run at `vl = 64` so all 64 bits are defined; the mask register's
+ *  tail bits past lane 63 are never read. */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_rune_mask_to_bits_rvv_(vbool2_t lanes_b2) {
     vuint64m1_t const words_u64m1 = __riscv_vreinterpret_v_u8m1_u64m1(__riscv_vreinterpret_v_b2_u8m1(lanes_b2));
     return __riscv_vmv_x_s_u64m1_u64(words_u64m1);
 }
 
-/** @brief  Raise an engine-domain `sz_u64_t` lane mask back into a 64-lane `vbool2_t` in ONE register move
- *          (`vmv.s.x` into the mask register's low word), the inverse of @ref sz_utf8_rune_mask_to_bits_rvv_.
- *          Reserved for values that genuinely ORIGINATE in the portable `sz_u64_t` domain (a partition-resolver
- *          output, an engine `breaks` mask, a scalar `loaded`-clamped mix); a compare that was only just lowered
- *          must be recomputed in-register instead, never round-tripped. Consumers read only lanes `[0, 64)`. */
+/** Raise an engine-domain @c sz_u64_t lane mask back into a 64-lane @c vbool2_t in one register
+ *  move (`vmv.s.x` into the mask register's low word), the inverse of
+ *  @ref sz_utf8_rune_mask_to_bits_rvv_. Reserved for values that genuinely originate in the
+ *  portable @c sz_u64_t domain (a partition-resolver output, an engine @c breaks mask, a scalar
+ *  @c loaded-clamped mix); a compare that was only just lowered must be recomputed in-register
+ *  instead, never round-tripped. Consumers read only lanes `[0, 64)`. */
 SZ_HELPER_INLINE vbool2_t sz_utf8_rune_bits_to_mask_rvv_(sz_u64_t bits) {
     vuint64m1_t const words_u64m1 = __riscv_vmv_s_x_u64m1(bits, 1);
     return __riscv_vreinterpret_v_u8m1_b2(__riscv_vreinterpret_v_u64m1_u8m1(words_u64m1));
 }
 
-/** @brief  Forward neighbour `next[i] = window[(i + distance) & 63]`, wrapping modulo 64 exactly like the NEON
- *          `vextq` quarters and the Ice Lake `vpermb`, so every intermediate partition mask stays bit-identical
- *          across backends. Requires the window's lanes past 63 to be zero (see @ref sz_utf8_rune_load64_rvv_),
- *          so the `vslidedown` spill lanes OR cleanly with the wrapped head. */
+/** Forward neighbour `next[i] = window[(i + distance) & 63]`, wrapping modulo 64 exactly
+ *  like the NEON @c vextq quarters and the Ice Lake @c vpermb, so every intermediate
+ *  partition mask stays bit-identical across backends. Requires the window's lanes past 63
+ *  to be zero (see @ref sz_utf8_rune_load64_rvv_), so the @c vslidedown spill lanes OR
+ *  cleanly with the wrapped head. */
 SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_forward_neighbour_rvv_(vuint8m4_t window_u8m4, sz_size_t distance) {
     vuint8m4_t const zero_u8m4 = __riscv_vmv_v_x_u8m4(0, __riscv_vsetvlmax_e8m4());
     vuint8m4_t const slid_u8m4 = __riscv_vslidedown_vx_u8m4(window_u8m4, distance, 64);
@@ -680,10 +715,10 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_forward_neighbour_rvv_(vuint8m4_t windo
     return __riscv_vor_vv_u8m4(slid_u8m4, wrapped_u8m4, 64);
 }
 
-/** @brief  Extract the lead-class lane masks of a 64-byte window — the mask half of the RVV twin of
- *          @ref sz_utf8_rune_decode_window_neon_. The raw window vector arrives from the driver's single
- *          @ref sz_utf8_rune_load64_rvv_ materialization; the BMP halves are recomputed in-leaf via
- *          @ref sz_utf8_rune_bmp_halves_rvv_, so no byte array is ever staged. */
+/** Extract the lead-class lane masks of a 64-byte window — the mask half of the RVV twin of
+ *  @ref sz_utf8_rune_decode_window_neon_. The raw window vector arrives from the driver's single
+ *  @ref sz_utf8_rune_load64_rvv_ materialization; the BMP halves are recomputed in-leaf via
+ *  @ref sz_utf8_rune_bmp_halves_rvv_, so no byte array is ever staged. */
 SZ_HELPER_INLINE sz_utf8_rune_window_rvv_t sz_utf8_rune_decode_window_rvv_(vuint8m4_t const raw_u8m4,
                                                                            sz_size_t const loaded) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(loaded);
@@ -705,10 +740,11 @@ SZ_HELPER_INLINE sz_utf8_rune_window_rvv_t sz_utf8_rune_decode_window_rvv_(vuint
     return window;
 }
 
-/** @brief  BMP per-lane `(high, low)` codepoint halves from the raw window and its forward neighbours, as a
- *          register tuple `{high, low}` — 2-/3-byte reconstruction merged on the 3-byte-lead mask, bit-identical
- *          to the NEON decode. ASCII and 4-byte lanes carry don't-cares, exactly like NEON. Recomputed in each
- *          consuming leaf instead of threaded, so no 8-register liveness spans the leaves. */
+/** BMP per-lane @b (high,low) codepoint halves from the raw window and its forward neighbours,
+ *  as a register tuple `{high, low}` — 2-/3-byte reconstruction merged on the 3-byte-lead
+ *  mask, bit-identical to the NEON decode. ASCII and 4-byte lanes carry don't-cares, exactly
+ *  like NEON. Recomputed in each consuming leaf instead of threaded, so no 8-register liveness
+ *  spans the leaves. */
 SZ_HELPER_INLINE vuint8m4x2_t sz_utf8_rune_bmp_halves_rvv_(vuint8m4_t const raw_u8m4) {
     vuint8m4_t const next1_u8m4 = sz_utf8_rune_forward_neighbour_rvv_(raw_u8m4, 1);
     vuint8m4_t const next2_u8m4 = sz_utf8_rune_forward_neighbour_rvv_(raw_u8m4, 2);
@@ -732,11 +768,11 @@ SZ_HELPER_INLINE vuint8m4x2_t sz_utf8_rune_bmp_halves_rvv_(vuint8m4_t const raw_
                                     __riscv_vmerge_vvm_u8m4(low_two_u8m4, low_three_u8m4, three_byte_b2, 64));
 }
 
-/** @brief  Class byte per lane from a page-compressed flat table, the RVV twin of
- *          @ref sz_utf8_rune_flat_lookup_sve2_: `page_lut[high]` by an unmasked `vluxei8` gather (the LUT is
- *          total over the byte domain, so every lane is in-bounds by construction), then `flat[(page << 8) | low]`
- *          by a masked `vluxei16` gather. @p inactive_u8m4 rides through on masked-off lanes, which perform no
- *          memory access. Index safety never depends on @p active_b2. */
+/** Class byte per lane from a page-compressed flat table, the RVV twin of
+ *  @ref sz_utf8_rune_flat_lookup_sve2_. First `page_lut[high]` by an unmasked @c vluxei8 gather,
+ *  the LUT being total over the byte domain, so every lane is in-bounds by construction. Then
+ *  `flat[(page << 8) | low]` by a masked @c vluxei16 gather. @p inactive_u8m4 rides through on
+ *  masked-off lanes, which perform no memory access. Index safety never depends on @p active_b2. */
 SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, vuint8m4_t high_u8m4, vuint8m4_t low_u8m4, vbool2_t active_b2,
     vuint8m4_t inactive_u8m4) {
@@ -746,10 +782,11 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
     return __riscv_vluxei16_v_u8m4_mu(active_b2, inactive_u8m4, flat, fused_u16m8, 64);
 }
 
-/** @brief  RVV forward drain — the vector twin of @ref sz_utf8_rune_drain_forward_neon_, bit-exact with it. The
- *          set boundary lanes compress to dense u16 indices (`vid` + `vcompress`), widen to u64 absolute
- *          positions, and emit as a shifted-difference stream: `starts = vslide1up(positions, previous)`,
- *          `lengths = positions - starts`, honoring @p capacity and the carried open-word start @p previous_io. */
+/** RVV forward drain — the vector twin of @ref sz_utf8_rune_drain_forward_neon_, bit-exact with it.
+ *  The set boundary lanes compress to dense u16 indices (via @c vid and @c vcompress), widen to u64
+ *  absolute positions, and emit as a shifted-difference stream:
+ *  `starts = vslide1up(positions, previous)`, `lengths = positions - starts`, honoring @p capacity
+ *  and the carried open-word start @p previous_io. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_rvv_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {

@@ -1,33 +1,36 @@
 /**
  *  @file bench/shared.hpp
+ *  @author Ash Vardanian
+ *  @date January 4, 2024
  *  @brief Helper structures and functions for C++ benchmarks.
  *
- *  The StringZilla benchmarking suite doesn't use any external frameworks like Criterion or Google Benchmark.
- *  There are several reasons for that:
+ *  The StringZilla benchmarking suite doesn't use any external frameworks like Criterion or Google
+ *  Benchmark. There are several reasons for that:
  *
- *  1.  Reduce the number of @b dependencies and the complexity of the build system.
+ *  1. Reduce the number of @b dependencies and the complexity of the build system.
  *
- *  2.  Combine @b "stress-testing" with benchmarks to deduplicate logic.
- *      As we work with often large datasets, with complex preprocessing, and many different backends,
- *      we want to minimize the surface area we debug and maintain, keeping track of string-specific
- *      properties, like:
+ *  2. Combine @b "stress-testing" with benchmarks to deduplicate logic.
  *
- *      -   Is the string start aligned in memory?
- *      -   Does it take more than one cache line? Is it's length a multiple of the SIMD vector size?
- *      -   Is the string cached in the L1 or L2 cache? Can the dataset fit in L3?
+ *  As we work with often large datasets, with complex preprocessing, and many different backends,
+ *  we want to minimize the surface area we debug and maintain, tracking string-specific properties:
  *
- *      As part of that stress-testing, on failure, those properties will be persisted in a file on disk.
+ *  - Is the string start aligned in memory?
+ *  - Does it take more than one cache line? Is it's length a multiple of the SIMD vector size?
+ *  - Is the string cached in the L1 or L2 cache? Can the dataset fit in L3?
  *
- *  3.  Use cheaper profiling methods like @b CPU-counter instructions, as opposed to wall-clock time.
- *      Assuming we can clearly isolate single-threaded workloads and are more interested in the number
- *      of retired instructions, CPU counters can be more accurate and less noisy.
+ *  As part of that stress-testing, on failure, those properties are persisted in a file on disk.
  *
- *  4.  Integrate with Linux @b `perf` and other tools for more detailed analysis.
- *      We can isolate the relevant pieces of code, excluding the preprocessing costs from the actual workload.
- *      We can also track individual hardware counters, including platform-specific `PERF_TYPE_RAW` ones,
- *      that are not handled by most tools.
+ *  3. Use cheaper profiling methods like @b CPU-counter instructions, as opposed to wall-clock
+ *     time. Assuming we can clearly isolate single-threaded workloads and are more interested in
+ *     the number of retired instructions, CPU counters can be more accurate and less noisy.
  *
- *  5.  Visualize the results differently, with a compact output for both generic workloads and special cases.
+ *  4. Integrate with Linux @b perf and other tools for more detailed analysis.
+ *
+ *  We can isolate the relevant pieces of code, excluding the preprocessing costs from the actual
+ *  workload. We can also track individual hardware counters, including platform-specific
+ *  @c PERF_TYPE_RAW ones, that are not handled by most tools.
+ *
+ *  5. Visualize results differently, with compact output for generic workloads and special cases.
  */
 #pragma once
 #include <cctype>  // `std::isalnum`
@@ -74,8 +77,8 @@ namespace ashvardanian {
 namespace stringzilla {
 namespace bench {
 
-// The benchmarks run on the test harness: `unified_vector`, `arrow_strings_tape_t`, `read_file` and the
-// randomization helpers all live in `test/stringzilla.hpp`, which every benchmark target carries.
+/** The benchmarks run on the test harness: @c unified_vector, @c arrow_strings_tape_t, @c read_file
+ *  and the random helpers live in `test/stringzilla.hpp`, which every benchmark target carries. */
 using namespace ashvardanian::stringzilla::test;
 
 using accurate_clock_t = stdc::high_resolution_clock;
@@ -88,13 +91,17 @@ std::size_t round_up_to_multiple(std::size_t n) {
 using check_value_t = std::uint64_t;
 
 struct call_result_t {
-    /** @brief Number of input bytes processed. */
+
+    /** Number of input bytes processed. */
     std::size_t bytes_passed = 0;
-    /** @brief Some value used to compare execution result between the baseline and accelerated backend. */
+
+    /** Some value used to compare execution result between the baseline and accelerated backend. */
     check_value_t check_value = 0;
-    /** @brief For some operations with non-linear complexity, the throughput should be measured differently. */
+
+    /** For operations with non-linear complexity, the throughput should be measured differently. */
     std::size_t operations = 0;
-    /** @brief Equal to 1 for most inputs, but can be larger for batch-capable functions. */
+
+    /** Equal to 1 for most inputs, but can be larger for batch-capable functions. */
     std::size_t inputs_processed = 1;
 
     call_result_t() = default;
@@ -108,10 +115,8 @@ struct callable_no_op_t {
 
 using profiled_function_t = std::function<call_result_t(std::size_t)>;
 
-/**
- *  @brief Cross-platform function to get the number of CPU cycles elapsed @b only on the current core.
- *         Used as a more efficient alternative to `std::chrono::high_resolution_clock`.
- */
+/** Cross-platform function to get the number of CPU cycles elapsed @b only on the current core.
+ *  Used as a more efficient alternative to @c std::chrono::high_resolution_clock. */
 inline std::uint64_t cpu_cycle_counter() {
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
     // Use MSVC intrinsics for `rdtsc`
@@ -140,7 +145,7 @@ inline std::uint64_t cpu_cycle_counter() {
 #endif
 }
 
-/** @brief Measures the duration of a single call to the given function. */
+/** Measures the duration of a single call to the given function. */
 template <typename function_type_>
 double seconds_per_call(function_type_ &&function) {
     accurate_clock_t::time_point start = accurate_clock_t::now();
@@ -150,14 +155,14 @@ double seconds_per_call(function_type_ &&function) {
 }
 
 /**
- *  @brief Allows time-limited for-loop iteration, similar to Google Benchmark's `for (auto _ : state)`.
- *         Use as `for (auto call_index : repeat_up_to(5.0)) { ... }`, then read `repeat.seconds()`.
+ *  @brief Allows time-limited for-loop iteration, like `for (auto _ : state)` in Google Benchmark.
+ *      Use as `for (auto call_index : repeat_up_to(5.0)) { ... }`, then read `repeat.seconds()`.
  *
- *  The loop body receives the @b iteration index — the quantity it actually needs to rotate over tokens
- *  and count calls. The elapsed time and iteration count are deliberately @b not yielded per-iteration;
- *  they are exposed as `seconds()` and `count()`, computed live from the owning object. Nothing is cached,
- *  so a read after the loop is as valid as one inside it — there is no stale snapshot to get the denominator
- *  out of sync with the numerator.
+ *  The loop body receives the @b iteration index — the quantity it actually needs to rotate over
+ *  tokens and count calls. The elapsed time and iteration count are deliberately @b not yielded
+ *  per-iteration; they are exposed as `seconds()` and `count()`, computed live from the owning
+ *  object. Nothing is cached, so a read after the loop is as valid as one inside it — there is no
+ *  stale snapshot to get the denominator out of sync with the numerator.
  */
 struct repeat_up_to_t {
     double max_seconds_ = 0;
@@ -177,21 +182,19 @@ struct repeat_up_to_t {
     inline iterator_t begin() { return start_ = accurate_clock_t::now(), count_ = 0, iterator_t {this}; }
     inline end_sentinel_t end() const noexcept { return {}; }
 
-    /** @brief Live wall-clock seconds since `begin()` — computed on demand, never cached. */
+    /** Live wall-clock seconds since `begin()` — computed on demand, never cached. */
     inline double seconds() const noexcept {
         return stdc::duration_cast<stdc::nanoseconds>(accurate_clock_t::now() - start_).count() / 1.e9;
     }
-    /** @brief Number of completed iterations — authoritative both during and after the loop. */
+
+    /** Number of completed iterations — authoritative both during and after the loop. */
     inline std::size_t count() const noexcept { return count_; }
     inline bool keep_running() const noexcept { return max_seconds_ != 0 && seconds() < max_seconds_; }
 };
 
 inline repeat_up_to_t repeat_up_to(double max_seconds) noexcept { return repeat_up_to_t {max_seconds}; }
 
-/**
- *  @brief Stops compilers from optimizing out the expression.
- *         Shamelessly stolen from Google Benchmark's @b `DoNotOptimize`.
- */
+/** Stops compilers from optimizing out the expression, like Google Benchmark's @b DoNotOptimize. */
 template <typename argument_type_>
 static void do_not_optimize(argument_type_ &&value) noexcept {
 
@@ -207,29 +210,29 @@ static void do_not_optimize(argument_type_ &&value) noexcept {
 #endif
 }
 
-/** The device-measured kernel time an engine reports, in milliseconds, or @b 0 for CPU engines, whose plain
- *  `status_t` carries no such timer. */
+/** The device-measured kernel time an engine reports, in milliseconds, or @b 0 for CPU engines,
+ *  whose plain @c status_t carries no such timer. */
 template <typename status_type_>
 float engine_elapsed_milliseconds(status_type_ const &status) noexcept {
     if constexpr (requires { status.elapsed_milliseconds; }) return status.elapsed_milliseconds;
     else return 0.0f;
 }
 
-/** @brief A status paired with the device-measured kernel time, both read out of one materialized copy. */
+/** A status paired with the device-measured kernel time, both read out of one materialized copy. */
 struct engine_timing_t {
     sz::status_t status = sz::status_t::success_k;
     float kernel_milliseconds = 0.0f;
 };
 
 /**
- *  @brief Calls @p invocable and decomposes its returned status through opaque memory, in one non-inlined
- *         frame. Every timed engine call in the suite goes through here.
+ *  @brief Calls @p invocable and decomposes its returned status through opaque memory, in one
+ *      non-inlined frame. Every timed engine call in the suite goes through here.
  *
- *  Both halves must stay in this frame. Compilers miscompile the engines' return-by-value inside these
- *  large translation units at @b -O2 : NVCC 12.x corrupts a `cuda_status_t`'s two leading enum fields
- *  while its `float elapsed_milliseconds` survives, and g++ trunk corrupts the status when it folds the
- *  return into an inlined caller. The libraries are correct - a separate-TU call returns `success_k`.
- *  Sharing one `[[gnu::noinline]]` frame reproduces that separate-TU code path.
+ *  Both halves must stay in this frame. Compilers miscompile the engines' return-by-value inside
+ *  these large translation units at @b -O2 : NVCC 12.x corrupts the two leading enum fields of a
+ *  @c cuda_status_t while its `float elapsed_milliseconds` survives, and g++ trunk corrupts the
+ *  status when it folds the return into an inlined caller. The libraries are correct: a separate-TU
+ *  call returns @c success_k, and sharing one `[[gnu::noinline]]` frame reproduces that code path.
  */
 template <typename invocable_type_>
 SZ_NOINLINE engine_timing_t invoke_engine_(invocable_type_ &&invocable) noexcept {
@@ -248,7 +251,7 @@ SZ_NOINLINE engine_timing_t invoke_engine_(invocable_type_ &&invocable) noexcept
 
 /**
  *  @brief Rounds the number @b down to the preceding power of two.
- *  @see Equivalent to `std::bit_floor`: https://en.cppreference.com/w/cpp/numeric/bit_floor
+ *  @see Equivalent to @c std::bit_floor: https://en.cppreference.com/w/cpp/numeric/bit_floor
  */
 inline std::size_t bit_floor(std::size_t n) {
     if (n == 0) return 0;
@@ -257,10 +260,9 @@ inline std::size_t bit_floor(std::size_t n) {
     return static_cast<std::size_t>(1) << most_significant_bit_position;
 }
 
-/**
- *  @brief Parses a human byte size like `64mb` or `1gb` into bytes; `kb`/`mb`/`gb` are powers of 1024,
- *         matching StringWars' `parse_size`. A bare number is bytes, and an empty or zero value is the whole file.
- */
+/** Parses a human byte size like @c 64mb or @c 1gb into bytes; @c kb, @c mb and @c gb are powers of
+ *  1024, matching the @c parse_size of StringWars. A bare number is bytes, and an empty or zero
+ *  value is the whole file. */
 inline std::size_t parse_size(std::string const &text) {
     std::size_t cursor = 0;
     while (cursor < text.size() && (std::isdigit((unsigned char)text[cursor]) || text[cursor] == '.')) ++cursor;
@@ -277,10 +279,8 @@ inline std::size_t parse_size(std::string const &text) {
     return static_cast<std::size_t>(number * (double)multiplier);
 }
 
-/**
- *  @brief The smallest read that still exercises a compute-bound bench's control-flow paths on the
- *         multilingual corpus. Memory-bound benches ignore it and read the whole file.
- */
+/** The smallest read that still exercises the control-flow paths of a compute-bound bench on the
+ *  multilingual corpus. Memory-bound benches ignore it and read the whole file. */
 static constexpr std::size_t compute_bound_slice_bytes_k = 64ull * 1024ull * 1024ull;
 
 #if !SZ_USE_CUDA
@@ -322,8 +322,8 @@ tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separat
 /**
  *  @brief Tokenizes a string around the given separator @p byteset in one lazy SIMD pass.
  *
- *  Each step of the underlying `split` issues one `sz_find_byteset` scan. The whole corpus is already
- *  bounded by the dataset read, so the walk runs to the end rather than carrying its own cap.
+ *  Each step of the underlying @c split issues one @c sz_find_byteset scan. The whole corpus is
+ *  already bounded by the dataset read, so the walk runs to the end without a cap of its own.
  */
 inline tokens_t tokenize(std::string_view str, sz::byteset_t separators) {
     tokens_t tokens;
@@ -334,7 +334,7 @@ inline tokens_t tokenize(std::string_view str, sz::byteset_t separators) {
     return tokens;
 }
 
-/** @brief Splits a string into words around newlines, tabs, and other ASCII whitespaces. */
+/** Splits a string into words around newlines, tabs, and other ASCII whitespaces. */
 inline tokens_t tokenize(std::string_view str) { return tokenize(str, sz::whitespaces_set()); }
 
 template <typename result_string_type_ = std::string_view, typename from_string_type_ = result_string_type_,
@@ -352,12 +352,12 @@ std::vector<result_string_type_, allocator_type_> filter_by_length(
 /**
  *  @brief Environment for the benchmarking scripts pulled from the CLI arguments.
  *
- *  The original CLI arguments include the @p path to the dataset file and the number of @p seconds per benchmark,
- *  the Regex @p filter to select only the backends that match the given pattern, as well as the @p tokenization
- *  mode to convert the loaded textual @p dataset to a @p tokens array.
+ *  The original CLI arguments include the @c path to the dataset file and the number of seconds per
+ *  benchmark, the Regex @c filter to select only the backends that match the given pattern, as well
+ *  as the @c tokenization mode to convert the loaded textual @c dataset to a @c tokens array.
  *
  *  In the RELEASE mode, the tokens will be shuffled to avoid any bias in the benchmarking process.
- *  The @p seed is used to guarantee reproducibility of the results between different runs.
+ *  The @c seed is used to guarantee reproducibility of the results between different runs.
  */
 struct environment_t {
     enum tokenization_t : unsigned char {
@@ -366,7 +366,7 @@ struct environment_t {
         words_k = 253,
     };
 
-    /** How `fmt` spells a tokenization mode: `file`, `line`, `word`, or `N-grams`. */
+    /** How @c fmt spells a tokenization mode: @c file, @c line, @c word, or @c N-grams. */
     friend std::string format_as(tokenization_t mode) {
         switch (mode) {
         case file_k: return "file";
@@ -376,37 +376,49 @@ struct environment_t {
         }
     }
 
-    /** @brief Absolute path of the textual input file on disk. */
+    /** Absolute path of the textual input file on disk. */
     std::string path;
-    /** @brief Stress-testing results directory. */
+
+    /** Stress-testing results directory. */
     std::string stress_dir;
 
-    /** @brief Tokenization mode to convert the @p dataset to @p tokens. */
+    /** Tokenization mode to convert the @c dataset to @c tokens. */
     tokenization_t tokenization = tokenization_t::words_k;
-    /** @brief Regular expression to filter the backends. */
+
+    /** Regular expression to filter the backends. */
     std::string filter;
 
-    /** @brief Whether to stress-test the backends. */
+    /** Whether to stress-test the backends. */
     bool stress = true;
-    /** @brief Upper time bound on a duration of the stress-test for a single callable. */
+
+    /** Upper time bound on a duration of the stress-test for a single callable. */
     std::size_t stress_seconds = SZ_DEBUG ? 1 : 10;
-    /** @brief Upper time bound on a duration of a single callable. */
+
+    /** Upper time bound on a duration of a single callable. */
     std::size_t benchmark_seconds = SZ_DEBUG ? 1 : 10;
-    /** @brief Seed for the random number generator. */
+
+    /** Seed for the random number generator. */
     std::uint64_t seed = 0;
-    /** @brief Upper bound on the number of stress test failures on a callable. */
+
+    /** Upper bound on the number of stress test failures on a callable. */
     std::size_t stress_limit = 1;
-    /** @brief Whether to deduplicate tokens before benchmarking. */
+
+    /** Whether to deduplicate tokens before benchmarking. */
     bool unique = false;
-    /** @brief Read at most this many dataset bytes, 0 means the whole file; `STRINGWARS_DATASET_LIMIT`. */
+
+    /** Dataset bytes to read at most, 0 meaning the whole file; @c STRINGWARS_DATASET_LIMIT. */
     std::size_t dataset_limit_bytes = 0;
-    /** @brief Optional override for per-benchmark batch sizes, empty means the backend default; `STRINGWARS_BATCH`. */
+
+    /** Per-benchmark batch sizes from @c STRINGWARS_BATCH, empty means the backend default. */
     std::vector<std::size_t> batch_sizes_override;
-    /** @brief Textual content of the dataset file, fully loaded into memory. */
+
+    /** Textual content of the dataset file, fully loaded into memory. */
     dataset_t dataset;
-    /** @brief Array of tokens extracted from the @p dataset. */
+
+    /** Array of tokens extracted from the @c dataset. */
     tokens_t tokens;
-    /** @brief This machine's cache geometry, which cache-resident benchmark shapes are sized from. */
+
+    /** This machine's cache geometry, which cache-resident benchmark shapes are sized from. */
     sz::cpu_specs_t specs;
 
     bool allow(std::string const &benchmark_name) const {
@@ -419,28 +431,28 @@ struct environment_t {
     }
 };
 
-/** @brief Whether `build_environment` stress-tests the backends absent `STRINGWARS_STRESS`. */
+/** Whether @c build_environment stress-tests the backends absent @c STRINGWARS_STRESS. */
 enum class stress_default_t : bool { quick_k, stress_k };
 
 /**
- *  @brief Prepares the environment for benchmarking based on environment variables and default settings.
- *         It's expected that different workloads may use different default datasets and tokenization modes,
- *         but time limits and seeds are usually consistent across all benchmarks.
+ *  @brief Prepares the environment for benchmarking based on environment variables and default
+ *      settings. Different workloads may use different default datasets and tokenization modes, but
+ *      time limits and seeds are usually consistent across all benchmarks.
  *
- *  @param argc Number of command-line string arguments. Not used in reality.
- *  @param argv Array of command-line string arguments. Not used in reality.
+ *  @param[in] argc Number of command-line string arguments. Not used in reality.
+ *  @param[in] argv Array of command-line string arguments. Not used in reality.
  *
- *  @param default_dataset Path to the default dataset file, if the @b `STRINGWARS_DATASET` is not set.
- *  @param default_tokens Tokenization mode, if the @b `STRINGWARS_TOKENS` is not set.
- *  @param default_duration Time limit per benchmark, if the @b `STRINGWARS_DURATION` is not set.
+ *  @param[in] default_dataset Default dataset file path, if @b STRINGWARS_DATASET is not set.
+ *  @param[in] default_tokens Tokenization mode, if @b STRINGWARS_TOKENS is not set.
+ *  @param[in] default_duration Time limit per benchmark, if @b STRINGWARS_DURATION is not set.
  *
- *  @param default_stress Whether to stress-test the backends, if the @b `STRINGWARS_STRESS` is not set.
- *  @param default_stress_dir Directory for stress-testing logs, if the @b `STRINGWARS_STRESS_DIR` is not set.
- *  @param default_stress_limit Max number of failures to tolerate, if the @b `STRINGWARS_STRESS_LIMIT` is not set.
- *  @param default_stress_duration Time limit per stress-test, if the @b `STRINGWARS_STRESS_DURATION` is not set.
+ *  @param[in] default_stress Whether to stress-test backends, if @b STRINGWARS_STRESS is not set.
+ *  @param[in] default_stress_dir Stress-test log directory, if @b STRINGWARS_STRESS_DIR is unset.
+ *  @param[in] default_stress_limit Failures to tolerate, if @b STRINGWARS_STRESS_LIMIT is not set.
+ *  @param[in] default_stress_duration Stress-test time, if @b STRINGWARS_STRESS_DURATION is unset.
  *
- *  @param default_filter Regular expression to filter the backends, if the @b `STRINGWARS_FILTER` is not set.
- *  @param default_seed Seed for reproducibility, if the @b `STRINGWARS_SEED` is not set.
+ *  @param[in] default_filter Regex to filter the backends, if @b STRINGWARS_FILTER is not set.
+ *  @param[in] default_seed Seed for reproducibility, if @b STRINGWARS_SEED is not set.
  */
 inline environment_t build_environment(                                        //
     int argc, char const *argv[],                                              //< Ignored
@@ -615,7 +627,7 @@ inline environment_t build_environment(                                        /
     return env;
 }
 
-/** @brief The slice's median token length in bytes: the short query, and the typical candidate. */
+/** The slice's median token length in bytes: the short query, and the typical candidate. */
 inline std::size_t median_token_bytes(environment_t const &env) {
     std::vector<std::size_t> lengths(env.tokens.size());
     std::transform(env.tokens.begin(), env.tokens.end(), lengths.begin(),
@@ -624,16 +636,17 @@ inline std::size_t median_token_bytes(environment_t const &env) {
     return lengths[lengths.size() / 2];
 }
 
-/** @brief Candidates one call scores: the first `STRINGWARS_BATCH` entry if set, else as many median tokens as
- *         fill the first-level cache. */
+/** Candidates one call scores: the first @c STRINGWARS_BATCH entry if set, else as many median
+ *  tokens as fill the first-level cache. */
 inline std::size_t candidates_per_call(environment_t const &env) {
     if (!env.batch_sizes_override.empty()) return env.batch_sizes_override.front();
     return std::max<std::size_t>(1, env.specs.l1_bytes / median_token_bytes(env));
 }
 
 #if SZ_USE_CUDA
-/** @brief Candidates one device call scores: the first `STRINGWARS_BATCH` entry if set, else one per resident thread
- *         of the bound device. */
+
+/** Candidates one device call scores: the first @c STRINGWARS_BATCH entry if set, else one per
+ *  resident thread of the bound device. */
 inline std::size_t resident_candidates_per_call(environment_t const &env) {
     if (!env.batch_sizes_override.empty()) return env.batch_sizes_override.front();
     int device = 0;
@@ -644,10 +657,8 @@ inline std::size_t resident_candidates_per_call(environment_t const &env) {
 }
 #endif
 
-/**
- *  @brief Uses C-style file IO to save information about the most recent stress test failure.
- *         Files can be found in: "$STRINGWARS_STRESS_DIR/failed_$time_$name.txt".
- */
+/** Uses C-style file IO to save information about the most recent stress test failure. Files are
+ *  written to @c STRINGWARS_STRESS_DIR as `failed_<time>_<name>.txt`. */
 inline void log_failure(                                              //
     environment_t const &env, std::string const &name,                //
     std::size_t expected_check_value, std::size_t actual_check_value, //
@@ -677,7 +688,7 @@ inline void log_failure(                                              //
 
 /**
  *  @brief Light-weight structure to construct a histogram of function call durations for a very
- *         wide range of floating point values using logarithmic binning, queryable by percentile.
+ *      wide range of floating point values using logarithmic binning, queryable by percentile.
  *
  *  Every call site below feeds it raw CPU-cycle deltas rather than wall-clock seconds, so the
  *  bounds are sized for cycle counts: from a single cycle up to a call spanning hours at multi-GHz
@@ -701,12 +712,12 @@ struct duration_histogram {
     }
 
     /**
-     *  @brief Upper edge of the bin holding the nearest-rank percentile, e.g. `0.99` for the p99.
-     *  @retval `0` when the histogram is empty, since there is nothing to report.
+     *  @brief Upper edge of the bin holding the nearest-rank percentile, e.g. @c 0.99 for the p99.
+     *  @return The upper edge, or @b 0 when the histogram is empty and there is nothing to report.
      *
-     *  Nearest rank is the `ceil(fraction * count)`-th sample, so the p99 of a hundred samples is the 99th
-     *  rather than the largest. The bin's upper edge is reported because a bin only knows its own bounds,
-     *  which rounds every reading up by at most one bin width.
+     *  Nearest rank is the `ceil(fraction * count)`-th sample, so the p99 of a hundred samples is
+     *  the 99th rather than the largest. The bin's upper edge is reported because a bin only knows
+     *  its own bounds, which rounds every reading up by at most one bin width.
      */
     inline double percentile(double fraction) const noexcept {
         std::size_t total_count = 0;
@@ -743,7 +754,7 @@ struct bench_result_t {
 
     duration_histogram_t cpu_cycles_histogram;
 
-    /** @brief Cheapest single call observed, in CPU cycles; a less noisy cost estimator than the mean. */
+    /** Cheapest single call observed, in CPU cycles; a less noisy cost estimator than the mean. */
     std::uint64_t profiled_cpu_cycles_min = std::numeric_limits<std::uint64_t>::max();
 
     std::size_t bytes_passed = 0; //< Pulled from the `call_result_t`
@@ -752,9 +763,9 @@ struct bench_result_t {
 
     /**
      *  @brief Logs the benchmark results to the console, including the throughput and latency,
-     *         comparing against one or more baselines.
+     *      comparing against one or more baselines.
      *
-     *  Example output:
+     *  The output reads like this:
      *
      *  @code{.unparsed}
      *  Benchmarking `sz_find_skylake`:
@@ -766,7 +777,7 @@ struct bench_result_t {
      *  > + 70 % against `memmem`
      *  @endcode
      *
-     *  When running on Linux, additional hardware counters can be sampled using `perf`:
+     *  When running on Linux, additional hardware counters can be sampled using @c perf:
      *
      *  @code{.unparsed}
      *  > Instructions retired: ... ~ 3.2 per cycle
@@ -782,8 +793,8 @@ struct bench_result_t {
      *  ...
      *  @endcode
      *
-     *  After a section of benchmarks is completed, you can use other functionality to visualize the results
-     *  in a more structured way, like a table or a graph or a set of progress bars.
+     *  After a section of benchmarks is completed, you can use other functionality to visualize the
+     *  results in a more structured way, like a table or a graph or a set of progress bars.
      */
     template <typename... baselines_types_>
     bench_result_t const &log(baselines_types_ const &...bases) const {
@@ -874,12 +885,12 @@ struct bench_result_t {
 };
 
 /**
- *  @brief Repeatedly calls and profiles a given @b nullary function, comparing it against a baseline.
- *  @param env Environment with the dataset and tokens.
- *  @param name Name of the benchmark, used for logging.
- *  @param baseline Optional serial analog, against which the accelerated function will be stress-tested.
- *  @param callable Nullary function taking no arguments and returning a @b `call_result_t`.
- *  @param check_validator Optional function to validate the results of the benchmark.
+ *  @brief Repeatedly calls and profiles a given @b nullary function, comparing it to a baseline.
+ *  @param[in] env Environment with the dataset and tokens.
+ *  @param[in] name Name of the benchmark, used for logging.
+ *  @param[in] baseline Optional serial analog to stress-test the accelerated function against.
+ *  @param[in] callable Nullary function taking no arguments and returning a @b call_result_t.
+ *  @param[in] check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <                                                        //
@@ -953,13 +964,14 @@ bench_result_t bench_nullary(  //
 }
 
 /**
- *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
- *  @param env Environment with the dataset and tokens.
- *  @param name Name of the benchmark, used for logging.
- *  @param baseline Optional serial analog, against which the accelerated function will be stress-tested.
- *  @param callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
- *  @param preprocessing Optional function to pre-process the data after the prediction.
- *  @param check_validator Optional function to validate the results of the benchmark.
+ *  @brief Loops over all tokens of the environment in loop-unrolled batches, applying the given
+ *      @b unary function.
+ *  @param[in] env Environment with the dataset and tokens.
+ *  @param[in] name Name of the benchmark, used for logging.
+ *  @param[in] baseline Optional serial analog to stress-test the accelerated function against.
+ *  @param[in] callable Unary function from a @c std::size_t token index to a @b call_result_t.
+ *  @param[in] preprocessing Optional function to pre-process the data after the prediction.
+ *  @param[in] check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <                                                        //
@@ -1072,10 +1084,11 @@ bench_result_t bench_unary(    //
 }
 
 /**
- *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b nullary function.
- *  @param env Environment with the dataset and tokens.
- *  @param name Name of the benchmark, used for logging.
- *  @param callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @brief Loops over all tokens of the environment in loop-unrolled batches, applying the given
+ *      @b nullary function.
+ *  @param[in] env Environment with the dataset and tokens.
+ *  @param[in] name Name of the benchmark, used for logging.
+ *  @param[in] callable Nullary function taking no arguments and returning a @b call_result_t.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
@@ -1084,10 +1097,11 @@ bench_result_t bench_nullary(environment_t const &env, std::string const &name, 
 }
 
 /**
- *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
- *  @param env Environment with the dataset and tokens.
- *  @param name Name of the benchmark, used for logging.
- *  @param callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
+ *  @brief Loops over all tokens of the environment in loop-unrolled batches, applying the given
+ *      @b unary function.
+ *  @param[in] env Environment with the dataset and tokens.
+ *  @param[in] name Name of the benchmark, used for logging.
+ *  @param[in] callable Unary function from a @c std::size_t token index to a @b call_result_t.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>

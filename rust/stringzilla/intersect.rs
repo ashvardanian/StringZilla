@@ -1,11 +1,14 @@
 //! Set intersections over string sequences.
+//!
+//! File: rust/stringzilla/intersect.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
 
-/// Intersects two sequences (inner join) using their default byte-slice views.
+/// Intersects two sequences, as an inner join, using their default byte-slice views.
 ///
-/// Both sequences must have an output buffer provided (for first and second positions)
+/// Both sequences must have an output buffer provided, for the first and second positions,
 /// whose length is at least the minimum of the two input lengths.
 ///
 /// # Example
@@ -52,9 +55,9 @@ pub fn intersection<Element: AsRef<[u8]>>(
     )
 }
 
-/// Intersects two sequences (inner join) using their elements corresponding byte-slice views.
-/// The caller must provide a closure that maps an index to the byte slice representation of
-/// the corresponding element in the first and second sequences.
+/// Intersects two sequences, as an inner join, using their elements corresponding byte-slice views.
+/// The caller must provide a closure that maps an index to the byte slice representation of the
+/// corresponding element in the first and second sequences.
 ///
 /// # Example
 ///
@@ -203,7 +206,7 @@ mod tests {
         assert!(n <= set1.len().min(set2.len()));
 
         // For simplicity, we will compare the intersection from the first set.
-        // Our API returns indices (for set1 in out1).
+        // Our API returns indices, for set1 in out1.
         let common_from_api: HashSet<_> = out1[..n].iter().map(|&i| set1[i]).collect();
 
         // Compute the expected intersection using a `HashSet`.

@@ -1,7 +1,8 @@
 /**
- *  @brief Serial backend for UAX-14 line break boundaries.
  *  @file include/stringzilla/utf8_linebreaks/serial.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Serial backend for UAX-14 line break boundaries.
  */
 #ifndef STRINGZILLA_UTF8_LINEBREAKS_SERIAL_H_
 #define STRINGZILLA_UTF8_LINEBREAKS_SERIAL_H_
@@ -16,7 +17,8 @@ extern "C" {
 
 #pragma region UAX 14 Line Boundaries
 
-/** @brief Returns the UAX-14 palette descriptor (class in bits 0-5, side flags in bits 6-13) for a codepoint. */
+/** Returns the UAX-14 palette descriptor for a codepoint, with the class in bits 0-5 and side flags
+ *  in bits 6-13. */
 SZ_API_COMPTIME sz_u16_t sz_rune_line_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_line_break_big_count_k; ++range)
         if (rune >= sz_utf8_line_break_big_lo_[range] && rune <= sz_utf8_line_break_big_hi_[range])
@@ -39,34 +41,41 @@ SZ_API_COMPTIME sz_u16_t sz_rune_line_break_property(sz_rune_t rune) {
     return sz_utf8_line_break_palette_[0];
 }
 
-/** @brief Resolved Line_Break class (palette bits 0-5) of a descriptor. */
+/** Resolved Line_Break class, in palette bits 0-5, of a descriptor. */
 SZ_HELPER_INLINE sz_u8_t sz_line_break_descriptor_class_(sz_u16_t descriptor) { return (sz_u8_t)(descriptor & 0x3Fu); }
-/** @brief True if a descriptor carries the general-category Pi (initial quote) flag. */
+
+/** True if a descriptor carries the general-category Pi initial-quote flag. */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_pi_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 6) & 1u);
 }
-/** @brief True if a descriptor carries the general-category Pf (final quote) flag. */
+
+/** True if a descriptor carries the general-category Pf final-quote flag. */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_pf_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 7) & 1u);
 }
-/** @brief True if a descriptor carries the East-Asian Width F/W/H flag. */
+
+/** True if a descriptor carries the East-Asian Width F/W/H flag. */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_eaw_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 8) & 1u);
 }
-/** @brief True if a descriptor is an unassigned Extended_Pictographic (LB30b second clause). */
+
+/** True if a descriptor is an unassigned Extended_Pictographic, the second clause of LB30b. */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_extpict_cn_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 9) & 1u);
 }
-/** @brief True if a descriptor is Dotted_Circle U+25CC (an aksara base in LB28a). */
+
+/** True if a descriptor is Dotted_Circle U+25CC, an aksara base in LB28a. */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_dotted_circle_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 13) & 1u);
 }
-/** @brief True for a Line_Break CM or ZWJ class (LB9 attachment candidates). */
+
+/** True for a Line_Break CM or ZWJ class, the LB9 attachment candidates. */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_is_cm_or_zwj_(sz_u8_t line_break_class) {
     return (sz_bool_t)(line_break_class == sz_line_break_cm_k || line_break_class == sz_line_break_zwj_k);
 }
 
-/** @brief One decoded codepoint's LB1-resolved Line_Break class; advances @p position and returns the descriptor. */
+/** One decoded codepoint's LB1-resolved Line_Break class; advances @p position and
+ *  returns the descriptor. */
 SZ_HELPER_INLINE sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t length, sz_size_t *position,
                                                    sz_u16_t *descriptor_out) {
     sz_size_t decode = *position;
@@ -85,17 +94,28 @@ SZ_HELPER_INLINE sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t len
     return line_break_class;
 }
 
-/** @brief One LB9/LB10-collapsed cluster: a base codepoint with its trailing combining marks already folded in. */
+/** One LB9/LB10-collapsed cluster: a base codepoint with its trailing combining marks
+ *  already folded in. */
 typedef struct sz_line_break_cluster_t {
-    sz_size_t byte_start;      /**< absolute byte offset of the cluster's base codepoint */
-    sz_u16_t descriptor;       /**< base descriptor (0 for a lone mark reclassified to AL) */
-    sz_u8_t line_break_class;  /**< effective Line_Break class (≡ raw class, post LB9/LB10) */
-    sz_bool_t preceded_by_zwj; /**< the codepoint immediately before the base was a ZWJ (LB8a) */
-    sz_bool_t valid;           /**< sz_false_k once the text is exhausted */
+
+    /** absolute byte offset of the cluster's base codepoint */
+    sz_size_t byte_start;
+
+    /** base descriptor (0 for a lone mark reclassified to AL) */
+    sz_u16_t descriptor;
+
+    /** effective Line_Break class (≡ raw class, post LB9/LB10) */
+    sz_u8_t line_break_class;
+
+    /** the codepoint immediately before the base was a ZWJ (LB8a) */
+    sz_bool_t preceded_by_zwj;
+
+    /** sz_false_k once the text is exhausted */
+    sz_bool_t valid;
 } sz_line_break_cluster_t;
 
-/** @brief A fully-zeroed invalid cluster standing in for start/end of text — every field is set, so no slot is ever
- *         read uninitialized even though `valid == sz_false_k` gates its use. */
+/** A fully-zeroed invalid cluster standing in for the start or end of text: every field is set, so
+ *  no slot is ever read uninitialized even though `valid == sz_false_k` gates its use. */
 SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_(void) {
     sz_line_break_cluster_t cluster;
     cluster.byte_start = 0;
@@ -107,9 +127,12 @@ SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_(void) {
 }
 
 /**
- *  @brief Decodes the next LB9/LB10 cluster — the base codepoint plus every trailing CM/ZWJ that attaches to it.
- *         A combining mark with no attachable base (start of text, or after BK/CR/LF/NL/SP/ZW) is LB10: kept as a
- *         lone AL cluster. @p last_codepoint_was_zwj carries the LB8a "preceded by ZWJ" bit across calls.
+ *  @brief Decodes the next LB9/LB10 cluster: the base codepoint plus every trailing CM/ZWJ that
+ *      attaches to it.
+ *
+ *  A combining mark with no attachable base, at the start of text or after BK/CR/LF/NL/SP/ZW, is
+ *  LB10: kept as a lone AL cluster. @p last_codepoint_was_zwj carries the LB8a "preceded by ZWJ"
+ *  bit across calls.
  */
 SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t text, sz_size_t length,
                                                                      sz_size_t *position,
@@ -152,24 +175,46 @@ SZ_HELPER_INLINE sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t t
 }
 
 /**
- *  @brief Forward-carried UAX-14 run state — the streaming analogue of the per-cluster context the window engine
- *         rebuilt each window: the nearest non-space cluster (LB8/14-17), the "NU (SY|IS)*" numeric run (LB25), and
- *         the Regional_Indicator parity (LB30a). Advanced by `right` each step via `sz_line_break_serial_advance_`.
+ *  @brief Forward-carried UAX-14 run state: the streaming analogue of the per-cluster context the
+ *      window engine rebuilt each window.
+ *
+ *  Holds the nearest non-space cluster for LB8/14-17, the "NU (SY|IS)*" numeric run for
+ *  LB25, and the Regional_Indicator parity for LB30a. Advanced by @c right each step
+ *  via @c sz_line_break_serial_advance_.
  */
 typedef struct sz_line_break_serial_state_t {
-    sz_u8_t last_non_space_class;            /**< nearest non-SP class at or left of `left` (LB8/14-17) */
-    sz_u16_t last_non_space_descriptor;      /**< its base descriptor (LB15a gc=Pi test) */
-    sz_u8_t last_non_space_left_class;       /**< class of the cluster just left of it (LB15a left context) */
-    sz_bool_t last_non_space_is_first;       /**< it is cluster 0 (LB15a quote_base_index == 0) */
-    sz_bool_t numeric_run_open;              /**< a "NU (SY|IS)*" run is open at `left` (LB25) */
-    sz_bool_t numeric_run_open_before;       /**< ... was open at `previous2` (LB25 close before CL/CP) */
-    sz_bool_t regional_indicator_parity_odd; /**< the RI run ending at `left` has odd length (LB30a) */
-    sz_bool_t last_codepoint_was_zwj; /**< the last codepoint decoded was a ZWJ (LB8a; carried into the decoder) */
-    sz_size_t cluster_index;          /**< index of `right`; the LB8 `had_space` / left-context `≥ 2` guards */
+
+    /** nearest non-SP class at or left of @c left (LB8/14-17) */
+    sz_u8_t last_non_space_class;
+
+    /** its base descriptor (LB15a gc=Pi test) */
+    sz_u16_t last_non_space_descriptor;
+
+    /** class of the cluster just left of it (LB15a left context) */
+    sz_u8_t last_non_space_left_class;
+
+    /** it is cluster 0 (LB15a quote_base_index == 0) */
+    sz_bool_t last_non_space_is_first;
+
+    /** a "NU (SY|IS)*" run is open at @c left (LB25) */
+    sz_bool_t numeric_run_open;
+
+    /** ... was open at @c previous2 (LB25 close before CL/CP) */
+    sz_bool_t numeric_run_open_before;
+
+    /** the RI run ending at @c left has odd length (LB30a) */
+    sz_bool_t regional_indicator_parity_odd;
+
+    /** the last codepoint decoded was a ZWJ (LB8a; carried into the decoder) */
+    sz_bool_t last_codepoint_was_zwj;
+
+    /** index of @c right; the LB8 @c had_space / left-context `≥ 2` guards */
+    sz_size_t cluster_index;
 } sz_line_break_serial_state_t;
 
-/** @brief Advance @p state by the `right` cluster (the one about to become `left`): refresh the nearest non-space
- *         context, the numeric-run flags, the Regional_Indicator parity, and the cluster counter. */
+/** Advance @p state by the @c right cluster, the one about to become @c left: refresh the
+ *  nearest non-space context, the numeric-run flags, the Regional_Indicator parity, and
+ *  the cluster counter. */
 SZ_HELPER_AUTO void sz_line_break_serial_advance_(sz_line_break_serial_state_t *state,
                                                   sz_line_break_cluster_t const *right, sz_u8_t left_class) {
     sz_u8_t const right_class = right->line_break_class;
@@ -190,16 +235,19 @@ SZ_HELPER_AUTO void sz_line_break_serial_advance_(sz_line_break_serial_state_t *
 }
 
 /**
- *  @brief Plural UAX-14 line-break segmentation: one streaming left-to-right sweep emits every break opportunity
- *         (LB1-LB31) into parallel `line_starts` / `line_lengths`. Forward-only (no reverse counterpart).
+ *  @brief Plural UAX-14 line-break segmentation: one streaming left-to-right sweep emits every
+ *      LB1-LB31 break opportunity into the parallel @c line_starts and @c line_lengths.
+ *      Forward-only, with no reverse counterpart.
  *
- *  Like the word/grapheme/sentence serial kernels, this decodes each codepoint once and carries the bounded UAX-14
- *  context forward — no fixed window, O(1) stack — so a line of any length segments correctly. The carried context is
- *  a tiny sliding run of five LB9/LB10-collapsed clusters (two back for LB19/LB20a/LB21a/LB28a, two ahead for
- *  LB15/LB19/LB25/LB28a) plus the scalar run-state the rules summarise: the nearest non-space cluster (LB8/14-17), the
- *  "NU (SY|IS)*" numeric run (LB25), and the Regional_Indicator parity (LB30a). On a full output buffer
- *  `*bytes_consumed` is the start of the open line that did not fit — always a true LB boundary — so a caller resumes
- *  from `text + *bytes_consumed` and obtains the identical remainder.
+ *  Like the word, grapheme and sentence serial kernels, this decodes each codepoint once and
+ *  carries the bounded UAX-14 context forward - no fixed window, O(1) stack - so a line of any
+ *  length segments correctly. The carried context is a tiny sliding run of five
+ *  LB9/LB10-collapsed clusters, two back for LB19/LB20a/LB21a/LB28a and two ahead for
+ *  LB15/LB19/LB25/LB28a, plus the scalar run-state the rules summarise: the nearest non-space
+ *  cluster for LB8/14-17, the "NU (SY|IS)*" numeric run for LB25, and the Regional_Indicator
+ *  parity for LB30a. On a full output buffer `*bytes_consumed` is the start of the open line that
+ *  did not fit - always a true LB boundary - so a caller resumes from `text + *bytes_consumed`
+ *  and obtains the identical remainder.
  */
 SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_serial( //
     sz_cptr_t text, sz_size_t length,                //
@@ -557,67 +605,123 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_serial( //
     return lines;
 }
 
-#pragma endregion // UAX 14 Line Boundaries
+#pragma endregion UAX 14 Line Boundaries
 
 #pragma region UAX 14 Line Boundaries window engine
 
-/** @brief Number of distinct UAX-14 Line_Break classes (`xx_k` .. `hh_k`); array stride for per-class membership. */
+/** Number of distinct UAX-14 Line_Break classes, from @c sz_line_break_xx_k to
+ *  @c sz_line_break_hh_k; the array stride for per-class membership. */
 enum { sz_line_break_class_count_k = 49 };
 
-/** @brief Engine side-word bits, one per descriptor flag the LB rules read. */
+/** Engine side-word bits, one per descriptor flag the LB rules read. */
 enum {
-    sz_line_break_side_pi_k = 0x01,     /**< gc=Pi (LB15a/LB19) */
-    sz_line_break_side_pf_k = 0x02,     /**< gc=Pf (LB15b/LB19) */
-    sz_line_break_side_eaw_k = 0x04,    /**< East-Asian Width F/W/H (LB19/LB30) */
-    sz_line_break_side_cn_k = 0x08,     /**< unassigned (LB30b, only in conjunction with ExtPict) */
-    sz_line_break_side_ext_k = 0x10,    /**< Extended_Pictographic (LB30b) */
-    sz_line_break_side_ri_k = 0x20,     /**< raw RI class (LB30a parity) */
-    sz_line_break_side_zwj_k = 0x40,    /**< raw ZWJ class (LB8a) */
-    sz_line_break_side_mark_k = 0x80,   /**< resolved CM|ZWJ (LB9/LB10 attachment) */
-    sz_line_break_side_dotted_k = 0x100 /**< DottedCircle U+25CC (LB28a); above the byte side-word */
+
+    /** gc=Pi (LB15a/LB19) */
+    sz_line_break_side_pi_k = 0x01,
+
+    /** gc=Pf (LB15b/LB19) */
+    sz_line_break_side_pf_k = 0x02,
+
+    /** East-Asian Width F/W/H (LB19/LB30) */
+    sz_line_break_side_eaw_k = 0x04,
+
+    /** unassigned (LB30b, only in conjunction with ExtPict) */
+    sz_line_break_side_cn_k = 0x08,
+
+    /** Extended_Pictographic (LB30b) */
+    sz_line_break_side_ext_k = 0x10,
+
+    /** raw RI class (LB30a parity) */
+    sz_line_break_side_ri_k = 0x20,
+
+    /** raw ZWJ class (LB8a) */
+    sz_line_break_side_zwj_k = 0x40,
+
+    /** resolved CM|ZWJ (LB9/LB10 attachment) */
+    sz_line_break_side_mark_k = 0x80,
+
+    /** DottedCircle U+25CC (LB28a); above the byte side-word */
+    sz_line_break_side_dotted_k = 0x100
 };
 
-/** @brief Window state carried across the 64-lane block window_edge: the left context + open runs straddling into
- *         lane 0, so the next window decides its first cluster's break-before with NO byte re-read (no overlap). */
+/** Window state carried across the 64-lane block edge: the left context and the open runs
+ *  straddling into lane 0, so the next window decides its first cluster's break-before with no byte
+ *  re-read and no overlap. */
 typedef struct sz_line_break_carry_t {
-    sz_u8_t have_prev; /**< 0 only at start-of-text (LB2); 1 once a cluster precedes lane 0 */
-    sz_u64_t
-        previous_class_bit; /**< one-hot effective LB class of the cluster ending just before lane 0 (post LB9/10) */
-    sz_u64_t
-        previous2_class_bit; /**< one-hot LB class of the cluster two before lane 0 (2-left rules LB19/LB20a/LB21a) */
-    sz_u8_t left_eaw;        /**< the cluster before lane 0 is East-Asian F/W/H (LB19 side bit) */
-    sz_u8_t left2_eaw;       /**< the cluster two before lane 0 is East-Asian F/W/H (LB19 ~prev2EAW) */
-    sz_u8_t left_pf;         /**< the cluster before lane 0 carries gc=Pf (LB19 `prev_(QU & ~PF)`) */
-    sz_u8_t left_aksara;     /**< the cluster before lane 0 is an aksara base AK|AS|DottedCircle (LB28a) */
-    sz_u8_t left2_aksara;    /**< the cluster two before lane 0 is an aksara base (LB28a `prev_(base_vi)`) */
-    sz_u8_t left_extpict_cn; /**< the cluster before lane 0 is Extended_Pictographic & unassigned (LB30b) */
-    sz_u8_t prev_is_zwj;     /**< the cluster before lane 0 is a bare ZWJ (LB8a no-break-after) */
-    sz_u8_t open_sp_opener;  /**< class anchoring an open "X SP*" run (LB14/16/17/8); 0xFF = none */
-    sz_u8_t in_nu_run;       /**< lane 0 continues a "NU (SY|IS)*" run (LB25) */
-    sz_u8_t in_nu_close;     /**< the cluster before lane 0 is a CL/CP closing a NU run (LB25 nu_run_close) */
-    sz_u8_t ri_open;         /**< lane 0 continues an RI sequence (parity carries) */
-    sz_u8_t ri_parity_odd;   /**< odd count of RI characters precede lane 0 within the open sequence */
-    sz_u8_t qupi_sp_open;    /**< lane 0 continues an open "[QU&Pi] SP*" governed run (LB15a) */
+
+    /** 0 only at start-of-text (LB2); 1 once a cluster precedes lane 0 */
+    sz_u8_t have_prev;
+
+    /** one-hot effective LB class of the cluster ending just before lane 0 (post LB9/10) */
+    sz_u64_t previous_class_bit;
+
+    /** one-hot LB class of the cluster two before lane 0 (2-left rules LB19/LB20a/LB21a) */
+    sz_u64_t previous2_class_bit;
+
+    /** the cluster before lane 0 is East-Asian F/W/H (LB19 side bit) */
+    sz_u8_t left_eaw;
+
+    /** the cluster two before lane 0 is East-Asian F/W/H (LB19 ~prev2EAW) */
+    sz_u8_t left2_eaw;
+
+    /** the cluster before lane 0 carries gc=Pf (LB19 `prev_(QU & ~PF)`) */
+    sz_u8_t left_pf;
+
+    /** the cluster before lane 0 is an aksara base AK|AS|DottedCircle (LB28a) */
+    sz_u8_t left_aksara;
+
+    /** the cluster two before lane 0 is an aksara base (LB28a `prev_(base_vi)`) */
+    sz_u8_t left2_aksara;
+
+    /** the cluster before lane 0 is Extended_Pictographic & unassigned (LB30b) */
+    sz_u8_t left_extpict_cn;
+
+    /** the cluster before lane 0 is a bare ZWJ (LB8a no-break-after) */
+    sz_u8_t prev_is_zwj;
+
+    /** class anchoring an open "X SP*" run (LB14/16/17/8); 0xFF = none */
+    sz_u8_t open_sp_opener;
+
+    /** lane 0 continues a "NU (SY|IS)*" run (LB25) */
+    sz_u8_t in_nu_run;
+
+    /** the cluster before lane 0 is a CL/CP closing a NU run (LB25 nu_run_close) */
+    sz_u8_t in_nu_close;
+
+    /** lane 0 continues an RI sequence (parity carries) */
+    sz_u8_t ri_open;
+
+    /** odd count of RI characters precede lane 0 within the open sequence */
+    sz_u8_t ri_parity_odd;
+
+    /** lane 0 continues an open "[QU&Pi] SP*" governed run (LB15a) */
+    sz_u8_t qupi_sp_open;
 } sz_line_break_carry_t;
 
-/** @brief Is the carried one-hot class word @p class_bits set for class `cls`? `class_bits` is hoisted once per
- *         window into a register (0 at start-of-text), so every call is a pure register shift/and the compiler CSEs. */
+/** Is the carried one-hot class word @p class_bits set for class @p cls? @p class_bits is hoisted
+ *  once per window into a register, 0 at start-of-text, so every call is a pure register shift and
+ *  AND that the compiler CSEs. */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_class_is_(sz_u64_t class_bits, sz_u8_t cls) {
     return (sz_bool_t)((class_bits >> cls) & 1ull);
 }
 
-/** @brief Is the carried one-hot class word @p class_bits a member of @p class_set? */
+/** Is the carried one-hot class word @p class_bits a member of @p class_set? */
 SZ_HELPER_INLINE sz_bool_t sz_line_break_class_in_(sz_u64_t class_bits, sz_u64_t class_set) {
     return (sz_bool_t)((class_bits & class_set) != 0);
 }
 
-/** @brief Result of one window decision: break-before bits + the trust horizon (lanes [0,resolved) are committable). */
+/** Result of one window decision: break-before bits plus the trust horizon. */
 typedef struct sz_line_break_window_t {
-    sz_u64_t breaks;    /**< break-before bits at cluster-base lanes */
-    sz_size_t resolved; /**< lowest lane whose verdict needs context past the window edge; commit below this */
+
+    /** Break-before bits at cluster-base lanes. */
+    sz_u64_t breaks;
+
+    /** Lowest lane whose verdict needs context past the window edge; lanes below it
+     *  can be committed. */
+    sz_size_t resolved;
 } sz_line_break_window_t;
 
-/** @brief Start-of-text carry: no previous cluster, all runs closed. */
+/** Start-of-text carry: no previous cluster, all runs closed. */
 SZ_HELPER_INLINE sz_line_break_carry_t sz_line_break_carry_sot_(void) {
     sz_line_break_carry_t carry;
     carry.have_prev = 0, carry.previous_class_bit = 1ull << sz_line_break_xx_k,
@@ -629,9 +733,9 @@ SZ_HELPER_INLINE sz_line_break_carry_t sz_line_break_carry_sot_(void) {
     return carry;
 }
 
-/** @brief  Largest byte prefix of a decode window whose codepoints are all fully loaded, from the plain u64 lane
- *          masks - the mask-domain twin of the per-ISA `complete_limit` helpers, for back-ends that carry their
- *          window state as scalars. Never below 1 when the window is non-empty. */
+/** Largest byte prefix of a decode window whose codepoints are all fully loaded, from the plain u64
+ *  lane masks, never below 1 when the window is non-empty: the mask-domain twin of the per-ISA
+ *  @c complete_limit helpers, for back-ends that carry their window state as scalars. */
 SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_masks_(sz_size_t loaded, sz_u64_t start_bytes,
                                                              sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
                                                              sz_u64_t four_byte_starts, sz_bool_t more_text) {
@@ -644,62 +748,84 @@ SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_masks_(sz_size_t loaded, s
     return limit > 0 ? limit : loaded;
 }
 
-/** @brief Per-lane class/side membership of one decoded 64-byte window, precomputed by a per-ISA extractor so the
- *         portable rule engine sources every mask from `sz_u64_t` words without touching the codepoint vectors. */
+/** Per-lane class and side membership of one decoded 64-byte window, precomputed by a per-ISA
+ *  extractor so the portable rule engine sources every mask from @c sz_u64_t words without touching
+ *  the codepoint vectors. */
 typedef struct sz_line_break_frame_t {
-    sz_u64_t base, gate, attached, lone_mark;              /**< from the byte-level cluster frame */
-    sz_u64_t non_start, dotted, starts, replacement;       /**< from the classifier */
-    sz_u64_t effective_class[sz_line_break_class_count_k]; /**< membership per class, AFTER LB10 lone->AL; NOT &base */
-    sz_u64_t raw_zwj; /**< class_mask(classified.classes_*, zwj_k), pre-effective */
-    sz_u64_t side_pi, side_pf, side_eaw, side_cn, side_ext; /**< side-bit membership masks (NOT yet &base) */
+
+    /** From the byte-level cluster frame. */
+    sz_u64_t base, gate, attached, lone_mark;
+
+    /** From the classifier. */
+    sz_u64_t non_start, dotted, starts, replacement;
+
+    /** Membership per class, after the LB10 lone → AL reclassify, and not yet masked by @c base. */
+    sz_u64_t effective_class[sz_line_break_class_count_k];
+
+    /** The ZWJ class mask over the raw classified classes, before the effective reclassify. */
+    sz_u64_t raw_zwj;
+
+    /** Side-bit membership masks, not yet masked by @c base. */
+    sz_u64_t side_pi, side_pf, side_eaw, side_cn, side_ext;
 } sz_line_break_frame_t;
 
-/** @brief OR-reduction of the per-class membership masks over the inclusive class range [@p lo, @p hi]; the portable
- *         twin of the icelake `class_range_mask` byte-range compare used to cheaply gate the script blocks. */
+/** OR-reduction of the per-class membership masks over the inclusive class range from @p lo to
+ *  @p hi; the portable twin of the icelake @c class_range_mask byte-range compare used to cheaply
+ *  gate the script blocks. */
 SZ_HELPER_AUTO sz_u64_t sz_line_break_effective_range_(sz_line_break_frame_t const *frame, sz_u8_t lo, sz_u8_t hi) {
     sz_u64_t accumulated = 0;
     for (sz_u8_t cls = lo; cls <= hi; ++cls) accumulated |= frame->effective_class[cls];
     return accumulated;
 }
 
-/** @brief Previous-cluster mask: bit k set => the cluster ending just before lane k has a base in @p class_base. */
+/** Previous-cluster mask: bit k set means the cluster ending just before lane k has a base
+ *  in @p class_base. */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_prev_(sz_u64_t class_base, sz_u64_t gate) {
     return sz_u64_fill_right_(class_base, gate) << 1;
 }
 
-/** @brief Next-cluster mask: bit k set => the cluster starting just after lane k has a base in @p class_base. */
+/** Next-cluster mask: bit k set means the cluster starting just after lane k has a base
+ *  in @p class_base. */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_next_(sz_u64_t class_base, sz_u64_t gate) {
     return sz_u64_fill_left_(class_base, gate) >> 1;
 }
 
-/** @brief Carry-aware previous-cluster mask: like @ref sz_line_break_prev_, but additionally marks @p edge (lane 0)
- *         when the carried left cluster matches (@p left_in_set), so cross-window left context needs no byte re-read. */
+/** Carry-aware previous-cluster mask: like @ref sz_line_break_prev_, but additionally marks
+ *  @p edge, lane 0, when the carried left cluster matches per @p left_in_set, so cross-window left
+ *  context needs no byte re-read. */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_prevc_(sz_u64_t class_base, sz_u64_t gate, sz_bool_t left_in_set,
                                                sz_u64_t edge) {
     return (sz_u64_fill_right_(class_base, gate) << 1) | (left_in_set ? edge : 0);
 }
 
-/** @brief Commit a forced break at the undecided lanes of @p where (sets break + settled). */
+/** Commit a forced break at the undecided lanes of @p where, setting both break and settled. */
 SZ_HELPER_INLINE void sz_line_break_force_break_(sz_u64_t where, sz_u64_t all, sz_u64_t *settled, sz_u64_t *breaks) {
     sz_u64_t const w = where & ~*settled & all;
     *breaks |= w, *settled |= w;
 }
 
-/** @brief Commit a forced join (no break) at the undecided lanes of @p where (sets settled only). */
+/** Commit a forced join, no break, at the undecided lanes of @p where, setting only settled. */
 SZ_HELPER_INLINE void sz_line_break_force_join_(sz_u64_t where, sz_u64_t all, sz_u64_t *settled) {
     *settled |= where & ~*settled & all;
 }
 
-/** @brief Opener-governed "X SP*" run over byte-start lanes (LB8/14/16/17): flood the opener rightward across the
- *         transparent gate and the space bases; the result marks the opener + the governed space base lanes. */
+/** Opener-governed "X SP*" run over byte-start lanes, for LB8/14/16/17: flood the opener rightward
+ *  across the transparent gate and the space bases; the result marks the opener and the governed
+ *  space base lanes. */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_run_byte_(sz_u64_t opener, sz_u64_t spaces, sz_u64_t gate) {
     return sz_u64_fill_right_(opener, gate | spaces) & (opener | spaces);
 }
 
-/** @brief Inclusive segmented prefix-XOR of @p members over each contiguous @p run_gate run (LB30a RI parity); when
- *         @p inbound_parity, an odd virtual member below lane 0 toggles the whole leading run. Returns the per-lane
- *         inclusive parity. The prefix-XOR scan is the shared substrate primitive; this wrapper adds the RI-pairing
- *         inbound-run seed (mirrors the word kernel's `ri_join_`). */
+/**
+ *  @brief Inclusive segmented prefix-XOR of @p members over each contiguous @p run_gate run, for
+ *      LB30a RI parity.
+ *
+ *  When @p inbound_parity is set, an odd virtual member below lane 0 toggles the whole leading run.
+ *  The prefix-XOR scan is the shared substrate primitive; this wrapper adds the RI-pairing
+ *  inbound-run seed, mirroring the word kernel's @c ri_join_.
+ *
+ *  @return The per-lane inclusive parity.
+ */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_segmented_parity_(sz_u64_t members, sz_u64_t run_gate,
                                                           sz_bool_t inbound_parity) {
     sz_u64_t bits = sz_u64_segmented_parity_(members, run_gate);
@@ -708,11 +834,14 @@ SZ_HELPER_INLINE sz_u64_t sz_line_break_segmented_parity_(sz_u64_t members, sz_u
 }
 
 /**
- *  @brief  Portable byte-level UAX-14 rule engine: decide break-before bits at the cluster-base lanes of one decoded
- *          window. Every LB1-LB31 rule is expressed over byte-start lanes as `sz_u64_t` bit-mask algebra, reading
- *          effective neighbours across `gate` via `sz_line_break_prev_`/`_next_` (no scalar collapse, no intrinsics).
- *          All per-lane class/side membership is supplied precomputed in @p frame by a per-ISA extractor. The returned
- *          mask has bits only at base lanes (a break opportunity precedes that cluster).
+ *  @brief Portable byte-level UAX-14 rule engine: decide break-before bits at the cluster-base
+ *      lanes of one decoded window.
+ *
+ *  Every LB1-LB31 rule is expressed over byte-start lanes as @c sz_u64_t bit-mask algebra, reading
+ *  effective neighbours across @c gate via @c sz_line_break_prev_ and @c sz_line_break_next_, with
+ *  no scalar collapse and no intrinsics. All per-lane class and side membership is supplied
+ *  precomputed in @p frame by a per-ISA extractor. The returned mask has bits only at base lanes,
+ *  where a break opportunity precedes that cluster.
  */
 SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     sz_line_break_frame_t const *frame, sz_u8_t const *effective_class_byte, sz_u8_t const *side_byte,
@@ -746,8 +875,9 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     //  side bits, which live outside the class field, keep dedicated booleans here.
     sz_bool_t const left_is_east_asian_width = (sz_bool_t)(carry.have_prev && carry.left_eaw != 0);
     sz_bool_t const left2_is_east_asian_width = (sz_bool_t)(carry.have_prev && carry.left2_eaw != 0);
-    //  Shared class sets for the two-left LB20a allow-list and (below) the one-left LB20a allow-list. Listing the SAME
-    //  classes the original boolean tested: BK, CR, LF, NL, SP, ZW, CB, GL.
+    //  Shared class sets for the two-left LB20a allow-list and (below) the one-left LB20a
+    //  allow-list. They list the same classes the original boolean tested: BK, CR, LF, NL, SP,
+    //  ZW, CB and GL.
     sz_u64_t const lb20a_allowed_mask = (1ull << sz_line_break_bk_k) | (1ull << sz_line_break_cr_k) |
                                         (1ull << sz_line_break_lf_k) | (1ull << sz_line_break_nl_k) |
                                         (1ull << sz_line_break_sp_k) | (1ull << sz_line_break_zw_k) |
@@ -803,9 +933,10 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
                                              carry.open_sp_opener == sz_line_break_cp_k);
     sz_bool_t const carry_b2 = (sz_bool_t)(carry.open_sp_opener == sz_line_break_b2_k);
     sz_bool_t const carry_zw = (sz_bool_t)(carry.open_sp_opener == sz_line_break_zw_k);
-    //  "X SP*" run governance (LB8/14/16/17). The fill_right floods are skipped whenever no opener is present in the
-    //  window AND none is carried open across the edge -- the dominant CJK/plain-text case -- leaving every gov empty
-    //  (bit-identical, since prev_(0) contributes nothing and carry-out then finds no opener).
+    //  "X SP*" run governance (LB8/14/16/17). The fill_right floods are skipped whenever no opener
+    //  is present in the window and none is carried open across the edge -- the dominant
+    //  CJK/plain-text case -- leaving every gov empty (bit-identical, since prev_(0) contributes
+    //  nothing and carry-out then finds no opener).
     sz_u64_t opener_governance = 0, close_governance = 0, break_both_governance = 0, zero_width_governance = 0;
     if ((class_open_punctuation | class_close_punctuation | class_close_parenthesis | class_break_both |
          class_zero_width_space) ||
@@ -832,14 +963,16 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
         break_both_governance = break_both_bits & (b2_seed | class_space);
         zero_width_governance = zero_width_bits & (zw_seed | class_space);
     }
-    //  LB15a "(sot|allowed) [QU&Pi] SP* x" governance, seeded by a carried open QU·Pi run when lane 0 continues it.
+    //  LB15a "(sot|allowed) [QU&Pi] SP* x" governance, seeded by a carried open QU · Pi run when
+    //  lane 0 continues it.
     sz_u64_t const quote_initial = class_quotation & side_quote_initial;
     sz_u64_t quote_initial_governance = 0;
     if (quote_initial || carry.qupi_sp_open) {
         sz_u64_t const qupi_allowed_left = class_break_mandatory | class_carriage_return | class_line_feed |
                                            class_next_line | class_open_punctuation | class_quotation | class_glue |
                                            class_space | class_zero_width_space;
-        //  A QU·Pi opening at lane 0 may have its allowed-left cluster carried across the edge (LB15a left context).
+        //  A QU · Pi opening at lane 0 may have its allowed-left cluster carried across the edge
+        //  (LB15a left context).
         sz_bool_t const carry_qupi_left = (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_bk_k) ||
                                                       sz_line_break_class_is_(left_bit, sz_line_break_cr_k) ||
                                                       sz_line_break_class_is_(left_bit, sz_line_break_lf_k) ||
@@ -950,8 +1083,9 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
         &settled);
     // LB18: SP /
     sz_line_break_force_break_(space_prev & interior_lanes, base, &settled, &breaks);
-    // LB19 group (East-Asian-aware quotation); every term reads a QU cluster, so skip when none is present in the
-    // window AND the carried left is neither a QU nor an East-Asian cluster that LB19 reads across the edge.
+    // LB19 group (East-Asian-aware quotation); every term reads a QU cluster, so skip when none is
+    // present in the window and the carried left is neither a QU nor an East-Asian cluster that
+    // LB19 reads across the edge.
     if (class_quotation || sz_line_break_class_is_(left_bit, sz_line_break_qu_k) || left_is_east_asian_width ||
         left2_is_east_asian_width) {
         sz_u64_t const previous_east_asian_width = sz_line_break_prevc_(side_east_asian_width, gate,
@@ -994,9 +1128,10 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
                                                    sz_line_break_class_is_(left_bit, sz_line_break_hh_k)) &&
                                                   (left2_is_lb20a_allowed ||
                                                    sz_line_break_class_is_(left2_bit, sz_line_break_xx_k)));
-        //  When the HY/HH itself is at lane 0, its allowed-left predecessor is the CARRIED left cluster -- the in-window
-        //  prev_ cannot see it, so qualify the lane-0 HY/HH via the carried left class in the allowed set (same classes
-        //  as `lb20a_allowed_mask`: BK, CR, LF, NL, SP, ZW, CB, GL).
+        //  When the HY/HH itself is at lane 0, its allowed-left predecessor is the carried left
+        //  cluster -- the in-window prev_ cannot see it, so qualify the lane-0 HY/HH via the
+        //  carried left class in the allowed set (same classes as `lb20a_allowed_mask`: BK, CR, LF,
+        //  NL, SP, ZW, CB, GL).
         sz_bool_t const left_is_lb20a_allowed = sz_line_break_class_in_(left_bit, lb20a_allowed_mask);
         sz_u64_t const hy_ok = (class_hyphen | class_unambiguous_hyphen) &
                                (sz_line_break_prevc_(leftset, gate, left_is_lb20a_allowed, edge) | start_of_text);
@@ -1248,7 +1383,7 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
              class_open_punctuation & ~side_east_asian_width) &
                 interior_lanes,
             base, &settled);
-        //  CP[^EAW]: a carried left CP qualifies only when it is NOT East-Asian-wide.
+        //  CP[^EAW]: a carried left CP qualifies only when it is not East-Asian-wide.
         sz_line_break_force_join_(
             (sz_line_break_prevc_(class_close_parenthesis & ~side_east_asian_width, gate,
                                   (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_cp_k) && !carry.left_eaw),
@@ -1332,10 +1467,11 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     }
     breaks &= sz_u64_mask_until_serial_(resolved);
 
-    //  The driver advances by `advance` bytes after this call: the clamp horizon `resolved` when it bit before the
-    //  complete edge, else the whole complete span. The carry anchors at THAT byte so a single decision rebuilds the
-    //  next window's exact left context -- no second pass. (`resolved == 0` is an unbounded run longer than one window;
-    //  the driver steps the full complete span for progress, so the carry anchors at the complete edge too.)
+    //  The driver advances by `advance` bytes after this call: the clamp horizon `resolved` when it
+    //  bit before the complete edge, else the whole complete span. The carry anchors at that byte
+    //  so a single decision rebuilds the next window's exact left context -- no second pass.
+    //  (`resolved == 0` is an unbounded run longer than one window; the driver steps the full
+    //  complete span for progress, so the carry anchors at the complete edge too.)
     sz_size_t const advance = resolved ? resolved : complete_limit;
 
     //  Cross-window carry: run state of the cluster ending at the highest base lane below `advance` (the next window's
@@ -1362,9 +1498,10 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
                                             ((side_pbit & sz_line_break_side_cn_k) != 0));
             out.left_aksara = (sz_u8_t)(((class_aksara | class_aksara_start) & previous_cluster_bit) != 0 ||
                                         (dotted_circle & previous_cluster_bit) != 0);
-            //  LB8a is codepoint-level: the previous CLUSTER joins lane 0 when its LAST codepoint is a bare ZWJ -- that
-            //  ZWJ is an attached mark (LB9), so it sits ABOVE the base `pbit`, not on it. Test the highest codepoint
-            //  START below the edge, not the highest base.
+            //  LB8a is codepoint-level: the previous cluster joins lane 0 when its last codepoint
+            //  is a bare ZWJ -- that ZWJ is an attached mark (LB9), so it sits above the base
+            //  `pbit`, not on it. Test the highest codepoint start below the edge, rather than the
+            //  highest base start.
             sz_u64_t const starts_below = frame->starts & sz_u64_mask_until_serial_(advance);
             sz_u64_t const last_start = starts_below ? (1ull << (63 - sz_u64_clz(starts_below))) : 0ull;
             out.prev_is_zwj = (sz_u8_t)((zwj_starts & last_start) != 0);
@@ -1418,7 +1555,7 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     return result;
 }
 
-#pragma endregion // UAX 14 Line Boundaries window engine
+#pragma endregion UAX 14 Line Boundaries window engine
 
 #ifdef __cplusplus
 }

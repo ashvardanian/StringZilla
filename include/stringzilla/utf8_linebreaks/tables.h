@@ -1,7 +1,8 @@
 /**
- *  @brief UAX-14 Line_Break property tables.
  *  @file include/stringzilla/utf8_linebreaks/tables.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief UAX-14 Line_Break property tables.
  */
 #ifndef STRINGZILLA_UTF8_LINEBREAKS_TABLES_H_
 #define STRINGZILLA_UTF8_LINEBREAKS_TABLES_H_
@@ -20,70 +21,169 @@ extern "C" {
  *  The two-letter names match the canonical UAX-14 property abbreviations.
  */
 enum sz_line_break_t {
-    sz_line_break_xx_k = 0,   /**< Unknown / unassigned (treated as AL) */
-    sz_line_break_bk_k = 1,   /**< Mandatory Break (U+000C, U+2028, U+2029) */
-    sz_line_break_cr_k = 2,   /**< Carriage Return (U+000D) */
-    sz_line_break_lf_k = 3,   /**< Line Feed (U+000A) */
-    sz_line_break_cm_k = 4,   /**< Combining Mark */
-    sz_line_break_nl_k = 5,   /**< Next Line (U+0085) */
-    sz_line_break_sg_k = 6,   /**< Surrogate (invalid in UTF-8) */
-    sz_line_break_wj_k = 7,   /**< Word Joiner (U+2060) */
-    sz_line_break_zw_k = 8,   /**< Zero Width Space (U+200B) */
-    sz_line_break_gl_k = 9,   /**< Non-breaking ("Glue") */
-    sz_line_break_sp_k = 10,  /**< Space (U+0020) */
-    sz_line_break_b2_k = 11,  /**< Break Opportunity Before and After (em dash) */
-    sz_line_break_ba_k = 12,  /**< Break After */
-    sz_line_break_bb_k = 13,  /**< Break Before */
-    sz_line_break_hy_k = 14,  /**< Hyphen (U+002D) */
-    sz_line_break_cb_k = 15,  /**< Contingent Break Opportunity (object replacement) */
-    sz_line_break_cl_k = 16,  /**< Close Punctuation */
-    sz_line_break_cp_k = 17,  /**< Close Parenthesis */
-    sz_line_break_ex_k = 18,  /**< Exclamation / Interrogation */
-    sz_line_break_in_k = 19,  /**< Inseparable (ellipsis) */
-    sz_line_break_ns_k = 20,  /**< Nonstarter */
-    sz_line_break_op_k = 21,  /**< Open Punctuation */
-    sz_line_break_qu_k = 22,  /**< Quotation */
-    sz_line_break_is_k = 23,  /**< Infix Numeric Separator (period, comma) */
-    sz_line_break_nu_k = 24,  /**< Numeric */
-    sz_line_break_po_k = 25,  /**< Postfix Numeric */
-    sz_line_break_pr_k = 26,  /**< Prefix Numeric */
-    sz_line_break_sy_k = 27,  /**< Symbols Allowing Break After (solidus) */
-    sz_line_break_ai_k = 28,  /**< Ambiguous (Alphabetic or Ideograph) */
-    sz_line_break_al_k = 29,  /**< Alphabetic */
-    sz_line_break_cj_k = 30,  /**< Conditional Japanese Starter */
-    sz_line_break_eb_k = 31,  /**< Emoji Base */
-    sz_line_break_em_k = 32,  /**< Emoji Modifier */
-    sz_line_break_h2_k = 33,  /**< Hangul LV Syllable */
-    sz_line_break_h3_k = 34,  /**< Hangul LVT Syllable */
-    sz_line_break_hl_k = 35,  /**< Hebrew Letter */
-    sz_line_break_id_k = 36,  /**< Ideographic */
-    sz_line_break_jl_k = 37,  /**< Hangul L Jamo */
-    sz_line_break_jv_k = 38,  /**< Hangul V Jamo */
-    sz_line_break_jt_k = 39,  /**< Hangul T Jamo */
-    sz_line_break_ri_k = 40,  /**< Regional Indicator */
-    sz_line_break_sa_k = 41,  /**< Complex Context Dependent (South East Asian) */
-    sz_line_break_zwj_k = 42, /**< Zero Width Joiner (U+200D) */
-    sz_line_break_ak_k = 43,  /**< Aksara (Brahmic consonant) */
-    sz_line_break_ap_k = 44,  /**< Aksara Pre-Base */
-    sz_line_break_as_k = 45,  /**< Aksara Start */
-    sz_line_break_vf_k = 46,  /**< Virama Final */
-    sz_line_break_vi_k = 47,  /**< Virama */
-    sz_line_break_hh_k = 48,  /**< Unambiguous Hyphen */
+
+    /** Unknown / unassigned (treated as AL) */
+    sz_line_break_xx_k = 0,
+
+    /** Mandatory Break (U+000C, U+2028, U+2029) */
+    sz_line_break_bk_k = 1,
+
+    /** Carriage Return (U+000D) */
+    sz_line_break_cr_k = 2,
+
+    /** Line Feed (U+000A) */
+    sz_line_break_lf_k = 3,
+
+    /** Combining Mark */
+    sz_line_break_cm_k = 4,
+
+    /** Next Line (U+0085) */
+    sz_line_break_nl_k = 5,
+
+    /** Surrogate (invalid in UTF-8) */
+    sz_line_break_sg_k = 6,
+
+    /** Word Joiner (U+2060) */
+    sz_line_break_wj_k = 7,
+
+    /** Zero Width Space (U+200B) */
+    sz_line_break_zw_k = 8,
+
+    /** Non-breaking ("Glue") */
+    sz_line_break_gl_k = 9,
+
+    /** Space (U+0020) */
+    sz_line_break_sp_k = 10,
+
+    /** Break Opportunity Before and After (em dash) */
+    sz_line_break_b2_k = 11,
+
+    /** Break After */
+    sz_line_break_ba_k = 12,
+
+    /** Break Before */
+    sz_line_break_bb_k = 13,
+
+    /** Hyphen (U+002D) */
+    sz_line_break_hy_k = 14,
+
+    /** Contingent Break Opportunity (object replacement) */
+    sz_line_break_cb_k = 15,
+
+    /** Close Punctuation */
+    sz_line_break_cl_k = 16,
+
+    /** Close Parenthesis */
+    sz_line_break_cp_k = 17,
+
+    /** Exclamation / Interrogation */
+    sz_line_break_ex_k = 18,
+
+    /** Inseparable (ellipsis) */
+    sz_line_break_in_k = 19,
+
+    /** Nonstarter */
+    sz_line_break_ns_k = 20,
+
+    /** Open Punctuation */
+    sz_line_break_op_k = 21,
+
+    /** Quotation */
+    sz_line_break_qu_k = 22,
+
+    /** Infix Numeric Separator (period, comma) */
+    sz_line_break_is_k = 23,
+
+    /** Numeric */
+    sz_line_break_nu_k = 24,
+
+    /** Postfix Numeric */
+    sz_line_break_po_k = 25,
+
+    /** Prefix Numeric */
+    sz_line_break_pr_k = 26,
+
+    /** Symbols Allowing Break After (solidus) */
+    sz_line_break_sy_k = 27,
+
+    /** Ambiguous (Alphabetic or Ideograph) */
+    sz_line_break_ai_k = 28,
+
+    /** Alphabetic */
+    sz_line_break_al_k = 29,
+
+    /** Conditional Japanese Starter */
+    sz_line_break_cj_k = 30,
+
+    /** Emoji Base */
+    sz_line_break_eb_k = 31,
+
+    /** Emoji Modifier */
+    sz_line_break_em_k = 32,
+
+    /** Hangul LV Syllable */
+    sz_line_break_h2_k = 33,
+
+    /** Hangul LVT Syllable */
+    sz_line_break_h3_k = 34,
+
+    /** Hebrew Letter */
+    sz_line_break_hl_k = 35,
+
+    /** Ideographic */
+    sz_line_break_id_k = 36,
+
+    /** Hangul L Jamo */
+    sz_line_break_jl_k = 37,
+
+    /** Hangul V Jamo */
+    sz_line_break_jv_k = 38,
+
+    /** Hangul T Jamo */
+    sz_line_break_jt_k = 39,
+
+    /** Regional Indicator */
+    sz_line_break_ri_k = 40,
+
+    /** Complex Context Dependent (South East Asian) */
+    sz_line_break_sa_k = 41,
+
+    /** Zero Width Joiner (U+200D) */
+    sz_line_break_zwj_k = 42,
+
+    /** Aksara (Brahmic consonant) */
+    sz_line_break_ak_k = 43,
+
+    /** Aksara Pre-Base */
+    sz_line_break_ap_k = 44,
+
+    /** Aksara Start */
+    sz_line_break_as_k = 45,
+
+    /** Virama Final */
+    sz_line_break_vf_k = 46,
+
+    /** Virama */
+    sz_line_break_vi_k = 47,
+
+    /** Unambiguous Hyphen */
+    sz_line_break_hh_k = 48,
 };
 
 #pragma region Line_Break tables
 
 /**
- *  @brief UAX-14 Line_Break property tables. The trie/range layers resolve a codepoint to a
- *  6-bit *palette index*; palette[index] is a 16-bit descriptor whose bits 0-5 are the resolved Line_Break
- *  class and whose bits 6-13 carry the side flags the rule engine needs (Pi, Pf, East-Asian F/W/H,
- *  Extended_Pictographic & Cn, Regional_Indicator, ZWJ, combining mark, Dotted_Circle).
+ *  @brief UAX-14 Line_Break property tables.
  *
- *  ! The SIMD kernels resolve the BMP through the page-compressed FLAT table in the `Flat BMP classifier tables`
- *  ! region, whose leaf indexes `flat_palette_` rather than this 62-entry palette. The tables below feed the serial
- *  ! oracle and the SIMD astral cascade, which speak this palette's index space.
+ *  The trie and range layers resolve a codepoint to a 6-bit palette index; `palette[index]` is a
+ *  16-bit descriptor whose bits 0-5 are the resolved Line_Break class and whose bits 6-13 carry the
+ *  side flags the rule engine needs: Pi, Pf, East-Asian F/W/H, Extended_Pictographic & Cn,
+ *  Regional_Indicator, ZWJ, combining mark, and Dotted_Circle.
  *
- *  Derived by:
+ *  The SIMD kernels resolve the BMP through the page-compressed flat table in the "Flat BMP
+ *  classifier tables" region, whose leaf indexes @c flat_palette_ rather than this 62-entry
+ *  palette. The tables below feed the serial oracle and the SIMD astral cascade, which speak this
+ *  palette's index space. Derived by:
  *
  *  @code{.py}
  *  # LineBreak.txt -> Line_Break class; East_Asian_Width.txt, emoji-data.txt, DerivedGeneralCategory.txt
@@ -94,7 +194,6 @@ enum sz_line_break_t {
  *  # astral (cp >= 0x10000): a sorted (lo, hi, palette-index) range list.
  *  @endcode
  */
-
 enum {
     sz_utf8_line_break_palette_count_k = 62,
     sz_utf8_line_break_big_count_k = 50,
@@ -612,9 +711,14 @@ static const sz_u8_t sz_utf8_line_break_astral_idx_[618] = {
     0x28, 0x2E, 0x3A, 0x8,  0x10, 0x8,  0x8,  0x8,  0x8,  0x8,
 };
 
-/** @brief Register-resident astral (>=0x10000) Line_Break palette trie: 8/4/4/4 split of (cp-0x10000),
- *  leaf holds the palette index. Bit-exact with `sz_rune_line_break_property` over the astral planes; read
- *  re-init-free from .rodata via the substrate permute256_/lut_cascade_ helpers. tiles_k: s1=6 s2=20 leaf=62 */
+/**
+ *  @brief Register-resident astral Line_Break palette trie, for cp ≥ 0x10000: an 8/4/4/4 split of
+ *      (cp - 0x10000) whose leaf holds the palette index.
+ *
+ *  Bit-exact with @c sz_rune_line_break_property over the astral planes; read re-init-free from
+ *  .rodata via the substrate @c permute256_ and @c lut_cascade_ helpers. Tile counts: s1 = 6,
+ *  s2 = 20, leaf = 62.
+ */
 sz_align_(64) static const sz_u8_t sz_utf8_line_break_astral_s0_[256] = {
     0, 1, 2, 3, 4, 5, 6, 7, 8, 5, 9, 10, 11, 12, 13, 14, 7,  7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 15,
     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,  7,  7,  7,  15, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -845,11 +949,16 @@ enum {
     sz_utf8_line_break_astral_leaf_tiles_k = 62,
 };
 
-/** @brief Palette index → resolved LB class / engine side byte / DottedCircle bit, precomputed from the palette
- *  descriptor (LB1 resolution baked in). Lets the classifier resolve class+side with three vpermb instead of a u16
- *  descriptor permute + bitfield unpack. Sized [256] (not [64]) for the Haswell/NEON 16×16 = 256-byte cascade
- *  loader; the palette index is < 64 so the trailing 192 zero bytes are never selected — the padding only removes
- *  an out-of-bounds read over the named object (Ice Lake loads exactly 64). */
+/**
+ *  @brief Palette index → resolved LB class, engine side byte and DottedCircle bit, precomputed
+ *      from the palette descriptor with the LB1 resolution baked in.
+ *
+ *  Lets the classifier resolve class and side with three @c vpermb instead of a u16 descriptor
+ *  permute and a bitfield unpack. Sized [256] rather than [64] for the Haswell and NEON cascade
+ *  loader, which reads 16 × 16 = 256 bytes; the palette index is below 64, so the trailing 192
+ *  zero bytes are never selected, and the padding only removes an out-of-bounds read over the
+ *  named object. Ice Lake loads exactly 64.
+ */
 sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_class_[256] = {
     4,  12, 3,  1,  2,  10, 18, 22, 29, 26, 25, 21, 17, 23, 14, 27, 24, 16, 5,  9,  22, 13,
     22, 48, 35, 37, 38, 39, 20, 43, 47, 45, 36, 46, 8,  42, 11, 19, 7,  26, 36, 21, 16, 29,
@@ -868,10 +977,13 @@ sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_dotted_[256] = {
 #if SZ_USE_HASWELL || SZ_USE_NEON
 
 /**
- *  @brief SIMD palette-index tables mapping a codepoint to the 6-bit index that `sz_utf8_line_break_palette_*`
- *  unpacks. `bmp_page_lut_` maps `cp >> 8` to a page index and doubles as the page LUT of the flat BMP classifier below;
- *  astral (cp >= 0x10000, addressed by `cp - 0x10000`) resolves via a 5-nibble in-register `vpshufb`
- *  stage1/stage2(lo,hi)/stage3(lo,hi)/stage4 cascade, exhaustively bit-exact with the serial oracle. Derived by:
+ *  @brief SIMD palette-index tables mapping a codepoint to the 6-bit palette index to unpack.
+ *
+ *  @c bmp_page_lut_ maps `cp >> 8` to a page index and doubles as the page LUT of the flat BMP
+ *  classifier below; `sz_utf8_line_break_palette_*` unpacks the resulting index. Astral codepoints,
+ *  cp ≥ 0x10000 addressed by `cp - 0x10000`, resolve via a 5-nibble in-register @c vpshufb cascade
+ *  over stage1, stage2 in low and high planes, stage3 in low and high planes, and stage4,
+ *  exhaustively bit-exact with the serial oracle. Derived by:
  *
  *  @code{.py}
  *  # ASTRAL: palette index per (cp-0x10000) deduplicated into a 5-nibble cascade.
@@ -889,7 +1001,8 @@ sz_align_(64) static const sz_u8_t sz_utf8_line_break_bmp_page_lut_[256] = {
     58, 59, 60, 61, 55, 56, 57, 58, 59, 60, 61, 55, 62, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
     1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  46, 46, 63, 1,  64, 65, 66};
 
-// Haswell vpshufb nibble cascade: ASTRAL codepoint -> UAX-14 palette index. Bit-exact.
+/** The bit-exact Haswell @c vpshufb nibble cascade mapping an astral codepoint →
+ *  UAX-14 palette index. */
 enum {
     sz_utf8_line_break_haswell_astral_stage2_lo_count_k = 288,
     sz_utf8_line_break_haswell_astral_stage3_lo_count_k = 1280,
@@ -1160,13 +1273,15 @@ static const sz_u8_t sz_utf8_line_break_haswell_astral_stage4_groups_[4096] = {
 // clang-format off
 
 /**
- *  @brief  Flat Line_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 67 distinct
- *          256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, one indexed lookup per
- *          codepoint, read by `vpgatherdd` on x86, `svld1_gather` on SVE2, and a bounded scalar leaf walk on NEON,
- *          which has no gather. The page LUT is `bmp_page_lut_` itself, reused rather than duplicated.
- *          The leaf holds a 56-entry palette index rather than the wide descriptor, so it stays one byte per
- *          codepoint; `flat_palette_[index]` is the real value.
- *          Bit-exact with `sz_rune_line_break_property` across the BMP by construction. Derived by:
+ *  @brief Flat Line_Break classifier table, one indexed lookup per BMP codepoint.
+ *
+ *  `bmp_page_lut_[cp >> 8]` selects one of 67 distinct 256-byte pages, then
+ *  `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, read by @c vpgatherdd on x86,
+ *  @c svld1_gather on SVE2, and a bounded scalar leaf walk on NEON, which has no gather. The page
+ *  LUT is @c bmp_page_lut_ itself, reused rather than duplicated. The leaf holds a 56-entry palette
+ *  index rather than the wide descriptor, so it stays one byte per codepoint;
+ *  `flat_palette_[index]` is the real value. Bit-exact with @c sz_rune_line_break_property across
+ *  the BMP by construction, and derived by:
  *
  *  @code{.py}
  *  # desc[cp] = sz_rune_line_break_property(cp) for cp in range(0x110000), dumped from the serial oracle.
@@ -1182,9 +1297,15 @@ static const sz_u8_t sz_utf8_line_break_haswell_astral_stage4_groups_[4096] = {
  *  @endcode
  */
 enum {
-    sz_utf8_line_break_flat_pages_k = 67, /**< Distinct 256-byte pages the BMP compresses to. */
-    sz_utf8_line_break_flat_count_k = 17152, /**< Logical entries of the flat leaf (the array is padded). */
-    sz_utf8_line_break_flat_palette_count_k = 56, /**< Distinct wide descriptors. */
+
+    /** Distinct 256-byte pages the BMP compresses to. */
+    sz_utf8_line_break_flat_pages_k = 67,
+
+    /** Logical entries of the flat leaf (the array is padded). */
+    sz_utf8_line_break_flat_count_k = 17152,
+
+    /** Distinct wide descriptors. */
+    sz_utf8_line_break_flat_palette_count_k = 56,
 };
 
 sz_align_(64) static const sz_u8_t sz_utf8_line_break_flat_bmp_[17216] = {

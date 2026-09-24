@@ -1,7 +1,9 @@
 /**
- *  @brief IBM Power (VSX) uncased UTF-8 search, comparison & invariance backend.
  *  @file include/stringzilla/utf8_uncased/powervsx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief IBM Power (VSX) uncased UTF-8 search, comparison & invariance backend.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_POWERVSX_H_
@@ -13,6 +15,8 @@
 extern "C" {
 #endif
 
+/*  This ISA has no dedicated uncased UTF-8 kernels yet; it delegates to the serial
+ *  scaffolding so the per-backend symbol set stays uniform across all targets. */
 #if SZ_USE_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
@@ -20,9 +24,6 @@ extern "C" {
 #pragma GCC push_options
 #pragma GCC target("power9-vector")
 #endif
-
-/*  This ISA has no dedicated uncased UTF-8 kernels yet; it delegates to the serial
- *  scaffolding so the per-backend symbol set stays uniform across all targets. */
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_powervsx( //
     sz_cptr_t haystack, sz_size_t haystack_length,         //

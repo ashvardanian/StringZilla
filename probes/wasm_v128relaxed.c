@@ -1,5 +1,11 @@
-/* StringZilla ISA probe: WebAssembly relaxed SIMD (compile with `-msimd128 -mrelaxed-simd`), mirroring
- * `include/stringzilla/memory/v128relaxed.h` */
+/**
+ *  @file probes/wasm_v128relaxed.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for WebAssembly relaxed SIMD, compiled with `-msimd128 -mrelaxed-simd`.
+ *
+ *  @sa include/stringzilla/memory/v128relaxed.h
+ */
 #include <wasm_simd128.h>
 
 #if defined(__clang__)

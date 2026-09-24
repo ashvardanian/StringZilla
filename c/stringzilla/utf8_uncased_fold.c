@@ -1,11 +1,11 @@
 /**
  *  @file c/stringzilla/utf8_uncased_fold.c
- *  @brief Per-domain dispatch shim for UTF-8 case folding.
  *  @author Ash Vardanian
- *  @date January 16, 2024
+ *  @date November 23, 2025
+ *  @brief Per-domain dispatch shim for UTF-8 case folding.
  *
- *  Split from the uncased @b find/order shim (`utf8_uncased.c`) so the cheap
- *  folding kernels compile as their own translation unit, in parallel with the heavy AVX-512 find.
+ *  Split from the uncased find and order shim, `utf8_uncased.c`, so the cheap folding kernels
+ *  compile as their own translation unit, in parallel with the heavy AVX-512 find.
  */
 #include <stringzilla/utf8_uncased_fold.h> // `sz_utf8_uncased_fold_*`
 

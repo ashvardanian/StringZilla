@@ -44,7 +44,7 @@ project(
     VERSION 5.1.2
     LANGUAGES C CXX ASM
     DESCRIPTION "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
-    HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla"
+    HOMEPAGE_URL "https://github.com/ashvardanian/StringZilla"
 )
 
 set(CMAKE_C_STANDARD 99)

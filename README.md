@@ -47,7 +47,7 @@ __Who is this for?__
 
 - For data-engineers parsing large datasets, like the [CommonCrawl](https://commoncrawl.org/), [RedPajama](https://github.com/togethercomputer/RedPajama-Data), or [LAION](https://laion.ai/blog/laion-5b/).
 - For software engineers optimizing strings in their apps and services.
-- For bioinformaticians and search engineers looking for edit-distances for [USearch](https://github.com/unum-cloud/usearch).
+- For bioinformaticians and search engineers looking for edit-distances for [USearch](https://github.com/unum-cloud/USearch).
 - For [DBMS][faq-dbms] devs, optimizing `LIKE`, `ORDER BY`, and `GROUP BY` operations.
 - For hardware designers, needing a SWAR baseline for string-processing functionality.
 - For students studying SIMD/SWAR applications to non-data-parallel operations.
@@ -717,10 +717,10 @@ sz.reset_capabilities(sz.__capabilities__)  # Reset to auto-dispatch
 Please check out the [contributing guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) for more details on how to set up the development environment and contribute to this project.
 If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall], [UForm][uform], and [SimSIMD][simsimd]. 🤗
 
-[usearch]: https://github.com/unum-cloud/usearch
-[ucall]: https://github.com/unum-cloud/ucall
-[uform]: https://github.com/unum-cloud/uform
-[simsimd]: https://github.com/ashvardanian/simsimd
+[usearch]: https://github.com/unum-cloud/USearch
+[ucall]: https://github.com/unum-cloud/UCall
+[uform]: https://github.com/unum-cloud/UForm
+[simsimd]: https://github.com/ashvardanian/SimSIMD
 
 If you like strings and value efficiency, you may also enjoy the following projects:
 

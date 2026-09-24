@@ -1,3 +1,10 @@
+/**
+ *  @file test/stringzilla.js
+ *  @author Ash Vardanian
+ *  @date September 23, 2023
+ *  @brief Tests for the StringZilla JavaScript binding.
+ */
+
 import test from "node:test";
 import assert from "node:assert";
 

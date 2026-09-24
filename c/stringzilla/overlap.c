@@ -1,8 +1,9 @@
 /**
  *  @file c/stringzilla/overlap.c
- *  @brief Per-domain dispatch shim for the window-overlap engine (`sz_overlap_engine_*`, `sz_overlap_scores`).
  *  @author Ash Vardanian
  *  @date January 27, 2024
+ *  @brief Per-domain dispatch shim for the window-overlap engine: `sz_overlap_engine_*` and
+ *      @c sz_overlap_scores.
  */
 #include <stringzilla/overlap.h>
 #include <stringzilla/stringzilla.h> // `sz_capabilities`
@@ -24,9 +25,9 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_update_(sz_capability_t caps) {
 #endif
 }
 
-/*  Filled from the GPU runtime rather than from `sz_capabilities`, and left null where none is compiled in or no
- *  device answers. Assigning the slot is the whole body, so a second call answers the same thing.
- */
+/*  Filled from the GPU runtime rather than from @c sz_capabilities, and left null where none is
+ *  compiled in or no device answers. Assigning the slot is the whole body, so a second call answers
+ *  the same thing. */
 SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_gpu_update_(void) {
 #if SZ_USE_CUDA
     int devices = 0;

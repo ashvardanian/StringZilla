@@ -1,3 +1,6 @@
+// File: bench/stringzilla.go
+// Author: Ash Vardanian
+
 package main
 
 import (

@@ -57,7 +57,7 @@ With CMake 3.14 or newer, pull the project in with `FetchContent` and link the i
 include(FetchContent)
 FetchContent_Declare(
     stringzilla
-    GIT_REPOSITORY https://github.com/ashvardanian/stringzilla.git
+    GIT_REPOSITORY https://github.com/ashvardanian/StringZilla.git
     GIT_TAG main)
 FetchContent_MakeAvailable(stringzilla)
 

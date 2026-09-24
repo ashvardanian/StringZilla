@@ -1,7 +1,8 @@
 /**
- *  @brief POWER VSX backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/powervsx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief POWER VSX backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_POWERVSX_H_
 #define STRINGZILLA_UTF8_TOKENS_POWERVSX_H_
@@ -23,10 +24,12 @@ extern "C" {
 #endif
 
 /**
- *  @brief Peel the window's first `emit_count` matches by SIMD left-pack (no `ctz`, no per-match branch).
- *         Each ascending 2-lane sub-block gathers its set lanes' `(position+lane, length)` `u64` pairs with one
- *         `vec_perm` and full-stores to an 18-wide scratch (absorbing the last sub-block's 2-lane spill, since
- *         VSX has no masked store); the low `emit_count` entries copy out in ascending lane order, byte-exact.
+ *  @brief Peels the window's first @p emit_count matches by a branchless, ctz-free SIMD left-pack.
+ *
+ *  Each ascending 2-lane sub-block gathers its set lanes' `(position + lane, length)` @c u64 pairs
+ *  with one @c vec_perm and full-stores to an 18-wide scratch, absorbing the last sub-block's
+ *  2-lane spill since VSX has no masked store; the low @p emit_count entries copy out in ascending
+ *  lane order, byte-exact.
  */
 SZ_HELPER_INLINE void sz_utf8_iterate_peel_powervsx_(                          //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
@@ -257,13 +260,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
     return count;
 }
 
-#pragma endregion Multistep newline / whitespace iteration
+#pragma endregion Multistep newline and whitespace iteration
 
-/**
- *  @brief UAX-29 word boundary detection using IBM Power VSX (forward & reverse). Stateful sub-rules stay in
- *         the serial reference; all-ASCII windows resolve their trusted lanes in-vector and emit the proven
- *         boundaries, deferring every uncertain position to `_serial` so the output stays byte-exact.
- */
+/*  UAX-29 word boundary detection using IBM Power VSX, both forward and in reverse. Stateful
+ *  sub-rules stay in the serial reference; all-ASCII windows resolve their trusted lanes in-vector
+ *  and emit the proven boundaries, deferring every uncertain position to @c _serial so that the
+ *  output stays byte-exact. */
 
 #if defined(__clang__)
 #pragma clang attribute pop

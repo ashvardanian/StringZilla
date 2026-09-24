@@ -1,20 +1,27 @@
-/* StringZilla machine probe: prints the tiers the RUNNING CPU supports, one comma-separated list.
+/**
+ *  @file probes/run_capabilities.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief Machine probe printing the tiers the running CPU supports, as one comma-separated list.
  *
- * Unlike the sibling `<arch>_<tier>.c` files - which are try-COMPILED to learn what the toolchain can
- * emit - this program is try-RUN by the build systems (CMake `try_run`, Cargo `build.rs`) to learn what
- * the build machine can execute. Static/comptime dispatch then enables the intersection of the two sets.
+ *  Unlike the sibling `<arch>_<tier>.c` files, which are try-compiled to learn what the toolchain
+ *  can emit, this program is try-run by the build systems, through CMake @c try_run and Cargo
+ *  @c build.rs, to learn what the build machine can execute. Static and comptime dispatch then
+ *  enable the intersection of the two sets.
  *
- * The translation unit is serial-only (every `SZ_USE_*` is off, so no SIMD kernel or intrinsics header
- * is pulled in and it compiles at baseline flags everywhere), and the GPU tiers are off for a second
- * reason: this program answers for the CPU that will RUN the build, and a GPU attached to the build
- * machine says nothing about the one the binary will meet. Yet the runtime detectors still report the
- * FULL hardware capability set - detection is independent of the compiled tiers by design: cpuid/xgetbv
- * on x86, sysctl on Apple, `mrs` with a SIGILL guard on Linux Arm, auxiliary-vector HWCAPs on RISC-V,
- * LoongArch, and POWER. Token names come from the library's own capability map, so build systems parse
- * tokens they know and ignore the rest. On platforms where the header performs no real hardware
- * introspection (WebAssembly, OS-less targets - see `SZ_CAPABILITIES_RUNTIME_DETECTABLE_`) the program
- * exits non-zero instead of printing a misleading "serial", and build systems treat that like any other
- * probe failure: no answer, fall back to the target description.
+ *  The translation unit is serial-only: every `SZ_USE_*` is off, so no SIMD kernel or intrinsics
+ *  header is pulled in and it compiles at baseline flags everywhere. The GPU tiers are off for a
+ *  second reason: this program answers for the CPU that will run the build, and a GPU attached to
+ *  the build machine says nothing about the one the binary will meet. Yet the runtime detectors
+ *  still report the full hardware capability set - detection is independent of the compiled tiers
+ *  by design: cpuid/xgetbv on x86, sysctl on Apple, @c mrs with a SIGILL guard on Linux Arm, and
+ *  auxiliary-vector HWCAPs on RISC-V, LoongArch, and POWER. Token names come from the library's own
+ *  capability map, so build systems parse tokens they know and ignore the rest.
+ *
+ *  On platforms where the header performs no real hardware introspection, such as WebAssembly and
+ *  the OS-less targets @c SZ_CAPABILITIES_RUNTIME_DETECTABLE_ excludes, the program exits non-zero
+ *  instead of printing a misleading "serial", and build systems treat that like any other probe
+ *  failure: no answer, fall back to the target description.
  */
 #define SZ_DYNAMIC_DISPATCH 0
 #define SZ_AVOID_LIBC 0

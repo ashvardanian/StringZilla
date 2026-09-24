@@ -18,6 +18,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/utf8_wordbreaks.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/utf8_wordbreaks.py -q
+
+File: test/utf8_wordbreaks.py
+Author: Ash Vardanian
+Date: November 30, 2025
 """
 
 import itertools

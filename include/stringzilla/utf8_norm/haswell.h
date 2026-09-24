@@ -1,17 +1,21 @@
 /**
- *  @brief Haswell (AVX2) backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/haswell.h
  *  @author Ash Vardanian
+ *  @date June 15, 2026
+ *  @brief Haswell AVX2 backend for the single-pass Unicode normalizer, NFD / NFC / NFKD / NFKC.
+ *
+ *  This is the AVX2 sibling of the AVX-512 `skylake.h` scanner, mirrored at 32-byte YMM
+ *  granularity. It overrides exactly one point of the shared engine: the scan primitive
+ *  @c sz_utf8_norm_classify_haswell_, a 32-byte all-ASCII gate via @c _mm256_movemask_epi8 plus a
+ *  lead-byte classify over the shared @c sz_utf8_norm_lead_lut_, then the shared cold per-codepoint
+ *  verify, @c sz_utf8_norm_verify_block_.
+ *
+ *  AVX2 has no unsigned byte compare and no @c vpermb, so the continuation test rides the
+ *  @c min_epu8 range idiom, and the 64-entry lead lookup is a nibble-split of four broadcast
+ *  16-byte @c vpshufb quadrants selected by @c vpblendvb: the emulation Skylake uses, narrowed to
+ *  one YMM lane pair.
+ *
  *  @sa include/stringzilla/utf8_norm.h
- *
- *  This is the AVX2 sibling of the AVX-512 `skylake.h` scanner, mirrored at 32-byte YMM granularity.
- *  It overrides exactly one point of the shared engine: the scan primitive `sz_utf8_norm_classify_haswell_`,
- *  a 32-byte all-ASCII gate (`_mm256_movemask_epi8`) plus a lead-byte classify over the shared
- *  `sz_utf8_norm_lead_lut_`, then the shared cold per-codepoint verify (`sz_utf8_norm_verify_block_`).
- *
- *  AVX2 has no unsigned byte compare and no `vpermb`, so the continuation test rides the `min_epu8`
- *  range idiom and the 64-entry lead lookup is a nibble-split of four broadcast 16-byte `vpshufb`
- *  quadrants selected by `vpblendvb` - exactly the emulation Skylake uses, narrowed to one YMM lane pair.
  */
 #ifndef STRINGZILLA_UTF8_NORM_HASWELL_H_
 #define STRINGZILLA_UTF8_NORM_HASWELL_H_
@@ -32,9 +36,10 @@ extern "C" {
 #endif
 
 /**
- *  @brief 64-entry lead lookup without AVX-512 VBMI: four per-128-lane `vpshufb` over the broadcast LUT
- *         quadrants, selected by the index's high two bits. `families & flag` then identifies the form.
- *  @return The vector of flagged lanes (nonzero where a lead byte begins a candidate-non-inert codepoint).
+ *  @brief 64-entry lead lookup without AVX-512 VBMI: four per-128-lane @c vpshufb over the
+ *      broadcast LUT quadrants, selected by the high two index bits, then `families & flag` picks
+ *      out the requested form.
+ *  @return The flagged lanes, nonzero where a lead byte begins a candidate non-inert codepoint.
  */
 SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_classify_shuffle_haswell_(__m256i bytes_u8x32, __m256i is_lead_u8x32,
                                                                      sz_u8_t form_flag) {
@@ -61,11 +66,14 @@ SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_classify_shuffle_haswell_(__m256i byt
 }
 
 /**
- *  @brief Scan primitive (Haswell): first byte that begins a non-inert codepoint for @p form, else NULL.
+ *  @brief Haswell scan primitive: finds the first byte starting a non-inert codepoint for @p form.
  *
- *  Mirrors `sz_utf8_norm_classify_skylake_` at 32-byte granularity: a 32-byte all-ASCII gate, a `vpshufb`
- *  lead-classify, then the shared scalar verify on any block that survives the gate. The verify carries
- *  the combining class across blocks and reports order / quick-check violations exactly.
+ *  Mirrors @c sz_utf8_norm_classify_skylake_ at 32-byte granularity: a 32-byte all-ASCII gate, a
+ *  @c vpshufb lead-classify, then the shared scalar verify on any block that survives the gate. The
+ *  verify carries the combining class across blocks and reports order and quick-check violations
+ *  exactly as they occur.
+ *
+ *  @return The first such byte, or NULL.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_haswell_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;

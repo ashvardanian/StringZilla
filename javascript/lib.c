@@ -1,11 +1,12 @@
 /**
- *  @file       javascript/lib.c
- *  @brief      JavaScript bindings for StringZilla.
- *  @author     Ash Vardanian
- *  @date       September 18, 2023
+ *  @file javascript/lib.c
+ *  @author Ash Vardanian
+ *  @date September 18, 2023
+ *  @brief JavaScript bindings for StringZilla.
  *
- *  @copyright  Copyright (c) 2023
- *  @see        NodeJS docs: https://nodejs.org/api/n-api.html
+ *  @copyright Copyright (c) 2023
+ *
+ *  @see NodeJS docs: https://nodejs.org/api/n-api.html
  */
 #include <stdio.h>  // `printf` for debug builds
 #include <stdlib.h> // `malloc` to export strings into UTF-8

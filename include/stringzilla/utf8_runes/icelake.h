@@ -1,7 +1,9 @@
 /**
- *  @brief Ice Lake (AVX-512 VBMI+VAES) backend for UTF-8 codepoint mechanics and shared SIMD substrate.
  *  @file include/stringzilla/utf8_runes/icelake.h
  *  @author Ash Vardanian
+ *  @date November 19, 2025
+ *  @brief Ice Lake (AVX-512 VBMI+VAES) backend for UTF-8 codepoint mechanics and
+ *      shared SIMD substrate.
  */
 #ifndef STRINGZILLA_UTF8_RUNES_ICELAKE_H_
 #define STRINGZILLA_UTF8_RUNES_ICELAKE_H_
@@ -28,20 +30,22 @@ extern "C" {
                    "popcnt")
 #endif
 
+/*  Family-agnostic AVX-512 leaf helpers shared by every UTF-8 segmentation kernel (word / grapheme
+ *  / sentence / line / delimiters). Each family `#include`s this header and calls these substrate
+ *  helpers primitives instead of carrying its own copy. The substrate bakes in zero property
+ *  semantics: classifier tables flow in as bare pointers, boundary algebra flows in as bare masks,
+ *  so the same code resolves any break property. Every routine treats all 64 lanes uniformly with
+ *  no scalar per-lane loop and no spill-to-stack-then-reload round-trip. Table reads come in two
+ *  shapes: the in-register @c vpermi2b and @c vpermi2w page networks below, and
+ *  @ref sz_utf8_rune_flat_lookup_icelake_, which reads a page-compressed flat table with one
+ *  @c vpgatherdd. The classifiers use the latter: cross-lane shuffles are port-5-only, so a
+ *  dependent cascade saturates that single port, while the gather issues on the load ports and
+ *  leaves the shuffle port to the decode. */
 #pragma region Shared SIMD leaf substrate
 
-/*  Family-agnostic AVX-512 leaf helpers shared by every UTF-8 segmentation kernel (word / grapheme /
- *  sentence / line / delimiters). Each family `#include`s this header and calls these substrate helpers
- *  primitives instead of carrying its own copy. The substrate bakes in zero property semantics: classifier
- *  tables flow in as bare pointers, boundary algebra flows in as bare masks, so the same code resolves any
- *  break property. Every routine treats all 64 lanes uniformly with no scalar per-lane loop and no
- *  spill-to-stack-then-reload round-trip. Table reads come in two shapes: the in-register `vpermi2b`/`vpermi2w` page
- *  networks below, and @ref sz_utf8_rune_flat_lookup_icelake_, which reads a page-compressed flat table with one
- *  `vpgatherdd`. The classifiers use the latter: cross-lane shuffles are port-5-only, so a dependent cascade saturates
- *  that single port, while the gather issues on the load ports and leaves the shuffle port to the decode. */
-
-/** @brief  Byte lane identity (lane `i` holds the value `i`: {0,1,...,63}) for `vpcompressb`-based drains and
- *          permute waves. The `_mm512_set_epi8` arguments read 63..0 because they fill highest lane first. */
+/** Byte lane identity (lane @c i holds the value @c i: {0,1,...,63}) for @c vpcompressb-based
+ *  drains and permute waves. The @c _mm512_set_epi8 arguments read 63..0 because they fill
+ *  highest lane first. */
 SZ_HELPER_INLINE __m512i sz_utf8_lane_identity_icelake_(void) {
     return _mm512_set_epi8(                                             //
         63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
@@ -50,18 +54,18 @@ SZ_HELPER_INLINE __m512i sz_utf8_lane_identity_icelake_(void) {
         15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
 }
 
-/** @brief  Mask of codepoint-start bytes in a loaded window: every lane that is not a continuation byte `0x80..0xBF`.
- *          Continuation bytes are signed `-128..-65`, so a single signed `vpcmpgtb` against `-65` selects starts -
- *          the one-op form shared by count, find-nth, and the unpack classifier (was written four different ways). */
+/** Mask of codepoint-start bytes in a loaded window: every lane that is not a continuation byte
+ *  `0x80..0xBF`. Continuation bytes are signed `-128..-65`, so a single signed @c vpcmpgtb against
+ *  `-65` selects starts - the one-op form shared by count, find-nth, and the unpack classifier (was
+ *  written four different ways). */
 SZ_HELPER_INLINE __mmask64 sz_utf8_rune_start_mask_icelake_(__m512i window_u8x64, __mmask64 load_mask_m64) {
     return _mm512_mask_cmpgt_epi8_mask(load_mask_m64, window_u8x64, _mm512_set1_epi8((char)-65));
 }
 
-/**
- *  @brief  Emit a window's @p emit delimiter matches in-register via `vpcompressb` and `ceil(emit/8)` masked
- *          widen-stores. `_mm512_alignr_epi64` shifts the compressed registers down between waves, so @p emit may
- *          exceed 8. Per-lane byte length is 1, plus 1 on a 2-byte start, plus 2 on a 3-byte start (disjoint masks).
- */
+/** Emit a window's @p emit delimiter matches in-register via @c vpcompressb and `ceil(emit/8)`
+ *  masked widen-stores. @c _mm512_alignr_epi64 shifts the compressed registers down between waves,
+ *  so @p emit may exceed 8. Per-lane byte length is 1, plus 1 on a 2-byte start, plus 2 on a 3-byte
+ *  start (disjoint masks). */
 SZ_HELPER_INLINE void sz_utf8_rune_peel_icelake_(                                        //
     sz_u64_t start_bits, __mmask64 two_byte_starts_m64, __mmask64 three_byte_starts_m64, //
     sz_size_t emit, sz_size_t position, __m512i lane_identity_u8x64,                     //
@@ -94,34 +98,53 @@ SZ_HELPER_INLINE void sz_utf8_rune_peel_icelake_(                               
 
 #pragma region Decode window
 
-/** @brief  Per-byte logical right shift by @p shift, retaining only the low @p keep bits of every lane. */
+/** Per-byte logical right shift by @p shift, retaining only the low @p keep bits of every lane. */
 SZ_HELPER_INLINE __m512i sz_utf8_srl8_icelake_(__m512i value_u8x64, int shift, sz_u8_t keep) {
     return _mm512_and_si512(_mm512_srli_epi16(value_u8x64, shift), _mm512_set1_epi8((char)keep));
 }
 
 /**
- *  @brief  Per-lane codepoint reconstruction of a 64-byte window, family-agnostic and gather-free.
+ *  @brief Per-lane codepoint reconstruction of a 64-byte window, family-agnostic and gather-free.
  *
- *  Loads up to 64 bytes (masked at the buffer tail) and, treating every lane as a potential codepoint start,
- *  reassembles each codepoint's value via the lead/2nd/3rd-byte arithmetic trick into byte-domain halves
- *  `high = codepoint >> 8` and `low = codepoint & 0xFF`. No codepoint is ever materialized to memory and no
- *  gather is issued; downstream classifiers read the halves directly and address tables from them. The 2-byte
- *  and 3-byte BMP cases are blended in-register; ASCII lanes keep `high == 0`, and 4-byte (SMP) leads leave
- *  `high`/`low` holding the low 16 bits, which the caller resolves through arithmetic ranges.
+ *  Loads up to 64 bytes (masked at the buffer tail) and, treating every lane as a potential
+ *  codepoint start, reassembles each codepoint's value via the lead/2nd/3rd-byte arithmetic trick
+ *  into byte-domain halves `high = codepoint >> 8` and `low = codepoint & 0xFF`. No codepoint is
+ *  ever materialized to memory and no gather is issued; downstream classifiers read the halves
+ *  directly and address tables from them. The 2-byte and 3-byte BMP cases are blended in-register;
+ *  ASCII lanes keep `high == 0`, and 4-byte (SMP) leads leave @c high and @c low holding the low 16
+ *  bits, which the caller resolves through arithmetic ranges.
  */
 typedef struct sz_utf8_rune_window_t {
-    __m512i window_u8x64;        /**< The raw 64 input bytes (continuation bytes included). */
-    __m512i high_byte_u8x64;     /**< Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
-    __m512i low_byte_u8x64;      /**< Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
-    __mmask64 continuation;      /**< Bit `i` set => lane `i` is a UTF-8 continuation byte `10xxxxxx`. */
-    __mmask64 codepoint_starts;  /**< Bit `i` set => lane `i` begins a codepoint (loaded, non-continuation). */
-    __mmask64 two_byte_starts;   /**< Bit `i` set => lane `i` is a 2-byte lead `110xxxxx`. */
-    __mmask64 three_byte_starts; /**< Bit `i` set => lane `i` is a 3-byte lead `1110xxxx`. */
-    __mmask64 four_byte_starts;  /**< Bit `i` set => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;            /**< Number of bytes actually loaded (<= 64) into lanes [0, loaded). */
+
+    /** The raw 64 input bytes (continuation bytes included). */
+    __m512i window_u8x64;
+
+    /** Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
+    __m512i high_byte_u8x64;
+
+    /** Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
+    __m512i low_byte_u8x64;
+
+    /** Bit @c i is set when lane @c i is a UTF-8 continuation byte `10xxxxxx`. */
+    __mmask64 continuation;
+
+    /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
+    __mmask64 codepoint_starts;
+
+    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    __mmask64 two_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    __mmask64 three_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    __mmask64 four_byte_starts;
+
+    /** Number of bytes actually loaded (at most 64) into lanes [0, loaded). */
+    sz_size_t loaded;
 } sz_utf8_rune_window_t;
 
-/** @brief  Load up to 64 bytes from @p text (masked tail) and decode every lane into byte-domain halves. */
+/** Load up to 64 bytes from @p text (masked tail) and decode every lane into byte-domain halves. */
 SZ_HELPER_INLINE sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
     sz_u8_t const *text, sz_size_t available, __m512i lane_identity_u8x64) {
     sz_utf8_rune_window_t result;
@@ -173,13 +196,12 @@ SZ_HELPER_INLINE sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
 
 #pragma region In register page networks
 
-/**
- *  @brief  Gather one byte per 16-bit lane from a register-resident byte table @p table of @p count entries,
- *          addressed by the 16-bit @p indices_u16x32, using a `vpermi2b` page network (NO `vpgather`). Each 128-byte
- *          page is two ZMM tiles selected by `vpermi2b` on the low 7 index bits, with the page chosen by the
- *          high index bits via masked moves. The final partial page is `maskz`-loaded so an unpadded @p table
- *          is never over-read. Out-of-range lanes (none in valid trie use) read as zero.
- */
+/** Gather one byte per 16-bit lane from a register-resident byte table @p table of @p count
+ *  entries, addressed by the 16-bit @p indices_u16x32, using a @c vpermi2b page network (NO
+ *  @c vpgather). Each 128-byte page is two ZMM tiles selected by @c vpermi2b on the low 7 index
+ *  bits, with the page chosen by the high index bits via masked moves. The final partial page is
+ *  @c maskz-loaded so an unpadded @p table is never over-read. Out-of-range lanes (none in valid
+ *  trie use) read as zero. */
 SZ_HELPER_INLINE __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count, __m512i indices_u16x32) {
     __m512i const within_u16x32 = _mm512_and_si512(indices_u16x32, _mm512_set1_epi16(0x7F));
     __m512i const page_u16x32 = _mm512_srli_epi16(indices_u16x32, 7);
@@ -215,12 +237,11 @@ SZ_HELPER_INLINE __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int cou
     return result_u16x32;
 }
 
-/**
- *  @brief  256-entry byte LUT read over a 64-byte-aligned 256-byte @p table, per 32-bit lane @p index_u32x16 in
- *          [0,256). A `vpermb` over the four resident quads; the high two bits of the index select the quad via
- *          masked blends. Tiles load directly from `.rodata` (no per-call materialization), so the family
- *          classifiers stay re-init-free. @p table must be `sz_align_(64)` and exactly 256 bytes.
- */
+/** 256-entry byte LUT read over a 64-byte-aligned 256-byte @p table, per 32-bit lane
+ *  @p index_u32x16 in [0,256). A @c vpermb over the four resident quads; the high two bits of the
+ *  index select the quad via masked blends. Tiles load directly from `.rodata` (no per-call
+ *  materialization), so the family classifiers stay re-init-free. @p table must be `sz_align_(64)`
+ *  and exactly 256 bytes. */
 SZ_HELPER_INLINE __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __m512i index_u32x16) {
     __m512i const quad0_u8x64 = _mm512_load_si512((void const *)(table + 0 * 64));
     __m512i const quad1_u8x64 = _mm512_load_si512((void const *)(table + 1 * 64));
@@ -247,14 +268,17 @@ SZ_HELPER_INLINE __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, 
 }
 
 /**
- *  @brief  In-register indexed read of a 64-byte-aligned byte LUT spanning @p tile_count tiles of 64 bytes, with a
- *          per-32-bit-lane byte @p index_dwords_u32x16 in [0, tile_count*64). A `vpermi2b` cascade: each ZMM pair
- *          covers 128 byte slots addressed by the low 7 bits; the high bits select the pair via masked blends. Tiles
- *          load directly from the aligned `.rodata` @p table — no `luts` struct, no per-call init.
- *          @p table must be `sz_align_(64)` and zero-padded to `tile_count * 64` bytes.
+ *  @brief In-register indexed read of a 64-byte-aligned byte LUT spanning @p tile_count tiles of 64
+ *      bytes, with a per-32-bit-lane byte @p index_dwords_u32x16 in [0, @p tile_count*64).
  *
- *  ! Cost scales with @p tile_count, not with the window: every tile is scanned on the single cross-lane shuffle port.
- *  ! The BMP classifiers use @ref sz_utf8_rune_flat_lookup_icelake_ instead for exactly that reason.
+ *  A @c vpermi2b cascade: each ZMM pair covers 128 byte slots addressed by the low 7 bits; the high
+ *  bits select the pair via masked blends. Tiles load directly from the aligned `.rodata` @p table
+ *  — no @c luts struct, no per-call init. @p table must be `sz_align_(64)` and zero-padded to
+ *  `tile_count * 64` bytes.
+ *
+ *  ! Cost scales with @p tile_count, not with the window: every tile is scanned on the single
+ *  ! cross-lane shuffle port. The BMP classifiers use @ref sz_utf8_rune_flat_lookup_icelake_
+ *  ! instead for exactly that reason.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, int tile_count,
                                                            __m512i index_dwords_u32x16) {
@@ -275,14 +299,12 @@ SZ_HELPER_INLINE __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table,
     return result_u32x16;
 }
 
-/**
- *  @brief  Indexed read of a 4-bit-per-cell LUT: @p packed holds two output nibbles per byte (cell `i` is the low
- *          nibble of `packed[i/2]` for even `i`, the high nibble for odd `i`). Halves the table and so HALVES the
- *          `vpermi2b` cascade depth vs a byte-per-cell layout, for tables whose outputs fit in 4 bits (e.g. the
- *          grapheme `stage_sub` descriptor index, the word `astral_leaf` class). @p tile_count counts the packed
- *          tiles; @p index_dwords_u32x16 is the unpacked cell index per 32-bit lane. Reads straight from aligned
- *          `.rodata`.
- */
+/** Indexed read of a 4-bit-per-cell LUT: @p packed holds two output nibbles per byte (cell @c i is
+ *  the low nibble of `packed[i/2]` for even @c i, the high nibble for odd @c i). Halves the table
+ *  and so halves the @c vpermi2b cascade depth vs a byte-per-cell layout, for tables whose outputs
+ *  fit in 4 bits (e.g. the grapheme @c stage_sub descriptor index, the word @c astral_leaf class).
+ *  @p tile_count counts the packed tiles; @p index_dwords_u32x16 is the unpacked cell index per
+ *  32-bit lane. Reads straight from aligned `.rodata`. */
 SZ_HELPER_INLINE __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const *packed, int tile_count,
                                                                   __m512i index_dwords_u32x16) {
     __m512i const byte_index_u32x16 = _mm512_srli_epi32(index_dwords_u32x16, 1);
@@ -299,13 +321,17 @@ SZ_HELPER_INLINE __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const 
 #pragma region Flat table lookup
 
 /**
- *  @brief  Class byte per lane from a page-compressed flat table: `page_lut[cp >> 8]` selects a 256-byte page via one
- *          `vpermb`, then `flat[page * 256 + (cp & 0xFF)]` is fetched by one `vpgatherdd` at native width, riding the
- *          load ports instead of the contended cross-lane shuffle port. @p flat must extend four bytes past its last
- *          index, since the dword gather over-reads three.
+ *  @brief Class byte per lane from a page-compressed flat table.
  *
- *  ! Only the low byte of each lane is the class; the upper three carry gather garbage. Most callers truncate with
- *  ! `vpmovdb` anyway; a caller that keeps the u32 lanes must mask with 0xFF itself.
+ *  `page_lut[cp >> 8]` selects a 256-byte page via one @c vpermb, then
+ *  `flat[page * 256 + (cp & 0xFF)]` is fetched by one @c vpgatherdd at native
+ *  width, riding the load ports instead of the contended cross-lane shuffle
+ *  port. @p flat must extend four bytes past its last index, since the dword
+ *  gather over-reads three.
+ *
+ *  ! Only the low byte of each lane is the class; the upper three carry gather garbage. Most
+ *  ! callers truncate with @c vpmovdb anyway; a caller that keeps the u32 lanes must mask
+ *  ! with 0xFF itself.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_rune_flat_lookup_icelake_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, __m512i codepoints_u32x16) {
@@ -322,14 +348,17 @@ SZ_HELPER_INLINE __m512i sz_utf8_rune_flat_lookup_icelake_( //
 #pragma region Drains
 
 /**
- *  @brief  Emit boundary-lane offsets within an effective window via `vpcompressb`, honoring @p capacity and a
- *          carried previous-boundary position. Effective-window aware: only lanes in `[effective_lo, effective_hi]`
- *          (those with full in-register context) are trusted; the caller advances by `effective_step < 64` so
- *          edge lanes serve as context only and are never re-walked scalar-wise.
+ *  @brief Emit boundary-lane offsets within an effective window via @c vpcompressb, honoring
+ *      @p capacity and a carried previous-boundary position.
  *
- *  The `boundary` mask is pre-masked by the caller to the trusted band. Each set lane `i` opens a segment whose
- *  start is the previous boundary position and whose length reaches to `base + i`. Output is widened to 64-bit
- *  `starts[]` / `lengths[]` in waves of eight, carrying the open segment across waves and windows via @p previous_io.
+ *  Effective-window aware: only lanes in `[effective_lo, effective_hi]` (those with full
+ *  in-register context) are trusted; the caller advances by `effective_step < 64` so edge lanes
+ *  serve as context only and are never re-walked scalar-wise.
+ *
+ *  The @p boundary mask is pre-masked by the caller to the trusted band. Each set lane @c i opens a
+ *  segment whose start is the previous boundary position and whose length reaches to `base + i`.
+ *  Output is widened to 64-bit `starts[]` / `lengths[]` in waves of eight, carrying the open
+ *  segment across waves and windows via @p previous_io.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_( //
     sz_u64_t boundary, sz_size_t base, __m512i lane_identity_u8x64, sz_size_t *starts, sz_size_t *lengths,
@@ -357,28 +386,32 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_( //
     return produced;
 }
 
-/** @brief  Bring the @p block-th group of 16 bytes of @p value_u8x64 down to the low 128 bits (for `vpmovzxbd`
- *          widening), selecting the group with a runtime `vpermb` (the block index need not be a compile-time
- *          immediate). */
+/** Bring the @p block-th group of 16 bytes of @p value_u8x64 down to the low 128 bits (for
+ *  @c vpmovzxbd widening), selecting the group with a runtime @c vpermb (the block index need not
+ *  be a compile-time immediate). */
 SZ_HELPER_INLINE __m128i sz_utf8_rune_pick16_icelake_(__m512i value_u8x64, __m512i lane_identity_u8x64, int block) {
     return _mm512_castsi512_si128(_mm512_permutexvar_epi8(
         _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8((char)(block * 16))), value_u8x64));
 }
 
 /**
- *  @brief  Decode the dense set of emitted-start lanes @p emit_starts of a classified window into sequential UTF-32
- *          runes, the rune-valued sibling of @ref sz_utf8_rune_drain_forward_. `vpcompressb` packs the start
- *          byte-offsets, three sibling permutes gather the lead + up to three trailing bytes per codepoint, and a
- *          width-blend (1/2/3/4-byte) assembles each value branchlessly in 16-lane blocks. A narrower lead always
- *          blends in a value that is already inert for its width, so all four widths run unconditionally.
+ *  @brief Decode the dense set of emitted-start lanes @p emit_starts of a classified window into
+ *      sequential UTF-32 runes, the rune-valued sibling of @ref sz_utf8_rune_drain_forward_.
  *
- *  TOTAL decode: @p emit_starts also covers promoted orphan continuation bytes, and @p ill_formed marks every start
- *  lane whose maximal ill-formed subpart must collapse to a single U+FFFD (Unicode 17.0 §3.9 / W3C). After the
- *  width-blend assembles the (for ill-formed lanes, garbage) values, those lanes are overwritten with U+FFFD per
- *  16-lane block. The resume cursor is read from @p consumed_length_u8x64 (the per-lane maximal-subpart length, in
- *  window order) at the last emitted lane, so an ill-formed trailing lane never skips bytes that owe their own next
- *  U+FFFD.
- *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
+ *  @c vpcompressb packs the start byte-offsets, three sibling permutes gather the lead + up to
+ *  three trailing bytes per codepoint, and a width-blend (1/2/3/4-byte) assembles each value
+ *  branchlessly in 16-lane blocks. A narrower lead always blends in a value that is already inert
+ *  for its width, so all four widths run unconditionally.
+ *
+ *  Total decode: @p emit_starts also covers promoted orphan continuation bytes, and @p ill_formed
+ *  marks every start lane whose maximal ill-formed subpart must collapse to a single U+FFFD
+ *  (Unicode 17.0 §3.9 / W3C). After the width-blend assembles the (for ill-formed lanes, garbage)
+ *  values, those lanes are overwritten with U+FFFD per 16-lane block. The resume cursor is read
+ *  from @p consumed_length_u8x64 (the per-lane maximal-subpart length, in window order) at the last
+ *  emitted lane, so an ill-formed trailing lane never skips bytes that owe their own next U+FFFD.
+ *
+ *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the
+ *      resume cursor delta).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_icelake_( //
     __m512i window_u8x64, sz_u64_t emit_starts, sz_u64_t ill_formed, __m512i consumed_length_u8x64,
@@ -538,15 +571,14 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length,
     return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
 
-/**
- *  @brief  Decode one window of @p text into dense UTF-32 @p runes by the uniform "classify → per-lane well-formed +
- *          orphan promotion → compress emitted starts → gather → width-blend → blend U+FFFD" path, emitting at
- *          most @p runes_capacity runes and returning the resume cursor. Pure ASCII takes a dedicated `vpmovzxbd`
- *          widen lane. The decode is TOTAL: clean and dirty bytes are handled in-vector, one U+FFFD per maximal
- *          ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with @ref sz_utf8_decode_serial. The step
- *          declines (`*runes_unpacked == 0`, cursor unchanged) ONLY when the first lead's declared sequence crosses
- *          the window edge (a boundary truncation), which the public entry finalizes without a serial re-decode.
- */
+/** Decode one window of @p text into dense UTF-32 @p runes by the uniform "classify → per-lane
+ *  well-formed + orphan promotion → compress emitted starts → gather → width-blend → blend U+FFFD"
+ *  path, emitting at most @p runes_capacity runes and returning the resume cursor. Pure ASCII takes
+ *  a dedicated @c vpmovzxbd widen lane. The decode is total: clean and dirty bytes are handled
+ *  in-vector, one U+FFFD per maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with
+ *  @ref sz_utf8_decode_serial. The step declines (`*runes_unpacked == 0`, cursor unchanged) only
+ *  when the first lead's declared sequence crosses the window edge (a boundary truncation), which
+ *  the public entry finalizes without a serial re-decode. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_icelake_( //
     sz_cptr_t text, sz_size_t length,                    //
     sz_rune_t *runes, sz_size_t runes_capacity,          //
@@ -584,9 +616,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_icelake_( //
     __m512i const high_nibble_u8x64 = _mm512_and_si512(_mm512_srli_epi16(window_u8x64, 4), _mm512_set1_epi8(0x0F));
     __m512i const lengths_u8x64 = _mm512_shuffle_epi8(length_lut_u8x64, high_nibble_u8x64);
     sz_u64_t const starts_bits = _cvtmask64_u64(starts_m64);
-    // Any start whose declared sequence would reach past the window is deferred: well-formed text has only the
-    // trailing one (a resumable truncation), but a malformed lead-in-lead (e.g. `E0 C0`) can overrun earlier - the
-    // FIRST overrunning start bounds the decodable prefix, and its bytes resume in the next window or via serial.
+    // Any start whose declared sequence would reach past the window is deferred: well-formed text
+    // has only the trailing one (a resumable truncation), but a malformed lead-in-lead (e.g.
+    // `E0 C0`) can overrun earlier - the first overrunning start bounds the decodable prefix, and
+    // its bytes resume in the next window or via serial.
     __m512i const sequence_end_u8x64 = _mm512_add_epi8(lane_identity_u8x64, lengths_u8x64);
     __mmask64 const overruns_m64 = _kand_mask64(
         _mm512_cmpgt_epu8_mask(sequence_end_u8x64, _mm512_set1_epi8((char)chunk)), starts_m64);
@@ -659,10 +692,11 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_icelake_( //
         }
     }
 
-    // Per-lane validity, classifying every lane uniformly (no per-lane loop, no decline). The window is decoded TOTAL:
-    // well-formed leads decode to their value, ill-formed leads (bad lead, broken continuation chain, overlong /
-    // surrogate / out-of-range first continuation) and orphan continuation bytes each collapse to one U+FFFD over the
-    // maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial reference.
+    // Per-lane validity, classifying every lane uniformly (no per-lane loop, no decline). The
+    // window is decoded total: well-formed leads decode to their value, ill-formed leads (bad lead,
+    // broken continuation chain, overlong / surrogate / out-of-range first continuation) and orphan
+    // continuation bytes each collapse to one U+FFFD over the maximal ill-formed subpart (Unicode
+    // 17.0 §3.9 / W3C), bit-exact with the serial reference.
     __mmask64 const length_ge_two_m64 = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(2)),
                                                      starts_m64);
     __mmask64 const length_ge_three_m64 = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(3)),
@@ -724,9 +758,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_icelake_( //
     sz_u64_t const step3 = step2 & _cvtmask64_u64(length_ge_three_m64) & cont2;
     sz_u64_t const step4 = step3 & _cvtmask64_u64(length_ge_four_m64) & cont3;
 
-    // Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span (well-formed OR the bytes
-    // an ill-formed lead's single U+FFFD consumes) becomes its own 1-byte U+FFFD. The subpart spans are exactly the
-    // continuation slots the `step2/3/4` adds reached, so coverage is those slots smeared by their offset.
+    // Orphan promotion: a continuation byte not covered by any lead's maximal-subpart span
+    // (well-formed or the bytes an ill-formed lead's single U+FFFD consumes) becomes its own 1-byte
+    // U+FFFD. The subpart spans are exactly the continuation slots the `step2/3/4` adds reached, so
+    // coverage is those slots smeared by their offset.
     sz_u64_t const covered = ((step2 & decodable_mask) << 1) | ((step3 & decodable_mask) << 2) |
                              ((step4 & decodable_mask) << 3);
     sz_u64_t const orphan = continuation_bits & decodable_mask & ~covered;

@@ -1,7 +1,9 @@
 /**
- *  @brief IBM Power VSX backend for hash.
  *  @file include/stringzilla/hash/powervsx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief IBM Power VSX backend for hash.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_POWERVSX_H_
@@ -52,41 +54,39 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
+/*  StringZilla guarantees that every backend produces @b bit-identical hashes for a given input and
+ *  seed. The reference is @c sz_hash_serial, built around two primitives:
+ *
+ *      1. `sz_emulate_aesenc_si128_serial_(state, key)` computes
+ *         `MixColumns(SubBytes(ShiftRows(state))) ^ key`, one full x86-style AES encryption round.
+ *      2. `sz_emulate_shuffle_epi8_serial_(state, order)` is a byte permutation in the style of
+ *         @c _mm_shuffle_epi8.
+ *
+ *  Power8+ exposes a hardware AES round via @c __builtin_crypto_vcipher. The instruction follows
+ *  the big-endian AES state mapping, which is the byte-reverse of x86's @c _mm_aesenc_si128.
+ *  Empirically, as validated under QEMU against the serial reference over millions of random
+ *  vectors, the exact x86-compatible round is reproduced on little-endian Power by:
+ *
+ *      reverse the 16 state bytes → @c vcipher with an all-zero round key → reverse back → XOR key.
+ *
+ *  `vcipher(s, 0)` performs `SubBytes(ShiftRows(MixColumns(...)))` over the BE-mapped state;
+ *  framing it between two byte reversals realigns the rows/columns to x86's layout, after which we
+ *  apply the round key XOR ourselves, so the key needs no reordering. The shuffle primitive maps
+ *  directly onto `vec_perm(state, state, order)` because little-endian VSX byte indexing matches
+ *  the in-memory byte order the serial code reads. On big-endian Power both byte-order assumptions
+ *  break, so we delegate the whole hash family to the serial reference there. */
 #pragma region AES based hashing
-
-/*
- *  StringZilla guarantees that every backend produces @b bit-identical hashes for a given input and
- *  seed. The reference is `sz_hash_serial`, built around two primitives:
- *
- *      1. `sz_emulate_aesenc_si128_serial_(state, key)` = `MixColumns(SubBytes(ShiftRows(state))) ^ key`,
- *         i.e. one full x86-style AES encryption round.
- *      2. `sz_emulate_shuffle_epi8_serial_(state, order)` = `_mm_shuffle_epi8`-style byte permutation.
- *
- *  Power8+ exposes a hardware AES round via `__builtin_crypto_vcipher`. The instruction follows the
- *  big-endian AES state mapping, which is the byte-reverse of x86's `_mm_aesenc_si128`. Empirically
- *  (validated under QEMU against the serial reference over millions of random vectors) the exact
- *  x86-compatible round is reproduced on little-endian Power by:
- *
- *      reverse the 16 state bytes -> `vcipher` with an all-zero round key -> reverse back -> XOR key.
- *
- *  `vcipher(s, 0)` performs `SubBytes(ShiftRows(MixColumns(...)))` over the BE-mapped state; framing
- *  it between two byte reversals realigns the rows/columns to x86's layout, after which we apply the
- *  round key XOR ourselves (so the key needs no reordering). The shuffle primitive maps directly onto
- *  `vec_perm(state, state, order)` because little-endian VSX byte indexing matches the in-memory
- *  byte order the serial code reads. On big-endian Power both byte-order assumptions break, so we
- *  delegate the whole hash family to the serial reference there.
- */
 
 #if !SZ_IS_BIG_ENDIAN_
 
-/** @brief Byte-reverse permutation selector for a 16-byte VSX register. */
+/** Byte-reverse permutation selector for a 16-byte VSX register. */
 SZ_HELPER_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powervsx_(void) {
     __vector unsigned char const mask_u8x16 = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
     return mask_u8x16;
 }
 
 /**
- *  @brief Bit-exact VSX equivalent of `sz_emulate_aesenc_si128_serial_` using hardware AES.
+ *  @brief Bit-exact VSX equivalent of @c sz_emulate_aesenc_si128_serial_ using hardware AES.
  *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to the serial reference.
  */
 SZ_HELPER_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
@@ -94,9 +94,10 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u
     __vector unsigned char state_u8x16 = state_vec.vsx_u8;
     __vector unsigned char reversed_u8x16 = vec_perm(state_u8x16, state_u8x16, rev_u8x16);
     __vector unsigned char zero_u8x16 = vec_splats((unsigned char)0);
-    // `__builtin_crypto_vcipher` is not in the AltiVec ABI, so the compilers typed it differently: Clang over
-    // `vector unsigned char`, GCC over `vector unsigned long long`. The blessed `vec_cipher_be` is NOT a substitute -
-    // its byte-order contract differs from the x86 `aesenc` emulation this reversal implements.
+    // `__builtin_crypto_vcipher` is not in the AltiVec ABI, so the compilers typed it differently:
+    // Clang over `vector unsigned char`, GCC over `vector unsigned long long`. The blessed
+    // `vec_cipher_be` is not a substitute - its byte-order contract differs from the x86 `aesenc`
+    // emulation this reversal implements.
 #if defined(__clang__)
     typedef __vector unsigned char sz_vcipher_operand_t;
 #else
@@ -112,7 +113,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u
     return result_vec;
 }
 
-/** @brief Bit-exact VSX equivalent of `sz_emulate_shuffle_epi8_serial_` via `vec_perm`. */
+/** Bit-exact VSX equivalent of @c sz_emulate_shuffle_epi8_serial_ via @c vec_perm. */
 SZ_HELPER_INLINE sz_u128_vec_t sz_shuffle_epi8_powervsx_(sz_u128_vec_t state_vec,
                                                          sz_u8_t const order[sz_at_least_(16)]) {
     __vector unsigned char order_u8x16 = vec_xl(0, (unsigned char const *)order);
@@ -161,9 +162,8 @@ SZ_API_COMPTIME void sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_
     state->ins_length = 0;
 }
 
-/**
- *  @brief Loads the packed public state into the aligned internal twin (4x `vec_xl` per 64-byte field).
- */
+/** Loads the packed public state into the aligned internal twin (4x @c vec_xl
+ *  per 64-byte field). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_powervsx_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
@@ -177,7 +177,8 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_powervsx_(sz_hash_st
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state (4x `vec_xst` per 64-byte field). */
+/** Stores the aligned internal twin back into the packed public state (4x @c vec_xst
+ *  per 64-byte field). */
 SZ_HELPER_INLINE void sz_hash_state_store_powervsx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -307,8 +308,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_powervsx(sz_cptr_t start,
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_powervsx((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_powervsx_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_powervsx_` to fold - the same
+        // deferral the streaming path uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
                 state.ins.u128s[lane_index].vsx_u8 = vec_xl(
@@ -329,9 +331,10 @@ SZ_API_COMPTIME void sz_hash_state_update_powervsx(sz_hash_state_t *packed, sz_c
     sz_hash_state_aligned_t state = sz_hash_state_load_powervsx_(packed);
     while (length) {
         sz_size_t progress_in_block = state.ins_length % 64;
-        // A full block from an earlier fill is still buffered: its absorption is DEFERRED so `digest` can choose
-        // the same minimal (<=64) / full (>64) path the one-shot `sz_hash` would, keyed on the total length. Now
-        // that more bytes have arrived, that block is interior - flush it and clear the buffer.
+        // A full block from an earlier fill is still buffered: its absorption is deferred so
+        // `digest` can choose the same minimal (<=64) / full (>64) path the one-shot `sz_hash`
+        // would, keyed on the total length. Now that more bytes have arrived, that block is
+        // interior - flush it and clear the buffer.
         if (progress_in_block == 0 && state.ins_length != 0) {
             sz_hash_state_update_powervsx_(&state);
             for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index) state.ins.u8s[byte_index] = 0;
@@ -397,37 +400,40 @@ SZ_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t length, sz
 
 #else // SZ_IS_BIG_ENDIAN_
 
-// On big-endian Power the hardware AES byte mapping and the `vec_perm` shuffle indexing both diverge
-// from the x86 layout the serial reference encodes, so we delegate to keep hashes bit-exact.
+/*  On big-endian Power, the hardware AES byte mapping and the @c vec_perm shuffle indexing both
+ *  diverge from the x86 layout of the serial reference, so we delegate to keep hashes bit-exact. */
 
-/** @brief Big-endian Power stub: delegates to `sz_hash_serial` to preserve bit-exact digests. */
+/** Big-endian Power stub: delegates to @c sz_hash_serial to preserve bit-exact digests. */
 SZ_API_COMPTIME sz_u64_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
     return sz_hash_serial(start, length, seed);
 }
-/** @brief Big-endian Power stub: delegates to `sz_hash_state_init_serial`. */
+
+/** Big-endian Power stub: delegates to @c sz_hash_state_init_serial. */
 SZ_API_COMPTIME void sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_serial(state, seed);
 }
-/** @brief Big-endian Power stub: delegates to `sz_hash_state_update_serial`. */
+
+/** Big-endian Power stub: delegates to @c sz_hash_state_update_serial. */
 SZ_API_COMPTIME void sz_hash_state_update_powervsx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_hash_state_update_serial(state, text, length);
 }
-/** @brief Big-endian Power stub: delegates to `sz_hash_state_digest_serial`. */
+
+/** Big-endian Power stub: delegates to @c sz_hash_state_digest_serial. */
 SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state) {
     return sz_hash_state_digest_serial(state);
 }
-/** @brief Big-endian Power stub: delegates to `sz_fill_random_serial`. */
+
+/** Big-endian Power stub: delegates to @c sz_fill_random_serial. */
 SZ_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_fill_random_serial(text, length, nonce);
 }
 
 #endif // SZ_IS_BIG_ENDIAN_
 
-#pragma endregion // AES based hashing
+#pragma endregion AES based hashing
 
+/*  No VSX SHA extension is targeted, so the SHA-256 family delegates to the serial reference. */
 #pragma region SHA256
-
-// No VSX SHA extension is targeted here, so the SHA-256 family delegates to the serial reference.
 
 SZ_API_COMPTIME void sz_sha256_state_init_powervsx(sz_sha256_state_t *state) { sz_sha256_state_init_serial(state); }
 
@@ -440,7 +446,7 @@ SZ_API_COMPTIME void sz_sha256_state_digest_powervsx(sz_sha256_state_t const *st
     sz_sha256_state_digest_serial(state, digest);
 }
 
-#pragma endregion // SHA256
+#pragma endregion SHA256
 
 #if defined(__clang__)
 #pragma clang attribute pop

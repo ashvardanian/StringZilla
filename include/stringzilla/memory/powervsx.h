@@ -1,7 +1,9 @@
 /**
- *  @brief IBM Power VSX backend for memory.
  *  @file include/stringzilla/memory/powervsx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief IBM Power VSX backend for memory.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_POWERVSX_H_

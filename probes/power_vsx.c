@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: IBM POWER9 VSX, mirroring `include/stringzilla/find/powervsx.h` */
+/**
+ *  @file probes/power_vsx.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for IBM POWER9 VSX.
+ *
+ *  @sa include/stringzilla/find/powervsx.h
+ */
 #include <altivec.h>
 
 #if defined(__clang__)

@@ -1,4 +1,7 @@
 //! UAX-29 grapheme cluster segmentation of UTF-8 text.
+//!
+//! File: rust/stringzilla/utf8_graphemes.rs
+//! Author: Ash Vardanian
 
 use super::*;
 
@@ -12,9 +15,9 @@ impl SegmenterKernel for Graphemes {
 
 /// An iterator over UAX-29 grapheme clusters in UTF-8 text, in order.
 ///
-/// Unlike whitespace splitting, the grapheme clusters tile the input: every byte belongs to exactly one
-/// grapheme cluster, so consecutive clusters are contiguous and no empty slices are produced. Follows the
-/// Unicode UAX-29 rules.
+/// Unlike whitespace splitting, the grapheme clusters tile the input: every byte belongs to exactly
+/// one grapheme cluster, so consecutive clusters are contiguous and no empty slices are produced.
+/// Follows the Unicode UAX-29 rules.
 ///
 /// # Examples
 ///
@@ -33,7 +36,8 @@ mod tests {
     use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
     use crate::sz::*;
 
-    // Pride caption: a ZWJ family and VS16 rainbow flag, a skin-tone modifier, a keycap, an odd regional-indicator run.
+    // Pride caption: a ZWJ family and VS16 rainbow flag, a skin-tone modifier, a keycap, an
+    // odd regional-indicator run.
     const PROSE_PRIDE_CAPTION: &str = concat!(
         "Best Pride yet \u{1f3f3}\u{fe0f}\u{200d}\u{1f308} \u{2014} the whole crew showed up. Even my par",
         "ents \u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}\u{200d}\u{1f466} and grandma \u{1f44d}\u{1f3fd}",
@@ -41,7 +45,8 @@ mod tests {
         "\u{1f1f8}\u{1f1ef}\u{1f1f5}\u{1f1eb}. Texting \u{260e}\u{fe0e} over calling \u{2708}\u{fe0f} all",
         " day; 10/10, would march again."
     );
-    // Devanagari note: a virama conjunct, ZWJ/ZWNJ half-forms, a spacing vowel sign, and an NFKC vulgar fraction.
+    // Devanagari note: a virama conjunct, ZWJ/ZWNJ half-forms, a spacing vowel sign, and an
+    // NFKC vulgar fraction.
     const PROSE_DEVANAGARI_TIP: &str = concat!(
         "Quick Devanagari tip: \u{915}\u{94d}\u{937} is one cluster (\u{915} + \u{94d} + \u{937}), not th",
         "ree. Force the half-form with ZWJ \u{2014} \u{915}\u{94d}\u{200d}\u{937} \u{2014} or split it wi",
@@ -49,7 +54,8 @@ mod tests {
         "\u{94d}\u{930}\u{93f}\u{92f} and spacing vowel signs like \u{915}\u{940}. Renderers disagree, so",
         " test (\u{bd} the bugs are font bugs) before you ship!"
     );
-    // Two Prepend characters (Arabic number sign, Malayalam dot-reph): clusters fewer than codepoints.
+    // Two Prepend characters (Arabic number sign, Malayalam dot-reph): clusters
+    // fewer than codepoints.
     const PROSE_MICRO_PREPEND: &str = "\u{600}\u{664} \u{d4e}\u{d15}";
 
     #[test]

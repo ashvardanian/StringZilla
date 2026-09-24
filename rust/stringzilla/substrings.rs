@@ -1,10 +1,14 @@
 //! Multi-pattern substring search: one compiled Aho-Corasick automaton walked over many haystacks.
+//!
+//! File: rust/stringzilla/substrings.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
 use core::mem::MaybeUninit;
 
-/// The `hot_states` argument's "size the hot tier yourself" value, so zero stays a real all-cold request.
+/// The `hot_states` argument's "size the hot tier yourself" value, so zero stays a
+/// real all-cold request.
 pub const SUBSTRINGS_HOT_STATES_AUTO: usize = usize::MAX;
 
 /// The `matches_budget` argument's "let the tier choose" value; a host tier reads no budget at all.
@@ -24,8 +28,8 @@ pub enum CaseSensitivity {
 
 /// How matches that share bytes resolve: reported in full, or thinned to a leftmost run.
 ///
-/// The policy sizes the engine's arena, so it is fixed at construction rather than travelling per call,
-/// and one engine runs exactly one of the three.
+/// The policy sizes the engine's arena, so it is fixed at construction rather than travelling per
+/// call, and one engine runs exactly one of the three.
 ///
 /// Corresponds to `sz_substrings_overlap_policy_t` in the C API.
 #[repr(C)]
@@ -41,8 +45,8 @@ pub enum SubstringsOverlapPolicy {
 
 /// One reported match, locating it by haystack, by needle, and by byte span.
 ///
-/// Under case folding a needle's own byte length is not the length of every match - needle `k` matches
-/// both the 1-byte `k` and the 3-byte Kelvin sign `U+212A` - so the span travels per match.
+/// Under case folding a needle's own byte length is not the length of every match - needle `k`
+/// matches both the 1-byte `k` and the 3-byte Kelvin sign `U+212A` - so the span travels per match.
 ///
 /// Corresponds to `sz_substrings_match_t` in the C API.
 #[repr(C)]
@@ -60,8 +64,9 @@ pub struct SubstringsMatch {
 
 /// What a round found, which is how a capacity shortfall is reported rather than as an error.
 ///
-/// The sizing walk always runs, so `matches_emitted` is the truth whatever the caller's output could
-/// hold, and a nonzero `shortfall` is the one signal that an output is incomplete rather than wrong.
+/// The sizing walk always runs, so `matches_emitted` is the truth whatever the caller's
+/// output could hold, and a nonzero `shortfall` is the one signal that an output is
+/// incomplete rather than wrong.
 ///
 /// Corresponds to `sz_substrings_report_t` in the C API.
 #[repr(C)]
@@ -80,9 +85,9 @@ pub struct SubstringsReport {
 /// BM25's continuous parameters.
 ///
 /// There is no correct default for the corpus mean, so there is no `Default`: reach for
-/// [`Bm25Params::normalized`] or [`Bm25Params::unnormalized`], which name the two configurations that
-/// exist. A positive `length_normalization` beside a non-positive `average_document_length` is refused,
-/// since it would divide by a mean that is not there.
+/// [`Bm25Params::normalized`] or [`Bm25Params::unnormalized`], which name the two configurations
+/// that exist. A positive `length_normalization` beside a non-positive `average_document_length` is
+/// refused, since it would divide by a mean that is not there.
 ///
 /// Corresponds to `sz_substrings_bm25_t` in the C API.
 #[repr(C)]
@@ -109,8 +114,8 @@ impl Bm25Params {
         }
     }
 
-    /// BM25 with length normalization switched off, for a corpus whose mean length is unknown or whose
-    /// documents are uniform enough not to need it; the per-document lengths then go unread.
+    /// BM25 with length normalization switched off, for a corpus whose mean length is unknown or
+    /// whose documents are uniform enough not to need it; the per-document lengths then go unread.
     pub const fn unnormalized() -> Self {
         Self {
             term_frequency_saturation: 1.2,
@@ -120,17 +125,18 @@ impl Bm25Params {
     }
 }
 
-/// A vocabulary compiled into one automaton, walked over as many batches of haystacks as a caller has.
+/// A vocabulary compiled into one automaton, walked over as many batches of haystacks as
+/// a caller has.
 ///
 /// Building the automaton is the expensive half and every verb below reuses it, so one long-lived
-/// engine amortizes that across every later batch: a dictionary of thousands of terms costs one pass
-/// over a haystack rather than thousands.
+/// engine amortizes that across every later batch: a dictionary of thousands of terms costs one
+/// pass over a haystack rather than thousands.
 ///
-/// The fields mirror `sz_substrings_engine_t` one for one and only `needles_count`, `overlap_policy`
-/// and `report` are read from Rust, so the layout is load-bearing and the engine travels to C by
-/// pointer. Owning raw pointers makes it neither `Send` nor `Sync`, which is what the C contract wants:
-/// a compute verb writes the engine's round arena, so it mutates, and every verb below takes
-/// `&mut self` for that reason.
+/// The fields mirror `sz_substrings_engine_t` one for one and only `needles_count`,
+/// `overlap_policy` and `report` are read from Rust, so the layout is load-bearing and the engine
+/// travels to C by pointer. Owning raw pointers makes it neither `Send` nor `Sync`, which is what
+/// the C contract wants: a compute verb writes the engine's round arena, so it mutates, and every
+/// verb below takes `&mut self` for that reason.
 ///
 /// # Examples
 ///
@@ -193,11 +199,12 @@ pub struct SubstringsEngine {
 impl SubstringsEngine {
     /// Compiles `needles` into an automaton the matching verbs read, on the host.
     ///
-    /// An empty needle is refused rather than skipped, since it would match at every position and
-    /// dropping it would shift every later needle's reported index. `hot_states` is the count kept in
-    /// the dense hot rows, or [`SUBSTRINGS_HOT_STATES_AUTO`] to fill a fixed byte budget instead;
-    /// `matches_budget` bounds one device round and is read by a device tier alone, so a host engine
-    /// takes [`SUBSTRINGS_MATCHES_BUDGET_AUTO`] and walks straight into the caller's output.
+    /// An empty needle is refused rather than skipped, since it would match at every position
+    /// and dropping it would shift every later needle's reported index. `hot_states` is the
+    /// count kept in the dense hot rows, or [`SUBSTRINGS_HOT_STATES_AUTO`] to fill a fixed byte
+    /// budget instead; `matches_budget` bounds one device round and is read by a device tier
+    /// alone, so a host engine takes [`SUBSTRINGS_MATCHES_BUDGET_AUTO`] and walks straight into
+    /// the caller's output.
     pub fn new<Needle>(
         needles: &[Needle],
         case_sensitivity: CaseSensitivity,
@@ -228,8 +235,9 @@ impl SubstringsEngine {
 
     /// Compiles `needles` into an automaton on `stream`'s device, round arena included.
     ///
-    /// `stream` is a `cudaStream_t`, or null for the default stream. `matches_budget` is what a round
-    /// may emit before every later kernel retires, and is the one size bound construction takes.
+    /// `stream` is a `cudaStream_t`, or null for the default stream. `matches_budget` is
+    /// what a round may emit before every later kernel retires, and is the one size
+    /// bound construction takes.
     ///
     /// A compute verb of a device engine also needs a candidate sequence whose accessors run on the
     /// device, which this crate cannot build yet, so such an engine is constructible here before it
@@ -239,8 +247,8 @@ impl SubstringsEngine {
     ///
     /// `stream` must be a live stream of the current context, and it makes every later verb of this
     /// engine asynchronous: each one enqueues and returns, so every output slice has to be
-    /// device-reachable, has to outlive the launch, and neither it nor
-    /// [`SubstringsEngine::report`] may be read before the caller joins `stream` itself.
+    /// device-reachable, has to outlive the launch, and neither it nor [`SubstringsEngine::report`]
+    /// may be read before the caller joins `stream` itself.
     #[cfg(feature = "cuda")]
     pub unsafe fn new_on_gpu<Needle>(
         needles: &[Needle],
@@ -282,7 +290,8 @@ impl SubstringsEngine {
         self.overlap_policy
     }
 
-    /// What the last round found, which is how a capacity shortfall surfaces instead of as an error.
+    /// What the last round found, which is how a capacity shortfall surfaces instead of
+    /// as an error.
     ///
     /// On an engine built by `new_on_gpu` the record is written by the device, so
     /// this reads it only correctly after the caller has joined its own stream.
@@ -319,10 +328,10 @@ impl SubstringsEngine {
 
     /// Reports every match of every needle in every haystack, ascending by haystack.
     ///
-    /// `matches_offsets` holds one boundary per haystack plus a final total, and is filled whether or
-    /// not the matches fit, which is what sizes the next call. A capacity too small is not an error:
-    /// [`SubstringsEngine::report`] names the true total and what did not fit, so a sizing call with an
-    /// empty `matches` followed by one filling call needs no walk in between.
+    /// `matches_offsets` holds one boundary per haystack plus a final total, and is filled whether
+    /// or not the matches fit, which is what sizes the next call. A capacity too small is not an
+    /// error: [`SubstringsEngine::report`] names the true total and what did not fit, so a sizing
+    /// call with an empty `matches` followed by one filling call needs no walk in between.
     pub fn find<Haystack>(
         &mut self,
         haystacks: &[Haystack],
@@ -352,13 +361,13 @@ impl SubstringsEngine {
     /// Rewrites every haystack onto one tape, substituting one replacement per needle.
     ///
     /// `replacements` is indexed by needle and an empty one deletes the match, so it holds exactly
-    /// [`SubstringsEngine::needles_count`] entries. `offsets` holds one boundary per haystack plus a
-    /// final total and is filled whether or not the tape held the result, which is what sizes the next
-    /// call; a tape too small leaves its contents unspecified rather than failing, and
+    /// [`SubstringsEngine::needles_count`] entries. `offsets` holds one boundary per haystack plus
+    /// a final total and is filled whether or not the tape held the result, which is what sizes the
+    /// next call; a tape too small leaves its contents unspecified rather than failing, and
     /// [`SubstringsEngine::report`] names the bytes the rewrite needed.
     ///
-    /// The engine's policy must be a cover, since a substitution over matches that share bytes is not
-    /// a function.
+    /// The engine's policy must be a cover, since a substitution over matches that share bytes is
+    /// not a function.
     pub fn replace<Haystack, Replacement>(
         &mut self,
         haystacks: &[Haystack],
@@ -399,13 +408,14 @@ impl SubstringsEngine {
         }
     }
 
-    /// Scores every haystack against the whole vocabulary as one BM25 query, one score per haystack.
+    /// Scores every haystack against the whole vocabulary as one BM25 query, one
+    /// score per haystack.
     ///
     /// The vocabulary is the query and `needle_weights` holds each needle's IDF or boost, so a
     /// many-term query over a large corpus never materializes per-term frequency rows. Term
-    /// frequencies are raw overlapping counts, since a cover would suppress genuine occurrences of a
-    /// needle nested in another, so the engine's own policy does not apply here. `document_lengths` is
-    /// `None` to normalize by each haystack's byte length instead.
+    /// frequencies are raw overlapping counts, since a cover would suppress genuine occurrences of
+    /// a needle nested in another, so the engine's own policy does not apply here.
+    /// `document_lengths` is `None` to normalize by each haystack's byte length instead.
     ///
     /// `scores` receives haystack `h` at `scores[h * scores_stride]`, on the same convention as
     /// [`SubstringsEngine::counts`].
@@ -475,7 +485,8 @@ fn strided_column_check(haystacks: usize, entries: usize, stride: usize) -> Resu
     Ok(())
 }
 
-/// The C verbs read a null output as a pure size query, which an empty slice's dangling pointer is not.
+/// The C verbs read a null output as a pure size query, which an empty slice's dangling
+/// pointer is not.
 fn optional_mut_ptr<Element>(buffer: &mut [Element]) -> *mut Element {
     if buffer.is_empty() {
         core::ptr::null_mut()

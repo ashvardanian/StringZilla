@@ -1,10 +1,14 @@
 /**
- *  @brief Westmere (SSE4.2 + AES-NI + PCLMUL) backend for AES-256 encryption in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/westmere.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief Westmere (SSE4.2 + AES-NI + PCLMUL) backend for AES-256 encryption in counter
+ *      and Galois/counter modes.
  *
- *  The fourteen rounds are written out rather than looped, for the reason `cipher/icelake.h` spells out.
+ *  The fourteen rounds are written out rather than looped, for the reason
+ *  `cipher/icelake.h` spells out.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_WESTMERE_H_
 #define STRINGZILLA_CIPHER_WESTMERE_H_
@@ -27,9 +31,10 @@ extern "C" {
 #pragma region Key Schedule
 
 /**
- *  @brief Folds a substituted schedule word into the round key four words back, producing the next one.
- *  @param previous_u8x16 The round key four words back, all four of its words in one register.
- *  @param substituted_u8x16 The substituted word, already broadcast across every lane.
+ *  @brief Folds a substituted schedule word into the round key four words back, producing
+ *      the next one.
+ *  @param[in] previous_u8x16 The round key four words back, all four of its words in one register.
+ *  @param[in] substituted_u8x16 The substituted word, already broadcast across every lane.
  *  @return The next round key.
  *
  *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it.
@@ -92,14 +97,14 @@ SZ_API_COMPTIME void sz_aes256_key_init_westmere(sz_aes256_key_t *key, sz_u8_t c
     _mm_storeu_si128(schedule_u8x16 + 14, even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
 /**
  *  @brief Reads one round key out of an expanded schedule.
- *  @param key The expanded schedule.
- *  @param round_index Which of the fifteen round keys to read, zero through fourteen.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] round_index Which of the fifteen round keys to read, zero through fourteen.
  *  @return The round key.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_round_key_westmere_(sz_aes256_key_t const *key, sz_size_t round_index) {
@@ -108,8 +113,8 @@ SZ_HELPER_INLINE __m128i sz_aes256_round_key_westmere_(sz_aes256_key_t const *ke
 
 /**
  *  @brief Encrypts one block with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param block_u8x16 The plaintext block.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_westmere_(sz_aes256_key_t const *key, __m128i block_u8x16) {
@@ -130,7 +135,7 @@ SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_westmere_(sz_aes256_key_t const
     return _mm_aesenclast_si128(block_u8x16, sz_aes256_round_key_westmere_(key, 14));
 }
 
-/** @brief Applies one middle round to all four chains, so the four issue back to back. */
+/** Applies one middle round to all four chains, so the four issue back to back. */
 SZ_HELPER_INLINE void sz_aes256_blocks_round_westmere_(sz_u512_vec_t *blocks_vec, __m128i round_key_u8x16) {
     blocks_vec->xmms[0] = _mm_aesenc_si128(blocks_vec->xmms[0], round_key_u8x16);
     blocks_vec->xmms[1] = _mm_aesenc_si128(blocks_vec->xmms[1], round_key_u8x16);
@@ -140,12 +145,12 @@ SZ_HELPER_INLINE void sz_aes256_blocks_round_westmere_(sz_u512_vec_t *blocks_vec
 
 /**
  *  @brief Encrypts four blocks with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param blocks_vec The four plaintext blocks.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] blocks_vec The four plaintext blocks.
  *  @return The four ciphertext blocks.
  *
- *  One round instruction has several cycles of latency and issues every cycle, so a single chain of fourteen
- *  dependent rounds leaves most of that throughput idle.
+ *  One round instruction has several cycles of latency and issues every cycle, so a single chain of
+ *  fourteen dependent rounds leaves most of that throughput idle.
  */
 SZ_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_t const *key,
                                                                   sz_u512_vec_t blocks_vec) {
@@ -178,13 +183,13 @@ SZ_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_
     return blocks_vec;
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
 /**
  *  @brief Places the twelve nonce bytes in a counter block whose trailing index word is zero.
- *  @param nonce The twelve nonce bytes.
+ *  @param[in] nonce The twelve nonce bytes.
  *  @return The counter block for index zero.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_counter_base_westmere_(sz_u8_t const *nonce) {
@@ -196,8 +201,9 @@ SZ_HELPER_INLINE __m128i sz_aes256_counter_base_westmere_(sz_u8_t const *nonce) 
 
 /**
  *  @brief Completes a counter block with a big-endian block index in its trailing word.
- *  @param counter_base_u8x16 A counter block carrying the nonce, whose trailing word is overwritten.
- *  @param block_index The block index.
+ *  @param[in] counter_base_u8x16 A counter block carrying the nonce, whose trailing
+ *      word is overwritten.
+ *  @param[in] block_index The block index.
  *  @return The counter block for that index.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_counter_block_westmere_(__m128i counter_base_u8x16, sz_u32_t block_index) {
@@ -258,11 +264,11 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key, sz_u
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
-/** @brief The byte order that moves a hash block between the tag's byte order and the multiplier's. */
+/** The byte order that moves a hash block between the tag's byte order and the multiplier's. */
 SZ_HELPER_INLINE sz_u8_t const *sz_ghash_byte_order_westmere_(void) {
     static sz_align_(64) sz_u8_t const order[16] = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
     return &order[0];
@@ -270,11 +276,11 @@ SZ_HELPER_INLINE sz_u8_t const *sz_ghash_byte_order_westmere_(void) {
 
 /**
  *  @brief Reverses a hash block between the tag's byte order and the multiplier's.
- *  @param block_u8x16 The block in either order.
+ *  @param[in] block_u8x16 The block in either order.
  *  @return The same block in the other order.
  *
- *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient, which is the
- *  opposite of how a carry-less multiply reads its operands.
+ *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient,
+ *  which is the opposite of how a carry-less multiply reads its operands.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_reflect_westmere_(__m128i block_u8x16) {
     return _mm_shuffle_epi8(block_u8x16, _mm_load_si128((__m128i const *)sz_ghash_byte_order_westmere_()));
@@ -282,14 +288,14 @@ SZ_HELPER_INLINE __m128i sz_ghash_reflect_westmere_(__m128i block_u8x16) {
 
 /**
  *  @brief Loads a hash block from the tag's byte order into the multiplier's.
- *  @param block The sixteen block bytes.
+ *  @param[in] block The sixteen block bytes.
  *  @return The reflected block.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_load_westmere_(sz_u8_t const *block) {
     return sz_ghash_reflect_westmere_(_mm_lddqu_si128((__m128i const *)block));
 }
 
-/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+/** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_westmere_(sz_u8_t const *first, sz_u8_t const *second) {
     __m128i const first_u8x16 = _mm_lddqu_si128((__m128i const *)first);
     __m128i const second_u8x16 = _mm_lddqu_si128((__m128i const *)second);
@@ -300,8 +306,8 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_westmere_(sz_u8_t const *first, s
 /**
  *  @brief Loads a pending block with everything past @p buffered forced to zero.
  *
- *  A lane-identity compare rather than a byte loop, which GCC lowered to a LibC fill call and clang to branchy
- *  scalar stores, both then stalling on store forwarding.
+ *  A lane-identity compare rather than a byte loop, which GCC lowered to a LibC fill call and clang
+ *  to branchy scalar stores, both then stalling on store forwarding.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_load_padded_westmere_(sz_u8_t const *block, sz_size_t buffered) {
     __m128i const lane_ids_u8x16 = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
@@ -312,8 +318,8 @@ SZ_HELPER_INLINE __m128i sz_ghash_load_padded_westmere_(sz_u8_t const *block, sz
 
 /**
  *  @brief Stores a hash block back in the tag's byte order.
- *  @param value_u8x16 The reflected block.
- *  @param block Receives the sixteen bytes.
+ *  @param[in] value_u8x16 The reflected block.
+ *  @param[out] block Receives the sixteen bytes.
  */
 SZ_HELPER_INLINE void sz_ghash_store_westmere_(__m128i value_u8x16, sz_u8_t *block) {
     _mm_storeu_si128((__m128i *)block, sz_ghash_reflect_westmere_(value_u8x16));
@@ -321,14 +327,15 @@ SZ_HELPER_INLINE void sz_ghash_store_westmere_(__m128i value_u8x16, sz_u8_t *blo
 
 /**
  *  @brief Accumulates the 256-bit carry-less product of two reflected blocks into a running triple.
- *  @param multiplicand_u8x16 One reflected operand.
- *  @param multiplier_u8x16 The other reflected operand.
- *  @param low_u8x16 Accumulates the product of the two low halves.
- *  @param middle_u8x16 Accumulates both cross products.
- *  @param high_u8x16 Accumulates the product of the two high halves.
+ *  @param[in] multiplicand_u8x16 One reflected operand.
+ *  @param[in] multiplier_u8x16 The other reflected operand.
+ *  @param[inout] low_u8x16 Accumulates the product of the two low halves.
+ *  @param[inout] middle_u8x16 Accumulates both cross products.
+ *  @param[inout] high_u8x16 Accumulates the product of the two high halves.
  *
- *  Splitting the schoolbook product from its reduction is what lets several blocks share one reduction: the
- *  field is linear, so the partial products of a whole group may be summed before folding once.
+ *  Splitting the schoolbook product from its reduction is what lets several blocks share one
+ *  reduction: the field is linear, so the partial products of a whole group may be summed
+ *  before folding once.
  */
 SZ_HELPER_INLINE void sz_ghash_accumulate_westmere_(__m128i multiplicand_u8x16, __m128i multiplier_u8x16,
                                                     __m128i *low_u8x16, __m128i *middle_u8x16, __m128i *high_u8x16) {
@@ -340,9 +347,9 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_westmere_(__m128i multiplicand_u8x16, 
 
 /**
  *  @brief Folds an accumulated triple into one reflected block.
- *  @param product_low_u8x16 The accumulated low halves.
- *  @param product_middle_u8x16 The accumulated cross products.
- *  @param product_high_u8x16 The accumulated high halves.
+ *  @param[in] product_low_u8x16 The accumulated low halves.
+ *  @param[in] product_middle_u8x16 The accumulated cross products.
+ *  @param[in] product_high_u8x16 The accumulated high halves.
  *  @return The reduced product, reflected.
  *
  *  The cross products straddle the halves, so they are split and merged first.
@@ -377,8 +384,8 @@ SZ_HELPER_INLINE __m128i sz_ghash_reduce_westmere_(__m128i product_low_u8x16, __
 
 /**
  *  @brief Multiplies two reflected blocks in the Galois field the tag is built over.
- *  @param accumulator_u8x16 The running hash, reflected.
- *  @param subkey_u8x16 One of the reflected subkey powers.
+ *  @param[in] accumulator_u8x16 The running hash, reflected.
+ *  @param[in] subkey_u8x16 One of the reflected subkey powers.
  *  @return The reduced product, reflected.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_multiply_westmere_(__m128i accumulator_u8x16, __m128i subkey_u8x16) {
@@ -391,9 +398,9 @@ SZ_HELPER_INLINE __m128i sz_ghash_multiply_westmere_(__m128i accumulator_u8x16, 
 
 /**
  *  @brief Absorbs one reflected block into the running hash.
- *  @param accumulator_u8x16 The running hash, reflected.
- *  @param block_u8x16 The reflected block to absorb.
- *  @param subkey_u8x16 The reflected hash subkey.
+ *  @param[in] accumulator_u8x16 The running hash, reflected.
+ *  @param[in] block_u8x16 The reflected block to absorb.
+ *  @param[in] subkey_u8x16 The reflected hash subkey.
  *  @return The updated running hash, reflected.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_absorb_westmere_(__m128i accumulator_u8x16, __m128i block_u8x16,
@@ -416,9 +423,10 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_westmere(sz_aes256_gcm_key_t *key, s
 }
 
 /**
- *  @brief Loads the first four subkey powers, descending, so power `j` pairs with block `j` of a group.
- *  @param powers The eight subkey powers in the tag's byte order, ascending.
- *  @return The reflected powers `H^4`, `H^3`, `H^2`, `H^1`.
+ *  @brief Loads the first four subkey powers, descending, so power @c j pairs with block @c j
+ *      of a group.
+ *  @param[in] powers The eight subkey powers in the tag's byte order, ascending.
+ *  @return The reflected powers H⁴, H³, H², H¹.
  */
 SZ_HELPER_INLINE sz_u512_vec_t sz_ghash_descending_powers_westmere_(sz_u8_t const *powers) {
     sz_u512_vec_t powers_vec;
@@ -431,13 +439,13 @@ SZ_HELPER_INLINE sz_u512_vec_t sz_ghash_descending_powers_westmere_(sz_u8_t cons
 
 /**
  *  @brief Absorbs four reflected blocks into the running hash with a single field reduction.
- *  @param accumulator_u8x16 The running hash, reflected.
- *  @param blocks_vec The four reflected blocks, in the order they arrived.
- *  @param powers_vec The reflected powers `H^4` through `H^1`.
+ *  @param[in] accumulator_u8x16 The running hash, reflected.
+ *  @param[in] blocks_vec The four reflected blocks, in the order they arrived.
+ *  @param[in] powers_vec The reflected powers H⁴ through H¹.
  *  @return The updated running hash, reflected.
  *
- *  Four absorbed blocks expand to `(Y ^ X1) H^4 ^ X2 H^3 ^ X3 H^2 ^ X4 H`, which needs four multiplies either
- *  way but only one reduction instead of four.
+ *  Four absorbed blocks expand to (Y ⊕ X₁) H⁴ ⊕ X₂ H³ ⊕ X₃ H² ⊕ X₄ H, which needs four
+ *  multiplies either way but only one reduction instead of four.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x16, sz_u512_vec_t blocks_vec,
                                                         sz_u512_vec_t powers_vec) {
@@ -454,15 +462,15 @@ SZ_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x1
     return sz_ghash_reduce_westmere_(product_low_u8x16, product_middle_u8x16, product_high_u8x16);
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time, so both bounds are constants and the fill unrolls into twenty-nine
- *  whole-register stores and an eight-byte tail.
+ *  The size is known at compile time, so both bounds are constants and the fill unrolls into
+ *  twenty-nine whole-register stores and an eight-byte tail.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_westmere_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -474,7 +482,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_westmere_(sz_aes256_gcm_state_t 
     sz_keep_alive_(state);
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_westmere_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                     sz_u8_t const nonce[sz_at_least_(12)]) {
     __m128i initial_u8x16;
@@ -496,7 +504,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_westmere_(sz_aes256_gcm_state_t *state
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
                                                         sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
@@ -542,17 +550,18 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t *s
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param state The state, whose two sixteen-byte counters advance together here.
- *  @param input The bytes to transform.
- *  @param output Receives the transformed bytes.
- *  @param count Bytes to consume, never more than the keystream block has left.
- *  @param accumulator_u8x16 The running hash, reflected.
- *  @param subkey_u8x16 The reflected hash subkey.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in] input The bytes to transform.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] count Bytes to consume, never more than the keystream block has left.
+ *  @param[in] accumulator_u8x16 The running hash, reflected.
+ *  @param[in] subkey_u8x16 The reflected hash subkey.
+ *  @param[in] direction Which buffer the hash absorbs.
  *  @return The updated running hash, reflected.
  *
- *  Through the message the keystream offset and the hash offset are the same number, because every byte spends
- *  one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
+ *  Through the message the keystream offset and the hash offset are the same number, because
+ *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
+ *  this resumes both.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
                                                        sz_u8_t *output, sz_size_t count, __m128i accumulator_u8x16,
@@ -580,15 +589,15 @@ SZ_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *st
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
- *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole blocks
- *  four at a time, then a trailing block that the next chunk will resume.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes
+ *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
+ *  block, then whole blocks four at a time, then a trailing block that the next chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                         sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -672,7 +681,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *s
     _mm_storeu_si128((__m128i *)state->counter, sz_aes256_counter_block_westmere_(counter_vec.xmm, block_index));
 }
 
-/** @brief Folds the pending block and the length block into the hash, then unmasks it into the tag. */
+/** Folds the pending block and the length block into the hash, then unmasks it into the tag. */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_westmere_(sz_aes256_gcm_state_t const *state,
                                                      sz_u8_t tag[sz_at_least_(16)]) {
     __m128i const subkey_u8x16 = sz_ghash_load_westmere_(state->key.powers);
@@ -740,7 +749,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_westmere(sz_aes256_gc
                                                                              : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -774,7 +783,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_westmere(sz_aes256_gcm_key_t c
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

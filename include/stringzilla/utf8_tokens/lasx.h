@@ -1,7 +1,8 @@
 /**
- *  @brief LoongArch LASX backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/lasx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief LoongArch LASX backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_LASX_H_
 #define STRINGZILLA_UTF8_TOKENS_LASX_H_
@@ -15,9 +16,11 @@ extern "C" {
 #endif
 
 #if SZ_USE_LASX
-/** @brief  Peel the tile's first `emit_count` matches with a `__lasx_xvperm_w` left-pack, 4 lanes per sub-block.
- *  Each sub-block gathers its set `(position+lane, length)` pairs to the front (same dword-index table as
- *  `sz_utf8_iterate_peel_haswell_`) and element-stores `min(popcount, remaining)` at the advancing cursor. */
+
+/** Peels the tile's first @p emit_count matches with a @c __lasx_xvperm_w left-pack, 4 lanes per
+ *  sub-block. Each sub-block gathers its set `(position + lane, length)` pairs to the front, with
+ *  the same dword-index table as @ref sz_utf8_iterate_peel_haswell_, and element-stores
+ *  `min(popcount, remaining)` at the advancing cursor. */
 SZ_HELPER_INLINE void sz_utf8_iterate_peel_lasx_(                              //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
@@ -184,7 +187,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_lasx(     //
         sz_u32_t x_a9_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window_u8x32, x_a9_u8x32));
         sz_u32_t x_af_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window_u8x32, x_af_u8x32));
         sz_u32_t x_9f_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window_u8x32, x_9f_u8x32));
-        // [0x80, 0x8A] range: unsigned `b >= 0x80` AND `b <= 0x8A`.
+        // [0x80, 0x8A] range: unsigned `b >= 0x80` and `b <= 0x8A`.
         __m256i x_80_ge_cmp_u8x32 = __lasx_xvsle_bu(byte_80_u8x32, window_u8x32);
         __m256i x_8a_le_cmp_u8x32 = __lasx_xvsle_bu(window_u8x32, x_8a_u8x32);
         sz_u32_t x_8a_range_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(x_80_ge_cmp_u8x32, x_8a_le_cmp_u8x32));
@@ -221,7 +224,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_lasx(     //
     return count;
 }
 
-#pragma endregion Multistep Newline &Whitespace Iteration
+#pragma endregion Multistep newline and whitespace iteration
 #endif // SZ_USE_LASX
 
 #ifdef __cplusplus

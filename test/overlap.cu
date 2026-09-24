@@ -1,17 +1,21 @@
 /**
- *  @brief  Window overlap on the GPU: the device engine against serial's answers, the memory contract the scoring
- *          verb keeps, the width bounds the per-thread ring imposes, and the asynchrony the verb promises.
- *  @file   test/overlap.cu
+ *  @file test/overlap.cu
  *  @author Ash Vardanian
- *  @date   September 15, 2026
+ *  @date January 27, 2024
+ *  @brief Window overlap on the GPU.
  *
- *  @c test/overlap.cpp defines @c test_overlap_all and @c test_overlap_safety over the CPU backend table, and
- *  this file defines them over the CUDA one. No target links both - @c stringzilla_test_cpp20 takes the first
- *  and @c stringzilla_test_cu20 the second - which is a CMake invariant rather than a language one.
+ *  Covers the device engine against serial's answers, the memory contract the scoring verb keeps,
+ *  the width bounds the per-thread ring imposes, and the asynchrony the verb promises.
  *
- *  The sibling @c test/overlap.cpp drives the step primitives and the CPU backends; nothing here repeats that.
- *  These are the cases a host translation unit cannot express: device-reachable memory, a device-bound sequence,
- *  a caller's own stream, and the refusals that keep a host pointer from reaching a kernel as an address.
+ *  @c test/overlap.cpp defines @c test_overlap_all and @c test_overlap_safety over the CPU backend
+ *  table, and this file defines them over the CUDA one. No target links both -
+ *  @c stringzilla_test_cpp20 takes the first and @c stringzilla_test_cu20 the second - which is a
+ *  CMake invariant rather than a language one.
+ *
+ *  The sibling @c test/overlap.cpp drives the step primitives and the CPU backends; nothing here
+ *  repeats that. These are the cases a host translation unit cannot express: device-reachable
+ *  memory, a device-bound sequence, a caller's own stream, and the refusals that keep a host
+ *  pointer from reaching a kernel as an address.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -34,20 +38,35 @@ using namespace sz::test;
 #pragma region Helpers
 
 /**
- *  @brief A corpus both sides address: one arena, the views into it, and the room for one round's scores.
+ *  @brief A corpus both sides address: one arena, its views, and room for one round's scores.
  *
- *  Unified storage is readable from the host, so the serial reference runs against these very bytes rather than
- *  a second copy of them, and the two candidate sequences differ only in whose accessors they carry. The queries
- *  stay plain host strings, because an engine's builder reads them on the host and no kernel ever sees them.
+ *  Unified storage is readable from the host, so the serial reference runs against these very bytes
+ *  rather than a second copy of them, and the two candidate sequences differ only in whose
+ *  accessors they carry. The queries stay plain host strings, because an engine's builder reads
+ *  them on the host and no kernel ever sees them.
  */
 struct overlap_cuda_corpus_t {
-    std::vector<std::string> queries;       /**< The texts whose windows are sorted into the forest. */
-    unified_vector<char> arena;             /**< Every candidate's bytes, back to back. */
-    unified_vector<sz_string_view_t> views; /**< One view per candidate; its size is the candidate count. */
-    unified_vector<sz_f32_t> scores;        /**< @b [queries,candidates,widths], written by whichever verb ran. */
-    sz_sequence_t query_sequence {};        /**< Host accessors, which is what an engine's builder calls. */
-    sz_sequence_t device_candidates {};     /**< Accessors a kernel calls, as the scoring verb requires. */
-    sz_sequence_t host_candidates {};       /**< Accessors the serial reference calls, over the same views. */
+
+    /** The texts whose windows are sorted into the forest. */
+    std::vector<std::string> queries;
+
+    /** Every candidate's bytes, back to back. */
+    unified_vector<char> arena;
+
+    /** One view per candidate; its size is the candidate count. */
+    unified_vector<sz_string_view_t> views;
+
+    /** @b [queries,candidates,widths], written by whichever verb ran. */
+    unified_vector<sz_f32_t> scores;
+
+    /** Host accessors, which is what an engine's builder calls. */
+    sz_sequence_t query_sequence {};
+
+    /** Accessors a kernel calls, as the scoring verb requires. */
+    sz_sequence_t device_candidates {};
+
+    /** Accessors the serial reference calls, over the same views. */
+    sz_sequence_t host_candidates {};
 
     overlap_cuda_corpus_t(std::size_t queries_count, std::size_t count, std::size_t query_length,
                           std::size_t widths_count)
@@ -94,18 +113,25 @@ static std::vector<sz_f32_t> overlap_serial_reference_(overlap_cuda_corpus_t con
 
 #pragma region Backends
 
-/** @brief One CUDA backend's scoring verb, and the device it needs. */
+/** One CUDA backend's scoring verb, and the device it needs. */
 struct overlap_cuda_backend_t {
-    char const *name;           /**< The row's spelling, for @ref fail_backend_ and the log. */
-    sz_capability_t required;   /**< The tier bits @ref sz_capabilities must carry for this row to run. */
-    sz_overlap_scores_t scores; /**< The verb itself, which every row reaches through a device-built engine. */
+
+    /** The row's spelling, for @ref fail_backend_ and the log. */
+    char const *name;
+
+    /** The tier bits @ref sz_capabilities must carry for this row to run. */
+    sz_capability_t required;
+
+    /** The verb itself, which every row reaches through a device-built engine. */
+    sz_overlap_scores_t scores;
 };
 
 /**
  *  @brief Every CUDA backend compiled into this translation unit, dispatched first.
  *
- *  Unlike the CPU tables, whose rows a `#if` selects, every CUDA tier is compiled into one fatbin and chosen at
- *  run time - so a row states the tier bits it needs and the drivers skip it on a device that lacks them.
+ *  Unlike the CPU tables, whose rows a `#if` selects, every CUDA tier is compiled into one fatbin
+ *  and chosen at run time - so a row states the tier bits it needs and the drivers skip it on a
+ *  device that lacks them.
  */
 static overlap_cuda_backend_t const overlap_cuda_backends[] = {
     {"dispatched", sz_cap_cuda_k, sz_overlap_scores},
@@ -141,7 +167,7 @@ static void check_overlap_cuda_equivalence_(overlap_cuda_backend_t const &backen
             }
 }
 
-/** One backend refusing the host memory no kernel can address, rather than reaching it as an invalid pointer. */
+/** One backend refusing host memory no kernel can address, rather than reading a bad pointer. */
 static void check_overlap_cuda_memory_safety_(overlap_cuda_backend_t const &backend) {
     std::array<sz_size_t, 2> const widths {4, 6};
     overlap_cuda_corpus_t corpus(1, 8, 333, widths.size());
@@ -169,7 +195,7 @@ static void check_overlap_cuda_memory_safety_(overlap_cuda_backend_t const &back
     sz_overlap_engine_free(&engine);
 }
 
-/** The widest window the per-thread ring holds, and the two refusals one step past each of its bounds. */
+/** The widest window the per-thread ring holds, and the refusals one step past either bound. */
 static void check_overlap_cuda_width_safety_(overlap_cuda_backend_t const &backend) {
     std::array<sz_size_t, 1> const widest {sz_overlap_cuda_widest_window_k};
     std::array<sz_size_t, 1> const past {sz_overlap_cuda_widest_window_k + 1};
@@ -199,7 +225,8 @@ static void check_overlap_cuda_width_safety_(overlap_cuda_backend_t const &backe
     if (corpus.scores[0] != 1.0f) fail_backend_(backend.name, "a text does not fully overlap itself");
 }
 
-/** The scoring verb enqueues and returns, so a round big enough to outlive the call is still running after it. */
+/** The scoring verb enqueues and returns, so a round big enough to outlive the call is still
+ *  running after it. */
 static void check_overlap_cuda_asynchrony_() {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
     overlap_cuda_corpus_t corpus(8, 4096, 777, widths.size());
@@ -221,7 +248,7 @@ static void check_overlap_cuda_asynchrony_() {
 
 #pragma region Drivers
 
-/** @brief Every CUDA backend this device carries, against serial, over generated corpora. */
+/** Every CUDA backend this device carries, against serial, over generated corpora. */
 void test_overlap_all() {
     fmt::println("  - testing the CUDA window-overlap scores against the serial backend...");
     for (overlap_cuda_backend_t const &backend : overlap_cuda_backends) {
@@ -230,7 +257,7 @@ void test_overlap_all() {
     }
 }
 
-/** @brief Degenerate inputs, stated refusals, the bounds the per-thread ring imposes, and the asynchrony promised. */
+/** Degenerate inputs, stated refusals, the per-thread ring bounds, and the promised asynchrony. */
 void test_overlap_safety() {
     fmt::println("  - testing degenerate inputs and refused batches of the CUDA window-overlap kernels...");
     for (overlap_cuda_backend_t const &backend : overlap_cuda_backends) {

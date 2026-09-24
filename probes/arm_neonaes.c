@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: NEON + AES (Armv8-A crypto), mirroring `include/stringzilla/hash/neonaes.h` */
+/**
+ *  @file probes/arm_neonaes.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for NEON with AES from the Armv8-A crypto extension.
+ *
+ *  @sa include/stringzilla/hash/neonaes.h
+ */
 #include <arm_neon.h>
 
 #if defined(__clang__)

@@ -1,27 +1,27 @@
 /**
- *  @brief Hardware-accelerated memory operations.
  *  @file include/stringzilla/memory.h
  *  @author Ash Vardanian
+ *  @date October 7, 2023
+ *  @brief Hardware-accelerated memory operations.
  *
  *  Includes core APIs for contiguous memory operations:
  *
- *  - @b `sz_copy` - analog to @b `memcpy`, probably the most common operation in a computer
- *  - @b `sz_move` - analog to @b `memmove`, allowing overlapping memory regions, often used in string manipulation
- *  - @b `sz_fill` - analog to @b `memset`, often used to initialize memory with a constant value, like zero
- *  - @b `sz_lookup` - Look-Up Table @b (LUT) transformation of a string, mapping each byte to a new value
- *  - TODO: @b `sz_lookup_utf8` - LUT transformation of a UTF8 string, which can be used for normalization
+ *  - @c sz_copy - analog to @c memcpy, probably the most common operation in a computer.
+ *  - @c sz_move - analog to @c memmove, allowing overlapping regions, often used in string edits.
+ *  - @c sz_fill - analog to @c memset, often used to initialize memory with a constant, like zero.
+ *  - @c sz_lookup - Look-Up Table @b (LUT) transformation, mapping every byte to a new value.
+ *  - @c sz_lookup_utf8 - planned LUT transformation of a UTF-8 string, usable for normalization.
  *
- *  All of the core APIs receive the target output buffer as the first argument,
- *  and aim to minimize the number of "store" instructions, especially unaligned ones,
- *  that can invalidate 2 cache lines.
+ *  All of the core APIs receive the target output buffer as the first argument, and aim to minimize
+ *  the number of "store" instructions, especially unaligned ones that can invalidate 2 cache lines.
  *
- *  Unlike many other libraries focusing on trivial SIMD transformations, like converting
- *  lowercase to uppercase, StringZilla generalizes those to basic lookup table transforms.
- *  For typical ASCII conversions, you can use the following @b LUT initialization functions:
+ *  Unlike many other libraries focusing on trivial SIMD transformations, like converting lowercase
+ *  to uppercase, StringZilla generalizes those to basic lookup table transforms. For typical ASCII
+ *  conversions, you can use the following @b LUT initialization functions:
  *
- *  - `sz_lookup_init_lower` for transforms like `tolower`
- *  - `sz_lookup_init_upper` for transforms like `toupper`
- *  - `sz_lookup_init_ascii` for transforms like `isascii`
+ *  - @c sz_lookup_init_lower for transforms like @c tolower
+ *  - @c sz_lookup_init_upper for transforms like @c toupper
+ *  - @c sz_lookup_init_ascii for transforms like @c isascii
  */
 #ifndef STRINGZILLA_MEMORY_H_
 #define STRINGZILLA_MEMORY_H_
@@ -35,14 +35,14 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Similar to `memcpy`, copies contents of one string into another.
- *  @see https://en.cppreference.com/w/c/string/byte/memcpy
+ *  @brief Similar to @c memcpy, copies contents of one string into another.
  *
- *  @param target String to copy into. Can be `NULL`, if the @p length is zero.
- *  @param source String to copy from. Can be `NULL`, if the @p length is zero.
- *  @param length Number of bytes to copy. Can be a zero.
+ *  @param[out] target String to copy into. Can be @c NULL, if the @p length is zero.
+ *  @param[in] source String to copy from. Can be @c NULL, if the @p length is zero.
+ *  @param[in] length Number of bytes to copy. Can be a zero.
+ *  @see memcpy: https://en.cppreference.com/w/c/string/byte/memcpy
  *
- *  Example usage:
+ *  Copying two bytes into a buffer:
  *
  *  @code{.c}
  *      #include <stringzilla/memory.h>
@@ -56,22 +56,22 @@ extern "C" {
  *  @pre The @p target and @p source must not overlap.
  *  @sa sz_move
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
  *  @sa sz_copy_serial, sz_copy_haswell, sz_copy_skylake, sz_copy_neon, sz_copy_sve, sz_copy_v128,
  *      sz_copy_v128relaxed, sz_copy_rvv, sz_copy_lasx, sz_copy_powervsx
  */
 SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
- *  @brief Similar to `memmove`, copies (moves) contents of one string into another.
- *         Unlike `sz_copy`, allows overlapping strings as arguments.
- *  @see https://en.cppreference.com/w/c/string/byte/memmove
+ *  @brief Similar to @c memmove, copies (moves) contents of one string into another. Unlike
+ *      @c sz_copy, allows overlapping strings as arguments.
  *
- *  @param target String to copy into. Can be `NULL`, if the @p length is zero.
- *  @param source String to copy from. Can be `NULL`, if the @p length is zero.
- *  @param length Number of bytes to copy. Can be a zero.
+ *  @param[out] target String to copy into. Can be @c NULL, if the @p length is zero.
+ *  @param[in] source String to copy from. Can be @c NULL, if the @p length is zero.
+ *  @param[in] length Number of bytes to copy. Can be a zero.
+ *  @see memmove: https://en.cppreference.com/w/c/string/byte/memmove
  *
- *  Example usage:
+ *  Shifting a buffer left by one byte in place:
  *
  *  @code{.c}
  *      #include <stringzilla/memory.h>
@@ -82,21 +82,21 @@ SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
  *      }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
  *  @sa sz_move_serial, sz_move_haswell, sz_move_skylake, sz_move_neon, sz_move_sve, sz_move_v128,
  *      sz_move_v128relaxed, sz_move_rvv, sz_move_lasx, sz_move_powervsx
  */
 SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
- *  @brief Similar to `memset`, fills a string with a given value.
- *  @see https://en.cppreference.com/w/c/string/byte/memset
+ *  @brief Similar to @c memset, fills a string with a given value.
  *
- *  @param target String to fill. Can be `NULL`, if the @p length is zero.
- *  @param length Number of bytes to fill. Can be a zero.
- *  @param value Value to fill with.
+ *  @param[out] target String to fill. Can be @c NULL, if the @p length is zero.
+ *  @param[in] length Number of bytes to fill. Can be a zero.
+ *  @param[in] value Value to fill with.
+ *  @see memset: https://en.cppreference.com/w/c/string/byte/memset
  *
- *  Example usage:
+ *  Filling a buffer with one character:
  *
  *  @code{.c}
  *     #include <stringzilla/memory.h>
@@ -107,26 +107,27 @@ SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
  *     }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
  *  @sa sz_fill_serial, sz_fill_haswell, sz_fill_skylake, sz_fill_neon, sz_fill_sve, sz_fill_v128,
  *      sz_fill_v128relaxed, sz_fill_rvv, sz_fill_lasx, sz_fill_powervsx
  */
 SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /**
- *  @brief Look Up Table @b (LUT) transformation of a @p source string. Same as `for (char &c : text) c = lut[c]`.
- *  @see https://en.wikipedia.org/wiki/Lookup_table
+ *  @brief Look Up Table @b (LUT) transformation of a @p source string, the same as
+ *      `for (char &c : text) c = lut[c]`.
+ *
+ *  @param[out] target Output string, can point to the same address as @p source.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[in] source String to be mapped using the @p lut table into the @p target.
+ *  @param[in] lut Look Up Table to apply. Must be exactly @b 256 bytes long.
+ *  @see Lookup table: https://en.wikipedia.org/wiki/Lookup_table
  *
  *  Can be used to implement some form of string normalization, partially masking punctuation marks,
- *  or converting between different character sets, like uppercase or lowercase. Surprisingly, also has
- *  broad implications in image processing, where image channel transformations are often done using LUTs.
+ *  or converting between different character sets, like uppercase or lowercase. Surprisingly, also
+ *  has broad implications in image processing, where channel transformations often use LUTs.
  *
- *  @param target Output string, can point to the same address as @p source.
- *  @param length Number of bytes in the string.
- *  @param source String to be mapped using the @p lut table into the @p target.
- *  @param lut Look Up Table to apply. Must be exactly @b 256 bytes long.
- *
- *  Example usage:
+ *  Lowercasing a buffer in place:
  *
  *  @code{.c}
  *     #include <ctype.h> // for `tolower`
@@ -140,149 +141,188 @@ SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
  *     }
  *  @endcode
  *
- *  @pre The @p lut must be exactly 256 bytes long, even if the @p source string has no characters in the top range.
+ *  @pre The @p lut must be exactly 256 bytes long, even if @p source has no bytes in the top range.
  *  @pre The @p target and @p source can be the same, but must not overlap.
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_lookup_serial, sz_lookup_haswell, sz_lookup_icelake, sz_lookup_neon, sz_lookup_sve, sz_lookup_v128,
- *      sz_lookup_v128relaxed, sz_lookup_rvv, sz_lookup_lasx, sz_lookup_powervsx
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @sa sz_lookup_serial, sz_lookup_haswell, sz_lookup_icelake, sz_lookup_neon, sz_lookup_sve,
+ *      sz_lookup_v128, sz_lookup_v128relaxed, sz_lookup_rvv, sz_lookup_lasx, sz_lookup_powervsx
  */
 SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
 
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                       char const lut[sz_at_least_(256)]);
 
 #if SZ_USE_HASWELL
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                        char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_SKYLAKE
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
 #if SZ_USE_ICELAKE
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                        char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_NEON
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                     char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_SVE
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                    char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_V128
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                     char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_V128RELAXED
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                            char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_RVV
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                    char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_LASX
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                     char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_POWERVSX
+
 /** @copydoc sz_copy */
 SZ_API_COMPTIME void sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
 /** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                         char const lut[sz_at_least_(256)]);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #pragma region Helper API
 
 /**
  *  @brief Initializes a lookup table for converting ASCII characters to lowercase.
- *  @param lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @see SWAR swap case: http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  *
- *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
- *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
- *  can be done by flipping the 5th bit each inappropriate character byte.
- *  This, however, breaks for extended ASCII, so a different solution is needed.
- *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
+ *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122]. So there are 26
+ *  English letters, shifted by 32 values, meaning that a conversion can be done by flipping the 5th
+ *  bit of each inappropriate character byte. This, however, breaks for extended ASCII, so a
+ *  different solution is needed.
  */
 SZ_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
     static sz_u8_t const lowered[256] = {
@@ -308,13 +348,13 @@ SZ_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
 
 /**
  *  @brief Initializes a lookup table for converting ASCII characters to uppercase.
- *  @param lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @see SWAR swap case: http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  *
- *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
- *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
- *  can be done by flipping the 5th bit each inappropriate character byte.
- *  This, however, breaks for extended ASCII, so a different solution is needed.
- *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
+ *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122]. So there are 26
+ *  English letters, shifted by 32 values, meaning that a conversion can be done by flipping the 5th
+ *  bit of each inappropriate character byte. This, however, breaks for extended ASCII, so a
+ *  different solution is needed.
  */
 SZ_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
     static sz_u8_t const upped[256] = {
@@ -340,13 +380,13 @@ SZ_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
 
 /**
  *  @brief Initializes a lookup table for converting bytes to ASCII characters.
- *  @param lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
 SZ_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
     for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = (sz_u8_t)(byte_index & 0x7F);
 }
 
-#pragma endregion // Helper API
+#pragma endregion Helper API
 
 #include "stringzilla/memory/serial.h"
 #include "stringzilla/memory/haswell.h"
@@ -360,9 +400,8 @@ SZ_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
 #include "stringzilla/memory/lasx.h"
 #include "stringzilla/memory/powervsx.h"
 
-/*  Pick the right implementation for the string search algorithms.
- *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
- */
+/*  Pick the right implementation for the memory kernels. To override this behavior and precompile
+ *  all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
@@ -464,8 +503,8 @@ SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#endif // !SZ_DYNAMIC_DISPATCH
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

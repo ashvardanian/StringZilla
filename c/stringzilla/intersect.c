@@ -1,8 +1,8 @@
 /**
  *  @file c/stringzilla/intersect.c
- *  @brief Per-domain dispatch shim for unordered string-set intersection (`sz_sequence_intersect`).
  *  @author Ash Vardanian
- *  @date January 16, 2024
+ *  @date March 7, 2025
+ *  @brief Per-domain dispatch shim for unordered string-set intersection, @c sz_sequence_intersect.
  */
 #include <stringzilla/intersect.h>
 

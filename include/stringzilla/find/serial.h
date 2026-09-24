@@ -1,7 +1,9 @@
 /**
- *  @brief Serial backend for substring & byte-set search.
  *  @file include/stringzilla/find/serial.h
  *  @author Ash Vardanian
+ *  @date August 14, 2020
+ *  @brief Serial backend for substring & byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SERIAL_H_
@@ -17,20 +19,20 @@ extern "C" {
 /**
  *  @brief Chooses the offsets of the most interesting characters in a search needle.
  *
- *  Search throughput can significantly deteriorate if we are matching the wrong characters.
- *  Say the needle is "aXaYa", and we are comparing the first, second, and last character.
- *  If we use SIMD and compare many offsets at a time, comparing against "a" in every register is a waste.
+ *  Search throughput can significantly deteriorate if we are matching the wrong characters. Say the
+ *  needle is "aXaYa", and we are comparing the first, second, and last character. If we use SIMD
+ *  and compare many offsets at a time, comparing against "a" in every register is a waste.
  *
- *  Similarly, dealing with UTF-8 inputs, we know that the lower bits of each character code carry more information.
- *  Cyrillic alphabet, for example, falls into [0x0410, 0x042F] code range for uppercase [А, Я], and
- *  into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text written in Russian, half of the
- *  bytes will carry absolutely no value and will be equal to 0x04.
+ *  Similarly, dealing with UTF-8 inputs, we know that the lower bits of each character code carry
+ *  more information. Cyrillic alphabet, for example, falls into [0x0410, 0x042F] code range for
+ *  uppercase [А, Я], and into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text
+ *  written in Russian, half of the bytes will carry absolutely no value and will be equal to 0x04.
  *
- *  @param start Pointer to the needle bytes.
- *  @param length Length of the needle in bytes.
- *  @param first Output offset of the first anomalous byte.
- *  @param second Output offset of the second anomalous byte.
- *  @param third Output offset of the third anomalous byte.
+ *  @param[in] start Pointer to the needle bytes.
+ *  @param[in] length Length of the needle in bytes.
+ *  @param[out] first Output offset of the first anomalous byte.
+ *  @param[out] second Output offset of the second anomalous byte.
+ *  @param[out] third Output offset of the third anomalous byte.
  */
 SZ_HELPER_AUTO void sz_locate_needle_anomalies_( //
     sz_cptr_t start, sz_size_t length,           //
@@ -95,15 +97,15 @@ SZ_HELPER_AUTO void sz_locate_needle_anomalies_( //
     }
 }
 
-/** @brief  Number of byte values present in @p set - four branchless word popcounts. */
+/** Number of byte values present in @p set - four branchless word popcounts. */
 SZ_HELPER_INLINE sz_size_t sz_byteset_population_serial_(sz_byteset_t const *set) {
     return (sz_size_t)(sz_u64_popcount(set->_u64s[0]) + sz_u64_popcount(set->_u64s[1]) +
                        sz_u64_popcount(set->_u64s[2]) + sz_u64_popcount(set->_u64s[3]));
 }
 
-/** @brief  Unpack the member byte values of @p set into @p members in ascending order; the caller has already
- *          sized the destination from @ref sz_byteset_population_serial_. Shared by the ISA back-ends whose
- *          small-set fast paths broadcast the members as a needle segment. */
+/** Unpack the member byte values of @p set into @p members in ascending order; the caller has
+ *  already sized the destination from @ref sz_byteset_population_serial_. Shared by the ISA
+ *  back-ends whose small-set fast paths broadcast the members as a needle segment. */
 SZ_HELPER_INLINE void sz_byteset_members_serial_(sz_byteset_t const *set, sz_u8_t *members) {
     sz_size_t filled = 0;
     for (sz_size_t word_index = 0; word_index != 4; ++word_index)
@@ -217,10 +219,8 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-/**
- *  @brief Find the first occurrence of a @b two-character needle in an arbitrary length haystack.
- *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
- */
+/** Find the first occurrence of a @b two-character needle in an arbitrary length haystack, using a
+ *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
 SZ_HELPER_NOINLINE sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                    sz_size_t needle_length) {
 
@@ -280,10 +280,8 @@ SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a_vec, sz_u6
     return vec_vec;
 }
 
-/**
- *  @brief Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
- *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
- */
+/** Find the first occurrence of a @b four-character needle in an arbitrary length haystack, using a
+ *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
 SZ_HELPER_NOINLINE sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                    sz_size_t needle_length) {
 
@@ -365,10 +363,8 @@ SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a_vec, sz_u6
     return vec_vec;
 }
 
-/**
- *  @brief Find the first occurrence of a @b three-character needle in an arbitrary length haystack.
- *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
- */
+/** Find the first occurrence of a @b three-character needle in an arbitrary length haystack, using
+ *  a hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
 SZ_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                    sz_size_t needle_length) {
 
@@ -432,13 +428,14 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t
 }
 
 /**
- *  @brief Boyer-Moore-Horspool algorithm for exact matching of patterns up to @b 256-bytes long.
- *         Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
+ *  @brief Boyer-Moore-Horspool algorithm for exact matching of patterns up to @b 256-bytes
+ *      long. Uses the Raita heuristic to match the first two, the last, and the middle
+ *      character of the pattern.
  *
- *  @param haystack The haystack bytes.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle The needle bytes.
- *  @param needle_length Length of the needle in bytes (must be <= 256).
+ *  @param[in] haystack The haystack bytes.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle The needle bytes.
+ *  @param[in] needle_length Length of the needle in bytes (must be <= 256).
  *  @return Pointer to first match, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
@@ -496,13 +493,14 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
 }
 
 /**
- *  @brief Boyer-Moore-Horspool algorithm for @b reverse-order exact matching of patterns up to @b 256-bytes long.
- *         Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
+ *  @brief Boyer-Moore-Horspool algorithm for @b reverse-order exact matching of patterns up to
+ *      @b 256-bytes long. Uses the Raita heuristic to match the first two, the last, and the middle
+ *      character of the pattern.
  *
- *  @param haystack The haystack bytes.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle The needle bytes.
- *  @param needle_length Length of the needle in bytes (must be <= 256).
+ *  @param[in] haystack The haystack bytes.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle The needle bytes.
+ *  @param[in] needle_length Length of the needle in bytes (must be <= 256).
  *  @return Pointer to last match, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
@@ -558,15 +556,16 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
 }
 
 /**
- *  @brief Exact substring search helper function, that finds the first occurrence of a prefix of the needle
- *         using a given search function, and then verifies the remaining part of the needle.
+ *  @brief Exact substring search helper function, that finds the first occurrence of a
+ *      prefix of the needle using a given search function, and then verifies the remaining
+ *      part of the needle.
  *
- *  @param haystack Pointer to the haystack.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the needle.
- *  @param needle_length Length of the needle in bytes.
- *  @param find_prefix Function used to search for the prefix.
- *  @param prefix_length Length of the prefix to search for.
+ *  @param[in] haystack Pointer to the haystack.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the needle.
+ *  @param[in] needle_length Length of the needle in bytes.
+ *  @param[in] find_prefix Function used to search for the prefix.
+ *  @param[in] prefix_length Length of the prefix to search for.
  *  @return Pointer to first match, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_find_with_prefix_( //
@@ -593,15 +592,16 @@ SZ_HELPER_AUTO sz_cptr_t sz_find_with_prefix_( //
 }
 
 /**
- *  @brief Exact reverse-order substring search helper function, that finds the last occurrence of a suffix of the
- *         needle using a given search function, and then verifies the remaining part of the needle.
+ *  @brief Exact reverse-order substring search helper function, that finds the last occurrence of
+ *      a suffix of the needle using a given search function, and then verifies the remaining part
+ *      of the needle.
  *
- *  @param haystack Pointer to the haystack.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the needle.
- *  @param needle_length Length of the needle in bytes.
- *  @param find_suffix Function used to search for the suffix.
- *  @param suffix_length Length of the suffix to search for.
+ *  @param[in] haystack Pointer to the haystack.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the needle.
+ *  @param[in] needle_length Length of the needle in bytes.
+ *  @param[in] find_suffix Function used to search for the suffix.
+ *  @param[in] suffix_length Length of the suffix to search for.
  *  @return Pointer to last match start, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,

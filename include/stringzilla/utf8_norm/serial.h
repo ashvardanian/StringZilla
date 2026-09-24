@@ -1,8 +1,8 @@
 /**
- *  @brief Serial backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/serial.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 14, 2026
+ *  @brief Serial backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *
  *  Implements the three UAX #15 primitives over UTF-8:
  *
@@ -11,15 +11,17 @@
  *  - canonical @b composition (Hangul algorithm + the partner-indexed primary-composite table).
  *
  *  Work is streamed one combining segment at a time - a starter followed by its trailing
- *  non-starters - so no whole-string buffer is needed. Real-world non-starter runs are 1-2 long
- *  (Stream-Safe Text caps them at 30); the buffer falls back to a flush if a pathological run
+ *  non-starters - so no whole-string buffer is needed. Real-world non-starter runs are 1-2 long,
+ *  and Stream-Safe Text caps them at 30; the buffer falls back to a flush if a pathological run
  *  exceeds @b sz_utf8_norm_seg_cap_k.
  *
- *  The engine reads the unified `utf8_norm/tables.h` record set and exposes two public entry points -
- *  a normalizer and a violation finder - that share a single scan primitive
- *  (`sz_utf8_norm_classify_serial_`), the one point a NEON (or other ISA) backend overrides. The
- *  composition step is partner-indexed, so the compose key is a dense small-range search instead of a
- *  42-bit `(starter<<21)|combiner` probe.
+ *  The engine reads the unified `utf8_norm/tables.h` record set and exposes two public entry
+ *  points, a normalizer and a violation finder, that share a single scan primitive,
+ *  @c sz_utf8_norm_classify_serial_: the one point a NEON or other ISA backend overrides. The
+ *  composition step is partner-indexed, so the compose key is a dense small-range search instead of
+ *  a 42-bit `(starter<<21)|combiner` probe.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_SERIAL_H_
 #define STRINGZILLA_UTF8_NORM_SERIAL_H_
@@ -32,11 +34,9 @@
 extern "C" {
 #endif
 
-/**
- *  Geometry of the 3-stage props trie in `tables.h`. The stage widths are the only free parameters;
+/** Geometry of the 3-stage props trie in `tables.h`. The stage widths are the only free parameters;
  *  the block sizes and index masks below are derived from them, so retuning the trie means editing
- *  one number per stage instead of keeping three hand-computed values in sync.
- */
+ *  one number per stage instead of keeping three hand-computed values in sync. */
 enum {
     sz_utf8_norm_table_max_k = 0x30000,                // Codepoints covered by the tables
     sz_utf8_norm_low_bits_k = 3,                       // Stage-3 index width
@@ -61,15 +61,18 @@ enum {
 
 /** Working-buffer capacities for the single-pass engine. */
 enum {
-    sz_utf8_norm_seg_cap_k = 256,  /**< Max runes buffered per combining segment. */
-    sz_utf8_norm_decomp_max_k = 18 /**< Longest single-codepoint decomposition in the UCD. */
+
+    /** Max runes buffered per combining segment. */
+    sz_utf8_norm_seg_cap_k = 256,
+
+    /** Longest single-codepoint decomposition in the UCD. */
+    sz_utf8_norm_decomp_max_k = 18
 };
 
-/**
- *  Hangul is algorithmic and absent from the tables, so the syllable block is described by the
- *  standard's own constants (UAX #15, "Hangul Syllable Decomposition"). The two counts are products
- *  of the jamo counts rather than the literals 588 and 11172, so the identities stay self-evident.
- */
+/** Hangul is algorithmic and absent from the tables, so the syllable block is described by
+ *  the standard's own constants from UAX #15, "Hangul Syllable Decomposition". The two
+ *  counts are products of the jamo counts rather than the literals 588 and 11172, so the
+ *  identities stay self-evident. */
 enum {
     sz_utf8_norm_hangul_s_base_k = 0xAC00, // First precomposed syllable
     sz_utf8_norm_hangul_l_base_k = 0x1100, // First leading jamo
@@ -82,7 +85,7 @@ enum {
     sz_utf8_norm_hangul_s_count_k = sz_utf8_norm_hangul_l_count_k * sz_utf8_norm_hangul_n_count_k,
 };
 
-/** @brief NFC/NFKC Quick_Check bits packed into `sz_utf8_norm_props_t::quick_check`. */
+/** NFC/NFKC Quick_Check bits packed into @c sz_utf8_norm_props_t::quick_check. */
 enum sz_utf8_norm_quick_check_t {
     sz_utf8_norm_quick_check_nfc_k = 1 << 0,
     sz_utf8_norm_quick_check_nfkc_k = 1 << 1,
@@ -90,7 +93,8 @@ enum sz_utf8_norm_quick_check_t {
     sz_utf8_norm_quick_check_nfkd_k = 1 << 3,
 };
 
-/** @brief 3-stage trie index for @p codepoint (0 for out-of-range / default). Shared by the props and scan lookups. */
+/** 3-stage trie index for @p codepoint, 0 for out-of-range or default codepoints. Shared by the
+ *  props and scan lookups. */
 SZ_HELPER_AUTO sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
     if (codepoint >= sz_utf8_norm_table_max_k) return 0;
     sz_size_t leaf = codepoint >> sz_utf8_norm_low_bits_k;
@@ -99,17 +103,20 @@ SZ_HELPER_AUTO sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
     return sz_utf8_norm_stage3_[(sz_size_t)block * sz_utf8_norm_low_k + (codepoint & sz_utf8_norm_low_mask_k)];
 }
 
-/** @brief Look up the per-codepoint normalization properties (canonical combining class, quick-check, decomposition, compose). */
+/** Look up the per-codepoint normalization properties: canonical combining class, quick-check,
+ *  decomposition and composition. */
 SZ_HELPER_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) {
     return sz_utf8_norm_props_[sz_utf8_norm_index_(codepoint)];
 }
 
 /**
- *  @brief Cold-verify value `(quick_check_flags << 8) | canonical_combining_class` for @p codepoint, via the compact scan trie.
+ *  @brief Cold-verify value `(quick_check_flags << 8) | canonical_combining_class`
+ *      for @p codepoint.
  *
- *  A dedicated palette trie (u8 stage3 + a small u16 palette) keeps this cache-tight: the props trie's
- *  stage3 is u16 (it indexes 4k+ records), and walking it for a full-CJK scan doubled the working set
- *  (~20% slower). Hangul's decomposition bits are baked into the generated values, so no runtime Hangul
+ *  Read via the compact scan trie. A dedicated palette trie, a u8 stage3 plus a small u16
+ *  palette, keeps this cache-tight: the props trie's stage3 is u16 because it indexes 4k+
+ *  records, and walking it for a full-CJK scan doubled the working set, running about 20%
+ *  slower. Hangul's decomposition bits are baked into the generated values, so no runtime Hangul
  *  test is needed here.
  */
 SZ_HELPER_AUTO sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
@@ -123,7 +130,7 @@ SZ_HELPER_AUTO sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
     return sz_utf8_norm_scan_palette_[palette_index];
 }
 
-/** @brief Canonical_Combining_Class of a codepoint (0 for starters and all Hangul jamo). */
+/** Canonical_Combining_Class of a codepoint, 0 for starters and all Hangul jamo. */
 SZ_HELPER_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
     return sz_utf8_norm_lookup_(codepoint).canonical_combining_class;
 }
@@ -131,9 +138,10 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
 /**
  *  @brief Decompose one codepoint into 1-18 runes and their combining classes in a single lookup.
  *
- *  Fusing decomposition with the combining-class read avoids a second trie probe per codepoint on the
- *  common (non-decomposing) path - which is every base letter and every Hangul jamo.
- *  @return Number of runes written to @p out / @p out_canonical_combining_class (>= 1).
+ *  Fusing decomposition with the combining-class read avoids a second trie probe per codepoint on
+ *  the common non-decomposing path, which is every base letter and every Hangul jamo.
+ *
+ *  @return Number of runes written to @p out and @p out_canonical_combining_class, at least 1.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
                                                       sz_u8_t *out_canonical_combining_class) {
@@ -208,7 +216,7 @@ SZ_HELPER_AUTO sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
     return 0;
 }
 
-/** @brief Stable insertion sort of a combining segment by canonical combining class (canonical ordering). */
+/** Canonical ordering: a stable insertion sort of a combining segment by its combining classes. */
 SZ_HELPER_AUTO void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes,
                                                   sz_size_t count) {
     for (sz_size_t i = 1; i < count; ++i) {
@@ -226,13 +234,23 @@ SZ_HELPER_AUTO void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *can
     }
 }
 
-/** @brief Output sink: either appends UTF-8 to a destination, or compares against a source. */
+/** Output sink: either appends UTF-8 to a destination, or compares against a source. */
 typedef struct sz_utf8_norm_out_t {
-    sz_u8_t *dst;           /**< Destination cursor, or NULL in compare mode. */
-    sz_u8_t const *cmp;     /**< Source comparison cursor (compare mode). */
-    sz_u8_t const *cmp_end; /**< End of the source buffer (compare mode). */
-    sz_size_t written;      /**< Bytes written so far (write mode). */
-    sz_bool_t matches;      /**< Still byte-identical to the source (compare mode). */
+
+    /** Destination cursor, or NULL in compare mode. */
+    sz_u8_t *dst;
+
+    /** Source comparison cursor, used in compare mode. */
+    sz_u8_t const *cmp;
+
+    /** End of the source buffer, used in compare mode. */
+    sz_u8_t const *cmp_end;
+
+    /** Bytes written so far, used in write mode. */
+    sz_size_t written;
+
+    /** Still byte-identical to the source, used in compare mode. */
+    sz_bool_t matches;
 } sz_utf8_norm_out_t;
 
 SZ_HELPER_AUTO void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
@@ -255,8 +273,8 @@ SZ_HELPER_AUTO void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) 
 /**
  *  @brief Emit one literal byte to the sink, bypassing rune re-encoding.
  *
- *  A malformed byte is not a codepoint - it is its own 1-byte maximal subpart and must reach the
- *  output verbatim, never round-tripped through `sz_rune_encode`. It is an opaque barrier: it does
+ *  A malformed byte is not a codepoint: it is its own 1-byte maximal subpart and must reach the
+ *  output verbatim, never round-tripped through @c sz_rune_encode. It is an opaque barrier: it does
  *  not decompose, compose, or participate in canonical ordering.
  */
 SZ_HELPER_AUTO void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
@@ -266,7 +284,7 @@ SZ_HELPER_AUTO void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byt
     }
 }
 
-/** @brief Order, optionally compose, and emit one buffered combining segment. */
+/** Order, optionally compose, and emit one buffered combining segment. */
 SZ_HELPER_AUTO void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes, sz_size_t count,
                                         sz_bool_t compose, sz_utf8_norm_out_t *out) {
     if (count == 0) return;
@@ -300,7 +318,7 @@ SZ_HELPER_AUTO void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_com
     for (sz_size_t i = 0; i < count; ++i) sz_utf8_norm_emit_(out, runes[i]);
 }
 
-/** @brief Core normalization engine, shared by the write and compare entry points. */
+/** Core normalization engine, shared by the write and compare entry points. */
 SZ_HELPER_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                         sz_utf8_norm_out_t *out) {
     sz_bool_t compat = (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
@@ -362,10 +380,10 @@ SZ_HELPER_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_lengt
 /**
  *  @brief Is @p codepoint a normalization-safe break boundary for @p form?
  *
- *  A boundary is safe to split before iff @p codepoint is a starter (canonical combining class == 0) AND its Quick_Check for the
- *  form is Yes. The Quick_Check=Yes condition is essential: a starter that is QC=Maybe (e.g. a Hangul
- *  vowel/trailing jamo, which composes backward) must NOT be a split point, or `가` + `ᆨ` would be
- *  separated mid-composition.
+ *  A boundary is safe to split before iff @p codepoint is a starter, with a canonical combining
+ *  class of 0, and its Quick_Check for the form is Yes. The Quick_Check=Yes condition is essential:
+ *  a starter that is QC=Maybe, such as a Hangul vowel or trailing jamo that composes backward, must
+ *  not be a split point, or `가` + `ᆨ` would be separated mid-composition.
  */
 SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
     sz_bool_t hangul = (codepoint >= sz_utf8_norm_hangul_s_base_k &&
@@ -383,13 +401,15 @@ SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, s
 }
 
 /**
- *  @brief Scan primitive shared by both public entry points - the single point a NEON backend overrides.
+ *  @brief The scan primitive both public entry points share, and the one point a
+ *      NEON backend overrides.
  *
- *  Returns the first byte that begins a codepoint that is NOT provably inert for @p form (QC != Yes,
- *  or canonical combining class != 0, or has a relevant decomposition for the D-forms), or @b SZ_NULL_CHAR if the whole span
- *  is inert. This is the scalar reference; the NEON backend will replace just this with a `vqtbl4q`
- *  lead-classify plus a 64-byte gate. Semantics match the old module's `sz_utf8_find_denormalized`,
- *  but computed from the unified props trie - no dependency on the `utf8_*` segmentation modules.
+ *  Returns the first byte that begins a codepoint that is not provably inert for @p form - one
+ *  whose quick-check is not Yes, whose canonical combining class is nonzero, or that has a relevant
+ *  decomposition for the D-forms - or @b SZ_NULL_CHAR if the whole span is inert. This is the
+ *  scalar reference; the NEON backend replaces just this with a @c vqtbl4q lead-classify plus a
+ *  64-byte gate. Semantics match the old module's @c sz_utf8_find_denormalized, but are computed
+ *  from the unified props trie, with no dependency on the `utf8_*` segmentation modules.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
@@ -426,7 +446,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_si
     return SZ_NULL_CHAR;
 }
 
-/** @brief Map a normalization form to its hot-path `sz_utf8_norm_quick_check_k*` flag bit. */
+/** Map a normalization form to its hot-path `sz_utf8_norm_quick_check_k*` flag bit. */
 SZ_HELPER_AUTO sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
     switch (form) {
     case sz_normal_form_nfc_k: return sz_utf8_norm_quick_check_nfc_k;
@@ -437,16 +457,18 @@ SZ_HELPER_AUTO sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
 }
 
 /**
- *  @brief Cold per-codepoint verify shared by every vector scanner: walk `[*position_io, block_end)`
- *  and return the first byte that begins a non-inert codepoint for @p form_flag (a canonical-ordering
- *  violation or a quick-check No/Maybe), else @b SZ_NULL_CHAR. Updates `*position_io` to where it
- *  stopped and carries `*previous_canonical_combining_class_io` across SIMD-block boundaries.
+ *  @brief Cold per-codepoint verify shared by every vector scanner.
  *
- *  ASCII resets the combining class; 2-byte runes use the flat `sz_utf8_norm_twobyte_` table (one load,
- *  no general parse); 3-/4-byte runes parse and read `sz_utf8_norm_value_`. This is the exact body the
- *  NEON backend ran inline, lifted here so all backends share one copy of the carry-sensitive logic.
- *  A malformed byte is an opaque 1-byte barrier: it is inert (never flagged, passed through unchanged)
- *  and resets the carried combining class, exactly like ASCII.
+ *  Walks from the byte @p position_io points at up to @p block_end and returns the first byte that
+ *  begins a non-inert codepoint for @p form_flag, meaning a canonical-ordering violation or a
+ *  quick-check No or Maybe, else @b SZ_NULL_CHAR. Updates `*position_io` to where it stopped and
+ *  carries `*previous_canonical_combining_class_io` across SIMD-block boundaries.
+ *
+ *  ASCII resets the combining class; 2-byte runes use the flat @c sz_utf8_norm_twobyte_ table, one
+ *  load with no general parse; 3- and 4-byte runes parse and read @c sz_utf8_norm_value_. This is
+ *  the exact body the NEON backend ran inline, lifted here so all backends share one copy of the
+ *  carry-sensitive logic. A malformed byte is an opaque 1-byte barrier: it is inert, never flagged
+ *  and passed through unchanged, and resets the carried combining class, exactly like ASCII.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz_u8_t const *block_end,
                                                     sz_u8_t const *end, sz_u8_t form_flag,
@@ -495,21 +517,23 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io,
 }
 
 /**
- *  @brief A scan primitive: returns the first non-inert byte for @p form, or @b SZ_NULL_CHAR if the
- *  span is provably already normalized. The single ISA-specific point both engines force-inline.
+ *  @brief A scan primitive: returns the first non-inert byte for @p form, or
+ *      @b SZ_NULL_CHAR if the span is provably already normalized. The single ISA-specific
+ *      point both engines force-inline.
  *
- *  `sz_utf8_norm_classify_serial_` is the scalar reference; `sz_utf8_norm_classify_neon_` (in `neon.h`) is the
- *  vectorized override. Passing a constant function address into the `SZ_HELPER_AUTO` (always-inline)
- *  engines below devirtualizes the call at -O2/-O3, so each backend pays no indirection - this is the
- *  same force-inlined function-pointer idiom the case-folding family uses.
+ *  @c sz_utf8_norm_classify_serial_ is the scalar reference; @c sz_utf8_norm_classify_neon_ in
+ *  `neon.h` is the vectorized override. Passing a constant function address into the always-inline
+ *  @c SZ_HELPER_AUTO engines below devirtualizes the call at -O2 and -O3, so each backend pays no
+ *  indirection - the same force-inlined function-pointer idiom the case-folding family uses.
  */
 typedef sz_cptr_t (*sz_utf8_norm_scan_t)(sz_cptr_t, sz_size_t, sz_normal_form_t);
 
 /**
- *  @brief Does the codepoint (or malformed byte) at @p position open a safe split boundary for @p form?
+ *  @brief Does the codepoint or malformed byte at @p position open a safe split boundary
+ *      for @p form?
  *
- *  A malformed byte is an opaque 1-byte barrier - it never decomposes/composes/reorders - so it is
- *  always a safe boundary. A well-formed rune defers to `sz_utf8_norm_is_safe_boundary_`.
+ *  A malformed byte is an opaque 1-byte barrier that never decomposes, composes or reorders, so it
+ *  is always a safe boundary. A well-formed rune defers to @c sz_utf8_norm_is_safe_boundary_.
  */
 SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz_u8_t const *end,
                                                      sz_normal_form_t form) {
@@ -523,8 +547,8 @@ SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz
  *  @brief Step @p position back to the start of the preceding codepoint, never crossing @p begin.
  *
  *  A backward UTF-8 scan that is malformed-safe: a continuation run that does not resolve to a
- *  well-formed lead (or that would cross @p begin) is treated as single literal bytes, so the cursor
- *  retreats exactly one byte rather than over-reading.
+ *  well-formed lead, or that would cross @p begin, is treated as single literal bytes, so the
+ *  cursor retreats exactly one byte rather than over-reading.
  */
 SZ_HELPER_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
     sz_u8_t const *probe = position - 1;
@@ -536,11 +560,9 @@ SZ_HELPER_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position,
     return position - 1;
 }
 
-/**
- *  @brief Normalize via skip-and-fix: copy the already-normalized runs verbatim (located by the
- *  @p scan primitive) and run the decompose/reorder/compose engine only on the short dirty regions,
- *  each delimited by safe boundaries so composition never crosses a split. Shared across ISAs.
- */
+/** Normalize via skip-and-fix: copy the already-normalized runs verbatim, located by the @p scan
+ *  primitive, and run the decompose, reorder and compose engine only on the short dirty regions,
+ *  each delimited by safe boundaries so composition never crosses a split. Shared across ISAs. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                                 sz_ptr_t destination, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const begin = (sz_u8_t const *)source;
@@ -593,19 +615,19 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t sour
 
 /**
  *  @brief Find the first byte that proves @p source is not in @p form, or @b SZ_NULL_CHAR if it is.
- *  Shared across ISAs; the dirty runs are located by the @p scan primitive.
  *
- *  The @p scan scanner is a conservative superset (it flags every `canonical combining class != 0` byte so the normalizer
- *  can blindly re-fix), so a stop is not by itself a violation - a well-ordered bare combining mark is
- *  valid NFD. We therefore verify exactly: a combining segment (delimited by safe boundaries, so the
- *  check is compositional) is in @p form @b iff normalizing it reproduces it byte-for-byte. If it
- *  changes, the segment is the violation; otherwise we skip it and keep scanning. This single rule is
- *  exact for all four forms, subsuming the No/Maybe/order cases.
+ *  Shared across ISAs; the dirty runs are located by the @p scan primitive. That scanner is a
+ *  conservative superset, flagging every byte with a nonzero canonical combining class so the
+ *  normalizer can blindly re-fix, so a stop is not by itself a violation - a well-ordered bare
+ *  combining mark is valid NFD. We therefore verify exactly: a combining segment, delimited by safe
+ *  boundaries so the check is compositional, is in @p form @b iff normalizing it reproduces it
+ *  byte-for-byte. If it changes, the segment is the violation; otherwise we skip it and keep
+ *  scanning. This single rule is exact for all four forms, subsuming the No, Maybe and order cases.
  *
- *  We return the @b safe-boundary start of the first non-conforming segment, not the @p scan stop:
- *  this is backend-independent (a conservative serial scan and an exact NEON scan walk past the same
- *  benign segments and back up to the same boundary), and it carries the clean guarantee that every
- *  byte before the returned pointer is provably in @p form.
+ *  We return the @b safe-boundary start of the first non-conforming segment, not the @p scan stop.
+ *  This is backend-independent, as a conservative serial scan and an exact NEON scan walk past the
+ *  same benign segments and back up to the same boundary, and it carries the clean guarantee that
+ *  every byte before the returned pointer is provably in @p form.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
                                                              sz_normal_form_t form, sz_utf8_norm_scan_t scan) {

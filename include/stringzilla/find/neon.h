@@ -1,7 +1,9 @@
 /**
- *  @brief NEON backend for substring & byte-set search.
  *  @file include/stringzilla/find/neon.h
  *  @author Ash Vardanian
+ *  @date June 21, 2023
+ *  @brief NEON backend for substring & byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_NEON_H_
@@ -15,9 +17,9 @@
 extern "C" {
 #endif
 
-/*  Implementation of the string search algorithms using the Arm NEON instruction set, available on 64-bit
- *  Arm processors. Covers billions of mobile CPUs worldwide, including Apple's A-series, and Qualcomm's Snapdragon.
- */
+/*  Implementation of the string search algorithms using the Arm NEON instruction set, available on
+ *  64-bit Arm processors. Covers billions of mobile CPUs worldwide, including Apple's A-series,
+ *  and Qualcomm's Snapdragon. */
 #if SZ_USE_NEON
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
@@ -30,7 +32,7 @@ extern "C" {
  *  @brief Produce a movemask-style 64-bit value from a NEON comparison result.
  *      Each matching byte sets one bit in the result (bit spacing is 4 bits per byte).
  *
- *  @param vec_u8x16 A 16-byte NEON comparison vector (0xFF where matched, 0x00 otherwise).
+ *  @param[in] vec_u8x16 A 16-byte NEON comparison vector (0xFF where matched, 0x00 otherwise).
  *  @return 64-bit mask with one set bit per matching byte (at bit positions 0, 4, 8, ..., 60).
  */
 SZ_HELPER_INLINE sz_u64_t sz_find_vreinterpretq_u8_u4_(uint8x16_t vec_u8x16) {
@@ -79,9 +81,9 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t hayst
 /**
  *  @brief Compute a movemask-style presence bitmask for a 16-byte register against a byteset.
  *
- *  @param haystack_vec The 16-byte input register.
- *  @param set_top_vec_u8x16 Top half of the 32-byte byteset (bytes 0..15).
- *  @param set_bottom_vec_u8x16 Bottom half of the 32-byte byteset (bytes 16..31).
+ *  @param[in] haystack_vec The 16-byte input register.
+ *  @param[in] set_top_vec_u8x16 Top half of the 32-byte byteset (bytes 0..15).
+ *  @param[in] set_bottom_vec_u8x16 Bottom half of the 32-byte byteset (bytes 16..31).
  *  @return 64-bit mask with 4-bit-spaced bits set for matching positions.
  */
 SZ_API_COMPTIME sz_u64_t sz_find_byteset_neon_register_( //
@@ -105,11 +107,9 @@ SZ_API_COMPTIME sz_u64_t sz_find_byteset_neon_register_( //
     return sz_find_vreinterpretq_u8_u4_(matches_u8x16);
 }
 
-/**
- *  @brief Branch-light substring verify, bit-identical to `sz_equal_neon`, inlined into the match loop
- *         to avoid the per-candidate call + length re-dispatch. Loops over 16-byte `vceqq_u8` chunks with
- *         a `vminvq_u8` all-match reduction and closes with one overlapping tail window.
- */
+/** Branch-light substring verify, bit-identical to @c sz_equal_neon, inlined into the match loop to
+ *  avoid the per-candidate call and length re-dispatch. Loops over 16-byte @c vceqq_u8 chunks with
+ *  a @c vminvq_u8 all-match reduction and closes with one overlapping tail window. */
 SZ_HELPER_INLINE sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 16) return sz_equal_serial(a, b, length);
 

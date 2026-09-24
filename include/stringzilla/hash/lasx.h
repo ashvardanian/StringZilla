@@ -1,7 +1,9 @@
 /**
- *  @brief LoongArch LASX (256-bit) backend for hash.
  *  @file include/stringzilla/hash/lasx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief LoongArch LASX (256-bit) backend for hash.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_LASX_H_
@@ -21,12 +23,12 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t length) {
     // When the buffer is small, there isn't much to innovate.
     if (length <= 32) { return sz_bytesum_serial(text, length); }
     else {
-        // LASX has no single SAD (`_mm256_sad_epu8`) instruction. Rather than collapse each block all the
-        // way down to 64-bit lanes with a 3-stage widening-add chain (4 ops/block), we keep a 16-lane u16
-        // accumulator across the loop and reduce ONCE at the end. Per block we widen each adjacent byte
-        // pair into a u16 with `xvhaddw_hu_bu` (one op) and add it into the u16 lanes (one op). Each u16
-        // lane grows by at most 2*255 = 510 per block, so 65535/510 = 128 blocks fit before overflow; we
-        // flush to a u64 accumulator every 120 blocks to stay safe.
+        // LASX has no single SAD (`_mm256_sad_epu8`) instruction. Rather than collapse each block
+        // all the way down to 64-bit lanes with a 3-stage widening-add chain (4 ops/block), we keep
+        // a 16-lane u16 accumulator across the loop and reduce once at the end. Per block we widen
+        // each adjacent byte pair into a u16 with `xvhaddw_hu_bu` (one op) and add it into the u16
+        // lanes (one op). Each u16 lane grows by at most 2*255 = 510 per block, so 65535/510 = 128
+        // blocks fit before overflow; we flush to a u64 accumulator every 120 blocks to stay safe.
         __m256i const zero_u8x32 = __lasx_xvreplgr2vr_b(0);
         __m256i long_sums_u64x4 = zero_u8x32;   // 4x u64 long-term accumulator
         __m256i short_sums_u16x16 = zero_u8x32; // 16x u16 short-term accumulator
@@ -60,38 +62,38 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t length) {
     }
 }
 
-/*  Vector-permute (tower-field) AES round for the LASX backend.
+/*  Vector-permute, tower-field AES round for the LASX backend.
  *
- *  StringZilla's hashing (`sz_hash`) and CSPRNG (`sz_fill_random`) are built on a single round of AES
- *  (`_mm_aesenc_si128` on x86, `vaeseq`/`vaesmcq` on Arm). The base LoongArch LASX ISA exposes wide
- *  integer SIMD but @b no AES acceleration primitives. Instead of falling back to the byte-serial S-box,
- *  we implement Mike Hamburg's "vector permute" (vpaes) AES round in 128-bit `__lsx_*` lanes — the AES
- *  state is exactly 128 bits, so the 128-bit LSX path is the natural fit.
+ *  StringZilla's hashing, @c sz_hash, and CSPRNG, @c sz_fill_random, are built on a single round of
+ *  AES: @c _mm_aesenc_si128 on x86, @c vaeseq and @c vaesmcq on Arm. The base LoongArch LASX ISA
+ *  exposes wide integer SIMD but @b no AES acceleration primitives. Instead of falling back to the
+ *  byte-serial S-box, we implement Mike Hamburg's "vector permute" (vpaes) AES round in 128-bit
+ *  `__lsx_*` lanes: the AES state is exactly 128 bits, so the 128-bit LSX path is the natural fit.
  *
- *  Pipeline of `sz_emulate_aesenc_lasx_`, matching `sz_emulate_aesenc_si128_serial_` bit-for-bit:
+ *  Pipeline of @c sz_emulate_aesenc_lasx_, matching @c sz_emulate_aesenc_si128_serial_ bit-for-bit:
  *
- *   1. @b ShiftRows is a single `__lsx_vshuf_b` byte permutation applied up-front (the serial reference
- *      folds ShiftRows into its `SubBytes` indexing; we hoist it so SubBytes can be lane-parallel).
- *   2. @b SubBytes is computed as GF(2^8) inversion + affine via the tower field GF((2^4)^2):
- *        - `ipt` nibble tables map the standard AES basis into the tower basis (two `vshuf_b` + xor),
- *        - the GF(16) inversion of `e = h*Y + l` uses `d = inv4(nu*h^2 + h*l + l^2)`, `h' = h*d`,
- *          `l' = (h^l)*d`, where every GF(16) multiply is a log/antilog pair of `vshuf_b` lookups,
- *        - `sbo` nibble tables map back to the standard basis and apply the AES affine (`^ 0x63`).
- *      The tower isomorphism is a genuine GF(2)-linear field isomorphism (so the nibble decomposition is
- *      exact); its tables are derived offline and verified to reproduce the AES S-box for all 256 inputs.
- *   3. @b MixColumns is the textbook `xtime` (`__lsx_vslli_b` + a conditional `0x1b` xor selected by
- *      `__lsx_vslti_b(x, 0)`, i.e. the sign/MSB mask), combined within each 4-byte column.
- *   4. @b AddRoundKey is a single `__lsx_vxor_v`.
+ *   1. @b ShiftRows is a single @c __lsx_vshuf_b byte permutation applied up-front. The serial
+ *      reference folds ShiftRows into its SubBytes indexing; we hoist it so SubBytes can be
+ *      lane-parallel.
+ *   2. @b SubBytes is computed as GF(2⁸) inversion plus affine via the tower field GF((2⁴)²):
+ *        - @c ipt nibble tables map the standard AES basis into the tower basis, with two
+ *          @c vshuf_b and an xor,
+ *        - the GF(16) inversion of e = h × Y + l uses d = inv4(nu × h² + h × l + l²), h' = h × d
+ *          and l' = (h ⊕ l) × d, each GF(16) multiply a log/antilog pair of @c vshuf_b lookups,
+ *        - @c sbo nibble tables map back to the standard basis and apply the AES affine, ⊕ 0x63.
+ *   3. @b MixColumns is the textbook @c xtime, a @c __lsx_vslli_b plus a conditional 0x1b xor
+ *      selected by the sign mask `__lsx_vslti_b(x, 0)`, combined within each 4-byte column.
+ *   4. @b AddRoundKey is a single @c __lsx_vxor_v.
  *
- *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions", CHES 2009:
- *       https://shiftleft.org/papers/vector_aes/vector_aes.pdf (origin of the tower-field nibble tables).
- *  @see Reference vpaes implementation (constant-time, S-box-equivalent), OpenSSL `vpaes-x86_64.pl`:
- *       https://github.com/openssl/openssl/blob/master/crypto/aes/asm/vpaes-x86_64.pl
- *  @see `sz_emulate_aesenc_si128_serial_` (hash/serial.h) — the byte-exact oracle every output is checked
- *       against; the `tables` here are validated to reproduce the AES S-box for all 256 inputs.
- */
+ *  The tower isomorphism is a genuine GF(2)-linear field isomorphism, so the nibble decomposition
+ *  is exact. Its tables, whose origin is the paper below, are derived offline and verified to
+ *  reproduce the AES S-box for all 256 inputs; @c sz_emulate_aesenc_si128_serial_ in
+ *  `hash/serial.h` is the byte-exact oracle every output is checked against.
+ *
+ *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions", CHES 2009: https://shiftleft.org/papers/vector_aes/vector_aes.pdf
+ *  @see OpenSSL vpaes-x86_64.pl, the constant-time S-box-equivalent reference: https://github.com/openssl/openssl/blob/master/crypto/aes/asm/vpaes-x86_64.pl */
 
-/** @brief  Pre-computed vpaes-style nibble tables for the LASX AES round (see derivation above). */
+/** Pre-computed vpaes-style nibble tables for the LASX AES round (see derivation above). */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes_lasx_tables_(void) {
     // Layout: [iptlo, ipthi, sbolo, sbohi, glog, gexp, ginv, shiftrows] x16 bytes each.
     static sz_align_(64) sz_u8_t const tables[8 * 16] = {
@@ -235,14 +237,14 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes_lasx_tables_(void) {
     return &tables[0];
 }
 
-/** @brief  `_mm_shuffle_epi8`-equivalent for indices in 0..15 (top bits clear). */
+/** @c _mm_shuffle_epi8-equivalent for indices in 0..15 (top bits clear). */
 SZ_HELPER_INLINE __m128i sz_lsx_pshufb_(__m128i table_u8x16, __m128i indices_u8x16) {
     // `__lsx_vshuf_b(a, b, c)` masks `c` to 5 bits: 0..15 selects from `b`, 16..31 from `a`.
     // With indices in 0..15 the first operand is irrelevant; we reuse `indices` as a dummy.
     return __lsx_vshuf_b(indices_u8x16, table_u8x16, indices_u8x16);
 }
 
-/** @brief  Lane-wise GF(16) multiply (poly 0x13) of two nibble vectors via log/antilog tables. */
+/** Lane-wise GF(16) multiply (poly 0x13) of two nibble vectors via log/antilog tables. */
 SZ_HELPER_INLINE __m128i sz_lsx_gf16_mul_(__m128i factor_a_u8x16, __m128i factor_b_u8x16, __m128i gf16_log_u8x16,
                                           __m128i gf16_exp_u8x16, __m128i zero_u8x16) {
     __m128i log_sum_u8x16 = __lsx_vadd_b(sz_lsx_pshufb_(gf16_log_u8x16, factor_a_u8x16),
@@ -258,7 +260,8 @@ SZ_HELPER_INLINE __m128i sz_lsx_gf16_mul_(__m128i factor_a_u8x16, __m128i factor
 }
 
 /**
- *  @brief AES SubBytes on the ShiftRows-permuted state via tower-field GF((2^4)^2) inversion + affine.
+ *  @brief AES SubBytes on the ShiftRows-permuted state via tower-field GF((2⁴)²)
+ *      inversion + affine.
  *  @return The S-box output (with the `^ 0x63` AES affine constant already applied).
  */
 SZ_HELPER_INLINE __m128i sz_emulate_aes_subbytes_lasx_( //
@@ -315,9 +318,9 @@ SZ_HELPER_INLINE __m128i sz_emulate_aes_mixcolumns_lasx_(__m128i sbox_output_u8x
 }
 
 /**
- *  @brief Emulates a single `_mm_aesenc_si128` round on LoongArch LSX (128-bit lanes).
+ *  @brief Emulates a single @c _mm_aesenc_si128 round on LoongArch LSX (128-bit lanes).
  *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, bit-identical to
- *          `sz_emulate_aesenc_si128_serial_`.
+ *          @c sz_emulate_aesenc_si128_serial_.
  */
 SZ_HELPER_INLINE __m128i sz_emulate_aesenc_lasx_(__m128i state_u8x16, __m128i round_key_u8x16) {
     sz_u8_t const *tables = sz_aes_lasx_tables_();
@@ -344,9 +347,10 @@ SZ_HELPER_INLINE __m128i sz_emulate_aesenc_lasx_(__m128i state_u8x16, __m128i ro
     return __lsx_vxor_v(mixed_u8x16, round_key_u8x16);
 }
 
-/** @brief  Load 16 bytes from an `sz_u128_vec_t`-style buffer into an LSX register. */
+/** Load 16 bytes from an @c sz_u128_vec_t-style buffer into an LSX register. */
 SZ_HELPER_INLINE __m128i sz_lsx_load128_(void const *pointer) { return __lsx_vld(pointer, 0); }
-/** @brief  Store an LSX register into a 16-byte buffer. */
+
+/** Store an LSX register into a 16-byte buffer. */
 SZ_HELPER_INLINE void sz_lsx_store128_(void *pointer, __m128i value_u8x16) { __lsx_vst(value_u8x16, pointer, 0); }
 
 SZ_HELPER_INLINE void sz_hash_state_short_init_lasx_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
@@ -438,8 +442,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_lasx((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_lasx_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_lasx_` to fold - the same
+        // deferral the streaming path uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             __lasx_xvst(__lasx_xvld(start + state.ins_length, 0), state.ins.u8s, 0);
             __lasx_xvst(__lasx_xvld(start + state.ins_length + 32, 0), state.ins.u8s + 32, 0);
@@ -460,9 +465,8 @@ SZ_API_COMPTIME void sz_hash_state_init_lasx(sz_hash_state_t *state, sz_u64_t se
     sz_hash_state_init_serial(state, seed);
 }
 
-/**
- *  @brief Loads the packed public state into the aligned internal twin (LASX: 2x `__lasx_xvld` per 64-byte field).
- */
+/** Loads the packed public state into the aligned internal twin (LASX: 2x @c __lasx_xvld
+ *  per 64-byte field). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_lasx_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     __lasx_xvst(__lasx_xvld(packed->aes, 0), state.aes.u8s, 0);
@@ -476,7 +480,7 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_lasx_(sz_hash_state_
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state. */
+/** Stores the aligned internal twin back into the packed public state. */
 SZ_HELPER_INLINE void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     __lasx_xvst(__lasx_xvld(state->aes.u8s, 0), packed->aes, 0);
     __lasx_xvst(__lasx_xvld(state->aes.u8s + 32, 0), packed->aes + 32, 0);
@@ -490,7 +494,7 @@ SZ_HELPER_INLINE void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash
 
 /**
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
- *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
+ *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
 SZ_HELPER_INLINE void sz_hash_state_update_lasx_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
@@ -506,7 +510,7 @@ SZ_HELPER_INLINE void sz_hash_state_update_lasx_(sz_hash_state_aligned_t *state)
 
 /**
  *  @brief Finalizes the full 512-bit hash state and returns a 64-bit digest.
- *  @param state The hash state, taken by value.
+ *  @param[in] state The hash state, taken by value.
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
 SZ_HELPER_INLINE sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t state) {
@@ -555,9 +559,10 @@ SZ_API_COMPTIME void sz_hash_state_update_lasx(sz_hash_state_t *packed, sz_cptr_
     __m256i const zero_u8x32 = __lasx_xvreplgr2vr_b(0);
     while (length) {
         sz_size_t progress_in_block = state.ins_length % 64;
-        // A full block from an earlier fill is still buffered: its absorption is DEFERRED so `digest` can choose
-        // the same minimal (<=64) / full (>64) path the one-shot `sz_hash` would, keyed on the total length. Now
-        // that more bytes have arrived, that block is interior - flush it and clear the buffer.
+        // A full block from an earlier fill is still buffered: its absorption is deferred so
+        // `digest` can choose the same minimal (<=64) / full (>64) path the one-shot `sz_hash`
+        // would, keyed on the total length. Now that more bytes have arrived, that block is
+        // interior - flush it and clear the buffer.
         if (progress_in_block == 0 && state.ins_length != 0) {
             sz_hash_state_update_lasx_(&state);
             __lasx_xvst(zero_u8x32, state.ins.u8s, 0);
@@ -625,24 +630,27 @@ SZ_API_COMPTIME void sz_fill_random_lasx(sz_ptr_t text, sz_size_t length, sz_u64
 
 /*  SHA-256 with a SIMD-vectorized message schedule.
  *
- *  The compression rounds are inherently sequential (each updates `a..h` from the previous round), so for a
- *  single message they cannot be vectorized — that part stays scalar and identical to the serial reference.
- *  The @b message @b schedule, however, is a fixed recurrence we can compute four words at a time in 128-bit
- *  LSX lanes: `W[t] = sigma1(W[t-2]) + W[t-7] + sigma0(W[t-15]) + W[t-16]`. Within a group of four, `W[t+2]`
- *  and `W[t+3]` depend on `W[t]`/`W[t+1]` produced by the same group, so we finish in two steps. There is no
- *  SHA hardware on LoongArch (unlike x86 SHA-NI / Arm `sha256h`); this is a pure-SIMD-ALU acceleration.
+ *  The compression rounds are inherently sequential (each updates `a..h` from the previous
+ *  round), so for a single message they cannot be vectorized — that part stays scalar and
+ *  identical to the serial reference. The @b message @b schedule, however, is a fixed recurrence
+ *  we can compute four words at a time in 128-bit LSX lanes:
+ *  `W[t] = sigma1(W[t-2]) + W[t-7] + sigma0(W[t-15]) + W[t-16]`. Within a group of four,
+ *  `W[t+2]` and `W[t+3]` depend on `W[t]`/`W[t+1]` produced by the same group, so we finish in
+ *  two steps. There is no SHA hardware on LoongArch, unlike x86 SHA-NI or Arm @c sha256h; this
+ *  is a pure-SIMD-ALU acceleration.
  *
- *  @see FIPS 180-4 (SHA-256) and J. Guilford et al., "Fast SHA-256 Implementations on Intel Architecture
- *       Processors" (the standard SIMD message-schedule decomposition this mirrors).
- *  @see `sz_sha256_process_block_serial_` (hash/serial.h) — the byte-exact oracle this is validated against. */
+ *  The schedule follows FIPS 180-4 and mirrors the standard SIMD message-schedule
+ *  decomposition of J. Guilford et al., "Fast SHA-256 Implementations on Intel Architecture
+ *  Processors". It is validated against the byte-exact oracle
+ *  @c sz_sha256_process_block_serial_ in `hash/serial.h`. */
 
-/** @brief  Lane-wise SHA-256 lowercase-sigma0: `ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3)` over 4x u32. */
+/** Lane-wise SHA-256 lowercase-sigma0: `ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3)` over 4x u32. */
 SZ_HELPER_INLINE __m128i sz_sha256_sigma0_lower_lasx_(__m128i words_u32x4) {
     return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_u32x4, 7), __lsx_vrotri_w(words_u32x4, 18)),
                         __lsx_vsrli_w(words_u32x4, 3));
 }
 
-/** @brief  Lane-wise SHA-256 lowercase-sigma1: `ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10)` over 4x u32. */
+/** Lane-wise SHA-256 lowercase-sigma1: `ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10)` over 4x u32. */
 SZ_HELPER_INLINE __m128i sz_sha256_sigma1_lower_lasx_(__m128i words_u32x4) {
     return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_u32x4, 17), __lsx_vrotri_w(words_u32x4, 19)),
                         __lsx_vsrli_w(words_u32x4, 10));

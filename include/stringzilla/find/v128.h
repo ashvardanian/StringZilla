@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly SIMD128 backend for find.
  *  @file include/stringzilla/find/v128.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly SIMD128 backend for find.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_V128_H_
@@ -15,19 +17,18 @@
 extern "C" {
 #endif
 
+/*  WebAssembly SIMD128 has a true movemask via @c wasm_i8x16_bitmask, producing one bit per byte
+ *  from the most significant bit of each lane. Combined with @c sz_u32_ctz and @c sz_u32_clz we get
+ *  the SSE/Westmere-style search. The fixed register width is 16 bytes, like Arm NEON. */
 #if SZ_USE_V128
-
-/*  WebAssembly SIMD128 has a TRUE movemask via `wasm_i8x16_bitmask`, producing one bit per byte
- *  (the most significant bit of each lane). Combined with `sz_u32_ctz`/`sz_u32_clz` we get the
- *  SSE/Westmere-style search. The fixed register width is 16 bytes, like Arm NEON. */
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
 /**
  *  @brief Return a pointer to the first matching byte in a 16-byte block, or NULL if none.
- *  @param match_u8x16 A 16-byte comparison result (0xFF where matched, 0x00 otherwise).
- *  @param block_start Pointer to the first byte of the block.
+ *  @param[in] match_u8x16 A 16-byte comparison result (0xFF where matched, 0x00 otherwise).
+ *  @param[in] block_start Pointer to the first byte of the block.
  *  @return Pointer to the first match, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_locate_first_v128_(v128_t match_u8x16, sz_cptr_t block_start) {
@@ -38,8 +39,8 @@ SZ_HELPER_INLINE sz_cptr_t sz_locate_first_v128_(v128_t match_u8x16, sz_cptr_t b
 
 /**
  *  @brief Return a pointer to the last matching byte in a 16-byte block, or NULL if none.
- *  @param match_u8x16 A 16-byte comparison result (0xFF where matched, 0x00 otherwise).
- *  @param block_start Pointer to the first byte of the block.
+ *  @param[in] match_u8x16 A 16-byte comparison result (0xFF where matched, 0x00 otherwise).
+ *  @param[in] block_start Pointer to the first byte of the block.
  *  @return Pointer to the last match, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_locate_last_v128_(v128_t match_u8x16, sz_cptr_t block_start) {
@@ -83,7 +84,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haysta
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     v128_t needle_u8x16 = wasm_i8x16_splat(*(sz_i8_t const *)needle);
 
-    // Scan the trailing 64 bytes per iteration; on a hit, locate the LAST match by walking the four
+    // Scan the trailing 64 bytes per iteration; on a hit, locate the last match by walking the four
     // sub-windows from the highest one down (each block reports its own latest match).
     while (haystack_length >= 64) {
         sz_cptr_t window_start = haystack + haystack_length - 64;
@@ -114,10 +115,11 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t hayst
 }
 
 /**
- *  @brief Compute a per-lane match mask for bytes present in `set`, split across two 16-byte half-tables.
- *  @param haystack_u8x16 The 16-byte input register.
- *  @param set_top_u8x16 Top half of the byteset (byte indices 0..15).
- *  @param set_bottom_u8x16 Bottom half of the byteset (byte indices 16..31).
+ *  @brief Compute a per-lane match mask for bytes present in @c set, split across
+ *      two 16-byte half-tables.
+ *  @param[in] haystack_u8x16 The 16-byte input register.
+ *  @param[in] set_top_u8x16 Top half of the byteset (byte indices 0..15).
+ *  @param[in] set_bottom_u8x16 Bottom half of the byteset (byte indices 16..31).
  *  @return 0xFF per lane where the byte belongs to the set, 0x00 otherwise.
  */
 SZ_HELPER_INLINE v128_t sz_find_byteset_match_v128_(v128_t haystack_u8x16, v128_t set_top_u8x16,
@@ -209,14 +211,15 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t ha
 }
 
 /**
- *  @brief Candidate mask for a substring window: lanes where the first/mid/last needle bytes all line up.
- *  @param haystack_start Base pointer for the 16-byte window.
- *  @param offset_first Offset of the first anomaly byte in the needle.
- *  @param offset_mid Offset of the mid anomaly byte in the needle.
- *  @param offset_last Offset of the last anomaly byte in the needle.
- *  @param needle_first_u8x16 Broadcasted first-anomaly needle byte.
- *  @param needle_mid_u8x16 Broadcasted mid-anomaly needle byte.
- *  @param needle_last_u8x16 Broadcasted last-anomaly needle byte.
+ *  @brief Candidate mask for a substring window: lanes where the first/mid/last needle bytes
+ *      all line up.
+ *  @param[in] haystack_start Base pointer for the 16-byte window.
+ *  @param[in] offset_first Offset of the first anomaly byte in the needle.
+ *  @param[in] offset_mid Offset of the mid anomaly byte in the needle.
+ *  @param[in] offset_last Offset of the last anomaly byte in the needle.
+ *  @param[in] needle_first_u8x16 Broadcasted first-anomaly needle byte.
+ *  @param[in] needle_mid_u8x16 Broadcasted mid-anomaly needle byte.
+ *  @param[in] needle_last_u8x16 Broadcasted last-anomaly needle byte.
  *  @return 0xFF per lane where all three needle bytes match.
  */
 SZ_HELPER_INLINE v128_t sz_find_substr_match_v128_(                                                //
@@ -230,11 +233,12 @@ SZ_HELPER_INLINE v128_t sz_find_substr_match_v128_(                             
 }
 
 /**
- *  @brief Walk a window's candidates low-to-high, returning the first that verifies via `sz_equal`.
- *  @param match_u8x16 The 16-byte candidate mask.
- *  @param window_start Base pointer for this 16-byte window.
- *  @param needle The full needle to verify against.
- *  @param needle_length Length of `needle` in bytes.
+ *  @brief Walk a window's candidates low-to-high, returning the first that verifies
+ *      via @c sz_equal.
+ *  @param[in] match_u8x16 The 16-byte candidate mask.
+ *  @param[in] window_start Base pointer for this 16-byte window.
+ *  @param[in] needle The full needle to verify against.
+ *  @param[in] needle_length Length of @c needle in bytes.
  *  @return Pointer to the first verified match, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_first_v128_( //
@@ -250,11 +254,11 @@ SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_first_v128_( //
 }
 
 /**
- *  @brief Walk a window's candidates high-to-low, returning the last that verifies via `sz_equal`.
- *  @param match_u8x16 The 16-byte candidate mask.
- *  @param window_start Base pointer for this 16-byte window.
- *  @param needle The full needle to verify against.
- *  @param needle_length Length of `needle` in bytes.
+ *  @brief Walk a window's candidates high-to-low, returning the last that verifies via @c sz_equal.
+ *  @param[in] match_u8x16 The 16-byte candidate mask.
+ *  @param[in] window_start Base pointer for this 16-byte window.
+ *  @param[in] needle The full needle to verify against.
+ *  @param[in] needle_length Length of @c needle in bytes.
  *  @return Pointer to the last verified match, or SZ_NULL_CHAR if none.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_last_v128_( //

@@ -1,7 +1,8 @@
 /**
- *  @brief Unicode normalization of UTF-8 text — NFC, NFD, NFKC, and NFKD.
  *  @file python/stringzilla/utf8_norm.c
  *  @author Ash Vardanian
+ *  @date June 15, 2026
+ *  @brief Unicode normalization of UTF-8 text — NFC, NFD, NFKC, and NFKD.
  */
 #include "stringzilla.h"
 

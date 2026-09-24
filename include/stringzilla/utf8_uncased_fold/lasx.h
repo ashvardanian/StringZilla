@@ -1,7 +1,9 @@
 /**
- *  @brief LoongArch ASX backend for UTF-8 case folding (delegates to serial).
  *  @file include/stringzilla/utf8_uncased_fold/lasx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief LoongArch ASX backend for UTF-8 case folding (delegates to serial).
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_LASX_H_

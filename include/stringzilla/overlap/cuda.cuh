@@ -1,27 +1,33 @@
 /**
- *  @brief CUDA backend for window overlap: one thread per candidate, its chain walked through a ring of prefix
- *      hashes so every width is scored in one pass, and one prepared query's B-tree probed per block row.
  *  @file include/stringzilla/overlap/cuda.cuh
  *  @author Ash Vardanian
+ *  @date January 27, 2024
+ *  @brief CUDA backend for window overlap: one thread per candidate, its chain walked through a
+ *      ring of prefix hashes so every width is scored in one pass, and one prepared query's B-tree
+ *      probed per block row.
+ *
+ *  The arithmetic is the serial tier's, reached from the device through `--expt-relaxed-constexpr`,
+ *  so the scores are bit-identical rather than merely close. Integers, not doubles: both factors
+ *  are below 2^32, so the product fits one @c u64 and the remainder by a constant lowers to a
+ *  multiply-high - where an @c f64 reduction would run at the device's double-precision rate, a
+ *  sixty-fourth of its single-precision one on consumer parts.
+ *
+ *  A candidate's chain is a dependent recurrence, so it stays on one thread; parallelism comes from
+ *  the candidates, which is what the device has thousands of. The thread keeps the last
+ *  @ref sz_overlap_cuda_ring_span_k prefix hashes rather than the whole chain, so its footprint is
+ *  constant in the candidate's length and every width is scored in the same pass over the text.
+ *
+ *  The query axis rides @c blockIdx.y, one tree per block, strided when a batch outruns a grid
+ *  dimension. The chain is therefore walked once per query rather than once per candidate - the
+ *  probe is a @c levels deep descent with a sixteen-key branch step at every node against two
+ *  operations of chain, so sharing it would buy about a percent and cost a per-thread match counter
+ *  per query, which no register file holds.
+ *
+ *  Nothing here crosses the bus during a round. The forest, the candidates and the scores are
+ *  already where the device reaches them and the texts are read in place, so a round costs one
+ *  launch rather than a round trip.
+ *
  *  @sa include/stringzilla/overlap.h
- *
- *  The arithmetic is the serial tier's, reached from the device through `--expt-relaxed-constexpr`, so the scores
- *  are bit-identical rather than merely close. Integers, not doubles: both factors are below 2^32, so the product
- *  fits one @c u64 and the remainder by a constant lowers to a multiply-high - where an @c f64 reduction would run
- *  at the device's double-precision rate, a sixty-fourth of its single-precision one on consumer parts.
- *
- *  A candidate's chain is a dependent recurrence, so it stays on one thread; parallelism comes from the candidates,
- *  which is what the device has thousands of. The thread keeps the last @ref sz_overlap_cuda_ring_span_k prefix
- *  hashes rather than the whole chain, so its footprint is constant in the candidate's length and every width is
- *  scored in the same pass over the text.
- *
- *  The query axis rides @c blockIdx.y, one tree per block, strided when a batch outruns a grid dimension. The chain
- *  is therefore walked once per query rather than once per candidate - the probe is a @c levels deep descent with a
- *  sixteen-key branch step at every node against two operations of chain, so sharing it would buy about a percent
- *  and cost a per-thread match counter per query, which no register file holds.
- *
- *  Nothing here crosses the bus during a round. The forest, the candidates and the scores are already where the
- *  device reaches them and the texts are read in place, so a round costs one launch rather than a round trip.
  */
 #ifndef STRINGZILLA_OVERLAP_CUDA_CUH_
 #define STRINGZILLA_OVERLAP_CUDA_CUH_
@@ -38,38 +44,51 @@ extern "C" {
 
 #pragma region CUDA
 
-/** Prefix hashes one thread keeps; a power of two, so the ring index is a mask rather than a division. */
+/** Prefix hashes one thread keeps; a power of two, so the ring index is a mask rather
+ *  than a division. */
 enum { sz_overlap_cuda_ring_span_k = 32 };
 
-/** Widest window this backend scores, one short of the ring so a window's start and end never alias. */
+/** Widest window this backend scores, one short of the ring so a window's start and
+ *  end never alias. */
 enum { sz_overlap_cuda_widest_window_k = sz_overlap_cuda_ring_span_k - 1 };
 
-/** Widths one engine may hold; the per-thread match counters are held in registers, so the bound is small. */
+/** Widths one engine may hold; the per-thread match counters are held in registers, so the
+ *  bound is small. */
 enum { sz_overlap_cuda_widths_max_k = 8 };
 
-/** Candidates one block scores when the device cannot be asked; measured flat from 32 to 512 and off a cliff
- *  at 1024, so this is the ceiling of the flat range rather than a tuned figure. */
+/** Candidates one block scores when the device cannot be asked; measured flat from 32 to 512 and
+ *  off a cliff at 1024, so this is the ceiling of the flat range rather than a tuned figure. */
 enum { sz_overlap_cuda_candidates_per_block_k = 512 };
 
-/** Queries one grid carries on @c blockIdx.y; a batch past it strides, since a grid dimension is bounded. */
+/** Queries one grid carries on @c blockIdx.y; a batch past it strides, since a grid
+ *  dimension is bounded. */
 enum { sz_overlap_cuda_queries_per_grid_k = 65535 };
 
-/** The share of a block's shared memory a staged tree may take. Staging is worth about half again while the tree
- *  is small, and stops paying past that: the descent is data-dependent, and shared memory's banks handle a scatter
- *  worse than L1 does with its sector reuse. A fraction rather than a byte count, because the ceiling itself moves
- *  - a hundred kilobytes per multiprocessor on consumer Ada against more than twice that on the datacenter parts. */
+/** The share of a block's shared memory a staged tree may take. Staging is worth about half again
+ *  while the tree is small, and stops paying past that: the descent is data-dependent, and shared
+ *  memory's banks handle a scatter worse than L1 does with its sector reuse. A fraction rather than
+ *  a byte count, because the ceiling itself moves
+ *  - a hundred kilobytes per multiprocessor on consumer Ada against more than twice that on
+ *    the datacenter parts. */
 enum { sz_overlap_cuda_shared_tree_share_k = 3 };
 
 /**
- *  @brief What @ref sz_overlap_engine_init_cuda resolved once, kept at the head of the engine's own block.
+ *  @brief What @ref sz_overlap_engine_init_cuda resolved once, kept at the head of the
+ *      engine's own block.
  *
- *  Every member costs a driver round trip to answer, and none of them moves between rounds, so a scoring verb
- *  reads them rather than asking again.
+ *  Every member costs a driver round trip to answer, and none of them moves between rounds, so a
+ *  scoring verb reads them rather than asking again.
  */
 typedef struct sz_overlap_cuda_geometry_t {
-    void *stream;                   /**< The @c cudaStream_t every round is enqueued on, or zero for the default. */
-    sz_size_t candidates_per_block; /**< Threads one block runs, whichever count lands the most resident warps. */
-    sz_size_t staged_nodes_count;   /**< @c u32 entries a block stages, sized by the widest tree, or zero for none. */
+
+    /** The @c cudaStream_t every round is enqueued on, or zero for the default. */
+    void *stream;
+
+    /** Threads one block runs, whichever count lands the most resident warps. */
+    sz_size_t candidates_per_block;
+
+    /** @c u32 entries a block stages, sized by the widest tree, or zero for none. */
+    sz_size_t staged_nodes_count;
 } sz_overlap_cuda_geometry_t;
 
 /** Whether the prepared query holds one raw @p window_hash, walking the tree a level at a time. */
@@ -89,12 +108,13 @@ SZ_DEVICE_INLINE sz_size_t sz_overlap_cuda_btree_probe_(sz_overlap_btree_t const
 /**
  *  @brief Scores one candidate against one prepared query, one score per width, on one thread.
  *
- *  The ring holds @c P(k) back to @c P(k - widest), so a window of any width up to that reads its start straight
- *  out of it and the text is walked once however many widths are asked for.
+ *  The ring holds P(k) back to P(k − widest), so a window of any width up to that reads its
+ *  start straight out of it and the text is walked once however many widths are asked for.
  *
- *  @p candidates ' accessors run here, on the device: one call per candidate, uniform across the warp, against
- *  multi-kilobyte texts. Nothing is flattened for the launch, so a caller whose sequence is some other layout
- *  entirely - a tape, a column, an index into someone else's arena - needs no conversion.
+ *  @p candidates ' accessors run here, on the device: one call per candidate, uniform across the
+ *  warp, against multi-kilobyte texts. Nothing is flattened for the launch, so a caller whose
+ *  sequence is some other layout entirely - a tape, a column, an index into someone else's arena -
+ *  needs no conversion.
  */
 SZ_DEVICE_INLINE void sz_overlap_cuda_sweep_(sz_overlap_engine_t const *engine, sz_overlap_btree_t const *btree,
                                              sz_size_t query, sz_sequence_t const *candidates, sz_size_t candidate,
@@ -138,10 +158,12 @@ SZ_DEVICE_INLINE void sz_overlap_cuda_sweep_(sz_overlap_engine_t const *engine, 
 }
 
 /**
- *  @brief One block row per prepared query, one thread per candidate, the tree staged when the launch asked for it.
+ *  @brief One block row per prepared query, one thread per candidate, the tree staged when the
+ *      launch asked for it.
  *
- *  No thread leaves the query loop early, because the staging barriers are collective: a candidate past the batch
- *  skips its sweep rather than returning, so every thread of the block reaches every @c __syncthreads.
+ *  No thread leaves the query loop early, because the staging barriers are collective: a candidate
+ *  past the batch skips its sweep rather than returning, so every thread of the block reaches
+ *  every @c __syncthreads.
  */
 static __global__ void sz_overlap_cuda_scores_kernel_(sz_overlap_engine_t engine, sz_sequence_t candidates,
                                                       sz_f32_t *scores, sz_size_t scores_query_stride,
@@ -167,19 +189,26 @@ static __global__ void sz_overlap_cuda_scores_kernel_(sz_overlap_engine_t engine
 }
 
 /**
- *  @brief Prepares every query of @p queries into one device-reachable block and resolves the launch geometry.
+ *  @brief Prepares every query of @p queries into one device-reachable block and resolves
+ *      the launch geometry.
  *
- *  The trees are laid out by the host, because a sort is neither a scan nor a map and a hand-written device radix
- *  sort would replace a host sort of a few tens of thousands of keys. The chain that feeds them is host working
- *  space no kernel ever reads, so it comes from the host allocator rather than from @p alloc.
+ *  The trees are laid out by the host, because a sort is neither a scan nor a map and a
+ *  hand-written device radix sort would replace a host sort of a few tens of thousands of keys. The
+ *  chain that feeds them is host working space no kernel ever reads, so it comes from the host
+ *  allocator rather than from @p alloc.
  *
- *  @param[in] queries Read on the @b host, so its accessors must be host-callable, unlike a round's candidates.
- *  @param[in] alloc Unified and device-reachable, or @c SZ_NULL to have a unified one derived from the context.
- *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the current device's default one.
- *  @retval sz_unexpected_dimensions_k for no widths, more than @ref sz_overlap_cuda_widths_max_k of them, or one
- *      past @ref sz_overlap_cuda_widest_window_k, which is the per-thread ring's compile-time bound.
- *  @retval sz_device_memory_mismatch_k when @p alloc hands back memory the device cannot reach.
+ *  @param[in] queries Read on the @b host, so its accessors must be host-callable, unlike
+ *      a round's candidates.
+ *  @param[in] alloc Unified and device-reachable, or @c SZ_NULL to have a unified one derived
+ *      from the context.
+ *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the current
+ *      device's default one.
+ *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for a bad count or width of windows, or
+ *      @c sz_device_memory_mismatch_k when @p alloc hands back memory the device cannot reach.
  *  @sa sz_overlap_engine_init_gpu
+ *
+ *  A window count is bad when zero or above @ref sz_overlap_cuda_widths_max_k, and a width when it
+ *  is past @ref sz_overlap_cuda_widest_window_k, the per-thread ring's compile-time bound.
  */
 SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_cuda(sz_sequence_t const *queries, sz_size_t const *window_widths,
                                                         sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
@@ -282,14 +311,16 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_cuda(sz_sequence_t const *que
 }
 
 /**
- *  The device arm of @ref sz_overlap_scores.
- *  @pre @p candidates carries @b device accessors, as @ref sz_sequence_from_string_views_cuda binds them, because
- *      the kernel is what calls them - one call per candidate, uniform across the warp. Only the handle can be
- *      checked from this side, so host accessors reach the device as an invalid address rather than a status.
- *  @retval sz_device_memory_mismatch_k when the scores or the first candidate is host memory.
- *  @retval sz_device_code_mismatch_k when the launch itself is refused.
- *  @note Enqueues and returns; the caller joins the stream it handed @ref sz_overlap_engine_init_gpu before
- *      reading @p scores.
+ *  @brief The device arm of @ref sz_overlap_scores.
+ *  @pre @p candidates carries @b device accessors, as @ref sz_sequence_from_string_views_cuda binds
+ *      them, because the kernel is what calls them, once per candidate, uniform across the warp.
+ *  @return @c sz_success_k, @c sz_device_memory_mismatch_k when the scores or the first candidate
+ *      is host memory, or @c sz_device_code_mismatch_k when the launch itself is refused.
+ *  @note Enqueues and returns; the caller joins the stream it handed
+ *      @ref sz_overlap_engine_init_gpu before reading @p scores.
+ *
+ *  Only the handle can be checked from this side, so host accessors reach the device as an invalid
+ *  address rather than a status.
  */
 SZ_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
                                                    sz_f32_t *scores, sz_size_t scores_query_stride,

@@ -1,31 +1,31 @@
 /**
- *  @brief Set intersections over string sequences.
  *  @file python/stringzilla/intersect.c
  *  @author Ash Vardanian
+ *  @date July 21, 2026
+ *  @brief Set intersections over string sequences.
  */
 #include "stringzilla.h"
 
-char const doc_Strs_intersect[] =                                                                            //
-    "intersect(other, *, seed=0) -> tuple[tuple[int, ...], tuple[int, ...]]\n"                               //
-    "\n"                                                                                                     //
-    "Return the positions of strings present in both collections.\n"                                         //
-    "Each distinct shared value is matched exactly once, even if either side has duplicates.\n"              //
-    "\n"                                                                                                     //
-    "Args:\n"                                                                                                //
-    "  other (Strs): The collection to intersect with.\n"                                                    //
-    "  seed (int, optional): Seed for the hash table to avoid attacks. Defaults to 0.\n"                     //
-    "Returns:\n"                                                                                             //
-    "  tuple[tuple[int, ...], tuple[int, ...]]: Parallel position tuples - `result[0][i]` in\n"              //
-    "  this collection and `result[1][i]` in `other` point to equal strings.\n"                              //
-    "Example:\n"                                                                                             //
-    "  >>> ours, theirs = sz.Strs(['banana', 'apple', 'cherry']).intersect(sz.Strs(['cherry', 'banana']))\n" //
-    "  >>> sorted(ours)\n"                                                                                   //
+char const doc_Strs_intersect[] =                                                               //
+    "intersect(other, *, seed=0) -> tuple[tuple[int, ...], tuple[int, ...]]\n"                  //
+    "\n"                                                                                        //
+    "Return the positions of strings present in both collections.\n"                            //
+    "Each distinct shared value is matched exactly once, even if either side has duplicates.\n" //
+    "\n"                                                                                        //
+    "Args:\n"                                                                                   //
+    "  other (Strs): The collection to intersect with.\n"                                       //
+    "  seed (int, optional): Seed for the hash table to avoid attacks. Defaults to 0.\n"        //
+    "Returns:\n"                                                                                //
+    "  tuple[tuple[int, ...], tuple[int, ...]]: Parallel position tuples - `result[0][i]` in\n" //
+    "  this collection and `result[1][i]` in `other` point to equal strings.\n"                 //
+    "Example:\n"                                                                                //
+    "  >>> ours, theirs = sz.Strs(['banana', 'apple', 'cherry']).intersect(\n"                  //
+    "  ...     sz.Strs(['cherry', 'banana']))\n"                                                //
+    "  >>> sorted(ours)\n"                                                                      //
     "  [0, 2]";
 
-/**
- *  @brief Returns the positions of strings shared between two `Strs` objects.
- *         Duplicates within either side are tolerated: each distinct shared value is matched exactly once.
- */
+/** Returns the positions of strings shared between two @c Strs objects. Duplicates within either
+ *  side are tolerated: each distinct shared value is matched exactly once. */
 PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                          PyObject *args_names_tuple) {
     if (positional_args_count != 1) {

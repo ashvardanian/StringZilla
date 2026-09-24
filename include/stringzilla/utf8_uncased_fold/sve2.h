@@ -1,7 +1,9 @@
 /**
- *  @brief Arm SVE2 backend for UTF-8 case folding.
  *  @file include/stringzilla/utf8_uncased_fold/sve2.h
  *  @author Ash Vardanian
+ *  @date July 17, 2026
+ *  @brief Arm SVE2 backend for UTF-8 case folding.
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_SVE2_H_
@@ -14,6 +16,12 @@
 extern "C" {
 #endif
 
+/*  The scalable twin of the NEON fold: the same 64-byte logical superchunk and family handlers,
+ *  walked as `64 / svcntb()` register chunks with one peeked vector, so chunk decisions stay
+ *  comparable across the serial, NEON, Ice Lake, and SVE2 back-ends on the same input. After-lead
+ *  positions ride the shared value-domain up-shift with a cross-chunk carry; stop lanes lower once
+ *  per chunk through the predicate bridge and resolve through the serial boundary walk-back that
+ *  all back-ends share. */
 #if SZ_USE_SVE2
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
@@ -22,22 +30,18 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-/*  The scalable twin of the NEON fold: the same 64-byte logical superchunk and family handlers, walked as
- *  `64 / svcntb()` register chunks with one peeked vector, so chunk decisions stay comparable across the serial,
- *  NEON, Ice Lake, and SVE2 back-ends on the same input. After-lead positions ride the shared value-domain
- *  up-shift with a cross-chunk carry; stop lanes lower once per chunk through the predicate bridge and resolve
- *  through the shared serial boundary walk-back. */
-
-/** @brief Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
+/** Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_fold_sve2_ascii_(svuint8_t source_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const is_upper_b8x = svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, source_u8x, 'A'), 26);
     return svadd_n_u8_m(is_upper_b8x, source_u8x, 0x20);
 }
 
-/** @brief  Per-lead well-formedness mirror of `sz_rune_decode` - the SVE2 twin of
- *          @ref sz_utf8_fold_neon_malformed_lead_ over one (chunk, peek) pair.
- *  @return Predicate set on every lead byte that does NOT begin a well-formed rune. */
+/**
+ *  @brief Per-lead well-formedness mirror of @c sz_rune_decode - the SVE2 twin of
+ *      @ref sz_utf8_fold_neon_malformed_lead_ over one (chunk, peek) pair.
+ *  @return Predicate set on every lead byte that does not begin a well-formed rune.
+ */
 SZ_HELPER_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x, svuint8_t peek_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const next1_u8x = svext_u8(source_u8x, peek_u8x, 1);
@@ -78,9 +82,11 @@ SZ_HELPER_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x
     return svbic_b_z(all_b8x, is_lead_b8x, well_formed_b8x);
 }
 
-/** @brief  Folds a 64-byte superchunk containing only caseless multi-byte scripts mixed with ASCII - the SVE2
- *          twin of @ref sz_utf8_uncased_fold_neon_caseless_chunk_.
- *  @return Bytes consumed; always 62..64, never zero. */
+/**
+ *  @brief Folds a 64-byte superchunk containing only caseless multi-byte scripts mixed with ASCII -
+ *      the SVE2 twin of @ref sz_utf8_uncased_fold_neon_caseless_chunk_.
+ *  @return Bytes consumed; always 62..64, never zero.
+ */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t source, sz_ptr_t target) {
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     for (sz_size_t chunk_base = 0; chunk_base < 64; chunk_base += chunk_bytes) {
@@ -95,10 +101,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t s
     return 64;
 }
 
-/** @brief  Folds a 64-byte superchunk of Latin text in place - the SVE2 twin of
- *          @ref sz_utf8_uncased_fold_neon_latin_chunk_, with the same C4/C5/C6 delta tables read through
- *          chunked `svtbl` walks and the same stop policy.
- *  @return Bytes consumed and written, or zero if the first character needs the serial path. */
+/**
+ *  @brief Folds a 64-byte superchunk of Latin text in place - the SVE2 twin of
+ *      @ref sz_utf8_uncased_fold_neon_latin_chunk_, with the same C4/C5/C6 delta tables read
+ *      through chunked @c svtbl walks and the same stop policy.
+ *  @return Bytes consumed and written, or zero if the first character needs the serial path.
+ */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -237,9 +245,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t sour
     return 64;
 }
 
-/** @brief  Folds a 64-byte superchunk of basic Cyrillic mixed with ASCII - the SVE2 twin of
- *          @ref sz_utf8_uncased_fold_neon_cyrillic_chunk_.
- *  @return Bytes consumed and written, or zero if the first character needs another path. */
+/**
+ *  @brief Folds a 64-byte superchunk of basic Cyrillic mixed with ASCII - the SVE2 twin of
+ *      @ref sz_utf8_uncased_fold_neon_cyrillic_chunk_.
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t source, sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     svbool_t const all_b8x = svptrue_b8();
@@ -298,9 +308,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t s
     return (last_byte == 0xD0 || last_byte == 0xD1) ? 63 : 64;
 }
 
-/** @brief  Folds a 64-byte superchunk of basic Greek mixed with ASCII - the SVE2 twin of
- *          @ref sz_utf8_uncased_fold_neon_greek_chunk_.
- *  @return Bytes consumed and written, or zero if the first character needs another path. */
+/**
+ *  @brief Folds a 64-byte superchunk of basic Greek mixed with ASCII - the SVE2 twin of
+ *      @ref sz_utf8_uncased_fold_neon_greek_chunk_.
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -325,7 +337,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t sour
         svbool_t const is_foreign_lead_b8x = svbic_b_z(loaded_b8x, is_lead_b8x,
                                                        svorr_b_z(loaded_b8x, is_ce_b8x, is_cf_b8x));
 
-        // Exclusions at the LEAD position: accented uppercase and 'ΰ' (CE < 0x91 or == 0xB0), symbols (CF >= 8F).
+        // Exclusions at the lead position: accented uppercase and 'ΰ' (CE < 0x91 or == 0xB0),
+        // symbols (CF >= 8F).
         svbool_t const ce_excluded_b8x = svand_b_z(
             loaded_b8x, is_ce_b8x,
             svorr_b_z(all_b8x, svcmplt_n_u8(all_b8x, next_byte_u8x, 0x91), svcmpeq_n_u8(all_b8x, next_byte_u8x, 0xB0)));
@@ -374,9 +387,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t sour
     return (last_byte == 0xCE || last_byte == 0xCF) ? 63 : 64;
 }
 
-/** @brief  Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII - the SVE2 twin of
- *          @ref sz_utf8_uncased_fold_neon_armenian_chunk_.
- *  @return Bytes consumed and written, or zero if the first character needs another path. */
+/**
+ *  @brief Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII - the SVE2 twin of
+ *      @ref sz_utf8_uncased_fold_neon_armenian_chunk_.
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -403,7 +418,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t s
                                                         is_d6_b8x);
         svbool_t const is_foreign_lead_b8x = svbic_b_z(loaded_b8x, is_lead_b8x, is_armenian_lead_b8x);
 
-        // Stops at the LEAD: D4 with a Cyrillic-Supplement second (<= B0) and the ligature (D6 87).
+        // Stops at the lead: D4 with a Cyrillic-Supplement second (<= B0) and the ligature (D6 87).
         svbool_t const is_d4_stop_b8x = svand_b_z(loaded_b8x, is_d4_b8x, svcmplt_n_u8(all_b8x, next_byte_u8x, 0xB1));
         svbool_t const is_ligature_stop_b8x = svand_b_z(loaded_b8x, is_d6_b8x,
                                                         svcmpeq_n_u8(all_b8x, next_byte_u8x, 0x87));
@@ -447,9 +462,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t s
     return (last_byte == 0xD4 || last_byte == 0xD5 || last_byte == 0xD6) ? 63 : 64;
 }
 
-/** @brief  Folds a 64-byte superchunk of Georgian (E1 82/83 content) mixed with ASCII - the SVE2 twin of
- *          @ref sz_utf8_uncased_fold_neon_georgian_chunk_.
- *  @return Bytes consumed and written, or zero if the first character needs another path. */
+/**
+ *  @brief Folds a 64-byte superchunk of Georgian (E1 82/83 content) mixed with ASCII - the SVE2
+ *      twin of @ref sz_utf8_uncased_fold_neon_georgian_chunk_.
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -483,7 +500,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t s
                                             malformed_lead_b8x);
         stop_lanes |= sz_utf8_rune_pred_to_u64_sve2_(svand_b_z(loaded_b8x, stop_b8x, loaded_b8x)) << chunk_base;
 
-        // Uppercase Georgian is keyed by the THIRD byte: E1 82 third >= A0, E1 83 third in 80-85 / 87 / 8D.
+        // Uppercase Georgian is keyed by the third byte: E1 82 third >= A0, E1 83 third in 80-85 /
+        // 87 / 8D.
         svbool_t const is_82_upper_lead_b8x = svand_b_z(loaded_b8x, is_82_lead_b8x,
                                                         svcmpge_n_u8(all_b8x, next_next_byte_u8x, 0xA0));
         svbool_t const is_83_third_b8x = svorr_b_z(
@@ -527,9 +545,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t s
     return 64;
 }
 
-/** @brief  Folds a 64-byte superchunk of caseless scripts mixed with SAFE guarded punctuation - the SVE2 twin
- *          of @ref sz_utf8_uncased_fold_neon_guarded_chunk_.
- *  @return Bytes consumed and written, or zero if the first character needs another path. */
+/**
+ *  @brief Folds a 64-byte superchunk of caseless scripts mixed with safe guarded punctuation - the
+ *      SVE2 twin of @ref sz_utf8_uncased_fold_neon_guarded_chunk_.
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -588,7 +608,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_sve2(sz_cptr_t source, sz_size_t 
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
 
     while (source_length >= 64) {
-        // FAST PATH: pure ASCII decided per chunk before any classification.
+        // Fast path: pure ASCII decided per chunk before any classification.
         int any_non_ascii = 0;
         sz_u8_t lead_families = 0;
         for (sz_size_t chunk_base = 0; chunk_base < 64 && !any_non_ascii; chunk_base += chunk_bytes) {

@@ -1,7 +1,9 @@
 /**
- *  @brief IBM Power (VSX) backend for UTF-8 case folding (delegates to serial).
  *  @file include/stringzilla/utf8_uncased_fold/powervsx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief IBM Power (VSX) backend for UTF-8 case folding (delegates to serial).
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_POWERVSX_H_

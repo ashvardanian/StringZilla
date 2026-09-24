@@ -1,7 +1,8 @@
 /**
- *  @brief The `Str` type - construction, buffer protocol, and byte-level transforms.
  *  @file python/stringzilla/str.c
  *  @author Ash Vardanian
+ *  @date September 11, 2023
+ *  @brief The @c Str type - construction, buffer protocol, and byte-level transforms.
  */
 #include "stringzilla.h"
 
@@ -207,25 +208,25 @@ static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
 }
 
 static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
-    //! This function MUST NOT decrement view->obj, since that is done automatically
+    //! This function must not decrement `view->obj`, since that is done automatically
     //! in PyBuffer_Release() (this scheme is useful for breaking reference cycles).
     //! https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
 }
 
-char const doc_decode[] =                                                      //
-    "Decode the bytes into a Unicode string with a given encoding.\n"          //
-    "\n"                                                                       //
-    "Args:\n"                                                                  //
-    "  text (Str or str or bytes): The string object.\n"                       //
-    "  encoding (str, optional): The encoding to use (default is 'utf-8').\n"  //
-    "  errors (str, optional): Error handling scheme (default is 'strict').\n" //
-    "Returns:\n"                                                               //
-    "  str: The decoded Unicode string.\n"                                     //
-    "Raises:\n"                                                                //
-    "  UnicodeDecodeError: If decoding fails.\n"                               //
-    "\n"                                                                       //
-    "Example:\n"                                                               //
-    "  >>> sz.Str('abc').decode() == 'abc'\n"                                  //
+char const doc_decode[] =                                                        //
+    "Decode the bytes into a Unicode string with a given encoding.\n"            //
+    "\n"                                                                         //
+    "Args:\n"                                                                    //
+    "  text (Str or str or bytes): The string object.\n"                         //
+    "  encoding (str, optional): The encoding to use, defaulting to 'utf-8'.\n"  //
+    "  errors (str, optional): Error handling scheme, defaulting to 'strict'.\n" //
+    "Returns:\n"                                                                 //
+    "  str: The decoded Unicode string.\n"                                       //
+    "Raises:\n"                                                                  //
+    "  UnicodeDecodeError: If decoding fails.\n"                                 //
+    "\n"                                                                         //
+    "Example:\n"                                                                 //
+    "  >>> sz.Str('abc').decode() == 'abc'\n"                                    //
     "  True";
 
 PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -466,7 +467,7 @@ static PyNumberMethods Str_as_number = {
 static char const doc_Str_address[] =                                  //
     "Memory address of the first byte of the string, as an integer.\n" //
     "\n"                                                               //
-    "Enables zero-copy interop (e.g. with PyArrow or ctypes).\n"       //
+    "Enables zero-copy interop, e.g. with PyArrow or ctypes.\n"        //
     "\n"                                                               //
     "Example:\n"                                                       //
     "  >>> isinstance(sz.Str('abc').address, int)\n"                   //

@@ -1,8 +1,9 @@
 /**
  *  @file c/stringzilla/memory.c
- *  @brief Per-domain dispatch shim for raw memory ops (`sz_copy`, `sz_move`, `sz_fill`, `sz_lookup`).
  *  @author Ash Vardanian
  *  @date January 16, 2024
+ *  @brief Per-domain dispatch shim for raw memory operations: @c sz_copy, @c sz_move, @c sz_fill,
+ *      and @c sz_lookup.
  */
 #if !defined(SZ_OVERRIDE_LIBC)
 #define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
@@ -133,15 +134,14 @@ SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
     sz_dispatch_cpu_table.lookup(target, length, source, lut);
 }
 
-// Provide overrides for the libc mem* functions
+/*  Overrides for the LibC `mem*` functions.
+ *
+ *  @c SZ_API_RUNTIME can't be used here for MSVC, which complains about different linkage, C2375,
+ *  probably because the CRT headers declare the function as `__declspec(dllimport)`; some
+ *  combination of defines might work, but for now the functions are exported manually with linker
+ *  flags. A 32-bit build must also prefix the exported name with an underscore, because that is how
+ *  MSVC decorates @c __cdecl functions: https://stackoverflow.com/questions/62753691 */
 #if SZ_OVERRIDE_LIBC && !defined(__CYGWIN__)
-
-// SZ_API_RUNTIME can't be use here for MSVC, because MSVC complains about different linkage (C2375), probably due
-// to to the CRT headers specifying the function as `__declspec(dllimport)`, there might be a combination of
-// defines that works. But for now they will be manually exported using linker flags.
-// Also when building for 32-bit we must add an underscore to the exported function name, because that's
-// how `__cdecl` functions are decorated in MSVC: https://stackoverflow.com/questions/62753691)
-
 #if defined(_MSC_VER)
 #if defined(_WIN64)
 #pragma comment(linker, "/export:memcpy")

@@ -1,11 +1,18 @@
-/* StringZilla ISA probe: Ice Lake (x86-64 AVX-512 VBMI/VNNI + VAES), mirroring `include/stringzilla/hash/icelake.h` */
+/**
+ *  @file probes/x86_icelake.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for Ice Lake, the x86-64 AVX-512 VBMI, VNNI, and VAES tier.
+ *
+ *  @sa include/stringzilla/hash/icelake.h
+ */
 #include <immintrin.h>
 
 #if defined(__clang__) && __clang_major__ < 23 && \
     (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
-// LLVM 18 through 22 (Apple Clang 17+, which is LLVM 19-based) split `evex512` out of AVX-512:
-// ZMM codegen in `target` attributes needs it named explicitly. LLVM 23 retired the token, and an
-// unknown feature makes Clang drop the whole `target` attribute, so the plain string serves again.
+/* LLVM 18 through 22, and Apple Clang 17+ built on LLVM 19, split @c evex512 out of AVX-512: ZMM
+ * codegen in @c target attributes needs it named explicitly. LLVM 23 retired the token, and Clang
+ * drops the whole @c target attribute over an unknown feature, so the plain string serves again. */
 #pragma clang attribute push(                                                                                        \
     __attribute__((target(                                                                                           \
         "avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,avx512vnni,bmi,bmi2,aes,vaes,sha,evex512"))), \
@@ -21,8 +28,9 @@
                    "bmi", "bmi2", "aes", "vaes", "sha")
 #endif
 
-/* The Ice Lake kernels split across two orthogonal AVX-512 sub-extensions - the hash/intersect cores use
- * VNNI dot-products, the find/UTF-8 cores use VBMI2 compress/expand - so the probe must exercise both. */
+/* The Ice Lake kernels split across two orthogonal AVX-512 sub-extensions: the hash and intersect
+ * cores use VNNI dot-products, while the find and UTF-8 cores use VBMI2 compress and expand, so
+ * the probe must exercise both. */
 static __m512i sz_probe_permute_(__m512i table, __m512i indices) { return _mm512_permutexvar_epi8(indices, table); }
 static __m512i sz_probe_compress_(__mmask64 mask, __m512i bytes) { return _mm512_maskz_compress_epi8(mask, bytes); }
 static __m512i sz_probe_dot_(__m512i acc, __m512i a, __m512i b) { return _mm512_dpbusds_epi32(acc, a, b); }

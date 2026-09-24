@@ -1,15 +1,17 @@
 /**
- *  @brief The shared types and forward declarations for the per-domain files.
  *  @file python/stringzilla/stringzilla.h
  *  @author Ash Vardanian
+ *  @date September 2, 2023
+ *  @brief The shared types and forward declarations for the per-domain files.
  *
- *  The `stringzilla` extension is split into one translation unit per domain - `memory.c`, `hash.c`,
- *  `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`, `overlap.c`, `substrings.c`,
- *  the `utf8_` files - alongside the CPython object-model files `file.c`, `str.c`, `strs.c` and the
- *  `shared.c` plumbing. This header carries everything more than one of those files touches: the
- *  `File`/`Str`/`Strs` struct layouts, the full `PyTypeObject` forward-declaration set the module-init file
- *  needs to build its type-registration table, and the per-interpreter free-list state. Structs read by a
- *  single translation unit live in that file instead.
+ *  The @c stringzilla extension is split into one translation unit per domain - `memory.c`,
+ *  `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`,
+ *  `overlap.c`, `substrings.c`, and the `utf8_*.c` files - alongside the CPython object-model files
+ *  `file.c`, `str.c`, `strs.c` and the `shared.c` plumbing. This header carries everything more
+ *  than one of those files touches: the @c File, @c Str, and @c Strs struct layouts, the full
+ *  @c PyTypeObject forward-declaration set the module-init file needs to build its
+ *  type-registration table, and the per-interpreter free-list state. Structs read by a single
+ *  translation unit live in that file instead.
  *
  *  Not installed; private to this extension's build.
  */
@@ -34,13 +36,16 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h> // `ssize_t`
 #endif
 
-// It seems like some Python versions forget to include a header, so we should:
-// https://github.com/ashvardanian/StringZilla/actions/runs/7706636733/job/21002535521
+/**
+ *  @brief Some Python versions forget to include a header, so define the limit here.
+ *
+ *  @see CI failure: https://github.com/ashvardanian/StringZilla/actions/runs/7706636733/job/21002535521
+ */
 #ifndef SSIZE_MAX
 #define SSIZE_MAX (SIZE_MAX / 2)
 #endif
 
-// Undefine _POSIX_C_SOURCE to avoid redefinition warning with Python headers
+/* Undefine @c _POSIX_C_SOURCE to avoid a redefinition warning with Python headers. */
 #ifdef _POSIX_C_SOURCE
 #undef _POSIX_C_SOURCE
 #endif
@@ -53,40 +58,42 @@ typedef SSIZE_T ssize_t;
 
 #include <stringzilla/stringzilla.h>
 
-/// @brief  Fast-call + keywords, the calling convention every `Str_like_*`/`Strs_*` method uses.
+/** Fast-call with keywords, the calling convention every `Str_like_*` and `Strs_*` method uses. */
 #define SZ_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
 
-// strs.c
-/** @brief  Reads the start pointer of the @p i -th element of a `Strs` handed as a raw `void const *`. */
+/* strs.c */
+
+/** Reads the start pointer of the @p i -th element of a @c Strs handed as a raw `void const *`. */
 extern sz_cptr_t Strs_get_start_(void const *handle, sz_size_t i);
 
-/** @brief  Reads the byte length of the @p i -th element of a `Strs` handed as a raw `void const *`. */
+/** Reads the byte length of the @p i -th element of a @c Strs handed as a raw `void const *`. */
 extern sz_size_t Strs_get_length_(void const *handle, sz_size_t i);
 
-/** @brief  Helper function to export a `Strs` or similar sequence objects into a `sz_sequence_t`. */
+/** Helper function to export a @c Strs or similar sequence objects into a @c sz_sequence_t. */
 extern sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence);
 
-/** @brief  Helper function to export a `Strs` object into `sz_sequence_u32tape_t` components. */
+/** Helper function to export a @c Strs object into @c sz_sequence_u32tape_t components. */
 extern sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
                                                  sz_size_t *count);
 
-/** @brief  Helper function to export a `Strs` object into `sz_sequence_u64tape_t` components. */
+/** Helper function to export a @c Strs object into @c sz_sequence_u64tape_t components. */
 extern sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
                                                  sz_size_t *count);
 
-/** @brief  Helper function to replace the memory allocator in a `Strs` object. */
+/** Helper function to replace the memory allocator in a @c Strs object. */
 extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator);
 
-// shared.c
-/** @brief  Whether a Python buffer-like object is writable; sets a `TypeError` and returns false if not. */
+/* shared.c */
+
+/** Whether a buffer-like object is writable; sets a @c TypeError and returns false if not. */
 extern sz_bool_t sz_py_is_mutable(PyObject *object);
 
-/** @brief  Helper function to export a Python string-like object into a `sz_string_view_t`. */
+/** Helper function to export a Python string-like object into a @c sz_string_view_t. */
 extern sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length);
 
 /**
- *  @brief  Parses an optional `start`/`end` index argument with CPython slice semantics.
- *  @return 1 on success (result written to @p result_out), 0 if a Python exception was set.
+ *  @brief Parses an optional @c start or @c end index argument with CPython slice semantics.
+ *  @return 1 with the result written to @p result_out, or 0 with a Python exception set.
  */
 extern int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, Py_ssize_t *result_out);
 
@@ -119,10 +126,8 @@ extern PyTypeObject SubstringsEngineType;
 
 extern struct PyModuleDef stringzilla_module;
 
-/**
- *  @brief  Describes an on-disk file mapped into RAM, which is different from Python's
- *          native `mmap` module, as it exposes the address of the mapping in memory.
- */
+/** Describes an on-disk file mapped into RAM, which is different from Python's native @c mmap
+ *  module, as it exposes the address of the mapping in memory. */
 typedef struct {
     PyObject ob_base;
 
@@ -136,14 +141,14 @@ typedef struct {
 } File;
 
 /**
- *  @brief  Type-punned StringZilla-string, that points to a slice of an existing Python `str`
- *          or a `File`.
+ *  @brief Type-punned StringZilla-string, that points to a slice of an existing Python @c str or a
+ *      @c File.
  *
- *  When a slice is constructed, the `parent` object's reference count is being incremented to preserve lifetime.
- *  It usage in Python would look like:
+ *  When a slice is constructed, the @c parent object's reference count is being incremented to
+ *  preserve lifetime. It usage in Python would look like:
  *
  *      - Str() # Empty string
- *      - Str("some-string") # Full-range slice of a Python `str`
+ *      - Str("some-string") # Full-range slice of a Python @c str
  *      - Str(File("some-path.txt")) # Full-range view of a persisted file
  *      - Str(File("some-path.txt"), from=0, to=sys.maxsize)
  */
@@ -155,12 +160,12 @@ typedef struct {
 } Str;
 
 /**
- *  @brief  Iterator for finding UAX segment boundaries in UTF-8 text - words, grapheme clusters,
- *          sentences, and line-break opportunities.
+ *  @brief Iterator for finding UAX segment boundaries in UTF-8 text - words, grapheme clusters,
+ *      sentences, and line-break opportunities.
  *
  *  Streams segments by refilling a small inline buffer with @c kernel, yielding one segment per
- *  @c __next__. The buffer lives in the iterator itself - no extra allocation. @c start advances past
- *  each batch as it is consumed.
+ *  @c __next__. The buffer lives in the iterator itself - no extra allocation. @c start advances
+ *  past each batch as it is consumed.
  */
 typedef struct {
     PyObject ob_base;
@@ -180,10 +185,8 @@ typedef struct {
 
 } Utf8Boundaries;
 
-/**
- *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
- *          for faster sorting, shuffling, joins, and lookups.
- */
+/** Variable length Python object similar to `Tuple[Union[Str, str]]`, for faster sorting,
+ *  shuffling, joins, and lookups. */
 typedef struct {
     PyObject ob_base;
 
@@ -196,10 +199,12 @@ typedef struct {
     } layout;
 
     union {
+
         /**
-         *  U32 tape view - references existing Arrow array data, owns nothing.
-         *  The layout is identical to Apache Arrow format: N+1 offsets for N strings.
-         *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
+         *  @brief U32 tape view - references existing Arrow array data, owns nothing. The layout
+         *      is identical to Apache Arrow format: N+1 offsets for N strings.
+         *
+         *  @see Arrow layout: https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
         struct u32_tape_view_t {
             sz_size_t count;
@@ -208,9 +213,7 @@ typedef struct {
             PyObject *parent;  // Parent Arrow array or other object
         } u32_tape_view;
 
-        /**
-         *  U32 tape - owns both offsets and data with custom allocator.
-         */
+        /** U32 tape - owns both offsets and data with custom allocator. */
         struct u32_tape_t {
             sz_size_t count;
             sz_cptr_t data;    // Owned data
@@ -219,9 +222,10 @@ typedef struct {
         } u32_tape;
 
         /**
-         *  U64 tape view - references existing Arrow array data, owns nothing.
-         *  The layout is identical to Apache Arrow format: N+1 offsets for N strings.
-         *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
+         *  @brief U64 tape view - references existing Arrow array data, owns nothing. The layout
+         *      is identical to Apache Arrow format: N+1 offsets for N strings.
+         *
+         *  @see Arrow layout: https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
         struct u64_tape_view_t {
             sz_size_t count;
@@ -230,9 +234,7 @@ typedef struct {
             PyObject *parent;  // Parent Arrow array or other object
         } u64_tape_view;
 
-        /**
-         *  U64 tape - owns both offsets and data with custom allocator.
-         */
+        /** U64 tape - owns both offsets and data with custom allocator. */
         struct u64_tape_t {
             sz_size_t count;
             sz_cptr_t data;    // Owned data
@@ -240,10 +242,8 @@ typedef struct {
             sz_memory_allocator_t allocator;
         } u64_tape;
 
-        /**
-         *  Reordered subviews - owns only the array of individual spans.
-         *  Each span points to data in the parent object.
-         */
+        /** Reordered subviews - owns only the array of individual spans. Each span points to data
+         *  in the parent object. */
         struct fragmented_t {
             sz_size_t count;
             sz_string_view_t *spans; // Owned array of spans
@@ -256,17 +256,17 @@ typedef struct {
 } Strs;
 
 /**
- *  @brief  Per-interpreter module state, holding the intrusive free-lists for `Str` and `Strs`.
+ *  @brief Per-interpreter module state, holding the intrusive free-lists for @c Str and @c Strs.
  *
- *  Both objects churn heavily: nearly every `split`/iterate element and every slice mints a fresh
- *  fixed-size header that is torn down moments later. Instead of round-tripping each header through
- *  `PyObject_Malloc`/`PyObject_Free`, dealloc parks the dead header on a singly-linked free-list and
- *  the allocation helper pops it back. The link is threaded through the dead object's own storage
- *  (`Str::parent`, `Strs::data`), so the state needs only a head pointer and a counter per type - no
- *  array. Living in module state keeps it per-interpreter, but on a free-threaded build the module
- *  state is shared by every thread in the interpreter, so all four fields are guarded by
- *  `freelist_lock`: without it, concurrent `alloc_`/`dealloc` calls race on the same linked list and
- *  can hand out one header to two live objects at once.
+ *  Both objects churn heavily: nearly every @c split or iterate element and every slice mints a
+ *  fresh fixed-size header that is torn down moments later. Instead of round-tripping each header
+ *  through @c PyObject_Malloc and @c PyObject_Free, dealloc parks the dead header on a
+ *  singly-linked free-list and the allocation helper pops it back. The link is threaded through the
+ *  dead object's own storage, @c Str::parent and @c Strs::data, so the state needs only a head
+ *  pointer and a counter per type - no array. Living in module state keeps it per-interpreter, but
+ *  on a free-threaded build the module state is shared by every thread in the interpreter, so all
+ *  four fields are guarded by @c freelist_lock: without it, concurrent @c alloc_ and @c dealloc
+ *  calls race on the same linked list and can hand out one header to two live objects at once.
  */
 enum { sz_freelist_capacity_k = 64 }; //< Headers retained per interpreter, per type.
 
@@ -280,36 +280,38 @@ typedef struct {
 #endif
 } stringzilla_state_t;
 
-// shared.c
-/** @brief Reach the per-interpreter free-list state, or @c NULL before registration / during teardown. */
+/* shared.c */
+
+/** Reach the per-interpreter free-list state, or @c NULL before registration / during teardown. */
 extern stringzilla_state_t *stringzilla_state_(void);
 
-/** @brief Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
+/** Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
 extern Str *Str_alloc_(void);
 
-/** @brief Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
+/** Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
 extern Strs *Strs_alloc_(void);
 
 /**
- *  @brief  Allocates an empty `Strs` in the fragmented layout. Consolidates the count-zero
- *          initialization otherwise inlined across slicing, splitting, and reordering paths.
- *  @return A new empty `Strs`, or `NULL` with a Python exception set on allocation failure.
+ *  @brief Allocates an empty @c Strs in the fragmented layout. Consolidates the count-zero
+ *      initialization otherwise inlined across slicing, splitting, and reordering paths.
+ *  @return A new empty @c Strs, or @c NULL with a Python exception set on allocation failure.
  */
 extern Strs *strs_make_empty_fragmented_(void);
 
-/** @brief  Helper function to wrap the current exception with a custom prefix message. */
+/** Helper function to wrap the current exception with a custom prefix message. */
 extern void wrap_current_exception(sz_cptr_t comment);
 
-/** @brief The dead `Strs` header's `data` union storage doubles as the intrusive `next` link. */
+/** The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
 extern Strs **Strs_freelist_next_(Strs *node);
 
-// strs.c
-/** @brief Number of live elements in a `Strs` collection, regardless of layout. */
+/* strs.c */
+
+/** Number of live elements in a @c Strs collection, regardless of layout. */
 extern Py_ssize_t Strs_len(Strs *self);
 
-// On a free-threaded build the module state above is shared by every thread in the interpreter, so
-// the free-list head/count pairs need a lock around each read-modify-write; on a GIL build the GIL
-// already serializes these calls, so the lock/unlock compile away to nothing.
+/* On a free-threaded build the module state above is shared by every thread in the interpreter, so
+ * the free-list head and count pairs need a lock around each read-modify-write; on a GIL build the
+ * GIL already serializes these calls, so the lock and unlock compile away to nothing. */
 #if defined(Py_GIL_DISABLED)
 #define sz_freelist_lock_(state) PyMutex_Lock(&(state)->freelist_lock)
 #define sz_freelist_unlock_(state) PyMutex_Unlock(&(state)->freelist_lock)
@@ -322,9 +324,10 @@ extern Py_ssize_t Strs_len(Strs *self);
     } while (0)
 #endif
 
-// Each engine keeps a grow-only round scratch that every compute verb writes through, so two threads
-// calling into one engine would race on it. The GIL is what serializes them today; a free-threaded
-// build says so out loud with a per-object mutex, zero-initialized by `tp_alloc` and never torn down.
+/* Each engine keeps a grow-only round scratch that every compute verb writes through, so two
+ * threads calling into one engine would race on it. The GIL serializes them on a regular build; a
+ * free-threaded build says so out loud with a per-object mutex, zero-initialized by @c tp_alloc and
+ * never torn down. */
 #if defined(Py_GIL_DISABLED)
 #define sz_engine_lock_field_ PyMutex engine_lock;
 #define sz_engine_lock_(engine) PyMutex_Lock(&(engine)->engine_lock)
@@ -339,20 +342,17 @@ extern Py_ssize_t Strs_len(Strs *self);
     } while (0)
 #endif
 
-/**
- *  @brief  Cross-domain function/docstring declarations.
- *
- *  Every `Str_like_*`/`Strs_*` method and its `doc_*` docstring constant named by the `Str_methods[]`,
- *  `Strs_methods[]`, and `stringzilla_methods[]` `PyMethodDef` tables in `str.c`, `strs.c`, and
- *  `stringzilla.c`. Each symbol is visible here so those tables can reach the domain file that owns it.
- */
+/*  Cross-domain function and docstring declarations: every `Str_like_*` and `Strs_*` method and its
+ *  `doc_*` docstring constant named by the `Str_methods[]`, `Strs_methods[]`, and
+ *  `stringzilla_methods[]` @c PyMethodDef tables in `str.c`, `strs.c`, and `stringzilla.c`. Each
+ *  symbol is visible here so those tables can reach the domain file that owns it. */
 
-// memory.c
+/* memory.c */
 extern char const doc_translate[];
 extern PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple);
 
-// hash.c
+/* hash.c */
 extern char const doc_like_hash[], doc_hash_multiseed[], doc_fill_random[], doc_random[], doc_like_bytesum[],
     doc_like_sha256[], doc_hmac_sha256[];
 extern Py_hash_t Str_hash(Str *self);
@@ -371,18 +371,19 @@ extern PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize
 extern PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple);
 
-// cipher.c
-/** @brief  Exception type raised when an AEAD tag fails to authenticate a ciphertext. */
+/* cipher.c */
+
+/** Exception type raised when an AEAD tag fails to authenticate a ciphertext. */
 extern PyObject *AuthenticationErrorType;
 extern char const doc_AuthenticationError[];
 
-// compare.c
+/* compare.c */
 extern char const doc_like_equal[];
 extern PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple);
 extern PyObject *Str_richcompare(PyObject *self, PyObject *other, int op);
 
-// find.c
+/* find.c */
 extern char const doc_contains[], doc_find[], doc_index[], doc_rfind[], doc_rindex[], doc_partition[], doc_rpartition[],
     doc_count[], doc_startswith[], doc_endswith[], doc_find_first_of[], doc_find_first_not_of[], doc_find_last_of[],
     doc_find_last_not_of[], doc_count_byteset[], doc_split[], doc_rsplit[], doc_split_byteset[], doc_rsplit_byteset[],
@@ -444,26 +445,26 @@ extern PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_
 extern PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple);
 
-// sort.c
+/* sort.c */
 extern char const doc_argsort[];
 extern sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
                                      sz_size_t top, sz_bool_t reverse);
 extern PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple);
 
-// intersect.c
+/* intersect.c */
 extern char const doc_Strs_intersect[];
 extern PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple);
 
-// utf8_runes.c
+/* utf8_runes.c */
 extern char const doc_utf8_count[], doc_utf8_codepoints[];
 extern PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple);
 extern PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-// utf8_tokens.c
+/* utf8_tokens.c */
 extern char const doc_utf8_split_newlines[], doc_utf8_newlines[], doc_utf8_split_whitespaces[], doc_utf8_whitespaces[],
     doc_utf8_split_delimiters[], doc_utf8_delimiters[];
 extern PyObject *Str_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -479,42 +480,46 @@ extern PyObject *Str_like_utf8_split_delimiters(PyObject *self, PyObject *const 
 extern PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-// utf8_boundaries.c
-/** @brief  Builds a @c Utf8Boundaries iterator of @p type over @p text_obj, segmenting it with @p kernel. */
+/* utf8_boundaries.c */
+
+/** Builds a @c Utf8Boundaries iterator of @p type over @p text_obj, segmented by @p kernel. */
 extern PyObject *Utf8Boundaries_make_(PyTypeObject *type, PyObject *text_obj, sz_utf8_segmenter_t kernel);
-/** @brief  Yields the next segment as a @c Str view, refilling the inline batch when it drains. */
+
+/** Yields the next segment as a @c Str view, refilling the inline batch when it drains. */
 extern PyObject *Utf8Boundaries_next_(Utf8Boundaries *self);
-/** @brief  Releases the reference to the segmented text and frees the iterator. */
+
+/** Releases the reference to the segmented text and frees the iterator. */
 extern void Utf8Boundaries_dealloc_(Utf8Boundaries *self);
-/** @brief  Returns the iterator itself, as required by the Python iterator protocol. */
+
+/** Returns the iterator itself, as required by the Python iterator protocol. */
 extern PyObject *Utf8Boundaries_iter_(PyObject *self);
 
-// utf8_wordbreaks.c
+/* utf8_wordbreaks.c */
 extern char const doc_utf8_wordbreaks[];
 extern PyObject *Str_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-// utf8_graphemes.c
+/* utf8_graphemes.c */
 extern char const doc_utf8_graphemes[];
 extern PyObject *Str_like_utf8_graphemes(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple);
 
-// utf8_sentences.c
+/* utf8_sentences.c */
 extern char const doc_utf8_sentences[];
 extern PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple);
 
-// utf8_linebreaks.c
+/* utf8_linebreaks.c */
 extern char const doc_utf8_linebreaks[];
 extern PyObject *Str_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-// utf8_uncased_fold.c
+/* utf8_uncased_fold.c */
 extern char const doc_utf8_uncased_fold[];
 extern PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                             PyObject *args_names_tuple);
 
-// utf8_uncased.c
+/* utf8_uncased.c */
 extern char const doc_utf8_uncased_search[], doc_utf8_uncased_order[], doc_utf8_uncased_matches[];
 extern PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                               PyObject *args_names_tuple);
@@ -523,37 +528,38 @@ extern PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *ar
 extern PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                                PyObject *args_names_tuple);
 
-// utf8_norm.c
+/* utf8_norm.c */
 extern char const doc_utf8_norm[], doc_utf8_find_denormalized[];
 extern PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple);
 extern PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
                                                  Py_ssize_t positional_args_count, PyObject *args_names_tuple);
 
-// stringzilla.c
-/** @brief  Raises the Python exception @p status names, blaming @p context; never called on success. */
+/* stringzilla.c */
+
+/** Raises the Python exception @p status names, blaming @p context; never called on success. */
 extern void sz_py_raise_status(sz_status_t status, char const *context);
 
-/** @brief  Exports @p object as a sequence of strings, or raises a `TypeError` naming @p name. */
+/** Exports @p object as a sequence of strings, or raises a @c TypeError naming @p name. */
 extern int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_t *sequence);
 
-/** @brief  Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
+/** Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
 extern int sz_py_export_stream(PyObject *stream_obj, void **stream);
 
 /**
- *  @brief  Binds @p object as a writable output of @p rank axes, each at least as wide as @p extents.
+ *  @brief Binds @p object as a writable output of @p rank axes, each at least @p extents wide.
  *  @param[out] strides Entries from one index of each axis to the next, in items rather than bytes.
  *  @return 0 with @p view bound, or -1 with an exception set and nothing left to release.
- *  @note Says nothing about contiguity: a verb taking no stride for an axis checks that axis itself.
+ *  @note Checks no contiguity, so a verb taking no stride for an axis checks that axis itself.
  */
 extern int sz_py_export_output_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, int rank,
                                       sz_size_t const *extents, Py_buffer *view, sz_size_t *strides);
 
-/** @brief  Binds @p object as a read-only, contiguous input of at least @p count items. */
+/** Binds @p object as a read-only, contiguous input of at least @p count items. */
 extern int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, sz_size_t count,
                                      Py_buffer *view);
 
-// str.c
+/* str.c */
 extern char const doc_offset_within[], doc_write_to[], doc_decode[];
 extern PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
 extern PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,

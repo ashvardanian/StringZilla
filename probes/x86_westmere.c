@@ -1,4 +1,12 @@
-/* StringZilla ISA probe: Westmere (x86-64 SSE4.2 + AES-NI), mirroring `include/stringzilla/{find,hash}/westmere.h` */
+/**
+ *  @file probes/x86_westmere.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for Westmere, the x86-64 SSE4.2 and AES-NI tier.
+ *
+ *  @sa include/stringzilla/find/westmere.h
+ *  @sa include/stringzilla/hash/westmere.h
+ */
 #include <immintrin.h>
 
 #if defined(__clang__)

@@ -1,7 +1,9 @@
 /**
- *  @brief LoongArch LASX (256-bit) backend for find.
  *  @file include/stringzilla/find/lasx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief LoongArch LASX (256-bit) backend for find.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_LASX_H_
@@ -19,14 +21,15 @@ extern "C" {
 
 /**
  *  @brief Produce an AVX2-style 32-bit movemask from a LASX 256-bit comparison result.
- *      Bit `i` reflects byte `i` of the comparison (0xFF → set, 0x00 → clear).
  *
- *  See `compare/lasx.h` for the rationale: `__lasx_xvmskltz_b` packs the sign bit of each byte into a
- *  per-128-bit-lane 16-bit mask (word 0 = low lane, word 4 = high lane). Recombining matches AVX2's
- *  `_mm256_movemask_epi8` byte ordering, so `ctz`/`clz` index bytes identically to the Haswell backend.
+ *  Bit @c i reflects byte @c i of the comparison, set for 0xFF and clear for 0x00. See
+ *  `compare/lasx.h` for the rationale: @c __lasx_xvmskltz_b packs the sign bit of each byte into a
+ *  per-128-bit-lane 16-bit mask, word 0 for the low lane and word 4 for the high one. Recombining
+ *  matches the byte order of @c _mm256_movemask_epi8, so @c ctz and @c clz index bytes identically
+ *  to the Haswell backend.
  *
- *  @param sign_extended_u8x32 A 256-bit comparison result vector (0xFF where matched, 0x00 otherwise).
- *  @return 32-bit movemask where bit `i` is set when byte `i` matched.
+ *  @param[in] sign_extended_u8x32 A 256-bit comparison result, 0xFF where matched, else 0x00.
+ *  @return 32-bit movemask where bit @c i is set when byte @c i matched.
  */
 SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended_u8x32) {
     __m256i collected_u32x8 = __lasx_xvmskltz_b(sign_extended_u8x32);
@@ -37,9 +40,10 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended_u8x32
 
 /**
  *  @brief Produce an SSE-style 16-bit movemask from an LSX 128-bit comparison result.
- *      Used to cover the sub-32-byte head/tail that a 256-bit-only loop would otherwise hand to the serial path.
  *
- *  @param sign_extended_u8x16 A 128-bit comparison result vector (0xFF where matched, 0x00 otherwise).
+ *  Covers the sub-32-byte head and tail, which a 256-bit-only loop would hand to the serial path.
+ *
+ *  @param[in] sign_extended_u8x16 A 128-bit comparison result, 0xFF where matched, else 0x00.
  *  @return Low 16 bits of the movemask.
  */
 SZ_HELPER_INLINE sz_u32_t sz_vmovemask_b_find_lsx_(__m128i sign_extended_u8x16) {
@@ -88,8 +92,9 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haysta
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u256_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.lasx = __lasx_xvldrepl_b(needle, 0);
-    // `xvfrstp` finds the FIRST match; reverse search wants the LAST, which LASX has no single op for, so we
-    // keep `clz` over the movemask. `xbnz_v` still skips the movemask entirely on match-free blocks.
+    // `xvfrstp` finds the first match; reverse search wants the last, which LASX has no single op
+    // for, so we keep `clz` over the movemask. `xbnz_v` still skips the movemask entirely on blocks
+    // that hold no match at all.
     while (haystack_length >= 32) {
         haystack_vec.lasx = __lasx_xvld(haystack + haystack_length - 32, 0);
         matches_vec.lasx = __lasx_xvseq_b(haystack_vec.lasx, needle_vec.lasx);
@@ -136,8 +141,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_le
         haystack_first_vec.lasx = __lasx_xvld(haystack + offset_first, 0);
         haystack_mid_vec.lasx = __lasx_xvld(haystack + offset_mid, 0);
         haystack_last_vec.lasx = __lasx_xvld(haystack + offset_last, 0);
-        // AND the three equality VECTORS first, then take a SINGLE movemask, instead of recombining a
-        // 32-bit mask three times per block (movemask is the expensive part on LASX).
+        // AND the three equality vectors first, then take a single movemask, instead of recombining
+        // a 32-bit mask three times per block (movemask is the expensive part on LASX).
         __m256i first_matches_u8x32 = __lasx_xvseq_b(haystack_first_vec.lasx, needle_first_vec.lasx);
         __m256i mid_matches_u8x32 = __lasx_xvseq_b(haystack_mid_vec.lasx, needle_mid_vec.lasx);
         __m256i last_matches_u8x32 = __lasx_xvseq_b(haystack_last_vec.lasx, needle_last_vec.lasx);
@@ -214,7 +219,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_l
         haystack_first_vec.lasx = __lasx_xvld(haystack_reversed + offset_first, 0);
         haystack_mid_vec.lasx = __lasx_xvld(haystack_reversed + offset_mid, 0);
         haystack_last_vec.lasx = __lasx_xvld(haystack_reversed + offset_last, 0);
-        // AND the three equality VECTORS first, then take a SINGLE movemask (see `sz_find_lasx`).
+        // AND the three equality vectors first, then take a single movemask (see `sz_find_lasx`).
         __m256i first_matches_u8x32 = __lasx_xvseq_b(haystack_first_vec.lasx, needle_first_vec.lasx);
         __m256i mid_matches_u8x32 = __lasx_xvseq_b(haystack_mid_vec.lasx, needle_mid_vec.lasx);
         __m256i last_matches_u8x32 = __lasx_xvseq_b(haystack_last_vec.lasx, needle_last_vec.lasx);

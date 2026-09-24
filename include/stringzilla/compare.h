@@ -1,19 +1,21 @@
 /**
- *  @brief Hardware-accelerated string comparison utilities.
  *  @file include/stringzilla/compare.h
  *  @author Ash Vardanian
+ *  @date August 14, 2020
+ *  @brief Hardware-accelerated string comparison utilities.
  *
  *  Includes core APIs:
  *
- *  - `sz_equal` - for equality comparison of two strings.
- *  - `sz_order` - for the relative order of two strings, similar to `memcmp`.
+ *  - @c sz_equal - for equality comparison of two strings.
+ *  - @c sz_order - for the relative order of two strings, similar to @c memcmp.
  *
- *  A valid suggestion may be to add an `sz_mismatch`, as the shared part of the `sz_order` and `sz_equal`.
- *  That would be great for a general-purpose library, but has little practical use for string processing.
+ *  A valid suggestion may be to add an @c sz_mismatch, as the shared part of the @c sz_order and
+ *  @c sz_equal. That would be great for a general-purpose library, but string processing has little
+ *  practical use for it.
  *
- *  The functions in this file can be used for both UTF-8 and other inputs.
- *  On platforms without masked loads they use interleaved prefix and suffix vector-loads
- *  to avoid scalar code, similar to the kernels in `memory.h`.
+ *  The functions in this file can be used for both UTF-8 and other inputs. On platforms without
+ *  masked loads they use interleaved prefix and suffix vector-loads to avoid scalar code, similar
+ *  to the kernels in `memory.h`.
  */
 #ifndef STRINGZILLA_COMPARE_H_
 #define STRINGZILLA_COMPARE_H_
@@ -27,17 +29,15 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Checks if two strings are equal. Equivalent to `memcmp(a, b, length) == 0` in LibC and `a == b` in STL.
- *  @see https://en.cppreference.com/w/c/string/byte/memcmp
+ *  @brief Checks if two strings are equal, like `memcmp(a, b, length) == 0`, or `a == b` in STL.
  *
- *  @param a First string to compare.
- *  @param b Second string to compare.
- *  @param length Number of bytes to compare in both strings.
+ *  @param[in] a First string to compare.
+ *  @param[in] b Second string to compare.
+ *  @param[in] length Number of bytes to compare in both strings.
+ *  @return @c sz_true_k if the strings are equal, @c sz_false_k if they differ.
+ *  @see memcmp: https://en.cppreference.com/w/c/string/byte/memcmp
  *
- *  @retval `sz_true_k` if strings are equal.
- *  @retval `sz_false_k` if strings are different.
- *
- *  Example usage:
+ *  Telling an equal pair from a different one:
  *
  *  @code{.c}
  *      #include <stringzilla/compare.h>
@@ -46,31 +46,30 @@ extern "C" {
  *      }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_equal_serial, sz_equal_westmere, sz_equal_haswell, sz_equal_skylake, sz_equal_neon, sz_equal_sve,
- *      sz_equal_v128, sz_equal_v128relaxed, sz_equal_rvv, sz_equal_lasx, sz_equal_powervsx
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @sa sz_equal_serial, sz_equal_westmere, sz_equal_haswell, sz_equal_skylake,
+ *      sz_equal_neon, sz_equal_sve, sz_equal_v128, sz_equal_v128relaxed, sz_equal_rvv,
+ *      sz_equal_lasx, sz_equal_powervsx
  */
 SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /**
- *  @brief Compares two strings lexicographically. Equivalent to `memcmp(a, b, length)` in LibC.
- *         Mostly used in sorting and associative containers. Can be used for @b UTF-8 inputs.
- *  @see https://en.cppreference.com/w/c/string/byte/memcmp
+ *  @brief Compares two strings lexicographically, like @c memcmp in LibC.
  *
- *  This function uses scalar code on most platforms, as in the majority of cases the strings that
- *  differ - will have differences among the very first characters and fetching more than one cache
- *  line may not be justified.
+ *  @param[in] a First string to compare.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Second string to compare.
+ *  @param[in] b_length Number of bytes in the second string.
+ *  @return @c sz_less_k if @p a is lexicographically smaller than @p b, @c sz_greater_k if it is
+ *      greater, or @c sz_equal_k if the strings are identical.
+ *  @see memcmp: https://en.cppreference.com/w/c/string/byte/memcmp
  *
- *  @param a First string to compare.
- *  @param a_length Number of bytes in the first string.
- *  @param b Second string to compare.
- *  @param b_length Number of bytes in the second string.
+ *  Mostly used in sorting and associative containers, and can be used for @b UTF-8 inputs. This
+ *  function uses scalar code on most platforms, as in the majority of cases the strings that differ
+ *  will have differences among the very first characters and fetching more than one cache line may
+ *  not be justified.
  *
- *  @retval `sz_less_k` if @p a is lexicographically smaller than @p b.
- *  @retval `sz_greater_k` if @p a is lexicographically greater than @p b.
- *  @retval `sz_equal_k` if strings @p a and @p b are identical.
- *
- *  Example usage:
+ *  Ordering three pairs of words:
  *
  *  @code{.c}
  *      #include <stringzilla/compare.h>
@@ -81,88 +80,110 @@ SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
  *      }
  *  @endcode
  *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_order_serial, sz_order_westmere, sz_order_haswell, sz_order_skylake, sz_order_neon, sz_order_sve,
- *      sz_order_v128, sz_order_v128relaxed, sz_order_rvv, sz_order_lasx, sz_order_powervsx
+ *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @sa sz_order_serial, sz_order_westmere, sz_order_haswell, sz_order_skylake,
+ *      sz_order_neon, sz_order_sve, sz_order_v128, sz_order_v128relaxed, sz_order_rvv,
+ *      sz_order_lasx, sz_order_powervsx
  */
 SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 #if SZ_USE_WESTMERE
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_HASWELL
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_SKYLAKE
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_NEON
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_SVE
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_V128RELAXED
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_V128
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_RVV
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_LASX
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_POWERVSX
+
 /** @copydoc sz_equal */
 SZ_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
 /** @copydoc sz_order */
 SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion Core API
 
 #include "stringzilla/compare/serial.h"
 #include "stringzilla/compare/westmere.h"
@@ -176,9 +197,8 @@ SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length,
 #include "stringzilla/compare/lasx.h"
 #include "stringzilla/compare/powervsx.h"
 
-/*  Pick the right implementation for the string search algorithms.
- *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
- */
+/*  Pick the right implementation for the comparison kernels. To override this behavior and
+ *  precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
@@ -230,8 +250,8 @@ SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
+#endif // !SZ_DYNAMIC_DISPATCH
+#pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus
 }

@@ -19,6 +19,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/cipher.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/cipher.py -q
+
+File: test/cipher.py
+Author: Ash Vardanian
+Date: August 4, 2026
 """
 
 import pytest
@@ -42,20 +46,21 @@ SECRET_LENGTH = 32
 NONCE_LENGTH = 12
 TAG_LENGTH = 16
 
-# The secrets and nonces the sweeps reuse, spelled out the same way `test/cipher.cpp` builds them so a
-# divergence between the two suites is a real one. Repeating a nonce is only acceptable because every
-# case here is compared against a locally computed expectation and no message ever leaves the process.
 COUNTER_SECRET = bytes((index * 7 + 1) & 0xFF for index in range(SECRET_LENGTH))
+"""The secrets and nonces the sweeps reuse, spelled out the same way `test/cipher.cpp` builds them
+so a divergence between the two suites is a real one. Repeating a nonce is only acceptable because
+every case here is compared against a locally computed expectation and no message ever leaves the
+process."""
 COUNTER_NONCE = bytes((index * 5 + 2) & 0xFF for index in range(NONCE_LENGTH))
 AUTHENTICATED_SECRET = bytes((index * 3 + 5) & 0xFF for index in range(SECRET_LENGTH))
 AUTHENTICATED_NONCE = bytes((index + 9) & 0xFF for index in range(NONCE_LENGTH))
 
-# NIST SP 800-38A F.5.5, CTR-AES256.Encrypt. That vector names a full 128-bit initial counter block
-# incremented across its whole width, while `Aes256CtrKey` builds its counter from a 12-byte nonce and a
-# 32-bit block index starting at zero. The two coincide exactly when the stream is entered at the block
-# index the published counter spells out, which is what `offset` reaches, and the low 32 bits carry
-# nowhere across these four blocks.
 COUNTER_VECTOR_SECRET = bytes.fromhex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4")
+"""NIST SP 800-38A F.5.5, CTR-AES256.Encrypt. That vector names a full 128-bit initial counter
+block incremented across its whole width, while `Aes256CtrKey` builds its counter from a 12-byte
+nonce and a 32-bit block index starting at zero. The two coincide exactly when the stream is entered
+at the block index the published counter spells out, which is what `offset` reaches, and the low
+32 bits carry nowhere across these four blocks."""
 COUNTER_VECTOR_NONCE = bytes.fromhex("f0f1f2f3f4f5f6f7f8f9fafb")
 COUNTER_VECTOR_BLOCK_INDEX = 0xFCFDFEFF
 COUNTER_VECTOR_PLAINTEXT = bytes.fromhex(
@@ -71,8 +76,6 @@ COUNTER_VECTOR_CIPHERTEXT = bytes.fromhex(
     "dfc9c58db67aada613c2dd08457941a6"
 )
 
-# Cases 13 through 16 of McGrew and Viega's Galois/counter mode note, the AES-256 vectors NIST's own
-# validation suite is built from, byte for byte the same literals `test/cipher.cpp` carries.
 AUTHENTICATED_VECTORS = [
     # Empty message, empty associated data
     (
@@ -115,11 +118,13 @@ AUTHENTICATED_VECTORS = [
         "76fc6ece0f4e1768cddf8853bb2d551b",
     ),
 ]
+"""Cases 13 through 16 of McGrew and Viega's Galois/counter mode note, the AES-256 vectors NIST's own
+validation suite is built from, byte for byte the same literals `test/cipher.cpp` carries."""
 
 AUTHENTICATED_VECTOR_NAMES = ["empty", "one-block", "four-blocks", "partial-block-with-associated"]
 
-# Associated-data lengths bracketing the 16-byte hash block, crossed with message lengths below.
 ASSOCIATED_LENGTHS = [0, 1, 15, 16, 17, 40]
+"""Associated-data lengths bracketing the 16-byte hash block, crossed with message lengths below."""
 
 
 def random_bytes(length: int, seed_value: int) -> bytes:
@@ -609,9 +614,9 @@ def test_unit_backend_differential_ctr_seek(seed_value: int):
 
 # region Third-party differential
 
-# Chunk sizes for the streaming stress, none of them a divisor of 16, so a boundary lands inside a
-# keystream block, inside a hash block, and astride both.
 STREAMING_CHUNK_SIZES = [1, 3, 7, 13, 15, 17, 31, 33]
+"""Chunk sizes for the streaming stress, none of them a divisor of 16, so a boundary lands inside a
+keystream block, inside a hash block, and astride both."""
 
 
 def counter_cipher_from_pycryptodome(aes, secret: bytes, nonce: bytes, byte_offset: int):

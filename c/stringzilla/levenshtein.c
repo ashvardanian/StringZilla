@@ -1,8 +1,8 @@
 /**
  *  @file c/stringzilla/levenshtein.c
- *  @brief Per-domain dispatch shim for the Levenshtein edit distances (`sz_levenshtein_*`).
  *  @author Ash Vardanian
- *  @date January 16, 2024
+ *  @date September 6, 2023
+ *  @brief Per-domain dispatch shim for the Levenshtein edit distances (`sz_levenshtein_*`).
  */
 
 #include <stringzilla/levenshtein.h>

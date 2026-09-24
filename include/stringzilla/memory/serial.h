@@ -1,7 +1,9 @@
 /**
- *  @brief Serial backend for hardware-accelerated memory operations.
  *  @file include/stringzilla/memory/serial.h
  *  @author Ash Vardanian
+ *  @date January 1, 2024
+ *  @brief Serial backend for hardware-accelerated memory operations.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_SERIAL_H_

@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: RISC-V Vector 1.0 (RVV), mirroring `include/stringzilla/find/rvv.h` */
+/**
+ *  @file probes/riscv_rvv.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for RISC-V Vector 1.0, RVV.
+ *
+ *  @sa include/stringzilla/find/rvv.h
+ */
 #include <riscv_vector.h>
 
 #if defined(__clang__)

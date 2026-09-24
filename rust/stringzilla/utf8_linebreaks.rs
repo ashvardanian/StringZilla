@@ -1,4 +1,7 @@
 //! UAX-14 line break opportunities in UTF-8 text.
+//!
+//! File: rust/stringzilla/utf8_linebreaks.rs
+//! Author: Ash Vardanian
 
 use super::*;
 
@@ -12,12 +15,13 @@ impl SegmenterKernel for Linebreaks {
 
 /// An iterator over UAX-14 line break opportunities in UTF-8 text, in order.
 ///
-/// Unlike whitespace splitting, the lines tile the input: every byte belongs to exactly one line, so
-/// consecutive lines are contiguous and no empty slices are produced. Follows the Unicode TR14 rules.
+/// Unlike whitespace splitting, the lines tile the input: every byte belongs to exactly one
+/// line, so consecutive lines are contiguous and no empty slices are produced. Follows the
+/// Unicode TR14 rules.
 ///
-/// Each yielded segment ends at a TR14 break opportunity, including soft breaks where a renderer *may*
-/// wrap but is not required to. To split only on hard line breaks (the "splitlines" behaviour), use the
-/// newline API ([`StringZillableUnary::sz_utf8_split_newlines`]) instead.
+/// Each yielded segment ends at a TR14 break opportunity, including soft breaks where a renderer
+/// _may_ wrap but is not required to. To split only on hard line breaks (the "splitlines"
+/// behaviour), use the newline API ([`StringZillableUnary::sz_utf8_split_newlines`]) instead.
 ///
 /// # Examples
 ///
@@ -36,7 +40,8 @@ mod tests {
     use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
     use crate::sz::*;
 
-    // Science abstract: NFKC ligatures/superscripts/Roman/full-width, Kelvin and Angstrom singletons, NBSP, WJ + ZWSP.
+    // Science abstract: NFKC ligatures/superscripts/Roman/full-width, Kelvin and Angstrom
+    // singletons, NBSP, WJ + ZWSP.
     const PROSE_SCIENCE_ABSTRACT: &str = concat!(
         "The \u{fb01}lm grew at 300\u{a0}\u{212a} on a 5\u{a0}\u{212b} buffer (\u{2248} 2\u{b2} monolayer",
         "s). Section \u{216b} covers the \u{ff21}-phase; see Fig. 2 for the \u{3a3}-band dispersion. Resi",

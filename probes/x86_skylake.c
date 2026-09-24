@@ -1,11 +1,18 @@
-/* StringZilla ISA probe: Skylake-X (x86-64 AVX-512 F/VL/BW), mirroring `include/stringzilla/find/skylake.h` */
+/**
+ *  @file probes/x86_skylake.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for Skylake-X, the x86-64 AVX-512 F, VL, and BW tier.
+ *
+ *  @sa include/stringzilla/find/skylake.h
+ */
 #include <immintrin.h>
 
 #if defined(__clang__) && __clang_major__ < 23 && \
     (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
-// LLVM 18 through 22 (Apple Clang 17+, which is LLVM 19-based) split `evex512` out of AVX-512:
-// ZMM codegen in `target` attributes needs it named explicitly. LLVM 23 retired the token, and an
-// unknown feature makes Clang drop the whole `target` attribute, so the plain string serves again.
+/* LLVM 18 through 22, and Apple Clang 17+ built on LLVM 19, split @c evex512 out of AVX-512: ZMM
+ * codegen in @c target attributes needs it named explicitly. LLVM 23 retired the token, and Clang
+ * drops the whole @c target attribute over an unknown feature, so the plain string serves again. */
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
 #elif defined(__clang__)

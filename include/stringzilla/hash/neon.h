@@ -1,7 +1,9 @@
 /**
- *  @brief NEON backend for string hashing and checksums.
  *  @file include/stringzilla/hash/neon.h
  *  @author Ash Vardanian
+ *  @date December 1, 2024
+ *  @brief NEON backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_NEON_H_

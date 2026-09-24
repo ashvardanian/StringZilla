@@ -1,20 +1,21 @@
 /**
- *  @brief The `Str`/`Strs` free-lists and the argument-export helpers.
  *  @file python/stringzilla/shared.c
  *  @author Ash Vardanian
+ *  @date September 16, 2023
+ *  @brief The @c Str and @c Strs free-lists and the argument-export helpers.
  */
 #include "stringzilla.h"
 
-/** @brief Reach the per-interpreter free-list state, or @c NULL before registration / during teardown. */
+/** Reach the per-interpreter free-list state, or @c NULL before registration / during teardown. */
 stringzilla_state_t *stringzilla_state_(void) {
     PyObject *module = PyState_FindModule(&stringzilla_module);
     return module ? (stringzilla_state_t *)PyModule_GetState(module) : NULL;
 }
 
-/** @brief The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
+/** The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
 Strs **Strs_freelist_next_(Strs *node) { return (Strs **)&node->data; }
 
-/** @brief Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
+/** Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
 Str *Str_alloc_(void) {
     stringzilla_state_t *state = stringzilla_state_();
     if (state) sz_freelist_lock_(state);
@@ -33,7 +34,7 @@ Str *Str_alloc_(void) {
     return (Str *)StrType.tp_alloc(&StrType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
 }
 
-/** @brief Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
+/** Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
 Strs *Strs_alloc_(void) {
     stringzilla_state_t *state = stringzilla_state_();
     if (state) sz_freelist_lock_(state);
@@ -54,9 +55,9 @@ Strs *Strs_alloc_(void) {
 }
 
 /**
- *  @brief  Allocates an empty `Strs` in the fragmented layout. Consolidates the count-zero
- *          initialization otherwise inlined across slicing, splitting, and reordering paths.
- *  @return A new empty `Strs`, or `NULL` with a Python exception set on allocation failure.
+ *  @brief Allocates an empty @c Strs in the fragmented layout. Consolidates the count-zero
+ *      initialization otherwise inlined across slicing, splitting, and reordering paths.
+ *  @return A new empty @c Strs, or @c NULL with a Python exception set on allocation failure.
  */
 Strs *strs_make_empty_fragmented_(void) {
     Strs *result = Strs_alloc_();
@@ -69,11 +70,8 @@ Strs *strs_make_empty_fragmented_(void) {
     return result;
 }
 
-/**
- *  @brief  Helper function to check if a Python object represents a mutable buffer.
- *          Returns sz_true_k if the object is mutable (can be written to), sz_false_k if immutable.
- *          Sets a Python exception if immutable.
- */
+/** Checks if a Python object represents a mutable buffer. Returns @c sz_true_k if the object can
+ *  be written to, and @c sz_false_k with a Python exception set if it is immutable. */
 sz_bool_t sz_py_is_mutable(PyObject *object) {
     if (PyUnicode_Check(object)) {
         PyErr_SetString(PyExc_TypeError, "str objects are immutable (use bytearray instead)");
@@ -95,11 +93,12 @@ sz_bool_t sz_py_is_mutable(PyObject *object) {
 }
 
 /**
- *  @brief  Parses an optional `start`/`end` index argument with CPython slice semantics.
- *          A `NULL` or `None` object yields @p default_index; an out-of-`ssize_t` value is clamped to
- *          the representable range (via `PyNumber_AsSsize_t` with a `NULL` exception) instead of raising;
- *          a non-integer leaves a `TypeError` set.
- *  @return 1 on success (result written to @p result_out), 0 if a Python exception was set.
+ *  @brief Parses an optional @c start or @c end index argument with CPython slice semantics.
+ *  @return 1 with the result written to @p result_out, or 0 with a Python exception set.
+ *
+ *  A @c NULL or @c None object yields @p default_index. A value outside @c ssize_t is clamped to
+ *  the representable range, via @c PyNumber_AsSsize_t with a @c NULL exception, instead of raising.
+ *  A non-integer leaves a @c TypeError set.
  */
 int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, Py_ssize_t *result_out) {
     if (index_obj == NULL || index_obj == Py_None) {
@@ -110,10 +109,8 @@ int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, P
     return !(*result_out == -1 && PyErr_Occurred());
 }
 
-/**
- *  @brief  Helper function to export a Python string-like object into a `sz_string_view_t`.
- *          On failure, sets a Python exception and returns 0.
- */
+/** Helper function to export a Python string-like object into a @c sz_string_view_t. On failure,
+ *  sets a Python exception and returns 0. */
 sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python `str` object
@@ -183,11 +180,8 @@ sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t
     }
 }
 
-/**
- *  @brief  Helper function to wrap the current exception with a custom prefix message.
- *          A example is augmenting the argument parsing error with the name of the variable
- *          that didn't pass the validation.
- */
+/** Helper function to wrap the current exception with a custom prefix message. An example is
+ *  augmenting an argument parsing error with the name of the variable that failed validation. */
 void wrap_current_exception(sz_cptr_t comment) {
     // ? Prior to Python 3.12 we need to fetch and restore the exception state using
     // ? `PyErr_Fetch` and `PyErr_Restore` to avoid overwriting the current exception.

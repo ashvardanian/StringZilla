@@ -1,7 +1,9 @@
 /**
- *  @brief IBM Power VSX backend for find.
  *  @file include/stringzilla/find/powervsx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief IBM Power VSX backend for find.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_POWERVSX_H_
@@ -24,14 +26,14 @@ extern "C" {
 #endif
 
 /**
- *  @brief x86-`movemask`-equivalent for VSX: gathers the MSB of each of the 16 bytes into a
- *         16-bit mask where bit `i` reflects byte `i` (lowest-addressed byte -> bit 0).
+ *  @brief Equivalent of the x86 movemask for VSX: gathers the MSB of each of the 16 bytes into a
+ *      16-bit mask where bit @c i reflects byte @c i, the lowest-addressed byte landing in bit 0.
  *
- *  Implemented with `vec_vbpermq`, which bit-gathers from a source vector using the supplied
+ *  Implemented with @c vec_vbpermq, which bit-gathers from a source vector using the supplied
  *  big-endian bit indices. On little-endian targets the gathered bits land in element `[1]`.
- *  The indices `(15 - i) * 8` select the MSB (bit 7) of byte `i`, yielding an SSE-like ordering.
+ *  The indices `(15 - i) * 8` select the MSB (bit 7) of byte @c i, yielding an SSE-like ordering.
  *
- *  @param cmp_u8x16 A comparison result vector (0xFF where matched, 0x00 otherwise).
+ *  @param[in] cmp_u8x16 A comparison result vector, 0xFF where matched, else 0x00.
  *  @return 64-bit value with low 16 bits forming the movemask.
  */
 SZ_HELPER_INLINE sz_u64_t sz_movemask_powervsx_(__vector unsigned char cmp_u8x16) {

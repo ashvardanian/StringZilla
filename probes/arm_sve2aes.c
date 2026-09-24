@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: SVE2 + AES (Armv9-A crypto), mirroring `include/stringzilla/hash/sve2aes.h` */
+/**
+ *  @file probes/arm_sve2aes.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for SVE2 with AES from the Armv9-A crypto extension.
+ *
+ *  @sa include/stringzilla/hash/sve2aes.h
+ */
 #if defined(_MSC_VER)
 #error "SVE target attributes and intrinsics are unavailable under MSVC"
 #endif

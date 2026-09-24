@@ -1,4 +1,7 @@
 //! AES-256 in counter mode and in Galois/counter mode.
+//!
+//! File: rust/stringzilla/cipher.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
@@ -16,7 +19,7 @@ pub const AES256_TAG_LENGTH: usize = 16;
 /// Round keys in an AES-256 schedule: 15 of them, four 32-bit words each.
 const AES256_ROUND_KEYS: usize = 60;
 
-/// Bytes of Galois hash, or GHASH, subkey powers, holding `H^1` through `H^8` ascending.
+/// Bytes of Galois hash, or GHASH, subkey powers, holding H¹ through H⁸ ascending.
 const AES256_GALOIS_POWERS: usize = 8 * 16;
 
 /// Why an authenticated decryption refused to hand back plaintext.
@@ -41,7 +44,8 @@ pub struct Aes256CtrKey {
     round_keys: [u32; AES256_ROUND_KEYS],
 }
 
-/// Expanded AES-256 schedule plus the Galois hash subkey powers, the construction named AES-256-GCM.
+/// Expanded AES-256 schedule plus the Galois hash subkey powers, the
+/// construction named AES-256-GCM.
 ///
 /// Authentication costs the ability to seek, so this mode transforms whole messages or bounded
 /// chunks in order. Reusing a nonce under one key exposes the hash subkey, from which every message
@@ -74,7 +78,8 @@ struct Aes256GcmState {
     keystream_used: u8,
 }
 
-/// Seals a message delivered in chunks under Galois/counter mode, or GCM, accumulating its tag as it goes.
+/// Seals a message delivered in chunks under Galois/counter mode, or GCM, accumulating its tag
+/// as it goes.
 ///
 /// A chunk boundary is invisible to the result, so any chunking produces the ciphertext and tag a
 /// single [`Aes256GcmKey::encrypt_into`] would.
@@ -85,10 +90,12 @@ pub struct Aes256GcmEncryptor {
     state: Aes256GcmState,
 }
 
-/// Opens a message delivered in chunks under Galois/counter mode, or GCM, accumulating its tag as it goes.
+/// Opens a message delivered in chunks under Galois/counter mode, or GCM, accumulating its tag
+/// as it goes.
 ///
-/// Every emitted byte leaves this type unauthenticated, which is why the methods that emit them say
-/// so in their names. Only [`Aes256GcmDecryptor::verify`] tells the caller whether they were genuine.
+/// Every emitted byte leaves this type unauthenticated, which is why the methods that emit
+/// them say so in their names. Only [`Aes256GcmDecryptor::verify`] tells the caller whether
+/// they were genuine.
 ///
 /// Mirrors `sz_aes256_gcm_decryptor_t`, whose address every call below passes.
 #[repr(C)]
@@ -164,9 +171,9 @@ impl Aes256CtrKey {
 impl Drop for Aes256CtrKey {
     /// Overwrites the schedule so the key does not outlive its use.
     ///
-    /// The write is volatile because a plain assignment is a dead store - nothing reads the schedule
-    /// after this returns, so the optimizer is free to delete it - and the fence stops the zeros from
-    /// sinking past the end of the drop.
+    /// The write is volatile because a plain assignment is a dead store - nothing reads the
+    /// schedule after this returns, so the optimizer is free to delete it - and the fence stops the
+    /// zeros from sinking past the end of the drop.
     fn drop(&mut self) {
         unsafe { core::ptr::write_volatile(self as *mut Self, Self::zeroed()) };
         core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
@@ -349,8 +356,8 @@ impl Aes256GcmState {
 impl Drop for Aes256GcmEncryptor {
     /// Overwrites the payload so a streamed message leaves nothing behind.
     ///
-    /// The embedded key scrubs itself through [`Aes256GcmKey`]'s drop; the rest does not, and 77 bytes
-    /// of tag mask, live keystream and pending hash block survived before this existed.
+    /// The embedded key scrubs itself through [`Aes256GcmKey`]'s drop; the rest does not, and 77
+    /// bytes of tag mask, live keystream and pending hash block survived before this existed.
     fn drop(&mut self) {
         unsafe { core::ptr::write_volatile(&mut self.state as *mut Aes256GcmState, Aes256GcmState::zeroed()) };
         core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
@@ -366,7 +373,8 @@ impl Drop for Aes256GcmDecryptor {
 }
 
 impl Aes256GcmEncryptor {
-    /// Begins a chunked encryption under `key` and `nonce`, copying `key` in so this cannot outlive it.
+    /// Begins a chunked encryption under `key` and `nonce`, copying `key` in so this
+    /// cannot outlive it.
     pub fn new(key: &Aes256GcmKey, nonce: &[u8; AES256_NONCE_LENGTH]) -> Self {
         let mut encryptor = Aes256GcmEncryptor {
             state: Aes256GcmState::zeroed(),
@@ -431,7 +439,8 @@ impl Aes256GcmEncryptor {
 }
 
 impl Aes256GcmDecryptor {
-    /// Begins a chunked decryption under `key` and `nonce`, copying `key` in so this cannot outlive it.
+    /// Begins a chunked decryption under `key` and `nonce`, copying `key` in so this
+    /// cannot outlive it.
     pub fn new(key: &Aes256GcmKey, nonce: &[u8; AES256_NONCE_LENGTH]) -> Self {
         let mut decryptor = Aes256GcmDecryptor {
             state: Aes256GcmState::zeroed(),
@@ -461,7 +470,7 @@ impl Aes256GcmDecryptor {
 
     /// Decrypts one chunk into `output` and folds its ciphertext into the running tag.
     ///
-    /// The emitted bytes are **not authenticated**. Nothing has yet checked that this ciphertext is
+    /// The emitted bytes are __not authenticated__. Nothing has yet checked that this ciphertext is
     /// genuine, so the caller owns that risk: buffer the output until [`Self::verify`] succeeds and
     /// discard it if it does not. A streaming decryption cannot avoid this, which is why the name
     /// says so. Callers who can hold the whole message should use [`Aes256GcmKey::decrypt_into`],
@@ -485,8 +494,9 @@ impl Aes256GcmDecryptor {
 
     /// Decrypts one chunk in place and folds its ciphertext into the running tag.
     ///
-    /// The emitted bytes are **not authenticated**, exactly as in [`Self::decrypt_unverified_into`],
-    /// and in place they also overwrite the ciphertext a failed [`Self::verify`] would have to discard.
+    /// The emitted bytes are __not authenticated__, exactly as in
+    /// [`Self::decrypt_unverified_into`], and in place they also overwrite the ciphertext a failed
+    /// [`Self::verify`] would have to discard.
     pub fn decrypt_unverified_in_place(&mut self, text: &mut [u8]) -> &mut Self {
         let length = text.len();
         let pointer = text.as_mut_ptr() as *mut c_void;
@@ -719,7 +729,8 @@ mod tests {
         let mut whole = vec![0u8; plaintext.len()];
         let whole_tag = key.encrypt_into(&nonce, associated, &plaintext, &mut whole);
 
-        // A chunk boundary must be invisible: the keystream block and the hash block both straddle it.
+        // A chunk boundary must be invisible: the keystream block and the hash block
+        // both straddle it.
         for chunk in [1usize, 7, 15, 16, 17, 64] {
             let mut streamed = vec![0u8; plaintext.len()];
             let mut encryptor = sz::Aes256GcmEncryptor::new(&key, &nonce);
@@ -759,7 +770,8 @@ mod tests {
         assert_eq!(recovered, plaintext);
     }
 
-    /// A dropped encryptor must leave none of its payload behind, which a passing build cannot show.
+    /// A dropped encryptor must leave none of its payload behind, which a passing
+    /// build cannot show.
     ///
     /// The encryptor lives in storage this test owns so the bytes can be read back. Only the named
     /// fields are checked; the six trailing padding bytes are never written by the C core.
@@ -824,8 +836,8 @@ mod tests {
         decryptor.verify(&tag).expect("the genuine tag must verify");
         assert_eq!(opened_in_place, plaintext);
 
-        // A decryptor that never absorbed the header authenticates a shorter message than the sender
-        // sealed, so the same tag must be refused.
+        // A decryptor that never absorbed the header authenticates a shorter message than the
+        // sender sealed, so the same tag must be refused.
         let mut unassociated = ciphertext.clone();
         let mut decryptor = sz::Aes256GcmDecryptor::new(&key, &nonce);
         decryptor.decrypt_unverified_in_place(&mut unassociated);

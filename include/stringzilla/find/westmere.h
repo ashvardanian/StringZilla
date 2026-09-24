@@ -1,7 +1,9 @@
 /**
- *  @brief Westmere (SSE4.2) backend for substring & byte-set search.
  *  @file include/stringzilla/find/westmere.h
  *  @author Ash Vardanian
+ *  @date October 2, 2025
+ *  @brief Westmere (SSE4.2) backend for substring & byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_WESTMERE_H_
@@ -16,11 +18,11 @@ extern "C" {
 #endif
 
 /*  SSE implementation of the string search algorithms for Westmere processors and newer.
- *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation.
- */
+ *  Very minimalistic compared to AVX-512, but still faster than the serial implementation.
+ *
+ *  `bmi,lzcnt` are added only so GCC accepts @c _tzcnt_u32 and @c _lzcnt_u32; without those flags
+ *  both compile down to the legacy @c bsf and @c bsr, which keeps the tier honest. */
 #if SZ_USE_WESTMERE
-// `bmi,lzcnt` are added only so GCC accepts `_tzcnt_u32`/`_lzcnt_u32`; both compile down to the
-// legacy `bsf`/`bsr` encoding on hardware without those flags, so this doesn't misrepresent the tier.
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2,bmi,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)

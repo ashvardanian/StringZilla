@@ -1,11 +1,12 @@
 /**
- *  @brief Window overlap between one prepared batch of queries and many collections of candidates.
  *  @file python/stringzilla/overlap.c
  *  @author Ash Vardanian
+ *  @date January 27, 2024
+ *  @brief Window overlap between one prepared batch of queries and many collections of candidates.
  */
 #include "stringzilla.h"
 
-/** @brief A forest of query trees built once, probed by a fresh collection of candidates each round. */
+/** A forest of query trees built once, probed by a fresh collection of candidates each round. */
 typedef struct {
     PyObject ob_base;
     sz_overlap_engine_t engine; //< Owned; freed in `tp_dealloc`, rebuilt by a second `__init__`.
@@ -16,7 +17,7 @@ typedef struct {
 
 /**
  *  @brief Copies the window widths out of a Python sequence of integers.
- *  @return A `malloc`ed array of @p count widths, or @c NULL with a Python exception set.
+ *  @return An array of @p count widths from @c malloc, or @c NULL with a Python exception set.
  */
 static sz_size_t *parse_window_widths_(PyObject *widths_obj, sz_size_t *count) {
     PyObject *const widths_tuple = PySequence_Tuple(widths_obj);

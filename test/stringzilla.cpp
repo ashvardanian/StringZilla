@@ -1,43 +1,35 @@
 /**
- *  @brief  Test entry point and template instantiations; registers every per-domain unit and driver.
- *  @file   test/stringzilla.cpp
+ *  @file test/stringzilla.cpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date December 21, 2023
+ *  @brief Test entry point and template instantiations; registers every per-domain unit and driver.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development, to validate different ISA-specific backends:
+ *
+ *      #define SZ_USE_WESTMERE 0
+ *      #define SZ_USE_HASWELL 0
+ *      #define SZ_USE_GOLDMONT 0
+ *      #define SZ_USE_SKYLAKE 0
+ *      #define SZ_USE_ICELAKE 0
+ *      #define SZ_USE_NEON 0
+ *      #define SZ_USE_SVE 0
+ *      #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Include the StringZilla headers before anything else, to intercept missing @c #include
+ *  directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -73,10 +65,8 @@ using sz::literals::operator""_bs; // for `sz::byteset_t`
 
 using namespace std::literals; // for ""sv
 
-/**
- *  Instantiate all the templates to make the symbols visible and also check
- *  for weird compilation errors on uncommon paths.
- */
+/*  Instantiate all the templates to make the symbols visible and also check for weird compilation
+ *  errors on uncommon paths. */
 template class std::basic_string_view<char>;
 template class sz::basic_string_slice<char>;
 template class std::basic_string<char>;

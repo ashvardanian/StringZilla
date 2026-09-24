@@ -1,8 +1,8 @@
 /**
- *  @brief  AES-256 counter and Galois/counter mode known-answer, safety, and equivalence tests.
- *  @file   test/cipher.cpp
+ *  @file test/cipher.cpp
  *  @author Ash Vardanian
  *  @date August 3, 2026
+ *  @brief AES-256 counter and Galois/counter mode known-answer, safety, and equivalence tests.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -15,10 +15,8 @@
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Make sure to include the StringZilla headers before anything else, to intercept missing
+ *  `#include` directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -33,7 +31,7 @@ using namespace sz::test;
 
 #pragma region Helpers
 
-/** @brief Decodes a hexadecimal literal into bytes, returning how many were written. */
+/** Decodes a hexadecimal literal into bytes, returning how many were written. */
 static std::size_t bytes_from_hex_(char const *hex, sz_u8_t *output) noexcept {
     auto nibble = [](char character) -> sz_u8_t {
         return (sz_u8_t)(character <= '9' ? character - '0' : (character | 32) - 'a' + 10);
@@ -44,7 +42,7 @@ static std::size_t bytes_from_hex_(char const *hex, sz_u8_t *output) noexcept {
     return written;
 }
 
-/** @brief One published Galois/counter mode vector, spelled out rather than derived from any backend. */
+/** One published Galois/counter mode vector, spelled out rather than derived from any backend. */
 struct known_gcm_t {
     char const *key_hex;
     char const *nonce_hex;
@@ -56,10 +54,10 @@ struct known_gcm_t {
 
 /**
  *  @brief Cases 13 through 16 of McGrew and Viega's Galois/counter mode note, the ones NIST's own
- *         validation suite is built from.
+ *      validation suite is built from.
  *
- *  Values longer than a line are split into adjacent literals at 32-byte boundaries, so the formatter
- *  has no reason to re-break them somewhere less readable.
+ *  Values longer than a line are split into adjacent literals at 32-byte boundaries, so the
+ *  formatter has no reason to re-break them somewhere less readable.
  */
 static known_gcm_t const known_gcm_vectors_[] = {
     // Empty message, empty associated data.
@@ -100,9 +98,10 @@ static known_gcm_t const known_gcm_vectors_[] = {
  *  @brief NIST SP 800-38A F.5.5, the AES-256 counter mode encryption vector.
  *
  *  That vector names a full 128-bit initial counter block incremented across its whole width, while
- *  `sz_aes256_ctr_xor` builds its counter from a twelve-byte nonce and a 32-bit block index starting at
- *  zero. The two coincide exactly when the stream is entered at the block index the published counter
- *  spells out, which is what the byte offset reaches, and the low 32 bits carry nowhere across four blocks.
+ *  @c sz_aes256_ctr_xor builds its counter from a twelve-byte nonce and a 32-bit block index
+ *  starting at zero. The two coincide exactly when the stream is entered at the block index the
+ *  published counter spells out, which is what the byte offset reaches, and the low 32 bits carry
+ *  nowhere across four blocks.
  */
 struct known_ctr_t {
     char const *key_hex;
@@ -126,14 +125,14 @@ static known_ctr_t const known_ctr_vectors_[] = {
      "dfc9c58db67aada613c2dd08457941a6"},
 };
 
-/** @brief One counter-mode backend, named so a failing check can say which one disagreed. */
+/** One counter-mode backend, named so a failing check can say which one disagreed. */
 struct ctr_backend_t {
     char const *name;
     sz_aes256_key_init_t key_init;
     sz_aes256_ctr_xor_t xor_bytes;
 };
 
-/** @brief One authenticated backend, one-shot and streaming kernels alike. */
+/** One authenticated backend, one-shot and streaming kernels alike. */
 struct gcm_backend_t {
     char const *name;
     sz_aes256_gcm_key_init_t key_init;
@@ -152,8 +151,8 @@ struct gcm_backend_t {
 /**
  *  @brief Every counter-mode backend compiled into this translation unit, dispatched first.
  *
- *  The dispatched entry points lead, because a published vector has to reach whatever the dispatcher
- *  picks as well as each kernel named outright.
+ *  The dispatched entry points lead, because a published vector has to reach whatever the
+ *  dispatcher picks as well as each kernel named outright.
  */
 static ctr_backend_t const ctr_backends[] = {
     {"dispatched", sz_aes256_key_init, sz_aes256_ctr_xor},
@@ -184,7 +183,7 @@ static ctr_backend_t const ctr_backends[] = {
 #endif
 };
 
-/** @brief Every authenticated backend compiled into this translation unit, dispatched first. */
+/** Every authenticated backend compiled into this translation unit, dispatched first. */
 static gcm_backend_t const gcm_backends[] = {
     {"dispatched", sz_aes256_gcm_key_init, sz_aes256_gcm_encrypt, sz_aes256_gcm_decrypt, sz_aes256_gcm_encryptor_init,
      sz_aes256_gcm_encryptor_associate, sz_aes256_gcm_encryptor_update, sz_aes256_gcm_encryptor_digest,
@@ -253,11 +252,11 @@ static gcm_backend_t const gcm_backends[] = {
 #endif
 };
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
-/** @brief Checks one counter-mode backend against a published vector, seeking to its block index. */
+/** Checks one counter-mode backend against a published vector, seeking to its block index. */
 static void check_ctr_unit_(ctr_backend_t const &backend, known_ctr_t const &vector) {
     sz_u8_t secret[32], nonce[12];
     std::vector<sz_u8_t> plaintext(64), expected(64), produced(64), recovered(64);
@@ -280,7 +279,7 @@ static void check_ctr_unit_(ctr_backend_t const &backend, known_ctr_t const &vec
         fail_backend_(backend.name, "counter mode did not recover its own plaintext");
 }
 
-/** @brief Checks one authenticated backend against a published vector, both directions and a forged tag. */
+/** Checks one authenticated backend on a published vector, both directions and a forged tag. */
 static void check_gcm_unit_(gcm_backend_t const &backend, known_gcm_t const &vector) {
     sz_u8_t secret[32], nonce[12], associated[64], expected_tag[16], produced_tag[16];
     std::vector<sz_u8_t> plaintext(256), expected(256), produced(256), recovered(256);
@@ -321,10 +320,10 @@ static void check_gcm_unit_(gcm_backend_t const &backend, known_gcm_t const &vec
  *  @brief Checks every compiled kernel against literal expectations only.
  *
  *  The counter-mode vector is NIST SP 800-38A F.5.5 and the four authenticated vectors are cases 13
- *  through 16 of McGrew and Viega's Galois/counter mode note, the ones NIST's own validation suite is
- *  built from. Nothing here is derived by calling another backend, so a shared mistake cannot hide.
- *  Every vector reaches the dispatched entry point, the serial kernel, and each per-ISA kernel in turn,
- *  because agreement between backends is blind to a mistake all of them share.
+ *  through 16 of McGrew and Viega's Galois/counter mode note, the ones NIST's own validation suite
+ *  is built from. Nothing here is derived by calling another backend, so a shared mistake cannot
+ *  hide. Every vector reaches the dispatched entry point, the serial kernel, and each per-ISA
+ *  kernel in turn, because agreement between backends is blind to a mistake all of them share.
  */
 void test_cipher_unit() {
 
@@ -335,15 +334,15 @@ void test_cipher_unit() {
         for (known_gcm_t const &vector : known_gcm_vectors_) check_gcm_unit_(backend, vector);
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
 /**
  *  @brief Cross-checks a counter-mode backend against a reference across lengths and seek offsets.
  *
- *  Seeking is the whole reason counter mode is exposed separately, so every offset is compared against
- *  the same bytes taken from a from-zero encryption rather than only against the reference backend.
+ *  Seeking is the whole reason counter mode is exposed separately, so every offset is compared
+ *  against the same bytes taken from a from-zero encryption, not just the reference backend.
  */
 void check_ctr_equivalence_(ctr_backend_t const &reference, ctr_backend_t const &candidate, sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12];
@@ -389,11 +388,11 @@ void check_ctr_equivalence_(ctr_backend_t const &reference, ctr_backend_t const 
 
 /**
  *  @brief Cross-checks an authenticated backend against a reference, one-shot and in chunks.
- *  @param inputs The longest message fuzzed, inclusive.
+ *  @param[in] inputs The longest message fuzzed, inclusive.
  *
- *  Also asserts the aliasing permission the header grants, which holds independently of any reference:
- *  passing one pointer for both sides reaches the bytes and the tag two pointers would, and a rejected
- *  tag still clears the buffer it was handed.
+ *  Also asserts the aliasing permission the header grants, which holds independently of any
+ *  reference: passing one pointer for both sides reaches the bytes and the tag two pointers would,
+ *  and a rejected tag still clears the buffer it was handed.
  */
 void check_gcm_equivalence_(gcm_backend_t const &reference, gcm_backend_t const &candidate, sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12], reference_tag[16], candidate_tag[16];
@@ -530,16 +529,16 @@ void check_gcm_equivalence_(gcm_backend_t const &reference, gcm_backend_t const 
     }
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Drivers
 
 /**
  *  @brief Confirms the kernels stay inside their buffers when transforming in place.
  *
- *  Counter mode and Galois/counter mode both permit the output pointer to equal the input pointer, and
- *  both must leave the bytes on either side of the buffer untouched. Whether the bytes they write are
- *  the right ones is the unit tier's question, not this one's.
+ *  Counter mode and Galois/counter mode both permit the output pointer to equal the input pointer,
+ *  and both must leave the bytes on either side of the buffer untouched. Whether the bytes they
+ *  write are the right ones is the unit tier's question, not this one's.
  */
 void test_cipher_safety() {
     sz_u8_t secret[32], nonce[12], tag[16];
@@ -575,7 +574,7 @@ void test_cipher_safety() {
     }
 }
 
-/** @brief Drives the serial-versus-SIMD differential across every cipher backend compiled here. */
+/** Drives the serial-versus-SIMD differential across every cipher backend compiled here. */
 void test_cipher_all() {
 
     // Each length sweeps a fresh buffer, so the work grows with the square of the count.
@@ -589,4 +588,4 @@ void test_cipher_all() {
     for (gcm_backend_t const &candidate : gcm_backends) check_gcm_equivalence_(gcm_reference, candidate, cipher_inputs);
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

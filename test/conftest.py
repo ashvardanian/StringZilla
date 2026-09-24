@@ -4,6 +4,10 @@ Shared pytest configuration for the StringZilla per-family test modules.
 Hosts the session-wide environment banner and the QEMU capability mask so every split test file
 (string.py, find.py, utf8_wordbreaks.py, …) inherits them without importing anything. The
 seeded-RNG helpers and `SEED_VALUES` live in `test.sz_helpers` and are imported by each module directly.
+
+File: test/conftest.py
+Author: Ash Vardanian
+Date: August 30, 2025
 """
 
 import os
@@ -78,9 +82,9 @@ def log_test_environment():
     print()  # New line for better readability
 
 
-# Unicode property tables and conformance corpora shared across the segmentation families. Session-scoped
-# so each file is downloaded and parsed once, every consumer skips uniformly when the data is unreachable,
-# and no test body reaches for the network from inside a `pytest-run-parallel` thread.
+# Unicode property tables and conformance corpora shared across the segmentation families,
+# session-scoped so each file is downloaded and parsed once. Every consumer skips uniformly when the
+# data is unreachable, and no test body touches the network from a `pytest-run-parallel` thread.
 @pytest.fixture(scope="session")
 def grapheme_break_props():
     try:

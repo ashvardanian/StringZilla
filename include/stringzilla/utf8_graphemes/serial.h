@@ -1,7 +1,8 @@
 /**
- *  @brief Serial backend for UAX-29 grapheme cluster boundaries.
  *  @file include/stringzilla/utf8_graphemes/serial.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Serial backend for UAX-29 grapheme cluster boundaries.
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_SERIAL_H_
 #define STRINGZILLA_UTF8_GRAPHEMES_SERIAL_H_
@@ -16,7 +17,8 @@ extern "C" {
 
 #pragma region UAX 29 Grapheme Cluster Boundaries
 
-/** @brief Returns the packed Grapheme_Cluster_Break descriptor (gcb | incb << 4 | extpict << 6) for a codepoint. */
+/** Returns the packed Grapheme_Cluster_Break descriptor, `gcb | incb << 4 | extpict << 6`,
+ *  for a codepoint. */
 SZ_API_COMPTIME sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
     if (rune >= 0xAC00u && rune <= 0xD7A3u)
         return ((rune - 0xAC00u) % 28u == 0u) ? (sz_u8_t)(sz_grapheme_break_hangul_lv_k)
@@ -34,11 +36,13 @@ SZ_API_COMPTIME sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
 }
 
 /**
- *  @brief Start offset of the codepoint after @p position: the next non-continuation byte, or @p length.
- *         Mirrors the SIMD `sz_utf8_rune_decode_window_` codepoint-start convention (every loaded
- *         non-continuation byte begins a codepoint) so the serial and Ice Lake backends step over malformed
- *         input identically. Stepping by the lead's declared byte length would skip past trailing
- *         non-continuation bytes of a truncated lead, diverging from the window decoder.
+ *  @brief Start offset of the codepoint after @p position: the next non-continuation byte,
+ *      or @p length.
+ *
+ *  Mirrors the SIMD @c sz_utf8_rune_decode_window_ codepoint-start convention, where every loaded
+ *  non-continuation byte begins a codepoint, so the serial and Ice Lake backends step over
+ *  malformed input identically. Stepping by the lead's declared byte length would skip past
+ *  trailing non-continuation bytes of a truncated lead, diverging from the window decoder.
  */
 SZ_HELPER_AUTO sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_size_t next = position + 1;
@@ -47,16 +51,17 @@ SZ_HELPER_AUTO sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t
 }
 
 /**
- *  @brief Grapheme_Cluster_Break descriptor of the codepoint starting at @p start, decoded BLINDLY to mirror the
- *         Ice Lake `sz_grapheme_classify_window_` value reconstruction byte-for-byte, dispatching on the value.
+ *  @brief Grapheme_Cluster_Break descriptor of the codepoint starting at @p start, decoded blindly
+ *      to mirror the Ice Lake @c sz_grapheme_classify_window_ value reconstruction byte-for-byte.
  *
- *         The lead's strict length class selects the fold width — ASCII `< 0x80` stays the raw byte, 3-byte
- *         `1110xxxx` and 4-byte `11110xxx` use their reconstruction, and EVERY other non-ASCII lead (2-byte
- *         `110xxxxx`, stray `0xF8..0xFF`, isolated `0xC0/0xC1`) folds through the 2-byte formula exactly as the
- *         SIMD window does. No continuation / overlong / surrogate validation and no U+FFFD substitution: the
- *         class is dispatched on the decoded VALUE so the serial and Ice Lake backends agree bit-for-bit on
- *         ill-formed input (UAX-29 leaves such bytes undefined). Valid UTF-8 decodes identically to the checked
- *         path; only malformed input differs, by design.
+ *  Dispatches on the value. The lead's strict length class selects the fold width: ASCII `< 0x80`
+ *  stays the raw byte, 3-byte @c 1110xxxx and 4-byte @c 11110xxx use their reconstruction, and
+ *  every other non-ASCII lead, whether a 2-byte @c 110xxxxx, a stray `0xF8..0xFF`, or an isolated
+ *  @c 0xC0 or @c 0xC1, folds through the 2-byte formula exactly as the SIMD window does. There is
+ *  no continuation, overlong, or surrogate validation and no U+FFFD substitution: the class is
+ *  dispatched on the decoded value so the serial and Ice Lake backends agree bit-for-bit on
+ *  ill-formed input, which UAX-29 leaves undefined. Valid UTF-8 decodes identically to the checked
+ *  path; only malformed input differs, by design.
  */
 SZ_HELPER_INLINE sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
@@ -90,22 +95,24 @@ SZ_HELPER_INLINE sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_
     return sz_rune_grapheme_break_property(rune);
 }
 
-/** @brief Extracts the Grapheme_Cluster_Break class (bits 0-3) from a packed descriptor. */
+/** Extracts the Grapheme_Cluster_Break class, bits 0-3, from a packed descriptor. */
 SZ_HELPER_INLINE sz_u8_t sz_grapheme_break_descriptor_gcb_(sz_u8_t descriptor) { return (sz_u8_t)(descriptor & 0x0Fu); }
-/** @brief Extracts the Indic_Conjunct_Break value (bits 4-5) from a packed descriptor. */
+
+/** Extracts the Indic_Conjunct_Break value, bits 4-5, from a packed descriptor. */
 SZ_HELPER_INLINE sz_u8_t sz_grapheme_break_descriptor_incb_(sz_u8_t descriptor) {
     return (sz_u8_t)((descriptor >> 4) & 0x03u);
 }
-/** @brief Extracts the Extended_Pictographic flag (bit 6) from a packed descriptor. */
+
+/** Extracts the Extended_Pictographic flag, bit 6, from a packed descriptor. */
 SZ_HELPER_INLINE sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_t descriptor) {
     return (sz_bool_t)((descriptor >> 6) & 1u);
 }
 
 /**
- *  @brief Check if `position` is a grapheme cluster boundary per Unicode TR29 (GB1-GB999, incl. GB9c and GB11).
+ *  @brief Checks whether @p position is a TR29 grapheme boundary, GB1-GB999 with GB9c and GB11.
  *
- *  Nothing in the library calls this: the segmenters run a streaming state machine instead. It is the
- *  independent second opinion the tests measure that machine against.
+ *  Nothing in the library calls this: the segmenters run a streaming state machine instead. It is
+ *  the independent second opinion the tests measure that machine against.
  */
 SZ_API_COMPTIME sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // GB1
@@ -113,9 +120,10 @@ SZ_API_COMPTIME sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz
     if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
 
     sz_size_t before_start = sz_utf8_previous_rune_start_(text, position);
-    // When `prev_start` lands on an orphan continuation byte there is no real codepoint before `position`: the SIMD
-    // window excludes continuation bytes from `codepoint_starts`, so the codepoint at `position` is the FIRST real
-    // codepoint with no left context and the leading orphan bytes form their own cluster. Force a boundary to match.
+    // When `prev_start` lands on an orphan continuation byte there is no real codepoint before
+    // `position`: the SIMD window excludes continuation bytes from `codepoint_starts`, so the
+    // codepoint at `position` is the first real codepoint with no left context and the leading
+    // orphan bytes form their own cluster. Force a boundary to match.
     if (((sz_u8_t)text[before_start] & 0xC0u) == 0x80u) return sz_true_k;
     sz_u8_t before_descriptor = sz_grapheme_break_property_at_(text, length, before_start);
     sz_u8_t after_descriptor = sz_grapheme_break_property_at_(text, length, position);
@@ -208,21 +216,32 @@ SZ_API_COMPTIME sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz
     return sz_true_k; // GB999
 }
 
-/**
- *  @brief Forward run-state carried across codepoints by the bulk segmenter, so the GB9c / GB11 / GB12-13
- *         unbounded runs resolve in O(1) per codepoint instead of a backward re-walk (the scalar twin of the
- *         Ice Lake register carry).
- */
+/** Forward run-state carried across codepoints by the bulk segmenter, so the GB9c, GB11, and
+ *  GB12-13 unbounded runs resolve in O(1) per codepoint instead of a backward re-walk: the
+ *  scalar twin of the Ice Lake register carry. */
 typedef struct sz_grapheme_serial_state_t {
-    sz_u8_t previous_descriptor;           // packed descriptor of the previous codepoint
-    sz_bool_t regional_indicator_run_odd;  // RI run ending at the previous codepoint has odd length
-    sz_bool_t extended_pictographic_run;   // previous codepoint continues an (ExtPict Extend*) run
-    sz_bool_t zero_width_joiner_connector; // previous codepoint is a ZWJ closing an ExtPict run
-    sz_bool_t indic_conjunct_open;         // a Consonant-rooted InCB run is open at the previous codepoint
-    sz_bool_t indic_conjunct_seen_linker;  // ... and a Linker has appeared in that open run
+
+    /** Packed descriptor of the previous codepoint. */
+    sz_u8_t previous_descriptor;
+
+    /** The RI run ending at the previous codepoint has odd length. */
+    sz_bool_t regional_indicator_run_odd;
+
+    /** The previous codepoint continues an (ExtPict Extend*) run. */
+    sz_bool_t extended_pictographic_run;
+
+    /** The previous codepoint is a ZWJ closing an ExtPict run. */
+    sz_bool_t zero_width_joiner_connector;
+
+    /** A Consonant-rooted InCB run is open at the previous codepoint. */
+    sz_bool_t indic_conjunct_open;
+
+    /** A Linker has appeared in that open InCB run. */
+    sz_bool_t indic_conjunct_seen_linker;
 } sz_grapheme_serial_state_t;
 
-/** @brief Boundary decision between @p state's previous codepoint and the @p after codepoint, GB3..GB13 in O(1). */
+/** Boundary decision between @p state's previous codepoint and the @p after codepoint,
+ *  GB3..GB13 in O(1). */
 SZ_HELPER_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
     sz_u8_t const before_class = sz_grapheme_break_descriptor_gcb_(state->previous_descriptor);
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
@@ -259,7 +278,8 @@ SZ_HELPER_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state
     return sz_true_k; // GB999
 }
 
-/** @brief Advance @p state by the @p after codepoint: toggle/close the RI, ExtPict-ZWJ and InCB runs. */
+/** Advances @p state by the @p after codepoint, toggling or closing the RI, ExtPict-ZWJ,
+ *  and InCB runs. */
 SZ_HELPER_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     state->regional_indicator_run_odd = (after_class == sz_grapheme_break_regional_indicator_k)
@@ -298,11 +318,10 @@ SZ_HELPER_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *st
     state->previous_descriptor = after;
 }
 
-/**
- *  @brief Plural UAX-29 grapheme cluster segmentation: ONE forward sweep emits every cluster into parallel
- *         `cluster_starts` / `cluster_lengths`, carrying the GB9c/GB11/GB12-13 runs in a register state (O(n), no
- *         backward re-walks). Byte-identical to the per-position `sz_utf8_is_grapheme_boundary_serial`.
- */
+/** Plural UAX-29 grapheme cluster segmentation: one forward sweep emits every cluster into
+ *  parallel @p cluster_starts and @p cluster_lengths, carrying the GB9c, GB11, and GB12-13
+ *  runs in a register state, O(n) with no backward re-walks. Byte-identical to the
+ *  per-position @c sz_utf8_is_grapheme_boundary_serial. */
 SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_serial(        //
     sz_cptr_t text, sz_size_t length,                      //
     sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
@@ -361,9 +380,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_serial(        //
 
 #pragma region Portable grapheme boundary algebra
 
-/** @brief  Largest byte prefix of a FULL decode window whose multi-byte leads are entirely loaded: the first
- *          2-/3-/4-byte start whose declared span crosses the window edge defers to the next window. Shared u64
- *          mask math for the windowed ISA fronts (short final windows keep everything - their neighbours read 0). */
+/** Largest byte prefix of a full decode window whose multi-byte leads are entirely loaded: the
+ *  first 2-, 3-, or 4-byte start whose declared span crosses the window edge defers to the next
+ *  window. Shared u64 mask math for the windowed ISA fronts; short final windows keep
+ *  everything, as their neighbours read 0. */
 SZ_HELPER_INLINE sz_size_t sz_grapheme_byte_span_serial_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
                                                          sz_u64_t four_byte_starts, sz_size_t loaded) {
     sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
@@ -372,17 +392,18 @@ SZ_HELPER_INLINE sz_size_t sz_grapheme_byte_span_serial_(sz_u64_t two_byte_start
     return overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
 }
 
-/** @brief  Precomputed routing masks for the Hacker's-Delight bit-compress network — the BMI2-free `pext`/`pdep`.
- *          shared by every back-end without
- *          hardware bit-permutes: one grapheme window applies the @b same `start_lanes` selector to 18 class
- *          masks plus the boundary scatter, so the six routing masks are built once and reused, and the
- *          apply stays branchless and constant-time. Bit-exact with BMI2. */
+/** Precomputed routing masks for the Hacker's Delight bit-compress network, the BMI2-free
+ *  @c pext and @c pdep shared by every backend without hardware bit-permutes. One grapheme
+ *  window applies the same @c start_lanes selector to 18 class masks plus the boundary scatter,
+ *  so the six routing masks are built once and reused, and the apply stays branchless and
+ *  constant-time. Bit-exact with BMI2. */
 typedef struct sz_grapheme_bit_route_t {
     sz_u64_t selector;
     sz_u64_t move_masks[6];
 } sz_grapheme_bit_route_t;
 
-/** @brief  Build the per-selector routing plan once; reuse it for every gather/scatter sharing this @p selector. */
+/** Builds the per-selector routing plan once; reuse it for every gather or scatter sharing
+ *  this @p selector. */
 SZ_HELPER_AUTO sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_u64_t selector) {
     sz_grapheme_bit_route_t route;
     route.selector = selector;
@@ -403,7 +424,8 @@ SZ_HELPER_AUTO sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_u64_t sel
     return route;
 }
 
-/** @brief  `pext` via a precomputed @p route: gather the bits of @p value at the selector positions to the low end. */
+/** A @c pext via a precomputed @p route: gathers the bits of @p value at the selector positions
+ *  to the low end. */
 SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
     value &= route->selector;
     for (int step = 0; step < 6; ++step) {
@@ -413,7 +435,8 @@ SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grapheme_bit_
     return value;
 }
 
-/** @brief  `pdep` via a precomputed @p route: scatter the low bits of @p value into the selector positions. */
+/** A @c pdep via a precomputed @p route: scatters the low bits of @p value into
+ *  the selector positions. */
 SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_scatter_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
     for (int step = 5; step >= 0; --step) {
         sz_u64_t const movable_value = value << (1u << step);
@@ -422,21 +445,35 @@ SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_scatter_(sz_u64_t value, sz_grapheme_bit
     return value & route->selector;
 }
 
-/**
- *  @brief  Cross-window left-context carry: the situation just AFTER the previous window's last codepoint, so this
- *          window's codepoint 0 sees an exact (i-1) context for all of GB3..GB13. ISA-independent.
- */
+/** Cross-window left-context carry: the situation just after the previous window's
+ *  last codepoint, so this window's codepoint 0 sees an exact (i-1) context for all
+ *  of GB3..GB13. ISA-independent. */
 typedef struct sz_grapheme_carry_t {
-    int has_previous;                /**< Stream has emitted at least one codepoint already. */
-    sz_u64_t previous_class_bit[14]; /**< Bit 0 set => the previous codepoint had that gcb class. */
-    int regional_indicator_run_odd;  /**< RI run ending at the previous codepoint has odd inclusive length. */
-    int extended_pictographic_run;   /**< Previous codepoint tails an (ExtPict Extend*) chain. */
-    int zero_width_joiner_connector; /**< Previous codepoint is a ZWJ closing an (ExtPict Extend*) run. */
-    int indic_conjunct_open;         /**< An InCB run rooted at a Consonant is open at the previous cp. */
-    int indic_conjunct_seen_linker;  /**< ... and a Linker has appeared in that open run. */
+
+    /** The stream has emitted at least one codepoint already. */
+    int has_previous;
+
+    /** Bit 0 set → the previous codepoint had that gcb class. */
+    sz_u64_t previous_class_bit[14];
+
+    /** The RI run ending at the previous codepoint has odd inclusive length. */
+    int regional_indicator_run_odd;
+
+    /** The previous codepoint tails an (ExtPict Extend*) chain. */
+    int extended_pictographic_run;
+
+    /** The previous codepoint is a ZWJ closing an (ExtPict Extend*) run. */
+    int zero_width_joiner_connector;
+
+    /** An InCB run rooted at a Consonant is open at the previous codepoint. */
+    int indic_conjunct_open;
+
+    /** A Linker has appeared in that open InCB run. */
+    int indic_conjunct_seen_linker;
 } sz_grapheme_carry_t;
 
-/** @brief  A zero-initialized cross-window carry (stream start: no previous codepoint, no open runs). */
+/** A zero-initialized cross-window carry for the stream start: no previous codepoint,
+ *  no open runs. */
 SZ_HELPER_AUTO sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
     sz_grapheme_carry_t carry;
     carry.has_previous = 0;
@@ -449,18 +486,24 @@ SZ_HELPER_AUTO sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
     return carry;
 }
 
-/** @brief  Per-window class membership masks derived once from the codepoint-dense packed descriptor bytes. */
+/** Per-window class membership masks derived once from the codepoint-dense
+ *  packed descriptor bytes. */
 typedef struct sz_grapheme_window_masks_t {
-    sz_u64_t class_bit[14]; /**< `class_bit[c]` bit i set => dense codepoint i is grapheme class c. */
+
+    /** Bit i of `class_bit[c]` set → dense codepoint i is grapheme class c. */
+    sz_u64_t class_bit[14];
+
     sz_u64_t extended_pictographic;
     sz_u64_t indic_consonant, indic_extend, indic_linker;
 } sz_grapheme_window_masks_t;
 
 /**
- *  @brief  The three unbounded run-carries (GB12/13 RI parity, GB11 ExtPict-ZWJ, GB9c InCB), computed once from this
- *          window's masks and the inbound carry. Returns their join-mask contribution and updates @p next for the
- *          following window. Bit i of the result set → a no-break suppression sits before dense codepoint i.
- *          ISA-independent: pure `sz_u64_t` bit-mask algebra over the substrate scan primitives.
+ *  @brief The three unbounded run-carries, GB12/13 RI parity, GB11 ExtPict-ZWJ, and GB9c InCB,
+ *      computed once from this window's masks and the inbound carry.
+ *
+ *  Returns their join-mask contribution and updates @p next for the following window. Bit i of the
+ *  result set → a no-break suppression sits before dense codepoint i. ISA-independent: pure
+ *  @c sz_u64_t bit-mask algebra over the substrate scan primitives.
  */
 SZ_HELPER_AUTO sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t const *window, int codepoint_count,
                                                     sz_grapheme_carry_t const *previous, sz_grapheme_carry_t *next) {
@@ -471,15 +514,17 @@ SZ_HELPER_AUTO sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t c
     sz_u64_t const last_bit = (codepoint_count > 0) ? (1ull << last) : 0;
     sz_u64_t join = 0;
 
-    // GB12/13: no-break before a Regional_Indicator that is an EVEN member of its maximal run. A segmented XOR parity
-    // scan over the run computes membership; the run is seeded from the inbound carry's RI parity. Skipped wholesale
-    // when the window holds no Regional_Indicator (the overwhelmingly common case).
+    // GB12/13: no-break before a Regional_Indicator that is an even member of its maximal run. A
+    // segmented XOR parity scan over the run computes membership; the run is seeded from the
+    // inbound carry's RI parity. Skipped wholesale when the window holds no Regional_Indicator (the
+    // overwhelmingly common case).
     if (regional) {
         sz_u64_t const previous_ri = (regional << 1) |
                                      (previous->previous_class_bit[sz_grapheme_break_regional_indicator_k] & 1ull);
         sz_u64_t const starts = regional & ~previous_ri;
-        // Seed lane 0 from the inbound run parity, branchless: a lane-0 RI that is NOT a fresh run start continues a
-        // previous-window run, so XOR in the carried odd-parity bit. Then a segmented XOR-parity scan over the run.
+        // Seed lane 0 from the inbound run parity, branchless: a lane-0 RI that is not a fresh run
+        // start continues a previous-window run, so XOR in the carried odd-parity bit. Then a
+        // segmented XOR-parity scan over the run.
         sz_u64_t const seed = regional ^
                               (regional & ~starts & 1ull & (sz_u64_t)(previous->regional_indicator_run_odd & 1));
         sz_u64_t const parity = sz_u64_segmented_parity_(seed, regional & ~starts);
@@ -534,19 +579,20 @@ SZ_HELPER_AUTO sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t c
     return join;
 }
 
-/**
- *  @brief  Per-class shift of @p current into the (i-1) position, seeding lane 0 from the inbound carry's last class.
- */
+/** Per-class shift of @p current into the (i-1) position, seeding lane 0 from the inbound
+ *  carry's last class. */
 SZ_HELPER_INLINE sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_carry_t const *previous,
                                                 int class_index) {
     return (current << 1) | (previous->previous_class_bit[class_index] & 1ull);
 }
 
 /**
- *  @brief  Portable boundary-algebra engine: from per-class window masks + the inbound carry, compute the
- *          codepoint-dense boundary bitmask (bit i set → a grapheme break sits before dense codepoint i) and thread
- *          the carry forward. The ISA-independent twin of the icelake fused window-boundaries; a per-ISA extractor
- *          builds @p window from descriptors, then calls this. Pure `sz_u64_t` algebra, no intrinsics.
+ *  @brief Portable boundary-algebra engine: from per-class window masks and the inbound carry,
+ *      computes the codepoint-dense boundary bitmask and threads the carry forward.
+ *
+ *  Bit i of the result set → a grapheme break sits before dense codepoint i. The ISA-independent
+ *  twin of the Ice Lake fused window-boundaries; a per-ISA extractor builds @p window from
+ *  descriptors, then calls this. Pure @c sz_u64_t algebra, no intrinsics.
  */
 SZ_HELPER_INLINE sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_masks_t const *window, int codepoint_count,
                                                          sz_u64_t valid, sz_grapheme_carry_t *carry) {

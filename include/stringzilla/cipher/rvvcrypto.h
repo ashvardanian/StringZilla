@@ -1,10 +1,12 @@
 /**
- *  @brief RISC-V vector-crypto backend for AES-256 in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/rvvcrypto.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief RISC-V vector-crypto backend for AES-256 in counter and Galois/counter modes.
  *
  *  Two vector-crypto extensions carry this backend.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_RVVCRYPTO_H_
 #define STRINGZILLA_CIPHER_RVVCRYPTO_H_
@@ -16,6 +18,11 @@
 extern "C" {
 #endif
 
+/*  @c SZ_USE_RVVCRYPTO turns on for @c Zvkned and @c Zvknhb, the pair @c sz_hash needs, and says
+ *  nothing about @c Zvkg. A target carrying AES but not the Galois hash therefore reaches this
+ *  file, and every hash step below is written against one pair of helpers that resolve to
+ *  `vghsh.vv` and `vgmul.vv` where the extension is present and to the constant-time serial
+ *  reduction where it is not. The AES side is vectorized either way. */
 #if SZ_USE_RVVCRYPTO
 
 #include <riscv_vector.h>
@@ -27,22 +34,16 @@ extern "C" {
 #pragma GCC target("arch=+v,+zvkned,+zvkg")
 #endif
 
-/*  `SZ_USE_RVVCRYPTO` turns on for `Zvkned` and `Zvknhb`, the pair `sz_hash` needs, and says nothing
- *  about `Zvkg`. A target carrying AES but not the Galois hash therefore reaches this file, and every
- *  hash step below is written against one pair of helpers that resolve to `vghsh.vv` and `vgmul.vv`
- *  where the extension is present and to the constant-time serial reduction where it is not. The AES
- *  side is vectorized either way. */
-
 #pragma region Block Element Groups
 
 /**
  *  @brief Loads one 16-byte block into element group zero of a vector register.
- *  @param bytes The 16 bytes, at any alignment.
+ *  @param[in] bytes The 16 bytes, at any alignment.
  *  @return The block, byte zero in the least significant position of the group.
  *
- *  Byte loads rather than word loads because every buffer this backend reads from is a `sz_u8_t` array whose
- *  alignment the caller chooses, and an element-width load may fault on an implementation without the
- *  misaligned-access extension.
+ *  Byte loads rather than word loads because every buffer this backend reads from is a @c sz_u8_t
+ *  array whose alignment the caller chooses, and an element-width load may fault on an
+ *  implementation without the misaligned-access extension.
  */
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_rvvcrypto_(sz_u8_t const *bytes) {
     return __riscv_vreinterpret_v_u8m1_u32m1(__riscv_vle8_v_u8m1(bytes, SZ_AES_BLOCK_LENGTH));
@@ -50,8 +51,8 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_rvvcrypto_(sz_u8_t const *byte
 
 /**
  *  @brief Writes element group zero of a vector register out as 16 bytes.
- *  @param bytes Receives the 16 bytes, at any alignment.
- *  @param block_u32m1 The block to store.
+ *  @param[out] bytes Receives the 16 bytes, at any alignment.
+ *  @param[in] block_u32m1 The block to store.
  */
 SZ_HELPER_INLINE void sz_aes256_block_store_rvvcrypto_(sz_u8_t *bytes, vuint32m1_t block_u32m1) {
     __riscv_vse8_v_u8m1(bytes, __riscv_vreinterpret_v_u32m1_u8m1(block_u32m1), SZ_AES_BLOCK_LENGTH);
@@ -59,9 +60,9 @@ SZ_HELPER_INLINE void sz_aes256_block_store_rvvcrypto_(sz_u8_t *bytes, vuint32m1
 
 /**
  *  @brief Extracts one 128-bit element group from a wide register into element group zero.
- *  @param blocks_u32m4 The wide register.
- *  @param block_ordinal Which element group to take, counting from zero.
- *  @param vector_length Active lanes in @p blocks_u32m4.
+ *  @param[in] blocks_u32m4 The wide register.
+ *  @param[in] block_ordinal Which element group to take, counting from zero.
+ *  @param[in] vector_length Active lanes in @p blocks_u32m4.
  *  @return The requested group, ready for a hash or a store.
  *
  *  A slide keeps the value in registers.
@@ -74,11 +75,12 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_group_extract_rvvcrypto_(vuint32m4_t bloc
 
 /**
  *  @brief Copies the twelve nonce bytes into the leading bytes of a counter block.
- *  @param counter_block Receives the nonce; its trailing index word is left for the caller to write.
- *  @param nonce The twelve nonce bytes.
+ *  @param[out] counter_block Receives the nonce; its trailing index word is left for the
+ *      caller to write.
+ *  @param[in] nonce The twelve nonce bytes.
  *
- *  The destination is a sixteen-byte buffer that a later load reads back, not a register, so this is a
- *  length-limited load paired with a length-limited store.
+ *  The destination is a sixteen-byte buffer that a later load reads back, not a register, so this
+ *  is a length-limited load paired with a length-limited store.
  */
 SZ_HELPER_INLINE void sz_aes256_counter_nonce_store_rvvcrypto_(sz_u8_t *counter_block, sz_u8_t const *nonce) {
     __riscv_vse8_v_u8m1(counter_block, __riscv_vle8_v_u8m1(nonce, 12), 12);
@@ -86,12 +88,12 @@ SZ_HELPER_INLINE void sz_aes256_counter_nonce_store_rvvcrypto_(sz_u8_t *counter_
 
 /**
  *  @brief Loads a partial block zero-padded to the full sixteen bytes.
- *  @param partial The pending bytes.
- *  @param buffered How many of them are live, below sixteen.
+ *  @param[in] partial The pending bytes.
+ *  @param[in] buffered How many of them are live, below sixteen.
  *  @return The block, with everything past @p buffered zero.
  *
- *  A length-limited load reads the live bytes and a merge supplies zeroes above them, so the padding is
- *  implicit and neither a staging buffer nor a byte loop is needed.
+ *  A length-limited load reads the live bytes and a merge supplies zeroes above them, so the
+ *  padding is implicit and neither a staging buffer nor a byte loop is needed.
  */
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_padded_rvvcrypto_(sz_u8_t const *partial, sz_size_t buffered) {
     vuint8m1_t const zeros_u8m1 = __riscv_vmv_v_x_u8m1(0, SZ_AES_BLOCK_LENGTH);
@@ -99,7 +101,7 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_padded_rvvcrypto_(sz_u8_t cons
     return __riscv_vreinterpret_v_u8m1_u32m1(loaded_u8m1);
 }
 
-/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+/** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_rvvcrypto_(sz_u8_t const *first, sz_u8_t const *second) {
     sz_size_t const vector_length = SZ_AES_BLOCK_LENGTH;
     vuint8m1_t const first_u8m1 = __riscv_vle8_v_u8m1(first, vector_length);
@@ -109,16 +111,17 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_rvvcrypto_(sz_u8_t const *first, 
 }
 
 /**
- *  @brief Byte offsets that replicate a 16-byte element group across every group of a wide register.
- *  @param vector_length Active lanes, always a multiple of four.
- *  @return Lane `i` holds `(i mod 4) * 4`, the byte offset of its word within a single block.
+ *  @brief Byte offsets that replicate a 16-byte element group across every group of
+ *      a wide register.
+ *  @param[in] vector_length Active lanes, always a multiple of four.
+ *  @return Lane @c i holds `(i mod 4) * 4`, the byte offset of its word within a single block.
  */
 SZ_HELPER_INLINE vuint32m4_t sz_aes256_broadcast_offsets_rvvcrypto_(sz_size_t vector_length) {
     vuint32m4_t const lane_index_u32m4 = __riscv_vid_v_u32m4(vector_length);
     return __riscv_vsll_vx_u32m4(__riscv_vand_vx_u32m4(lane_index_u32m4, 3, vector_length), 2, vector_length);
 }
 
-#pragma endregion // Block Element Groups
+#pragma endregion Block Element Groups
 
 #pragma region Key Schedule
 
@@ -157,26 +160,25 @@ SZ_API_COMPTIME void sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t 
     __riscv_vse32_v_u32m1(key->round_keys + 56, round_14_u32m1, vector_length);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
+/*  Round keys reach a wide register through an indexed load rather than through the `.vs` forms of
+ *  the AES instructions, which take element group zero of their second operand and apply it to
+ *  every group of the first, and which are the natural spelling for this. GCC 14 lowers `vaesem.vs`
+ *  under a @c vsetvli carrying the LMUL of the key operand instead of the LMUL of the state, so the
+ *  vector length is clamped to one element group and every block past the first leaves the pipeline
+ *  untransformed. Clang lowers the same intrinsic correctly. The indexed load costs one instruction
+ *  per round key, exactly what the unit-stride load feeding a `.vs` form would cost, so nothing is
+ *  given up by staying on the `.vv` forms and both compilers then agree. */
 #pragma region Block Encryption
 
-/*  Round keys reach a wide register through an indexed load rather than through the `.vs` forms of the
- *  AES instructions, which take element group zero of their second operand and apply it to every group
- *  of the first, and which are the natural spelling for this. GCC 14 lowers `vaesem.vs` under a
- *  `vsetvli` carrying the LMUL of the key operand instead of the LMUL of the state, so the vector length
- *  is clamped to one element group and every block past the first leaves the pipeline untransformed.
- *  Clang lowers the same intrinsic correctly. The indexed load costs one instruction per round key,
- *  exactly what the unit-stride load feeding a `.vs` form would cost, so nothing is given up by staying
- *  on the `.vv` forms and both compilers then agree. */
-
-/** @brief Applies one middle round to a single block, reading its round key from the schedule. */
+/** Applies one middle round to a single block, reading its round key from the schedule. */
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_round_rvvcrypto_(vuint32m1_t block_u32m1, sz_u32_t const *round_key,
                                                         sz_size_t vector_length) {
     return __riscv_vaesem_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(round_key, vector_length), vector_length);
 }
 
-/** @brief Applies one middle round to every element group, broadcasting its round key across them. */
+/** Applies one middle round to every element group, broadcasting its round key across them. */
 SZ_HELPER_INLINE vuint32m4_t sz_aes256_round_wide_rvvcrypto_(vuint32m4_t blocks_u32m4, sz_u32_t const *round_key,
                                                              vuint32m4_t broadcast_offsets_u32m4,
                                                              sz_size_t vector_length) {
@@ -186,8 +188,8 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_round_wide_rvvcrypto_(vuint32m4_t blocks_
 
 /**
  *  @brief Encrypts one block held in element group zero.
- *  @param key The expanded schedule.
- *  @param block_u32m1 The 16 plaintext bytes.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block_u32m1 The 16 plaintext bytes.
  *  @return The 16 ciphertext bytes.
  */
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t const *key, vuint32m1_t block_u32m1) {
@@ -215,10 +217,10 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t 
 
 /**
  *  @brief Encrypts every element group of a wide register under one schedule.
- *  @param key The expanded schedule.
- *  @param blocks_u32m4 One plaintext block per element group.
- *  @param broadcast_offsets_u32m4 Offsets from `sz_aes256_broadcast_offsets_rvvcrypto_`.
- *  @param vector_length Active lanes, four per block.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] blocks_u32m4 One plaintext block per element group.
+ *  @param[in] broadcast_offsets_u32m4 Offsets from @c sz_aes256_broadcast_offsets_rvvcrypto_.
+ *  @param[in] vector_length Active lanes, four per block.
  *  @return One ciphertext block per element group.
  */
 SZ_HELPER_INLINE vuint32m4_t sz_aes256_blocks_encrypt_rvvcrypto_(sz_aes256_key_t const *key, vuint32m4_t blocks_u32m4,
@@ -258,16 +260,16 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_blocks_encrypt_rvvcrypto_(sz_aes256_key_t
         vector_length);
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Blocks
 
-/** @brief Reads the big-endian 32-bit block index occupying the last four bytes of a counter block. */
+/** Reads the big-endian 32-bit block index occupying the last four bytes of a counter block. */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_counter_index_load_rvvcrypto_(sz_u8_t const *block) {
     return ((sz_u32_t)block[12] << 24) | ((sz_u32_t)block[13] << 16) | ((sz_u32_t)block[14] << 8) | (sz_u32_t)block[15];
 }
 
-/** @brief Writes the big-endian 32-bit block index into the last four bytes of a counter block. */
+/** Writes the big-endian 32-bit block index into the last four bytes of a counter block. */
 SZ_HELPER_INLINE void sz_aes256_counter_index_store_rvvcrypto_(sz_u8_t *block, sz_u32_t block_index) {
     block[12] = (sz_u8_t)(block_index >> 24);
     block[13] = (sz_u8_t)(block_index >> 16);
@@ -275,7 +277,7 @@ SZ_HELPER_INLINE void sz_aes256_counter_index_store_rvvcrypto_(sz_u8_t *block, s
     block[15] = (sz_u8_t)(block_index >> 0);
 }
 
-/** @brief Reverses the four bytes of every lane, turning a native counter into its big-endian image. */
+/** Reverses the four bytes of every lane, turning a native counter into its big-endian image. */
 SZ_HELPER_INLINE vuint32m4_t sz_u32m4_bytes_reverse_rvvcrypto_(vuint32m4_t value_u32m4, sz_size_t vector_length) {
     vuint32m4_t const highest_u32m4 = __riscv_vsll_vx_u32m4(value_u32m4, 24, vector_length);
     vuint32m4_t const higher_u32m4 = __riscv_vand_vx_u32m4(__riscv_vsll_vx_u32m4(value_u32m4, 8, vector_length),
@@ -289,14 +291,15 @@ SZ_HELPER_INLINE vuint32m4_t sz_u32m4_bytes_reverse_rvvcrypto_(vuint32m4_t value
 
 /**
  *  @brief Builds a run of consecutive counter blocks, one per element group.
- *  @param counter_block Any block carrying the 12 nonce bytes; its own index bytes are ignored.
- *  @param first_index Block index of element group zero; later groups count up and wrap at `2^32`.
- *  @param broadcast_offsets_u32m4 Offsets from `sz_aes256_broadcast_offsets_rvvcrypto_`.
- *  @param vector_length Active lanes, four per block.
+ *  @param[in] counter_block Any block carrying the 12 nonce bytes; its own index bytes are ignored.
+ *  @param[in] first_index Block index of element group zero; later groups count up and
+ *      wrap at 2³².
+ *  @param[in] broadcast_offsets_u32m4 Offsets from @c sz_aes256_broadcast_offsets_rvvcrypto_.
+ *  @param[in] vector_length Active lanes, four per block.
  *  @return The counter blocks, ready to encrypt.
  *
- *  The nonce is identical in every group, so one indexed load replicates it, and only the fourth lane of each
- *  group differs.
+ *  The nonce is identical in every group, so one indexed load replicates it, and only the fourth
+ *  lane of each group differs.
  */
 SZ_HELPER_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const *counter_block, sz_u32_t first_index,
                                                                  vuint32m4_t broadcast_offsets_u32m4,
@@ -316,19 +319,20 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const *
                                     index_lane_b8, vector_length);
 }
 
-#pragma endregion // Counter Blocks
+#pragma endregion Counter Blocks
 
 #pragma region Galois Hashing
 
 /**
  *  @brief Exclusive-ors a block into the running hash and multiplies by the subkey.
- *  @param accumulator_u32m1 The running hash.
- *  @param block_u32m1 The block to absorb.
- *  @param subkey_u32m1 The hash subkey `H`.
+ *  @param[in] accumulator_u32m1 The running hash.
+ *  @param[in] block_u32m1 The block to absorb.
+ *  @param[in] subkey_u32m1 The hash subkey @c H.
  *  @return The updated hash.
  *
- *  `Zvkg` carries the bit reflection GCM is defined over inside the instruction, so the three operands are the
- *  sixteen hash bytes in memory order and no shuffle stands between a load and the multiply.
+ *  @c Zvkg carries the bit reflection GCM is defined over inside the instruction, so the three
+ *  operands are the sixteen hash bytes in memory order and no shuffle stands between a load
+ *  and the multiply.
  */
 SZ_HELPER_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t block_u32m1,
                                                         vuint32m1_t subkey_u32m1) {
@@ -346,8 +350,8 @@ SZ_HELPER_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_
 
 /**
  *  @brief Multiplies the running hash by the subkey without absorbing anything.
- *  @param accumulator_u32m1 The value to multiply.
- *  @param subkey_u32m1 The hash subkey `H`.
+ *  @param[in] accumulator_u32m1 The value to multiply.
+ *  @param[in] subkey_u32m1 The hash subkey @c H.
  *  @return The product.
  */
 SZ_HELPER_INLINE vuint32m1_t sz_ghash_multiply_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t subkey_u32m1) {
@@ -379,7 +383,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Counter Mode
 
@@ -435,17 +439,17 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key, sz_
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Streaming Interface
 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time but the register width is not, so the length-agnostic `vsetvl` idiom
- *  drives the store loop: each iteration asks for as many bytes as the machine will take and the last one
- *  narrows itself, which reaches the end of a 472-byte state without a scalar epilogue and without ever
- *  writing past it.
+ *  The size is known at compile time but the register width is not, so the length-agnostic
+ *  @c vsetvl idiom drives the store loop: each iteration asks for as many bytes as the machine will
+ *  take and the last one narrows itself, which reaches the end of a 472-byte state without a scalar
+ *  epilogue and without ever writing past it.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_rvvcrypto_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *bytes = (sz_u8_t *)state;
@@ -459,7 +463,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_rvvcrypto_(sz_aes256_gcm_state_t
     sz_keep_alive_(state);
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                      sz_u8_t const nonce[sz_at_least_(12)]) {
     vuint32m1_t const zeros_u32m1 = __riscv_vreinterpret_v_u8m1_u32m1(__riscv_vmv_v_x_u8m1(0, SZ_AES_BLOCK_LENGTH));
@@ -484,7 +488,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *stat
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
                                                          sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
@@ -521,10 +525,10 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *
 }
 
 /**
- *  @brief Absorbs whatever `partial` holds, zero padded to a full block, and empties it.
- *  @param state The state, whose `buffered` count is cleared.
- *  @param accumulator_u32m1 The running hash.
- *  @param subkey_u32m1 The hash subkey `H`.
+ *  @brief Absorbs whatever @c partial holds, zero padded to a full block, and empties it.
+ *  @param[inout] state The state, whose @c buffered count is cleared.
+ *  @param[in] accumulator_u32m1 The running hash.
+ *  @param[in] subkey_u32m1 The hash subkey @c H.
  *  @return The updated hash, unchanged when nothing was pending.
  */
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
@@ -539,15 +543,15 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gc
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which buffer the hash absorbs.
  *
- *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may restart at a
- *  chunk boundary, so the wide path opens only where both are already on a block edge and closes the moment
- *  fewer than sixteen bytes remain.
+ *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may
+ *  restart at a chunk boundary, so the wide path opens only where both are already on a block edge
+ *  and closes the moment fewer than sixteen bytes remain.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                          sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -641,8 +645,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
 
 /**
  *  @brief Folds the pending block and the length block into the hash, then masks it into a tag.
- *  @param state The finished state, left untouched.
- *  @param tag Receives the 16 authentication bytes.
+ *  @param[in] state The finished state, left untouched.
+ *  @param[out] tag Receives the 16 authentication bytes.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state,
                                                       sz_u8_t tag[sz_at_least_(16)]) {
@@ -710,7 +714,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_rvvcrypto(sz_aes256_g
     return sz_aes256_tag_equal_rvvcrypto_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -744,7 +748,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t 
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

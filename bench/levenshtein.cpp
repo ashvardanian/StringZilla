@@ -1,31 +1,38 @@
 /**
  *  @file bench/levenshtein.cpp
+ *  @author Ash Vardanian
+ *  @date September 6, 2023
  *  @brief Benchmarks for Levenshtein edit distances under unit costs.
- *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the cross-product engine of
- *         every backend, validating the SIMD-accelerated backends against the serial one.
  *
- *  Compute-bound: Myers' algorithm costs one word-step per query word per candidate byte, so a 64 MiB slice
- *  exercises every path while each call samples only what it needs.
+ *  The program accepts a file path to a dataset, tokenizes it, and benchmarks the cross-product
+ *  engine of every backend, validating the SIMD-accelerated backends against the serial one.
+ *
+ *  Compute-bound: Myers' algorithm costs one word-step per query word per candidate byte, so a 64
+ *  MiB slice exercises every path while each call samples only what it needs.
  *
  *  Three shapes are measured, byte-level and rune-level alike, every candidate at its own length:
- *  - `sz_levenshtein_engine_init_cpu` plus one round over a single pair, which is what a caller scoring one pair
- *    pays: a batch of one, prepared and released around the round;
- *  - `sz_levenshtein_distances` from a prepared batch of queries against the next `STRINGWARS_BATCH` tokens - by
- *    default as many median tokens as fill a 32 KiB L1 - at two query lengths, the slice's median and the 1024
- *    bytes whose match masks fill that L1, on every compiled backend. The batch is prepared once per arm, so what
- *    the arm times is the sweep and not the preparation the engine exists to hoist;
- *  - the exported building blocks one at a time, so the query's preparation, the staging of candidate bytes into
- *    class ids, and the word-steps over those ids each carry a number of their own.
+ *  - @c sz_levenshtein_engine_init_cpu plus one round over a single pair, which is what a caller
+ *    scoring one pair pays: a batch of one, prepared and released around the round;
+ *  - @c sz_levenshtein_distances from a prepared batch of queries against the next
+ *    @c STRINGWARS_BATCH tokens - by default as many median tokens as fill a 32 KiB L1 - at two
+ *    query lengths, the slice's median and the 1024 bytes whose match masks fill that L1, on every
+ *    compiled backend. The batch is prepared once per arm, so what the arm times is the sweep and
+ *    not the preparation the engine exists to hoist;
+ *  - the exported building blocks one at a time, so the query's preparation, the staging of
+ *    candidate bytes into class ids, and the word-steps over those ids each get a number.
  *
- *  Every arm's name carries its query length, as `:q117`.
- *  Throughput is reported as Cell Updates Per Second @b (CUPS): the query's length times the candidates' lengths.
- *  The building blocks count what each of them does instead: query bytes prepared, class ids staged, word-steps
- *  taken - so one arm's ops/s column is read beside the next one's rather than against a shared denominator.
+ *  Every arm's name carries its query length, as `:q117`. Throughput is reported as Cell Updates
+ *  Per Second @b (CUPS): the query's length times the candidates' lengths. The building blocks
+ *  count what each of them does instead: query bytes prepared, class ids staged, word-steps taken -
+ *  so the ops/s column of one arm is read beside the next rather than against a shared denominator.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or an integer [1:200] for N-grams).
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or an integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -34,7 +41,7 @@
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -58,14 +65,14 @@
 
 using namespace ashvardanian::stringzilla::bench;
 
-/** Candidates every step arm advances at once, so every tier answers the same eight scores in the same order. */
+/** Candidates a step arm advances at once, so all tiers answer the same eight scores in order. */
 static constexpr std::size_t levenshtein_step_lanes_k = (std::size_t)sz_levenshtein_serial_u64x1_candidates_per_step_k *
                                                         sz_levenshtein_serial_u64x1_registers_per_position_k;
 
 /** Positions one step arm walks per call, the transpose width the sweeps feed it from. */
 static constexpr std::size_t levenshtein_step_positions_k = sz_levenshtein_positions_per_transpose_k;
 
-/** @brief The first token long enough to fill a @p query_bytes query, clamped to it; the first token otherwise. */
+/** The first token that fills a @p query_bytes query, clamped to it, or else the first token. */
 static std::string_view levenshtein_query_token(environment_t const &env, std::size_t query_bytes) {
     for (token_view_t const token : env.tokens)
         if (token.size() >= query_bytes) return std::string_view(token.data(), query_bytes);
@@ -73,7 +80,7 @@ static std::string_view levenshtein_query_token(environment_t const &env, std::s
     return std::string_view(shortest.data(), shortest.size());
 }
 
-/** @brief Stages @p lanes tokens' first @p positions bytes transposed as class ids, class zero past a token's end. */
+/** Stages @p positions bytes of @p lanes tokens as transposed class ids, zero past token ends. */
 static std::vector<sz_u8_t> levenshtein_staged_classes(environment_t const &env, sz_u8_t const *byte_to_class,
                                                        std::size_t lanes, std::size_t positions) {
     std::vector<sz_u8_t> classes(positions * lanes, 0);
@@ -88,14 +95,20 @@ static std::vector<sz_u8_t> levenshtein_staged_classes(environment_t const &env,
 
 #pragma region One Pair
 
-/** @brief Queries one prepared batch carries, so the sweeps cross a query axis wider than one. */
+/** Queries one prepared batch carries, so the sweeps cross a query axis wider than one. */
 static constexpr std::size_t levenshtein_queries_per_batch_k = 8;
 
-/** @brief One pair per call through a batch of one: the preparation and the round a caller now pays together. */
+/** One pair per call through a batch of one: the preparation and round a caller pays together. */
 struct levenshtein_pair_from_sz {
-    environment_t const &env;       /**< The tokens the pair is drawn from. */
-    std::size_t query_bytes;        /**< Bytes the query is clamped to. */
-    sz_levenshtein_symbol_t symbol; /**< Whether the distance counts bytes or runes. */
+
+    /** The tokens the pair is drawn from. */
+    environment_t const &env;
+
+    /** Bytes the query is clamped to. */
+    std::size_t query_bytes;
+
+    /** Whether the distance counts bytes or runes. */
+    sz_levenshtein_symbol_t symbol;
 
     levenshtein_pair_from_sz(environment_t const &env, std::size_t query_bytes, sz_levenshtein_symbol_t symbol)
         : env(env), query_bytes(query_bytes), symbol(symbol) {}
@@ -120,7 +133,7 @@ struct levenshtein_pair_from_sz {
     }
 };
 
-/** @brief The one-pair shape on the dispatched entry alone, since one pair fills one candidate on every backend. */
+/** One-pair shape on the dispatched entry alone, as one pair fills one candidate on any backend. */
 void bench_levenshtein_one_pair(environment_t const &env, std::size_t query_bytes) {
     std::string const suffix = ":q" + std::to_string(query_bytes);
     bench_unary(env, "sz_levenshtein_distances:pair" + suffix,
@@ -135,16 +148,30 @@ void bench_levenshtein_one_pair(environment_t const &env, std::size_t query_byte
 
 #pragma region Cross Product
 
-/** @brief One batch prepared per arm, scored against the next @c candidates tokens at their own length. */
+/** One batch prepared per arm, scored against the next @c candidates tokens at their own length. */
 template <sz_levenshtein_distances_t function_>
 struct levenshtein_distances_from_sz {
-    environment_t const &env;                  /**< The tokens the queries and candidates are drawn from. */
-    std::size_t query_bytes;                   /**< Bytes every query is clamped to. */
-    std::size_t candidates;                    /**< Candidates one round scores, which is also the row stride. */
-    std::vector<sz_string_view_t> query_views; /**< @b [queries] the batch was prepared from. */
-    std::vector<sz_string_view_t> views;       /**< @b [candidates] one round's texts. */
-    std::vector<sz_size_t> distances;          /**< @b [queries, candidates] one round's answers. */
-    sz_levenshtein_engine_t engine {};         /**< The batch, prepared once and reused by every round. */
+
+    /** The tokens the queries and candidates are drawn from. */
+    environment_t const &env;
+
+    /** Bytes every query is clamped to. */
+    std::size_t query_bytes;
+
+    /** Candidates one round scores, which is also the row stride. */
+    std::size_t candidates;
+
+    /** @b [queries] the batch was prepared from. */
+    std::vector<sz_string_view_t> query_views;
+
+    /** @b [candidates] one round's texts. */
+    std::vector<sz_string_view_t> views;
+
+    /** @b [queries, candidates] one round's answers. */
+    std::vector<sz_size_t> distances;
+
+    /** The batch, prepared once and reused by every round. */
+    sz_levenshtein_engine_t engine {};
 
     levenshtein_distances_from_sz(environment_t const &env, std::size_t query_bytes, std::size_t candidates,
                                   sz_levenshtein_symbol_t symbol)
@@ -185,7 +212,7 @@ struct levenshtein_distances_from_sz {
     }
 };
 
-/** @brief The cross-product entries at one query length, byte and rune level, every backend against serial. */
+/** Cross-product entries at one query length, byte and rune level, each backend against serial. */
 void bench_levenshtein_cross_product(environment_t const &env, std::size_t query_bytes, std::size_t candidates) {
     std::string const suffix = ":q" + std::to_string(query_bytes);
     auto validator = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {env, query_bytes, candidates,
@@ -232,13 +259,23 @@ void bench_levenshtein_cross_product(environment_t const &env, std::size_t query
 
 #pragma region Query Preparation
 
-/** @brief One query prepared per call, clamped to @c query_bytes: the fixed cost a sweep pays once per query. */
+/** One query prepared per call, clamped to @c query_bytes: a sweep's fixed cost per query. */
 struct levenshtein_prepare_from_sz {
-    environment_t const &env;                                      /**< The tokens the query is drawn from. */
-    std::size_t query_bytes;                                       /**< Bytes the query is clamped to. */
-    std::vector<sz_u64_t> masks;                                   /**< Match masks the preparation fills. */
-    std::vector<sz_u8_t> byte_to_class;                            /**< @b [256] mask row each byte value reads. */
-    std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals; /**< @b [words] one step's Myers deltas. */
+
+    /** The tokens the query is drawn from. */
+    environment_t const &env;
+
+    /** Bytes the query is clamped to. */
+    std::size_t query_bytes;
+
+    /** Match masks the preparation fills. */
+    std::vector<sz_u64_t> masks;
+
+    /** @b [256] mask row each byte value reads. */
+    std::vector<sz_u8_t> byte_to_class;
+
+    /** @b [words] one step's Myers deltas. */
+    std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals;
 
     levenshtein_prepare_from_sz(environment_t const &env, std::size_t query_bytes)
         : env(env), query_bytes(query_bytes), masks(sz_levenshtein_query_mask_entries(query_bytes)),
@@ -259,7 +296,7 @@ struct levenshtein_prepare_from_sz {
     }
 };
 
-/** @brief The query preparation alone, at one query length, on the single entry the family exports for it. */
+/** The query preparation alone, at one query length, on the single entry the family exports. */
 void bench_levenshtein_query_prepare(environment_t const &env, std::size_t query_bytes) {
     std::string const suffix = ":q" + std::to_string(query_bytes);
     bench_unary(env, "sz_levenshtein_query_prepare" + suffix, levenshtein_prepare_from_sz {env, query_bytes}).log();
@@ -270,18 +307,30 @@ void bench_levenshtein_query_prepare(environment_t const &env, std::size_t query
 #pragma region Steps
 
 /**
- *  @brief One transpose of staged class ids stepped per call, eight candidates deep, the staging already done.
+ *  @brief One transpose of staged class ids stepped per call, eight candidates deep, staging done.
  *
- *  The word count is a run-time value here, as it is for every query past two words, and the classes and the
- *  query are fixed across calls, so what is timed is the recurrence and nothing around it.
+ *  The word count is a run-time value here, as it is for every query past two words, and the
+ *  classes and the query are fixed across calls, so the recurrence alone is timed.
  */
 struct levenshtein_step_from_serial {
-    std::size_t words = 0;                                         /**< Query words every step walks. */
-    std::vector<sz_u64_t> masks;                                   /**< Match masks the query points at. */
-    std::vector<sz_u8_t> byte_to_class;                            /**< @b [256] mask row each byte reads. */
-    sz_levenshtein_query_t query {};                               /**< The query every lane is scored against. */
-    std::vector<sz_u8_t> classes;                                  /**< @b [positions x lanes] staged class ids. */
-    std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals; /**< @b [lanes x words] Myers deltas. */
+
+    /** Query words every step walks. */
+    std::size_t words = 0;
+
+    /** Match masks the query points at. */
+    std::vector<sz_u64_t> masks;
+
+    /** @b [256] mask row each byte reads. */
+    std::vector<sz_u8_t> byte_to_class;
+
+    /** The query every lane is scored against. */
+    sz_levenshtein_query_t query {};
+
+    /** @b [positions,lanes] staged class ids. */
+    std::vector<sz_u8_t> classes;
+
+    /** @b [lanes,words] Myers deltas. */
+    std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals;
 
     levenshtein_step_from_serial(environment_t const &env, std::size_t query_bytes)
         : masks(sz_levenshtein_query_mask_entries(query_bytes)), byte_to_class(sz_levenshtein_byte_classes_k) {
@@ -316,17 +365,28 @@ struct levenshtein_step_from_serial {
 
 #if SZ_USE_HASWELL
 
-/** @brief The same eight lanes as the serial step, taken four per YMM, so the two arms answer the same scores. */
+/** The serial step's eight lanes, four per YMM, so the two arms answer the same scores. */
 struct levenshtein_step_from_haswell {
     static constexpr std::size_t groups_k = levenshtein_step_lanes_k /
                                             sz_levenshtein_haswell_u64x4_candidates_per_step_k;
 
-    std::size_t words = 0;                                          /**< Query words every step walks. */
-    std::vector<sz_u64_t> masks;                                    /**< Match masks the query points at. */
-    std::vector<sz_u8_t> byte_to_class;                             /**< @b [256] mask row each byte reads. */
-    sz_levenshtein_query_t query {};                                /**< The query every lane is scored against. */
-    std::vector<sz_u8_t> classes;                                   /**< @b [positions x lanes] staged class ids. */
-    std::vector<sz_levenshtein_u64x4_vertical_haswell_t> verticals; /**< @b [groups x words] Myers deltas. */
+    /** Query words every step walks. */
+    std::size_t words = 0;
+
+    /** Match masks the query points at. */
+    std::vector<sz_u64_t> masks;
+
+    /** @b [256] mask row each byte reads. */
+    std::vector<sz_u8_t> byte_to_class;
+
+    /** The query every lane is scored against. */
+    sz_levenshtein_query_t query {};
+
+    /** @b [positions,lanes] staged class ids. */
+    std::vector<sz_u8_t> classes;
+
+    /** @b [groups,words] Myers deltas. */
+    std::vector<sz_levenshtein_u64x4_vertical_haswell_t> verticals;
 
     levenshtein_step_from_haswell(environment_t const &env, std::size_t query_bytes)
         : masks(sz_levenshtein_query_mask_entries(query_bytes)), byte_to_class(sz_levenshtein_byte_classes_k) {
@@ -366,14 +426,26 @@ struct levenshtein_step_from_haswell {
 
 #if SZ_USE_SKYLAKE
 
-/** @brief The same eight lanes as the serial step, taken eight per ZMM, so the two arms answer the same scores. */
+/** The serial step's eight lanes, eight per ZMM, so the two arms answer the same scores. */
 struct levenshtein_step_from_skylake {
-    std::size_t words = 0;                                          /**< Query words every step walks. */
-    std::vector<sz_u64_t> masks;                                    /**< Match masks the query points at. */
-    std::vector<sz_u8_t> byte_to_class;                             /**< @b [256] mask row each byte reads. */
-    sz_levenshtein_query_t query {};                                /**< The query every lane is scored against. */
-    std::vector<sz_u8_t> classes;                                   /**< @b [positions x lanes] staged class ids. */
-    std::vector<sz_levenshtein_u64x8_vertical_skylake_t> verticals; /**< @b [words] Myers deltas of eight lanes. */
+
+    /** Query words every step walks. */
+    std::size_t words = 0;
+
+    /** Match masks the query points at. */
+    std::vector<sz_u64_t> masks;
+
+    /** @b [256] mask row each byte reads. */
+    std::vector<sz_u8_t> byte_to_class;
+
+    /** The query every lane is scored against. */
+    sz_levenshtein_query_t query {};
+
+    /** @b [positions,lanes] staged class ids. */
+    std::vector<sz_u8_t> classes;
+
+    /** @b [words] Myers deltas of eight lanes. */
+    std::vector<sz_levenshtein_u64x8_vertical_skylake_t> verticals;
 
     levenshtein_step_from_skylake(environment_t const &env, std::size_t query_bytes)
         : masks(sz_levenshtein_query_mask_entries(query_bytes)), byte_to_class(sz_levenshtein_byte_classes_k) {
@@ -410,22 +482,34 @@ struct levenshtein_step_from_skylake {
 #if SZ_USE_ICELAKE
 
 /**
- *  @brief Sixty-four byte lanes stepped per call, of which the first eight carry the serial arm's lanes, so the
- *      two answer the same scores while the timing covers every lane.
+ *  @brief Sixty-four byte lanes stepped per call, of which the first eight carry the serial arm's
+ *      lanes, so the two answer the same scores while the timing covers every lane.
  *
- *  Only a query of at most eight symbols fits a byte lane, so the arm is registered at those lengths alone, and
- *  the deltas are folded into the scores on the cadence the sweep uses rather than on a per-position branch.
+ *  Only a query of at most eight symbols fits a byte lane, so the arm is registered at those
+ *  lengths alone, and the deltas are folded into the scores on the cadence the sweep uses rather
+ *  than on a per-position branch.
  */
 struct levenshtein_step_from_icelake_narrow {
     static constexpr std::size_t lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k;
     static constexpr std::size_t positions_per_flush_k = sz_levenshtein_icelake_u8x64_positions_per_flush_k;
 
-    std::vector<sz_u64_t> masks;                    /**< Match masks the query points at. */
-    std::vector<sz_u8_t> byte_to_class;             /**< @b [256] mask row each byte reads. */
-    sz_levenshtein_query_t query {};                /**< The query every lane is scored against. */
-    sz_levenshtein_u8x64_query_icelake_t packed {}; /**< The same query as one mask byte per class. */
-    std::vector<sz_u8_t> classes;                   /**< @b [positions x lanes] staged class ids. */
-    std::vector<sz_size_t> scores;                  /**< @b [lanes] running distances the deltas fold into. */
+    /** Match masks the query points at. */
+    std::vector<sz_u64_t> masks;
+
+    /** @b [256] mask row each byte reads. */
+    std::vector<sz_u8_t> byte_to_class;
+
+    /** The query every lane is scored against. */
+    sz_levenshtein_query_t query {};
+
+    /** The same query as one mask byte per class. */
+    sz_levenshtein_u8x64_query_icelake_t packed {};
+
+    /** @b [positions,lanes] staged class ids. */
+    std::vector<sz_u8_t> classes;
+
+    /** @b [lanes] running distances the deltas fold into. */
+    std::vector<sz_size_t> scores;
 
     levenshtein_step_from_icelake_narrow(environment_t const &env, std::size_t query_bytes)
         : masks(sz_levenshtein_query_mask_entries(query_bytes)), byte_to_class(sz_levenshtein_byte_classes_k),
@@ -461,7 +545,7 @@ struct levenshtein_step_from_icelake_narrow {
 
 #endif
 
-/** @brief The word-step alone, every tier over the same eight lanes, checked against the serial recurrence. */
+/** The word-step alone, every tier over the same eight lanes, checked against the serial one. */
 void bench_levenshtein_steps(environment_t const &env, std::size_t query_bytes) {
     std::string const suffix = ":q" + std::to_string(query_bytes);
     auto validator = levenshtein_step_from_serial {env, query_bytes};

@@ -1,21 +1,23 @@
 /**
- *  @brief Serial backend for multi-pattern search: the automaton's construction, its transition, and the
- *      walks and verb drivers every other CPU tier reuses.
  *  @file include/stringzilla/substrings/serial.h
  *  @author Ash Vardanian
+ *  @date August 8, 2026
+ *  @brief Serial backend for multi-pattern search: the automaton's construction, its transition,
+ *      and the walks and verb drivers every other CPU tier reuses.
+ *
+ *  Construction is a trie, a breadth-first failure pass, and a two-tier publication. The trie is
+ *  stored as sibling lists rather than as an edge pool with an index beside it: a tree gives every
+ *  state exactly one incoming edge, so a state @b is its edge, and the byte, the first child and
+ *  the next sibling are three fields of the state itself. That removes the hash table an edge pool
+ *  would need, and makes the edge count follow the state count instead of being bounded separately.
+ *
+ *  The walk is one data-dependent load per byte, so a single chain leaves the load ports idle for
+ *  that whole latency. Byte-exact walks therefore step @ref SZ_SUBSTRINGS_CHAINS disjoint slices at
+ *  once, each primed by the bytes before it; a walk reporting in haystack order does so in rounds
+ *  of windows whose matches it buffers and flushes in window order. A SIMD tier replaces the stages
+ *  in @ref sz_substrings_walks_t and inherits the verb drivers.
+ *
  *  @sa include/stringzilla/substrings.h
- *
- *  Construction is a trie, a breadth-first failure pass, and a two-tier publication. The trie is stored as
- *  sibling lists rather than as an edge pool with an index beside it: a tree gives every state exactly one
- *  incoming edge, so a state @b is its edge, and the byte, the first child and the next sibling are three
- *  fields of the state itself. That removes the hash table an edge pool would need, and makes the edge
- *  count follow the state count instead of being bounded separately.
- *
- *  The walk is one data-dependent load per byte, so a single chain leaves the load ports idle for that
- *  whole latency. Byte-exact walks therefore step @ref SZ_SUBSTRINGS_CHAINS disjoint slices at once, each
- *  primed by the bytes before it; a walk reporting in haystack order does so in rounds of windows whose
- *  matches it buffers and flushes in window order. A SIMD tier replaces the stages in
- *  @ref sz_substrings_walks_t and inherits the verb drivers.
  */
 #ifndef STRINGZILLA_SUBSTRINGS_SERIAL_H_
 #define STRINGZILLA_SUBSTRINGS_SERIAL_H_
@@ -32,38 +34,45 @@ extern "C" {
 
 #pragma region Vocabulary
 
-/** A state id no state ever takes, marking an empty slot, an absent child and an unplaced state alike. */
+/** A state id no state ever takes, marking an empty slot, an absent child and an
+ *  unplaced state alike. */
 #define SZ_SUBSTRINGS_NO_STATE ((sz_u32_t)0xFFFFFFFFu)
 
 /** Independent transition chains one counting walk keeps in flight, so their loads overlap. */
 #define SZ_SUBSTRINGS_CHAINS (8)
 
-/** Interior vacancies one double-array row may reject before it settles on the arena frontier instead. */
+/** Interior vacancies one double-array row may reject before it settles on the
+ *  arena frontier instead. */
 #define SZ_SUBSTRINGS_MAX_INTERIOR_PROBES (256)
 
-/** Bytes of hot rows an automaton keeps when the caller names no count, which is the last-level cache it
- *  assumes; a caller that can measure its own host passes @c hot_states instead. */
+/** Bytes of hot rows an automaton keeps when the caller names no count, which is the last-level
+ *  cache it assumes; a caller that can measure its own host passes @c hot_states instead. */
 #define SZ_SUBSTRINGS_HOT_BYTES_DEFAULT (4u << 20)
 
 /**
- *  @brief Whether a walk's reports arrive in the order the haystack spells them, or in any order at all.
+ *  @brief Whether a walk's reports arrive in the order the haystack spells them, or in any
+ *      order at all.
  *
- *  One chain finishes every match ending at a position before it steps to the next, so its reported ends
- *  never decrease - the order a leftmost cover drains its undecided starts in. Several chains stand at
- *  several positions of one haystack at once, which is what overlaps their loads, so nothing orders their
- *  reports against each other.
+ *  One chain finishes every match ending at a position before it steps to the next, so its reported
+ *  ends never decrease - the order a leftmost cover drains its undecided starts in. Several chains
+ *  stand at several positions of one haystack at once, which is what overlaps their loads, so
+ *  nothing orders their reports against each other.
  */
 typedef enum sz_substrings_report_order_t {
+
     /** Non-decreasing match end within one haystack; what a leftmost cover reads. */
     sz_substrings_ascending_ends_k = 0,
+
     /** Every match once, in no order at all; what a tally or a collector reads. */
     sz_substrings_unordered_k = 1,
 } sz_substrings_report_order_t;
 
 /** Whether a walk carries on, or the consumer has seen everything it wanted. */
 typedef enum sz_substrings_walk_t {
+
     /** Keep stepping the haystack. */
     sz_substrings_continue_k = 0,
+
     /** Stop where the walk stands; a leftmost cover then clears whatever it left undecided. */
     sz_substrings_stop_k = 1,
 } sz_substrings_walk_t;
@@ -82,9 +91,9 @@ typedef sz_substrings_walk_t (*sz_substrings_reporter_t)(void *context, sz_size_
  *  @brief Whether @p challenger outranks @p incumbent among matches sharing one start position.
  *  @param[in] incumbent A zero @c source_match_bytes means no match has claimed that start yet.
  *
- *  The only place either leftmost policy is consulted, and it runs once per discovered match rather than
- *  once per byte. Lengths compared here are source bytes, since a needle that folds shorter can still
- *  outspan a rival whose folded form is longer.
+ *  The only place either leftmost policy is consulted, and it runs once per discovered match rather
+ *  than once per byte. Lengths compared here are source bytes, since a needle that folds shorter
+ *  can still outspan a rival whose folded form is longer.
  */
 SZ_HELPER_AUTO sz_bool_t sz_substrings_leftmost_wins(sz_substrings_pending_start_t challenger,
                                                      sz_substrings_pending_start_t incumbent,
@@ -96,12 +105,15 @@ SZ_HELPER_AUTO sz_bool_t sz_substrings_leftmost_wins(sz_substrings_pending_start
 }
 
 /**
- *  @brief How many starts a leftmost walk can hold undecided, given the longest match in the vocabulary.
- *  @param[in] max_source_match_bytes The longest match in @b source bytes, which is what the slots are keyed
- *             by; passing the folded bound instead would undersize the ring wherever a fold contracts.
+ *  @brief How many starts a leftmost walk can hold undecided, given the longest match
+ *      in the vocabulary.
+ *  @param[in] max_source_match_bytes The longest match in @b source bytes, which is what the
+ *      slots are keyed by; passing the folded bound instead would undersize the ring wherever
+ *      a fold contracts.
  *
- *  A start can no longer be outbid once the walk is that many bytes past it, so that many slots suffice.
- *  Rounded up to a power of two, which turns the slot lookup into a mask rather than a runtime division.
+ *  A start cannot be outbid once the walk is that many bytes past it, so that many slots
+ *  suffice. Rounded up to a power of two, which turns the slot lookup into a mask rather than
+ *  a runtime division.
  */
 SZ_HELPER_AUTO sz_size_t sz_substrings_pending_starts_width(sz_size_t max_source_match_bytes) {
     sz_size_t const wanted = max_source_match_bytes > 1 ? max_source_match_bytes : 1;
@@ -120,9 +132,10 @@ SZ_HELPER_AUTO sz_u32_t const *sz_substrings_hot_row(sz_substrings_engine_t cons
 /**
  *  @brief Advances one state by one byte. The single definition every CPU and GPU walk shares.
  *
- *  Hot states resolve in one load. Cold states probe the double array and, when the slot is owned by
- *  somebody else, hop to the failure link and retry the same byte. The root is total - every one of its
- *  slots resolves, self-looping where the trie has no edge - which is what terminates the retry loop.
+ *  Hot states resolve in one load. Cold states probe the double array and, when the slot is owned
+ *  by somebody else, hop to the failure link and retry the same byte. The root is total - every
+ *  one of its slots resolves, self-looping where the trie has no edge - which is what terminates
+ *  the retry loop.
  */
 SZ_HELPER_AUTO sz_u32_t sz_substrings_step(sz_substrings_engine_t const *engine, sz_u32_t state, sz_u8_t byte) {
     for (;;) {
@@ -149,8 +162,8 @@ SZ_HELPER_AUTO sz_bool_t sz_substrings_accepts(sz_substrings_engine_t const *eng
 /**
  *  @brief Advances @p state by one byte and reports how many needles end on the new state.
  *
- *  The pair every walk repeats: the transition, then the output count that decides whether the walk stops
- *  to enumerate matches.
+ *  The pair every walk repeats: the transition, then the output count that decides whether the walk
+ *  stops to enumerate matches.
  */
 SZ_HELPER_AUTO sz_u32_t sz_substrings_step_counting(sz_substrings_engine_t const *engine, sz_u32_t *state,
                                                     sz_u8_t byte) {
@@ -167,48 +180,69 @@ SZ_HELPER_AUTO sz_u32_t sz_substrings_step_counting(sz_substrings_engine_t const
 
 /** One folded byte, and everything a walk needs about the codepoint it came from. */
 typedef struct sz_substrings_folded_byte_t {
+
     /** The folded byte itself, which is what the automaton steps on. */
     sz_u8_t byte;
-    /** Whether this byte ends a folded rune; a needle is valid UTF-8, so only there can a match end. */
+
+    /** Whether this byte ends a folded rune; a needle is valid UTF-8, so only there can
+     *  a match end. */
     sz_bool_t rune_end;
+
     /** Whether this codepoint's fold leaves a folded byte at an offset no source byte owns. */
     sz_bool_t breaks_boundary;
+
     /** Whether the source byte began no well-formed codepoint, so the walk must resynchronize. */
     sz_bool_t malformed;
+
     /** Offset just past the source codepoint; every folded byte of it reports the same end. */
     sz_size_t codepoint_end;
-    /** Folded bytes of this codepoint still to come, which a backward walk has to step over first. */
+
+    /** Folded bytes of this codepoint still to come, which a backward walk has to
+     *  step over first. */
     sz_u8_t trailing;
+
     /** Folded bytes back to this codepoint's previous rune end, zero at its first. */
     sz_u8_t shift;
 } sz_substrings_folded_byte_t;
 
 /**
- *  @brief Streams a haystack as folded bytes, one source codepoint at a time and never into a buffer.
+ *  @brief Streams a haystack as folded bytes, one source codepoint at a time and never
+ *      into a buffer.
  *
- *  The automaton's alphabet is bytes while @c sz_utf8_folded_iter_t yields runes, so one codepoint's runes
- *  are drained and re-encoded into a nine-byte image, then handed out a byte at a time. The ASCII fast
- *  path, the expansion buffering and the one-byte malformed resynchronization all remain the iterator's.
+ *  The automaton's alphabet is bytes while @c sz_utf8_folded_iter_t yields runes, so one
+ *  codepoint's runes are drained and re-encoded into a nine-byte image, then handed out a byte at a
+ *  time. The ASCII fast path, the expansion buffering and the one-byte malformed resynchronization
+ *  all remain the iterator's.
  */
 typedef struct sz_substrings_folded_cursor_t {
+
     /** The rune-level iterator this cursor re-encodes the output of. */
     sz_utf8_folded_iter_t runes;
+
     /** Where the haystack begins, so a codepoint's end can be reported as an offset. */
     sz_cptr_t origin;
+
     /** One codepoint's folded bytes, which is the widest image a fold can produce. */
     sz_u8_t image[SZ_SUBSTRINGS_FOLDED_IMAGE_MAX];
+
     /** Bit @c index marks the byte at @c index as ending a folded rune. */
     sz_u16_t rune_end_mask;
+
     /** Bytes the current image holds. */
     sz_u8_t image_length;
+
     /** Bytes of it already handed out. */
     sz_u8_t image_index;
+
     /** Where this codepoint's previous rune ended inside the image, zero before the first. */
     sz_u8_t previous_rune_end;
+
     /** Offset just past the source codepoint the image came from. */
     sz_size_t codepoint_end;
+
     /** Whether this codepoint's fold leaves a byte at an offset no source byte owns. */
     sz_bool_t breaks_boundary;
+
     /** Whether the source byte began no well-formed codepoint. */
     sz_bool_t malformed;
 } sz_substrings_folded_cursor_t;
@@ -313,27 +347,32 @@ SZ_HELPER_AUTO sz_bool_t sz_substrings_folded_cursor_next(sz_substrings_folded_c
 /**
  *  @brief Where a match resolved by walking backwards from the codepoint it ends in landed.
  *
- *  @c repeats marks a span an earlier rune end of that same codepoint already reported: needle "s" ends at
- *  both runes the sharp S folds to, and both spans are the whole codepoint. Equal spans are what makes a
- *  repeat, not equal content.
+ *  @c repeats marks a span an earlier rune end of that same codepoint already reported: needle "s"
+ *  ends at both runes the sharp S folds to, and both spans are the whole codepoint. Equal spans are
+ *  what makes a repeat, not equal content.
  */
 typedef struct sz_substrings_resolved_match_t {
+
     /** Where the match starts in the haystack's own bytes. */
     sz_size_t source_offset;
+
     /** Whether an earlier rune end of the same codepoint already reported this very span. */
     sz_bool_t repeats;
 } sz_substrings_resolved_match_t;
 
 /**
- *  @brief Resolves a match's source start, and whether it repeats an earlier rune end's span, in one pass.
+ *  @brief Resolves a match's source start, and whether it repeats an earlier rune end's span,
+ *      in one pass.
  *  @param[in] source_end End of the codepoint the match ends in; every rune end of it shares this.
  *  @param[in] trailing Folded bytes of that codepoint sitting past the match's end.
- *  @param[in] shift Folded bytes back to the previous rune end of the same codepoint, zero at the first.
+ *  @param[in] shift Folded bytes back to the previous rune end of the same codepoint, zero
+ *      at the first.
  *
- *  Reached only when the match starts at or before the last boundary-breaking codepoint, which is the only
- *  place either question is open. Two windows one length apart hold the same bytes exactly when the folded
- *  stream is periodic with that period, so the repeat test rides a @p shift -sized ring that one codepoint's
- *  image bounds, and shares the single backward walk with the start it recovers.
+ *  Reached only when the match starts at or before the last boundary-breaking codepoint, which is
+ *  the only place either question is open. Two windows one length apart hold the same bytes
+ *  exactly when the folded stream is periodic with that period, so the repeat test rides a
+ *  @p shift -sized ring that one codepoint's image bounds, and shares the single backward walk
+ *  with the start it recovers.
  */
 SZ_HELPER_AUTO sz_substrings_resolved_match_t sz_substrings_resolve_match(sz_cptr_t haystack, sz_size_t source_end,
                                                                           sz_size_t trailing,
@@ -387,11 +426,12 @@ SZ_HELPER_AUTO sz_substrings_resolved_match_t sz_substrings_resolve_match(sz_cpt
 
 /**
  *  @brief Resolves the source span of one output at the rune end @p step stands on.
- *  @param[in] folded Folded bytes consumed so far, the ending offset the output's length is taken back from.
+ *  @param[in] folded Folded bytes consumed so far, the ending offset the output's length is
+ *      taken back from.
  *  @param[in] last_break_folded_end Folded end of the last codepoint whose fold broke a boundary.
  *
- *  A match starting at or after the last break lies where folded and source offsets still agree, so its
- *  start is one subtraction; anything earlier pays the backward walk.
+ *  A match starting at or after the last break lies where folded and source offsets still agree, so
+ *  its start is one subtraction; anything earlier pays the backward walk.
  */
 SZ_HELPER_AUTO sz_substrings_resolved_match_t sz_substrings_folded_span(sz_cptr_t haystack,
                                                                         sz_substrings_folded_byte_t const *step,
@@ -412,89 +452,123 @@ SZ_HELPER_AUTO sz_substrings_resolved_match_t sz_substrings_folded_span(sz_cptr_
 #pragma region Construction
 
 /**
- *  @brief One trie state under construction: its place in its parent's sibling list, and what ends on it.
+ *  @brief One trie state under construction: its place in its parent's sibling list, and what
+ *      ends on it.
  *
- *  A tree gives every state exactly one incoming edge, so the byte of that edge is a field of the state
- *  rather than of a separate edge record - which is what lets the whole trie live in one growable array
- *  with no index beside it.
+ *  A tree gives every state exactly one incoming edge, so the byte of that edge is a field of the
+ *  state rather than of a separate edge record - which is what lets the whole trie live in one
+ *  growable array with no index beside it.
  */
 typedef struct sz_substrings_trie_node_t {
+
     /** Lowest-numbered child, or @ref SZ_SUBSTRINGS_NO_STATE. */
     sz_u32_t first_child;
+
     /** Next child of this node's own parent, or @ref SZ_SUBSTRINGS_NO_STATE. */
     sz_u32_t next_sibling;
+
     /** Needle ending exactly here, heading a list threaded through @c needle_next. */
     sz_u32_t output_head;
+
     /** Needles ending exactly here, before failure-chain inheritance. */
     sz_u32_t output_own_count;
+
     /** Matches ending here once the failure chain has merged them in. */
     sz_u32_t output_total_count;
+
     /** The failure state, always strictly shallower, so depth order finishes it first. */
     sz_u32_t failure;
+
     /** Published double-array slot, or @ref SZ_SUBSTRINGS_NO_STATE before packing places it. */
     sz_u32_t published;
+
     /** Byte on the edge into this state; the root's is never read. */
     sz_u8_t parent_byte;
+
     /** Into the published output pool: own matches followed by the failure state's whole run. */
     sz_size_t output_total_offset;
 } sz_substrings_trie_node_t;
 
 /** The construction state one build threads through its phases, none of which survives the call. */
 typedef struct sz_substrings_builder_t {
+
     /** The trie, growing by doubling as insertion mints states. */
     sz_substrings_trie_node_t *nodes;
+
     /** States @c nodes can hold before it has to grow. */
     sz_size_t nodes_capacity;
+
     /** States the trie holds. */
     sz_size_t nodes_count;
 
     /** Next needle in the list of needles ending on one state, @b [needles_count]. */
     sz_u32_t *needle_next;
+
     /** Folded bytes each needle spans, @b [needles_count]. */
     sz_u32_t *needle_folded_bytes;
+
     /** One needle's canonical folded bytes, reused across insertions; uncased mode only. */
     sz_u8_t *fold_scratch;
+
     /** Bytes @c fold_scratch holds. */
     sz_size_t fold_scratch_bytes;
 
     /** States in depth-band, out-degree-descending order: the input to the published numbering. */
     sz_u32_t *order;
+
     /** Scratch the band sort permutes through, since a band is not a contiguous id range. */
     sz_u32_t *order_scratch;
-    /** The root's goto-completed row, so a failure chase that falls all the way back ends in one lookup. */
+
+    /** The root's goto-completed row, so a failure chase that falls all the way back ends
+     *  in one lookup. */
     sz_u32_t *root_row;
 
-    /** Double-array arena: transition target for @c state on @c byte is @c base[state] @c + @c byte. */
+    /** Double-array arena: transition target for @c state on @c byte is @c base[state]
+     *  @c + @c byte. */
     sz_u32_t *base;
+
     /** Double-array arena: owner of each slot. */
     sz_u32_t *check;
+
     /** Which trie state each published slot names, or @ref SZ_SUBSTRINGS_NO_STATE. */
     sz_u32_t *state_of_slot;
+
     /** One bit per slot; the only record of what the packing search has claimed. */
     sz_u64_t *occupied;
+
     /** Slots the arena can hold. */
     sz_size_t slots_capacity;
+
     /** Lowest slot that could still be free; packing only fills forward, so it never moves back. */
     sz_size_t lowest_free_cursor;
+
     /** One past the highest claimed slot, so every slot at or above it is free by construction. */
     sz_size_t arena_frontier;
 
     /** Needles inserted, which is also the next needle's own index. */
     sz_size_t needles_count;
+
     /** Worst-case haystack span of one match; a fold contracting three bytes into one widens it. */
     sz_u32_t max_source_match_bytes;
+
     /** The mirror bound, in haystack bytes, of the shortest match any needle can make. */
     sz_u32_t min_source_match_bytes;
+
     /** Most outputs any one state carries once failure links have merged them. */
     sz_u32_t max_outputs_per_state;
+
     /** Whether this vocabulary matches byte-exact or case-folded. */
     sz_substrings_case_sensitivity_t case_sensitivity;
+
     /** Each byte's hot-row column, derived from the edge labels once the trie is complete. */
     sz_u8_t byte_to_class[SZ_U8_MAX + 1];
+
     /** Columns of a hot row. */
     sz_size_t classes_count;
+
     /** States kept in the dense hot rows. */
     sz_size_t hot_count;
+
     /** The allocator every buffer above came from, and the one they go back to. */
     sz_memory_allocator_t *alloc;
 } sz_substrings_builder_t;
@@ -566,7 +640,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_mint_(sz_substrings_builder_t 
     return sz_success_k;
 }
 
-/** Child of @p parent on @p byte among its literal edges, or @ref SZ_SUBSTRINGS_NO_STATE if none. */
+/** Child of @p parent on @p byte among its literal edges, or
+ *  @ref SZ_SUBSTRINGS_NO_STATE if none. */
 SZ_API_COMPTIME sz_u32_t sz_substrings_builder_child_(sz_substrings_builder_t const *builder, sz_u32_t parent,
                                                       sz_u8_t byte) {
     sz_u32_t child = builder->nodes[parent].first_child;
@@ -577,7 +652,8 @@ SZ_API_COMPTIME sz_u32_t sz_substrings_builder_child_(sz_substrings_builder_t co
     return SZ_SUBSTRINGS_NO_STATE;
 }
 
-/** Follows @p parent's @p byte edge, minting a state and threading it onto the sibling list when missing. */
+/** Follows @p parent's @p byte edge, minting a state and threading it onto the sibling
+ *  list when missing. */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_follow_(sz_substrings_builder_t *builder, sz_u32_t parent,
                                                           sz_u8_t byte, sz_u32_t *child) {
     sz_u32_t minted;
@@ -597,11 +673,12 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_follow_(sz_substrings_builder_
 }
 
 /**
- *  @brief Records that @p needle_index ends on @p state, spanning @p folded_match_bytes folded bytes.
+ *  @brief Records that @p needle_index ends on @p state, spanning
+ *      @p folded_match_bytes folded bytes.
  *
- *  One folded byte can stand for up to @c sz_utf8_fold_max_contraction_k source bytes, and one source byte
- *  for up to @c sz_utf8_fold_max_expansion_k folded ones, so a folded length brackets rather than fixes the
- *  source span. Cased needles fold to themselves, so their bounds stay exact.
+ *  One folded byte can stand for up to @c sz_utf8_fold_max_contraction_k source bytes, and one
+ *  source byte for up to @c sz_utf8_fold_max_expansion_k folded ones, so a folded length brackets
+ *  rather than fixes the source span. Cased needles fold to themselves, so their bounds stay exact.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_add_output_(sz_substrings_builder_t *builder, sz_u32_t state,
                                                               sz_u32_t needle_index, sz_size_t folded_match_bytes) {
@@ -645,9 +722,10 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_insert_cased_(sz_substrings_bu
 /**
  *  @brief Case-folded trie insertion: fold the needle once, then insert those bytes literally.
  *
- *  The haystack is folded as the walk consumes it, so both sides meet in one canonical byte stream and the
- *  trie has nothing case-specific left in it - which is what keeps it a tree with single-valued failure
- *  links. A needle that folds to the same bytes as an earlier one simply shares its path.
+ *  The haystack is folded as the walk consumes it, so both sides meet in one canonical byte stream
+ *  and the trie has nothing case-specific left in it - which is what keeps it a tree with
+ *  single-valued failure links. A needle that folds to the same bytes as an earlier one simply
+ *  shares its path.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_insert_uncased_(sz_substrings_builder_t *builder, sz_cptr_t needle,
                                                                   sz_size_t length, sz_u32_t needle_index) {
@@ -671,9 +749,10 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_insert_uncased_(sz_substrings_
 }
 
 /**
- *  @brief Reorders one depth band of @c order by out-degree descending, so shallow high-fan-out states -
- *         the ones text keeps returning to - land in the hot tier regardless of vocabulary content.
- *  @note A band is the position range @c [band_first, @c band_last) within @c order, not an id range.
+ *  @brief Reorders one depth band of @c order by out-degree descending, so shallow high-fan-out
+ *      states, the ones text keeps returning to, land in the hot tier regardless of vocabulary.
+ *  @note A band is the position range from @p band_first up to @p band_last within @c order, not
+ *      an id range.
  */
 SZ_API_COMPTIME void sz_substrings_builder_order_band_(sz_substrings_builder_t *builder, sz_size_t band_first,
                                                        sz_size_t band_last) {
@@ -723,9 +802,10 @@ SZ_API_COMPTIME sz_u32_t sz_substrings_builder_chase_(sz_substrings_builder_t co
 /**
  *  @brief Assigns every state's failure link and lays @c order out depth band by depth band.
  *
- *  The classic Aho-Corasick construction: a child's failure link is found by chasing its parent's, and a
- *  failure link is always strictly shallower, so one shallow-to-deep pass finishes with no fixpoint. The
- *  trie is a tree, so each state is reached by exactly one edge and this visits each exactly once.
+ *  The classic Aho-Corasick construction: a child's failure link is found by chasing its
+ *  parent's, and a failure link is always strictly shallower, so one shallow-to-deep pass
+ *  finishes with no fixpoint. The trie is a tree, so each state is reached by exactly one edge
+ *  and this visits each exactly once.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_link_failures_(sz_substrings_builder_t *builder) {
     sz_memory_allocator_t *const alloc = builder->alloc;
@@ -770,7 +850,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_link_failures_(sz_substrings_b
     return sz_success_k;
 }
 
-/** Grows every slot-indexed array to hold @p minimum slots, clearing whatever the growth exposed. */
+/** Grows every slot-indexed array to hold @p minimum slots, clearing whatever
+ *  the growth exposed. */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_reserve_slots_(sz_substrings_builder_t *builder, sz_size_t minimum) {
     sz_memory_allocator_t *const alloc = builder->alloc;
     sz_size_t const old_capacity = builder->slots_capacity;
@@ -816,7 +897,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_reserve_slots_(sz_substrings_b
     return sz_success_k;
 }
 
-/** Marks @p slot taken and carries the frontier past it, which is what keeps the frontier a valid bound. */
+/** Marks @p slot taken and carries the frontier past it, which is what keeps the frontier
+ *  a valid bound. */
 SZ_API_COMPTIME void sz_substrings_builder_claim_(sz_substrings_builder_t *builder, sz_size_t slot) {
     builder->occupied[slot >> 6] |= (sz_u64_t)1 << (slot & 63);
     builder->arena_frontier = sz_max_of_two(builder->arena_frontier, slot + 1);
@@ -825,8 +907,9 @@ SZ_API_COMPTIME void sz_substrings_builder_claim_(sz_substrings_builder_t *build
 /**
  *  @brief First free slot at or after @p from, growing the arena when the search runs off the end.
  *
- *  Packing only ever fills forward, so @c lowest_free_cursor never moves back and the whole walk across one
- *  build is amortized linear in the slot count - but only while every packing phase advances it.
+ *  Packing only ever fills forward, so @c lowest_free_cursor never moves back and the whole
+ *  walk across one build is amortized linear in the slot count - but only while every packing
+ *  phase advances it.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_next_free_(sz_substrings_builder_t *builder, sz_size_t from,
                                                              sz_size_t *found) {
@@ -864,9 +947,9 @@ SZ_API_COMPTIME sz_bool_t sz_substrings_builder_row_fits_(sz_substrings_builder_
 /**
  *  @brief Places a hot parent's children on whatever free slots come next.
  *
- *  A hot row addresses every child unconditionally, so nothing has to verify ownership through @c check for
- *  them and they need no shared base. The slot stays unowned: a cold state's probe can land on it, and an
- *  owner would answer that probe as an edge that does not exist.
+ *  A hot row addresses every child unconditionally, so nothing has to verify ownership through
+ *  @c check for them and they need no shared base. The slot stays unowned: a cold state's probe can
+ *  land on it, and an owner would answer that probe as an edge that does not exist.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_pack_hot_children_(sz_substrings_builder_t *builder,
                                                                      sz_u32_t parent) {
@@ -887,13 +970,15 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_pack_hot_children_(sz_substrin
 }
 
 /**
- *  @brief Places a cold parent's children on one shared base, so @c base[parent] @c + @c byte addresses each.
+ *  @brief Places a cold parent's children on one shared base, so @c base[parent] @c +
+ *      @c byte addresses each.
  *
- *  Candidates are scanned out of the occupancy bitmap anchored on the parent's smallest child byte, and the
- *  whole row is tested at once rather than probed child by child. After
- *  @ref SZ_SUBSTRINGS_MAX_INTERIOR_PROBES rejections the row settles on the arena frontier instead: the
- *  vacancies a packed arena leaves behind are mostly singletons no multi-byte row can ever cover, and a
- *  search that keeps re-walking them is quadratic in the states it places rather than linear.
+ *  Candidates are scanned out of the occupancy bitmap anchored on the parent's smallest child
+ *  byte, and the whole row is tested at once rather than probed child by child. After
+ *  @ref SZ_SUBSTRINGS_MAX_INTERIOR_PROBES rejections the row settles on the arena frontier
+ *  instead: the vacancies a packed arena leaves behind are mostly singletons no multi-byte row
+ *  can ever cover, and a search that keeps re-walking them is quadratic in the states it places
+ *  rather than linear.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_pack_cold_children_(sz_substrings_builder_t *builder,
                                                                       sz_u32_t parent) {
@@ -962,11 +1047,11 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_pack_cold_children_(sz_substri
 }
 
 /**
- *  @brief Assigns every live state its published id: the hot tier takes @c [0, @c hot_count) in frequency
- *         order, and the rest pack into the double array in the same depth-ascending order.
+ *  @brief Assigns every live state its published id: the hot tier takes [0, hot_count) in
+ *      frequency order, and the rest pack into the double array in the same depth-ascending order.
  *
- *  Every state has exactly one parent edge, so every state is placed exactly once and each published slot
- *  names a distinct state.
+ *  Every state has exactly one parent edge, so every state is placed exactly once and each
+ *  published slot names a distinct state.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_pack_(sz_substrings_builder_t *builder) {
     sz_size_t index;
@@ -1004,8 +1089,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_pack_(sz_substrings_builder_t 
 /**
  *  @brief Sizes every state's merged output run, and reports the pool those runs need.
  *
- *  A state's matches are its own plus its failure state's complete set, and depth-band order finishes the
- *  failure state first, so one pass settles every offset.
+ *  A state's matches are its own plus its failure state's complete set, and depth-band order
+ *  finishes the failure state first, so one pass settles every offset.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_size_outputs_(sz_substrings_builder_t *builder,
                                                                 sz_size_t *outputs_total) {
@@ -1029,26 +1114,39 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_size_outputs_(sz_substrings_bu
 
 #pragma region Publication
 
-/** Byte offsets of the one block a published automaton owns. @sa `sz_substrings_publish_layout_`. */
+/**
+ *  @brief Byte offsets of the one block a published automaton owns.
+ *  @sa sz_substrings_publish_layout_
+ */
 typedef struct sz_substrings_layout_t {
+
     /** Exclusive prefix sums of the output counts, the widest member and so the first. */
     sz_size_t outputs_offsets;
+
     /** The merged output pool. */
     sz_size_t outputs;
+
     /** The dense goto-completed rows. */
     sz_size_t hot_rows;
+
     /** The byte-to-column map, the narrowest member and so the last. */
     sz_size_t byte_to_class;
+
     /** Double-array bases. */
     sz_size_t base;
+
     /** Double-array ownership. */
     sz_size_t check;
+
     /** Failure links. */
     sz_size_t fail;
+
     /** Outputs per slot. */
     sz_size_t outputs_counts;
+
     /** One acceptance bit per slot. */
     sz_size_t accepts_words;
+
     /** Bytes the whole block needs. */
     sz_size_t total;
 } sz_substrings_layout_t;
@@ -1075,8 +1173,8 @@ SZ_API_COMPTIME sz_substrings_layout_t sz_substrings_publish_layout_(sz_size_t h
 /**
  *  @brief Fills the published output pool from the per-state lists the insertion threaded.
  *
- *  A state's run is its own matches in insertion order, followed by its failure state's whole run, which
- *  depth-band order has already finished.
+ *  A state's run is its own matches in insertion order, followed by its failure state's whole run,
+ *  which depth-band order has already finished.
  */
 SZ_API_COMPTIME void sz_substrings_publish_outputs_(sz_substrings_builder_t const *builder,
                                                     sz_substrings_output_t *outputs) {
@@ -1105,8 +1203,9 @@ SZ_API_COMPTIME void sz_substrings_publish_outputs_(sz_substrings_builder_t cons
 /**
  *  @brief Gives every byte some needle spells its own class, and every other byte one shared class.
  *
- *  Bytes no edge carries behave identically from every state, falling through the failure links to the
- *  root, so one column answers for all of them, and a row is only as wide as the vocabulary's alphabet.
+ *  Bytes no edge carries behave identically from every state, falling through the failure
+ *  links to the root, so one column answers for all of them, and a row is only as wide as
+ *  the vocabulary's alphabet.
  */
 SZ_API_COMPTIME void sz_substrings_builder_classify_(sz_substrings_builder_t *builder) {
     sz_bool_t labelled[SZ_U8_MAX + 1];
@@ -1128,10 +1227,11 @@ SZ_API_COMPTIME void sz_substrings_builder_classify_(sz_substrings_builder_t *bu
 /**
  *  @brief Materializes the hot tier's goto-completed rows by inheritance.
  *
- *  Goto completion means @c goto(state, @c byte) @c == @c goto(fail(state), @c byte) wherever @c state has
- *  no literal edge on @c byte. The depth-primary ordering puts @c fail(state) at a strictly smaller index,
- *  so a hot state's failure state is always hot and always already materialized - one row copy plus one
- *  store per literal edge, instead of a failure chase per cell.
+ *  Goto completion means goto(state, byte) = goto(fail(state), byte) wherever @c state has no
+ *  literal edge on @c byte. The depth-primary ordering puts
+ *  @c fail(state) at a strictly smaller index, so a hot state's failure state is always hot
+ *  and always already materialized - one row copy plus one store per literal edge, instead
+ *  of a failure chase per cell.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_builder_t const *builder,
                                                             sz_u32_t *hot_rows) {
@@ -1185,10 +1285,12 @@ SZ_API_COMPTIME void sz_substrings_engine_free_(sz_substrings_engine_t *engine) 
 }
 
 /**
- *  @brief Compiles @p needles into @p engine 's first block, leaving the round's arena for a tier to size.
+ *  @brief Compiles @p needles into @p engine 's first block, leaving the round's arena for a
+ *      tier to size.
  *
- *  The one place the vocabulary is read: every tier's arena is a function of the bounds this settles, so a
- *  tier sizes its own scratch afterwards rather than passing the vocabulary around twice.
+ *  The one place the vocabulary is read: every tier's arena is a function of the bounds
+ *  this settles, so a tier sizes its own scratch afterwards rather than passing the
+ *  vocabulary around twice.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_engine_compile_(sz_sequence_t const *needles,
                                                           sz_substrings_case_sensitivity_t case_sensitivity,
@@ -1389,13 +1491,14 @@ SZ_HELPER_AUTO sz_size_t sz_substrings_bytes_warm_up_(sz_substrings_engine_t con
 }
 
 /**
- *  @brief Counts every match in @p haystack, byte for byte, without enumerating a single output run.
+ *  @brief Counts every match in @p haystack, byte for byte, without enumerating a
+ *      single output run.
  *
- *  The counts ride the transitions, so no output is ever read. @ref SZ_SUBSTRINGS_CHAINS disjoint slices
- *  step at once, each primed by the bytes before it: a state is the longest suffix read so far that spells
- *  a needle prefix, so once the longest match is behind it a chain cannot remember anything earlier, and
- *  the byte it first reports on is one of them. A haystack whose slices would be shorter than that priming
- *  walks on one chain instead.
+ *  The counts ride the transitions, so no output is ever read. @ref SZ_SUBSTRINGS_CHAINS disjoint
+ *  slices step at once, each primed by the bytes before it: a state is the longest suffix read so
+ *  far that spells a needle prefix, so once the longest match is behind it a chain cannot remember
+ *  anything earlier, and the byte it first reports on is one of them. A haystack whose slices would
+ *  be shorter than that priming walks on one chain instead.
  */
 SZ_API_COMPTIME sz_size_t sz_substrings_count_bytes_serial(sz_substrings_engine_t const *engine,
                                                            sz_cptr_t haystack, sz_size_t length) {
@@ -1452,19 +1555,23 @@ SZ_HELPER_AUTO sz_substrings_walk_t sz_substrings_report_outputs_(sz_substrings_
 
 /** One accepting position an ordered round found, held until the chains before it have reported. */
 typedef struct sz_substrings_pending_end_t {
+
     /** The state the chain stood on, whose outputs the flush enumerates. */
     sz_u32_t state;
+
     /** Where it stood, relative to the chain's window. */
     sz_u32_t delta;
 } sz_substrings_pending_end_t;
 
 /**
- *  @brief Reports every match in @p haystack in ascending end order, stepping several chains at once.
+ *  @brief Reports every match in @p haystack in ascending end order, stepping several
+ *      chains at once.
  *
- *  Each round cuts @ref SZ_SUBSTRINGS_CHAINS consecutive windows, primes every chain from the bytes before
- *  its window, and buffers the positions where it accepts. Windows are disjoint and each match belongs to
- *  the window its end falls in, so flushing the buffers in window order reproduces one chain's stream. The
- *  last chain ends exactly where the next round begins, so the tail continues from its state unprimed.
+ *  Each round cuts @ref SZ_SUBSTRINGS_CHAINS consecutive windows, primes every chain from the bytes
+ *  before its window, and buffers the positions where it accepts. Windows are disjoint and each
+ *  match belongs to the window its end falls in, so flushing the buffers in window order reproduces
+ *  one chain's stream. The last chain ends exactly where the next round begins, so the tail
+ *  continues from its state unprimed.
  */
 SZ_API_COMPTIME void sz_substrings_find_ascending_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                    sz_size_t length, sz_substrings_reporter_t reporter, void *context) {
@@ -1521,13 +1628,13 @@ SZ_API_COMPTIME void sz_substrings_find_ascending_(sz_substrings_engine_t const 
 /**
  *  @brief Reports every match in @p haystack, byte for byte, in whichever order @p order asks for.
  *
- *  A transition is one data-dependent load, so a single chain leaves the load ports idle for that whole
- *  latency. An unordered consumer gets @ref SZ_SUBSTRINGS_CHAINS disjoint slices stepped at once, each
- *  primed by the bytes before it; an ordered one gets them in rounds of windows it can buffer. Either way
- *  a haystack too short to amortize the priming walks on one chain.
+ *  A transition is one data-dependent load, so a single chain leaves the load ports idle for that
+ *  whole latency. An unordered consumer gets @ref SZ_SUBSTRINGS_CHAINS disjoint slices stepped at
+ *  once, each primed by the bytes before it; an ordered one gets them in rounds of windows it can
+ *  buffer. Either way a haystack too short to amortize the priming walks on one chain.
  *
- *  Acceptance rides the output count rather than the automaton's bit, because a state that accepts is
- *  about to have its count read anyway and both arrays are cache-resident on a host.
+ *  Acceptance rides the output count rather than the automaton's bit, because a state that accepts
+ *  is about to have its count read anyway and both arrays are cache-resident on a host.
  */
 SZ_API_COMPTIME void sz_substrings_find_bytes_serial(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                      sz_size_t length, sz_substrings_report_order_t order,
@@ -1591,9 +1698,10 @@ SZ_API_COMPTIME void sz_substrings_find_bytes_serial(sz_substrings_engine_t cons
 /**
  *  @brief Whether skipping from the root to the next live byte pays over @p haystack.
  *
- *  A byte search call costs about as much as eight transitions, so the skip pays once fewer than one byte
- *  in eight leaves the root. The density is a property of the text as much as of the vocabulary, so it is
- *  sampled here, at 64 evenly spaced bytes, rather than decided once per automaton.
+ *  A byte search call costs about as much as eight transitions, so the skip pays once fewer
+ *  than one byte in eight leaves the root. The density is a property of the text as much as
+ *  of the vocabulary, so it is sampled here, at 64 evenly spaced bytes, rather than decided
+ *  once per automaton.
  */
 SZ_API_COMPTIME sz_bool_t sz_substrings_skipping_pays_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                        sz_size_t length) {
@@ -1606,10 +1714,12 @@ SZ_API_COMPTIME sz_bool_t sz_substrings_skipping_pays_(sz_substrings_engine_t co
 }
 
 /**
- *  @brief Counts every match in @p haystack on one chain that jumps from the root to the next live byte.
+ *  @brief Counts every match in @p haystack on one chain that jumps from the root to the
+ *      next live byte.
  *  @param[in] find_live The tier's byte search, handed @c root_live.
  *
- *  The root carries no outputs and leaves itself on every dead byte, so a run of them is skipped whole.
+ *  The root carries no outputs and leaves itself on every dead byte, so a run of them
+ *  is skipped whole.
  */
 SZ_API_COMPTIME sz_size_t sz_substrings_count_skipping_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                         sz_size_t length, sz_find_byteset_t find_live) {
@@ -1628,7 +1738,8 @@ SZ_API_COMPTIME sz_size_t sz_substrings_count_skipping_(sz_substrings_engine_t c
     return total;
 }
 
-/** Reports every match in @p haystack in ascending end order, skipping from the root to the next live byte. */
+/** Reports every match in @p haystack in ascending end order, skipping from the root to the
+ *  next live byte. */
 SZ_API_COMPTIME void sz_substrings_find_skipping_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                   sz_size_t length, sz_substrings_reporter_t reporter, void *context,
                                                   sz_find_byteset_t find_live) {
@@ -1651,13 +1762,17 @@ SZ_API_COMPTIME void sz_substrings_find_skipping_(sz_substrings_engine_t const *
 }
 
 /**
- *  @brief The stages a tier may replace, handed to every verb so one tier's walk reaches all of them.
+ *  @brief The stages a tier may replace, handed to every verb so one tier's walk reaches
+ *      all of them.
  *
- *  Byte-exact walks answer for a cased vocabulary; a folded one takes the cursor, which folds as it walks.
+ *  Byte-exact walks answer for a cased vocabulary; a folded one takes the cursor, which folds
+ *  as it walks.
  */
 typedef struct sz_substrings_walks_t {
+
     /** Overlapping count of one haystack walked byte for byte. */
     sz_size_t (*count_bytes)(sz_substrings_engine_t const *, sz_cptr_t, sz_size_t);
+
     /** Overlapping reports of one haystack walked byte for byte, in the order asked. */
     void (*find_bytes)(sz_substrings_engine_t const *, sz_cptr_t, sz_size_t, sz_substrings_report_order_t,
                        sz_substrings_reporter_t, void *);
@@ -1671,7 +1786,8 @@ SZ_API_COMPTIME sz_substrings_walks_t sz_substrings_walks_serial_(void) {
     return walks;
 }
 
-/** Whether this vocabulary's haystacks are walked byte for byte, rather than folded as they are walked. */
+/** Whether this vocabulary's haystacks are walked byte for byte, rather than folded as
+ *  they are walked. */
 SZ_API_COMPTIME sz_bool_t sz_substrings_walks_bytes_(sz_substrings_engine_t const *engine) {
     return (sz_bool_t)(engine->case_sensitivity == sz_substrings_cased_k);
 }
@@ -1679,7 +1795,8 @@ SZ_API_COMPTIME sz_bool_t sz_substrings_walks_bytes_(sz_substrings_engine_t cons
 /**
  *  @brief Reports every match in @p haystack, folding it one codepoint at a time.
  *
- *  Only a byte ending a folded rune can end a match, so a reported end is always a whole codepoint's.
+ *  Only a byte ending a folded rune can end a match, so a reported end is always
+ *  a whole codepoint's.
  */
 SZ_API_COMPTIME void sz_substrings_find_uncased_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                  sz_size_t length, sz_substrings_reporter_t reporter, void *context) {
@@ -1724,8 +1841,8 @@ SZ_API_COMPTIME void sz_substrings_find_uncased_(sz_substrings_engine_t const *e
 
 /**
  *  @brief Reports every match of @p haystack, folding it when the vocabulary and the haystack ask.
- *  @note A folded walk keeps one chain whatever @p order names, since a fold consumes a variable number of
- *        source bytes per step and so cannot be indexed in lockstep.
+ *  @note A folded walk keeps one chain whatever @p order names, since a fold consumes a variable
+ *      number of source bytes per step and so cannot be indexed in lockstep.
  */
 SZ_API_COMPTIME void sz_substrings_find_all_(sz_substrings_engine_t const *engine,
                                              sz_substrings_walks_t const *walks, sz_cptr_t haystack, sz_size_t length,
@@ -1738,14 +1855,18 @@ SZ_API_COMPTIME void sz_substrings_find_all_(sz_substrings_engine_t const *engin
 /**
  *  @brief The undecided starts of a leftmost walk, and which of them any match has claimed.
  *
- *  Every claimed start lies within @c width of the drain position, so the ring holds them keyed by start
- *  modulo @c width, and the bitmap lets draining jump between claims rather than visit every byte.
+ *  Every claimed start lies within @c width of the drain position, so the ring holds them
+ *  keyed by start modulo @c width, and the bitmap lets draining jump between claims rather
+ *  than visit every byte.
  */
 typedef struct sz_substrings_ring_t {
+
     /** The @b [width] best match per start, zero where no match has claimed it. */
     sz_substrings_pending_start_t *starts;
+
     /** One bit per entry of @c starts, set exactly where that entry is claimed. */
     sz_u64_t *claimed;
+
     /** Entries the ring holds, a power of two so the slot lookup is a mask. */
     sz_size_t width;
 } sz_substrings_ring_t;
@@ -1753,7 +1874,7 @@ typedef struct sz_substrings_ring_t {
 /** Words the claimed bitmap of a ring @p width entries wide takes. */
 SZ_HELPER_AUTO sz_size_t sz_substrings_ring_words_(sz_size_t width) { return sz_size_divide_round_up(width, 64); }
 
-/** The first claimed start in @c [from, @c limit), or @p limit when there is none. */
+/** The first claimed start in [from, limit), or @p limit when there is none. */
 SZ_API_COMPTIME sz_size_t sz_substrings_ring_next_claimed_(sz_substrings_ring_t const *ring, sz_size_t from,
                                                            sz_size_t limit) {
     // Every claim lies within one width of `from`, so nothing past that can be claimed.
@@ -1770,27 +1891,37 @@ SZ_API_COMPTIME sz_size_t sz_substrings_ring_next_claimed_(sz_substrings_ring_t 
     return limit;
 }
 
-/** What a leftmost walk carries between the overlapping walk beneath it and the cover it is deciding. */
+/** What a leftmost walk carries between the overlapping walk beneath it and the cover
+ *  it is deciding. */
 typedef struct sz_substrings_leftmost_context_t {
+
     /** The undecided starts, empty on entry. */
     sz_substrings_ring_t *ring;
+
     /** Which cover the ties resolve under. */
     sz_substrings_overlap_policy_t policy;
+
     /** Where the consumer's own reports go. */
     sz_substrings_reporter_t reporter;
+
     /** Whatever the consumer bound to that reporter. */
     void *context;
+
     /** First byte no accepted match has claimed, which is what makes the cover non-overlapping. */
     sz_size_t cursor;
+
     /** Starts already drained. */
     sz_size_t settled;
+
     /** One past the last start any match claimed, which is where draining stops. */
     sz_size_t undrained_end;
+
     /** Whether the consumer is still listening. */
     sz_substrings_walk_t walk;
 } sz_substrings_leftmost_context_t;
 
-/** Drains one claimed start, reporting its incumbent when nothing accepted has already covered it. */
+/** Drains one claimed start, reporting its incumbent when nothing accepted has
+ *  already covered it. */
 SZ_API_COMPTIME void sz_substrings_leftmost_accept_(sz_substrings_leftmost_context_t *leftmost, sz_size_t start) {
     sz_substrings_ring_t *const ring = leftmost->ring;
     sz_size_t const slot_index = start & (ring->width - 1);
@@ -1844,8 +1975,8 @@ SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_leftmost_report_(void *contex
  *  @param[in] ring Empty on entry, and empty again on return.
  *
  *  Matches surface at their end, so the earliest start is not the first seen: over "abcd" against
- *  {"bc", "abcd"}, "bc" completes first and "abcd" starts before it. A start settles only once the walk is
- *  @c max_source_match_bytes past it, which is what the ring holds.
+ *  {"bc", "abcd"}, "bc" completes first and "abcd" starts before it. A start settles only once the
+ *  walk is @c max_source_match_bytes past it, which is what the ring holds.
  */
 SZ_API_COMPTIME void sz_substrings_find_leftmost_(sz_substrings_engine_t const *engine,
                                                   sz_substrings_walks_t const *walks, sz_cptr_t haystack,
@@ -1890,8 +2021,10 @@ SZ_API_COMPTIME void sz_substrings_visit_(sz_substrings_engine_t const *engine,
 
 #pragma region Serial Backends
 
-/** Tallies reported matches, which is what a leftmost count and a rewrite's sizing pass both need. */
+/** Tallies reported matches, which is what a leftmost count and a rewrite's sizing
+ *  pass both need. */
 typedef struct sz_substrings_tally_t {
+
     /** Matches reported so far. */
     sz_size_t count;
 } sz_substrings_tally_t;
@@ -1903,14 +2036,19 @@ SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_tally_report_(void *context, 
     return sz_substrings_continue_k;
 }
 
-/** Collects reported matches into the caller's array, tallying past its end rather than stopping there. */
+/** Collects reported matches into the caller's array, tallying past its end rather
+ *  than stopping there. */
 typedef struct sz_substrings_collector_t {
+
     /** Where the matches land, or @c SZ_NULL for a pure size query. */
     sz_substrings_match_t *matches;
+
     /** Entries @c matches holds. */
     sz_size_t capacity;
+
     /** Matches reported so far, which is the true total whether or not they fit. */
     sz_size_t count;
+
     /** Which haystack the current walk is over. */
     sz_size_t haystack_index;
 } sz_substrings_collector_t;
@@ -1929,29 +2067,40 @@ SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_collect_report_(void *context
     return sz_substrings_continue_k;
 }
 
-/** Splices replacements over one haystack, tallying the true size whether or not the output holds it. */
+/** Splices replacements over one haystack, tallying the true size whether or not the
+ *  output holds it. */
 typedef struct sz_substrings_rewriter_t {
+
     /** The haystack being rewritten, read in place. */
     sz_cptr_t haystack;
+
     /** Bytes it holds. */
     sz_size_t haystack_length;
+
     /** One replacement per needle, indexed by needle. */
     sz_sequence_t const *replacements;
+
     /** Where the rewrite lands, or @c SZ_NULL for a pure size query. */
     sz_ptr_t output;
+
     /** Bytes @c output holds. */
     sz_size_t output_capacity;
+
     /** Source bytes consumed, which is where the next gap begins. */
     sz_size_t cursor;
+
     /** Output bytes written. */
     sz_size_t written;
+
     /** Source bytes the accepted matches cover. */
     sz_size_t removed;
+
     /** Replacement bytes they bring in. */
     sz_size_t added;
 } sz_substrings_rewriter_t;
 
-/** Copies one stretch when the output still has room for all of it, and skips it whole when it does not. */
+/** Copies one stretch when the output still has room for all of it, and skips it whole when
+ *  it does not. */
 SZ_API_COMPTIME void sz_substrings_rewriter_emit_(sz_substrings_rewriter_t *rewriter, sz_cptr_t source,
                                                   sz_size_t bytes) {
     if (bytes == 0 || rewriter->written + bytes > rewriter->output_capacity) return;
@@ -1974,10 +2123,11 @@ SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_rewrite_report_(void *context
 
 /**
  *  @brief Rewrites one haystack, reporting the bytes it produces whether or not they fit.
- *  @return Bytes the rewrite produces, which is the true count for every haystack and from the first byte.
+ *  @return Bytes the rewrite produces, which is the true count for every haystack and from
+ *      the first byte.
  *
- *  Sizing and splicing are one walk: the copies run while there is room and the tally runs to the end
- *  whatever happens, so the size never depends on what the output could hold.
+ *  Sizing and splicing are one walk: the copies run while there is room and the tally runs to the
+ *  end whatever happens, so the size never depends on what the output could hold.
  */
 SZ_API_COMPTIME sz_size_t sz_substrings_rewrite_(sz_substrings_engine_t const *engine,
                                                  sz_substrings_walks_t const *walks, sz_cptr_t haystack,
@@ -2003,16 +2153,22 @@ SZ_HELPER_AUTO sz_size_t sz_substrings_ring_bytes_(sz_size_t width) {
 /**
  *  @brief Byte offsets of the one arena every host tier's round runs out of.
  *
- *  Everything a round needs is a function of the vocabulary and the policy, both settled at construction, so
- *  the arena is sized once and no compute verb ever reaches for an allocator.
+ *  Everything a round needs is a function of the vocabulary and the policy, both settled at
+ *  construction, so the arena is sized once and no compute verb ever reaches for an allocator.
  */
 typedef struct sz_substrings_host_arena_t {
+
     /** Offset of the round's report, which is the first thing every verb writes. */
     sz_size_t report;
-    /** Offset of the leftmost ring's starts, equal to @c bm25_counts when the policy claims no ring. */
+
+    /** Offset of the leftmost ring's starts, equal to @c bm25_counts when the policy
+     *  claims no ring. */
     sz_size_t ring;
-    /** Offset of the @b [2 * needles] BM25 counters: the per-needle tallies, then the touched list. */
+
+    /** Offset of the @b [2 * needles] BM25 counters: the per-needle tallies, then
+     *  the touched list. */
     sz_size_t bm25_counts;
+
     /** Bytes the whole arena takes. */
     sz_size_t total;
 } sz_substrings_host_arena_t;
@@ -2032,7 +2188,8 @@ SZ_API_COMPTIME sz_substrings_host_arena_t sz_substrings_host_arena_(sz_size_t n
     return arena;
 }
 
-/** Binds the leftmost ring onto the engine's arena, empty, or leaves it unbound under an overlapping policy. */
+/** Binds the leftmost ring onto the engine's arena, empty, or leaves it unbound under
+ *  an overlapping policy. */
 SZ_API_COMPTIME void sz_substrings_ring_bind_(sz_substrings_engine_t const *engine, sz_substrings_ring_t *ring) {
     sz_substrings_host_arena_t const arena =
         sz_substrings_host_arena_(engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
@@ -2068,9 +2225,11 @@ SZ_API_COMPTIME sz_status_t sz_substrings_engine_arena_host_(sz_substrings_engin
 }
 
 /**
- *  @brief Compiles @p needles and sizes the host arena beside it, which is @ref sz_substrings_engine_init_cpu.
+ *  @brief Compiles @p needles and sizes the host arena beside it, which
+ *      is @ref sz_substrings_engine_init_cpu.
  *
- *  Split from the public verb only so a device tier can reuse the compilation without the host arena.
+ *  Split from the public verb only so a device tier can reuse the compilation without
+ *  the host arena.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_engine_build_(sz_sequence_t const *needles,
                                                         sz_substrings_case_sensitivity_t case_sensitivity,
@@ -2219,14 +2378,16 @@ SZ_HELPER_AUTO sz_status_t sz_substrings_bm25_check(sz_substrings_bm25_t const *
     return sz_success_k;
 }
 
-/** The factor every term of one document shares: 1 without length normalization, otherwise `1 - b + b·len/avg`. */
+/** The factor every term of one document shares: 1 without length normalization, otherwise
+ *  1 - b + b · len/avg. */
 SZ_HELPER_AUTO sz_f64_t sz_substrings_bm25_norm(sz_substrings_bm25_t const *parameters, sz_f64_t document_length) {
     sz_f64_t const normalization = parameters->length_normalization;
     if (!(normalization > 0)) return 1;
     return 1 - normalization + normalization * document_length / parameters->average_document_length;
 }
 
-/** One needle's contribution: its weight times the saturated frequency `tf·(k1 + 1) / (tf + k1·norm)`. */
+/** One needle's contribution: its weight times the saturated frequency
+ *  tf · (k1 + 1) / (tf + k1 · norm). */
 SZ_HELPER_AUTO sz_f64_t sz_substrings_bm25_term(sz_substrings_bm25_t const *parameters, sz_f64_t norm, sz_f32_t weight,
                                                 sz_size_t term_frequency) {
     sz_f64_t const saturation = parameters->term_frequency_saturation;
@@ -2236,12 +2397,18 @@ SZ_HELPER_AUTO sz_f64_t sz_substrings_bm25_term(sz_substrings_bm25_t const *para
 
 /** Per-needle counters for one document, plus the needles it touched in first-occurrence order. */
 typedef struct sz_substrings_frequencies_t {
-    /** The @b [needles] occurrences of each needle so far, zero for every needle not in @c touched. */
+
+    /** The @b [needles] occurrences of each needle so far, zero for every needle not
+     *  in @c touched. */
     sz_u32_t *counts;
-    /** The @b [needles] list whose head holds the needles with a nonzero count, its tail spare room. */
+
+    /** The @b [needles] list whose head holds the needles with a nonzero count, its
+     *  tail spare room. */
     sz_u32_t *touched;
+
     /** Entries at the head of @c touched. */
     sz_size_t touched_count;
+
     /** Needles in the vocabulary, the length of both arrays. */
     sz_size_t needles_count;
 } sz_substrings_frequencies_t;
@@ -2258,8 +2425,9 @@ SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_frequencies_report_(void *con
 /**
  *  @brief Adds every overlapping occurrence in @p haystack to @p frequencies.
  *
- *  Split from @ref sz_substrings_bm25_total_ so slices of one long document can be counted into separate
- *  rows and merged by addition, since integer frequencies do not depend on who counted them.
+ *  Split from @ref sz_substrings_bm25_total_ so slices of one long document can be counted
+ *  into separate rows and merged by addition, since integer frequencies do not depend on
+ *  who counted them.
  */
 SZ_API_COMPTIME void sz_substrings_bm25_count_(sz_substrings_engine_t const *engine,
                                                sz_substrings_walks_t const *walks, sz_cptr_t haystack, sz_size_t length,
@@ -2270,7 +2438,8 @@ SZ_API_COMPTIME void sz_substrings_bm25_count_(sz_substrings_engine_t const *eng
 }
 
 /**
- *  @brief Sorts the touched needles ascending with a byte-wise LSD radix sort into the list's own tail.
+ *  @brief Sorts the touched needles ascending with a byte-wise LSD radix sort into the
+ *      list's own tail.
  *  @return Whichever half holds the sorted order.
  *  @pre `touched_count * 2 <= needles_count`, so the tail is at least as long as the head.
  */
@@ -2295,7 +2464,8 @@ SZ_API_COMPTIME sz_u32_t *sz_substrings_sort_needles_(sz_u32_t *keys, sz_size_t 
 }
 
 /**
- *  @brief Scores one counted document in ascending needle order, leaving @p frequencies empty again.
+ *  @brief Scores one counted document in ascending needle order, leaving
+ *      @p frequencies empty again.
  *
  *  Float addition is not associative, so the order is part of the answer: fixing it makes the score
  *  independent of the order any walk reported in.

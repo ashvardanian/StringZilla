@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: WebAssembly SIMD128 (compile with `-msimd128`), mirroring `include/stringzilla/find/v128.h` */
+/**
+ *  @file probes/wasm_v128.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for WebAssembly SIMD128, compiled with `-msimd128`.
+ *
+ *  @sa include/stringzilla/find/v128.h
+ */
 #include <wasm_simd128.h>
 
 #if defined(__clang__)

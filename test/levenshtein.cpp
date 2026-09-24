@@ -1,37 +1,30 @@
 /**
- *  @brief  Levenshtein edit-distance tests: known answers, a textbook DP oracle, and every backend against it.
- *  @file   test/levenshtein.cpp
+ *  @file test/levenshtein.cpp
  *  @author Ash Vardanian
- *  @date January 4, 2024
+ *  @date September 6, 2023
+ *  @brief Levenshtein edit-distance tests: known answers, a textbook DP oracle, and every
+ *      backend against it.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_HASWELL 0
- #define SZ_USE_ICELAKE 0
- */
+/*  ! Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development to validate ISA-specific implementations.
+ *
+ *  #define SZ_USE_HASWELL 0
+ *  #define SZ_USE_ICELAKE 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Make sure to include the StringZilla headers before anything else, to intercept missing
+ *  `#include` directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -51,7 +44,7 @@ using namespace sz::test;
 
 #pragma region Helpers
 
-/** @brief Textbook O(n·m) Levenshtein over any symbol sequence, the oracle every backend is measured against. */
+/** Textbook O(n · m) Levenshtein over any symbol sequence, the oracle every backend is held to. */
 template <typename symbols_type_>
 static std::size_t levenshtein_reference_(symbols_type_ const &first, symbols_type_ const &second) {
     std::vector<std::size_t> previous(second.size() + 1), current(second.size() + 1);
@@ -70,8 +63,8 @@ static std::size_t levenshtein_reference_(symbols_type_ const &first, symbols_ty
     return previous[second.size()];
 }
 
-/** @brief The rune sequence the UTF-8 entries score, decoded here on the rune codec alone so the oracle shares nothing
- *         with the kernel: an ill-formed byte is one @c U+FFFD. */
+/** The rune sequence the UTF-8 entries score, decoded here on the rune codec alone so the oracle
+ *  shares nothing with the kernel: an ill-formed byte is one @c U+FFFD. */
 static std::u32string levenshtein_runes_(std::string const &text) {
     std::u32string runes;
     for (std::size_t position = 0; position < text.size();) {
@@ -83,13 +76,17 @@ static std::u32string levenshtein_runes_(std::string const &text) {
     return runes;
 }
 
-/** @brief One backend's cross-product verb; a batch is prepared by one host builder whatever tier scores it. */
+/** One backend's cross-product verb; one host builder prepares a batch whatever tier scores it. */
 struct levenshtein_backend_t {
-    char const *name;                     /**< The row's spelling, for @ref fail_backend_ and the log. */
-    sz_levenshtein_distances_t distances; /**< The verb, over bytes or over runes as the engine was built. */
+
+    /** The row's spelling, for @ref fail_backend_ and the log. */
+    char const *name;
+
+    /** The verb, over bytes or over runes as the engine was built. */
+    sz_levenshtein_distances_t distances;
 };
 
-/** @brief Every cross-product backend compiled into this translation unit, dispatched first. */
+/** Every cross-product backend compiled into this translation unit, dispatched first. */
 static levenshtein_backend_t const levenshtein_backends[] = {
     {"dispatched", sz_levenshtein_distances},      {"serial", sz_levenshtein_distances_serial},
 #if SZ_USE_HASWELL
@@ -103,7 +100,7 @@ static levenshtein_backend_t const levenshtein_backends[] = {
 #endif
 };
 
-/** @brief One prepared batch, released with the scope that named it. */
+/** One prepared batch, released with the scope that named it. */
 struct levenshtein_engine_t {
     sz_levenshtein_engine_t engine {};
 
@@ -115,8 +112,8 @@ struct levenshtein_engine_t {
     levenshtein_engine_t &operator=(levenshtein_engine_t const &) = delete;
 };
 
-/** @brief Runs @p queries against @p candidates through @p distances of @p name, asserting the matrix matches
- *         @p expected, which is @b [queries, candidates] row-major. */
+/** Runs @p queries against @p candidates through @p distances of @p name, asserting the matrix
+ *  matches @p expected, which is @b [queries, candidates] row-major. */
 static void check_levenshtein_distances_(char const *name, std::vector<std::string> const &queries,
                                          std::vector<std::string> const &candidates,
                                          std::vector<sz_size_t> const &expected, sz_levenshtein_symbol_t symbol,
@@ -130,8 +127,8 @@ static void check_levenshtein_distances_(char const *name, std::vector<std::stri
     if (computed != expected) fail_backend_(name, "the cross-product distances differ from the expected answers");
 }
 
-/** @brief Runs @p queries against @p candidates through every backend row, byte-level and rune-level alike,
- *         against the given answers. */
+/** Runs @p queries against @p candidates through every backend row, byte-level and rune-level
+ *  alike, against the given answers. */
 static void check_levenshtein_expected_(std::vector<std::string> const &queries,
                                         std::vector<std::string> const &candidates,
                                         std::vector<sz_size_t> const &expected_bytes,
@@ -144,7 +141,7 @@ static void check_levenshtein_expected_(std::vector<std::string> const &queries,
     }
 }
 
-/** @brief Runs @p queries against @p candidates through every entry, each against its own oracle. */
+/** Runs @p queries against @p candidates through every entry, each against its own oracle. */
 static void check_levenshtein_case_(std::vector<std::string> const &queries,
                                     std::vector<std::string> const &candidates) {
     std::vector<sz_size_t> expected_bytes, expected_runes;
@@ -158,8 +155,8 @@ static void check_levenshtein_case_(std::vector<std::string> const &queries,
     check_levenshtein_expected_(queries, candidates, expected_bytes, expected_runes);
 }
 
-/** @brief One backend's answers against the serial backend's, bit for bit, over random batches on a two-letter
- *         and on a multi-byte rune alphabet, with several queries in flight so the query axis is exercised. */
+/** One backend's answers against the serial backend's, bit for bit, over random batches on a
+ *  two-letter and a multi-byte rune alphabet, with several queries in flight to cover that axis. */
 static void check_levenshtein_equivalence_(levenshtein_backend_t const &reference,
                                            levenshtein_backend_t const &candidate, std::size_t rounds) {
     std::mt19937 &generator = global_random_generator();
@@ -190,18 +187,18 @@ static void check_levenshtein_equivalence_(levenshtein_backend_t const &referenc
         }
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
-/** @brief One candidate and the literal distances it must score against the query, in bytes and in runes. */
+/** One candidate and the literal distances it must score against the query, in bytes and runes. */
 struct levenshtein_known_t {
     std::string candidate;
     sz_size_t bytes;
     sz_size_t runes;
 };
 
-/** @brief Runs one query against its known candidates through every backend row. */
+/** Runs one query against its known candidates through every backend row. */
 static void check_levenshtein_unit_(std::string const &query, std::vector<levenshtein_known_t> const &known) {
     std::vector<std::string> candidates;
     std::vector<sz_size_t> expected_bytes, expected_runes;
@@ -213,8 +210,8 @@ static void check_levenshtein_unit_(std::string const &query, std::vector<levens
     check_levenshtein_expected_({query}, candidates, expected_bytes, expected_runes);
 }
 
-/** @brief Known answers: the classic pairs, empties on either side, identity, the 64-symbol word boundary, and
- *         multi-byte runes, through every backend row. */
+/** Known answers: the classic pairs, empties on either side, identity, the 64-symbol word boundary,
+ *  and multi-byte runes, through every backend row. */
 void test_levenshtein_unit() {
     fmt::println("  - testing edit-distance known-answer vectors...");
     check_levenshtein_unit_(
@@ -241,12 +238,12 @@ void test_levenshtein_unit() {
                             {"kitten", "sitting", "", "kit", std::string(70, 'b')});
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Safety
 
-/** @brief The cross-product verb of @p backend on degenerate batches: empties on either side, both, and none
- *         survive, and a stride too narrow for one row is refused without touching the outputs. */
+/** The cross-product verb of @p backend on degenerate batches: empties on either side, both, and
+ *  none survive, and a stride too narrow for one row is refused without touching the outputs. */
 static void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
     std::vector<std::string> const queries = {"kitten", ""};
     std::vector<std::string> const words = {"sitting", "kitten"};
@@ -273,7 +270,7 @@ static void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
     }
 }
 
-/** @brief The host builder reporting a refused allocation rather than handing back a half-built engine. */
+/** The host builder reporting a refused allocation rather than handing back a half-built engine. */
 static void check_levenshtein_build_safety_() {
     sz_memory_allocator_t refusing = refusing_allocator_();
     std::vector<std::string> const queries = {"kitten", "sitting"};
@@ -286,26 +283,23 @@ static void check_levenshtein_build_safety_() {
     }
 }
 
-/**
- *  @brief Degenerate inputs for the edit-distance family, asserting survival and the stated refusals.
- *         Answers are not the subject here: empties are accepted, a refused allocation is reported, and no failure
- *         writes an output.
- */
+/** Degenerate inputs for the edit-distance family, asserting survival and the stated refusals.
+ *  Answers are not the subject here: empties are accepted, a refused allocation is reported, and no
+ *  failure writes an output. */
 void test_levenshtein_safety() {
     fmt::println("  - testing degenerate inputs and refused allocations of the edit-distance kernels...");
     for (levenshtein_backend_t const &backend : levenshtein_backends) check_levenshtein_safety_(backend);
     check_levenshtein_build_safety_();
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/**
- *  @brief Drives the oracle sweeps and the serial-versus-SIMD differential across every backend compiled here: query
- *         and candidate lengths sweep every 64-symbol word boundary and reach past the register-resident word tiers,
- *         on a two-letter alphabet that forces matches, on a multi-byte rune alphabet, and on full bytes.
- */
+/** Drives the oracle sweeps and the serial-versus-SIMD differential across every backend compiled
+ *  here: query and candidate lengths sweep every 64-symbol word boundary and reach past the
+ *  register-resident word tiers, on a two-letter alphabet that forces matches, on a multi-byte rune
+ *  alphabet, and on full bytes. */
 void test_levenshtein_all() {
     std::size_t const lengths[] = {0, 1, 2, 5, 63, 64, 65, 127, 128, 129, 255, 256, 257, 300, 511, 512, 513, 640, 1000};
     char const binary_alphabet[] = "ab";
@@ -359,4 +353,4 @@ void test_levenshtein_all() {
         check_levenshtein_equivalence_(reference, candidate, scale_iterations(8));
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

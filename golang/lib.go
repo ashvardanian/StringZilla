@@ -1,20 +1,6 @@
-// StringZilla is a SIMD-accelerated string library for modern CPUs, written in C 99,
-// and using AVX2, AVX512, Arm NEON, and SVE intrinsics to accelerate processing.
-//
-// The GoLang binding is intended to provide a simple interface to a precompiled
-// shared library, available on GitHub: https://github.com/ashvardanian/stringzilla
-//
-// It requires Go 1.24 or newer to leverage the `cGo` `noescape` and `nocallback`
-// directives. Without those the latency of calling C functions from Go is too high
-// to be useful for string processing.
-//
-// Unlike the native Go `strings` package, StringZilla primarily targets byte-level
-// binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
-//
-// For some functions we are avoiding `noescape` and `nocallback`, assuming they use
-// too much stack space:
-// - sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
-// - sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest
+// File: golang/lib.go
+// Author: Ash Vardanian
+
 package sz
 
 // #cgo CFLAGS: -O3 -I../include -DSZ_DYNAMIC_DISPATCH=1
@@ -80,7 +66,8 @@ func Contains(str string, substr string) bool {
 	return matchPtr != nil
 }
 
-// Index returns the index of the first instance of `substr` in `str`, or -1 if `substr` is not present.
+// Index returns the index of the first instance of `substr` in `str`, or -1 if `substr`
+// is not present.
 // https://pkg.go.dev/strings#Index
 func Index(str string, substr string) int64 {
 	substrLen := len(substr)
@@ -97,7 +84,8 @@ func Index(str string, substr string) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// LastIndex returns the index of the last instance of `substr` in `str`, or -1 if `substr` is not present.
+// LastIndex returns the index of the last instance of `substr` in `str`, or -1 if `substr`
+// is not present.
 // https://pkg.go.dev/strings#LastIndex
 func LastIndex(str string, substr string) int64 {
 	substrLen := len(substr)
@@ -114,7 +102,8 @@ func LastIndex(str string, substr string) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// IndexByte returns the index of the first instance of a byte in `str`, or -1 if a byte is not present.
+// IndexByte returns the index of the first instance of a byte in `str`, or -1 if a byte
+// is not present.
 // https://pkg.go.dev/strings#IndexByte
 func IndexByte(str string, c byte) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
@@ -127,7 +116,8 @@ func IndexByte(str string, c byte) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// LastIndexByte returns the index of the last instance of a byte in `str`, or -1 if a byte is not present.
+// LastIndexByte returns the index of the last instance of a byte in `str`, or -1 if a byte
+// is not present.
 // https://pkg.go.dev/strings#LastIndexByte
 func LastIndexByte(str string, c byte) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
@@ -140,8 +130,9 @@ func LastIndexByte(str string, c byte) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// IndexAny returns the index of the first instance of any byte from `substr` in `str`, or -1 if none are present.
-// Note: This is byte-set based (ASCII/bytes), not Unicode rune semantics like strings.IndexAny.
+// IndexAny returns the index of the first instance of any byte from `substr` in `str`, or -1
+// if none are present. Note: This is byte-set based (ASCII/bytes), not Unicode rune
+// semantics like strings.IndexAny.
 // https://pkg.go.dev/strings#IndexAny
 func IndexAny(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
@@ -155,8 +146,9 @@ func IndexAny(str string, substr string) int64 {
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
 }
 
-// LastIndexAny returns the index of the last instance of any byte from `substr` in `str`, or -1 if none are present.
-// Note: This is byte-set based (ASCII/bytes), not Unicode rune semantics like strings.LastIndexAny.
+// LastIndexAny returns the index of the last instance of any byte from `substr` in `str`, or
+// -1 if none are present. Note: This is byte-set based (ASCII/bytes), not Unicode rune
+// semantics like strings.LastIndexAny.
 // https://pkg.go.dev/strings#LastIndexAny
 func LastIndexAny(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
@@ -194,7 +186,7 @@ func isValidUTF8String(s string) bool {
 }
 
 // Utf8CaseFold applies full Unicode case folding to a UTF-8 string.
-// It can expand the output (e.g. "ß" -> "ss"), so it allocates up to 3x the input byte size.
+// It can expand the output, as "ß" → "ss" does, so it allocates up to 3× the input byte size.
 func Utf8CaseFold(str string, validate bool) (string, error) {
 	if len(str) == 0 {
 		return "", nil
@@ -211,7 +203,7 @@ func Utf8CaseFold(str string, validate bool) (string, error) {
 }
 
 // Utf8Count returns the number of Unicode codepoints in a UTF-8 string, SIMD-accelerated.
-// It counts non-continuation bytes (bytes not matching the 10xxxxxx pattern), which agrees with
+// It counts non-continuation bytes, the ones not matching the 10xxxxxx pattern, which agrees with
 // utf8.RuneCount on well-formed UTF-8 but can differ on malformed input: for example, a run of
 // lone continuation bytes counts as zero here, while utf8.RuneCount counts one per byte.
 func Utf8Count(str string) int {
@@ -277,7 +269,7 @@ func Utf8CaseInsensitiveFind(haystack, needle string, validate bool) (index int6
 }
 
 // Utf8CaseInsensitiveNeedle caches metadata for efficient repeated case-insensitive UTF-8 searches.
-// Note: this type is not safe for concurrent use, because the internal metadata is computed lazily and mutated.
+// It is not safe for concurrent use, as its internal metadata is computed lazily and mutated.
 type Utf8CaseInsensitiveNeedle struct {
 	needle   string
 	metadata C.sz_utf8_uncased_needle_metadata_t
@@ -376,7 +368,7 @@ func (h *Hasher) Sum64() uint64 {
 }
 
 // Digest returns the current 64-bit hash without consuming the state.
-// This is an alias for Sum64().
+// This is an alias for [Hasher.Sum64].
 func (h *Hasher) Digest() uint64 {
 	return h.Sum64()
 }
@@ -447,7 +439,7 @@ func (h *Sha256) Digest() [32]byte {
 }
 
 // Hexdigest returns the current SHA-256 hash as a lowercase hexadecimal string.
-// This is a convenience wrapper over Digest().
+// This is a convenience wrapper over [Sha256.Digest].
 func (h *Sha256) Hexdigest() string {
 	digest := h.Digest()
 	return fmt.Sprintf("%x", digest)

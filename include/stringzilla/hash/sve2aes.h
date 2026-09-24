@@ -1,7 +1,9 @@
 /**
- *  @brief SVE2 + AES backend for string hashing and checksums.
  *  @file include/stringzilla/hash/sve2aes.h
  *  @author Ash Vardanian
+ *  @date March 13, 2025
+ *  @brief SVE2 + AES backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_SVE2AES_H_
@@ -24,15 +26,14 @@ extern "C" {
 #endif
 
 /**
- *  @brief Emulates the Intel's AES-NI `AESENC` instruction with Arm SVE2.
- *  @see "Emulating x86 AES Intrinsics on ARMv8-A" by Michael Brase:
- *       https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
+ *  @brief Emulates the Intel's AES-NI @c AESENC instruction with Arm SVE2.
+ *  @see Emulating x86 AES Intrinsics on ARMv8-A by Michael Brase: https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
  */
 SZ_HELPER_INLINE svuint8_t sz_emulate_aesenc_u8x16_sve2_(svuint8_t state_u8x, svuint8_t round_key_u8x) {
     return sveor_u8_x(svptrue_b8(), svaesmc_u8(svaese_u8(state_u8x, svdup_n_u8(0))), round_key_u8x);
 }
 
-/** @brief A variant of `sz_hash_sve2aes` for strings up to 16 bytes long - smallest SVE register size. */
+/** A variant of @c sz_hash_sve2aes for strings up to 16 bytes long - smallest SVE register size. */
 SZ_HELPER_INLINE sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     svuint8_t state_aes_u8x, state_sum_u8x, state_key_u8x;
 
@@ -73,18 +74,15 @@ SZ_HELPER_INLINE sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length,
     return svlasta_u64(all_b64x, final_mixed_u64x); // Extract the first element
 }
 
-/*  @brief  SVE2 increment hash functions currently mostly delegate to NEON for optimal performance.
- *  @see draft/hash.h for experimental SVE2 implementations.
+/*  SVE2 incremental hash functions mostly delegate to NEON for optimal performance; experimental
+ *  SVE2 implementations live in `draft/hash.h`.
  *
- *  Vanilla SVE could have helped optimized loads & stores with predicated instructions,
- *  but the `mov` between Z and Q registers isn't free. Moreover, those "bridge" moving
- *  instructions are designed for the bottom 128 bits of the state. Using "stores" for
- *  larger 256-bit registers isn't fast either.
+ *  Vanilla SVE could have helped optimize loads and stores with predicated instructions, but the
+ *  @c mov between Z and Q registers isn't free. Moreover, those "bridge" moving instructions are
+ *  designed for the bottom 128 bits of the state, and "stores" for 256-bit registers are no faster.
  *
- *  SVE2 comes with optional AES extensions, but they don't yield absolutely any performance
- *  improvements even for wider registers due to the added cost and complexity of dealing with
- *  predicates.
- */
+ *  SVE2 comes with optional AES extensions, but they yield no performance improvement at all, even
+ *  for wider registers, because of the added cost and complexity of dealing with predicates. */
 
 SZ_API_COMPTIME void sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed) { //
     sz_hash_state_init_neonaes(state, seed);

@@ -1,7 +1,9 @@
 /**
- *  @brief Haswell (AVX2) backend for substring & byte-set search.
  *  @file include/stringzilla/find/haswell.h
  *  @author Ash Vardanian
+ *  @date August 14, 2020
+ *  @brief Haswell (AVX2) backend for substring & byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_HASWELL_H_
@@ -16,8 +18,7 @@ extern "C" {
 #endif
 
 /*  AVX2 implementation of the string search algorithms for Haswell processors and newer.
- *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation.
- */
+ *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation. */
 #if SZ_USE_HASWELL
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)

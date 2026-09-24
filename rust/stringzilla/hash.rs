@@ -1,4 +1,7 @@
 //! Byte-sums, the 64-bit hasher, SHA-256 states, and HMAC-SHA256.
+//!
+//! File: rust/stringzilla/hash.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
@@ -157,13 +160,15 @@ impl Default for Sha256 {
 
 /// Advances many independent SHA256 states at once, one message per lane.
 ///
-/// Hashing a single message is a serial dependency chain, so no instruction set can speed it up. Independent
-/// messages do compress in parallel lanes: sixteen at a time on AVX-512, eight on AVX2. Feed at least a few
-/// kilobytes per lane per call, since shorter chunks never reach the lane-parallel path.
+/// Hashing a single message is a serial dependency chain, so no instruction set can speed it
+/// up. Independent messages do compress in parallel lanes: sixteen at a time on AVX-512, eight
+/// on AVX2. Feed at least a few kilobytes per lane per call, since shorter chunks never reach
+/// the lane-parallel path.
 ///
-/// Borrows the caller's storage throughout and allocates nothing. Accepts anything that dereferences to
-/// bytes, so a `Vec<String>` or `Vec<Vec<u8>>` needs no intermediate slice-of-slices. See
-/// [`sha256_multistate_update_by`] for messages that do not sit in one contiguous slice.
+/// Borrows the caller's storage throughout and allocates nothing. Accepts anything that
+/// dereferences to bytes, so a `Vec<String>` or `Vec<Vec<u8>>` needs no intermediate
+/// slice-of-slices. See [`sha256_multistate_update_by`] for messages that do not sit in
+/// one contiguous slice.
 ///
 /// # Errors
 ///
@@ -192,7 +197,8 @@ pub fn sha256_multistate_update<Element: AsRef<[u8]>>(states: &mut [Sha256], chu
     sha256_multistate_update_by(states, |lane_index| chunks[lane_index].as_ref())
 }
 
-/// Advances many independent SHA256 states at once, taking each lane's next chunk from a caller-provided key.
+/// Advances many independent SHA256 states at once, taking each lane's next chunk from
+/// a caller-provided key.
 ///
 /// # Errors
 ///
@@ -222,8 +228,8 @@ where
         return Ok(());
     }
 
-    // Same adapter as `argsort_by`: relabel each borrowed chunk `'static` so it can cross the C ABI. Safe
-    // because the kernel reads the chunks only during this synchronous call.
+    // Same adapter as `argsort_by`: relabel each borrowed chunk `'static` so it can cross the C
+    // ABI. Safe because the kernel reads the chunks only during this synchronous call.
     let adapter = move |lane_index: usize| -> &'static [u8] {
         let binding = mapper(lane_index);
         let slice = binding.as_ref();
@@ -232,7 +238,7 @@ where
     _sha256_multistate_update_impl(adapter, states)
 }
 
-/// Helper that takes an adapter (with a concrete type) and performs the FFI call.
+/// Helper that takes an adapter of a concrete type and performs the FFI call.
 fn _sha256_multistate_update_impl<Adapter>(adapter: Adapter, states: &mut [Sha256]) -> Result<(), Status>
 where
     Adapter: Fn(usize) -> &'static [u8],
@@ -251,7 +257,8 @@ where
     Ok(())
 }
 
-/// Writes each lane's digest into caller-provided storage, leaving every lane able to accept more data.
+/// Writes each lane's digest into caller-provided storage, leaving every lane able to
+/// accept more data.
 ///
 /// # Errors
 ///
@@ -273,12 +280,12 @@ pub fn sha256_multistate_digest(states: &[Sha256], digests: &mut [Sha256Digest])
     Ok(())
 }
 
-/// Computes HMAC-SHA256 (Hash-based Message Authentication Code) for the given key and message.
+/// Computes HMAC-SHA256, the Hash-based Message Authentication Code, for the given key and message.
 ///
 /// # Arguments
 ///
-/// * `key` - The secret key (can be any length, will be hashed if > 64 bytes)
-/// * `message` - The message to authenticate
+/// - `key` - The secret key (can be any length, will be hashed if > 64 bytes)
+/// - `message` - The message to authenticate
 ///
 /// # Returns
 ///
@@ -325,8 +332,9 @@ fn _hmac_sha256_primed(key: &[u8]) -> (Sha256, Sha256) {
     }
     outer.update(&block);
 
-    // The pads are derived from the secret, so don't leave them on the stack for the next frame. The
-    // writes are volatile because nothing reads them afterwards and a plain assignment is a dead store.
+    // The pads are derived from the secret, so don't leave them on the stack for the next
+    // frame. The writes are volatile because nothing reads them afterwards and a plain
+    // assignment is a dead store.
     unsafe {
         core::ptr::write_volatile(&mut key_pad, [0u8; SHA256_BLOCK_LENGTH]);
         core::ptr::write_volatile(&mut block, [0u8; SHA256_BLOCK_LENGTH]);
@@ -345,12 +353,14 @@ fn _hmac_sha256_wrap(inner: &Sha256, outer: &Sha256) -> Sha256Digest {
 /// Authenticates many messages under one key at once, one message per lane.
 ///
 /// Authenticating one message is a serial dependency chain, but independent messages compress in
-/// parallel lanes - sixteen at a time on AVX-512, eight on AVX2 - and both the message pass and HMAC's
-/// outer wrap ride those same kernels. Intended for batches of short messages, such as tokens or
-/// webhook bodies sharing a secret; there is no streaming form, since the message never spans calls.
+/// parallel lanes - sixteen at a time on AVX-512, eight on AVX2 - and both the message pass and
+/// HMAC's outer wrap ride those same kernels. Intended for batches of short messages, such as
+/// tokens or webhook bodies sharing a secret; there is no streaming form, since the message
+/// never spans calls.
 ///
-/// Borrows the caller's storage throughout and allocates nothing, so it works under `no_std`. `states`
-/// is scratch of one state per message, reused for both passes; only `tags` is written for keeps.
+/// Borrows the caller's storage throughout and allocates nothing, so it works under `no_std`.
+/// `states` is scratch of one state per message, reused for both passes; only `tags` is
+/// written for keeps.
 ///
 /// # Errors
 ///
@@ -498,7 +508,7 @@ impl std::hash::BuildHasher for BuildSzHasher {
 ///
 /// # Arguments
 ///
-/// * `text`: The byte slice to compute the checksum for.
+/// - `text`: The byte slice to compute the checksum for.
 ///
 /// # Returns
 ///
@@ -521,8 +531,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `text`: The byte slice to compute the checksum for.
-/// * `seed`: A 64-bit value that acts as the seed for the hash function.
+/// - `text`: The byte slice to compute the checksum for.
+/// - `seed`: A 64-bit value that acts as the seed for the hash function.
 ///
 /// # Returns
 ///
@@ -545,7 +555,7 @@ where
 ///
 /// # Arguments
 ///
-/// * `text`: The byte slice to compute the checksum for.
+/// - `text`: The byte slice to compute the checksum for.
 ///
 /// # Returns
 ///
@@ -565,9 +575,9 @@ where
 ///
 /// # Arguments
 ///
-/// * `text`: The byte slice to hash.
-/// * `seeds`: The 64-bit seeds to hash under.
-/// * `out`: The output buffer, filled with one hash per seed. Must be the same length as `seeds`.
+/// - `text`: The byte slice to hash.
+/// - `seeds`: The 64-bit seeds to hash under.
+/// - `out`: The output buffer, filled with one hash per seed. Must be the same length as `seeds`.
 ///
 /// # Panics
 ///
@@ -597,8 +607,9 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::hash::Hasher as _;
-    // `HashMap`/`HashSet` have no `alloc`-only equivalent (unlike `Vec`/`String`/`BTreeMap`), so the
-    // handful of tests that need them stay behind `feature = "std"`; everything else here runs no_std.
+    // `HashMap`/`HashSet` have no `alloc`-only equivalent (unlike `Vec`/`String`/`BTreeMap`),
+    // so the handful of tests that need them stay behind `feature = "std"`; everything else
+    // here runs no_std.
     #[cfg(feature = "std")]
     use std::collections::{HashMap, HashSet};
 
@@ -817,7 +828,8 @@ mod tests {
 
     #[test]
     fn hmac_sha256_basic() {
-        // Degenerate case: an empty key is zero-padded to a full block, an empty message adds nothing.
+        // Degenerate case: an empty key is zero-padded to a full block, an empty
+        // message adds nothing.
         let key = b"";
         let message = b"";
         let mac = sz::hmac_sha256(key, message);
@@ -831,8 +843,9 @@ mod tests {
 
     #[test]
     fn hmac_sha256_multistate_matches_single() {
-        // Lane counts bracketing both vector widths, with ragged lengths, an empty message, and keys on
-        // either side of the one-block boundary where the key is replaced by its own digest.
+        // Lane counts bracketing both vector widths, with ragged lengths, an empty message,
+        // and keys on either side of the one-block boundary where the key is replaced by
+        // its own digest.
         for key_length in [0usize, 16, 64, 65, 200] {
             let key: Vec<u8> = (0..key_length).map(|index| (index % 251) as u8).collect();
             for lanes_count in [1usize, 7, 8, 9, 16, 17, 33] {

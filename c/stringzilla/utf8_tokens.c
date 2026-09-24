@@ -1,7 +1,8 @@
 /**
  *  @file c/stringzilla/utf8_tokens.c
- *  @brief Per-domain dispatch shim for UTF-8 newline, whitespace, and general delimiter scanning.
  *  @author Ash Vardanian
+ *  @date November 18, 2025
+ *  @brief Per-domain dispatch shim for UTF-8 newline, whitespace, and general delimiter scanning.
  */
 #include <stringzilla/utf8_tokens.h>
 

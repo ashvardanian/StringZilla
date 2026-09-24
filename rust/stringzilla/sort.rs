@@ -1,11 +1,14 @@
 //! Argument-sorting of string sequences.
+//!
+//! File: rust/stringzilla/sort.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
 
 /// Knobs for [`argsort`] and [`argsort_by`].
 ///
-/// The default is a full, ascending, byte-lexicographic, **stable** sort (equal elements keep their
+/// The default is a full, ascending, byte-lexicographic, __stable__ sort (equal elements keep their
 /// input order). Tweak the public fields directly or chain the builder methods:
 ///
 /// ```rust
@@ -17,12 +20,14 @@ use core::ffi::c_void;
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ArgsortOptions {
-    /// Sort in descending order; equal elements still keep their input order (stable).
+    /// Sort in descending order; equal elements still keep their input order, as the
+    /// sort is stable.
     pub reverse: bool,
     /// Order under Unicode case-folding instead of raw bytes.
     pub uncased: bool,
-    /// Only fully order the leading `Some(k)` elements (top-K / partial sort); `None` sorts everything.
-    /// The remaining entries of `order` stay a valid - but arbitrary - permutation of the leftover indices.
+    /// Only fully order the leading `Some(k)` elements (top-K / partial sort); `None` sorts
+    /// everything. The remaining entries of `order` stay a valid - but arbitrary - permutation of
+    /// the leftover indices.
     pub top: Option<usize>,
 }
 
@@ -46,9 +51,9 @@ impl ArgsortOptions {
 
 /// Computes the permutation that sorts `data` by its byte-slice representations.
 ///
-/// The caller supplies an output buffer `order` of length at least `data.len()`; on success the sorted
-/// permutation indices are written into its first `data.len()` slots. See [`ArgsortOptions`] for
-/// descending, uncased, and top-K variants.
+/// The caller supplies an output buffer `order` of length at least `data.len()`; on success the
+/// sorted permutation indices are written into its first `data.len()` slots. See [`ArgsortOptions`]
+/// for descending, uncased, and top-K variants.
 ///
 /// # Example
 ///
@@ -112,7 +117,7 @@ where
     _argsort_impl(adapter, order, options)
 }
 
-/// Helper that takes an adapter (with a concrete type) and performs the FFI call.
+/// Helper that takes an adapter of a concrete type and performs the FFI call.
 fn _argsort_impl<Adapter>(adapter: Adapter, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
 where
     Adapter: Fn(usize) -> &'static [u8],
@@ -208,7 +213,7 @@ mod tests {
         sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed()).expect("argsort failed");
         let sorted: Vec<_> = order.iter().map(|&i| labels[i]).collect();
         assert_eq!(sorted, vec!["gamma", "beta", "beta", "alpha"]);
-        // Stability: the first "beta" (index 0) precedes the second (index 2).
+        // Stability: the first "beta", at index 0, precedes the second, at index 2.
         let beta_positions: Vec<_> = order.iter().filter(|&&i| labels[i] == "beta").copied().collect();
         assert_eq!(beta_positions, vec![0, 2]);
     }
@@ -218,7 +223,7 @@ mod tests {
         let words = ["delta", "alpha", "echo", "bravo", "charlie"];
         let mut order = [0; 5];
         sz::argsort(&words, &mut order, sz::ArgsortOptions::default().top(2)).expect("argsort failed");
-        // Only the first two entries are guaranteed sorted (the two smallest).
+        // Only the first two entries are guaranteed sorted, being the two smallest.
         assert_eq!(words[order[0]], "alpha");
         assert_eq!(words[order[1]], "bravo");
         // `order` is still a full permutation.
@@ -233,7 +238,8 @@ mod tests {
         let mut order = [0; 4];
         sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().uncased()).expect("argsort failed");
         let sorted: Vec<_> = order.iter().map(|&i| labels[i]).collect();
-        // Fold-equal strings group together and stay in input order: "apple","Apple" then "Banana","BANANA".
+        // Fold-equal strings group together and stay in input order:
+        // "apple","Apple" then "Banana","BANANA".
         assert_eq!(sorted, vec!["apple", "Apple", "Banana", "BANANA"]);
     }
 }

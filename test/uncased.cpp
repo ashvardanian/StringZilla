@@ -1,43 +1,35 @@
 /**
- *  @brief  Uncased UTF-8 case-folding equivalence/fuzzing and uncased substring search tests.
- *  @file   test/uncased.cpp
+ *  @file test/uncased.cpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date November 23, 2025
+ *  @brief Uncased UTF-8 case-folding equivalence/fuzzing and uncased substring search tests.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  ! Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development to validate ISA-specific implementations.
+ *
+ *  #define SZ_USE_WESTMERE 0
+ *  #define SZ_USE_HASWELL 0
+ *  #define SZ_USE_GOLDMONT 0
+ *  #define SZ_USE_SKYLAKE 0
+ *  #define SZ_USE_ICELAKE 0
+ *  #define SZ_USE_NEON 0
+ *  #define SZ_USE_SVE 0
+ *  #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Make sure to include the StringZilla headers before anything else, to intercept missing
+ *  `#include` directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -67,7 +59,7 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/** @brief Runs one uncased-find backend over a known case and asserts the match offset and length. */
+/** Runs one uncased-find backend over a known case and asserts the match offset and length. */
 static void check_uncased_find_unit_(                                               //
     sz_utf8_uncased_search_t find, char const *haystack, sz_size_t haystack_length, //
     char const *needle, sz_size_t needle_length,                                    //
@@ -80,7 +72,7 @@ static void check_uncased_find_unit_(                                           
     verify(matched_length == expected_length);
 }
 
-/** @brief Runs one uncased-fold backend over `input` and asserts the folded bytes equal `expected`. */
+/** Runs one uncased-fold backend over @p input and asserts the folded bytes equal @p expected. */
 static void check_uncased_fold_unit_( //
     sz_utf8_uncased_fold_t fold, char const *input, sz_size_t input_length, char const *expected) {
     char produced[64];
@@ -91,14 +83,15 @@ static void check_uncased_fold_unit_( //
 }
 
 /**
- *  @brief Independent ground-truth uncased search: `fold(needle)` as a contiguous run of `fold(haystack)`.
+ *  @brief Independent ground-truth uncased search: `fold(needle)` as a run of `fold(haystack)`.
  *
- *  Folds the haystack codepoint by codepoint into fixed-size arrays, recording each folded rune's source
- *  byte span, then folds the needle and slides it over the folded stream. The earliest run wins; the
- *  reported offset and length snap to the source codepoint boundaries, so a match that begins or ends
- *  mid-expansion ("sss" inside "ssss" from "ßß") is reported in original haystack bytes. Depends on no
- *  production kernel, so it catches bugs the base-vs-SIMD differential cannot: those where every backend
- *  agrees yet all of them are wrong. Mirrors the Python `_reference_case_insensitive_find`.
+ *  Folds the haystack codepoint by codepoint into fixed-size arrays, recording each folded rune's
+ *  source byte span, then folds the needle and slides it over the folded stream. The earliest run
+ *  wins; the reported offset and length snap to the source codepoint boundaries, so a match that
+ *  begins or ends mid-expansion ("sss" inside "ssss" from "ßß") is reported in original haystack
+ *  bytes. Depends on no production kernel, so it catches bugs the base-vs-SIMD differential cannot:
+ *  those where every backend agrees yet all of them are wrong. Mirrors the Python reference,
+ *  @c _reference_case_insensitive_find.
  */
 static sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t haystack_length, //
                                          char const *needle, std::size_t needle_length, std::size_t *match_length) {
@@ -172,12 +165,13 @@ static sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
 }
 
 /**
- *  @brief Runs one uncased find query through two backends and the reference, demanding all three agree.
+ *  @brief Runs one uncased find query through two backends and the reference, which must all agree.
  *
- *  Both the match pointer offset and the matched length must agree across the base backend, the SIMD
- *  backend, and the independent fold-subset reference, including the not-found case. Because the SIMD
- *  kernels delegate short needles to the serial path, a base-vs-SIMD-only check is blind to a bug both
- *  share; the reference leg closes that gap. On mismatch prints the needle and haystack as hex.
+ *  Both the match pointer offset and the matched length must agree across the base backend, the
+ *  SIMD backend, and the independent fold-subset reference, including the not-found case. Because
+ *  the SIMD kernels delegate short needles to the serial path, a base-vs-SIMD-only check is blind
+ *  to a bug both share; the reference leg closes that gap. On mismatch prints the needle and
+ *  haystack as hex.
  */
 static void check_uncased_find_three_way_(                                  //
     sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd, //
@@ -219,19 +213,20 @@ static void check_uncased_find_three_way_(                                  //
  *  @brief Fuzz tests uncased UTF-8 substring search with controlled haystack sizes.
  *
  *  Uses two verification modes:
- *  - Exhaustive (max_needles_per_haystack == 0): Tests ALL N*(N+1)/2 substrings of each folded haystack
- *  - Sampled (max_needles_per_haystack > 0): Tests up to that many random substrings per haystack
+ *  - Exhaustive, @p max_needles_per_haystack = 0: tests all N × (N + 1) / 2 substrings of each
+ *    folded haystack
+ *  - Sampled, @p max_needles_per_haystack > 0: tests up to that many random substrings per haystack
  *
  *  Algorithm:
- *  1. Generate random haystack of ~haystack_length runes from character pool
+ *  1. Generate random haystack of about @p haystack_length runes from character pool
  *  2. Case-fold the haystack
  *  3. Extract needles from folded haystack (guarantees needle exists uncasedly)
- *  4. Search needle in ORIGINAL (unfolded) haystack with both serial and SIMD
+ *  4. Search needle in original (unfolded) haystack with both serial and SIMD
  *  5. Both must return identical positions
  *
- *  @param haystack_length Target number of bytes in each haystack
- *  @param max_needles_per_haystack  0 = exhaustive, >0 = sample this many per haystack
- *  @param total_queries Total needle searches to perform across all haystacks
+ *  @param[in] haystack_length Target number of bytes in each haystack.
+ *  @param[in] max_needles_per_haystack Zero for exhaustive, or how many to sample per haystack.
+ *  @param[in] total_queries Total needle searches to perform across all haystacks.
  */
 static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_utf8_uncased_search_t find_simd,
                                      sz_utf8_uncased_fold_t uncased_fold, sz_utf8_seek_t utf8_seek,
@@ -324,13 +319,13 @@ static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_ut
         "\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC", // "κόσμ" (Greek kosm) - World
 
         // Greek symbol forms (fold to normal counterparts - danger zone chars)
-        "\xCF\x90", // 'ϐ' (U+03D0, CF 90) - Greek Beta Symbol -> β
-        "\xCF\x91", // 'ϑ' (U+03D1, CF 91) - Greek Theta Symbol -> θ
-        "\xCF\x95", // 'ϕ' (U+03D5, CF 95) - Greek Phi Symbol -> φ
-        "\xCF\x96", // 'ϖ' (U+03D6, CF 96) - Greek Pi Symbol -> π
-        "\xCF\xB0", // 'ϰ' (U+03F0, CF B0) - Greek Kappa Symbol -> κ
-        "\xCF\xB1", // 'ϱ' (U+03F1, CF B1) - Greek Rho Symbol -> ρ
-        "\xCF\xB5", // 'ϵ' (U+03F5, CF B5) - Greek Lunate Epsilon Symbol -> ε
+        "\xCF\x90", // 'ϐ' (U+03D0, CF 90) - Greek Beta Symbol → β
+        "\xCF\x91", // 'ϑ' (U+03D1, CF 91) - Greek Theta Symbol → θ
+        "\xCF\x95", // 'ϕ' (U+03D5, CF 95) - Greek Phi Symbol → φ
+        "\xCF\x96", // 'ϖ' (U+03D6, CF 96) - Greek Pi Symbol → π
+        "\xCF\xB0", // 'ϰ' (U+03F0, CF B0) - Greek Kappa Symbol → κ
+        "\xCF\xB1", // 'ϱ' (U+03F1, CF B1) - Greek Rho Symbol → ρ
+        "\xCF\xB5", // 'ϵ' (U+03F5, CF B5) - Greek Lunate Epsilon Symbol → ε
 
         // Greek with dialytika + tonos (expand to base + combining marks)
         "\xCE\x90", // 'ΐ' (U+0390, CE 90) - Greek Small Letter Iota with Dialytika and Tonos
@@ -379,18 +374,18 @@ static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_ut
         "\xE1\xBA\x9E", // 'ẞ' (U+1E9E, E1 BA 9E) - Latin Capital Letter Sharp S
 
         // Lowercase Sharp S (U+00DF) - folds to ss (critical danger char!)
-        "\xC3\x9F", // 'ß' (U+00DF, C3 9F) - Latin Small Letter Sharp S -> ss
+        "\xC3\x9F", // 'ß' (U+00DF, C3 9F) - Latin Small Letter Sharp S → ss
 
         // Long S with dot above (U+1E9B) - folds to 'ṡ'
         "\xE1\xBA\x9B", // 'ẛ' (U+1E9B, E1 BA 9B) - Latin Small Letter Long S with Dot Above
 
         // Ohm sign - folds to Greek omega (danger char!)
-        "\xE2\x84\xA6", // 'Ω' (U+2126, E2 84 A6) - Ohm Sign -> ω (U+03C9)
+        "\xE2\x84\xA6", // 'Ω' (U+2126, E2 84 A6) - Ohm Sign → ω (U+03C9)
 
-        // Afrikaans n-apostrophe (U+0149) -> 'n
+        // Afrikaans n-apostrophe (U+0149) → 'n
         "\xC5\x89", // 'ŉ' (U+0149, C5 89) - Latin Small Letter N Preceded by Apostrophe
 
-        // J-caron (U+01F0) -> j + combining caron
+        // J-caron (U+01F0) → j + combining caron
         "\xC7\xB0", // 'ǰ' (U+01F0, C7 B0) - Latin Small Letter J with Caron
 
         // Modifier letter apostrophe (U+02BC) - context for n
@@ -526,7 +521,7 @@ static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_ut
     fmt::println("    passed {} fuzz tests across {} haystacks", total_passed, haystacks_tested);
 }
 
-/** @brief One codepoint whose case fold isn't the identity, in runes and in UTF-8. */
+/** One codepoint whose case fold isn't the identity, in runes and in UTF-8. */
 struct uncased_fold_t {
     sz_rune_t preimage;
     sz_rune_t folded_runes[3];
@@ -538,7 +533,7 @@ struct uncased_fold_t {
 };
 
 /**
- *  @brief Every non-identity fold in the Unicode range, derived once from `sz_unicode_fold_codepoint_`.
+ *  @brief Every non-identity fold in Unicode, derived once from @c sz_unicode_fold_codepoint_.
  *
  *  The adversarial enumerators and the invariant closure share this table, so the whole-range scan
  *  is paid once per process rather than once per enumerator per backend.
@@ -569,7 +564,7 @@ static std::vector<uncased_fold_t> const &uncased_folds_() {
  *
  *  Random fuzzing rarely places a rare preimage (like 'ϴ' U+03F4 → 'θ') right where a SIMD
  *  danger-detection "alarm" crosses a chunk boundary - structured enumeration does. For every
- *  codepoint whose `sz_unicode_fold_codepoint_` output differs from identity, the folded output
+ *  codepoint whose @c sz_unicode_fold_codepoint_ output differs from identity, the folded output
  *  becomes the needle (bare, "x"-prefixed, "x"-suffixed) and the UTF-8 @b preimage hides in
  *  'y'-padded haystacks at offsets straddling the 64-byte SIMD chunk boundary. Haystacks are
  *  built both with and without the mirroring "x" context, so the not-found path is exercised
@@ -627,13 +622,13 @@ static void check_uncased_find_preimages_(sz_utf8_uncased_search_t find_base, sz
 
 /**
  *  @brief Differential test for matches sitting at the very tail of the haystack, where the
- *         haystack span is wider or narrower than the folded needle window.
+ *      haystack span is wider or narrower than the folded needle window.
  *
  *  Expanding preimages ('ᾳ' U+1FB3 → "αι", 'ß' → "ss", the ﬁ/ﬀ/ﬃ ligatures, 'ŉ' U+0149) and
  *  shrinking ones ('K' Kelvin U+212A → "k", 'Å' Angstrom U+212B → "å") break the byte-for-byte
  *  relation between haystack and folded needle - exactly where SIMD tail danger-windows get cut
  *  short. The set is derived generatively: every preimage whose folded UTF-8 byte length differs
- *  from its own. Each lands within the last `needle_window` bytes (windows 4..16) of haystacks
+ *  from its own. Each lands within the last @c needle_window bytes (windows 4..16) of haystacks
  *  whose filler also sweeps the 64-byte SIMD chunk boundary.
  */
 static void check_uncased_find_tails_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
@@ -694,17 +689,17 @@ static void check_uncased_find_tails_(sz_utf8_uncased_search_t find_base, sz_utf
 }
 
 /**
- *  @brief Differential + ground-truth test for matches whose folded runes cross the boundary between
- *         two adjacent multi-rune-folding codepoints.
+ *  @brief Differential + ground-truth test for matches whose folded runes cross the boundary
+ *      between two adjacent multi-rune-folding codepoints.
  *
- *  The byte-history serial helpers are most fragile when a needle's folded runes begin mid-way through
- *  one expanding codepoint and end mid-way through the next - e.g. needle "sss" sits inside haystack
- *  "ßß" -> "ssss", beginning in the first 'ß' and finishing in the second. The preimage / expanding-tail
- *  fuzzers never reproduce this: they pad expansions with ASCII filler, so a folded run never straddles
- *  two expansions. Here we place two multi-rune-folding codepoints back to back, enumerate every proper
- *  sub-run of the combined folded stream that genuinely crosses the join, and use that sub-run (as
- *  folded bytes) as the needle - swept across the 64-byte SIMD chunk boundary - validated against the
- *  fold-subset reference.
+ *  The byte-history serial helpers are most fragile when a needle's folded runes begin mid-way
+ *  through one expanding codepoint and end mid-way through the next - e.g. needle "sss" sits inside
+ *  haystack "ßß" → "ssss", beginning in the first 'ß' and finishing in the second. The preimage /
+ *  expanding-tail fuzzers never reproduce this: they pad expansions with ASCII filler, so a folded
+ *  run never straddles two expansions. Here we place two multi-rune-folding codepoints back to
+ *  back, enumerate every proper sub-run of the combined folded stream that genuinely crosses the
+ *  join, and use that sub-run (as folded bytes) as the needle - swept across the 64-byte SIMD chunk
+ *  boundary - validated against the fold-subset reference.
  */
 static void check_uncased_find_crossing_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
 
@@ -775,14 +770,13 @@ static void check_uncased_find_crossing_(sz_utf8_uncased_search_t find_base, sz_
 }
 
 /**
- *  @brief Reference-validated coverage for the rolling-hash (Rabin-Karp) path when a match crosses
- *         expansion boundaries.
+ *  @brief Reference-validated coverage for the rolling-hash (Rabin-Karp) path across expansions.
  *
  *  The short-needle helpers cover needles folding to 1-3 runes; this drives the 4+-rune path with
- *  matches that begin and end mid-expansion. A haystack of repeated expanding codepoints (e.g. "ßßßß"
- *  folds to "ssssssss") is searched for every folded sub-run of 4 or more runes - which bypasses the
- *  short helpers - swept across the 64-byte chunk boundary, each result checked against the independent
- *  fold-subset reference via the three-way `check_uncased_find_three_way_`.
+ *  matches that begin and end mid-expansion. A haystack of repeated expanding codepoints (e.g.
+ *  "ßßßß" folds to "ssssssss") is searched for every folded sub-run of 4 or more runes - which
+ *  bypasses the short helpers - swept across the 64-byte chunk boundary, each result checked
+ *  against the independent fold-subset reference via @c check_uncased_find_three_way_.
  */
 static void check_uncased_find_long_crossing_fuzz_(sz_utf8_uncased_search_t find_base,
                                                    sz_utf8_uncased_search_t find_simd) {
@@ -841,9 +835,10 @@ static void check_uncased_find_long_crossing_fuzz_(sz_utf8_uncased_search_t find
 /**
  *  @brief The full differential + ground-truth battery for one backend's uncased find.
  *
- *  Runs the fuzzers and the structured adversarial enumerators (fold preimages, expanding tails, and
- *  cross-expansion needles) of `find_simd` against the serial baseline and the independent reference.
- *  Called once per backend so coverage stays uniform and a new backend cannot silently skip a test.
+ *  Runs the fuzzers and the structured adversarial enumerators (fold preimages, expanding tails,
+ *  and cross-expansion needles) of @p find_simd against the serial baseline and the independent
+ *  reference. Called once per backend so coverage stays uniform and a new backend cannot silently
+ *  skip a test.
  */
 static void check_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
     sz_utf8_uncased_search_t const find_serial = sz_utf8_uncased_search_serial;
@@ -890,15 +885,16 @@ static void check_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
                                   needle.data(), needle.size(), "long ascii needle, with match");
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
 /**
- *  @brief Known-answer battery for a single `sz_utf8_uncased_order` backend: case-insensitive equality,
- *  ASCII less/greater, length-prefix ordering, and 2-byte accented folds (ö = C3 B6, é = C3 A9).
+ *  @brief Known-answer battery for a single @c sz_utf8_uncased_order backend: case-insensitive
+ *      equality, ASCII less/greater, length-prefix ordering, and 2-byte accented folds (ö = C3 B6,
+ *      é = C3 A9).
  *
- *  Each compiled per-ISA kernel is run through it directly, mirroring the per-ISA `_search` coverage.
+ *  Each compiled per-ISA kernel is run through it directly, mirroring the per-ISA @c _search tests.
  */
 static void check_uncased_order_(sz_utf8_uncased_order_t order) {
     verify(order("Hello", 5, "HELLO", 5) == sz_equal_k);
@@ -910,12 +906,13 @@ static void check_uncased_order_(sz_utf8_uncased_order_t order) {
 }
 
 /**
- *  @brief Known-answer + C++ API coverage for the uncased UTF-8 family on simple, hand-verifiable inputs.
+ *  @brief Known-answer and C++ API coverage for the uncased UTF-8 family on hand-verifiable inputs.
  *
- *  First exercises each function through the dispatched C API (automatic kernel resolution), through the
- *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through the
- *  C++ wrappers, so a regression that the serial-vs-SIMD agreement tests would miss - because both share
- *  a wrong constant - is still caught against an external, hand-derived ground truth.
+ *  First exercises each function through the dispatched C API (automatic kernel resolution),
+ *  through the natively-compiled backend kernels directly (manual propagation to a specific
+ *  kernel), and through the C++ wrappers, so a regression that the serial-vs-SIMD agreement tests
+ *  would miss - because both share a wrong constant - is still caught against an external,
+ *  hand-derived ground truth.
  */
 void test_uncased_unit() {
 
@@ -1027,7 +1024,7 @@ void test_uncased_unit() {
 #endif
         verify(str("Hello").utf8_uncased_order("HELLO") == sz_equal_k); // C++ wrapper
 
-        // `sz_utf8_find_cased`: NULL for a fully-caseless string, else the FIRST cased codepoint.
+        // `sz_utf8_find_cased`: NULL for a fully-caseless string, else the first cased codepoint.
         // "价格 123" is caseless (CJK + digits + space), so no rune participates in case → NULL.
         char const *caseless = "\xE4\xBB\xB7\xE6\xA0\xBC 123"; // "价格 123"
         sz_size_t const caseless_length = (sz_size_t)std::strlen(caseless);
@@ -1091,9 +1088,9 @@ void test_uncased_unit() {
  *  @brief Known-answer sweep of the uncased C++ wrappers across the world's scripts.
  *
  *  Ordering, finding, ligatures and expansions over Latin-1, Central European, German Eszett, math
- *  symbols, Greek, Cyrillic, Turkish, Armenian, Vietnamese, Georgian, Cherokee, Coptic, Glagolitic and
- *  the caseless scripts - CJK, Arabic, Hebrew and emoji - each with a hand-derived expected offset and
- *  byte length, including the runs that straddle a 64-byte SIMD block.
+ *  symbols, Greek, Cyrillic, Turkish, Armenian, Vietnamese, Georgian, Cherokee, Coptic, Glagolitic
+ *  and the caseless scripts - CJK, Arabic, Hebrew and emoji - each with a hand-derived expected
+ *  offset and byte length, including the runs that straddle a 64-byte SIMD block.
  */
 void test_uncased_scripts_unit() {
     fmt::println("  - testing uncased search and order across Unicode scripts...");
@@ -1134,9 +1131,8 @@ void test_uncased_scripts_unit() {
     // Spanish/Portuguese
     verify(str("niño").utf8_uncased_order("NIÑO") == sz_equal_k);
 
-    // Polish / Central European (Latin Extended-A)
-    // "ĄĆĘŁŃÓŚŹŻ" -> "ąćęłńóśźż"
-    // "Zaółć gęślą jaźń" (classic Polish pangram fragment)
+    // Polish / Central European (Latin Extended-A):
+    // "ĄĆĘŁŃÓŚŹŻ" → "ąćęłńóśźż", and "Zaółć gęślą jaźń" is a classic Polish pangram fragment
     verify(str("Zaółć gęślą jaźń").utf8_uncased_order("ZAÓŁĆ GĘŚLĄ JAŹŃ") == sz_equal_k);
 
     // Czech characters: ř (U+0159, C5 99), ž (U+017E, C5 BE), č (U+010D, C4 8D), ě (U+011B, C4 9B)
@@ -1160,22 +1156,22 @@ void test_uncased_scripts_unit() {
         let_verify(auto m = str(prefix + "řž").utf8_uncased_search("ŘŽ"), m.offset == 62 && m.length == 4);
     }
 
-    // German (Eszett 'ß')
-    // 'ß' (U+00DF, C3 9F) -> "ss"
-    // "straße" -> "strasse"
-    // "STRASSE" -> "strasse"
+    // German (Eszett 'ß'):
+    // 'ß' (U+00DF, C3 9F) → "ss"
+    // "straße" → "strasse"
+    // "STRASSE" → "strasse"
     verify(str("straße").utf8_uncased_order("STRASSE") == sz_equal_k);
     verify(str("STRASSE").utf8_uncased_order("straße") == sz_equal_k);
 
-    // Uppercase 'ẞ' (U+1E9E, E1 BA 9E) -> "ss" or "ß" depending on fold
-    // StringZilla generally folds to lowercase first. 'ẞ' -> 'ss'.
+    // Uppercase 'ẞ' (U+1E9E, E1 BA 9E) → "ss" or "ß" depending on fold
+    // StringZilla generally folds to lowercase first. 'ẞ' → 'ss'.
     // Haystack uses 'ß' (2 bytes), Needle "SS".
     let_verify(auto m = str("straße").utf8_uncased_search("SS"),
                m.offset == 4 && m.length == 2); // Matches 'ß' (2 bytes)
 
     // Eszett Context Extensions
     let_verify(auto m = str("Eine straße").utf8_uncased_search("SS"),
-               m.offset == 9 && m.length == 2); // "Eine " is 5 chars -> 5 bytes + "stra" (4) = 9
+               m.offset == 9 && m.length == 2); // "Eine " is 5 chars → 5 bytes + "stra" (4) = 9
     let_verify(auto m = str("straßebahn").utf8_uncased_search("SS"), m.offset == 4 && m.length == 2);
     let_verify(auto m = str("Eine straßebahn").utf8_uncased_search("SS"), m.offset == 9 && m.length == 2);
 
@@ -1191,7 +1187,7 @@ void test_uncased_scripts_unit() {
     let_verify(auto m = str("STRASSE").utf8_uncased_search("straße"),
                m.offset == 0 && m.length == 7); // Matches "STRASSE" (7 bytes)
 
-    // "Maße" -> "MASSE"
+    // "Maße" → "MASSE"
     let_verify(auto m = str("Maße").utf8_uncased_search("MASSE"),
                m.offset == 0 && m.length == 5); // Matches "Maße" (5 bytes)
 
@@ -1218,7 +1214,7 @@ void test_uncased_scripts_unit() {
     // Length is 6 because we consume the entire haystack (ß expands, consuming whole character)
     let_verify(auto m = str("\xC3\x9F" "Stra").utf8_uncased_search("sstra"), m.offset == 0 && m.length == 6);
 
-    // Needle with 's' NOT at boundary - should use fast SIMD path
+    // Needle with 's' not at boundary - should use fast SIMD path
     let_verify(auto m = str("te\xC3\x9F" "t").utf8_uncased_search("tesst"), m.offset == 0 && m.length == 5);
     let_verify(auto m = str("ma\xC3\x9F" "e").utf8_uncased_search("masse"), m.offset == 0 && m.length == 5);
 
@@ -1275,25 +1271,25 @@ void test_uncased_scripts_unit() {
     let_verify(auto m = str("LongPrefix Μ Suffix").utf8_uncased_search("Prefix µ Suf"),
                m.offset == 4 && m.length == 13);
 
-    // Greek Lunate Epsilon 'ϵ' (U+03F5) -> 'ε' (U+03B5)
+    // Greek Lunate Epsilon 'ϵ' (U+03F5) → 'ε' (U+03B5)
     let_verify(auto m = str("ϵ").utf8_uncased_search("ε"), m.offset == 0 && m.length == 2);
     let_verify(auto m = str("start ϵ end").utf8_uncased_search("start ε end"), m.offset == 0 && m.length == 12);
     let_verify(auto m = str("...ϵ...").utf8_uncased_search(".ε."), m.offset == 2 && m.length == 4);
-    // Greek Kappa Symbol 'ϰ' (U+03F0) -> 'κ' (U+03BA)
+    // Greek Kappa Symbol 'ϰ' (U+03F0) → 'κ' (U+03BA)
     let_verify(auto m = str("ϰ").utf8_uncased_search("κ"), m.offset == 0 && m.length == 2);
     let_verify(auto m = str("text ϰ").utf8_uncased_search("text κ"), m.offset == 0 && m.length == 7); // 5 + 2
     let_verify(auto m = str("ϰ text").utf8_uncased_search("κ text"), m.offset == 0 && m.length == 7);
 
     // Greek Symbols & Anomalies
-    // 'ϐ' (CF 90) -> 'β' (CE B2)
+    // 'ϐ' (CF 90) → 'β' (CE B2)
     let_verify(auto m = str("ϐ").utf8_uncased_search("β"), m.offset == 0 && m.length == 2);
     let_verify(auto m = str("alpha ϐ").utf8_uncased_search("alpha β"), m.offset == 0 && m.length == 8);
     let_verify(auto m = str("ϐ beta").utf8_uncased_search("β beta"), m.offset == 0 && m.length == 7);
-    // 'ϑ' (CF 91) -> 'θ' (CE B8)
+    // 'ϑ' (CF 91) → 'θ' (CE B8)
     let_verify(auto m = str("ϑ").utf8_uncased_search("θ"), m.offset == 0 && m.length == 2);
     let_verify(auto m = str("1ϑ2").utf8_uncased_search("1θ2"), m.offset == 0 && m.length == 4);
     let_verify(auto m = str("prefix ϑ suffix").utf8_uncased_search("fix θ suf"), m.offset == 3 && m.length == 10);
-    // 'ϖ' (CF 96) -> 'π' (CF 80)
+    // 'ϖ' (CF 96) → 'π' (CF 80)
     let_verify(auto m = str("ϖ").utf8_uncased_search("π"), m.offset == 0 && m.length == 2);
     let_verify(auto m = str("AϖB").utf8_uncased_search("AπB"), m.offset == 0 && m.length == 4);
     let_verify(auto m = str("Long string with ϖ in it").utf8_uncased_search("th π in"),
@@ -1302,7 +1298,7 @@ void test_uncased_scripts_unit() {
     // Greek Context Extensions (Symbols)
     let_verify(auto m = str("alpha ϖ omega").utf8_uncased_search("π"), m.offset == 6 && m.length == 2);
 
-    // Dialytika with Tonos 'ΐ' (CE 90) -> Identity check mostly
+    // Dialytika with Tonos 'ΐ' (CE 90) → Identity check mostly
     verify(str("ΐ").utf8_uncased_order("ΐ") == sz_equal_k);
 
     // Greek in Mixed Scripts (boundary checks)
@@ -1320,20 +1316,20 @@ void test_uncased_scripts_unit() {
     let_verify(auto m = str("Check привет").utf8_uncased_search("ПРИВЕТ"), m.offset == 6 && m.length == 12);
     let_verify(auto m = str("привет check").utf8_uncased_search("ПРИВЕТ"), m.offset == 0 && m.length == 12);
 
-    // Palochka 'Ӏ' (U+04C0, D3 80) -> 'ӏ' (U+04CF, D3 8F)
+    // Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F)
     // Used in Caucasian languages. Case agnostic.
     let_verify(auto m = str("Ӏ").utf8_uncased_search("ӏ"), m.offset == 0 && m.length == 2);
     let_verify(auto m = str("ӏ").utf8_uncased_search("Ӏ"), m.offset == 0 && m.length == 2);
 
-    // Ukrainian Ґ (U+0490) -> ґ (U+0491)
+    // Ukrainian Ґ (U+0490) → ґ (U+0491)
     let_verify(auto m = str("Ґ").utf8_uncased_search("ґ"), m.offset == 0 && m.length == 2);
 
     // Mixed Cyrillic
     let_verify(auto m = str("Москва is beautiful").utf8_uncased_search("МОСКВА"),
                m.offset == 0 && m.length == 12); // 6 chars * 2
 
-    // Turkish
-    // Dotted 'İ' (U+0130, C4 B0) -> 'i' (ASCII) + combining dot (U+0307, CC 87)
+    // Turkish:
+    // Dotted 'İ' (U+0130, C4 B0) → 'i' (ASCII) + combining dot (U+0307, CC 87)
     // "İstanbul" (starts with İ) vs "i̇stanbul" (starts with i + dot)
     // StringZilla finds canonical equivalence. 'İ' (2 bytes) matches 'i̇' (3 bytes).
     let_verify(auto m = str("İstanbul").utf8_uncased_search("i̇stanbul"), // "i" + dot
@@ -1353,14 +1349,14 @@ void test_uncased_scripts_unit() {
     // Typically 'I' (ASCII) folds to 'i' (ASCII).
     // 'ı' folds to... itself? Or 'I' if we are in Turkish mode?
     // Default fold often treats 'ı' as distinct from 'i'.
-    // 'I' -> 'i'. 'ı' -> 'ı'. So 'I' != 'ı'.
+    // 'I' → 'i'. 'ı' → 'ı'. So 'I' != 'ı'.
     let_verify(auto m = str("I").utf8_uncased_search("ı"), m.offset == str::npos);
 
-    // Turkish Ğ (U+011E) -> ğ (U+011F) and Ş (U+015E) -> ş (U+015F)
+    // Turkish Ğ (U+011E) → ğ (U+011F) and Ş (U+015E) → ş (U+015F)
     let_verify(auto m = str("ĞŞ").utf8_uncased_search("ğş"), m.offset == 0 && m.length == 4);
 
     // Armenian
-    // Ligature: 'և' (U+0587, D6 87) -> 'ե' (U+0565, D5 A5) + 'ւ' (U+0582, D6 82)
+    // Ligature: 'և' (U+0587, D6 87) → 'ե' (U+0565, D5 A5) + 'ւ' (U+0582, D6 82)
     // Haystack: "և" (2 bytes). Needle: "եւ" (2 + 2 = 4 bytes).
     // Match should return haystack slice (2 bytes).
     let_verify(auto m = str("և").utf8_uncased_search("եւ"), m.offset == 0 && m.length == 2);
@@ -1375,50 +1371,50 @@ void test_uncased_scripts_unit() {
     // Armenian Context Extensions Reverse
     let_verify(auto m = str("abcեւ").utf8_uncased_search("և"), m.offset == 3 && m.length == 4);
 
-    // Ligature: 'ﬓ' (U+FB13 Men-Now) -> 'մ' (U+0574) + 'ն' (U+0576)
+    // Ligature: 'ﬓ' (U+FB13 Men-Now) → 'մ' (U+0574) + 'ն' (U+0576)
     // Haystack 3 bytes (EF AC 93). Needle 4 bytes (D5 B4 D5 B6).
     let_verify(auto m = str("ﬓ").utf8_uncased_search("մն"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("abcﬓdef").utf8_uncased_search("մն"), m.offset == 3 && m.length == 3);
     let_verify(auto m = str("ﬓ start").utf8_uncased_search("մն start"), m.offset == 0 && m.length == 9);
 
-    // Ligature: 'ﬔ' (U+FB14 Men-Ech) -> 'մ' (U+0574) + 'ե' (U+0565)
+    // Ligature: 'ﬔ' (U+FB14 Men-Ech) → 'մ' (U+0574) + 'ե' (U+0565)
     let_verify(auto m = str("ﬔ").utf8_uncased_search("մե"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("Some ﬔ text").utf8_uncased_search("մե"), m.offset == 5 && m.length == 3);
     let_verify(auto m = str("End ﬔ").utf8_uncased_search("End մե"), m.offset == 0 && m.length == 7);
 
-    // Ligature: 'ﬕ' (U+FB15 Men-Ini) -> 'մ' (U+0574) + 'ի' (U+056B)
+    // Ligature: 'ﬕ' (U+FB15 Men-Ini) → 'մ' (U+0574) + 'ի' (U+056B)
     let_verify(auto m = str("ﬕ").utf8_uncased_search("մի"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("123 ﬕ 456").utf8_uncased_search("123 մի 456"), m.offset == 0 && m.length == 11);
     let_verify(auto m = str("prefixﬕ").utf8_uncased_search("մի"), m.offset == 6 && m.length == 3);
 
-    // Ligature: 'ﬖ' (U+FB16 Vew-Now) -> 'վ' (U+057E) + 'ն' (U+0576)
+    // Ligature: 'ﬖ' (U+FB16 Vew-Now) → 'վ' (U+057E) + 'ն' (U+0576)
     let_verify(auto m = str("ﬖ").utf8_uncased_search("վն"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("Test ﬖ Case").utf8_uncased_search("Test վն Case"), m.offset == 0 && m.length == 13);
     let_verify(auto m = str("ﬖ").utf8_uncased_search("վն"),
                m.offset == 0 && m.length == 3); // Redundant but safe
 
-    // Ligature: 'ﬗ' (U+FB17 Men-Xeh) -> 'մ' (U+0574) + 'խ' (U+056D)
+    // Ligature: 'ﬗ' (U+FB17 Men-Xeh) → 'մ' (U+0574) + 'խ' (U+056D)
     let_verify(auto m = str("ﬗ").utf8_uncased_search("մխ"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("Mid ﬗ dle").utf8_uncased_search("մխ"), m.offset == 4 && m.length == 3);
     let_verify(auto m = str("Start ﬗ").utf8_uncased_search("Start մխ"), m.offset == 0 && m.length == 9);
 
-    // Vietnamese / Latin Extended Additional
-    // 'Ạ' (U+1EA0, E1 BA A0) -> 'ạ' (U+1EA1, E1 BA A1)
+    // Vietnamese / Latin Extended Additional:
+    // 'Ạ' (U+1EA0, E1 BA A0) → 'ạ' (U+1EA1, E1 BA A1)
     let_verify(auto m = str("Ạ").utf8_uncased_search("ạ"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("Word Ạ End").utf8_uncased_search("Word ạ End"), m.offset == 0 && m.length == 12);
     let_verify(auto m = str("PrefixẠ").utf8_uncased_search("ạ"), m.offset == 6 && m.length == 3);
 
-    // 'Ấ' (U+1EA4, E1 BA A4) -> 'ấ' (U+1EA5, E1 BA A5)
+    // 'Ấ' (U+1EA4, E1 BA A4) → 'ấ' (U+1EA5, E1 BA A5)
     let_verify(auto m = str("Ấ").utf8_uncased_search("ấ"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("Ấ Start").utf8_uncased_search("ấ Start"), m.offset == 0 && m.length == 9);
     let_verify(auto m = str("Mid Ấ dle").utf8_uncased_search("Mid ấ dle"), m.offset == 0 && m.length == 11);
 
-    // Horn letters: Ơ (U+01A0, C6 A0) -> ơ (U+01A1, C6 A1), Ư (U+01AF, C6 AF) -> ư (U+01B0, C6 B0)
+    // Horn letters: Ơ (U+01A0, C6 A0) → ơ (U+01A1, C6 A1), Ư (U+01AF, C6 AF) → ư (U+01B0, C6 B0)
     let_verify(auto m = str("ƠƯ").utf8_uncased_search("ơư"), m.offset == 0 && m.length == 4);
     let_verify(auto m = str("Big ƠƯ Horns").utf8_uncased_search("Big ơư Horns"), m.offset == 0 && m.length == 14);
     let_verify(auto m = str("Prefix ƠƯ").utf8_uncased_search("ơư"), m.offset == 7 && m.length == 4);
 
-    // Latin Extended Additional: Ḁ (U+1E80, E1 BA 80) -> ḁ (U+1E81, E1 BA 81)
+    // Latin Extended Additional: Ḁ (U+1E80, E1 BA 80) → ḁ (U+1E81, E1 BA 81)
     let_verify(auto m = str("Ḁ").utf8_uncased_search("ḁ"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("Code Ḁ").utf8_uncased_search("Code ḁ"), m.offset == 0 && m.length == 8);
     let_verify(auto m = str("StartḀ").utf8_uncased_search("Startḁ"), m.offset == 0 && m.length == 8);
@@ -1441,7 +1437,7 @@ void test_uncased_scripts_unit() {
     let_verify(auto m = str("Temp: 273 \xE2\x84\xAA").utf8_uncased_search("k"), m.offset == 10 && m.length == 3);
     let_verify(auto m = str("Unit: \xE2\x84\xAB").utf8_uncased_search("\xC3\xA5"), m.offset == 6 && m.length == 3);
 
-    // Long S 'ſ' (U+017F) -> 's'
+    // Long S 'ſ' (U+017F) → 's':
     // "Messer" vs "Meſſer"
     // Haystack "Meſſer": M(1) e(1) ſ(2) ſ(2) e(1) r(1) = 8 bytes.
     // Needle "MESSER": 6 bytes.
@@ -1449,13 +1445,13 @@ void test_uncased_scripts_unit() {
     let_verify(auto m = str("Ein Meſſer").utf8_uncased_search("MESSER"), m.offset == 4 && m.length == 8);
     let_verify(auto m = str("Meſſer block").utf8_uncased_search("MESSER"), m.offset == 0 && m.length == 8);
 
-    // Ligature 'ﬅ' (U+FB05 "st") -> "st"
+    // Ligature 'ﬅ' (U+FB05 "st") → "st":
     // Haystack "ﬅ" (3 bytes). Needle "st" (2 bytes).
     let_verify(auto m = str("ﬅ").utf8_uncased_search("st"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("Test ﬅ").utf8_uncased_search("Test st"), m.offset == 0 && m.length == 8);
     let_verify(auto m = str("ﬅart").utf8_uncased_search("start"), m.offset == 0 && m.length == 6);
 
-    // Ligature 'ﬆ' (U+FB06, EF AC 86) -> "st"
+    // Ligature 'ﬆ' (U+FB06, EF AC 86) → "st"
     let_verify(auto m = str("ﬆ").utf8_uncased_search("st"), m.offset == 0 && m.length == 3);
     let_verify(auto m = str("My ﬆyle").utf8_uncased_search("My style"), m.offset == 0 && m.length == 9);
     let_verify(auto m = str("Faﬆ").utf8_uncased_search("Fast"), m.offset == 0 && m.length == 5);
@@ -1501,27 +1497,27 @@ void test_uncased_scripts_unit() {
     // 'ﬆ' (U+FB06, EF AC 86)
     let_verify(auto m = str("Big ﬆ").utf8_uncased_search("st"), m.offset == 4 && m.length == 3);
 
-    // Georgian
-    // Mtavruli (Upper) -> Mkhedruli (Lower)
-    // 'Ა' (U+1C90, E1 B2 90) -> 'ა' (U+10D0, E1 83 90)
+    // Georgian:
+    // Mtavruli (Upper) → Mkhedruli (Lower):
+    // 'Ა' (U+1C90, E1 B2 90) → 'ა' (U+10D0, E1 83 90)
     // Both are 3 bytes in UTF-8.
     // Georgian Context
     let_verify(auto m = str("Text Ა").utf8_uncased_search("ა"), m.offset == 5 && m.length == 3);
 
-    // Cherokee
-    // Cherokee Supplement (Lower, U+AB70, EA AD B0, 'ꭰ') -> Cherokee (Upper, U+13A0, E1 8E A0, 'Ꭰ')
+    // Cherokee:
+    // Cherokee Supplement (Lower, U+AB70, EA AD B0, 'ꭰ') → Cherokee (Upper, U+13A0, E1 8E A0, 'Ꭰ')
     // Both 3 bytes.
     let_verify(auto m = str("ꭰ").utf8_uncased_search("Ꭰ"), m.offset == 0 && m.length == 3);
 
     // Cherokee Context
     let_verify(auto m = str("Syllable ꭰ").utf8_uncased_search("Ꭰ"), m.offset == 9 && m.length == 3);
 
-    // Coptic (Extended)
-    // Coptic Ⲡ (U+2C80, E2 B2 80) -> ⲡ (U+2C81, E2 B2 81)
+    // Coptic (Extended):
+    // Coptic Ⲡ (U+2C80, E2 B2 80) → ⲡ (U+2C81, E2 B2 81)
     let_verify(auto m = str("Ⲡ").utf8_uncased_search("ⲡ"), m.offset == 0 && m.length == 3);
 
-    // Glagolitic
-    // Ⰰ (U+2C00, E2 B0 80) -> ⰰ (U+2C30, E2 B0 B0)
+    // Glagolitic:
+    // Ⰰ (U+2C00, E2 B0 80) → ⰰ (U+2C30, E2 B0 B0)
     let_verify(auto m = str("Ⰰ").utf8_uncased_search("ⰰ"), m.offset == 0 && m.length == 3);
 
     // Glagolitic Context
@@ -1612,17 +1608,17 @@ void test_uncased_scripts_unit() {
     let_verify(auto m = str("me\xC5\xBF\xC5\xBF" "age").utf8_uncased_search("MESSAGE"),
                m.offset == 0 && m.length == 9); // meſſage (9 bytes)
 
-    // One-to-Many Expansions (U+1E96-1E9A range)
-    // h with line below (U+1E96, E1 BA 96) -> h + combining line below (CC B1)
+    // One-to-Many Expansions (U+1E96-1E9A range):
+    // h with line below (U+1E96, E1 BA 96) → h + combining line below (CC B1)
     let_verify(auto m = str("\xE1\xBA\x96").utf8_uncased_search("h\xCC\xB1"), m.offset == 0 && m.length == 3);
 
-    // t with diaeresis (U+1E97, E1 BA 97) -> t + combining diaeresis (CC 88)
+    // t with diaeresis (U+1E97, E1 BA 97) → t + combining diaeresis (CC 88)
     let_verify(auto m = str("\xE1\xBA\x97").utf8_uncased_search("t\xCC\x88"), m.offset == 0 && m.length == 3);
 
-    // w with ring above (U+1E98, E1 BA 98) -> w + combining ring above (CC 8A)
+    // w with ring above (U+1E98, E1 BA 98) → w + combining ring above (CC 8A)
     let_verify(auto m = str("\xE1\xBA\x98").utf8_uncased_search("w\xCC\x8A"), m.offset == 0 && m.length == 3);
 
-    // y with ring above (U+1E99, E1 BA 99) -> y + combining ring above (CC 8A)
+    // y with ring above (U+1E99, E1 BA 99) → y + combining ring above (CC 8A)
     let_verify(auto m = str("\xE1\xBA\x99").utf8_uncased_search("y\xCC\x8A"), m.offset == 0 && m.length == 3);
 
     // Kelvin Sign (E2 84 AA) in mixed context
@@ -1679,11 +1675,11 @@ void test_uncased_scripts_unit() {
 }
 
 /**
- *  @brief Minimized known-answer vectors pinning serial-vs-SIMD mismatches found by the find fuzzers.
+ *  @brief Minimized known-answer vectors pinning serial-vs-SIMD mismatches the find fuzzers found.
  *
- *  Each numbered pattern pins the smallest input reproducing a serial-vs-SIMD disagreement - ligature and
- *  Eszett expansions, one-to-many folds with combining marks, ring-buffer-length needles, and runs
- *  landing on a 64-byte block edge - so the fix stays nailed down at a fixed cost.
+ *  Each numbered pattern pins the smallest input reproducing a serial-vs-SIMD disagreement -
+ *  ligature and Eszett expansions, one-to-many folds with combining marks, ring-buffer-length
+ *  needles, and runs landing on a 64-byte block edge - so the fix stays nailed down cheaply.
  */
 void test_uncased_regressions_unit() {
     fmt::println("  - testing uncased fuzz-discovered regressions...");
@@ -1819,7 +1815,7 @@ void test_uncased_regressions_unit() {
         std::string hay33(33, 'a');
         let_verify(auto m = str(hay33 + "xyz").utf8_uncased_search(hay33), m.offset == 0 && m.length == 33);
 
-        // 16 eszett characters → 32 folded runes (ss×16), exactly at boundary
+        // 16 eszett characters → 32 folded runes (ss × 16), exactly at boundary
         std::string hay_16_ss(16, '\xC3');
         for (size_t i = 0; i < 16; ++i) hay_16_ss.insert(i * 2 + 1, 1, '\x9F'); // Build "ßßßßßßßßßßßßßßßß"
         std::string needle_32_s(32, 's');
@@ -1908,7 +1904,7 @@ void test_uncased_regressions_unit() {
         let_verify(auto m = str("hello \xCE\xBC world").utf8_uncased_search("\xCE\xBC"),
                    m.offset == 6 && m.length == 2);
 
-        // Greek mu NOT at position where 0xBC appears as second byte of another char
+        // Greek mu not at position where 0xBC appears as second byte of another char
         // Create haystack with Latin-1 char ending in 0xBC, then Greek mu
         // This ensures we only match at valid UTF-8 boundaries
         let_verify(auto m = str("test \xC2\xBC thing \xCE\xBC end").utf8_uncased_search("\xCE\xBC"),
@@ -2006,15 +2002,13 @@ void test_uncased_regressions_unit() {
     }
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
-/**
- *  @brief Compares the @p reference and @p candidate folds byte-by-byte over a fixed multi-script battery,
- *         @p min_iterations random concatenations of at least @p min_text_length bytes, and the exhaustive
- *         sweep of every valid Unicode codepoint, both in order and shuffled.
- */
+/** Compares the @p reference and @p candidate folds byte-by-byte over a fixed multi-script battery,
+ *  @p min_iterations random concatenations of at least @p min_text_length bytes, and the exhaustive
+ *  sweep of every valid Unicode codepoint, both in order and shuffled. */
 template <typename reference_, typename candidate_>
 void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate, sz_size_t min_text_length,
                                      sz_size_t min_iterations) {
@@ -2168,10 +2162,10 @@ void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate,
 /**
  *  @brief Closure property of the case-invariant classifier over the Unicode fold table.
  *
- *  A rune may be treated as case-invariant only if no uncased match can start or hide
- *  inside it. That demands two closures over `sz_unicode_fold_codepoint_`: every preimage with a
- *  non-identity fold participates in case, and every rune @b emitted by such a fold can appear
- *  inside a folded expansion (like 'ʾ' U+02BE inside 'ẚ' → "aʾ"), so neither may be invariant.
+ *  A rune may be treated as case-invariant only if no uncased match can start or hide inside it.
+ *  That demands two closures over @c sz_unicode_fold_codepoint_: every preimage with a non-identity
+ *  fold participates in case, and every rune @b emitted by such a fold can appear inside a folded
+ *  expansion (like 'ʾ' U+02BE inside 'ẚ' → "aʾ"), so neither may be invariant.
  *  Fully generative: a Unicode table update re-derives the expected set automatically.
  */
 void check_uncased_invariant_reference_() {
@@ -2199,14 +2193,12 @@ void check_uncased_invariant_reference_() {
     fmt::println("    passed {} preimages and {} fold-output runes", preimages_checked, outputs_checked);
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
-/**
- *  @brief One backend's uncased fold / find / violation kernels for the safety probe, stored by pointer so the
- *         driver can iterate a table.
- */
+/** One backend's uncased fold / find / violation kernels for the safety probe, stored by pointer so
+ *  the driver can iterate a table. */
 struct uncased_safety_backend_t {
     char const *name;
     sz_utf8_uncased_fold_t fold;
@@ -2215,11 +2207,13 @@ struct uncased_safety_backend_t {
 };
 
 /**
- *  @brief Feeds invalid UTF-8 through the fold / find / violation kernels of every @p backends entry, asserting
- *         each survives and writes nothing past its guarded destination. One battery drives all backends.
+ *  @brief Feeds invalid UTF-8 through the fold / find / violation kernels of every @p backends
+ *      entry, asserting each survives and writes nothing past its guarded destination. One battery
+ *      drives all backends.
  *
- *  Outputs are arbitrary off-contract, so only the fold length is checked, against `3 * input_length + 4` - a
- *  truncated multi-byte tail can mis-decode into one rune of up to 4 bytes beyond the documented 3x expansion.
+ *  Outputs are arbitrary off-contract, so only the fold length is checked, against 3 × length + 4:
+ *  a truncated multi-byte tail can mis-decode into one rune of up to 4 bytes past the 3× expansion
+ *  the contract documents.
  */
 static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backends,
                                   std::size_t random_inputs = scale_iterations(10000)) {
@@ -2256,11 +2250,9 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
     fmt::println("    invalid-input safety passed!");
 }
 
-/**
- *  @brief The uncased fold/find/violation backends probed for invalid-input safety on this target. The serial
- *         reference faces the same contract as the dispatched and native ones, and the two always-present entries
- *         keep the table non-empty on a baseline build.
- */
+/** The uncased fold/find/violation backends probed for invalid-input safety on this target. The
+ *  serial reference faces the same contract as the dispatched and native ones, and the two
+ *  always-present entries keep the table non-empty on a baseline build. */
 static uncased_safety_backend_t const uncased_safety_backends[] = {
     {"serial", sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial, sz_utf8_find_cased_serial},
     {"dispatched", sz_utf8_uncased_fold, sz_utf8_uncased_search, sz_utf8_find_cased},
@@ -2290,18 +2282,17 @@ static uncased_safety_backend_t const uncased_safety_backends[] = {
 #endif
 };
 
-/** @brief Adversarial invalid-input safety driver across every backend compiled on this target. */
+/** Adversarial invalid-input safety driver across every backend compiled on this target. */
 void test_uncased_safety() { check_uncased_safety_(span_over(uncased_safety_backends)); }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/**
- *  @brief One UTF-8 case-folding + case-insensitive search backend compiled on this target. The struct doubles as
- *         the fold functor for `check_uncased_fold_equivalence_` (via `operator()`), so the differential and the find
- *         battery iterate one table; the always-present `dispatched` entry keeps it non-empty on a baseline build.
- */
+/** One UTF-8 case-folding + case-insensitive search backend compiled on this target. The struct
+ *  doubles as the fold functor for @c check_uncased_fold_equivalence_ (via `operator()`), so the
+ *  differential and the find battery iterate one table; the always-present @c dispatched entry
+ *  keeps it non-empty on a baseline build. */
 struct uncased_backend_t {
     char const *name;
     sz_utf8_uncased_fold_t fold;
@@ -2340,12 +2331,13 @@ static uncased_backend_t const uncased_backends[] = {
 };
 
 /**
- *  @brief Drives the serial-vs-SIMD uncased fold/find differentials and the structured adversarial find
- *         enumerators across every backend compiled on this target.
+ *  @brief Drives the serial-vs-SIMD uncased fold/find differentials and the structured adversarial
+ *      find enumerators across every backend compiled on this target.
  *
- *  The backend-independent fold-table closure always runs, then the table (dispatched first) exercises each
- *  backend's fold equivalence (serial = reference, backend = candidate) and its full find battery. The
- *  invalid-input safety probes live in their own registered driver, `test_uncased_safety`.
+ *  The backend-independent fold-table closure always runs, then the table (dispatched first)
+ *  exercises each backend's fold equivalence (serial = reference, backend = candidate) and its full
+ *  find battery. The invalid-input safety probes live in their own registered driver,
+ *  @c test_uncased_safety.
  */
 void test_uncased_all() {
     uncased_backend_t const serial {"serial", sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial};
@@ -2361,4 +2353,4 @@ void test_uncased_all() {
     }
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

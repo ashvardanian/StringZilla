@@ -1,8 +1,9 @@
 /**
- *  @brief  UAX-29 grapheme-cluster (Grapheme_Cluster_Break) tests: known-answer goldens, malformed-input safety,
- *          and the serial-vs-ISA differential over hardened corpora.
- *  @file   test/utf8_graphemes.cpp
+ *  @file test/utf8_graphemes.cpp
  *  @author Ash Vardanian
+ *  @date June 22, 2026
+ *  @brief UAX-29 grapheme-cluster (Grapheme_Cluster_Break) tests: known-answer goldens,
+ *      malformed-input safety, and the serial-vs-ISA differential over hardened corpora.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -27,31 +28,28 @@
 
 #pragma region Unit
 
-/** @brief Hand-checked UAX-29 grapheme-cluster golden vectors: each source text and its expected cluster segments. */
+/** Hand-checked UAX-29 grapheme-cluster golden vectors: each source text and its clusters. */
 static utf8_unit_case_t const utf8_graphemes_unit_cases[] = {
     {""_sv, {}},
     {"a"_sv, {"a"_sv}},
     {"abc"_sv, {"a"_sv, "b"_sv, "c"_sv}},
     {"a\r\nb"_sv, {"a"_sv, "\r\n"_sv, "b"_sv}}, // GB3: CR x LF stay one cluster
-    {"e\xCC\x81"_sv, {"e\xCC\x81"_sv}},         // e + U+0301 combining acute -> one cluster (GB9)
-    {"\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv,
-     {"\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv}}, // RI pair -> one cluster (GB12/13)
+    {"e\xCC\x81"_sv, {"e\xCC\x81"_sv}},         // e + U+0301 combining acute → one cluster (GB9)
+    {"\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv, {"\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv}}, // RI pair → one cluster (GB12/13)
     {"\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv,
      {"\xF0\x9F\x87\xBA"_sv, "a"_sv, "\xF0\x9F\x87\xB8"_sv}}, // RI ASCII RI: parity reset
-    {"\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9"_sv,       // ZWJ joins -> one cluster (GB11)
+    {"\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9"_sv,       // ZWJ joins → one cluster (GB11)
      {"\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9"_sv}},
-    {"\xEA\xB0\x80"_sv, {"\xEA\xB0\x80"_sv}}, // Hangul LV syllable -> one cluster
+    {"\xEA\xB0\x80"_sv, {"\xEA\xB0\x80"_sv}}, // Hangul LV syllable → one cluster
     {"\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8"_sv,
-     {"\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8"_sv}}, // Hangul L+V+T jamo -> one cluster (GB6/7/8)
+     {"\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8"_sv}}, // Hangul L+V+T jamo → one cluster (GB6/7/8)
     {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7"_sv,
-     {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7"_sv}}, // Indic consonant + virama + consonant -> one cluster (GB9c InCB)
+     {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7"_sv}}, // Indic consonant + virama + consonant → one cluster (GB9c InCB)
 };
 
-/**
- *  @brief The UTF-8 grapheme-cluster segmenters compiled on this target. The always-present `dispatched` entry keeps
- *         the table non-empty on a baseline build; the unit / rule-coverage / safety / equivalence drivers all
- *         iterate this one ladder so their ISA coverage stays in lockstep.
- */
+/** The UTF-8 grapheme-cluster segmenters compiled on this target. The always-present @c dispatched
+ *  entry keeps the table non-empty on a baseline build; the unit / rule-coverage / safety /
+ *  equivalence drivers all iterate this one ladder so their ISA coverage stays in lockstep. */
 static utf8_segment_backend_t const utf8_graphemes_backends[] = {
     {"dispatched", sz_utf8_graphemes},
 #if SZ_USE_HASWELL
@@ -68,7 +66,7 @@ static utf8_segment_backend_t const utf8_graphemes_backends[] = {
 #endif
 };
 
-/** @brief Known-answer grapheme-cluster vectors through dispatched, serial, and each ISA backend + the C++ range. */
+/** Known-answer grapheme-cluster vectors via dispatched, serial, each ISA, and the C++ range. */
 void test_utf8_graphemes_unit() {
     fmt::println("  - testing UTF-8 grapheme-cluster known-answer vectors...");
 
@@ -101,15 +99,13 @@ void test_utf8_graphemes_unit() {
            "pride_caption runes exceed graphemes");
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
-/**
- *  @brief UAX-29 grapheme-cluster corner motifs (sprinkled into the random corpus): emoji-ZWJ chains, VS16,
- *         skin-tone modifiers, regional-indicator runs of varying parity, Indic virama clusters, Hangul jamo
- *         combinations, and bare CR/LF shapes. All non-ASCII bytes are `\xHH` escapes.
- */
+/** UAX-29 grapheme-cluster corner motifs (sprinkled into the random corpus): emoji-ZWJ chains,
+ *  VS16, skin-tone modifiers, regional-indicator runs of varying parity, Indic virama clusters,
+ *  Hangul jamo combinations, and bare CR/LF shapes. All non-ASCII bytes are `\xHH` escapes. */
 static sz::string_view_t const utf8_graphemes_motifs[] = {
     "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D" // three-link ZWJ chain
     "\xF0\x9F\x91\xA7"_sv,
@@ -138,7 +134,8 @@ static sz::string_view_t const utf8_graphemes_motifs[] = {
     "\xDF\xBF\xE0\xA0\x80"_sv,         // page-LUT edge: last 2-byte U+07FF abutting first 3-byte U+0800
 };
 
-/** @brief A pictograph ZWJ chain @p link_count deep, every other link followed by VS16 (GB11), into @p out (cleared). */
+/** A pictograph ZWJ chain @p link_count deep, every other link followed by VS16 (GB11), into
+ *  @p out, cleared first. */
 static void utf8_graphemes_dense_zwj_pictograph_chain_(std::string &out, std::size_t link_count) {
     out.clear();
     static sz_rune_t const pictographs[] = {0x1F468, 0x1F469, 0x1F467, 0x1F466}; // man, woman, girl, boy
@@ -150,7 +147,7 @@ static void utf8_graphemes_dense_zwj_pictograph_chain_(std::string &out, std::si
     }
 }
 
-/** @brief One base letter followed by @p link_count combining marks (GB9 Extend run), into @p out (cleared first). */
+/** A base letter and @p link_count combining marks (GB9 Extend run), into @p out, cleared first. */
 static void utf8_graphemes_dense_combining_marks_(std::string &out, std::size_t link_count) {
     out.clear();
     static sz_rune_t const marks[] = {0x0301, 0x0300, 0x0308, 0x0327, 0x0323, // acute, grave, diaeresis, cedilla, dot
@@ -159,7 +156,7 @@ static void utf8_graphemes_dense_combining_marks_(std::string &out, std::size_t 
     for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(marks[index % 9u]));
 }
 
-/** @brief @p link_count emoji each followed by a skin-tone modifier from @p generator (GB9 Extend), into @p out. */
+/** @p link_count emoji with skin-tone modifiers from @p generator (GB9 Extend), into @p out. */
 static void utf8_graphemes_dense_skin_tone_run_(std::string &out, std::mt19937 &generator, std::size_t link_count) {
     out.clear();
     std::uniform_int_distribution<sz_rune_t> modifier(0x1F3FB, 0x1F3FF); // U+1F3FB..U+1F3FF
@@ -169,7 +166,7 @@ static void utf8_graphemes_dense_skin_tone_run_(std::string &out, std::mt19937 &
     }
 }
 
-/** @brief @p link_count Indic consonant+virama conjunct links (GB9c InCB Consonant Linker chains), into @p out. */
+/** @p link_count Indic consonant+virama links (GB9c InCB Consonant Linker chains), into @p out. */
 static void utf8_graphemes_dense_indic_conjunct_(std::string &out, std::size_t link_count) {
     out.clear();
     out.append(encoded_rune_(0x0915)); // Devanagari KA
@@ -179,7 +176,7 @@ static void utf8_graphemes_dense_indic_conjunct_(std::string &out, std::size_t l
     }
 }
 
-/** @brief @p link_count Hangul L/V/T jamo triples (GB6/7/8 jamo composition runs), into @p out (cleared first). */
+/** @p link_count Hangul L/V/T jamo triples (GB6/7/8 runs), into @p out, cleared first. */
 static void utf8_graphemes_dense_hangul_jamo_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
@@ -189,7 +186,8 @@ static void utf8_graphemes_dense_hangul_jamo_(std::string &out, std::size_t link
     }
 }
 
-/** @brief Stream the grapheme family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+/** Stream the grapheme family's high-density homogeneous runs, each spanning several 64-byte
+ *  windows, to @p sink. */
 static void utf8_graphemes_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::uniform_int_distribution<std::size_t> wide(60, 220);
@@ -204,7 +202,7 @@ static void utf8_graphemes_dense_runs_(std::mt19937 &generator, utf8_run_sink_t 
     utf8_graphemes_dense_hangul_jamo_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Stream the grapheme family's long-range straddling constructions for a given @p gap to @p sink. */
+/** Stream the grapheme family's long-range straddling constructions for @p gap to @p sink. */
 static void utf8_graphemes_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     utf8_dense_regional_indicators_(scratch, generator, gap);
@@ -216,9 +214,10 @@ static void utf8_graphemes_straddles_(std::mt19937 &generator, std::size_t gap, 
     utf8_graphemes_dense_indic_conjunct_(scratch, gap);
     scratch.append(encoded_rune_(0x0061)); // ASCII break after the conjunct
     sink(context, scratch.data(), scratch.size());
-    // A long RI run, then a ZWJ before a final RI: RI...RI ZWJ RI. The ZWJ does NOT bridge two RIs (GB11 bridges only
-    // Extended_Pictographic), so this must break after the ZWJ - and the ZWJ resets the GB12/13 RI parity. Straddles
-    // the 64-byte window so the parity carry and the post-ZWJ break are exercised across the edge.
+    // A long RI run, then a ZWJ before a final RI: RI...RI ZWJ RI. The ZWJ does not bridge two RIs
+    // (GB11 bridges only Extended_Pictographic), so this must break after the ZWJ - and the ZWJ
+    // resets the GB12/13 RI parity. Straddles the 64-byte window so the parity carry and the
+    // post-ZWJ break are exercised across the edge.
     utf8_dense_regional_indicators_(scratch, generator, gap);
     scratch.append(encoded_rune_(0x200D));  // ZWJ
     scratch.append(encoded_rune_(0x1F1E6)); // Regional_Indicator after the ZWJ
@@ -226,7 +225,7 @@ static void utf8_graphemes_straddles_(std::mt19937 &generator, std::size_t gap, 
     sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Grapheme-biased snippets: ZWJ sequences, jamo, conjuncts, and mark stacks in Arabic/Greek/Cyrillic/Thai. */
+/** Grapheme-biased snippets: ZWJ sequences, jamo, conjuncts, Arabic/Greek/Cyrillic/Thai marks. */
 static char const *const utf8_graphemes_snippets[] = {
     "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9",     // woman ZWJ woman (GB11 emoji-ZWJ sequence)
     "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD",                 // thumbs-up + skin-tone modifier (GB9 Extend)
@@ -243,14 +242,14 @@ static char const *const utf8_graphemes_snippets[] = {
     "\xF0\x9D\x85\x97\xF0\x9D\x85\xA5\xF0\x9D\x85\xAE", // astral notehead + stem (SpacingMark) + flag (Extend)
 };
 
-/** @brief Grapheme family alphabet: weights bias toward astral/motif clusters (GB9/9c/11/12/13). */
+/** Grapheme family alphabet: weights bias toward astral/motif clusters (GB9/9c/11/12/13). */
 static utf8_corpus_alphabet_t const utf8_graphemes_alphabet = {
     span_over(utf8_graphemes_snippets),
     span_over(utf8_default_boundary_codepoints),
     {{35, 15, 25, 20, 5}}, // snippet, boundary, astral, motif, malformed
 };
 
-/** @brief Assemble the grapheme family's differential corpora (motifs + dense + straddle; no seam regressions). */
+/** Grapheme differential corpora: motifs, dense runs and straddles, without seam regressions. */
 static utf8_segment_corpora_t utf8_graphemes_corpora_() {
     utf8_segment_corpora_t corpora = {
         "grapheme",
@@ -263,11 +262,11 @@ static utf8_segment_corpora_t utf8_graphemes_corpora_() {
     return corpora;
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Rule coverage
 
-/** @brief Rule-coverage gate: every GB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
+/** Rule-coverage gate: every GB rule motif runs and agrees serial-vs-ISA at window phases. */
 void test_utf8_graphemes_rules() {
     fmt::println("  - testing UTF-8 grapheme rule-coverage matrix...");
 
@@ -288,10 +287,10 @@ void test_utf8_graphemes_rules() {
         {"GB13", utf8_rule_joins_k, "a\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},            // [^RI] (RI RI)* RI x RI
         {"GB999", utf8_rule_breaks_k, "ab"_sv},                                         // Any / Any (default break)
         // Opposite-direction motifs (E1): the same rule firing the other way.
-        {"GB11", utf8_rule_breaks_k, "\xF0\x9F\x98\x80z"_sv}, // ExtPict then ASCII: no ZWJ bridge -> break
+        {"GB11", utf8_rule_breaks_k, "\xF0\x9F\x98\x80z"_sv}, // ExtPict then ASCII: no ZWJ bridge → break
         {"GB12", utf8_rule_breaks_k,
          "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI: break after the pair
-        {"GB6", utf8_rule_breaks_k, "\xE1\x84\x80z"_sv},         // Hangul L then ASCII: not L|V|LV|LVT -> break
+        {"GB6", utf8_rule_breaks_k, "\xE1\x84\x80z"_sv},         // Hangul L then ASCII: not L|V|LV|LVT → break
     };
     // Every Grapheme_Cluster_Break rule id the gate requires a motif for (spec-derived checklist).
     char const *const required_rules[] = {
@@ -302,11 +301,11 @@ void test_utf8_graphemes_rules() {
                                   span_over(required_rules));
 }
 
-#pragma endregion // Rule coverage
+#pragma endregion Rule coverage
 
 #pragma region Safety
 
-/** @brief Malformed-input safety of the UTF-8 grapheme kernels: the serial reference and every compiled ISA. */
+/** Malformed-input safety of the UTF-8 grapheme kernels: serial and every compiled ISA. */
 void test_utf8_graphemes_safety() {
     fmt::println("  - testing malformed-input safety of UTF-8 grapheme kernels...");
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_graphemes_serial}};
@@ -315,11 +314,11 @@ void test_utf8_graphemes_safety() {
     fmt::println("    grapheme safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/** @brief Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
+/** Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
 void test_utf8_graphemes_all() {
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
     check_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
@@ -331,4 +330,4 @@ void test_utf8_graphemes_all() {
                                            motif.data(), motif.size());
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

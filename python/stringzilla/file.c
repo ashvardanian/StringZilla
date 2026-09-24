@@ -1,14 +1,14 @@
 /**
- *  @brief The `File` type - a memory-mapped file exposing its address range.
  *  @file python/stringzilla/file.c
  *  @author Ash Vardanian
+ *  @date September 11, 2023
+ *  @brief The @c File type - a memory-mapped file exposing its address range.
  */
 #include "stringzilla.h"
 
-/**
- *  @brief  Releases the memory mapping and OS handles held by a `File`, leaving it in the blank state
- *          produced by `File_new`. Shared by `File_dealloc` and the `File_init` re-initialization guard.
- */
+/** Releases the memory mapping and OS handles held by a @c File, leaving it in the blank state
+ *  produced by @c File_new. Shared by @c File_dealloc and the re-initialization guard of
+ *  @c File_init. */
 static void File_release_(File *self) {
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     if (self->memory.start) {
@@ -156,7 +156,7 @@ static char const doc_File[] =                                                  
     "\n"                                                                                     //
     "Args:\n"                                                                                //
     "  path (str): Path to the file to memory-map.\n"                                        //
-    "  mode (str): File access mode (default: 'r' for read-only).\n"                         //
+    "  mode (str): File access mode, defaulting to 'r' for read-only.\n"                     //
     "\n"                                                                                     //
     "Example:\n"                                                                             //
     "  >>> import os, tempfile, pathlib\n"                                                   //

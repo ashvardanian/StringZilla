@@ -1,7 +1,20 @@
 /**
- *  @brief NEON (AArch64) backend for UAX-29 sentence boundaries.
  *  @file include/stringzilla/utf8_sentences/neon.h
  *  @author Ash Vardanian
+ *  @date June 24, 2026
+ *  @brief NEON AArch64 backend for UAX-29 sentence boundaries.
+ *
+ *  The NEON twin of the Haswell and Ice Lake Sentence_Break classifier: a contiguous run of
+ *  codepoints resolves to per-codepoint Sentence_Break class bytes with no per-lane scalar loop and
+ *  no serial deferral.
+ *
+ *  Each 64-byte window lives as four @c uint8x16_t quarters, `window[0]` holding lanes [0,16)
+ *  through `window[3]` holding lanes [48,64), instead of the two Haswell halves; every per-lane
+ *  class compare is @c vceqq_u8 per quarter, the four boolean quarters OR-collapsed to a
+ *  @c sz_u64_t via @c mask_combine_neon_. The per-lane high and low codepoint byte pair reads the
+ *  shared page-compressed flat table via @ref sz_utf8_rune_flat_lookup_neon_ over the whole BMP,
+ *  and a 5-nibble @c vqtbl astral cascade for 4-byte leads. Both emit the Sentence_Break class byte
+ *  directly, bit-identical with @c sz_rune_sentence_break_property over the entire code space.
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_NEON_H_
 #define STRINGZILLA_UTF8_SENTENCES_NEON_H_
@@ -27,9 +40,10 @@ extern "C" {
 
 #pragma region Scalar bit shuffles
 
-/** @brief  Software `_pext_u64`: gather the bits of @p value selected by @p selector, packed to the low end (bit `j`
- *          of the result = the `j`-th set bit of @p value within @p selector). NEON has no `pext`; the sparse loop
- *          trips once per set @p selector bit (codepoint-dense compaction over the start lanes). Bit-exact with BMI2. */
+/** Software @c _pext_u64: gathers the bits of @p value selected by @p selector, packed to the
+ *  low end, so bit j of the result is the j-th set bit of @p value within @p selector. NEON has
+ *  no @c pext; the sparse loop trips once per set @p selector bit, the codepoint-dense
+ *  compaction over the start lanes. Bit-exact with BMI2. */
 SZ_HELPER_INLINE sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     sz_u64_t out_bit = 1;
@@ -42,9 +56,10 @@ SZ_HELPER_INLINE sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, sz_u64_t 
     return result;
 }
 
-/** @brief  Software `_pdep_u64`: scatter the low bits of @p value into the positions set in @p selector (the `j`-th
- *          set bit of @p selector receives bit `j` of @p value). NEON has no `pdep`; the sparse loop trips once per
- *          set @p selector bit (the dense-boundary scatter back onto codepoint-start lanes). Bit-exact with BMI2. */
+/** Software @c _pdep_u64: scatters the low bits of @p value into the positions set in
+ *  @p selector, so the j-th set bit of @p selector receives bit j of @p value. NEON has no
+ *  @c pdep; the sparse loop trips once per set @p selector bit, the dense-boundary scatter back
+ *  onto codepoint-start lanes. Bit-exact with BMI2. */
 SZ_HELPER_INLINE sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     while (selector) {
@@ -60,18 +75,8 @@ SZ_HELPER_INLINE sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t 
 
 #pragma region In register vectorized classifier
 
-/*  The NEON twin of the Haswell / Ice Lake Sentence_Break classifier: a contiguous run of codepoints resolves to
- *  per-codepoint Sentence_Break class bytes with ZERO per-lane scalar loop and NO serial deferral.
- *
- *  Each 64-byte window lives as four `uint8x16_t` quarters (`window[0]` = lanes [0,16), ... `window[3]` = lanes
- *  [48,64)) instead of haswell's two halves; every per-lane class compare is `vceqq_u8` per quarter, the four boolean
- *  quarters OR-collapsed to a `sz_u64_t` via `mask_combine_neon_`. The per-lane (high, low) codepoint byte pair reads
- *  the shared page-compressed flat table via @ref sz_utf8_rune_flat_lookup_neon_ over the whole BMP, and a 5-nibble
- *  `vqtbl` astral cascade for 4-byte leads. Both emit the Sentence_Break class byte directly, bit-identical with
- *  `sz_rune_sentence_break_property` over the entire code space. */
-
-/** @brief  Expand a 16-bit lane mask into a `uint8x16_t` select vector (byte `i` = 0xFF when bit `i` is set), the NEON
- *          twin of @ref sz_utf8_byte_mask_from_bits_haswell_ confined to one quarter. */
+/** Expands a 16-bit lane mask into a @c uint8x16_t select vector, byte i = 0xFF when bit i is
+ *  set, the NEON twin of @ref sz_utf8_byte_mask_from_bits_haswell_ confined to one quarter. */
 SZ_HELPER_INLINE uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
     static sz_u8_t const byte_router_lanes[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
     static sz_u8_t const bit_select_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
@@ -83,14 +88,20 @@ SZ_HELPER_INLINE uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64_t
     return vceqq_u8(isolated_u8x16, bit_select_u8x16);
 }
 
-/** @brief  Reconstruct the BMP (2-/3-byte) codepoint high/low bytes for one 16-lane quarter from EDGE-MASKED forward
- *          neighbours — the NEON twin of @ref sz_utf8_sentence_break_bmp_highlow_haswell_. The shared rune-window decode
- *          built `window.{high,low}` from its own mod-64-wrapping neighbours, so a 2-/3-byte lead straddling the loaded
- *          edge (the truncated trailing lead at end-of-input, where `complete_limit` does not trim because `!more_text`)
- *          would read a wrapped byte as its missing continuation. Recomputing from the driver's `keep`-masked neighbours
- *          makes those missing continuations read as zero, exactly like serial's blind decode (`text[start+k]` past the
- *          input reads 0). Lanes that are neither a 2- nor a 3-byte lead keep `low = raw`, `high = 0`; the classifier
- *          re-seats raw / 4-byte lanes anyway. */
+/**
+ *  @brief Reconstructs the BMP 2- and 3-byte codepoint high and low bytes for one 16-lane quarter
+ *      from edge-masked forward neighbours: the NEON twin of
+ *      @ref sz_utf8_sentence_break_bmp_highlow_haswell_.
+ *
+ *  The shared rune-window decode built `window.{high,low}` from its own mod-64-wrapping
+ *  neighbours, so a 2- or 3-byte lead straddling the loaded edge would read a wrapped byte as its
+ *  missing continuation. That is the truncated trailing lead at end-of-input, where
+ *  @c complete_limit does not trim because of `!more_text`. Recomputing from the driver's
+ *  neighbours masked by @c keep makes those missing continuations read as zero, exactly like the
+ *  serial blind decode, where `text[start+k]` past the input reads 0. Lanes that are neither a 2-
+ *  nor a 3-byte lead keep @p raw_u8x16 as the low byte and zero as the high byte; the classifier
+ *  re-seats raw and 4-byte lanes anyway.
+ */
 SZ_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_neon_( //
     uint8x16_t raw_u8x16, uint8x16_t next1_u8x16, uint8x16_t next2_u8x16, sz_u64_t two_bits, sz_u64_t three_bits,
     uint8x16_t *out_high_u8x16, uint8x16_t *out_low_u8x16) {
@@ -118,20 +129,22 @@ SZ_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_neon_( //
     *out_high_u8x16 = high_u8x16, *out_low_u8x16 = low_u8x16;
 }
 
-/** @brief  Sentence_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) from the flat
- *          page-compressed table via @ref sz_utf8_rune_flat_lookup_neon_, the NEON twin of
- *          @ref sz_utf8_sentence_break_bmp_class_haswell_. Bit-exact with `sz_rune_sentence_break_property` over the
- *          whole BMP. Operates on one quarter; the caller iterates the four quarters. */
+/** Sentence_Break class byte for sixteen BMP codepoints, with per-lane high = cp >> 8 and low =
+ *  cp & 0xFF, from the flat page-compressed table via @ref sz_utf8_rune_flat_lookup_neon_, the
+ *  NEON twin of @ref sz_utf8_sentence_break_bmp_class_haswell_. Bit-exact with
+ *  @c sz_rune_sentence_break_property over the whole BMP. Operates on one quarter; the caller
+ *  iterates the four quarters. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16,
                                                                    uint8x16_t low_bytes_u8x16) {
     return sz_utf8_rune_flat_lookup_neon_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
                                           (int)sz_utf8_sentence_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
 
-/** @brief  Sentence_Break class byte for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
- *          cascade), the NEON twin of @ref sz_utf8_sentence_break_astral_class_haswell_. Per-lane bytes:
- *          @p plane = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
- *          Bit-exact with `sz_rune_sentence_break_property` over all astral. Operates on one quarter. */
+/** Sentence_Break class byte for sixteen astral codepoints over the 20-bit `offset = cp - 0x10000`
+ *  with a 5-nibble cascade, the NEON twin of @ref sz_utf8_sentence_break_astral_class_haswell_.
+ *  Per-lane bytes: @p plane holds `(offset >> 16) & 0xFF`, of which only the low nibble matters,
+ *  @p high holds `(offset >> 8) & 0xFF`, and @p low holds `offset & 0xFF`. Operates on one quarter
+ *  and is bit-exact with @c sz_rune_sentence_break_property over all of the astral planes. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plane_u8x16, uint8x16_t high_u8x16,
                                                                       uint8x16_t low_u8x16) {
     uint8x16_t const low_nibble_mask_u8x16 = vdupq_n_u8(0x0F);
@@ -166,13 +179,17 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t
     return result_u8x16;
 }
 
-/** @brief  Per-byte-lane Sentence_Break class for ONE decoded window quarter, fully in-register and zero-scalar - the
- *          NEON twin of @ref sz_utf8_sentence_break_classify_half_haswell_. The decoded window only carries the
- *          2-/3-byte (high, low) reconstruction; this leaf rebuilds the ASCII (`low = raw`, `high = 0`) and 4-byte
- *          (`high`/`low` from the four-byte formula) codepoint bytes before the cascade, exactly as the haswell driver
- *          reconstructs them. BMP lanes go through the BMP cascade; 4-byte lanes are routed by reconstructed plane
- *          through the astral cascade. The class on non-codepoint-start lanes is irrelevant (the dense compaction only
- *          reads start lanes), so those lanes are never selected. */
+/**
+ *  @brief Per-byte-lane Sentence_Break class for one decoded window quarter, fully in-register and
+ *      zero-scalar: the NEON twin of @ref sz_utf8_sentence_break_classify_half_haswell_.
+ *
+ *  The decoded window only carries the 2- and 3-byte high and low reconstruction; this leaf
+ *  rebuilds the ASCII codepoint bytes, `low = raw` and `high = 0`, and the 4-byte ones, high and
+ *  low from the four-byte formula, before the cascade, exactly as the Haswell driver reconstructs
+ *  them. BMP lanes go through the BMP cascade; 4-byte lanes are routed by reconstructed plane
+ *  through the astral cascade. The class on non-codepoint-start lanes is irrelevant, as the dense
+ *  compaction only reads start lanes, so those lanes are never selected.
+ */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
     uint8x16_t window_high_u8x16, uint8x16_t window_low_u8x16, uint8x16_t raw_u8x16, uint8x16_t next1_u8x16,
     uint8x16_t next2_u8x16, uint8x16_t next3_u8x16, sz_u64_t four_byte_bits) {
@@ -180,13 +197,15 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
     uint8x16_t const low_four_bits_u8x16 = vdupq_n_u8(0x0F);
     uint8x16_t const low_six_bits_u8x16 = vdupq_n_u8(0x3F);
 
-    //  Raw-byte reconstruction (codepoint == raw byte: low = raw, high = 0) for every lane that is NOT a 2-/3-/4-byte
-    //  lead — ASCII (`raw < 0x80`), continuation bytes `0x80..0xBF` (a lone continuation forced to a start at position 0
-    //  decodes to its raw value, e.g. `0x85` → U+0085 NEL), and the non-lead bytes `0xF8..0xFF`. The decode window
-    //  pre-folds the 2-byte arithmetic into high/low on ALL lanes, so these must be overwritten. The 2-/3-/4-byte leads
-    //  are exactly `0xC0..0xF7`, so raw treatment is the complement `raw < 0xC0 || raw ≥ 0xF8`, matching serial's blind
-    //  `rune = lead` decode and the haswell / icelake classifiers (which seat `low = raw`, `high = 0` on every such
-    //  lane); 4-byte leads `0xF0..0xF7` are re-seated by the `four_select` blend below.
+    //  Raw-byte reconstruction (codepoint == raw byte: low = raw, high = 0) for every lane that is
+    //  not a 2-/3-/4-byte lead — ASCII (`raw < 0x80`), continuation bytes `0x80..0xBF` (a lone
+    //  continuation forced to a start at position 0 decodes to its raw value, e.g. `0x85` → U+0085
+    //  NEL), and the non-lead bytes `0xF8..0xFF`. The decode window pre-folds the 2-byte arithmetic
+    //  into high/low on all lanes, so these must be overwritten. The 2-/3-/4-byte leads are exactly
+    //  `0xC0..0xF7`, so raw treatment is the complement `raw < 0xC0 || raw ≥ 0xF8`, matching
+    //  serial's blind `rune = lead` decode and the haswell / icelake classifiers (which seat
+    //  `low = raw`, `high = 0` on every such lane); 4-byte leads `0xF0..0xF7` are re-seated by the
+    //  `four_select` blend below.
     uint8x16_t const raw_select_u8x16 = vorrq_u8(vcltq_u8(raw_u8x16, vdupq_n_u8(0xC0)),
                                                  vcgeq_u8(raw_u8x16, vdupq_n_u8(0xF8)));
     uint8x16_t low_u8x16 = vbslq_u8(raw_select_u8x16, raw_u8x16, window_low_u8x16);
@@ -205,13 +224,15 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
         low_u8x16 = vbslq_u8(four_select_u8x16, four_low_u8x16, low_u8x16);
         high_u8x16 = vbslq_u8(four_select_u8x16, four_high_u8x16, high_u8x16);
 
-        //  Split the 4-byte lanes on their blind plane (cp bits[16..20]) by VALUE, matching serial / haswell / icelake:
-        //    plane == 0      → BMP codepoint (cp = (four_high<<8)|four_low); resolved by the BMP cascade (e.g. the
-        //                       overlong `F0 80 87 AB` → U+01EB Lower lands here, NOT on the astral path).
+        //  Split the 4-byte lanes on their blind plane (cp bits[16..20]) by value, matching the
+        //  serial, haswell and icelake backends:
+        //    plane == 0      → BMP codepoint (cp = (four_high<<8)|four_low); resolved by the BMP
+        //                       cascade (e.g. the overlong `F0 80 87 AB` → U+01EB Lower lands here,
+        //                       not on the astral path).
         //    plane in [1,16]  → genuine astral (cp in 0x10000..0x10FFFF); routed to the astral cascade.
         //    plane ≥ 17       → cp ≥ 0x110000 (e.g. `F4 A0 ..`, `F5 ..`); neither BMP nor astral, class Other (0).
         //  The astral cascade only consumes the low nibble of `plane - 1`, so a plane ≥ 17 lane would alias a valid
-        //  offset and MUST be excluded, not just left to the cascade.
+        //  offset and must be excluded, not just left to the cascade.
         uint8x16_t const plane_u8x16 = vorrq_u8(
             vandq_u8(vshlq_n_u8(vandq_u8(raw_u8x16, vdupq_n_u8(0x07)), 2), vdupq_n_u8(0x1C)),
             sz_utf8_srl8_neon_(next1_u8x16, 4, 0x03));
@@ -233,9 +254,10 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
 
 #pragma region Dense compaction and scatter
 
-/** @brief  Build the per-class membership frame from the dense class byte stream with NEON compares: each class is one
- *          `vceqq_u8` per quarter OR-combined to a u64, the NEON twin of @ref sz_utf8_sentence_break_frame_haswell_ (no
- *          scalar pass). The dense stream is at most 64 lanes, held as four `uint8x16_t` quarters. */
+/** Builds the per-class membership frame from the dense class byte stream with NEON compares:
+ *  each class is one @c vceqq_u8 per quarter OR-combined to a u64, the NEON twin of
+ *  @ref sz_utf8_sentence_break_frame_haswell_ with no scalar pass. The dense stream is at most
+ *  64 lanes, held as four @c uint8x16_t quarters. */
 SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_neon_(sz_u8_t const *dense_classes,
                                                                                    sz_u64_t valid) {
     uint8x16_t dense_u8x16[4];
@@ -254,7 +276,8 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_neo
     return frame;
 }
 
-/** @brief  Run the portable rule engine over a dense class stream, building the frame with NEON compares first. */
+/** Runs the portable rule engine over a dense class stream, building the frame with
+ *  NEON compares first. */
 SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_neon_( //
     sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
@@ -262,9 +285,9 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_d
     return sz_utf8_sentence_break_decide_block_(&frame, dense_classes, count, carry, more_text);
 }
 
-/** @brief  Largest byte prefix of the window whose codepoints are all fully loaded — the NEON twin of
- *          @ref sz_utf8_sentence_break_complete_limit_haswell_ over the NEON window struct. Never below 1 when the
- *          window is non-empty. */
+/** Largest byte prefix of the window whose codepoints are all fully loaded, the NEON twin of
+ *  @ref sz_utf8_sentence_break_complete_limit_haswell_ over the NEON window struct. Never below
+ *  1 when the window is non-empty. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window,
                                                                        sz_u8_t const *bytes_after,
                                                                        sz_bool_t more_text) {
@@ -293,10 +316,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_r
 #pragma region Forward driver
 
 /**
- *  @brief  Forward UAX-29 sentence segmentation kernel (NEON AArch64). Bit-exact with `sz_utf8_sentences_serial`,
- *          `sz_utf8_sentences_haswell`, and `sz_utf8_sentences_icelake`: a NEON window/classify/dense-compaction
- *          front-end feeds the shared portable rule engine @ref sz_utf8_sentence_break_decide_block_, whose dense
- *          breaks are scattered back to byte lanes.
+ *  @brief Forward UAX-29 sentence segmentation kernel for NEON AArch64.
+ *
+ *  Bit-exact with @c sz_utf8_sentences_serial, @c sz_utf8_sentences_haswell, and
+ *  @c sz_utf8_sentences_icelake: a NEON window, classify, and dense-compaction front-end feeds the
+ *  shared portable rule engine @ref sz_utf8_sentence_break_decide_block_, whose dense breaks are
+ *  scattered back to byte lanes.
  */
 SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(            //
     sz_cptr_t text, sz_size_t length,                        //

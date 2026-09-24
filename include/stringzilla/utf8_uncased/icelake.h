@@ -1,7 +1,9 @@
 /**
- *  @brief Ice Lake (AVX-512) uncased UTF-8 search, comparison & invariance kernels.
  *  @file include/stringzilla/utf8_uncased/icelake.h
  *  @author Ash Vardanian
+ *  @date November 30, 2025
+ *  @brief Ice Lake (AVX-512) uncased UTF-8 search, comparison & invariance kernels.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_ICELAKE_H_
@@ -34,7 +36,7 @@ extern "C" {
  *  @brief Fold a ZMM register using ASCII case folding rules.
  *  @sa sz_utf8_uncased_rune_ascii_invariant_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_ascii_fold_zmm_(__m512i text_u8x64) {
@@ -50,10 +52,10 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_ascii_fold_zmm_(__m512i 
 /**
  *  @brief 3-probe ASCII uncased search using XOR + VPTERNLOG + VPTESTNMB.
  *
- *  For needles with folded_slice_length ≤ 3, probes at positions 0, mid, last cover ALL bytes.
- *  Uses parallel loads from different offsets, XOR for difference detection,
- *  VPTERNLOG to combine all 3, and VPTESTNMB to find matches.
- *  No window verification needed since probes cover the entire window.
+ *  For needles with @c folded_slice_length ≤ 3, probes at positions 0, mid, and last cover all
+ *  bytes. Uses parallel loads from different offsets, XOR for difference detection, VPTERNLOG to
+ *  combine all 3, and VPTESTNMB to find matches. No window verification is needed, since the probes
+ *  cover the entire window.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
@@ -65,7 +67,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_( //
     sz_cptr_t const haystack_end = haystack + haystack_length;
     sz_size_t const step = 64 - folded_window_length + 1;
 
-    // For ≤3 bytes: positions 0, mid, last cover ALL positions
+    // For ≤3 bytes: positions 0, mid, last cover all positions
     // 1-byte: 0=last, 2-byte: 0,1, 3-byte: 0,1,2
     sz_size_t const offset_second = folded_window_length / 2;
     sz_size_t const offset_last = folded_window_length - 1;
@@ -164,10 +166,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_( //
 /**
  *  @brief 4-probe ASCII uncased search using XOR + VPTERNLOG + VPTESTNMB.
  *
- *  For needles with folded_slice_length ≥ 4, probes at 4 positions filter candidates quickly.
- *  Uses parallel loads, XOR for difference detection, VPTERNLOG + VPOR to combine,
- *  and VPTESTNMB to find matches. Window verification IS required since probes
- *  don't cover all positions in the folded window.
+ *  For needles with @c folded_slice_length ≥ 4, probes at 4 positions filter candidates quickly.
+ *  Uses parallel loads, XOR for difference detection, VPTERNLOG and VPOR to combine, and VPTESTNMB
+ *  to find matches. Window verification is required, since the probes don't cover all positions in
+ *  the folded window.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
@@ -307,16 +309,16 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // ASCII Uncased Find
+#pragma endregion ASCII Uncased Find
 
 #pragma region Scripted Uncased Find
 
-/** @brief Folds one ZMM register of haystack text using script-specific rules. */
+/** Folds one ZMM register of haystack text using script-specific rules. */
 typedef __m512i (*sz_utf8_uncased_fold_zmm_t)(__m512i text_u8x64);
 
 /**
  *  @brief Flags positions of "danger" characters that fold to a different byte width.
- *  @param load_m64 Bitmask of the bytes actually loaded from the haystack, for tail-safe range checks.
+ *  @param[in] load_m64 Bitmask of the bytes loaded from the haystack, for tail-safe range checks.
  */
 typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t)(__m512i text_u8x64, __mmask64 load_m64);
 
@@ -331,16 +333,16 @@ typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t)(__m512i text_u8x64, __mmask64 l
  *  The driver is force-inlined into each wrapper, so the callbacks resolve to direct calls
  *  with no indirect branches in the emitted code.
  *
- *  @param fold Script-specific ZMM case-folding callback.
- *  @param alarm Script-specific danger detection callback, or NULL if the script has no
+ *  @param[in] fold Script-specific ZMM case-folding callback.
+ *  @param[in] alarm Script-specific danger detection callback, or @c NULL if the script has no
  *      danger characters: the danger branch disappears and the full step is used.
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Pre-folded window content with probe positions.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
     sz_utf8_uncased_fold_zmm_t fold,                                 //
@@ -402,7 +404,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
             if (danger_m64) {
                 // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
                 // The whole chunk is scanned, not just `valid_starts` positions: an expanding danger
-                // character makes the haystack span SHORTER than the folded window, so a real match
+                // character makes the haystack span shorter than the folded window, so a real match
                 // can start within the window's length of the chunk end.
                 sz_cptr_t match = sz_utf8_uncased_search_in_danger_zone_( //
                     haystack, haystack_length,                            //
@@ -451,7 +453,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
         haystack_ptr += step;
     }
 
-    // Expanding danger characters ('ᾳ' folding to "αι") make the haystack span SHORTER than the
+    // Expanding danger characters ('ᾳ' folding to "αι") make the haystack span shorter than the
     // folded needle window, so a match can still start in the sub-window tail the loop never
     // probes. The tail is shorter than the 16-byte window, so the serial scan costs nothing.
     if (alarm && haystack_ptr < haystack_end) {
@@ -468,7 +470,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Scripted Uncased Find
+#pragma endregion Scripted Uncased Find
 
 #pragma region Western European Uncased Find
 
@@ -476,7 +478,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
  *  @brief Fold a ZMM register using Western European case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_western_europe_fold_naively_zmm_(__m512i text_u8x64) {
@@ -527,7 +529,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_western_europe_fold_naiv
  *  @brief Fold a ZMM register using Western European case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_western_europe_fold_efficiently_zmm_(__m512i text_u8x64) {
@@ -556,7 +558,7 @@ SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_western_europe_fold_ef
  *
  *  Uses 12 CMPEQ operations (5 lead + 7 second byte checks).
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_naively_zmm_(__m512i text_u8x64) {
@@ -617,16 +619,16 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_n
 /**
  *  @brief Optimized alarm function for Western Europe danger zone detection.
  *
- *  Every Western European danger sequence starts with a 2-byte (lead, second) pair with a UNIQUE
+ *  Every Western European danger sequence starts with a 2-byte (lead, second) pair with a unique
  *  second byte, so the pair test inverts: one VPERMB maps each second byte to the lead that would
  *  make it dangerous (sentinel 0x00 otherwise), another VPERMB materializes the previous byte
  *  in-register, and a single VPCMPEQB matches them up. Two qualifiers make it exact: the second
- *  byte must be a continuation (its low-6-bit VPERMB index aliases ASCII and lead bytes), and the
- *  previous byte must be >= C0 (kills the sentinel matching a 0x00 byte and the zeroed lane 0).
- *  The third-byte refinements (E1 BA only expands for thirds 96-9E, E2 84 only for AA/AB) sit
- *  behind a `pair` branch, so the hot path is 5 port-5 ops instead of the naive 12 CMPEQs.
+ *  byte must be a continuation, as its low-6-bit VPERMB index aliases ASCII and lead bytes, and the
+ *  previous byte must be ≥ C0, which kills the sentinel matching a 0x00 byte and the zeroed lane 0.
+ *  The third-byte refinements, as E1 BA only expands for thirds 96-9E and E2 84 only for AA/AB, sit
+ *  behind a @c pair branch, so the hot path is 5 port-5 ops instead of the naive 12 CMPEQs.
  *
- *  @param text_u8x64 The text ZMM register to scan for danger bytes.
+ *  @param[in] text_u8x64 The text ZMM register to scan for danger bytes.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_efficiently_zmm_(__m512i text_u8x64,
@@ -685,17 +687,17 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm
  *  @brief Western European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  *
- *  Scans the entire haystack from byte 0, looking for the folded window pattern.
- *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
- *  comparison to handle variable-width folding correctly (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)).
+ *  Scans the entire haystack from byte 0, looking for the folded window pattern. When found,
+ *  verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint comparison to
+ *  handle variable-width folding correctly, e.g. 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73).
  *
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Pre-folded window content with probe positions.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_western_europe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                         //
@@ -708,7 +710,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_western_europe_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Western European Uncased Find
+#pragma endregion Western European Uncased Find
 
 #pragma region Central European Uncased Find
 
@@ -716,7 +718,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_western_europe_( //
  *  @brief Fold a ZMM register using Central European case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_naively_zmm_(__m512i text_u8x64) {
@@ -752,14 +754,14 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_naiv
 
     // 2. Latin Extended-A: C4xx / C5xx case folding
     //    The uppercase/lowercase parity pattern varies within Latin Extended-A:
-    //    - C4 80-B7 (U+0100-U+0137): uppercase = EVEN second bytes
-    //    - C4 B9-BD (U+0139-U+013D): uppercase = ODD (Ĺ,Ļ,Ľ → +1); 'ĸ' (C4 B8) is caseless,
+    //    - C4 80-B7 (U+0100-U+0137): uppercase = even second bytes
+    //    - C4 B9-BD (U+0139-U+013D): uppercase = odd (Ĺ,Ļ,Ľ → +1); 'ĸ' (C4 B8) is caseless,
     //      'ľ' (C4 BE) is lowercase, and 'Ŀ' (C4 BF) folds across leads to 'ŀ' (C5 80),
     //      so it is routed through the alarm instead
-    //    - C5 81-87 (U+0141-U+0147): uppercase = ODD (Ł,Ń,Ņ,Ň → +1)
-    //    - C5 8A-B6 (U+014A-U+0176): uppercase = EVEN (Ŋ-Ŷ → +1)
-    //    - C5 B9-BD (U+0179-U+017D): uppercase = ODD (Ź,Ż,Ž → +1)
-    //    NOT folded (handled elsewhere or excluded):
+    //    - C5 81-87 (U+0141-U+0147): uppercase = odd (Ł,Ń,Ņ,Ň → +1)
+    //    - C5 8A-B6 (U+014A-U+0176): uppercase = even (Ŋ-Ŷ → +1)
+    //    - C5 B9-BD (U+0179-U+017D): uppercase = odd (Ź,Ż,Ž → +1)
+    //    Not folded (handled elsewhere or excluded):
     //    - 'ŀ' (U+0140, C5 80)
     //    - 'ň' (U+0148, C5 88)
     //    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
@@ -818,7 +820,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_naiv
  *  @brief Fold a ZMM register using Central European case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_efficiently_zmm_(__m512i text_u8x64) {
@@ -923,7 +925,7 @@ SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_ef
  *
  *  Uses 10 CMPEQ operations (5 lead + 5 second byte checks).
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_naively_zmm_(__m512i text_u8x64) {
@@ -969,16 +971,16 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_n
 /**
  *  @brief Optimized alarm function for Central Europe danger zone detection.
  *
- *  Every Central European danger character is a 2-byte (lead, second) pair with a UNIQUE second
+ *  Every Central European danger character is a 2-byte (lead, second) pair with a unique second
  *  byte, so the pair test inverts naturally: one VPERMB maps each second byte to the lead that
  *  would make it dangerous (sentinel 0x00 otherwise), another VPERMB materializes the previous
  *  byte in-register, and a single VPCMPEQB matches them up. Two qualifiers make it exact:
  *  the second byte must be a continuation (its low-6-bit VPERMB index aliases ASCII and lead
- *  bytes), and the previous byte must be >= C0 (kills the sentinel matching a 0x00 byte and the
+ *  bytes), and the previous byte must be ≥ C0 (kills the sentinel matching a 0x00 byte and the
  *  zeroed lane 0). That is 5 port-5 ops instead of the naive 10 CMPEQs - and far fewer
  *  mask-register ops, which Clang would otherwise pile onto the same ports.
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_efficiently_zmm_(__m512i text_u8x64,
@@ -1027,13 +1029,13 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm
  *  @brief Central European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  *
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Safe window metadata.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Safe window metadata.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_central_europe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                         //
@@ -1046,7 +1048,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_central_europe_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Central European Uncased Find
+#pragma endregion Central European Uncased Find
 
 #pragma region Cyrillic Uncased Find
 
@@ -1056,7 +1058,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_central_europe_( //
  *
  *  Handles Basic Cyrillic (D0/D1) and Extended Cyrillic (D2/D3) ranges.
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_naively_zmm_(__m512i text_u8x64) {
@@ -1115,7 +1117,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_naively_zm
  *  to distinct offsets (+0x10, +0x20, -0x20). A single VPSHUFB lookup replaces
  *  3 range comparisons + 3 masked moves.
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_efficiently_zmm_(__m512i text_u8x64) {
@@ -1182,11 +1184,11 @@ SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_efficien
  *
  *  Basic Cyrillic itself never changes byte width when folded, and Extended Cyrillic needles
  *  (D2/D3 leads) are banned at needle-analysis time. The one haystack-side hazard is Cyrillic
- *  Extended-C: 'ᲀ'-'ᲈ' (U+1C80-1C88, E1 B2 80-88) fold INTO basic 2-byte Cyrillic letters
+ *  Extended-C: 'ᲀ'-'ᲈ' (U+1C80-1C88, E1 B2 80-88) fold into basic 2-byte Cyrillic letters
  *  ('в', 'д', 'о', 'с', 'т', 'ъ', 'ѣ'), so a 3-byte haystack character can match a 2-byte
  *  needle character and must go through the serial danger-zone scanner.
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_naively_zmm_(__m512i text_u8x64) {
@@ -1204,8 +1206,8 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_naively
  *  The E1 B2 pair is absent from virtually all real Cyrillic text, so the third-byte
  *  refinement hides behind a branch and the hot path is two compares.
  *
- *  @param text_u8x64 The haystack ZMM register.
- *  @param load_m64 Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature.
+ *  @param[in] text_u8x64 The haystack ZMM register.
+ *  @param[in] load_m64 Present for the shared @ref sz_utf8_uncased_alarm_zmm_t signature.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_efficiently_zmm_(__m512i text_u8x64,
@@ -1228,13 +1230,13 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_effic
  *  @brief Cyrillic uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_cyrillic_k
  *
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Safe window metadata.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Safe window metadata.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_cyrillic_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
@@ -1247,7 +1249,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_cyrillic_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Cyrillic Uncased Find
+#pragma endregion Cyrillic Uncased Find
 
 #pragma region Armenian Uncased Find
 
@@ -1255,7 +1257,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_cyrillic_( //
  *  @brief Fold a ZMM register using Armenian case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_armenian_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_naively_zmm_(__m512i text_u8x64) {
@@ -1323,7 +1325,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_naively_zm
  *  VPTERNLOG allows building 3 offset vectors in parallel (no dependencies),
  *  then combining them with a single OR operation (imm8=0xFE: A | B | C).
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_efficiently_zmm_(__m512i text_u8x64) {
@@ -1399,7 +1401,7 @@ SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_efficien
  *
  *  Uses 4 CMPEQ operations (2 lead + 2 second byte checks).
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_naively_zmm_(__m512i text_u8x64) {
@@ -1431,7 +1433,7 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_naively
  *  Currently delegates to the naive implementation.
  *  Armenian has only 4 CMPEQ ops, so optimization overhead may not be worthwhile.
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_efficiently_zmm_(__m512i text_u8x64,
@@ -1446,13 +1448,13 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_effic
  *  @brief Armenian uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_armenian_k
  *
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Pre-folded window content with probe positions.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_armenian_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
@@ -1465,7 +1467,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_armenian_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Armenian Uncased Find
+#pragma endregion Armenian Uncased Find
 
 #pragma region Greek Uncased Find
 
@@ -1473,7 +1475,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_armenian_( //
  *  @brief Fold a ZMM register using Greek case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_naively_zmm_(__m512i text_u8x64) {
@@ -1597,16 +1599,15 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_naively_zmm_(
  *  @brief Fold a ZMM register using Greek case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  *
- *  This function uses VPERMB lookup tables for Greek case-folding. Why?
- *  Every Greek transform is fully determined by the second byte of the CE-led sequence:
- *  five distinct offsets (+0x20, -0x20, +0x26, +0x25, -1) over six sub-ranges, plus a
- *  CE->CF lead promotion for four of them. A continuation byte 0x80-0xBF maps to a unique
- *  VPERMB index through its low 6 bits, so one lookup yields the second-byte delta and one
- *  more yields the lead-promotion flag - replacing ~10 range comparisons and the offset
- *  merging. This also keeps the live-constant count low: GCC re-materializes broadcast
- *  constants inside loops once their number outgrows the register budget.
+ *  This function uses VPERMB lookup tables for Greek case-folding. Why? Every Greek transform is
+ *  fully determined by the second byte of the CE-led sequence: five distinct offsets (+0x20, −0x20,
+ *  +0x26, +0x25, −1) over six sub-ranges, plus a CE → CF lead promotion for four of them. A
+ *  continuation byte 0x80-0xBF maps to a unique VPERMB index through its low 6 bits, so one lookup
+ *  yields the second-byte delta and one more yields the lead-promotion flag - replacing ~10 range
+ *  comparisons and the offset merging. This also keeps the live-constant count low: GCC
+ *  re-materializes broadcast constants inside loops once their number outgrows the register budget.
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_efficiently_zmm_(__m512i text_u8x64) {
@@ -1700,7 +1701,7 @@ SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_efficiently
  *  - E1: Polytonic Greek / Extensions
  *  - CD: Combining Diacritical Marks
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_naively_zmm_(__m512i text_u8x64) {
@@ -1748,7 +1749,7 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_naively_zm
  *  @brief Optimized danger zone detection for Greek text using bit-folded second-byte compares.
  *  @sa sz_utf8_uncased_search_icelake_greek_alarm_naively_zmm_
  *
- *  @param text_u8x64 The haystack ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_efficiently_zmm_(__m512i text_u8x64,
@@ -1807,13 +1808,13 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_efficien
  *  @brief Greek uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  *
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Pre-folded window content with probe positions.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_greek_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                //
@@ -1826,7 +1827,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_greek_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Greek Uncased Find
+#pragma endregion Greek Uncased Find
 
 #pragma region Vietnamese Uncased Find
 
@@ -1834,7 +1835,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_greek_( //
  *  @brief Fold a ZMM register using Vietnamese case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_naively_zmm_(__m512i text_u8x64) {
@@ -1882,9 +1883,9 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_naively_
 
     result_u8x64 = _mm512_mask_add_epi8(result_u8x64, is_c3_target_m64, result_u8x64, x_20_u8x64);
 
-    // 2. Latin Extended-A (C4/C5): Even → Odd (+1) for MOST characters
+    // 2. Latin Extended-A (C4/C5): Even → Odd (+1) for most characters:
     // Standard pattern (U+0100-U+0138, U+014A-U+017F): Even=uppercase, Odd=lowercase
-    // INVERTED pattern (U+0139-U+0148): Odd=uppercase, Even=lowercase
+    // Inverted pattern (U+0139-U+0148): Odd=uppercase, Even=lowercase
     //   - After C4: B9,BB,BD,BF are uppercase (odd), BA,BC,BE are lowercase (even)
     //   - After C5: 81,83,85,87 are uppercase (odd), 80,82,84,86,88 are lowercase (even)
     // Note: 'Ŀ' (U+013F, C4 BF) → 'ŀ' (U+0140, C5 80) crosses lead bytes, handled specially by safety profile
@@ -1892,7 +1893,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_naively_
     __mmask64 is_even_m64 = _mm512_cmpeq_epi8_mask(_mm512_and_si512(result_u8x64, x_01_u8x64), _mm512_setzero_si512());
     __mmask64 is_odd_m64 = ~is_even_m64;
 
-    // Identify the inverted range where Even=lowercase (should NOT be transformed +1)
+    // Identify the inverted range where Even=lowercase (should not be transformed +1)
     // After C4: B9-BE (U+0139-U+013E: Ĺ-ľ inverted pattern)
     // Note: BF (Ŀ U+013F) excluded - its lowercase ŀ (U+0140) is C5 80 (different lead byte)
     __mmask64 is_c4_inverted_range_m64 = is_after_c4_m64 &
@@ -1944,7 +1945,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_naively_
  *  @brief Fold a ZMM register using Vietnamese case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  *
- *  @param text_u8x64 The text ZMM register.
+ *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_efficiently_zmm_(__m512i text_u8x64) {
@@ -2070,10 +2071,10 @@ SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_effici
  *  - E2 84 AA: 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
  *
  *  Uses ~11 CMPEQ + 2 range operations.
- *  Note: Returns danger positions shifted to the START of multi-byte sequences.
+ *  Note: Returns danger positions shifted to the start of multi-byte sequences.
  *
- *  @param text_u8x64 The haystack ZMM register.
- *  @param load_m64 Mask of valid bytes in the ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
+ *  @param[in] load_m64 Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
 SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_naively_zmm_(__m512i text_u8x64,
@@ -2132,8 +2133,8 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_naive
  *
  *  Port summary: 11 p5 ops + 1 p0 op (vs 12 p5 originally)
  *
- *  @param text_u8x64 The haystack ZMM register.
- *  @param load_m64 Mask of valid bytes in the ZMM register.
+ *  @param[in] text_u8x64 The haystack ZMM register.
+ *  @param[in] load_m64 Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_efficiently_zmm_(__m512i text_u8x64,
@@ -2195,13 +2196,13 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_eff
  *  @brief Vietnamese uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  *
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Pre-folded window content with probe positions.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_vietnamese_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                     //
@@ -2214,7 +2215,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_vietnamese_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Vietnamese Uncased Find
+#pragma endregion Vietnamese Uncased Find
 
 #pragma region Georgian Uncased Find
 
@@ -2263,15 +2264,15 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_zmm_(__
  *  @brief Optimized alarm function for Georgian danger zone detection.
  *  @sa sz_utf8_uncased_search_icelake_georgian_alarm_zmm_
  *
- *  Every Georgian danger sequence starts with a 2-byte (lead, second) pair with a UNIQUE second
- *  byte, so the pair test inverts: one VPERMB maps each second byte to the lead that would make
- *  it dangerous (sentinel 0x00 otherwise), another VPERMB materializes the previous byte
- *  in-register, and a single VPCMPEQB matches them up. Two qualifiers make it exact: the second
- *  byte must be a continuation (its low-6-bit VPERMB index aliases ASCII and lead bytes), and the
- *  previous byte must be >= C0 (kills the sentinel matching a 0x00 byte and the zeroed lane 0).
- *  The Asomtavruli third-byte range check sits behind a `pair` branch, keeping the hot path at
- *  5 port-5 ops. The reference `sz_utf8_uncased_search_icelake_georgian_alarm_zmm_` keeps
- *  its name unsuffixed because the probe harness references it directly.
+ *  Every Georgian danger sequence starts with a 2-byte (lead, second) pair with a unique second
+ *  byte, so the pair test inverts: one VPERMB maps each second byte to the lead that would make it
+ *  dangerous (sentinel 0x00 otherwise), another VPERMB materializes the previous byte in-register,
+ *  and a single VPCMPEQB matches them up. Two qualifiers make it exact: the second byte must be a
+ *  continuation, as its low-6-bit VPERMB index aliases ASCII and lead bytes, and the previous byte
+ *  must be ≥ C0, which kills the sentinel matching a 0x00 byte and the zeroed lane 0. The
+ *  Asomtavruli third-byte range check sits behind a @c pair branch, keeping the hot path at 5
+ *  port-5 ops. The reference @ref sz_utf8_uncased_search_icelake_georgian_alarm_zmm_ keeps its name
+ *  unsuffixed because the probe harness references it directly.
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_efficiently_zmm_(__m512i text_u8x64,
                                                                                             __mmask64 load_m64) {
@@ -2341,13 +2342,13 @@ SZ_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_georgian_fold_zmm_(__m
  *  This is the fastest non-ASCII kernel because Mkhedruli is caseless - no Georgian
  *  folding needed in the hot path. Only ASCII A-Z folding for mixed text.
  *
- *  @param haystack Pointer to the haystack string.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle Pointer to the full needle string.
- *  @param needle_length Length of the full needle in bytes.
- *  @param needle_metadata Pre-folded window content with probe positions.
- *  @param matched_length Haystack bytes consumed by the match.
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_georgian_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
@@ -2360,7 +2361,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_georgian_( //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Georgian Uncased Find
+#pragma endregion Georgian Uncased Find
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_icelake( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
@@ -2501,9 +2502,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t le
                 }
 
                 // Note: CA 80-BF includes both IPA Extensions (U+0280-02AF) and Spacing Modifier Letters
-                // (U+02B0-02BF). Spacing Modifier Letters CAN appear in case fold expansions:
+                // (U+02B0-02BF). Spacing Modifier Letters can appear in case fold expansions:
                 // e.g., ẚ (U+1E9A) folds to [a, ʾ] where ʾ = U+02BE is a Spacing Modifier Letter.
-                // So we must NOT exclude this range from bicameral check.
+                // So we must not exclude this range from bicameral check.
 
                 if (is_bicameral_m64 & is_two_m64) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
             }

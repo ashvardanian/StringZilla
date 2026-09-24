@@ -1,42 +1,51 @@
 /**
  *  @file bench/levenshtein.cu
- *  @brief Benchmarks Levenshtein edit distances on CUDA GPUs, against the widest CPU backend this build carries.
+ *  @author Ash Vardanian
+ *  @date September 6, 2023
+ *  @brief Benchmarks Levenshtein distances on CUDA GPUs against the widest CPU backend built.
  *
- *  Compute-bound: Myers costs one word-step per query word per candidate byte, so a device-resident corpus of a
- *  few tens of megabytes keeps every multiprocessor busy for the whole round.
+ *  Compute-bound: Myers costs one word-step per query word per candidate byte, so a device-resident
+ *  corpus of a few tens of megabytes keeps every multiprocessor busy for the whole round.
  *
- *  The candidates are uploaded once into a device tape, so every call scores a wave-sized slice of memory the
- *  kernel already owns - which is the regime the GPU backend exists for. Scoring a handful of candidates per
- *  call would time the launch instead, and answer a question nobody is asking of a GPU. Leaving the candidates
- *  or the answers in managed memory answers a different question again: those pages follow whoever touched them
- *  last, so a short-candidate round times migration rather than the kernel. The query batch is prepared once per
- *  arm, so what an arm times is the sweep across `grid.y` and not the preparation the engine exists to hoist.
+ *  The candidates are uploaded once into a device tape, so every call scores a wave-sized slice of
+ *  memory the kernel already owns - which is the regime the GPU backend exists for. Scoring a
+ *  handful of candidates per call would time the launch instead, and answer a question nobody is
+ *  asking of a GPU. Leaving the candidates or the answers in managed memory answers a different
+ *  question again: those pages follow whoever touched them last, so a short-candidate round times
+ *  migration rather than the kernel. The query batch is prepared once per arm, so what an arm times
+ *  is the sweep across `grid.y` and not the preparation the engine exists to hoist.
  *
- *  One candidate per thread means a warp costs the longest of its thirty-two, while throughput divides by the
- *  sum of their lengths - so length variance is a tax inside every number here. Each device arm therefore runs
- *  twice over the very same views, once in corpus order and once sorted by length descending, and the gap
- *  between `:shuffled` and `:sorted` is that tax measured rather than assumed.
+ *  One candidate per thread means a warp costs the longest of its thirty-two, while throughput
+ *  divides by the sum of their lengths - so length variance is a tax inside every number here. Each
+ *  device arm therefore runs twice over the very same views, once in corpus order and once sorted
+ *  by length descending, and the gap between `:shuffled` and `:sorted` measures that tax rather
+ *  than assuming it.
  *
- *  There is no per-stage breakdown as in `levenshtein.cpp`: the device settles every candidate inside one launch,
- *  so there is no boundary between the query's preparation and its sweep to time.
+ *  There is no per-stage breakdown as in `levenshtein.cpp`: the device settles every candidate
+ *  inside one launch, leaving no boundary between the query's preparation and its sweep to time.
  *
- *  There is no `Standard` row here: the platform ships no stock GPU edit-distance kernel to compare against, so
- *  the baseline is the widest CPU backend, which is the comparison a dispatch decision actually turns on.
+ *  There is no Standard row here: the platform ships no stock GPU edit-distance kernel to compare
+ *  against, so the baseline is the widest CPU backend, which is the comparison a dispatch decision
+ *  actually turns on.
  *
- *  Throughput is reported as Cell Updates Per Second @b (CUPS): the query's length times the candidates' lengths,
- *  as the CPU benchmark reports it, though Myers settles sixty-four of those cells per word-step.
+ *  Throughput is reported as Cell Updates Per Second @b (CUPS): the query's length times the
+ *  candidates' lengths, as the CPU benchmark reports it, though Myers settles sixty-four of those
+ *  cells per word-step.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test the GPU backend against the serial baseline.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
@@ -61,13 +70,17 @@
 
 using namespace ashvardanian::stringzilla::bench;
 
-/** @brief Which ordering of the same candidates an arm scores. */
+/** Which ordering of the same candidates an arm scores. */
 enum class levenshtein_cuda_order_t {
-    shuffled_k, /**< Corpus order, where a warp's thirty-two candidates have whatever lengths they had. */
-    sorted_k,   /**< Length descending, so a warp's candidates sit as close in length as the corpus allows. */
+
+    /** Corpus order, where a warp's thirty-two candidates have whatever lengths they had. */
+    shuffled_k,
+
+    /** Length descending, so a warp's candidates sit as close in length as the corpus allows. */
+    sorted_k,
 };
 
-/** @brief The label an arm's name carries for the ordering it scored. */
+/** The label an arm's name carries for the ordering it scored. */
 static char const *levenshtein_cuda_order_name(levenshtein_cuda_order_t order) {
     return order == levenshtein_cuda_order_t::sorted_k ? ":sorted" : ":shuffled";
 }
@@ -81,8 +94,9 @@ enum { levenshtein_check_lanes_k = 8 };
 /**
  *  @brief Folds one round's distances into the value the stress gate compares between backends.
  *
- *  One chain of `mixed * 31 + distance` is a loop-carried multiply with nothing else in flight, and over a
- *  wave of candidates it costs more than the kernel; eight chains over strided lanes retire in parallel.
+ *  One chain of `mixed * 31 + distance` is a loop-carried multiply with nothing else in flight, and
+ *  over a wave of candidates it costs more than the kernel; eight chains over strided lanes retire
+ *  in parallel instead.
  */
 template <typename answers_type_>
 static check_value_t levenshtein_check_value(answers_type_ const &answers) {
@@ -102,26 +116,50 @@ static check_value_t levenshtein_check_value(answers_type_ const &answers) {
 }
 
 /**
- *  @brief The corpus as the device sees it: a tape of every candidate's bytes, two orderings of views into it,
- *      and the room for one round's distances.
+ *  @brief The corpus as the device sees it: a tape of every candidate's bytes, two orderings of
+ *      views into it, and the room for one round's distances.
  *
- *  The dataset the environment loads is managed, so a view into it is a page that follows whoever touched it
- *  last. The candidates therefore cross once into plain device memory the host cannot address, and the CPU arms
- *  keep their own views into the dataset to score the very same texts.
+ *  The dataset the environment loads is managed, so a view into it is a page that follows whoever
+ *  touched it last. The candidates therefore cross once into plain device memory the host cannot
+ *  address, and the CPU arms keep their own views into the dataset to score the very same texts.
  */
 struct levenshtein_cuda_corpus_t {
-    device_vector<char> tape;                            /**< Every candidate's bytes, back to back. */
-    device_vector<sz_string_view_t> device_views;        /**< Tape addresses, corpus order. */
-    device_vector<sz_string_view_t> device_sorted_views; /**< The same tape addresses, length descending. */
-    device_vector<sz_size_t> distances;                  /**< @b [queries, candidates], written by every round. */
-    pinned_vector<sz_size_t> answers;                    /**< The same matrix, one copy per round feeding the check. */
-    std::vector<sz_string_view_t> host_views;            /**< Dataset views the CPU arms read, corpus order. */
-    std::vector<sz_string_view_t> host_sorted_views;     /**< The same dataset views, length descending. */
-    sz_sequence_t device_shuffled {};                    /**< Device accessors over @ref device_views. */
-    sz_sequence_t device_sorted {};                      /**< Device accessors over @ref device_sorted_views. */
-    sz_sequence_t host_shuffled {};                      /**< Host accessors over @ref host_views. */
-    sz_sequence_t host_sorted {};                        /**< Host accessors over @ref host_sorted_views. */
-    std::size_t bytes = 0;                               /**< Candidate bytes one round touches, whichever order. */
+
+    /** Every candidate's bytes, back to back. */
+    device_vector<char> tape;
+
+    /** Tape addresses, corpus order. */
+    device_vector<sz_string_view_t> device_views;
+
+    /** The same tape addresses, length descending. */
+    device_vector<sz_string_view_t> device_sorted_views;
+
+    /** @b [queries, candidates], written by every round. */
+    device_vector<sz_size_t> distances;
+
+    /** The same matrix, one copy per round feeding the check. */
+    pinned_vector<sz_size_t> answers;
+
+    /** Dataset views the CPU arms read, corpus order. */
+    std::vector<sz_string_view_t> host_views;
+
+    /** The same dataset views, length descending. */
+    std::vector<sz_string_view_t> host_sorted_views;
+
+    /** Device accessors over @ref device_views. */
+    sz_sequence_t device_shuffled {};
+
+    /** Device accessors over @ref device_sorted_views. */
+    sz_sequence_t device_sorted {};
+
+    /** Host accessors over @ref host_views. */
+    sz_sequence_t host_shuffled {};
+
+    /** Host accessors over @ref host_sorted_views. */
+    sz_sequence_t host_sorted {};
+
+    /** Candidate bytes one round touches, whichever order. */
+    std::size_t bytes = 0;
 
     levenshtein_cuda_corpus_t(environment_t const &env) {
         std::size_t const count = std::min<std::size_t>(env.tokens.size(), resident_candidates_per_call(env));
@@ -186,14 +224,15 @@ struct levenshtein_cuda_corpus_t {
 };
 
 /**
- *  @brief The queries an arm of @p query_bytes prepares: that many dataset windows, each starting at one token.
+ *  @brief The queries an arm of @p query_bytes prepares: that many dataset windows, each starting
+ *      at one token.
  *
- *  Only three percent of XLSum lines reach sixteen kilobytes, so clamping a token to the width would leave the
- *  widest arms running at whatever length the token happened to have - a different rung per call, under a name
- *  that claims one width. The window is corpus text either way.
+ *  Only three percent of XLSum lines reach sixteen kilobytes, so clamping a token to the width
+ *  would leave the widest arms running at whatever length the token happened to have - a different
+ *  rung per call, under a name that claims one width. The window is corpus text either way.
  *
- *  The windows are managed dataset memory, which the host reads to count symbols and classes and the device
- *  builder then reads from the copies the init stages for it.
+ *  The windows are managed dataset memory, which the host reads to count symbols and classes and
+ *  the device builder then reads from the copies the init stages for it.
  */
 static std::vector<sz_string_view_t> levenshtein_cuda_queries(environment_t const &env, std::size_t query_bytes) {
     std::vector<sz_string_view_t> views(levenshtein_queries_per_batch_k);
@@ -205,11 +244,17 @@ static std::vector<sz_string_view_t> levenshtein_cuda_queries(environment_t cons
     return views;
 }
 
-/** @brief One prepared batch and the residency it was built for, released with the scope that named it. */
+/** One prepared batch and the residency it was built for, released with the scope that named it. */
 struct levenshtein_cuda_batch_t {
-    std::vector<sz_string_view_t> views; /**< The windows the batch was prepared from. */
-    sz_sequence_t queries {};            /**< Host accessors over them, as both inits require. */
-    sz_levenshtein_engine_t engine {};   /**< The batch, prepared once and reused by every round. */
+
+    /** The windows the batch was prepared from. */
+    std::vector<sz_string_view_t> views;
+
+    /** Host accessors over them, as both inits require. */
+    sz_sequence_t queries {};
+
+    /** The batch, prepared once and reused by every round. */
+    sz_levenshtein_engine_t engine {};
 
     levenshtein_cuda_batch_t(environment_t const &env, std::size_t query_bytes, sz_levenshtein_symbol_t symbol,
                              sz_bool_t on_device)
@@ -224,7 +269,7 @@ struct levenshtein_cuda_batch_t {
     levenshtein_cuda_batch_t(levenshtein_cuda_batch_t const &) = delete;
     levenshtein_cuda_batch_t &operator=(levenshtein_cuda_batch_t const &) = delete;
 
-    /** Symbols the batch spans together, which is the row count of the cell budget an arm reports. */
+    /** Symbols the batch spans together: the row count of the cell budget an arm reports. */
     std::size_t symbols() const {
         std::size_t total = 0;
         for (sz_string_view_t const &view : views) total += view.length;
@@ -235,9 +280,15 @@ struct levenshtein_cuda_batch_t {
 /** Scores the resident corpus against a prepared batch, entirely on the device. */
 template <sz_levenshtein_distances_t distances_>
 struct levenshtein_distances_from_cuda {
-    levenshtein_cuda_corpus_t &corpus; /**< The candidates, and the room for their distances. */
-    levenshtein_cuda_order_t order;    /**< Which ordering of the candidates this arm walks. */
-    levenshtein_cuda_batch_t batch;    /**< The queries, prepared on the device once. */
+
+    /** The candidates, and the room for their distances. */
+    levenshtein_cuda_corpus_t &corpus;
+
+    /** Which ordering of the candidates this arm walks. */
+    levenshtein_cuda_order_t order;
+
+    /** The queries, prepared on the device once. */
+    levenshtein_cuda_batch_t batch;
 
     levenshtein_distances_from_cuda(environment_t const &env, levenshtein_cuda_corpus_t &corpus,
                                     std::size_t query_bytes, levenshtein_cuda_order_t order,
@@ -259,13 +310,21 @@ struct levenshtein_distances_from_cuda {
     }
 };
 
-/** The same round on the CPU, so the two check values line up under `STRINGWARS_STRESS`. */
+/** The same round on the CPU, so the two check values line up under @c STRINGWARS_STRESS. */
 template <sz_levenshtein_distances_t distances_>
 struct levenshtein_distances_from_sz {
-    levenshtein_cuda_corpus_t &corpus; /**< The candidates, whose texts both sides score. */
-    levenshtein_cuda_order_t order;    /**< Which ordering of the candidates this arm walks. */
-    levenshtein_cuda_batch_t batch;    /**< The same queries, prepared on the host. */
-    std::vector<sz_size_t> distances;  /**< @b [queries, candidates], the CPU's own answers. */
+
+    /** The candidates, whose texts both sides score. */
+    levenshtein_cuda_corpus_t &corpus;
+
+    /** Which ordering of the candidates this arm walks. */
+    levenshtein_cuda_order_t order;
+
+    /** The same queries, prepared on the host. */
+    levenshtein_cuda_batch_t batch;
+
+    /** @b [queries, candidates], the CPU's own answers. */
+    std::vector<sz_size_t> distances;
 
     levenshtein_distances_from_sz(environment_t const &env, levenshtein_cuda_corpus_t &corpus, std::size_t query_bytes,
                                   levenshtein_cuda_order_t order,
@@ -283,7 +342,7 @@ struct levenshtein_distances_from_sz {
     }
 };
 
-/** @brief The device arm alone across query widths and both orderings, so the word-count curve exists both ways. */
+/** The device arm alone across query widths and both orders, for the word-count curve both ways. */
 static void bench_levenshtein_word_counts(environment_t const &env, levenshtein_cuda_corpus_t &corpus) {
     std::size_t const widths[] = {8, 64, 128, 256, 384, 512, 1024, 2048, 4096, 8192, 16384};
     levenshtein_cuda_order_t const orders[] = {levenshtein_cuda_order_t::shuffled_k,
@@ -301,7 +360,7 @@ static void bench_levenshtein_word_counts(environment_t const &env, levenshtein_
         }
 }
 
-/** @brief Every arm at one query width, the width carried in each arm's name beside the resident count. */
+/** Every arm at one query width, the width carried in each arm's name beside the resident count. */
 static void bench_levenshtein_cross_product(environment_t const &env, levenshtein_cuda_corpus_t &corpus,
                                             std::size_t query_bytes) {
     std::string const suffix = ":q" + std::to_string(query_bytes) + ":c" + std::to_string(corpus.count());

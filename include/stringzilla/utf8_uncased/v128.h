@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly SIMD128 uncased UTF-8 search, comparison & invariance backend.
  *  @file include/stringzilla/utf8_uncased/v128.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly SIMD128 uncased UTF-8 search, comparison & invariance backend.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_V128_H_
@@ -15,41 +17,44 @@
 extern "C" {
 #endif
 
+/*  The uncased substring search mirrors the NEON/RVV port: a scripted driver walks the haystack in
+ *  32-byte chunks; each per-script kernel supplies a @c fold callback, which case-folds a
+ *  length-preserving chunk in place with one folded byte per source byte, and an @c alarm callback,
+ *  which flags length-changing folds like ß → ss, ligatures, and Kelvin. Clean chunks are folded
+ *  and probe-filtered: four needle bytes are broadcast and compared at their offsets, AND-ed, and
+ *  walked low-to-high; each survivor re-checks its folded window and defers to the value-exact
+ *  serial @ref sz_utf8_uncased_verify_match_. Alarmed chunks and the sub-window tail go to the
+ *  serial danger-zone scanner. The fold math is the length-preserving subset of
+ *  `utf8_uncased_fold/v128.h`; the cross-chunk predecessor and successor are read straight from the
+ *  padded chunk buffer, so every byte folds with the same neighbours the whole-chunk vector would
+ *  have seen. Matches the Ice Lake, NEON, and RVV SIMD backends exactly; those may differ from the
+ *  serial folded-rune scanner on a few expanding-needle ties, a cross-backend property that is not
+ *  specific to WebAssembly. */
 #if SZ_USE_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-/*  The uncased substring search mirrors the NEON/RVV port: a scripted driver walks the haystack
- *  in 32-byte chunks; each per-script kernel supplies a `fold` callback (case-folds a length-preserving
- *  chunk in place, one folded byte per source byte) and an `alarm` callback (flags length-CHANGING folds
- *  like ß→ss, ligatures, Kelvin). Clean chunks are folded and probe-filtered (four needle bytes broadcast
- *  and compared at their offsets, AND-ed, walked low-to-high); each survivor re-checks its folded window
- *  and defers to the value-exact serial `sz_utf8_uncased_verify_match_`. Alarmed chunks and the
- *  sub-window tail go to the serial danger-zone scanner. The fold math is the length-preserving subset of
- *  `utf8_uncased_fold/v128.h`; the cross-chunk predecessor/successor are read straight from the padded chunk
- *  buffer so every byte folds with the same neighbours the whole-chunk vector would have seen. Matches the
- *  Ice Lake / NEON / RVV SIMD backends exactly (which may differ from the serial folded-rune scanner on a
- *  few expanding-needle ties; that is a pre-existing cross-backend property, not wasm-specific). */
-
 #pragma region Helpers
 
-/** @brief `result[0] = carry`, `result[i] = vector[i-1]` — slide-up carrying a real predecessor across windows. */
+/** Slide-up carrying a real predecessor across windows: `result[0] = carry` and
+ *  `result[i] = vector[i - 1]`. */
 SZ_HELPER_INLINE v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector_u8x16, sz_u8_t carry) {
     return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
                               12, 13, 14);
 }
 
-/** @brief 0/1 byte (not 0xFF): 1 where `bytes == value`. */
+/** 0/1 byte (not 0xFF): 1 where `bytes == value`. */
 SZ_HELPER_INLINE v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes_u8x16, sz_u8_t value) {
     return wasm_v128_and(wasm_i8x16_eq(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)value)), wasm_i8x16_splat(1));
 }
-/** @brief 0/1 byte: 1 where `bytes` in `[start, start+length)`. */
+
+/** 0/1 byte: 1 where @p bytes_u8x16 lies in `[start, start + length)`. */
 SZ_HELPER_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
     return wasm_v128_and(sz_utf8_in_range_v128_(bytes_u8x16, start, length), wasm_i8x16_splat(1));
 }
 
-/** @brief Zero a scratch buffer then copy `length` bytes, so strip kernels can read one byte past. */
+/** Zero a scratch buffer then copy @p length bytes, so strip kernels can read one byte past. */
 SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
                                                                   sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
@@ -57,7 +62,7 @@ SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t sour
     return buffer;
 }
 
-/** @brief Gather the C4/C5/C6 +1 parity delta for the continuation byte's low 6 bits (irregular flag kept). */
+/** C4/C5/C6 +1 parity delta for the continuation byte's low 6 bits, irregular flag kept. */
 SZ_HELPER_INLINE v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v128_t after_c4_u8x16,
                                                           v128_t after_c5_u8x16, v128_t after_c6_u8x16,
                                                           v128_t is_continuation_u8x16) {
@@ -81,14 +86,14 @@ SZ_HELPER_INLINE v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v
     return wasm_v128_and(delta_u8x16, is_continuation_u8x16);
 }
 
-/** @brief A 16-byte fold window: the chunk at `src + pos` plus its cross-boundary neighbours. */
+/** A 16-byte fold window: the chunk at `src + pos` plus its cross-boundary neighbours. */
 typedef struct {
     v128_t source_u8x16;   // The 16 bytes at `src + pos`.
     v128_t previous_u8x16; // `source_u8x16` slid up one lane, carrying the real predecessor byte (0 at `pos == 0`).
     v128_t next_u8x16;     // `source_u8x16` slid down one lane, carrying the real successor byte.
 } sz_utf8_uncased_window_v128_t;
 
-/** @brief Loads the fold window at `src + pos`, reading one byte on each side for cross-window folds. */
+/** Loads the fold window at `src + pos`, reading one byte on each side for cross-window folds. */
 SZ_HELPER_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_window_v128_(sz_u8_t const *src, sz_size_t pos) {
     sz_utf8_uncased_window_v128_t window;
     window.source_u8x16 = wasm_v128_load(src + pos);
@@ -97,7 +102,7 @@ SZ_HELPER_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_window_v128_
     return window;
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Per script fold strips
 
@@ -294,11 +299,11 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t cons
     }
 }
 
-#pragma endregion // Per script fold strips
+#pragma endregion Per script fold strips
 
 #pragma region Per script alarm strips
 
-/** @brief Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
+/** Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
 SZ_HELPER_INLINE void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos, sz_size_t window,
                                                     long *best) {
     sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(wasm_i8x16_ne(danger_second_u8x16, wasm_i8x16_splat(0)));
@@ -494,7 +499,7 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const
     return best;
 }
 
-#pragma endregion // Per script alarm strips
+#pragma endregion Per script alarm strips
 
 #pragma region Scripted driver
 
@@ -595,7 +600,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(               
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Scripted driver
+#pragma endregion Scripted driver
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length);
 
@@ -667,7 +672,8 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_v128( //
 
 #pragma region Case Invariance
 
-/** @brief 32-bit movemask of two 16-byte registers: bit `i` = lane `i` of `low`, bit `16+i` = lane `i` of `high`. */
+/** 32-bit movemask of two 16-byte registers: bit @c i is lane @c i of @p low_u8x16, and bit 16 + i
+ *  is lane @c i of @p high_u8x16. */
 SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low_u8x16, v128_t high_u8x16) {
     return (sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(low_u8x16) |
            ((sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(high_u8x16) << 16);
@@ -771,7 +777,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t lengt
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Case Invariance
+#pragma endregion Case Invariance
 
 SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                          sz_size_t b_length) {

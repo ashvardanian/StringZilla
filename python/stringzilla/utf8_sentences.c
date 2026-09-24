@@ -1,7 +1,8 @@
 /**
- *  @brief UAX-29 sentence segmentation of UTF-8 text.
  *  @file python/stringzilla/utf8_sentences.c
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief UAX-29 sentence segmentation of UTF-8 text.
  */
 #include "stringzilla.h"
 
@@ -34,25 +35,25 @@ PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssiz
     return Utf8Boundaries_make_(&Utf8SentencesType, args[0], sz_utf8_sentences);
 }
 
-static char const doc_Utf8Sentences[] =                                           //
-    "Utf8Sentences(string, ...)\n"                                                //
-    "\n"                                                                          //
-    "UTF-8 aware sentence boundary iterator per Unicode UAX-29 algorithm.\n"      //
-    "Yields sentences (text segments between consecutive sentence boundaries).\n" //
-    "\n"                                                                          //
-    "Created by:\n"                                                               //
-    "  - Str.utf8_sentences()\n"                                                  //
-    "  - sz.utf8_sentences()\n"                                                   //
-    "\n"                                                                          //
-    "UAX-29 Sentence_Break rules implemented:\n"                                  //
-    "  - SB3: CR x LF (no break)\n"                                               //
-    "  - SB4: ParaSep breaks\n"                                                   //
-    "  - SB6-SB8: ATerm/STerm sentence-final sequences\n"                         //
-    "  - SB9-SB11: Close/Sp/ParaSep continuations\n"                              //
-    "  - SB998: Otherwise no break\n\n"                                           //
-    "\n"                                                                          //
-    "Example:\n"                                                                  //
-    "  >>> len(list(sz.utf8_sentences('Hi. Bye.'))) >= 2\n"                       //
+static char const doc_Utf8Sentences[] =                                              //
+    "Utf8Sentences(string, ...)\n"                                                   //
+    "\n"                                                                             //
+    "UTF-8 aware sentence boundary iterator per Unicode UAX-29 algorithm.\n"         //
+    "Yields sentences, the text segments between consecutive sentence boundaries.\n" //
+    "\n"                                                                             //
+    "Created by:\n"                                                                  //
+    "  - Str.utf8_sentences()\n"                                                     //
+    "  - sz.utf8_sentences()\n"                                                      //
+    "\n"                                                                             //
+    "UAX-29 Sentence_Break rules implemented:\n"                                     //
+    "  - SB3: CR x LF, no break\n"                                                   //
+    "  - SB4: ParaSep breaks\n"                                                      //
+    "  - SB6-SB8: ATerm/STerm sentence-final sequences\n"                            //
+    "  - SB9-SB11: Close/Sp/ParaSep continuations\n"                                 //
+    "  - SB998: Otherwise no break\n\n"                                              //
+    "\n"                                                                             //
+    "Example:\n"                                                                     //
+    "  >>> len(list(sz.utf8_sentences('Hi. Bye.'))) >= 2\n"                          //
     "  True";
 
 PyTypeObject Utf8SentencesType = {

@@ -1,7 +1,8 @@
 /**
- *  @brief Ice Lake backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/icelake.h
  *  @author Ash Vardanian
+ *  @date November 18, 2025
+ *  @brief Ice Lake backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_ICELAKE_H_
 #define STRINGZILLA_UTF8_TOKENS_ICELAKE_H_
@@ -30,11 +31,12 @@ extern "C" {
                    "popcnt")
 #endif
 
-/*  Multistep newline / whitespace iteration (Ice Lake / AVX-512).
+/*  Multistep newline and whitespace iteration for Ice Lake AVX-512.
  *
- *  Each 64-byte window is classified branchlessly into a `starts` mask plus a per-lane byte-length vector,
- *  then `vpcompressb` peels the matching lanes and lengths. Starts are trusted in lanes [0,61] (step 62) so
- *  any 2-/3-byte delimiter is fully loaded; a `t[pos-1] == '\r'` carry suppresses an LF closing an edge CRLF. */
+ *  Each 64-byte window is classified branchlessly into a @c starts mask plus a per-lane byte-length
+ *  vector, then @c vpcompressb peels the matching lanes and lengths. Starts are trusted in lanes
+ *  [0,61], stepping 62, so any 2-/3-byte delimiter is fully loaded; a `t[pos - 1] == '\r'` carry
+ *  suppresses an LF closing an edge CRLF. */
 SZ_API_COMPTIME sz_size_t sz_utf8_newlines_icelake(     //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
@@ -200,7 +202,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(  //
 
 #pragma region Membership
 
-/** @brief  Per-lane single-bit test `(bitmap_byte_u8x64 >> (low_u8x64 & 7)) & 1` over all 64 lanes, as a mask. */
+/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` over all 64 lanes of
+ *  @p bitmap_byte_u8x64 and @p low_u8x64, as a mask. */
 SZ_HELPER_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte_u8x64, __m512i low_u8x64) {
     __m512i const bit_table_u8x64 = _mm512_broadcast_i32x4(_mm_setr_epi8( //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0));
@@ -209,14 +212,6 @@ SZ_HELPER_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte_u8
     return _mm512_test_epi8_mask(bitmap_byte_u8x64, bit_mask_u8x64);
 }
 
-/**
- *  @brief  BMP (codepoint < 0x10000) delimiter membership for every lane, resolved in-register.
- *
- *  `high` (cp >> 8, in [0,256)) selects a 32-byte bitmap row id through the aligned 256-entry `bmp_block` table via
- *  `vpermb` (`sz_utf8_rune_permute256_icelake_`); the bitmap byte at `row_id*32 + (low >> 3)` is read through the
- *  substrate page network; the bit `(low & 7)` is tested. ASCII lanes (high == 0) fall through naturally — block 0
- *  encodes the ASCII delimiters.
- */
 SZ_HELPER_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0_u32x16, __m512i chunk1_u32x16,
                                                                 __m512i chunk2_u32x16, __m512i chunk3_u32x16) {
     // Each chunk holds 16 byte-domain results in its low 16 32-bit lanes; place them in byte order [0,64).
@@ -230,6 +225,15 @@ SZ_HELPER_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0_u
     return result_u8x64;
 }
 
+/**
+ *  @brief BMP (codepoint < 0x10000) delimiter membership for every lane, resolved in-register.
+ *
+ *  The @c high byte (cp >> 8, in [0,256)) selects a 32-byte bitmap row id through the aligned
+ *  256-entry @c bmp_block table with @c vpermb, as @ref sz_utf8_rune_permute256_icelake_ does; the
+ *  bitmap byte at `row_id * 32 + (low >> 3)` is read through the substrate page network, and the
+ *  bit `(low & 7)` is tested. ASCII lanes (high == 0) fall through naturally, as block 0 encodes
+ *  the ASCII delimiter set.
+ */
 SZ_HELPER_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u8x64, __m512i high_in_u8x64,
                                                                 __m512i low_in_u8x64) {
     // The decode window only reconstructs `high`/`low` for 2-/3-byte leads; ASCII lanes (top bit clear) carry their
@@ -270,11 +274,12 @@ SZ_HELPER_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u
 }
 
 /**
- *  @brief  Astral (codepoint >= 0x10000) delimiter membership for the four-byte lanes, resolved in-register.
+ *  @brief Astral delimiter membership (codepoint ≥ 0x10000) for four-byte lanes, in-register.
  *
- *  Reconstructs the full 21-bit codepoint per lane from the raw lead/continuation bytes, then walks the small astral
- *  network: `super = offset>>16` selects an L1 group, `group*256 + ((offset>>8)&0xFF)` selects a bitmap row id, and the
- *  bit `(offset & 7)` is tested. Resolved over all 64 lanes; the caller blends the result onto the four-byte lanes.
+ *  Reconstructs the full 21-bit codepoint per lane from the raw lead/continuation bytes, then walks
+ *  the small astral network: `super = offset >> 16` picks an L1 group, `(offset >> 8) & 0xFF` plus
+ *  group × 256 names the bitmap row, and the bit `(offset & 7)` is tested. The walk covers all 64
+ *  lanes, and the caller blends the result onto the four-byte lanes.
  */
 SZ_HELPER_INLINE __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
                                                                    __m512i next2_u8x64, __m512i next3_u8x64) {
@@ -335,10 +340,11 @@ SZ_HELPER_INLINE __mmask64 sz_delimiter_astral_membership_icelake_(__m512i windo
 }
 
 /**
- *  @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
- *          valid only when its continuation bytes are present (within the loaded span) and well-formed, and it is not
- *          overlong, a surrogate, or beyond U+10FFFF. Invalid leads are never reported (serial advances one byte and
- *          re-syncs, which never matches the cleared lane).
+ *  @brief Per-lane UTF-8 validity for codepoint-start lanes, mirroring @ref sz_rune_decode exactly.
+ *
+ *  A 2/3/4-byte lead is valid only when its continuation bytes are present (within the loaded span)
+ *  and well-formed, and it is not overlong, a surrogate, or beyond U+10FFFF. Invalid leads are
+ *  never reported: serial advances one byte and re-syncs, which never matches the cleared lane.
  */
 SZ_HELPER_INLINE __mmask64 sz_delimiter_valid_starts_icelake_( //
     __m512i window_u8x64, __m512i next1_u8x64, __m512i next2_u8x64, __m512i next3_u8x64,

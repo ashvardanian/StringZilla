@@ -1,4 +1,7 @@
 //! UAX-29 word segmentation of UTF-8 text.
+//!
+//! File: rust/stringzilla/utf8_wordbreaks.rs
+//! Author: Ash Vardanian
 
 use super::*;
 
@@ -12,8 +15,9 @@ impl SegmenterKernel for Wordbreaks {
 
 /// An iterator over UAX-29 words in UTF-8 text, in order.
 ///
-/// Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word, so
-/// consecutive words are contiguous and no empty slices are produced. Follows the Unicode UAX-29 rules.
+/// Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one
+/// word, so consecutive words are contiguous and no empty slices are produced. Follows the
+/// Unicode UAX-29 rules.
 ///
 /// # Examples
 ///

@@ -1,7 +1,9 @@
 /**
- *  @brief SVE2 backend for byte-set search.
  *  @file include/stringzilla/find/sve2.h
  *  @author Ash Vardanian
+ *  @date July 17, 2026
+ *  @brief SVE2 backend for byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SVE2_H_
@@ -22,9 +24,9 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-/** @brief  Byte-set membership for one predicated vector: the serial `set->_u8s[c >> 3] & (1 << (c & 7))` test
- *          rides two 16-byte `svtbl` tables — the second addressed at `index - 16`, where the wrap past the
- *          zero-padded table reads zero at any vector length. */
+/** Byte-set membership for one predicated vector: the serial `set->_u8s[c >> 3] & (1 << (c & 7))`
+ *  test rides two 16-byte @c svtbl tables — the second addressed at `index - 16`, where the wrap
+ *  past the zero-padded table reads zero at any vector length. */
 SZ_HELPER_INLINE svbool_t sz_find_byteset_matches_sve2_(svbool_t progress_b8x, svuint8_t haystack_u8x,
                                                         svuint8_t set_low_u8x, svuint8_t set_high_u8x) {
     svuint8_t const byte_index_u8x = svlsr_n_u8_x(progress_b8x, haystack_u8x, 3);

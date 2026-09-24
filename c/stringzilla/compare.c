@@ -1,8 +1,8 @@
 /**
  *  @file c/stringzilla/compare.c
- *  @brief Per-domain dispatch shim for byte-level comparison (`sz_equal`, `sz_order`).
  *  @author Ash Vardanian
  *  @date January 16, 2024
+ *  @brief Per-domain dispatch shim for byte-level comparison: @c sz_equal and @c sz_order.
  */
 #include <stringzilla/compare.h>
 

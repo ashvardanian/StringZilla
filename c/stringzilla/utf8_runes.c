@@ -1,7 +1,8 @@
 /**
  *  @file c/stringzilla/utf8_runes.c
- *  @brief Per-domain dispatch shim for UTF-8 codepoint mechanics: count, find-nth, and rune unpacking.
  *  @author Ash Vardanian
+ *  @date November 19, 2025
+ *  @brief Per-domain dispatch shim for UTF-8 codepoints: counting, find-nth, and rune unpacking.
  */
 #include <stringzilla/utf8_runes.h>
 

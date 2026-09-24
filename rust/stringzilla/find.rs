@@ -1,6 +1,9 @@
 //! Substring and byteset search, partitioning, counting, and splitting.
 //!
 //! Also home to the binary-operation trait shared by the match and split iterators.
+//!
+//! File: rust/stringzilla/find.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
@@ -12,8 +15,8 @@ use core::marker::PhantomData;
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needle`: The byte slice to find within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needle`: The byte slice to find within the haystack.
 ///
 /// # Returns
 ///
@@ -51,8 +54,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needle`: The byte slice to find within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needle`: The byte slice to find within the haystack.
 ///
 /// # Returns
 ///
@@ -89,8 +92,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needle`: The byte slice to look for within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needle`: The byte slice to look for within the haystack.
 ///
 /// # Returns
 ///
@@ -99,7 +102,7 @@ where
 /// # Empty needle
 ///
 /// Mirrors `str::contains`: an empty needle is always present, so `contains(haystack, b"")` is
-/// always `true`, matching `"abc".contains("") == true` (even for an empty `haystack`).
+/// always `true`, matching `"abc".contains("") == true`, even for an empty `haystack`.
 #[inline(always)]
 pub fn contains<Haystack, Needle>(haystack: Haystack, needle: Needle) -> bool
 where
@@ -115,8 +118,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needles`: The set of bytes to search for within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needles`: The set of bytes to search for within the haystack.
 ///
 /// # Returns
 ///
@@ -145,8 +148,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needles`: The set of bytes to search for within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needles`: The set of bytes to search for within the haystack.
 ///
 /// # Returns
 ///
@@ -174,8 +177,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needles`: The set of bytes to search for within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needles`: The set of bytes to search for within the haystack.
 ///
 /// # Returns
 ///
@@ -196,8 +199,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needles`: The set of bytes to search for within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needles`: The set of bytes to search for within the haystack.
 ///
 /// # Returns
 ///
@@ -217,8 +220,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needles`: The set of bytes that should not be matched within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needles`: The set of bytes that should not be matched within the haystack.
 ///
 /// # Returns
 ///
@@ -238,8 +241,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `haystack`: The byte slice to search.
-/// * `needles`: The set of bytes that should not be matched within the haystack.
+/// - `haystack`: The byte slice to search.
+/// - `needles`: The set of bytes that should not be matched within the haystack.
 ///
 /// # Returns
 ///
@@ -275,7 +278,8 @@ impl<'a> MatcherType<'a> {
         }
     }
 
-    /// Bytes to skip past a hit: the needle's own length for substring modes, one byte for byteset modes.
+    /// Bytes to skip past a hit: the needle's own length for substring modes, one byte
+    /// for byteset modes.
     pub fn needle_length(&self) -> usize {
         match self {
             MatcherType::Find(needle) | MatcherType::RFind(needle) => needle.len(),
@@ -321,7 +325,7 @@ impl<'a> FindMatches<'a, NonOverlapping> {
         }
     }
 
-    /// Report overlapping matches too (compile-time policy; returns the `Overlapping` variant).
+    /// Report overlapping matches too, a compile-time policy returning the `Overlapping` variant.
     pub fn overlapping(self) -> FindMatches<'a, Overlapping> {
         FindMatches {
             haystack: self.haystack,
@@ -351,7 +355,7 @@ impl<'a, Overlap: Overlaps> Iterator for FindMatches<'a, Overlap> {
             );
             let start = self.position + index;
             let end = start + self.matcher.needle_length();
-            // A zero-length match (empty needle) must still advance by at least one byte, or
+            // A zero-length match from an empty needle must still advance by at least one byte, or
             // this would loop forever re-matching the same position.
             let step = if Overlap::OVERLAP {
                 1
@@ -370,17 +374,17 @@ impl<'a, Overlap: Overlaps> Iterator for FindMatches<'a, Overlap> {
 /// An iterator over non-overlapping splits of a string slice by a pattern.
 /// This iterator yields the substrings between the matches of the pattern.
 ///
-/// By default empty segments are **kept** (adjacent delimiters and leading/trailing matches yield empty
-/// slices, mirroring `str::split`). Call [`Self::skip_empty`] to drop zero-length segments. The `STEPS`
-/// const-generic mirrors the UTF-8 split iterators for API uniformity; substring/byteset splits search
-/// match-by-match, so it does not affect the yielded segments.
+/// By default empty segments are __kept__ (adjacent delimiters and leading/trailing matches yield
+/// empty slices, mirroring `str::split`). Call [`Self::skip_empty`] to drop zero-length segments.
+/// The `STEPS` const-generic mirrors the UTF-8 split iterators for API uniformity;
+/// substring/byteset splits search match-by-match, so it does not affect the yielded segments.
 ///
 /// # Empty needle and empty haystack
 ///
-/// An empty haystack always yields exactly one (empty) segment, mirroring `"".split(",") == [""]`.
-/// An empty needle matches at every position - including past the last byte - so it still yields one
-/// empty segment per position instead of hanging: each zero-length match advances the search position
-/// by at least one byte.
+/// An empty haystack always yields exactly one empty segment, mirroring `"".split(",") == [""]`.
+/// An empty needle matches at every position - including past the last byte - so it still yields
+/// one empty segment per position instead of hanging: each zero-length match advances the search
+/// position by at least one byte.
 ///
 /// # Examples
 ///
@@ -407,7 +411,8 @@ impl<'a> FindSplits<'a, KeepEmpty, ITERATORS_DEFAULT_STEPS> {
 }
 
 impl<'a, const STEPS: usize> FindSplits<'a, KeepEmpty, STEPS> {
-    /// Constructs an iterator with an explicit batch size (kept for API uniformity with the UTF-8 splits).
+    /// Constructs an iterator with an explicit batch size (kept for API uniformity with
+    /// the UTF-8 splits).
     pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self {
             haystack,
@@ -417,7 +422,7 @@ impl<'a, const STEPS: usize> FindSplits<'a, KeepEmpty, STEPS> {
         }
     }
 
-    /// Drop zero-length segments (compile-time policy; returns the `SkipEmpty` variant).
+    /// Drop zero-length segments, a compile-time policy returning the `SkipEmpty` variant.
     pub fn skip_empty(self) -> FindSplits<'a, SkipEmpty, STEPS> {
         FindSplits {
             haystack: self.haystack,
@@ -454,7 +459,7 @@ impl<'a, Empty: EmptySegments, const STEPS: usize> FindSplits<'a, Empty, STEPS> 
             );
             let start = self.position;
             let end = self.position + index;
-            // A zero-length match (empty needle) must still advance by at least one byte, or
+            // A zero-length match from an empty needle must still advance by at least one byte, or
             // this would loop forever re-matching the same position.
             self.position = end + self.matcher.needle_length().max(1);
             Some(&self.haystack[start..end])
@@ -519,7 +524,7 @@ impl<'a> RFindMatches<'a, NonOverlapping> {
         }
     }
 
-    /// Report overlapping matches too (compile-time policy; returns the `Overlapping` variant).
+    /// Report overlapping matches too, a compile-time policy returning the `Overlapping` variant.
     pub fn overlapping(self) -> RFindMatches<'a, Overlapping> {
         RFindMatches {
             haystack: self.haystack,
@@ -552,7 +557,7 @@ impl<'a, Overlap: Overlaps> Iterator for RFindMatches<'a, Overlap> {
                 0
             };
             let next_position = start + skip;
-            // A zero-length match (empty needle) can land exactly at the current window's
+            // A zero-length match from an empty needle can land exactly at the current window's
             // right edge, leaving `next_position == previous_position`; shrink by one more so
             // the window keeps making progress. Once there is nothing left to shrink, mark the
             // iterator exhausted via the `usize::MAX` sentinel instead of wrapping around.
@@ -574,9 +579,10 @@ impl<'a, Overlap: Overlaps> Iterator for RFindMatches<'a, Overlap> {
 /// An iterator over non-overlapping splits of a string slice by a pattern, searching from the end.
 /// This iterator yields the substrings between the matches of the pattern in reverse order.
 ///
-/// By default empty segments are **kept** (mirroring `str::rsplit`). Call [`Self::skip_empty`] to drop
-/// zero-length segments. The `STEPS` const-generic mirrors the UTF-8 split iterators for API uniformity;
-/// substring/byteset splits search match-by-match, so it does not affect the yielded segments.
+/// By default empty segments are __kept__, mirroring `str::rsplit`. Call [`Self::skip_empty`]
+/// to drop zero-length segments. The `STEPS` const-generic mirrors the UTF-8 split iterators
+/// for API uniformity; substring/byteset splits search match-by-match, so it does not affect
+/// the yielded segments.
 ///
 /// # Empty needle
 ///
@@ -609,7 +615,8 @@ impl<'a> RFindSplits<'a, KeepEmpty, ITERATORS_DEFAULT_STEPS> {
 }
 
 impl<'a, const STEPS: usize> RFindSplits<'a, KeepEmpty, STEPS> {
-    /// Constructs an iterator with an explicit batch size (kept for API uniformity with the UTF-8 splits).
+    /// Constructs an iterator with an explicit batch size (kept for API uniformity with
+    /// the UTF-8 splits).
     pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self {
             haystack,
@@ -619,7 +626,7 @@ impl<'a, const STEPS: usize> RFindSplits<'a, KeepEmpty, STEPS> {
         }
     }
 
-    /// Drop zero-length segments (compile-time policy; returns the `SkipEmpty` variant).
+    /// Drop zero-length segments, a compile-time policy returning the `SkipEmpty` variant.
     pub fn skip_empty(self) -> RFindSplits<'a, SkipEmpty, STEPS> {
         RFindSplits {
             haystack: self.haystack,
@@ -631,7 +638,7 @@ impl<'a, const STEPS: usize> RFindSplits<'a, KeepEmpty, STEPS> {
 }
 
 impl<'a, Empty: EmptySegments, const STEPS: usize> RFindSplits<'a, Empty, STEPS> {
-    /// Yields the next raw segment (reverse order) without the empty-segment filter.
+    /// Yields the next raw segment, in reverse order, without the empty-segment filter.
     #[inline(always)]
     fn next_raw(&mut self) -> Option<&'a [u8]> {
         let position = self.position?;
@@ -768,7 +775,7 @@ where
     ///
     /// # Arguments
     ///
-    /// * `needle`: The byte slice to search for within `self`.
+    /// - `needle`: The byte slice to search for within `self`.
     ///
     /// # Examples
     ///
@@ -784,11 +791,12 @@ where
     /// ```
     fn sz_matches(&'a self, needle: &'a Needle) -> FindMatches<'a>;
 
-    /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`, searching from the end.
+    /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`,
+    /// searching from the end.
     ///
     /// # Arguments
     ///
-    /// * `needle`: The byte slice to search for within `self`.
+    /// - `needle`: The byte slice to search for within `self`.
     ///
     /// # Examples
     ///
@@ -808,7 +816,7 @@ where
     ///
     /// # Arguments
     ///
-    /// * `needle`: The byte slice to split `self` by.
+    /// - `needle`: The byte slice to split `self` by.
     ///
     /// # Examples
     ///
@@ -822,11 +830,12 @@ where
     /// ```
     fn sz_splits(&'a self, needle: &'a Needle) -> FindSplits<'a>;
 
-    /// Returns an iterator over the substrings of `self` that are separated by the given `needle`, searching from the end.
+    /// Returns an iterator over the substrings of `self` that are separated by the given `needle`,
+    /// searching from the end.
     ///
     /// # Arguments
     ///
-    /// * `needle`: The byte slice to split `self` by.
+    /// - `needle`: The byte slice to split `self` by.
     ///
     /// # Examples
     ///
@@ -840,11 +849,12 @@ where
     /// ```
     fn sz_rsplits(&'a self, needle: &'a Needle) -> RFindSplits<'a>;
 
-    /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`.
+    /// Returns an iterator over all non-overlapping matches of any of the bytes in
+    /// `needles` within `self`.
     ///
     /// # Arguments
     ///
-    /// * `needles`: The set of bytes to search for within `self`.
+    /// - `needles`: The set of bytes to search for within `self`.
     ///
     /// # Examples
     ///
@@ -858,11 +868,12 @@ where
     /// ```
     fn sz_find_first_of(&'a self, needles: &'a Needle) -> FindMatches<'a>;
 
-    /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`, searching from the end.
+    /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within
+    /// `self`, searching from the end.
     ///
     /// # Arguments
     ///
-    /// * `needles`: The set of bytes to search for within `self`.
+    /// - `needles`: The set of bytes to search for within `self`.
     ///
     /// # Examples
     ///
@@ -876,11 +887,12 @@ where
     /// ```
     fn sz_find_last_of(&'a self, needles: &'a Needle) -> RFindMatches<'a>;
 
-    /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`.
+    /// Returns an iterator over all non-overlapping matches of any byte not in
+    /// `needles` within `self`.
     ///
     /// # Arguments
     ///
-    /// * `needles`: The set of bytes that should not be matched within `self`.
+    /// - `needles`: The set of bytes that should not be matched within `self`.
     ///
     /// # Examples
     ///
@@ -894,11 +906,12 @@ where
     /// ```
     fn sz_find_first_not_of(&'a self, needles: &'a Needle) -> FindMatches<'a>;
 
-    /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`, searching from the end.
+    /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within
+    /// `self`, searching from the end.
     ///
     /// # Arguments
     ///
-    /// * `needles`: The set of bytes that should not be matched within `self`.
+    /// - `needles`: The set of bytes that should not be matched within `self`.
     ///
     /// # Examples
     ///
@@ -1145,7 +1158,8 @@ mod tests {
 
     #[test]
     fn iter_splits_byteset_skip_empty() {
-        // Byteset matcher (split on any of ",;"): adjacent delimiters yield empties under the KEEP default.
+        // Byteset matcher (split on any of ",;"): adjacent delimiters yield empties under
+        // the KEEP default.
         let haystack = b",a;;b,";
         let kept: Vec<_> = FindSplits::new(haystack, MatcherType::FindFirstOf(b",;")).collect();
         assert_eq!(kept, vec![&b""[..], b"a", &b""[..], b"b", &b""[..]]);
@@ -1159,7 +1173,8 @@ mod tests {
     fn iter_matches_with_overlaps() {
         let haystack = b"aaaa";
         let needle = b"aa";
-        // Default is non-overlapping; `.overlapping()` opts into the compile-time Overlapping policy.
+        // Default is non-overlapping; `.overlapping()` opts into the
+        // compile-time Overlapping policy.
         let non_overlapping: Vec<_> = haystack.sz_matches(needle).collect();
         assert_eq!(non_overlapping, vec![b"aa", b"aa"]);
         let matches: Vec<_> = haystack.sz_matches(needle).overlapping().collect();

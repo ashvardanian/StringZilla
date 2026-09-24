@@ -1,7 +1,8 @@
 /**
- *  @brief SVE2 backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/sve2.h
  *  @author Ash Vardanian
+ *  @date November 22, 2025
+ *  @brief SVE2 backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_SVE2_H_
 #define STRINGZILLA_UTF8_TOKENS_SVE2_H_
@@ -22,14 +23,17 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-/** @brief  Drain the first @p emit_count match starts within the first @p span byte lanes into absolute
- *          `(offset, length)` pairs, one 32-bit quarter at a time - the `(offset, length)` twin of
- *          @ref sz_utf8_rune_drain_sve2_.
+/**
+ *  @brief Drains the first @p emit_count match starts within the first @p span byte lanes into
+ *      absolute @b (offset,length) pairs, one 32-bit quarter at a time.
  *
- *  SVE2 has no `svcompact_u8`, so each quarter of the byte-granular start lanes widens to 32-bit (the lane index
- *  rides a biased iota) and one `svcompact_u32` packs the start indices while a lockstep `svcompact_u32` packs
- *  their byte lengths; the offsets turn absolute only after the 64-bit widening, so multi-gigabyte inputs never
- *  truncate. The caller's `while` loop resumes past the last emitted match when the capacity cuts the tile. */
+ *  This is the @b (offset,length) twin of @ref sz_utf8_rune_drain_sve2_. SVE2 has no
+ *  @c svcompact_u8, so each quarter of the byte-granular start lanes widens to 32-bit, with the
+ *  lane index riding a biased iota, and one @c svcompact_u32 packs the start indices while a
+ *  lockstep @c svcompact_u32 packs their byte lengths. The offsets turn absolute only after the
+ *  64-bit widening, so multi-gigabyte inputs never truncate. The caller's @c while loop resumes
+ *  past the last emitted match when the capacity cuts the tile.
+ */
 SZ_HELPER_INLINE void sz_utf8_token_drain_sve2_(                                    //
     svbool_t starts_b8x, svuint8_t lengths_u8x, sz_size_t position, sz_size_t span, //
     sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -124,9 +128,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_newlines_sve2(        //
             pg_b8x, lead_e280_mask_b8x,
             svorr_b_z(pg_b8x, svcmpeq_n_u8(pg_b8x, text2_u8x, 0xA8), svcmpeq_n_u8(pg_b8x, text2_u8x, 0xA9)));
 
-        // A CR that completes a CRLF must be emitted once (len 2); the trailing LF must NOT also be a match.
-        // `crlf_mask` marks the CR lane; the LF to suppress is the next lane. Up-shift a 0/1 CRLF flag by one
-        // lane (svinsr inserts 0 at lane 0 and slides everything toward higher indices) to land on that LF.
+        // A CR that completes a CRLF must be emitted once (len 2); the trailing LF must not also be
+        // a match. `crlf_mask` marks the CR lane; the LF to suppress is the next lane. Up-shift a
+        // 0/1 CRLF flag by one lane (svinsr inserts 0 at lane 0 and slides everything toward higher
+        // indices) to land on that LF.
         svuint8_t crlf_flag_u8x = svdup_u8_z(crlf_mask_b8x, 1);
         svbool_t lf_of_crlf_mask_b8x = svand_b_z(pg_b8x, lf_mask_b8x,
                                                  svcmpne_n_u8(pg_b8x, svinsr_n_u8(crlf_flag_u8x, 0), 0));
@@ -266,10 +271,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(     //
     return count;
 }
 
-/** @brief  Membership of each byte-lane @p value_u8x in a 32-byte (256-bit) bitmap held in two zero-padded
- *          16-byte table vectors: the byte at `value >> 3` rides two `svtbl` tables - the second addressed at
- *          `index - 16`, where the wrap past the zero-padded table reads zero at any vector length - and the
- *          bit `value & 7` decides. The in-register twin of the gathered two-level walk this file used to do. */
+/** Membership of each byte-lane @p value_u8x in a 32-byte (256-bit) bitmap held in two zero-padded
+ *  16-byte table vectors: the byte at `value >> 3` rides two @c svtbl tables - the second addressed
+ *  at `index - 16`, where the wrap past the zero-padded table reads zero at any vector length - and
+ *  the bit `value & 7` decides. The in-register alternative to a gathered two-level walk. */
 SZ_HELPER_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svuint8_t table_low_u8x,
                                                            svuint8_t table_high_u8x, svuint8_t value_u8x) {
     svuint8_t const byte_index_u8x = svlsr_n_u8_x(pg_b8x, value_u8x, 3);
@@ -397,11 +402,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2(      //
             high_u8x = svsel_u8(ascii_b8x, svdup_n_u8(0), high_u8x);
             low_u8x = svsel_u8(ascii_b8x, text0_u8x, low_u8x);
 
-            // Exact membership, fully in-register. Lanes below U+0100 read bitmap row 0 directly; the rest
-            // survive the block-level pre-filter only if their 256-codepoint block holds ANY delimiter (row 1 -
-            // most of the plane, including all CJK letters - is the unique empty row), and the survivors resolve
-            // one DISTINCT high byte at a time: running text shares one to three highs per chunk, and each round
-            // loads that block's 32-byte row once and settles every lane carrying it.
+            // Exact membership, fully in-register. Lanes below U+0100 read bitmap row 0 directly;
+            // the rest survive the block-level pre-filter only if their 256-codepoint block holds
+            // any delimiter (row 1 - most of the plane, including all CJK letters - is the unique
+            // empty row), and the survivors resolve one distinct high byte at a time: running text
+            // shares one to three highs per chunk, and each round loads that block's 32-byte row
+            // once and settles every lane carrying it.
             svbool_t const noncont_b8x = svcmpne_n_u8(pg_b8x, svand_n_u8_x(pg_b8x, text0_u8x, 0xC0), 0x80);
             svbool_t const startable_b8x = svand_b_z(pg_b8x, valid_b8x, noncont_b8x);
             svbool_t const high0_b8x = svcmpeq_n_u8(pg_b8x, high_u8x, 0);

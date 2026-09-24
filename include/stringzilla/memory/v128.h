@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly SIMD128 backend for memory.
  *  @file include/stringzilla/memory/v128.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly SIMD128 backend for memory.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_V128_H_
@@ -14,17 +16,17 @@
 extern "C" {
 #endif
 
+/*  Branch-light partial load/store of 0..16 bytes — the shared building block for WASM tails, so
+ *  the kernels never fall back to a scalar byte loop and never over-read/over-write past the
+ *  buffer. WASM lane load/store need compile-time-constant lane indices, so the 0..7 byte assembly
+ *  is a small constant-lane switch; the 8..15 case loads the low 8 with @c load64_zero and folds
+ *  the remaining bytes in with one constant `i8x16.shuffle`. Other @c v128 backends `#include` this
+ *  header to reuse these (hash short-string loads, @c fill_random tails, …). */
 #if SZ_USE_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-/*  Branch-light partial load/store of 0..16 bytes — the shared building block for WASM tails, so the
- *  kernels never fall back to a scalar byte loop and never over-read/over-write past the buffer. WASM
- *  lane load/store need compile-time-constant lane indices, so the 0..7 byte assembly is a small
- *  constant-lane switch; the 8..15 case loads the low 8 with `load64_zero` and folds the remaining
- *  bytes in with one constant `i8x16.shuffle`. Other `v128` backends `#include` this header to reuse
- *  these (hash short-string loads, `fill_random` tails, …). */
 SZ_HELPER_INLINE v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer, sz_size_t remainder) {
     v128_t result_u8x16 = wasm_u64x2_splat(0);
     switch (remainder) {
@@ -53,7 +55,7 @@ SZ_HELPER_INLINE v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer,
     return result_u8x16;
 }
 
-/** @brief Load exactly `length` (0..16) bytes into a v128; remaining lanes zero; no over-read. */
+/** Load exactly @p length (0..16) bytes into a v128; remaining lanes zero; no over-read. */
 SZ_HELPER_INLINE v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t const *source_pointer = (sz_u8_t const *)source;
     if (length >= 16) return wasm_v128_load(source_pointer);
@@ -92,7 +94,7 @@ SZ_HELPER_INLINE void sz_store_partial_lo8_v128_(sz_u8_t *target_pointer, v128_t
     }
 }
 
-/** @brief Store exactly `length` (0..16) bytes from a v128; no over-write past the buffer. */
+/** Store exactly @p length (0..16) bytes from a v128; no over-write past the buffer. */
 SZ_HELPER_INLINE void sz_store_partial_v128_(sz_ptr_t target, v128_t data_u8x16, sz_size_t length) {
     sz_u8_t *target_pointer = (sz_u8_t *)target;
     if (length >= 16) {

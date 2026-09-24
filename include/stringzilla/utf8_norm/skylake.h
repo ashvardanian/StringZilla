@@ -1,18 +1,22 @@
 /**
- *  @brief Skylake-X (AVX-512 F/BW/VL baseline) backend for the single-pass Unicode normalizer.
  *  @file include/stringzilla/utf8_norm/skylake.h
  *  @author Ash Vardanian
+ *  @date June 14, 2026
+ *  @brief Skylake-X (AVX-512 F/BW/VL baseline) backend for the single-pass Unicode normalizer.
+ *
+ *  This is the AVX-512 baseline that Ice Lake reuses, never the reverse. It overrides exactly the
+ *  scan primitive: a 64-byte all-ASCII gate via @c _mm512_movepi8_mask plus a lead-byte classify
+ *  over the shared @c sz_utf8_norm_lead_lut_, then the shared cold per-codepoint verify,
+ *  @c sz_utf8_norm_verify_block_.
+ *
+ *  The scanner skeleton @c sz_utf8_norm_classify_avx512_ is parameterized over the lead-classify
+ *  step via a force-inlined function pointer, the same devirtualization idiom the engines use.
+ *  Skylake instantiates it with the @c vpshufb based 64-entry lookup, because Skylake lacks the
+ *  AVX-512 VBMI @c vpermb; Ice Lake re-instantiates the same skeleton with a single @c vpermb. The
+ *  scanner never compacts, returning the first non-inert byte instead, so AVX-512 VBMI2
+ *  @c vpcompressb is irrelevant here.
+ *
  *  @sa include/stringzilla/utf8_norm.h
- *
- *  This is the AVX-512 baseline that Ice Lake reuses (never the reverse). It overrides exactly the
- *  scan primitive: a 64-byte all-ASCII gate (`_mm512_movepi8_mask`) plus a lead-byte classify over the
- *  shared `sz_utf8_norm_lead_lut_`, then the shared cold per-codepoint verify (`sz_utf8_norm_verify_block_`).
- *
- *  The scanner skeleton `sz_utf8_norm_classify_avx512_` is parameterized over the lead-classify step via a
- *  force-inlined function pointer (the same devirtualization idiom the engines use). Skylake instantiates
- *  it with the `vpshufb`-based 64-entry lookup, because Skylake lacks `vpermb` (AVX-512 VBMI); Ice Lake
- *  re-instantiates the same skeleton with a single `vpermb`. The scanner never compacts (it returns the
- *  first non-inert byte), so AVX-512 VBMI2 `vpcompressb` is irrelevant here.
  */
 #ifndef STRINGZILLA_UTF8_NORM_SKYLAKE_H_
 #define STRINGZILLA_UTF8_NORM_SKYLAKE_H_
@@ -35,14 +39,13 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #endif
 
-/** @brief Per-tier lead classifier: given a 64-byte vector, the lead mask, and the form flag, return the
- *         mask of lanes that begin a candidate-non-inert lead. The only step Ice Lake overrides. */
+/** Per-tier lead classifier: given a 64-byte vector, the lead mask, and the form flag, returns the
+ *  mask of lanes that begin a candidate non-inert lead. It is the only step Ice Lake overrides. */
 typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t)(__m512i, __mmask64, sz_u8_t);
 
-/**
- *  @brief 64-entry lead lookup without AVX-512 VBMI: four per-128-lane `vpshufb` over the broadcast LUT
- *         quadrants, selected by the index's high two bits. `families & flag` then identifies the form.
- */
+/** 64-entry lead lookup without AVX-512 VBMI: four per-128-lane @c vpshufb over the
+ *  broadcast LUT quadrants, selected by the high two index bits, then `families & flag`
+ *  picks out the requested form. */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
                                                                          sz_u8_t form_flag) {
     __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
@@ -65,10 +68,8 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i
     return is_lead_m64 & has_flag_m64;
 }
 
-/**
- *  @brief Shared AVX-512 scan skeleton: 64-byte all-ASCII gate, lead-classify via @p classify, then the
- *         shared scalar verify on any block that survives the gate. Ice Lake reuses this verbatim.
- */
+/** Shared AVX-512 scan skeleton: a 64-byte all-ASCII gate, lead-classify via @p classify, then the
+ *  shared scalar verify on any block that survives the gate. Ice Lake reuses this verbatim. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form,
                                                          sz_utf8_norm_lead_classify_avx512_t classify) {
     sz_u8_t const *position = (sz_u8_t const *)text;
@@ -100,7 +101,8 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-/** @brief Scan primitive (Skylake): first byte beginning a non-inert codepoint for @p form, else NULL. */
+/** Skylake scan primitive: the first byte beginning a non-inert codepoint for
+ *  @p form, else NULL. */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_shuffle_skylake_);
 }

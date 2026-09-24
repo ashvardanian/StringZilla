@@ -8,11 +8,11 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ashvardanian/stringzilla.git"
+    "url": "https://github.com/ashvardanian/StringZilla.git"
   },
   "homepage": "https://ashvardanian.com/posts/stringzilla/",
   "bugs": {
-    "url": "https://github.com/ashvardanian/stringzilla/issues"
+    "url": "https://github.com/ashvardanian/StringZilla/issues"
   },
   "keywords": [
     "simd",

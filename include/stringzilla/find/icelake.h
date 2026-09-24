@@ -1,7 +1,9 @@
 /**
- *  @brief Ice Lake (AVX-512 VBMI+VAES) backend for substring & byte-set search.
  *  @file include/stringzilla/find/icelake.h
  *  @author Ash Vardanian
+ *  @date January 6, 2024
+ *  @brief Ice Lake (AVX-512 VBMI+VAES) backend for substring & byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_ICELAKE_H_
@@ -21,8 +23,7 @@ extern "C" {
  *      - 2018 CannonLake: IFMA, VBMI,
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
- *  We are going to use VBMI2 for `_mm256_maskz_compress_epi8`.
- */
+ *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
 #pragma clang attribute push(                                                                                        \
@@ -155,9 +156,10 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t leng
 
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
-    // Reverse mirror of `sz_find_byteset_icelake`: identical membership computation, but we scan 64-byte
-    // windows from the end of the buffer and take the HIGHEST set bit (closest to the buffer end) so the
-    // result matches `sz_rfind_byteset_serial`, which returns the last in-set byte.
+    // Reverse mirror of `sz_find_byteset_icelake`: identical membership computation, but we scan
+    // 64-byte windows from the end of the buffer and take the highest set bit, the one closest to
+    // the buffer end, so the result matches `sz_rfind_byteset_serial`, which returns the last byte
+    // in the set.
     sz_u512_vec_t filter_even_vec, filter_odd_vec;
     __m256i filter_u8x32 = _mm256_lddqu_si256((__m256i const *)filter);
     filter_even_vec.zmm = _mm512_broadcast_i32x4(_mm256_castsi256_si128( //

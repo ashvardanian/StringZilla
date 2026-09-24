@@ -1,12 +1,12 @@
 /**
  *  @file c/stringzilla/utf8_uncased.c
- *  @brief Per-domain dispatch shim for uncased UTF-8 search & ordering.
  *  @author Ash Vardanian
- *  @date January 16, 2024
+ *  @date November 23, 2025
+ *  @brief Per-domain dispatch shim for uncased UTF-8 search & ordering.
  *
- *  Isolated from the folding shim (`utf8_uncased_fold.c`) because the AVX-512 per-script find kernels in
- *  `utf8_uncased/icelake.h` are by far the heaviest single compilation in the core; keeping
- *  them in their own translation unit lets the rest of the UTF-8 case domain build in parallel.
+ *  Isolated from the folding shim, `utf8_uncased_fold.c`, because the AVX-512 per-script find
+ *  kernels in `utf8_uncased/icelake.h` are by far the heaviest single compilation in the core;
+ *  their own translation unit lets the rest of the UTF-8 case domain build in parallel.
  */
 #include <stringzilla/utf8_uncased.h> // `sz_utf8_uncased_{find,order}_*`
 

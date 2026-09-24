@@ -1,7 +1,9 @@
 /**
- *  @brief Ice Lake (AVX-512 VBMI+VAES) backend for set intersection.
  *  @file include/stringzilla/intersect/icelake.h
  *  @author Ash Vardanian
+ *  @date March 7, 2025
+ *  @brief Ice Lake (AVX-512 VBMI+VAES) backend for set intersection.
+ *
  *  @sa include/stringzilla/intersect.h
  */
 #ifndef STRINGZILLA_INTERSECT_ICELAKE_H_
@@ -23,8 +25,7 @@ extern "C" {
  *      - 2018 CannonLake: IFMA, VBMI,
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
- *  We are going to use VBMI2 for `_mm256_maskz_compress_epi8`.
- */
+ *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
 #pragma clang attribute push(                                                                                   \
@@ -42,10 +43,11 @@ extern "C" {
 #endif
 
 /**
- *  @brief Checks whether any two of the four 64-bit integers in a 256-bit vector are equal (i.e., have collisions).
- *      Used to detect slot collisions before attempting a vectorized scatter into the hash table.
+ *  @brief Checks whether any two of the four 64-bit integers in a 256-bit vector are equal (i.e.,
+ *      have collisions). Used to detect slot collisions before attempting a vectorized scatter into
+ *      the hash table.
  *
- *  @param values_u64x4 A 256-bit vector holding four 64-bit values [a, b, c, d].
+ *  @param[in] values_u64x4 A 256-bit vector holding four 64-bit values [a, b, c, d].
  *  @return Non-zero if at least two of the four values are identical, zero otherwise.
  */
 SZ_HELPER_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4) {
@@ -106,7 +108,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
     sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
 
     // Empty-slot sentinel for the 64-bit `table_hashes`: the `0xFF` fill makes every slot all-ones.
-    // It must be a 64-bit constant, NOT `SZ_SIZE_MAX` - on 32-bit targets `sz_size_t` is 32-bit, so
+    // It must be a 64-bit constant, not `SZ_SIZE_MAX` - on 32-bit targets `sz_size_t` is 32-bit, so
     // `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe loop spins forever.
     sz_u64_t const empty_slot = ~(sz_u64_t)0;
     // Top bit of a stored position marks a slot whose (distinct) value already produced a pair, so a

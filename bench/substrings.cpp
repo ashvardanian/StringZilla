@@ -1,33 +1,38 @@
 /**
  *  @file bench/substrings.cpp
- *  @brief Benchmarks multi-pattern search on the CPU: one compiled vocabulary against the whole corpus.
+ *  @author Ash Vardanian
+ *  @date August 8, 2026
+ *  @brief Benchmarks multi-pattern search on the CPU: one compiled vocabulary against the corpus.
  *
- *  Memory-bound rather than compute-bound: the walk is one data-dependent load per byte, so what a row
- *  measures is how often that load hits a cache line the automaton already brought in. Vocabulary shape is
- *  what moves that, so every verb is measured twice - against the most frequent slice of the corpus
- *  vocabulary, where accepting states are common, and against the least frequent slice,
- *  where the walk sits near the root and almost never reports.
+ *  Memory-bound rather than compute-bound: the walk is one data-dependent load per byte, so what a
+ *  row measures is how often that load hits a cache line the automaton already brought in.
+ *  Vocabulary shape is what moves that, so every verb is measured twice - against the most frequent
+ *  slice of the corpus vocabulary, where accepting states are common, and against the least
+ *  frequent slice, where the walk sits near the root and almost never reports.
  *
- *  Compilation is timed separately, because a pipeline that recompiles per query is bound by that rather
- *  than by the walk, and because its cost scales with the vocabulary while every other row scales with the
- *  corpus. A compilation row reports needle bytes as its bytes and operations, and needles as its inputs;
- *  every other row reports the corpus bytes one call walks, and its haystacks as inputs.
+ *  Compilation is timed separately, because a pipeline that recompiles per query is bound by that
+ *  rather than by the walk, and because its cost scales with the vocabulary while every other row
+ *  scales with the corpus. A compilation row reports needle bytes as its bytes and operations, and
+ *  needles as its inputs; every other row reports the corpus bytes one call walks, and its
+ *  haystacks as inputs.
  *
- *  There is no Standard row: the platform ships no multi-pattern search, so the serial backend is its own
- *  reference and the accelerated rows are logged against it.
+ *  There is no Standard row: the platform ships no multi-pattern search, so the serial backend is
+ *  its own reference and the accelerated rows are logged against it.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are
- *  used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Cross-check the backends against each other.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
@@ -50,9 +55,11 @@ using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Compilation
 
-/** Compiles the vocabulary from scratch, which is the cost a pipeline pays once rather than per haystack. */
+/** Compiles the vocabulary from scratch: the cost a pipeline pays once rather than per haystack. */
 struct substrings_build_from_sz {
-    substrings_dictionary_t const &dictionary; /**< The needles to compile, and the sensitivity to compile them at. */
+
+    /** The needles to compile, and the sensitivity to compile them at. */
+    substrings_dictionary_t const &dictionary;
 
     call_result_t operator()(std::size_t) const {
         sz_memory_allocator_t allocator;
@@ -168,7 +175,7 @@ static void bench_substrings_bm25(environment_t const &env, substrings_engine_t 
 #endif
 }
 
-/** One vocabulary slice, compiled, then walked by every verb under every policy that verb accepts. */
+/** One vocabulary slice, compiled, then walked by every verb under every policy it accepts. */
 static void bench_substrings_slice(environment_t const &env, substrings_corpus_t const &corpus,
                                    substrings_slice_t slice, sz_substrings_case_sensitivity_t sensitivity) {
     sz_memory_allocator_t allocator;

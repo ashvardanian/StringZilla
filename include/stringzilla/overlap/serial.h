@@ -1,8 +1,11 @@
 /**
- *  @brief Serial backend for window overlap: the prefix chain one byte at a time, the window hashes at any width
- *      and offset, and the prepared-query B-tree every candidate probes, plus the constants its SIMD backends share.
  *  @file include/stringzilla/overlap/serial.h
  *  @author Ash Vardanian
+ *  @date January 27, 2024
+ *  @brief Serial backend for window overlap: the prefix chain one byte at a time, the window hashes
+ *      at any width and offset, and the prepared-query B-tree every candidate probes, plus the
+ *      constants its SIMD backends share.
+ *
  *  @sa include/stringzilla/overlap.h
  */
 #ifndef STRINGZILLA_OVERLAP_SERIAL_H_
@@ -14,11 +17,12 @@
 extern "C" {
 #endif
 
-/** The 32-bit prime every window hash is reduced by; the SIMD backends hold it as an @c f64 and reduce through
- *  a rounded reciprocal. Its cheapest signed base-256 multiple within a machine word has digit weight twenty-four. */
+/** The 32-bit prime every window hash is reduced by; the SIMD backends hold it as an @c f64 and
+ *  reduce through a rounded reciprocal. Its cheapest signed base-256 multiple within a machine word
+ *  has digit weight twenty-four. */
 static sz_u32_t const sz_overlap_modulus_k = 4026525731u;
 
-/** @c 256^k mod p for @c k in @c 0…8: the multipliers that carry a prefix @c k bytes on. */
+/** 256ᵏ mod p for k ∈ [0, 8]: the multipliers that carry a prefix k bytes on. */
 static sz_f64_t const sz_overlap_powers_of_256_k[9] = {1.0,         256.0,       65536.0,     16777216.0,  268441565.0,
                                                        270103213.0, 695485101.0, 877053692.0, 3066829947.0};
 
@@ -34,13 +38,14 @@ static sz_u32_t const sz_overlap_padding_key_k = 0xFFFFFFFFu;
 /** The tree stores every key with this bit flipped, so signed compares order them. */
 static sz_u32_t const sz_overlap_sign_flip_k = 0x80000000u;
 
-/** Candidate chains advanced together in the scoring loops: one modular multiply-add step is about fifty cycles
- *  of latency against about a dozen of issue, so four independent chains fill the pipe and a fifth gains nothing. */
+/** Candidate chains advanced together in the scoring loops: one modular multiply-add step is about
+ *  fifty cycles of latency against about a dozen of issue, so four independent chains fill the pipe
+ *  and a fifth gains nothing. */
 enum { sz_overlap_interleaved_chains_k = 4 };
 
 #pragma region Generic Public Helpers
 
-/** @c 256^width mod p, the multiplier that shifts a prefix past a window of @p width bytes. */
+/** 256 raised to @p width, mod p: the multiplier that shifts a prefix past that many bytes. */
 SZ_HELPER_AUTO sz_f64_t sz_overlap_window_power(sz_size_t width) {
     sz_u64_t const prime = sz_overlap_modulus_k;
     sz_u64_t result = 1, base = 256ull % prime, exponent = width;
@@ -55,32 +60,41 @@ SZ_HELPER_AUTO sz_f64_t sz_overlap_window_power(sz_size_t width) {
 /**
  *  @brief One query's window hashes laid out as the tree every candidate probes.
  *
- *  The leaves hold the sorted keys, sixteen to a node, sign-flipped and padded above every residue; each branch
- *  level above holds separators, one below the first key of the child to its right, so a signed @c key > separator
- *  count is the child ordinal. The leaves lead the arena and every branch level follows, the root last.
+ *  The leaves hold the sorted keys, sixteen to a node, sign-flipped and padded above every residue;
+ *  each branch level above holds separators, one below the first key of the child to its right, so
+ *  a signed @c key > separator count is the child ordinal. The leaves lead the arena and every
+ *  branch level follows, the root last.
  */
 typedef struct sz_overlap_btree_t {
-    sz_u32_t const *nodes; /**< The @b [nodes,keys_per_node] slots, leaves first, keys sign-flipped. */
-    sz_size_t levels;      /**< Levels including the leaves. */
-    /** First node of each level, the root at index zero; a level holds only the nodes its leaves need. */
+
+    /** The @b [nodes,keys_per_node] slots, leaves first, keys sign-flipped. */
+    sz_u32_t const *nodes;
+
+    /** Levels including the leaves. */
+    sz_size_t levels;
+
+    /** First node of each level, the root at index zero; a level holds only the nodes
+     *  its leaves need. */
     sz_size_t level_bases[sz_overlap_btree_levels_max_k];
 } sz_overlap_btree_t;
 
-/** Slots the sort pads @p count keys up to: the least power of two at or above @p count and at least 64. */
+/** Slots the sort pads @p count keys up to: the least power of two at or above @p count and
+ *  at least 64. */
 SZ_API_COMPTIME sz_size_t sz_overlap_btree_sorted_capacity(sz_size_t count) {
     sz_size_t capacity = 64;
     while (capacity < count) capacity *= 2;
     return capacity;
 }
 
-/** Leaves a tree of @p keys_count keys needs; never zero, so an empty tree still has one padding leaf. */
+/** Leaves a tree of @p keys_count keys needs; never zero, so an empty tree still has
+ *  one padding leaf. */
 SZ_HELPER_AUTO sz_size_t sz_overlap_btree_leaves_(sz_size_t keys_count) {
     sz_size_t const leaves = (keys_count + sz_overlap_keys_per_node_k - 1) / sz_overlap_keys_per_node_k;
     return leaves ? leaves : 1;
 }
 
-/** @c u32 entries the arena must hold for @p keys_count keys written at its start: the sort's padded capacity
- *  or every level's nodes, whichever is larger. */
+/** @c u32 entries the arena must hold for @p keys_count keys written at its start: the sort's
+ *  padded capacity or every level's nodes, whichever is larger. */
 SZ_API_COMPTIME sz_size_t sz_overlap_btree_entries(sz_size_t keys_count) {
     sz_size_t const sorted = sz_overlap_btree_sorted_capacity(keys_count);
     sz_size_t nodes = 0;
@@ -102,10 +116,12 @@ SZ_API_COMPTIME sz_size_t sz_overlap_btree_unique_(sz_u32_t *keys, sz_size_t cou
 }
 
 /**
- *  @brief Lays out the tree over @p keys_count sorted distinct keys already at @c nodes[0…): flips the leaves in
- *      place, pads the last leaf, writes the branch levels after the leaves. Zero keys give one padding leaf.
- *  @param[in] nodes Caller-owned, @ref sz_overlap_btree_entries entries, the keys at its start.
- *  @retval sz_success_k always; the level count is an invariant of sixteen keys per node, asserted, never reported.
+ *  @brief Lays out the tree over the @p keys_count sorted distinct keys leading @c nodes: flips the
+ *      leaves in place, pads the last leaf, and writes the branch levels after the leaves. Zero
+ *      keys give one padding leaf.
+ *  @param[inout] nodes Caller-owned, @ref sz_overlap_btree_entries entries, the keys at its start.
+ *  @return @c sz_success_k always; the level count is an invariant of sixteen keys per node,
+ *      asserted, never reported.
  */
 SZ_API_COMPTIME sz_status_t sz_overlap_btree_prepare(sz_u32_t *nodes, sz_size_t keys_count, sz_overlap_btree_t *btree) {
     sz_size_t const keys_per_node = sz_overlap_keys_per_node_k, branches_per_node = sz_overlap_branches_per_node_k;
@@ -142,8 +158,8 @@ SZ_API_COMPTIME sz_status_t sz_overlap_btree_prepare(sz_u32_t *nodes, sz_size_t 
     return sz_success_k;
 }
 
-/** @p matches over the longer side's window count, zero when both are empty; only the longer side keeps the
- *  share within @c [0, 1]. */
+/** @p matches over the longer side's window count, zero when both are empty; only the longer side
+ *  keeps the share within [0, 1]. */
 SZ_HELPER_AUTO sz_f32_t sz_overlap_share_(sz_size_t matches, sz_size_t candidate_windows, sz_size_t query_windows) {
     sz_size_t const longer = candidate_windows > query_windows ? candidate_windows : query_windows;
     return longer ? (sz_f32_t)((sz_f64_t)matches / (sz_f64_t)longer) : 0.0f;
@@ -154,27 +170,57 @@ SZ_HELPER_AUTO sz_f32_t sz_overlap_share_(sz_size_t matches, sz_size_t candidate
 #pragma region Engine
 
 /**
- *  @brief A forest of prepared query trees over one block, and the widths every one of them scores at.
+ *  @brief A forest of prepared query trees over one block, and the widths every one of
+ *      them scores at.
  *
- *  The first six members are the @ref sz_overlap_btree_t forest in tensor form: every query's slots back to back,
- *  which a kernel indexes by arithmetic where an array of structs would need a pointer chase. Whatever a tier needs
- *  beyond them - a launch geometry, a stream - sits in @c memory 's head, which only that tier reads.
+ *  The first six members are the @ref sz_overlap_btree_t forest in tensor form: every query's slots
+ *  back to back, which a kernel indexes by arithmetic where an array of structs would need a
+ *  pointer chase. Whatever a tier needs beyond them - a launch geometry, a stream - sits in
+ *  @c memory 's head, which only that tier reads.
  */
 typedef struct sz_overlap_engine_t {
-    sz_u32_t const *nodes;          /**< Every query's tree slots, back to back, @c nodes_offsets addressing them. */
-    sz_size_t const *nodes_offsets; /**< The @b [count+1] slot offsets into @c nodes, the last being its length. */
-    sz_u32_t const *keys_counts;    /**< The @b [count] keys each tree holds, from which its levels follow. */
-    sz_u32_t const *widths;         /**< The @b [widths_count] window widths, in bytes. */
-    sz_u32_t const *powers;         /**< The @b [widths_count] @ref sz_overlap_window_power values. */
-    sz_u32_t const *lengths;        /**< The @b [count] bytes each query spans, a share's denominator. */
-    sz_size_t count;                /**< Queries prepared, which is the first axis of every output. */
-    sz_size_t widths_count;         /**< Entries in @c widths and @c powers, the last axis of an output. */
-    sz_capability_t capability;     /**< The tier @c _init_* resolved, and the only one that may score with it. */
-    sz_memory_allocator_t alloc;    /**< What built both blocks below and what grows the second. */
-    void *memory;                   /**< The forest's block, fixed for the engine's life, its head tier-private. */
-    sz_size_t memory_bytes;         /**< Bytes of that block. */
-    void *scratch;                  /**< The round's chains and window hashes, grown and never shrunk. */
-    sz_size_t scratch_bytes;        /**< Bytes of that block, zero until the first round sizes it. */
+
+    /** Every query's tree slots, back to back, @c nodes_offsets addressing them. */
+    sz_u32_t const *nodes;
+
+    /** The @b [count+1] slot offsets into @c nodes, the last being its length. */
+    sz_size_t const *nodes_offsets;
+
+    /** The @b [count] keys each tree holds, from which its levels follow. */
+    sz_u32_t const *keys_counts;
+
+    /** The @b [widths_count] window widths, in bytes. */
+    sz_u32_t const *widths;
+
+    /** The @b [widths_count] @ref sz_overlap_window_power values. */
+    sz_u32_t const *powers;
+
+    /** The @b [count] bytes each query spans, a share's denominator. */
+    sz_u32_t const *lengths;
+
+    /** Queries prepared, which is the first axis of every output. */
+    sz_size_t count;
+
+    /** Entries in @c widths and @c powers, the last axis of an output. */
+    sz_size_t widths_count;
+
+    /** The tier @c _init_* resolved, and the only one that may score with it. */
+    sz_capability_t capability;
+
+    /** What built both blocks below and what grows the second. */
+    sz_memory_allocator_t alloc;
+
+    /** The forest's block, fixed for the engine's life, its head tier-private. */
+    void *memory;
+
+    /** Bytes of that block. */
+    sz_size_t memory_bytes;
+
+    /** The round's chains and window hashes, grown and never shrunk. */
+    void *scratch;
+
+    /** Bytes of that block, zero until the first round sizes it. */
+    sz_size_t scratch_bytes;
 } sz_overlap_engine_t;
 
 /** Materializes one query's tree: the levels and their bases are a closed form of its key count. */
@@ -199,20 +245,24 @@ SZ_HELPER_AUTO sz_overlap_btree_t sz_overlap_engine_row_(sz_overlap_engine_t con
     return btree;
 }
 
-/** The tier's own record at the head of @p engine 's block, where @ref sz_overlap_engine_open_ reserved it. */
+/** The tier's own record at the head of @p engine 's block, where
+ *  @ref sz_overlap_engine_open_ reserved it. */
 SZ_API_COMPTIME void *sz_overlap_engine_head_(sz_overlap_engine_t const *engine) {
     return (void *)(((sz_size_t)engine->memory + 63) & ~(sz_size_t)63);
 }
 
 /**
- *  @brief Takes one block for @p queries ' forest and points every view of @p engine into it.
+ *  @brief Takes one block for the forest of @p queries and points every view of @p engine into it.
  *
- *  Leaves @c nodes uninitialized and @c keys_counts zero: a tier fills both with its own hashing and sort, and
- *  records the capability it did so at.
- *  @param[in] head_bytes Bytes the tier keeps for itself before the arena, rounded up to a cache line.
- *  @param[in] alloc Whose residency every view of the engine inherits; stored by value, so @c _free needs no other.
- *  @retval sz_unexpected_dimensions_k for zero widths.
- *  @retval sz_bad_alloc_k when the block cannot be taken.
+ *  Leaves @c nodes uninitialized and @c keys_counts zero: a tier fills both with its own hashing
+ *  and sort, and records the capability it did so at.
+ *
+ *  @param[in] head_bytes Bytes the tier keeps for itself before the arena, rounded up to
+ *      a cache line.
+ *  @param[in] alloc Whose residency every view of the engine inherits; stored by value, so @c _free
+ *      needs no other.
+ *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for zero widths, or @c sz_bad_alloc_k
+ *      when the block cannot be taken.
  */
 SZ_API_COMPTIME sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries, sz_size_t const *window_widths,
                                                     sz_size_t window_widths_count, sz_size_t head_bytes,
@@ -273,12 +323,14 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries
     return sz_success_k;
 }
 
-/** Bytes one round's @p chains interleaved chains and its window hashes need over its longest candidate. */
+/** Bytes one round's @p chains interleaved chains and its window hashes need over
+ *  its longest candidate. */
 SZ_API_COMPTIME sz_size_t sz_overlap_engine_round_bytes_(sz_size_t longest_candidate, sz_size_t chains) {
     return (longest_candidate + 1) * chains * sizeof(sz_f64_t) + (longest_candidate + 1) * sizeof(sz_u32_t);
 }
 
-/** Grows @p engine 's round block to @p bytes, keeping whatever it already holds when that is enough. */
+/** Grows @p engine 's round block to @p bytes, keeping whatever it already holds when
+ *  that is enough. */
 SZ_API_COMPTIME sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine, sz_size_t bytes) {
     if (engine->scratch_bytes >= bytes) return sz_success_k;
     if (engine->scratch) engine->alloc.free(engine->scratch, engine->scratch_bytes, engine->alloc.handle);
@@ -296,7 +348,8 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t const
     return sz_success_k;
 }
 
-/** Returns both of @p engine 's blocks to the allocator they were built with, and leaves it empty. */
+/** Returns both of @p engine 's blocks to the allocator they were built with, and
+ *  leaves it empty. */
 SZ_API_COMPTIME void sz_overlap_engine_close_(sz_overlap_engine_t *engine) {
     if (engine->scratch) engine->alloc.free(engine->scratch, engine->scratch_bytes, engine->alloc.handle);
     if (engine->memory) engine->alloc.free(engine->memory, engine->memory_bytes, engine->alloc.handle);
@@ -314,8 +367,8 @@ SZ_API_COMPTIME void sz_overlap_engine_close_(sz_overlap_engine_t *engine) {
 /** Positions one serial step advances the chain by. */
 enum { sz_overlap_serial_f64x1_positions_per_step_k = 1 };
 
-/** @c (multiplier · multiplicand + addend) mod p in @c [0, p), exact for every input below 2^32; the product fits
- *  one @c u64, and the remainder by a constant lowers to a multiply-high and a shift. */
+/** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
+ *  product fits one @c u64, and the remainder by a constant becomes a multiply-high and a shift. */
 SZ_HELPER_AUTO sz_f64_t sz_overlap_serial_multiply_add_(sz_f64_t multiplier, sz_f64_t multiplicand, sz_f64_t addend) {
     sz_u64_t const product = (sz_u64_t)multiplier * (sz_u64_t)multiplicand + (sz_u64_t)addend;
     return (sz_f64_t)(product % (sz_u64_t)sz_overlap_modulus_k);
@@ -337,7 +390,8 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_tail_serial(sz_f64_t 
 }
 
 /**
- *  @brief One position's window hash: @c H(i,w) = P(i+w) - P(i)·b^w, a full-width hash under the modulus.
+ *  @brief One position's window hash: H(i, w) = P(i + w) − P(i) · bʷ, a full-width hash
+ *      under the modulus.
  *  @param[in] window_power @ref sz_overlap_window_power for this window's width.
  */
 SZ_HELPER_AUTO void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *prefix_hashes_at_start,
@@ -366,8 +420,8 @@ SZ_API_COMPTIME void sz_overlap_serial_exchange_(sz_u32_t *lower, sz_u32_t *uppe
     *upper = first < second ? second : first;
 }
 
-/** Sorts @p count keys ascending in place, unsigned, and drops repeats, answering how many remain; the buffer
- *  holds @ref sz_overlap_btree_sorted_capacity entries. */
+/** Sorts @p count keys ascending in place, unsigned, and drops repeats, answering how many remain;
+ *  the buffer holds @ref sz_overlap_btree_sorted_capacity entries. */
 SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_sort_serial(sz_u32_t *keys, sz_size_t count) {
     sz_size_t const capacity = sz_overlap_btree_sorted_capacity(count);
     for (sz_size_t position = count; position != capacity; ++position) keys[position] = sz_overlap_padding_key_k;
@@ -385,7 +439,8 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_sort_serial(sz_u32_t *keys, sz_
     return sz_overlap_btree_unique_(keys, count);
 }
 
-/** One branch level: the child ordinal a flipped @p key descends into, the count of separators below it. */
+/** One branch level: the child ordinal a flipped @p key descends into, the count of
+ *  separators below it. */
 SZ_HELPER_AUTO sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, sz_u32_t key) {
     sz_size_t child = 0;
     for (sz_size_t separator = 0; separator != sz_overlap_keys_per_node_k; ++separator)
@@ -419,8 +474,10 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_probe_serial(sz_overlap_btree_t
 }
 
 /**
- *  @brief Prepares every query of @p queries into one block, hashing and sorting on the serial tier.
- *  @param[in] alloc Where the forest's block comes from, or @c SZ_NULL for the default host allocator.
+ *  @brief Prepares every query of @p queries into one block, hashing and sorting on
+ *      the serial tier.
+ *  @param[in] alloc Where the forest's block comes from, or @c SZ_NULL for the
+ *      default host allocator.
  *  @sa sz_overlap_engine_init_cpu
  */
 SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_serial(sz_sequence_t const *queries, sz_size_t const *window_widths,

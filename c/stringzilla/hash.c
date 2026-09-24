@@ -1,8 +1,8 @@
 /**
  *  @file c/stringzilla/hash.c
- *  @brief Per-domain dispatch shim for hashing, checksums, SHA-256, and random fills.
  *  @author Ash Vardanian
  *  @date January 16, 2024
+ *  @brief Per-domain dispatch shim for hashing, checksums, SHA-256, and random fills.
  */
 #if !defined(SZ_OVERRIDE_LIBC)
 #define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
@@ -273,7 +273,7 @@ SZ_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states,
     sz_dispatch_cpu_table.sha256_multistate_digest(states, states_count, digests);
 }
 
-// Provide overrides for the libc mem* functions
+/* Provide overrides for the LibC `mem*` functions. */
 #if SZ_OVERRIDE_LIBC && !defined(__CYGWIN__)
 #if !defined(_MSC_VER)
 SZ_API_RUNTIME void memfrob(void *target, size_t length) {

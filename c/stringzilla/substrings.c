@@ -1,8 +1,8 @@
 /**
  *  @file c/stringzilla/substrings.c
- *  @brief Per-domain dispatch shim for multi-pattern search and scoring (`sz_substrings_*`).
  *  @author Ash Vardanian
- *  @date September 20, 2026
+ *  @date August 8, 2026
+ *  @brief Per-domain dispatch shim for multi-pattern search and scoring (`sz_substrings_*`).
  */
 #include <stringzilla/stringzilla.h> // `sz_capabilities`
 #include <stringzilla/substrings.h>

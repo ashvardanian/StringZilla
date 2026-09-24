@@ -1,15 +1,18 @@
 /**
- *  @brief SVE2 backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/sve2.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 15, 2026
+ *  @brief SVE2 backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *
  *  The normalizer scanner is a 64-entry table lookup behind an ASCII/inert gate. SVE2's headline
- *  instruction `svmatch` matches against a 16-byte set, which does not help a 64-entry LUT scanner -
- *  there is no scalable equivalent that subsumes the four `svtbl_u8` quadrants. So the SVE2 scan
- *  primitive `sz_utf8_norm_classify_sve2_` simply reuses the proven, vector-length-agnostic SVE body
- *  `sz_utf8_norm_classify_sve_`. The two public entry points exist so SVE2-tier dispatch resolves to
- *  named `_sve2` symbols, but the hot loop is byte-for-byte the SVE kernel.
+ *  instruction @c svmatch matches against a 16-byte set, which does not help a 64-entry LUT
+ *  scanner: there is no scalable equivalent that subsumes the four @c svtbl_u8 quadrants. So the
+ *  SVE2 scan primitive @c sz_utf8_norm_classify_sve2_ simply reuses the proven,
+ *  vector-length-agnostic SVE body @c sz_utf8_norm_classify_sve_. The two public entry points exist
+ *  so SVE2-tier dispatch resolves to named @c _sve2 symbols, while the hot loop stays byte-for-byte
+ *  identical to the SVE one.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_SVE2_H_
 #define STRINGZILLA_UTF8_NORM_SVE2_H_
@@ -30,8 +33,13 @@ extern "C" {
 #pragma GCC target("+sve2")
 #endif
 
-/** @brief Scan primitive (SVE2): first byte beginning a non-inert codepoint for @p form, else NULL.
- *         Reuses the SVE kernel verbatim - `svmatch` does not subsume the 64-entry LUT lookup. */
+/**
+ *  @brief SVE2 scan primitive: finds the first byte starting a non-inert codepoint for @p form.
+ *
+ *  Reuses the SVE kernel verbatim, because @c svmatch does not subsume the 64-entry LUT lookup.
+ *
+ *  @return The first such byte, or NULL.
+ */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve2_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_sve_(text, length, form);
 }

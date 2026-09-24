@@ -1,8 +1,11 @@
 /**
- *  @brief AVX2 (Haswell) backend for window overlap: four prefix hashes from one word, the window hashes four
- *      positions at a time, the sort over eight-key registers, and the B-tree probe eight keys at a time.
  *  @file include/stringzilla/overlap/haswell.h
  *  @author Ash Vardanian
+ *  @date January 27, 2024
+ *  @brief AVX2 (Haswell) backend for window overlap: four prefix hashes from one word, the window
+ *      hashes four positions at a time, the sort over eight-key registers, and the B-tree probe
+ *      eight keys at a time.
+ *
  *  @sa include/stringzilla/overlap.h
  */
 #ifndef STRINGZILLA_OVERLAP_HASWELL_H_
@@ -46,8 +49,8 @@ SZ_API_COMPTIME __m128i sz_overlap_haswell_f64x4_to_u32x4_(__m256d values_vec) {
     return _mm_xor_si128(biased_vec, _mm_set1_epi32((int)0x80000000u));
 }
 
-/** @c (multiplier · multiplicand + addend) mod p in @c [0, p), exact for every input below 2^32; the product's
- *  rounded head and its exact tail reduce together, so the 53-bit mantissa never binds. */
+/** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
+ *  product's rounded head and exact tail reduce together, so the 53-bit mantissa never binds. */
 SZ_API_COMPTIME __m256d sz_overlap_haswell_multiply_add_(__m256d multiplier_vec, __m256d multiplicand_vec,
                                                          __m256d addend_vec) {
     sz_u256_vec_t modulus_vec, reciprocal_vec, high_vec, low_vec, quotient_vec, folded_vec;
@@ -89,7 +92,8 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_f64x4_prefix_hash_step_tail_haswell(sz_f64_t
     return prior;
 }
 
-/** Four positions' window hashes: @c H(i,w) = P(i+w) - P(i)·b^w, a full-width hash under the modulus. */
+/** Four positions' window hashes: H(i, w) = P(i + w) − P(i) · bʷ, a full-width hash
+ *  under the modulus. */
 SZ_API_COMPTIME void sz_overlap_f64x4_window_hash_step_haswell(sz_f64_t const *prefix_hashes_at_start,
                                                                sz_f64_t const *prefix_hashes_at_end,
                                                                sz_f64_t window_power, sz_u32_t *window_hashes) {
@@ -157,7 +161,8 @@ SZ_HELPER_INLINE void sz_overlap_haswell_exchange_(__m256i *lower_vec, __m256i *
     *lower_vec = smaller_vec, *upper_vec = larger_vec;
 }
 
-/** The mirrored stage opening a merge of two ascending runs: @p upper is read and written reversed. */
+/** The mirrored stage opening a merge of two ascending runs: @p upper is read
+ *  and written reversed. */
 SZ_HELPER_INLINE void sz_overlap_haswell_exchange_mirrored_(__m256i *lower_vec, __m256i *upper_vec) {
     __m256i const reversed_vec = sz_overlap_haswell_reverse_(*upper_vec);
     __m256i const smaller_vec = _mm256_min_epu32(*lower_vec, reversed_vec);
@@ -165,7 +170,8 @@ SZ_HELPER_INLINE void sz_overlap_haswell_exchange_mirrored_(__m256i *lower_vec, 
     *lower_vec = smaller_vec, *upper_vec = sz_overlap_haswell_reverse_(larger_vec);
 }
 
-/** Sorts the eight keys of one register ascending: the merges of two, four and eight keys, all inside it. */
+/** Sorts the eight keys of one register ascending: the merges of two, four and eight keys,
+ *  all inside it. */
 SZ_API_COMPTIME __m256i sz_overlap_haswell_sort_within_(__m256i keys_vec) {
     keys_vec = sz_overlap_haswell_exchange_at_1_(keys_vec);
     keys_vec = sz_overlap_haswell_mirror_over_4_(keys_vec);
@@ -175,7 +181,8 @@ SZ_API_COMPTIME __m256i sz_overlap_haswell_sort_within_(__m256i keys_vec) {
     return sz_overlap_haswell_exchange_at_1_(keys_vec);
 }
 
-/** The ascending half-cleaners at distances four, two and one, closing a merge inside the register. */
+/** The ascending half-cleaners at distances four, two and one, closing a merge
+ *  inside the register. */
 SZ_API_COMPTIME __m256i sz_overlap_haswell_merge_within_(__m256i keys_vec) {
     keys_vec = sz_overlap_haswell_exchange_at_4_(keys_vec);
     keys_vec = sz_overlap_haswell_exchange_at_2_(keys_vec);
@@ -218,7 +225,8 @@ SZ_HELPER_INLINE void sz_overlap_haswell_merge_within_run_(__m256i *registers_ve
     registers_vec[7] = sz_overlap_haswell_merge_within_(registers_vec[7]);
 }
 
-/** Sorts one 64-key run ascending in eight registers: every stage is a fixed register pair or an immediate blend. */
+/** Sorts one 64-key run ascending in eight registers: every stage is a fixed register pair or
+ *  an immediate blend. */
 SZ_API_COMPTIME void sz_overlap_haswell_sort_run_(sz_u32_t *keys) {
     __m256i registers_vec[8];
     sz_overlap_haswell_load_run_(keys, registers_vec);
@@ -263,7 +271,8 @@ SZ_API_COMPTIME void sz_overlap_haswell_sort_run_(sz_u32_t *keys) {
     sz_overlap_haswell_store_run_(registers_vec, keys);
 }
 
-/** Closes a merge inside one 64-key run: the ascending stages at distances thirty-two down to one. */
+/** Closes a merge inside one 64-key run: the ascending stages at distances thirty-two
+ *  down to one. */
 SZ_API_COMPTIME void sz_overlap_haswell_merge_run_(sz_u32_t *keys) {
     __m256i registers_vec[8];
     sz_overlap_haswell_load_run_(keys, registers_vec);
@@ -283,8 +292,8 @@ SZ_API_COMPTIME void sz_overlap_haswell_merge_run_(sz_u32_t *keys) {
     sz_overlap_haswell_store_run_(registers_vec, keys);
 }
 
-/** Sorts @p count keys ascending in place, unsigned, and drops repeats, answering how many remain; the buffer
- *  holds @ref sz_overlap_btree_sorted_capacity entries. */
+/** Sorts @p count keys ascending in place, unsigned, and drops repeats, answering how many remain;
+ *  the buffer holds @ref sz_overlap_btree_sorted_capacity entries. */
 SZ_API_COMPTIME sz_size_t sz_overlap_u32x8_btree_sort_haswell(sz_u32_t *keys, sz_size_t count) {
     sz_size_t const keys_per_register = sz_overlap_haswell_keys_per_register_k;
     sz_size_t const keys_per_run = sz_overlap_haswell_keys_per_run_k;
@@ -320,7 +329,8 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x8_btree_sort_haswell(sz_u32_t *keys, sz
     return sz_overlap_btree_unique_(keys, count);
 }
 
-/** One branch level: the child ordinal a flipped @p key_vec descends into, the count of separators below it. */
+/** One branch level: the child ordinal a flipped @p key_vec descends into, the count of
+ *  separators below it. */
 SZ_API_COMPTIME sz_size_t sz_overlap_haswell_branch_step_(sz_u32_t const *node, __m256i key_vec) {
     __m256i const first_below_vec = _mm256_cmpgt_epi32(key_vec, _mm256_loadu_si256((__m256i const *)node));
     __m256i const second_below_vec = _mm256_cmpgt_epi32(key_vec, _mm256_loadu_si256((__m256i const *)(node + 8)));
@@ -394,8 +404,10 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x8_btree_probe_haswell(sz_overlap_btree_
 }
 
 /**
- *  @brief Prepares every query of @p queries into one block, hashing and sorting on the Haswell tier.
- *  @param[in] alloc Where the forest's block comes from, or @c SZ_NULL for the default host allocator.
+ *  @brief Prepares every query of @p queries into one block, hashing and sorting on
+ *      the Haswell tier.
+ *  @param[in] alloc Where the forest's block comes from, or @c SZ_NULL for the
+ *      default host allocator.
  *  @sa sz_overlap_engine_init_cpu
  */
 SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_haswell(sz_sequence_t const *queries,

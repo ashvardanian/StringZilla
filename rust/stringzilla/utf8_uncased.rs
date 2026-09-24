@@ -1,4 +1,7 @@
 //! Case-insensitive UTF-8 search, ordering, and match iteration.
+//!
+//! File: rust/stringzilla/utf8_uncased.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::cell::UnsafeCell;
@@ -8,19 +11,20 @@ use core::marker::PhantomData;
 
 /// Performs uncased search for `needle` in UTF-8 `haystack`.
 ///
-/// Unlike ASCII uncased search, this handles Unicode case folding
-/// (e.g., German ß matches "ss", Turkish İ matches "i").
+/// Unlike ASCII uncased search, this handles Unicode case folding,
+/// like German ß matching "ss" and Turkish İ matching "i".
 ///
 /// # Arguments
 ///
-/// * `haystack`: The UTF-8 text to search in.
-/// * `needle`: The UTF-8 pattern to search for.
+/// - `haystack`: The UTF-8 text to search in.
+/// - `needle`: The UTF-8 pattern to search for.
 ///
 /// # Returns
 ///
 /// If found, returns `Some((offset, matched_length))` where:
 /// - `offset` is the byte position in haystack where the match starts
-/// - `matched_length` is the number of bytes matched in haystack (may differ from needle length)
+/// - `matched_length` is the number of bytes matched in haystack, which may differ from
+///   the needle length
 ///
 /// Returns `None` if no match is found.
 ///
@@ -63,7 +67,7 @@ where
 /// Internal metadata for uncased UTF-8 search operations.
 ///
 /// This structure caches pre-computed information about the needle for reuse
-/// across multiple searches. Zero-initialization (default) triggers automatic
+/// across multiple searches. Zero-initialization, the default, triggers automatic
 /// analysis on first use.
 ///
 /// Matches C's `sz_utf8_uncased_needle_metadata_t`.
@@ -87,7 +91,8 @@ pub(crate) struct Utf8UncasedNeedleMetadata {
 }
 
 impl Utf8UncasedNeedleMetadata {
-    /// The state that requests analysis on first use, usable in a `const` unlike the `Default` it backs.
+    /// The state that requests analysis on first use, usable in a `const` unlike the
+    /// `Default` it backs.
     pub(crate) const UNANALYZED: Self = Self {
         offset_in_unfolded: 0,
         length_in_unfolded: 0,
@@ -176,7 +181,7 @@ unsafe impl<'a> Sync for Utf8UncasedNeedle<'a> {}
 /// Trait for types that can be used as a uncased search needle.
 ///
 /// This trait is implemented for:
-/// - Any type implementing `AsRef<[u8]>` (strings, byte slices, etc.)
+/// - Any type implementing `AsRef<[u8]>`, such as strings and byte slices
 /// - [`Utf8UncasedNeedle`] references for efficient repeated searches
 pub trait Utf8UncasedNeedleArg {
     /// Performs the uncased search in the given haystack.
@@ -241,14 +246,14 @@ impl<'a, 'b> Utf8UncasedNeedleArg for &'b Utf8UncasedNeedle<'a> {
 ///
 /// # Arguments
 ///
-/// * `first`: First UTF-8 string.
-/// * `second`: Second UTF-8 string.
+/// - `first`: First UTF-8 string.
+/// - `second`: Second UTF-8 string.
 ///
 /// # Returns
 ///
-/// * `Ordering::Less` if `first < second`
-/// * `Ordering::Equal` if `first == second` (uncasedly)
-/// * `Ordering::Greater` if `first > second`
+/// - `Ordering::Less` if `first < second`
+/// - `Ordering::Equal` if `first == second` uncasedly
+/// - `Ordering::Greater` if `first > second`
 ///
 /// # Examples
 ///
@@ -287,7 +292,7 @@ where
 ///
 /// This iterator yields `IndexSpan` values representing the byte offset and length
 /// of each match. The match length may differ from the needle length due to Unicode
-/// case folding (e.g., "ß" matches "SS", German eszett expands to two characters).
+/// case folding: "ß" matches "SS", as German eszett expands to two characters.
 ///
 /// The iterator caches needle metadata internally for efficient repeated searches.
 ///
@@ -337,7 +342,7 @@ impl<'a> Utf8UncasedMatches<'a, NonOverlapping> {
         }
     }
 
-    /// Report overlapping matches too (compile-time policy; returns the `Overlapping` variant).
+    /// Report overlapping matches too, a compile-time policy returning the `Overlapping` variant.
     pub fn overlapping(self) -> Utf8UncasedMatches<'a, Overlapping> {
         Utf8UncasedMatches {
             haystack: self.haystack,
@@ -379,7 +384,7 @@ impl<'a, O: Overlaps> Iterator for Utf8UncasedMatches<'a, O> {
             let offset_in_remaining = unsafe { result.offset_from(remaining.as_ptr() as *const c_void) } as usize;
             let absolute_offset = self.position + offset_in_remaining;
 
-            // Advance position for next search. A zero-length match (empty needle) must still
+            // Advance position for next search. A zero-length match from an empty needle must still
             // advance by at least one byte in the non-overlapping case, or this would loop
             // forever re-matching the same position; the overlapping case already always
             // advances by 1 regardless of `matched_length`.
@@ -416,16 +421,16 @@ mod tests {
         (folded, folded_length)
     }
 
-    /// Independent oracle for uncased UTF-8 search. A match exists iff the fold of
-    /// `needle` is a contiguous run of the fold of `haystack`; the earliest such run wins.
-    /// The reported `(offset, length)` is in ORIGINAL haystack bytes, snapped to codepoint
-    /// boundaries. Implemented by folding each haystack codepoint and remembering, for every
-    /// folded byte, the original byte span of the codepoint that produced it.
+    /// Independent oracle for uncased UTF-8 search. A match exists iff the fold of `needle` is a
+    /// contiguous run of the fold of `haystack`; the earliest such run wins. The reported
+    /// `(offset, length)` is in original haystack bytes, snapped to codepoint boundaries.
+    /// Implemented by folding each haystack codepoint and remembering, for every folded byte, the
+    /// original byte span of the codepoint that produced it.
     fn reference_uncased_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
         // Fixed-size accumulators sized for the short test inputs.
         const CAPACITY: usize = 512;
         let mut haystack_folded = [0u8; CAPACITY];
-        // For each folded byte, the [start, end) byte range in the ORIGINAL haystack of the
+        // For each folded byte, the [start, end) byte range in the original haystack of the
         // codepoint that produced it.
         let mut source_starts = [0usize; CAPACITY];
         let mut source_ends = [0usize; CAPACITY];

@@ -1,25 +1,29 @@
 /**
- *  @brief Hardware-accelerated Levenshtein edit distances under unit costs.
  *  @file include/stringzilla/levenshtein.h
  *  @author Ash Vardanian
+ *  @date September 6, 2023
+ *  @brief Hardware-accelerated Levenshtein edit distances under unit costs.
  *
  *  Includes core APIs with hardware-specific backends:
  *
- *  - @c sz_levenshtein_engine_init_cpu - prepares a batch of queries on the host and fixes the tier that scores it.
- *  - @c sz_levenshtein_engine_init_gpu - prepares the same batch on a device, on a stream the caller owns.
- *  - @c sz_levenshtein_engine_free - returns both of an engine's blocks to the allocator that built them.
- *  - @c sz_levenshtein_distances - the @b [queries, candidates] edit distances of one prepared batch.
+ *  - @c sz_levenshtein_engine_init_cpu - prepares a batch of queries on the host and fixes the tier
+ *    that scores it.
+ *  - @c sz_levenshtein_engine_init_gpu - prepares the same batch on a device, on a caller's stream.
+ *  - @c sz_levenshtein_engine_free - returns an engine's blocks to the allocator that built them.
+ *  - @c sz_levenshtein_distances - the @b [queries, candidates] edit distances of one batch.
  *
- *  All run Myers' bit-parallel algorithm: every query is a pattern, packed 64 symbols per machine word, and every
- *  candidate streams one symbol per step. An engine prepares the whole batch's match masks once and advances
- *  several candidates per step - one per scalar state, four per YMM, eight per ZMM, one per thread on a device -
- *  so the tables are built once per batch rather than once per pair. A byte is its own mask class, while a rune
- *  takes the class its query assigned it or class zero when the query lacks it, which @ref sz_levenshtein_symbol_t
- *  picks between. Strings of any length are accepted on either side.
+ *  All run Myers' bit-parallel algorithm: every query is a pattern, packed 64 symbols per machine
+ *  word, and every candidate streams one symbol per step. An engine prepares the whole batch's
+ *  match masks once and advances several candidates per step - one per scalar state, four per YMM,
+ *  eight per ZMM, one per thread on a device - so the tables are built once per batch rather than
+ *  once per pair. A byte is its own mask class, while a rune takes the class its query assigned it
+ *  or class zero when the query lacks it, which @ref sz_levenshtein_symbol_t picks between. Strings
+ *  of any length are accepted on either side.
  *
- *  The building blocks are public as well, for callers that own the loop nest: the query preparation and the
- *  transposes on the query side, and per backend a @c state, a @c vertical, and the @c init / @c step / @c any_active
- *  / @c score verbs over them, named by candidates per step - @c sz_levenshtein_u64x4_step_haswell and so on.
+ *  The building blocks are public as well, for callers that own the loop nest: the query
+ *  preparation and the transposes on the query side, and per backend a state, a vertical, and the
+ *  init, step, any-active and score verbs over them, named by candidates per step, such as
+ *  @c sz_levenshtein_u64x4_step_haswell.
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_H_
 #define STRINGZILLA_LEVENSHTEIN_H_
@@ -39,15 +43,16 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Prepares @p queries on the host into one block @p alloc hands back, and resolves the CPU tier once.
+ *  @brief Prepares @p queries on the host into one block from @p alloc, resolving the CPU tier.
  *
- *  @param[in] queries The patterns every candidate is scored against, read through host-callable accessors.
- *  @param[in] symbol Whether a distance counts bytes or UTF-8 runes, which picks the tier as well as the layout.
- *  @param[in] alloc Where both of the engine's blocks come from, or @c SZ_NULL for the default host allocator.
- *  @param[out] engine Left untouched unless the call succeeds, and released by @ref sz_levenshtein_engine_free.
- *
- *  @retval sz_bad_alloc_k when the batch's block or the sizing pass's scratch could not be allocated.
- *  @note Ice Lake's byte lanes have no rune arm, so a rune batch resolves to Skylake however capable the machine is.
+ *  @param[in] queries The patterns every candidate is scored against, via host-callable accessors.
+ *  @param[in] symbol Whether a distance counts bytes or UTF-8 runes, picking tier and layout alike.
+ *  @param[in] alloc Source of the engine's blocks, or @c SZ_NULL for the default host allocator.
+ *  @param[out] engine Untouched unless the call succeeds; @ref sz_levenshtein_engine_free frees it.
+ *  @return @c sz_success_k, or @c sz_bad_alloc_k when the batch's block or the sizing pass's
+ *      scratch could not be allocated.
+ *  @note Ice Lake's byte lanes have no rune arm, so a rune batch resolves to Skylake however
+ *      capable the machine is.
  *  @sa sz_levenshtein_tier_for
  */
 SZ_API_RUNTIME sz_status_t sz_levenshtein_engine_init_cpu(sz_sequence_t const *queries,
@@ -58,15 +63,16 @@ SZ_API_RUNTIME sz_status_t sz_levenshtein_engine_init_cpu(sz_sequence_t const *q
 /**
  *  @brief Prepares @p queries on @p stream 's device, resolving the launch geometry once.
  *
- *  @param[in] queries The patterns every candidate is scored against, read through @b host-callable accessors
- *      over @b host-readable texts, since this side counts their symbols and their classes to size the block.
+ *  @param[in] queries The patterns every candidate is scored against, read through @b host-callable
+ *      accessors over @b host-readable texts, since this side counts their symbols and their
+ *      classes to size the block.
  *  @param[in] symbol Whether a distance counts bytes or UTF-8 runes.
- *  @param[in] alloc Unified and bound to @p stream, or @c SZ_NULL to have a unified one derived from it.
- *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the current device's default one.
+ *  @param[in] alloc Unified and bound to @p stream, or @c SZ_NULL to derive a unified one from it.
+ *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the default stream.
  *  @param[out] engine Left untouched unless the call succeeds.
- *
- *  @retval sz_unexpected_dimensions_k for an empty query, or one past @ref sz_levenshtein_cuda_words_max_k words.
- *  @retval sz_device_code_mismatch_k when no GPU runtime is compiled in, or a launch itself fails.
+ *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for an empty query or one past
+ *      @ref sz_levenshtein_cuda_words_max_k words, or @c sz_device_code_mismatch_k when no GPU
+ *      runtime is compiled in or a launch itself fails.
  *  @note May join @p stream; no scoring verb ever does.
  */
 SZ_API_RUNTIME sz_status_t sz_levenshtein_engine_init_gpu(sz_sequence_t const *queries,
@@ -74,22 +80,23 @@ SZ_API_RUNTIME sz_status_t sz_levenshtein_engine_init_gpu(sz_sequence_t const *q
                                                           sz_memory_allocator_t *alloc, void *stream,
                                                           sz_levenshtein_engine_t *engine);
 
-/** @brief Returns both of @p engine 's blocks to the allocator they were built with, and leaves it empty. */
+/** Returns both of @p engine 's blocks to the allocator that built them, and leaves it empty. */
 SZ_API_RUNTIME void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine);
 
 /**
- *  @brief Edit distances from every prepared query to every candidate, on the tier @p engine was built for.
+ *  @brief Edit distances from every prepared query to every candidate, on the tier of @p engine.
  *
- *  @param[in] engine The batch @c _init_cpu or @c _init_gpu prepared, whose round scratch this may grow.
+ *  @param[in] engine The batch @c _init_cpu or @c _init_gpu prepared; its round scratch may grow.
  *  @param[in] candidates The collection of texts, on the residency @p engine was built for.
- *  @param[out] distances The @b [count, candidates] distances; query @c q at @c distances[q*stride + c].
- *  @param[in] distances_stride Entries from one query's row to the next, in @c sz_size_t, at least the count.
- *
- *  @retval sz_unexpected_dimensions_k when @p distances_stride is under @c candidates->count.
- *  @retval sz_bad_alloc_k when the round's verticals could not be allocated.
- *  @note Grows @c engine->scratch when a round needs more than the last one did; never joins.
- *  @sa sz_levenshtein_distances_serial, sz_levenshtein_distances_haswell, sz_levenshtein_distances_skylake,
- *      sz_levenshtein_distances_icelake, sz_levenshtein_distances_cuda
+ *  @param[out] distances The @b [count, candidates] distances, query @c q at
+ *      `distances[q * stride + c]`.
+ *  @param[in] distances_stride Entries from one query's row to the next, at least the count.
+ *  @return @c sz_success_k, @c sz_unexpected_dimensions_k when @p distances_stride is under the
+ *      candidate count, or @c sz_bad_alloc_k when the round's verticals could not be allocated.
+ *  @note Grows the engine's scratch when a round needs more than the last one did; never joins.
+ *  @sa sz_levenshtein_distances_serial, sz_levenshtein_distances_haswell
+ *  @sa sz_levenshtein_distances_skylake, sz_levenshtein_distances_icelake
+ *  @sa sz_levenshtein_distances_cuda
  */
 SZ_API_RUNTIME sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
                                                     sz_size_t *distances, sz_size_t distances_stride);
@@ -133,11 +140,12 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_engine_init_cuda(sz_sequence_t const 
                                                             sz_levenshtein_engine_t *engine);
 
 /**
- *  @brief One pair's Levenshtein distance through the tiled wavefront, on texts the device already reaches.
+ *  @brief One pair's Levenshtein distance through the tiled wavefront, on device-reachable texts.
  *
- *  Myers parallelizes over candidates and over the query's words, and a pair is one candidate, so an engine of
- *  one query hands it a single lane. The wavefront parallelizes over the long text's tile-columns instead, which
- *  is the axis the bit-parallel recurrence cannot touch, and is the entry point for a pair too long for it.
+ *  Myers parallelizes over candidates and over the query's words, and a pair is one candidate, so
+ *  an engine of one query hands it a single lane. The wavefront parallelizes over the long text's
+ *  tile-columns instead, which is the axis the bit-parallel recurrence cannot touch, and is the
+ *  entry point for a pair too long for it.
  *
  *  @param[in] a First text, device-reachable.
  *  @param[in] a_length Its length in bytes.
@@ -146,8 +154,9 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_engine_init_cuda(sz_sequence_t const 
  *  @param[in] alloc Hands back the frontier scratch, which has to be memory the device reaches.
  *  @param[out] distance Host-readable slot receiving the distance.
  *  @param[in] stream The @c cudaStream_t to schedule on, or @c SZ_NULL for the default one.
- *  @retval sz_unexpected_dimensions_k when either text is longer than the kernel indexes.
- *  @retval sz_device_memory_mismatch_k when a text or the scratch is not memory the device reaches.
+ *  @return @c sz_success_k, @c sz_unexpected_dimensions_k when either text is longer than the
+ *      kernel indexes, or @c sz_device_memory_mismatch_k when a text or the scratch is not memory
+ *      the device reaches.
  *  @note Joins @p stream before it answers, which is what carries the distance back.
  */
 SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
@@ -158,8 +167,7 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_s
 #pragma endregion Core API
 
 /*  Pick the right implementation for the edit-distance algorithms.
- *  To override this behavior and precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1.
- */
+ *  To override this behavior and precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 

@@ -1,7 +1,9 @@
 /**
- *  @brief Skylake (AVX-512) backend for substring & byte-set search.
  *  @file include/stringzilla/find/skylake.h
  *  @author Ash Vardanian
+ *  @date December 9, 2023
+ *  @brief Skylake (AVX-512) backend for substring & byte-set search.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SKYLAKE_H_
@@ -18,8 +20,7 @@ extern "C" {
 /*  AVX512 implementation of the string search algorithms for Skylake and newer CPUs.
  *  Includes extensions: F, CD, ER, PF, VL, DQ, BW.
  *
- *  This is the "starting level" for the advanced algorithms using K-mask registers on x86.
- */
+ *  This is the "starting level" for the advanced algorithms using K-mask registers on x86. */
 #if SZ_USE_SKYLAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,lzcnt,evex512"))), \

@@ -1,7 +1,9 @@
 /**
- *  @brief Haswell (AVX2) backend for string comparison utilities.
  *  @file include/stringzilla/compare/haswell.h
  *  @author Ash Vardanian
+ *  @date October 1, 2024
+ *  @brief Haswell (AVX2) backend for string comparison utilities.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_HASWELL_H_

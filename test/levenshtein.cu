@@ -1,21 +1,25 @@
 /**
- *  @brief  Levenshtein distances on the GPU: the device engine against serial's answers at every word boundary
- *          a rung is cut at, the memory contract the verbs keep, and the query bound the verticals impose.
- *  @file   test/levenshtein.cu
+ *  @file test/levenshtein.cu
  *  @author Ash Vardanian
- *  @date   September 15, 2026
+ *  @date September 6, 2023
+ *  @brief Levenshtein distances on the GPU.
  *
- *  @c test/levenshtein.cpp defines @c test_levenshtein_all and @c test_levenshtein_safety over the CPU backend
- *  table, and this file defines them over the CUDA one. No target links both - @c stringzilla_test_cpp20 takes
- *  the first and @c stringzilla_test_cu20 the second - a CMake invariant rather than a language one.
+ *  Covers the device engine against serial's answers at every word boundary a rung is cut at, the
+ *  memory contract the verbs keep, and the query bound the verticals impose.
  *
- *  The sibling @c test/levenshtein.cpp drives the step primitives and the CPU backends; nothing here repeats that.
- *  These are the cases a host translation unit cannot express: device-reachable memory, a device-bound sequence,
- *  a caller's own stream, and the refusals that keep a host pointer from reaching a kernel as an address.
+ *  @c test/levenshtein.cpp defines @c test_levenshtein_all and @c test_levenshtein_safety over the
+ *  CPU backend table, and this file defines them over the CUDA one. No target links both -
+ *  @c stringzilla_test_cpp20 takes the first and @c stringzilla_test_cu20 the second - a CMake
+ *  invariant rather than a language one.
  *
- *  Query lengths are swept from a table whose status at each length is derived from the widest rung that length's
- *  alphabet reaches, so a length past it is expected to be refused and a raised constant turns that row into an
- *  answer without a line changing here.
+ *  The sibling @c test/levenshtein.cpp drives the step primitives and the CPU backends; nothing
+ *  here repeats that. These are the cases a host translation unit cannot express: device-reachable
+ *  memory, a device-bound sequence, a caller's own stream, and the refusals that keep a host
+ *  pointer from reaching a kernel as an address.
+ *
+ *  Query lengths are swept from a table whose status at each length is derived from the widest rung
+ *  that length's alphabet reaches, so a length past it is expected to be refused and a raised
+ *  constant turns that row into an answer without a line changing here.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -37,15 +41,15 @@ using namespace sz::test;
 
 #pragma region Helpers
 
-/** @brief What one symbol of a corpus is: a byte the tables class directly, or a rune the page table classes. */
+/** What a corpus symbol is: a byte the tables class directly, or a rune the page table classes. */
 enum class levenshtein_cuda_alphabet_t { bytes_k, runes_k };
 
-/** The alphabet enumerator an engine is prepared over, for the corpus alphabet a check drew its symbols from. */
+/** The alphabet enumerator an engine is prepared over, matching the corpus alphabet of a check. */
 static sz_levenshtein_symbol_t levenshtein_cuda_symbol_(levenshtein_cuda_alphabet_t alphabet) {
     return alphabet == levenshtein_cuda_alphabet_t::runes_k ? sz_levenshtein_runes_k : sz_levenshtein_bytes_k;
 }
 
-/** The symbols a corpus draws from: every byte value, or runes across four scripts and all three encoded widths. */
+/** Corpus symbols: every byte value, or runes across four scripts and all three encoded widths. */
 static std::vector<std::string> levenshtein_cuda_symbols_(levenshtein_cuda_alphabet_t alphabet) {
     std::vector<std::string> symbols;
     if (alphabet == levenshtein_cuda_alphabet_t::bytes_k) {
@@ -59,22 +63,38 @@ static std::vector<std::string> levenshtein_cuda_symbols_(levenshtein_cuda_alpha
 }
 
 /**
- *  @brief A corpus both sides address: one arena of near-duplicates, the views into it, and room for the matrix.
+ *  @brief A corpus both sides address: an arena of near-duplicates, its views, and the matrix.
  *
- *  The candidates are edits of the queries, so the distances are small and every word of the Myers state moves.
- *  Unified storage is readable from the host, so the serial reference runs against these very bytes and the device
- *  builder reads them where they already live. Edits land on whole symbols, so a rune corpus stays well-formed and
- *  its symbol count is exactly what the engine is told.
+ *  The candidates are edits of the queries, so the distances are small and every word of the Myers
+ *  state moves. Unified storage is readable from the host, so the serial reference runs against
+ *  these very bytes and the device builder reads them where they already live. Edits land on whole
+ *  symbols, so a rune corpus stays well-formed and the engine is told its exact symbol count.
  */
 struct levenshtein_cuda_corpus_t {
-    unified_vector<char> query_arena;             /**< Every query's bytes, back to back. */
-    unified_vector<sz_string_view_t> query_views; /**< One view per query; its size is the query count. */
-    unified_vector<char> arena;                   /**< Every candidate's bytes, back to back. */
-    unified_vector<sz_string_view_t> views;       /**< One view per candidate; its size is the candidate count. */
-    unified_vector<sz_size_t> distances;          /**< @b [queries, candidates], written by whichever round ran. */
-    sz_sequence_t queries {};                     /**< Host accessors over the queries, as an init requires. */
-    sz_sequence_t device_candidates {};           /**< Accessors a kernel calls, as the scoring verb requires. */
-    sz_sequence_t host_candidates {};             /**< Accessors the serial reference calls, over the same views. */
+
+    /** Every query's bytes, back to back. */
+    unified_vector<char> query_arena;
+
+    /** One view per query; its size is the query count. */
+    unified_vector<sz_string_view_t> query_views;
+
+    /** Every candidate's bytes, back to back. */
+    unified_vector<char> arena;
+
+    /** One view per candidate; its size is the candidate count. */
+    unified_vector<sz_string_view_t> views;
+
+    /** @b [queries, candidates], written by whichever round ran. */
+    unified_vector<sz_size_t> distances;
+
+    /** Host accessors over the queries, as an init requires. */
+    sz_sequence_t queries {};
+
+    /** Accessors a kernel calls, as the scoring verb requires. */
+    sz_sequence_t device_candidates {};
+
+    /** Accessors the serial reference calls, over the same views. */
+    sz_sequence_t host_candidates {};
 
     levenshtein_cuda_corpus_t(std::size_t count, std::size_t query_symbols, std::size_t query_count,
                               levenshtein_cuda_alphabet_t alphabet)
@@ -141,18 +161,25 @@ static std::vector<sz_size_t> levenshtein_serial_reference_(levenshtein_cuda_cor
 
 #pragma region Backends
 
-/** @brief One CUDA backend's cross-product verb, and the device it needs. */
+/** One CUDA backend's cross-product verb, and the device it needs. */
 struct levenshtein_cuda_backend_t {
-    char const *name;                     /**< The row's spelling, for @ref fail_backend_ and the log. */
-    sz_capability_t required;             /**< The tier bits @ref sz_capabilities must carry for this row to run. */
-    sz_levenshtein_distances_t distances; /**< The verb, over bytes or over runes as the engine was built. */
+
+    /** The row's spelling, for @ref fail_backend_ and the log. */
+    char const *name;
+
+    /** The tier bits @ref sz_capabilities must carry for this row to run. */
+    sz_capability_t required;
+
+    /** The verb, over bytes or over runes as the engine was built. */
+    sz_levenshtein_distances_t distances;
 };
 
 /**
  *  @brief Every CUDA backend compiled into this translation unit, dispatched first.
  *
- *  Unlike the CPU tables, whose rows a `#if` selects, every CUDA tier is compiled into one fatbin and chosen at
- *  run time - so a row states the tier bits it needs and the drivers skip it on a device that lacks them.
+ *  Unlike the CPU tables, whose rows a `#if` selects, every CUDA tier is compiled into one fatbin
+ *  and chosen at run time - so a row states the tier bits it needs and the drivers skip it on a
+ *  device that lacks them.
  */
 static levenshtein_cuda_backend_t const levenshtein_cuda_backends[] = {
     {"dispatched", sz_cap_cuda_k, sz_levenshtein_distances},
@@ -166,29 +193,30 @@ static levenshtein_cuda_backend_t const levenshtein_cuda_backends[] = {
 /**
  *  @brief The status a query of @p query_symbols symbols draws, as the widest rung decides it.
  *
- *  Both alphabets reach the warped rung, whose thirty-two lanes hold @ref sz_levenshtein_cuda_words_max_k words
- *  between them; a rune query gets there by riding its class down the lanes rather than by indexing the candidate.
+ *  Both alphabets reach the warped rung, whose thirty-two lanes hold
+ *  @ref sz_levenshtein_cuda_words_max_k words between them; a rune query gets there by riding its
+ *  class down the lanes rather than by indexing the candidate.
  */
 static constexpr sz_status_t levenshtein_cuda_expected_status_(std::size_t query_symbols) {
     return query_symbols <= (std::size_t)sz_levenshtein_cuda_words_max_k * 64 ? sz_success_k
                                                                               : sz_unexpected_dimensions_k;
 }
 
-/** Symbol-pairs one sweep scores before it drops the widest batch, so the serial reference stays quadratic in time
- *  but bounded in it as the rungs widen. */
+/** Symbol-pairs one sweep scores before it drops the widest batch, so the serial reference stays
+ *  quadratic in time but bounded in it as the rungs widen. */
 enum { levenshtein_cuda_sweep_budget_k = 4u * 1024u * 1024u };
 
-/** Queries one sweep prepares at a time, so @c grid.y carries an axis wider than one in every rung. */
+/** Queries one sweep prepares at a time, so @c grid.y carries an axis wider than one per rung. */
 enum { levenshtein_cuda_sweep_queries_k = 3 };
 
 /**
- *  @brief Every query length the sweeps walk, sitting either side of each boundary a rung is cut at.
+ *  @brief Every query length the sweeps walk, either side of each boundary a rung is cut at.
  *
- *  The narrow rungs share one register between candidates, four ways through eight symbols and two ways
- *  through sixteen, so the symbols either side of 8 and 16. The threaded rung cuts at every word through its
- *  sixteenth, where the warped rung takes over, so the bytes either side of 64, 128 and 1024. The warped rung
- *  hands its lanes one more word each at every thirty-second word past that, so the bytes either side of every
- *  multiple of 2048 up to the ceiling itself.
+ *  The narrow rungs share one register between candidates, four ways through eight symbols and two
+ *  ways through sixteen, so the symbols either side of 8 and 16. The threaded rung cuts at every
+ *  word through its sixteenth, where the warped rung takes over, so the bytes either side of 64,
+ *  128 and 1024. The warped rung hands its lanes one more word each at every thirty-second word
+ *  past that, so the bytes either side of every multiple of 2048 up to the ceiling itself.
  */
 static constexpr std::size_t levenshtein_cuda_query_symbols_k[] = {
     1,    2,    4,    8,    9,    16,   17,   63,   64,    65,    127,   128,   129,   1023,  1024,  1025,  2047,  2048,
@@ -231,10 +259,11 @@ static void check_levenshtein_cuda_equivalence_(char const *name, levenshtein_cu
 /**
  *  @brief The narrow rungs against serial, on a batch wide enough for the dispatch to reach them.
  *
- *  Four candidates share a byte-laned register and two share a short-laned one, so their grid is that many
- *  times narrower than the threaded rung's over one batch, and the dispatch keeps them for batches that still
- *  fill the device. That width is past anything the length sweep builds, which is why they are checked here,
- *  over candidates that run past the eight bytes one refill hands a lane and start at every alignment.
+ *  Four candidates share a byte-laned register and two share a short-laned one, so their grid is
+ *  that many times narrower than the threaded rung's over one batch, and the dispatch keeps them
+ *  for batches that still fill the device. That width is past anything the length sweep builds,
+ *  which is why they are checked here, over candidates that run past the eight bytes one refill
+ *  hands a lane and start at every alignment.
  */
 static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtein_distances_t device) {
     enum { arena_bytes_k = 256, longest_candidate_k = 33, offsets_k = 97 };
@@ -305,7 +334,7 @@ static void check_levenshtein_cuda_tiled_() {
     }
 }
 
-/** One backend refusing host memory rather than staging it, the sequence handle and the outputs alike. */
+/** One backend refusing host memory, sequence handle and outputs alike, rather than staging it. */
 static void check_levenshtein_cuda_memory_safety_(levenshtein_cuda_backend_t const &backend) {
     std::string arena(660, '\0');
     randomize_string(&arena[0], arena.size());
@@ -326,7 +355,7 @@ static void check_levenshtein_cuda_memory_safety_(levenshtein_cuda_backend_t con
     sz_levenshtein_engine_free(&engine);
 }
 
-/** The builder's refusal of a query past what the widest rung holds, in bytes and again in runes. */
+/** The builder refusing a query past what the widest rung holds, in bytes and again in runes. */
 static void check_levenshtein_cuda_query_safety_() {
     enum { symbols_k = sz_levenshtein_cuda_words_max_k * 64 + 1 };
     for (levenshtein_cuda_alphabet_t const alphabet :
@@ -340,7 +369,7 @@ static void check_levenshtein_cuda_query_safety_() {
     }
 }
 
-/** An empty query has no last word to read its score off, so a batch holding one is refused outright. */
+/** An empty query has no last word to read a score off, so a batch holding one is refused. */
 static void check_levenshtein_cuda_empty_query_safety_() {
     unified_vector<sz_string_view_t> query_views(1);
     query_views[0].start = SZ_NULL, query_views[0].length = 0;
@@ -352,19 +381,19 @@ static void check_levenshtein_cuda_empty_query_safety_() {
         fail_backend_("cuda", "an empty query was not refused");
 }
 
-/** Device work queued ahead of the verb, so a stream still draining after it returns is not a timing accident. */
+/** Device work queued ahead of the verb, so a stream draining after it returns is no accident. */
 enum { levenshtein_cuda_filler_bytes_k = 128u * 1024u * 1024u, levenshtein_cuda_filler_passes_k = 16 };
 
-/** Candidates and query symbols the asynchrony check scores, wide enough to outlast one launch on its own. */
+/** Candidates and query symbols the asynchrony check scores, enough to outlast one launch alone. */
 enum { levenshtein_cuda_scheduled_candidates_k = 2048, levenshtein_cuda_scheduled_symbols_k = 1024 };
 
 /**
- *  @brief The scoring verb returning before the round it schedules completes, on a stream the caller owns.
+ *  @brief The scoring verb returning before its round completes, on a stream the caller owns.
  *
- *  Work is queued on that stream first, so it is busy when the verb is called: a verb that joined would drain
- *  the filler too, and the query right after it would report the stream idle. Nothing is asserted about the
- *  init, which is allowed to join. The distances are checked once the stream does drain, so the round that ran
- *  asynchronously is the round the equivalence sweep would run.
+ *  Work is queued on that stream first, so it is busy when the verb is called: a verb that joined
+ *  would drain the filler too, and the query right after it would report the stream idle. Nothing
+ *  is asserted about the init, which is allowed to join. The distances are checked once the stream
+ *  does drain, so the round that ran asynchronously is the round the equivalence sweep would run.
  */
 static void check_levenshtein_cuda_scheduled_asynchrony_() {
     levenshtein_cuda_corpus_t corpus(levenshtein_cuda_scheduled_candidates_k, levenshtein_cuda_scheduled_symbols_k,
@@ -401,7 +430,7 @@ static void check_levenshtein_cuda_scheduled_asynchrony_() {
 
 #pragma region Drivers
 
-/** @brief Every CUDA backend this device carries, against serial, over generated corpora at every rung boundary. */
+/** Every CUDA backend this device carries, against serial, on generated corpora at rung edges. */
 void test_levenshtein_all() {
     fmt::println("  - testing {} CUDA query lengths against serial over bytes and runes, refused past {} words",
                  sizeof(levenshtein_cuda_query_symbols_k) / sizeof(std::size_t), (int)sz_levenshtein_cuda_words_max_k);
@@ -417,7 +446,7 @@ void test_levenshtein_all() {
     }
 }
 
-/** @brief Degenerate inputs, stated refusals, and the bound each alphabet's widest rung imposes. */
+/** Degenerate inputs, stated refusals, and the bound each alphabet's widest rung imposes. */
 void test_levenshtein_safety() {
     fmt::println("  - testing degenerate inputs and refused batches of the CUDA edit-distance kernels...");
     for (levenshtein_cuda_backend_t const &backend : levenshtein_cuda_backends) {

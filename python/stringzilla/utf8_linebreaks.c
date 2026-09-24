@@ -1,7 +1,8 @@
 /**
- *  @brief UAX-14 line break opportunities in UTF-8 text.
  *  @file python/stringzilla/utf8_linebreaks.c
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief UAX-14 line break opportunities in UTF-8 text.
  */
 #include "stringzilla.h"
 
@@ -9,7 +10,7 @@ char const doc_utf8_linebreaks[] =                                              
     "utf8_linebreaks(string, /)\n"                                                   //
     "\n"                                                                             //
     "Return an iterator yielding segments at line-break opportunities per UAX-14.\n" //
-    "Each segment ends at a line-break opportunity (a soft wrap point).\n"           //
+    "Each segment ends at a line-break opportunity, a soft wrap point.\n"            //
     "For hard-line splitting (str.splitlines()), use utf8_split_newlines().\n"       //
     "\n"                                                                             //
     "Args:\n"                                                                        //
@@ -39,7 +40,7 @@ static char const doc_Utf8Linebreaks[] =                                        
     "Utf8Linebreaks(string, ...)\n"                                               //
     "\n"                                                                          //
     "UTF-8 aware line-break-opportunity iterator per Unicode UAX-14 algorithm.\n" //
-    "Yields Str views for each line-break-opportunity segment (a soft wrap).\n"   //
+    "Yields Str views for each line-break-opportunity segment, a soft wrap.\n"    //
     "For hard-line splitting (str.splitlines()), use utf8_split_newlines().\n"    //
     "\n"                                                                          //
     "Created by:\n"                                                               //
@@ -47,7 +48,7 @@ static char const doc_Utf8Linebreaks[] =                                        
     "  - sz.utf8_linebreaks()\n"                                                  //
     "\n"                                                                          //
     "UAX-14 Line_Break rules implemented:\n"                                      //
-    "  - LB4-LB6: Mandatory breaks (BK, CR, LF, NL)\n"                            //
+    "  - LB4-LB6: Mandatory breaks at BK, CR, LF, NL\n"                           //
     "  - LB7-LB8: Spaces and ZWSP break opportunities\n"                          //
     "  - LB9-LB14: Combining marks, opening/closing punctuation\n"                //
     "  - LB15-LB31: Quotation, numbers, words, CJK rules\n\n"                     //

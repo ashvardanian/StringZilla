@@ -1,43 +1,35 @@
 /**
- *  @brief  UTF-8 codepoint counting, nth-character finding, and streaming rune-unpacking tests.
  *  @file test/utf8_runes.cpp
  *  @author Ash Vardanian
- *  @date June 20, 2026
+ *  @date November 24, 2025
+ *  @brief UTF-8 codepoint counting, nth-character finding, and streaming rune-unpacking tests.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  ! Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development to validate ISA-specific implementations.
+ *
+ *  #define SZ_USE_WESTMERE 0
+ *  #define SZ_USE_HASWELL 0
+ *  #define SZ_USE_GOLDMONT 0
+ *  #define SZ_USE_SKYLAKE 0
+ *  #define SZ_USE_ICELAKE 0
+ *  #define SZ_USE_NEON 0
+ *  #define SZ_USE_SVE 0
+ *  #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Make sure to include the StringZilla headers before anything else, to intercept missing
+ *  `#include` directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -64,7 +56,7 @@ using sz::literals::operator""_sv; // for `sz::string_view_t`
 
 #pragma region Helpers
 
-/** @brief Repeats one UTF-8 encoded codepoint @p repeats times, giving a run of a single byte-width. */
+/** Repeats one UTF-8 encoded codepoint @p repeats times, giving a run of a single byte-width. */
 static std::string uniform_utf8_run_(char const *encoded_rune, std::size_t repeats) {
     std::string text;
     text.reserve(std::strlen(encoded_rune) * repeats);
@@ -73,14 +65,14 @@ static std::string uniform_utf8_run_(char const *encoded_rune, std::size_t repea
 }
 
 /**
- *  @brief Streams `unpack` over the entire @p text, collecting every decoded rune.
+ *  @brief Streams @c unpack over the entire @p text, collecting every decoded rune.
  *
  *  Mirrors the documented streaming contract: each call decodes a prefix of the remaining bytes and
- *  reports how many runes it produced and how far the cursor advanced; on valid UTF-8 every call must
- *  advance, so the loop terminates.
+ *  reports how many runes it produced and how far the cursor advanced; on valid UTF-8 every call
+ *  must advance, so the loop terminates.
  *
- *  A small @p chunk_capacity forces the capacity-limited resume path, where the decoder fills the buffer,
- *  returns mid-input, and restarts from the reported cursor.
+ *  A small @p chunk_capacity forces the capacity-limited resume path, where the decoder fills the
+ *  buffer, returns mid-input, and restarts from the reported cursor.
  */
 static void collect_unpacked_runes_(sz_utf8_decode_t unpack, sz_cptr_t text, sz_size_t length, sz_size_t chunk_capacity,
                                     std::vector<sz_rune_t> &out) {
@@ -102,20 +94,20 @@ static void collect_unpacked_runes_(sz_utf8_decode_t unpack, sz_cptr_t text, sz_
 }
 
 /**
- *  @brief Runs one UTF-8 codepoint backend (count + nth-finder + chunk-unpacker) over the known-answer
- *         anchor and asserts the produced count, byte offsets, and decoded runes match the expectations.
+ *  @brief Runs one UTF-8 codepoint backend (count, nth-finder, chunk-unpacker) over the
+ *      known-answer anchor and asserts the produced count, byte offsets, and decoded runes.
  *
- *  Mirrors `check_sha256_unit_` in `hash.cpp`: the caller drives it once per backend (dispatched,
- *  serial, and each natively-compiled kernel), so a wrong constant shared by the serial-vs-SIMD agreement
- *  tests is still caught against an external ground truth.
+ *  Mirrors @c check_sha256_unit_ in `hash.cpp`: the caller drives it once per backend (dispatched,
+ *  serial, and each natively-compiled kernel), so a wrong constant shared by the serial-vs-SIMD
+ *  agreement tests is still caught against an external ground truth.
  *
- *  @param count           Codepoint counter under test.
- *  @param find_nth        Nth-codepoint byte-offset finder under test.
- *  @param unpack          Streaming chunk decoder under test (or NULL when this backend has no decoder).
- *  @param text            Anchor text whose codepoints are counted / located / decoded.
- *  @param length          Byte length of @p text.
- *  @param expected_count  Expected codepoint count of @p text.
- *  @param expected_runes  Expected decoded codepoints, in order.
+ *  @param[in] count Codepoint counter under test.
+ *  @param[in] find_nth Nth-codepoint byte-offset finder under test.
+ *  @param[in] unpack Streaming chunk decoder under test, or NULL when this backend has none.
+ *  @param[in] text Anchor text whose codepoints are counted / located / decoded.
+ *  @param[in] length Byte length of @p text.
+ *  @param[in] expected_count Expected codepoint count of @p text.
+ *  @param[in] expected_runes Expected decoded codepoints, in order.
  */
 static void check_utf8_runes_unit_(                                          //
     sz_utf8_count_t count, sz_utf8_seek_t find_nth, sz_utf8_decode_t unpack, //
@@ -148,12 +140,11 @@ static void check_utf8_runes_unit_(                                          //
     }
 }
 
-/**
- *  @brief One UTF-8 codepoint backend: its three kernels plus whether its streaming decoder is hardened against
- *         malformed input. Built once here and iterated by every driver, so the unit/safety and equivalence
- *         passes can never drift apart in which ISAs they cover. The always-present `dispatched` entry keeps the
- *         table non-empty (and the helpers live) even on a baseline target with no SIMD tier compiled in.
- */
+/** One UTF-8 codepoint backend: its three kernels plus whether its streaming decoder is hardened
+ *  against malformed input. Built once here and iterated by every driver, so the unit/safety and
+ *  equivalence passes can never drift apart in which ISAs they cover. The always-present
+ *  @c dispatched entry keeps the table non-empty (and the helpers live) even on a baseline target
+ *  with no SIMD tier compiled in. */
 struct utf8_runes_backend_t {
     char const *name;
     sz_utf8_count_t count;
@@ -192,19 +183,19 @@ static utf8_runes_backend_t const utf8_runes_backends[] = {
 #endif
 };
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
 /**
- *  @brief Known-answer unit tests for the UTF-8 codepoints family on simple, hand-verifiable inputs.
+ *  @brief Known-answer unit tests for the UTF-8 codepoint family on simple, hand-verifiable inputs.
  *
  *  Exercises each function through the dispatched C API (automatic kernel resolution), through the
- *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through
- *  the C++ `sz::string_view_t` wrappers, so a regression that the serial-vs-SIMD agreement tests would
- *  miss - because both share a wrong constant - is still caught against an external ground truth. This
- *  is the isolated coverage for `sz_utf8_seek` and `sz_utf8_decode`, whose SIMD variants are
- *  otherwise only fuzzed against serial.
+ *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and
+ *  through the C++ @c sz::string_view_t wrappers, so a regression that the serial-vs-SIMD agreement
+ *  tests would miss - because both share a wrong constant - is still caught against an external
+ *  ground truth. This is the isolated coverage for @c sz_utf8_seek and @c sz_utf8_decode, whose
+ *  SIMD variants are otherwise only fuzzed against serial.
  */
 void test_utf8_runes_unit() {
     fmt::println("  - testing UTF-8 codepoints known-answer vectors...");
@@ -363,11 +354,12 @@ void test_utf8_runes_unit() {
 }
 
 /**
- *  @brief Known-answer rune-iteration vectors spanning the Unicode script range and every byte-width transition.
+ *  @brief Known-answer rune-iteration vectors spanning Unicode scripts and byte-width transitions.
  *
- *  Decodes hand-written samples of ASCII, CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, emoji, the maximum
- *  codepoint U+10FFFF, Deseret, zero-width and combining marks through the C++ `utf8_runes` wrapper, then walks
- *  every 1/2/3/4-byte neighbor pair, so a kernel that assumes a homogeneous byte-width run is caught here.
+ *  Decodes hand-written samples of ASCII, CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, emoji,
+ *  the maximum codepoint U+10FFFF, Deseret, zero-width and combining marks through the C++
+ *  @c utf8_runes wrapper, then walks every 1/2/3/4-byte neighbor pair, so a kernel that assumes a
+ *  homogeneous byte-width run is caught here.
  */
 void test_utf8_runes_scripts_unit() {
     fmt::println("  - testing UTF-8 codepoints across Unicode scripts...");
@@ -494,18 +486,18 @@ void test_utf8_runes_scripts_unit() {
     }
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
 /**
- *  @brief Cross-checks the serial UTF-8 codepoint kernels against every candidate backend on random,
- *         well-formed inputs: the chunk-unpacked runes, the nth-codepoint byte offsets, and the count.
+ *  @brief Cross-checks the serial UTF-8 codepoint kernels against every candidate backend on
+ *      random, well-formed inputs: chunk-unpacked runes, nth-codepoint byte offsets, and counts.
  *
- *  The known-answer anchors live in `test_utf8_runes_unit`; this is the serial-vs-ISA differential,
- *  the only coverage that exercises the SIMD `sz_utf8_decode` and `sz_utf8_seek` variants. Each input is
- *  generated once and driven through all @p candidates, so every backend sees byte-identical bytes and a
- *  divergence reproduces on the next ladder entry.
+ *  The known-answer anchors live in @c test_utf8_runes_unit; this is the serial-vs-ISA
+ *  differential, the only coverage that exercises the SIMD @c sz_utf8_decode and @c sz_utf8_seek
+ *  variants. Each input is generated once and driven through all @p candidates, so every backend
+ *  sees byte-identical bytes and a divergence reproduces on the next ladder entry.
  */
 static inline void check_utf8_runes_equivalence_(                                                 //
     sz_utf8_count_t count_serial, sz_utf8_seek_t find_nth_serial, sz_utf8_decode_t unpack_serial, //
@@ -571,10 +563,8 @@ static inline void check_utf8_runes_equivalence_(                               
     }
 }
 
-/**
- *  @brief Large-buffer count agreement: a few hundred KB of mixed-width codepoints where the dispatched
- *         and C++ counts must equal the serial reference and the exact known total.
- */
+/** Large-buffer count agreement: a few hundred KB of mixed-width codepoints where the dispatched
+ *  and C++ counts must equal the serial reference and the exact known total. */
 static void check_utf8_runes_large_count_() {
     // Every repeat contributes one ASCII 'x', one 2-byte, one 3-byte, and one 4-byte codepoint - 4
     // codepoints in 10 bytes - so the total is exactly `repeats * 4`.
@@ -591,23 +581,23 @@ static void check_utf8_runes_large_count_() {
     verify(sz::string_view_t(mixed).utf8_count() == count_serial); // C++ wrapper matches serial
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
 /**
- *  @brief Feeds malformed / invalid UTF-8 through one backend's counting and streaming-unpack kernels,
- *         asserting no crash, in-bounds output, and a cursor that never escapes the input.
+ *  @brief Feeds malformed / invalid UTF-8 through one backend's counting and streaming-unpack
+ *      kernels, asserting no crash, in-bounds output, and a cursor that never escapes the input.
  *
- *  Counting is bounds-safe on arbitrary bytes, so it faces the full malformed battery: it must merely
- *  survive. `sz_utf8_decode` documents a valid-UTF-8 precondition (the decoder "performs no
- *  validity checks") and asserts internally on garbage, so it is only exercised on the `sz_utf8_find_malformed`
- *  subset; each call must report no more runes than the destination holds and never let its cursor run
- *  past the input.
+ *  Counting is bounds-safe on arbitrary bytes, so it faces the full malformed battery: it must
+ *  merely survive. @c sz_utf8_decode documents a valid-UTF-8 precondition (the decoder "performs no
+ *  validity checks") and asserts internally on garbage, so it is only exercised on the
+ *  @c sz_utf8_find_malformed subset; each call must report no more runes than the destination holds
+ *  and never let its cursor run past the input.
  *
- *  @param count          Codepoint counter under test.
- *  @param unpack         Streaming chunk decoder under test (or NULL when this backend has no decoder).
- *  @param random_inputs  Number of random garbage buffers to fuzz on top of the exhaustive byte sweeps.
+ *  @param[in] count Codepoint counter under test.
+ *  @param[in] unpack Streaming chunk decoder under test, or NULL when this backend has none.
+ *  @param[in] random_inputs Random garbage buffers to fuzz on top of the exhaustive byte sweeps.
  */
 static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unpack,
                                      std::size_t random_inputs = scale_iterations(4000)) {
@@ -668,7 +658,7 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
     }
 }
 
-/** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
+/** Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
 void test_utf8_runes_safety() {
     fmt::println("  - testing malformed-input safety of UTF-8 codepoint kernels...");
 
@@ -680,14 +670,12 @@ void test_utf8_runes_safety() {
     fmt::println("    malformed-input safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/**
- *  @brief Drives the serial-vs-SIMD UTF-8 codepoint differential (unpack + find-nth + count) across every
- *         backend compiled on this target, plus the large-buffer count agreement.
- */
+/** Drives the serial-vs-SIMD UTF-8 codepoint differential (unpack + find-nth + count) across every
+ *  backend compiled on this target, plus the large-buffer count agreement. */
 void test_utf8_runes_all() {
     // This family's share of the suite budget: each input is checked at 11 cache-line offsets, over 5 decoder
     // capacities, per backend.
@@ -702,4 +690,4 @@ void test_utf8_runes_all() {
     check_utf8_runes_large_count_();
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

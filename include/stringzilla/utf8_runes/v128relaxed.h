@@ -1,7 +1,8 @@
 /**
- *  @brief WebAssembly relaxed-SIMD backend for UTF-8 codepoint mechanics (level above SIMD128).
  *  @file include/stringzilla/utf8_runes/v128relaxed.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly relaxed-SIMD backend for UTF-8 codepoint mechanics (level above SIMD128).
  */
 #ifndef STRINGZILLA_UTF8_RUNES_V128RELAXED_H_
 #define STRINGZILLA_UTF8_RUNES_V128RELAXED_H_
@@ -14,15 +15,15 @@
 extern "C" {
 #endif
 
+/*  Relaxed-SIMD offers no win for the count / find-nth kernels (they use @c wasm_i8x16_eq, range
+ *  compares, compile-time-constant @c wasm_i8x16_shuffle rotations, and @c wasm_i8x16_bitmask -
+ *  none of which map onto a relaxed op), so they delegate to the baseline SIMD128. The multistep
+ *  newline/whitespace iterators are not defined here at all: the dispatch table routes the
+ *  @c v128relaxed capability straight to the @c v128 kernels. */
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
-
-/*  Relaxed-SIMD offers no win for the count / find-nth kernels (they use `wasm_i8x16_eq`, range compares,
- *  compile-time-constant `wasm_i8x16_shuffle` rotations, and `wasm_i8x16_bitmask` - none of which map onto a
- *  relaxed op), so they delegate to the baseline SIMD128. The multistep newline/whitespace iterators are not
- *  defined here at all: the dispatch table routes the `v128relaxed` capability straight to the `v128` kernels. */
 
 SZ_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) {
     return sz_utf8_count_v128(text, length);

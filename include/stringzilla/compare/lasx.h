@@ -1,7 +1,9 @@
 /**
- *  @brief LoongArch LASX (256-bit) backend for compare.
  *  @file include/stringzilla/compare/lasx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief LoongArch LASX (256-bit) backend for compare.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_LASX_H_
@@ -14,12 +16,12 @@
 extern "C" {
 #endif
 
+/*  LASX has no single "movemask" instruction. @c __lasx_xvmskltz_b collects the sign bit of
+ *  every byte into a per-128-bit-lane 16-bit mask, deposited into word 0 for the low lane and
+ *  word 4 for the high one. Recombining them yields the same 32-bit mask @c _mm256_movemask_epi8
+ *  of AVX2 would produce, so the byte order matches and @c ctz and @c clz index bytes
+ *  identically to the Haswell backend. */
 #if SZ_USE_LASX
-
-/*  LASX has no single "movemask" instruction. `__lasx_xvmskltz_b` collects the sign bit of every
- *  byte into a per-128-bit-lane 16-bit mask, deposited into word 0 (low lane) and word 4 (high lane).
- *  Recombining them yields the same 32-bit mask AVX2's `_mm256_movemask_epi8` would produce, so the
- *  byte order matches and `ctz`/`clz` index bytes identically to the Haswell backend. */
 SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
     __m256i collected_u8x32 = __lasx_xvmskltz_b(sign_extended);
     unsigned int low = __lasx_xvpickve2gr_wu(collected_u8x32, 0);
@@ -27,10 +29,10 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
     return (low & 0xFFFFu) | ((high & 0xFFFFu) << 16);
 }
 
-/*  The 128-bit LSX analog: `__lsx_vmskltz_b` packs the 16 byte sign bits into the low 16 bits of element 0,
- *  so a single GPR extraction yields the SSE-style 16-bit `_mm_movemask_epi8` value. LSX is the natural fit
- *  for sub-32-byte inputs, where a 256-bit LASX register would be half-empty and a serial byte loop wastes
- *  the wide datapath the Loongson cores expose. */
+/*  The 128-bit LSX analog: @c __lsx_vmskltz_b packs the 16 byte sign bits into the low 16 bits of
+ *  element 0, so a single GPR extraction yields the SSE-style 16-bit @c _mm_movemask_epi8 value.
+ *  LSX is the natural fit for sub-32-byte inputs, where a 256-bit LASX register would be half-empty
+ *  and a serial byte loop wastes the wide datapath the Loongson cores expose. */
 SZ_HELPER_INLINE sz_u32_t sz_vmovemask_b_compare_lsx_(__m128i sign_extended) {
     return (unsigned int)__lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended), 0) & 0xFFFFu;
 }

@@ -1,43 +1,35 @@
 /**
- *  @brief  Hashing, multi-seed hashing, random-generator, and SHA256 equivalence tests.
- *  @file   test/hash.cpp
+ *  @file test/hash.cpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date February 26, 2025
+ *  @brief Hashing, multi-seed hashing, random-generator, and SHA256 equivalence tests.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development, to validate different ISA-specific backends:
+ *
+ *      #define SZ_USE_WESTMERE 0
+ *      #define SZ_USE_HASWELL 0
+ *      #define SZ_USE_GOLDMONT 0
+ *      #define SZ_USE_SKYLAKE 0
+ *      #define SZ_USE_ICELAKE 0
+ *      #define SZ_USE_NEON 0
+ *      #define SZ_USE_SVE 0
+ *      #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Include the StringZilla headers before anything else, to intercept missing @c #include
+ *  directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -66,7 +58,7 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/** @brief Parses a 64-character lowercase-hex SHA256 digest into 32 bytes. */
+/** Parses a 64-character lowercase-hex SHA256 digest into 32 bytes. */
 static void sha256_digest_from_hex_(char const *hex, sz_u8_t (&digest)[SZ_SHA256_DIGEST_LENGTH]) {
     auto nibble = [](char character) -> sz_u8_t {
         if (character >= '0' && character <= '9') return (sz_u8_t)(character - '0');
@@ -76,7 +68,7 @@ static void sha256_digest_from_hex_(char const *hex, sz_u8_t (&digest)[SZ_SHA256
         digest[byte_index] = (sz_u8_t)((nibble(hex[byte_index * 2]) << 4) | nibble(hex[byte_index * 2 + 1]));
 }
 
-/** @brief Runs one SHA256 backend (init/update/digest) over `message` and asserts the expected digest. */
+/** Runs one SHA256 backend (init/update/digest) over @c message and asserts the expected digest. */
 static void check_sha256_unit_(                                   //
     sz_sha256_state_init_t init, sz_sha256_state_update_t update, //
     sz_sha256_state_digest_t digest, std::string const &message, char const *expected_hex) {
@@ -89,13 +81,13 @@ static void check_sha256_unit_(                                   //
     verify(std::memcmp(produced, expected, SZ_SHA256_DIGEST_LENGTH) == 0);
 }
 
-/** @brief A message paired with the digest it must produce, for known-answer testing. */
+/** A message paired with the digest it must produce, for known-answer testing. */
 struct known_sha256_t {
     char const *message;
     char const *digest_hex;
 };
 
-/** @brief Runs one multi-state SHA256 backend over a batch of vectors and asserts every expected digest. */
+/** Runs one multi-state SHA256 backend over a batch of vectors, asserting every expected digest. */
 static void check_sha256_multistate_unit_(                                      //
     sz_sha256_multistate_update_t update, sz_sha256_multistate_digest_t digest, //
     known_sha256_t const *vectors, std::size_t vectors_count) {
@@ -119,17 +111,18 @@ static void check_sha256_multistate_unit_(                                      
     }
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
 /**
  *  @brief Known-answer unit tests for the hashing family on simple, hand-verifiable inputs.
  *
- *  Exercises each function through the dispatched C API (automatic kernel resolution), through the
- *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through
- *  the C++ `sz::string_view_t` wrappers, so a regression that the serial-vs-SIMD agreement tests would
- *  miss - because both share a wrong constant - is still caught against an external ground truth.
+ *  Exercises each function through the dispatched C API with automatic kernel resolution, through
+ *  the natively-compiled backend kernels directly with manual propagation to a specific kernel, and
+ *  through the C++ @c sz::string_view_t wrappers, so a regression that the serial-vs-SIMD agreement
+ *  tests would miss - because both share a wrong constant - is still caught against an external
+ *  ground truth of known answers.
  */
 void test_hash_unit() {
     fmt::println("  - testing hashing known-answer vectors...");
@@ -209,11 +202,11 @@ void test_hash_unit() {
     verify(sz_hash(embedded_nul.data(), embedded_nul.size(), 0u) != sz_hash(embedded_nul.data(), 3u, 0u));
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
-/** @brief Wraps a hashing backend (one-shot + streaming) by its kernel pointers. */
+/** Wraps a hashing backend (one-shot + streaming) by its kernel pointers. */
 template <sz_hash_t hash_, sz_hash_state_init_t init_, sz_hash_state_update_t update_, sz_hash_state_digest_t digest_>
 struct hash_from_sz_ {
     sz_u64_t operator()(sz_cptr_t text, sz_size_t length, sz_u64_t seed) const noexcept {
@@ -226,7 +219,7 @@ struct hash_from_sz_ {
     sz_u64_t digest(sz_hash_state_t const *state) const noexcept { return digest_(state); }
 };
 
-/** @brief Wraps a multi-seed hashing backend (batch + single-seed) by its kernel pointers. */
+/** Wraps a multi-seed hashing backend (batch + single-seed) by its kernel pointers. */
 template <sz_hash_multiseed_t multiseed_, sz_hash_t hash_one_>
 struct hash_multiseed_from_sz_ {
     void multiseed(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seed_count,
@@ -238,7 +231,7 @@ struct hash_multiseed_from_sz_ {
     }
 };
 
-/** @brief Wraps a SHA256 backend (init/update/digest) by its kernel pointers. */
+/** Wraps a SHA256 backend (init/update/digest) by its kernel pointers. */
 template <sz_sha256_state_init_t init_, sz_sha256_state_update_t update_, sz_sha256_state_digest_t digest_>
 struct sha256_from_sz_ {
     void init(sz_sha256_state_t *state) const noexcept { init_(state); }
@@ -248,7 +241,7 @@ struct sha256_from_sz_ {
     void digest(sz_sha256_state_t *state, sz_u8_t *output) const noexcept { digest_(state, output); }
 };
 
-/** @brief Wraps a multi-state SHA256 backend (update/digest) by its kernel pointers. */
+/** Wraps a multi-state SHA256 backend (update/digest) by its kernel pointers. */
 template <sz_sha256_multistate_update_t update_, sz_sha256_multistate_digest_t digest_>
 struct sha256_multistate_from_sz_ {
     void update(sz_sha256_state_t *states, sz_sequence_t const *texts) const noexcept { update_(states, texts); }
@@ -257,13 +250,13 @@ struct sha256_multistate_from_sz_ {
     }
 };
 
-/** @brief Wraps a pseudo-random fill backend by its kernel pointer. */
+/** Wraps a pseudo-random fill backend by its kernel pointer. */
 template <sz_fill_random_t generate_>
 struct fill_random_from_sz_ {
     void operator()(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) const noexcept { generate_(text, length, nonce); }
 };
 
-/** @brief Wraps a byte-summing backend by its kernel pointer. */
+/** Wraps a byte-summing backend by its kernel pointer. */
 template <sz_bytesum_t bytesum_>
 struct bytesum_from_sz_ {
     sz_u64_t operator()(sz_cptr_t text, sz_size_t length) const noexcept { return bytesum_(text, length); }
@@ -273,9 +266,9 @@ struct bytesum_from_sz_ {
  *  @brief Cross-checks a byte-summing backend against a reference across lengths and alignments.
  *
  *  The wide kernels split a buffer into an unaligned head, an aligned body, and a tail, so sweeping
- *  cache-line offsets is what reaches the head and tail paths at all. The AVX-512 tiers additionally
- *  switch to non-temporal loads and bidirectional traversal past a megabyte, which only one oversized
- *  input reaches. `inputs` arrives already scaled by the caller.
+ *  cache-line offsets is what reaches the head and tail paths at all. The AVX-512 tiers
+ *  additionally switch to non-temporal loads and bidirectional traversal past a megabyte, which
+ *  only one oversized input reaches. @c inputs arrives already scaled by the caller.
  */
 template <typename reference_, typename candidate_>
 void check_bytesum_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -318,7 +311,7 @@ void check_bytesum_equivalence_(reference_ reference, candidate_ candidate, sz_s
 }
 
 /**
- *  @brief Hashes a string and compares the output between a reference and a candidate hashing backend.
+ *  @brief Hashes a string and compares the output of a reference and a candidate hashing backend.
  *
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
@@ -390,11 +383,11 @@ void check_hash_equivalence_(reference_ reference, candidate_ candidate, sz_size
 
 /**
  *  @brief Verifies a backend's batch multi-seed output equals a loop of its own single-seed hashes,
- *         across many lengths and seed counts (covering the 4-lane tail handling).
+ *      across many lengths and seed counts, covering the 4-lane tail handling.
  *
- *  This is a single-backend self-consistency check: the candidate's `multiseed` must agree with its
- *  own `hash_one` for every seed, so a wrong shared constant in both is still caught against the
- *  per-seed reduction rather than a sibling backend.
+ *  This is a single-backend self-consistency check: the candidate's @c multiseed must agree with
+ *  its own @c hash_one for every seed, so a wrong shared constant in both is still caught against
+ *  the per-seed reduction rather than a sibling backend.
  */
 template <typename candidate_>
 void check_hash_multiseed_equivalence_(candidate_ candidate, sz_size_t inputs) {
@@ -438,10 +431,8 @@ void check_hash_multiseed_equivalence_(candidate_ candidate, sz_size_t inputs) {
     }
 }
 
-/**
- *  @brief Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
- *         produces exactly the same output across a reference and a candidate implementation.
- */
+/** Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce produces exactly the
+ *  same output across a reference and a candidate implementation. */
 template <typename reference_, typename candidate_>
 void check_random_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
@@ -475,11 +466,9 @@ void check_random_equivalence_(reference_ reference, candidate_ candidate, sz_si
             test_on_nonce(length, nonce);
 }
 
-/**
- *  @brief Cross-checks SHA256 backends against each other (reference vs candidate) on random inputs,
- *         one-shot and incremental. The known-answer FIPS 180-4 vectors live in `test_hash_unit`.
- *         `inputs` is the maximum length fuzzed, inclusive.
- */
+/** Cross-checks SHA256 backends against each other (reference vs candidate) on random inputs,
+ *  one-shot and incremental. The known-answer FIPS 180-4 vectors live in @c test_hash_unit.
+ *  @c inputs is the maximum length fuzzed, inclusive. */
 template <typename reference_, typename candidate_>
 void check_sha256_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
@@ -517,20 +506,20 @@ void check_sha256_equivalence_(reference_ reference, candidate_ candidate, sz_si
 
 /**
  *  @brief Compares two multi-state SHA256 backends over batches of randomly-shaped messages.
+ *  @param[in] reference Reference multi-state backend, producing the expected digests.
+ *  @param[in] candidate Candidate multi-state backend to validate against the reference.
+ *  @param[in] inputs Inclusive maximum lane count, and maximum message length to fuzz with.
  *
- *  @param reference  Reference multi-state backend, producing the expected digests.
- *  @param candidate  Candidate multi-state backend to validate against the reference.
- *  @param inputs     Maximum lane count (inclusive) and maximum message length to fuzz with.
+ *  Sweeps every lane count up to @p inputs, so batches that fall one lane short of a vector width
+ *  take a different path through the kernel than batches that fill it. Each batch is fed twice:
+ *  once in a single call, then again split into random per-lane slices, which is what carries a
+ *  partial block across calls. Both digest buffers keep a guard lane past the end, since a batched
+ *  kernel that miscounts lanes would otherwise corrupt the caller's memory silently.
  *
- *  Sweeps every lane count up to @p inputs, so batches that fall one lane short of a vector width take a
- *  different path through the kernel than batches that fill it. Each batch is fed twice: once in a single
- *  call, then again split into random per-lane slices, which is what carries a partial block across calls.
- *  Both digest buffers keep a guard lane past the end, since a batched kernel that miscounts lanes would
- *  otherwise corrupt the caller's memory silently.
- *
- *  Messages reach several blocks rather than the one a 64-byte bound would give, because lanes retire from
- *  the wide loop independently: a batch where every lane owns the same number of blocks never exercises the
- *  retirement order, the countdown, or the rule that parks a finished lane's cursor on its last full block.
+ *  Messages reach several blocks rather than the one a 64-byte bound would give, because lanes
+ *  retire from the wide loop independently: a batch where every lane owns the same number of blocks
+ *  never exercises the retirement order, the countdown, or the rule that parks a finished lane's
+ *  cursor on its last full block.
  */
 template <typename reference_, typename candidate_>
 void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -621,17 +610,17 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
     }
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
 /**
- *  @brief Degenerate lengths and alignments for the hashing family, asserting bounds rather than digests.
+ *  @brief Degenerate lengths and alignments for the hashing family, asserting bounds, not digests.
  *
- *  A hash of nothing still has to be a hash: the empty input, the single byte and the streaming state fed in
- *  one-byte pieces all have to agree with the one-shot call over the same bytes, and none may write past the
- *  digest it was handed. The canary-guarded buffer is what catches the last of those, since a digest that
- *  overruns by one byte produces a perfectly plausible value.
+ *  A hash of nothing still has to be a hash: the empty input, the single byte and the streaming
+ *  state fed in one-byte pieces all have to agree with the one-shot call over the same bytes, and
+ *  none may write past the digest it was handed. The canary-guarded buffer is what catches the last
+ *  of those, since a digest that overruns by one byte produces a perfectly plausible value.
  */
 void test_hash_safety() {
     fmt::println("  - testing degenerate lengths and alignments of the hashing kernels...");
@@ -676,14 +665,12 @@ void test_hash_safety() {
     fmt::println("    degenerate-input safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/**
- *  @brief Drives the serial-vs-SIMD hashing, random-fill, and SHA256 differential tests across
- *         every hashing backend compiled on this target. Hashing has no Haswell tier.
- */
+/** Drives the serial-vs-SIMD hashing, random-fill, and SHA256 differential tests across every
+ *  hashing backend compiled on this target. Hashing has no Haswell tier. */
 void test_hash_all() {
 
     using hash_serial_t = hash_from_sz_<sz_hash_serial, sz_hash_state_init_serial, //
@@ -916,7 +903,7 @@ void test_hash_all() {
 #endif
 }
 
-/** @brief Drives `check_hash_multiseed_equivalence_` across every hashing backend compiled on this target. */
+/** Drives @c check_hash_multiseed_equivalence_ across every hashing backend compiled here. */
 void test_hash_multiseed_all() {
     // Cover the <= 64 byte ladder, the 64-byte boundary, and into the wide path. Every length is hashed by
     // every seeded kernel on every backend, so this count is the family's whole budget.
@@ -945,4 +932,4 @@ void test_hash_multiseed_all() {
 #endif
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

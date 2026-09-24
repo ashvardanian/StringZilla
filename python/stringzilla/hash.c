@@ -1,19 +1,21 @@
 /**
- *  @brief Byte-sums, the 64-bit hasher, SHA-256 states, and HMAC-SHA256.
  *  @file python/stringzilla/hash.c
  *  @author Ash Vardanian
+ *  @date September 16, 2023
+ *  @brief Byte-sums, the 64-bit hasher, SHA-256 states, and HMAC-SHA256.
  */
 #include "stringzilla.h"
 
 /**
  *  @brief Points @p sequence at the strings in @p texts, borrowing them in place.
  *
- *  A `Strs` is read through its own layout-aware accessors, so a tape-backed corpus never leaves its
- *  buffer. Any other sequence is snapshotted into a tuple and unpacked into @p scratch, which must hold
- *  @p scratch_capacity views. The snapshot is what pins the chunks: holding the caller's list would keep
- *  the container alive while leaving each chunk free to be dropped from under the exported pointers.
+ *  A @c Strs is read through its own layout-aware accessors, so a tape-backed corpus never leaves
+ *  its buffer. Any other sequence is snapshotted into a tuple and unpacked into @p scratch, which
+ *  must hold @p scratch_capacity views. The snapshot is what pins the chunks: holding the
+ *  caller's list would keep the container alive while leaving each chunk free to be dropped from
+ *  under the exported pointers.
  *
- *  @return A new reference that pins the strings and must outlive the kernel call, or `NULL` on failure.
+ *  @return A new reference pinning the strings, to outlive the kernel call, or @c NULL on failure.
  */
 static PyObject *Sha256_bind_texts_(PyObject *texts, sz_sequence_t *sequence, sz_string_view_t *scratch,
                                     sz_size_t scratch_capacity) {
@@ -79,7 +81,7 @@ static sz_bool_t Sha256_bind_digests_(PyObject *out, sz_size_t digests_count, Py
     return sz_true_k;
 }
 
-/** @brief Packs @p digests_count digests into a list of `bytes`, in lane order. */
+/** Packs @p digests_count digests into a list of @c bytes, in lane order. */
 static PyObject *Sha256_digests_to_list_(sz_u8_t const *digests, sz_size_t digests_count) {
     PyObject *result = PyList_New((Py_ssize_t)digests_count);
     if (!result) return NULL;
@@ -102,7 +104,7 @@ char const doc_like_hash[] =                                                    
     "\n"                                                                                                 //
     "This function can be called as a method on a Str object or as a standalone function.\n"             //
     "Args:\n"                                                                                            //
-    "  text (Str or str or bytes): The string to hash (positional-only when standalone).\n"              //
+    "  text (Str or str or bytes): The string to hash, positional-only when standalone.\n"               //
     "  seed (int, optional): The seed value for hashing. Defaults to 0. Can be positional or keyword.\n" //
     "Returns:\n"                                                                                         //
     "  int: The hash value as an unsigned 64-bit integer. This differs from Python's\n"                  //
@@ -190,23 +192,23 @@ PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positi
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
-char const doc_hash_multiseed[] =                                                                            //
-    "Hash one string under many seeds at once.\n"                                                            //
-    "\n"                                                                                                     //
-    "Equivalent to `tuple(hash(text, s) for s in seeds)`, but normalizes the input into AES\n"               //
-    "blocks once and replays the cheap per-seed rounds - markedly faster for short strings under\n"          //
-    "many seeds (feature hashing, Count-Min sketches, Bloom/cuckoo filters, MinHash/LSH).\n"                 //
-    "\n"                                                                                                     //
-    "Args:\n"                                                                                                //
-    "  text (Str or str or bytes): The string to hash (positional-only when standalone).\n"                  //
-    "  seeds (buffer of uint64): Contiguous 64-bit seeds, e.g. numpy.uint64 array or array('Q', ...).\n"     //
-    "       Plain int lists are not accepted - wrap them in array('Q', seeds) or numpy.\n"                   //
-    "  out (writable uint64 buffer, optional): A contiguous buffer of at least len(seeds) elements.\n"       //
-    "       When given it is filled in place and None is returned; otherwise a tuple of ints is returned.\n" //
-    "Returns:\n"                                                                                             //
-    "  tuple[int, ...] | None: Tuple of 64-bit hashes, or None when writing into `out`.\n"                   //
-    "\n"                                                                                                     //
-    "Example:\n"                                                                                             //
+char const doc_hash_multiseed[] =                                                                        //
+    "Hash one string under many seeds at once.\n"                                                        //
+    "\n"                                                                                                 //
+    "Equivalent to `tuple(hash(text, s) for s in seeds)`, but normalizes the input into AES\n"           //
+    "blocks once and replays the cheap per-seed rounds - markedly faster for short strings under\n"      //
+    "many seeds (feature hashing, Count-Min sketches, Bloom/cuckoo filters, MinHash/LSH).\n"             //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "  text (Str or str or bytes): The string to hash, positional-only when standalone.\n"               //
+    "  seeds (buffer of uint64): Contiguous 64-bit seeds, e.g. numpy.uint64 array or array('Q', ...).\n" //
+    "       Plain int lists are not accepted - wrap them in array('Q', seeds) or numpy.\n"               //
+    "  out (writable uint64 buffer, optional): A contiguous buffer of at least len(seeds) elements.\n"   //
+    "       If given, it is filled in place and None returned; otherwise a tuple of ints is returned.\n" //
+    "Returns:\n"                                                                                         //
+    "  tuple[int, ...] | None: Tuple of 64-bit hashes, or None when writing into `out`.\n"               //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
     "  >>> def hash_multiseed(text, seeds, /, out=None) -> tuple | None: ...";
 
 PyObject *Str_like_hash_multiseed(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -303,22 +305,22 @@ PyObject *Str_like_hash_multiseed(PyObject *self, PyObject *const *args, Py_ssiz
     return result;
 }
 
-char const doc_fill_random[] =                                                                                 //
-    "Fill a string-like buffer in place with pseudo-random bytes.\n"                                           //
-    "\n"                                                                                                       //
-    "Args:\n"                                                                                                  //
-    "  buffer (Str or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).\n"           //
-    "  nonce (int, optional): Seed/nonce ensuring reproducible output for the same inputs (default 0).\n"      //
-    "  alphabet (str or bytes, optional): If provided, remaps random bytes to characters from the alphabet.\n" //
-    "  start (int, optional): Starting index (default 0).\n"                                                   //
-    "  end (int, optional): Ending index (default len(buffer)).\n"                                             //
-    "Returns:\n"                                                                                               //
-    "  None: Mutates the buffer slice in place.\n"                                                             //
-    "\n"                                                                                                       //
-    "Example:\n"                                                                                               //
-    "  >>> buf = bytearray(16)\n"                                                                              //
-    "  >>> sz.fill_random(buf)\n"                                                                              //
-    "  >>> len(buf)\n"                                                                                         //
+char const doc_fill_random[] =                                                                           //
+    "Fill a string-like buffer in place with pseudo-random bytes.\n"                                     //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "  buffer (Str or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).\n"     //
+    "  nonce (int, optional): Seed ensuring reproducible output for the same inputs, defaulting to 0.\n" //
+    "  alphabet (str or bytes, optional): If provided, remaps random bytes to its characters.\n"         //
+    "  start (int, optional): Starting index, defaulting to 0.\n"                                        //
+    "  end (int, optional): Ending index, defaulting to len(buffer).\n"                                  //
+    "Returns:\n"                                                                                         //
+    "  None: Mutates the buffer slice in place.\n"                                                       //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "  >>> buf = bytearray(16)\n"                                                                        //
+    "  >>> sz.fill_random(buf)\n"                                                                        //
+    "  >>> len(buf)\n"                                                                                   //
     "  16";
 
 PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -596,8 +598,8 @@ PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t posi
  *  @brief Primes @p inner and @p outer with the HMAC key pads, per FIPS 198-1.
  *
  *  The message enters only the inner hash, as the suffix of the ipad block, so authenticating many
- *  messages under one key is just as lane-parallel as digesting them: prime once, broadcast into every
- *  lane, and pay for the key again only in the outer wrap.
+ *  messages under one key is just as lane-parallel as digesting them: prime once, broadcast into
+ *  every lane, and pay for the key again only in the outer wrap.
  */
 static void Hmac_prime_(sz_sha256_state_t *inner, sz_sha256_state_t *outer, sz_cptr_t key, sz_size_t key_length) {
 
@@ -642,11 +644,11 @@ static void Hmac_digest_one_(sz_sha256_state_t const *inner, sz_sha256_state_t c
 /**
  *  @brief Authenticates @p texts under one key, writing one tag per message into @p digests.
  *
- *  Runs the message pass and the outer wrap through the same lane-parallel kernels, reusing @p states
- *  for both so the wrap costs no extra allocation.
+ *  Runs the message pass and the outer wrap through the same lane-parallel kernels, reusing
+ *  @p states for both so the wrap costs no extra allocation.
  *
- *  @param states Scratch of at least `texts->count` states.
- *  @param views Scratch of at least `texts->count` views, reused for the inner digests.
+ *  @param[out] states Scratch of at least `texts->count` states.
+ *  @param[out] views Scratch of at least `texts->count` views, reused for the inner digests.
  *  @note Runs with the GIL released, so it must touch no Python object.
  */
 static void Hmac_digest_many_(sz_sequence_t const *texts, sz_sha256_state_t const *inner,
@@ -1384,10 +1386,8 @@ static PyObject *Sha256s_lane(PyObject *self_obj, Py_ssize_t lane_index) {
     return (PyObject *)lane;
 }
 
-/**
- *  @brief Installs @p lane_obj into a lane, so a finished lane can be retired without disturbing its
- *         neighbours - the pattern that lets a fixed pool of lanes stream a longer list of files.
- */
+/** Installs @p lane_obj into a lane, so a finished lane can be retired without disturbing its
+ *  neighbours - the pattern that lets a fixed pool of lanes stream a longer list of files. */
 static int Sha256s_set_lane(PyObject *self_obj, Py_ssize_t lane_index, PyObject *lane_obj) {
     Sha256s *self = (Sha256s *)self_obj;
     if (lane_index < 0 || (sz_size_t)lane_index >= self->lanes_count) {

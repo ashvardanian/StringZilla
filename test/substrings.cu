@@ -1,17 +1,20 @@
 /**
- *  @brief  Multi-pattern search on the GPU: the device backend against serial's answers, and the memory
- *          and budget contracts the device verbs keep.
- *  @file   test/substrings.cu
+ *  @file test/substrings.cu
  *  @author Ash Vardanian
- *  @date   September 20, 2026
+ *  @date August 8, 2026
+ *  @brief Multi-pattern search on the GPU.
  *
- *  @c test/substrings.cpp defines @c test_substrings_all and @c test_substrings_safety over the CPU backend,
- *  and this file defines them over the CUDA one. No target links both - @c stringzilla_test_cpp20 takes the
- *  first and @c stringzilla_test_cu20 the second - a CMake invariant rather than a language one.
+ *  Covers the device backend against serial's answers, and the memory and budget contracts kept by
+ *  the device verbs.
  *
- *  The serial tier is the oracle rather than a second brute force: the CPU file already measures it against
- *  one, so what is open here is whether a chunked, warmed-up device walk reports the same matches as a
- *  single-chain host walk - which is the whole of what the chunking can get wrong.
+ *  @c test/substrings.cpp defines @c test_substrings_all and @c test_substrings_safety over the CPU
+ *  backend, and this file defines them over the CUDA one. No target links both -
+ *  @c stringzilla_test_cpp20 takes the first and @c stringzilla_test_cu20 the second - a CMake
+ *  invariant rather than a language one.
+ *
+ *  The serial tier is the oracle rather than a second brute force: the CPU file already measures it
+ *  against one, so what is open here is whether a chunked, warmed-up device walk reports the same
+ *  matches as a single-chain host walk - which is the whole of what the chunking can get wrong.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -36,14 +39,22 @@ using namespace sz::test;
 /**
  *  @brief A corpus both sides address: one arena of haystacks and the views into it.
  *
- *  Unified storage is readable from the host, so the serial reference runs against these very bytes and the
- *  device verbs accept them without anything being staged.
+ *  Unified storage is readable from the host, so the serial reference runs against these very bytes
+ *  and the device verbs accept them without anything being staged.
  */
 struct substrings_cuda_corpus_t {
-    unified_vector<char> arena;             /**< Every haystack's bytes, back to back. */
-    unified_vector<sz_string_view_t> views; /**< One view per haystack; its size is the haystack count. */
-    sz_sequence_t device_haystacks {};      /**< Accessors a kernel calls, as the device verbs require. */
-    sz_sequence_t host_haystacks {};        /**< Accessors the serial reference calls, over the same views. */
+
+    /** Every haystack's bytes, back to back. */
+    unified_vector<char> arena;
+
+    /** One view per haystack; its size is the haystack count. */
+    unified_vector<sz_string_view_t> views;
+
+    /** Accessors a kernel calls, as the device verbs require. */
+    sz_sequence_t device_haystacks {};
+
+    /** Accessors the serial reference calls, over the same views. */
+    sz_sequence_t host_haystacks {};
 
     substrings_cuda_corpus_t(std::vector<std::string> const &haystacks) : views(haystacks.size()) {
         for (std::size_t index = 0; index != haystacks.size(); ++index) {
@@ -58,12 +69,20 @@ struct substrings_cuda_corpus_t {
     }
 };
 
-/** @brief A vocabulary both sides address, in memory a kernel can read. */
+/** A vocabulary both sides address, in memory a kernel can read. */
 struct substrings_cuda_vocabulary_t {
-    unified_vector<char> arena;             /**< Every needle's bytes, back to back. */
-    unified_vector<sz_string_view_t> views; /**< One view per needle. */
-    sz_memory_allocator_t unified {};       /**< Hands back memory both the host and the device address. */
-    sz_sequence_t needles {};               /**< Host accessors, which is all the builder needs. */
+
+    /** Every needle's bytes, back to back. */
+    unified_vector<char> arena;
+
+    /** One view per needle. */
+    unified_vector<sz_string_view_t> views;
+
+    /** Hands back memory both the host and the device address. */
+    sz_memory_allocator_t unified {};
+
+    /** Host accessors, which is all the builder needs. */
+    sz_sequence_t needles {};
 
     substrings_cuda_vocabulary_t(std::vector<std::string> const &strings) : views(strings.size()) {
         for (std::size_t index = 0; index != strings.size(); ++index) {
@@ -80,14 +99,18 @@ struct substrings_cuda_vocabulary_t {
 };
 
 /**
- *  @brief One vocabulary compiled twice under one policy: once for the host, once for @c stream 's device.
+ *  @brief One vocabulary compiled twice under one policy: for the host and for @c stream 's device.
  *
- *  The policy sizes the arena, so it belongs to the engine rather than to a call, and comparing two tiers
- *  under one policy means holding two engines rather than one object two verbs read differently.
+ *  The policy sizes the arena, so it belongs to the engine rather than to a call, and comparing two
+ *  tiers under one policy means holding two engines rather than one object read two ways.
  */
 struct substrings_cuda_engines_t {
-    sz_substrings_engine_t host {};   /**< The serial oracle's engine, in plain host memory. */
-    sz_substrings_engine_t device {}; /**< The device's engine, arena and report included. */
+
+    /** The serial oracle's engine, in plain host memory. */
+    sz_substrings_engine_t host {};
+
+    /** The device's engine, arena and report included. */
+    sz_substrings_engine_t device {};
 
     substrings_cuda_engines_t(substrings_cuda_vocabulary_t &vocabulary, sz_substrings_case_sensitivity_t sensitivity,
                               sz_substrings_overlap_policy_t policy) {
@@ -108,15 +131,23 @@ struct substrings_cuda_engines_t {
     }
 };
 
-/** @brief Joins the default stream, which is what every device verb leaves the caller to do. */
+/** Joins the default stream, which is what every device verb leaves the caller to do. */
 static void join_() { verify(cudaStreamSynchronize(nullptr) == cudaSuccess); }
 
-/** @brief One match, ordered so two backends' reports compare as sequences rather than as multisets. */
+/** One match, ordered so two backends' reports compare as sequences rather than as multisets. */
 struct substrings_cuda_case_t {
-    sz_size_t haystack_index {}; /**< Which haystack of the sequence this match was found in. */
-    sz_size_t needle_index {};   /**< Which needle of the vocabulary matched. */
-    sz_size_t byte_offset {};    /**< Where the match starts inside that haystack. */
-    sz_size_t byte_length {};    /**< Haystack bytes the match spans. */
+
+    /** Which haystack of the sequence this match was found in. */
+    sz_size_t haystack_index {};
+
+    /** Which needle of the vocabulary matched. */
+    sz_size_t needle_index {};
+
+    /** Where the match starts inside that haystack. */
+    sz_size_t byte_offset {};
+
+    /** Haystack bytes the match spans. */
+    sz_size_t byte_length {};
 
     bool operator==(substrings_cuda_case_t const &other) const noexcept {
         return haystack_index == other.haystack_index && needle_index == other.needle_index &&
@@ -130,7 +161,7 @@ struct substrings_cuda_case_t {
     }
 };
 
-/** @brief Sorts one verb's match array into the shape two backends compare position by position. */
+/** Sorts one verb's match array into the shape two backends compare position by position. */
 static std::vector<substrings_cuda_case_t> sorted_(sz_substrings_match_t const *matches, sz_size_t count) {
     std::vector<substrings_cuda_case_t> reported(count);
     for (std::size_t index = 0; index != count; ++index)
@@ -140,7 +171,7 @@ static std::vector<substrings_cuda_case_t> sorted_(sz_substrings_match_t const *
     return reported;
 }
 
-/** @brief Every match the serial tier reports, sized from the report its own sizing call leaves. */
+/** Every match the serial tier reports, sized from the report its own sizing call leaves. */
 static std::vector<substrings_cuda_case_t> serial_matches_(sz_substrings_engine_t *engine,
                                                            sz_sequence_t const *haystacks) {
     std::vector<sz_size_t> offsets(haystacks->count + 1, 0);
@@ -152,7 +183,7 @@ static std::vector<substrings_cuda_case_t> serial_matches_(sz_substrings_engine_
     return sorted_(matches.data(), matches.size());
 }
 
-/** @brief Every match the device tier reports, joined once per call because no verb joins for the caller. */
+/** Every match the device tier reports, joined per call since no verb joins for the caller. */
 static std::vector<substrings_cuda_case_t> device_matches_(sz_substrings_engine_t *engine,
                                                            sz_sequence_t const *haystacks) {
     unified_vector<sz_size_t> offsets(haystacks->count + 1, 0);
@@ -170,7 +201,7 @@ static std::vector<substrings_cuda_case_t> device_matches_(sz_substrings_engine_
     return sorted_(matches.data(), total);
 }
 
-/** @brief That every reported match is real, and that no two of them share a byte of one haystack. */
+/** That every reported match is real, and that no two of them share a byte of one haystack. */
 static void verify_is_a_cover_(std::vector<substrings_cuda_case_t> const &reported,
                                std::vector<substrings_cuda_case_t> const &every_match) {
     // Both lists arrive sorted, so the subset test is one merge rather than a scan per reported match.
@@ -189,11 +220,12 @@ static void verify_is_a_cover_(std::vector<substrings_cuda_case_t> const &report
 }
 
 /**
- *  @brief The device's matches, counts and rewrite against the serial tier's, over one corpus and policy.
- *  @param[in] fidelity Whether the device's cover must equal the serial one, or merely be a valid cover.
+ *  @brief The device's matches, counts and rewrite against serial's, over one corpus and policy.
+ *  @param[in] fidelity Whether the device's cover must equal the serial one or just be valid.
  *
- *  A dense vocabulary leaves no gap between matches, so one run of mutually-reaching matches spans a whole
- *  haystack and the device falls back to emitted order rather than running a quadratic greedy over it.
+ *  A dense vocabulary leaves no gap between matches, so one run of mutually-reaching matches spans
+ *  a whole haystack and the device falls back to emitted order rather than running a quadratic
+ *  greedy over it.
  */
 static void check_against_serial_(substrings_cuda_corpus_t &corpus, substrings_cuda_vocabulary_t &vocabulary,
                                   std::vector<std::string> const &haystacks,
@@ -264,8 +296,8 @@ static void check_against_serial_(substrings_cuda_corpus_t &corpus, substrings_c
 /**
  *  @brief The device's BM25 against the serial tier's, by byte lengths and by caller-given ones.
  *
- *  The device sums in fixed point and the host in ascending needle order, so the two agree to rounding
- *  rather than bit for bit.
+ *  The device sums in fixed point and the host in ascending needle order, so the two agree to
+ *  rounding rather than bit for bit.
  */
 static void check_bm25_against_serial_(substrings_cuda_corpus_t &corpus, substrings_cuda_vocabulary_t &vocabulary,
                                        std::vector<std::string> const &haystacks,
@@ -297,7 +329,7 @@ static void check_bm25_against_serial_(substrings_cuda_corpus_t &corpus, substri
     }
 }
 
-/** @brief One vocabulary against one corpus under every policy. */
+/** One vocabulary against one corpus under every policy. */
 static void check_policies_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                             sz_substrings_case_sensitivity_t sensitivity,
                             sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k) {
@@ -382,7 +414,7 @@ void test_substrings_all() {
     }
 }
 
-/** What the device verbs refuse, and what the report says when an output could not hold the answer. */
+/** What the device verbs refuse, and what the report says when an output cannot hold the answer. */
 void test_substrings_safety() {
     std::vector<std::string> const needles {"ab", "cd"};
     std::vector<std::string> const haystacks {"abcdabcd"};

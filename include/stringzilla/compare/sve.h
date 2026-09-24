@@ -1,7 +1,9 @@
 /**
- *  @brief SVE backend for string comparison utilities.
  *  @file include/stringzilla/compare/sve.h
  *  @author Ash Vardanian
+ *  @date October 3, 2024
+ *  @brief SVE backend for string comparison utilities.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_SVE_H_

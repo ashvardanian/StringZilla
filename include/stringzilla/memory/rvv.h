@@ -1,7 +1,9 @@
 /**
- *  @brief RISC-V Vector (RVV 1.0) backend for memory.
  *  @file include/stringzilla/memory/rvv.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief RISC-V Vector (RVV 1.0) backend for memory.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_RVV_H_
@@ -59,10 +61,11 @@ SZ_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t valu
     }
 }
 
-/*  Byte-wise table lookup via an indexed (gather) memory load. `vluxei8` reads `lut[index[i]]` from
- *  the in-memory 256-entry table for every lane, so any input byte in [0, 255] is a valid index at any
- *  `VLEN` — no register-group capacity ceiling, hence no half-split and no scalar fallback. The
- *  `vsetvl`-driven loop handles every length including the sub-`VLMAX` tail, so there is no serial path. */
+/*  Byte-wise table lookup via an indexed gather memory load. @c vluxei8 reads `lut[index[i]]` from
+ *  the in-memory 256-entry table for every lane, so any input byte in [0, 255] is a valid index at
+ *  any @c VLEN: no register-group capacity ceiling, hence no half-split and no scalar fallback. The
+ *  loop driven by @c vsetvl handles every length, including a tail shorter than @c VLMAX, so there
+ *  is no serial path. */
 SZ_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                    char const lut[sz_at_least_(256)]) {
     sz_u8_t *target_cursor = (sz_u8_t *)target;

@@ -1,6 +1,9 @@
 //! Byte-level memory kernels — copies, moves, fills, and lookup transforms.
 //!
 //! Also home to the in-place substring replacement kernels built on those primitives.
+//!
+//! File: rust/stringzilla/memory.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
@@ -67,14 +70,14 @@ where
     }
 }
 
-/// Performs a lookup transformation (LUT), mapping contents of a buffer into the same or other
+/// Performs a lookup-table transformation, mapping contents of a buffer into the same or other
 /// memory region, taking a byte substitution value from the provided table.
 ///
 /// # Arguments
 ///
-/// * `target`: A mutable buffer to populate.
-/// * `source`: An immutable buffer to map from.
-/// * `table`: Lookup table of 256 substitution values.
+/// - `target`: A mutable buffer to populate.
+/// - `source`: An immutable buffer to map from.
+/// - `table`: Lookup table of 256 substitution values.
 ///
 /// # Examples
 ///
@@ -114,13 +117,13 @@ where
     }
 }
 
-/// Performs a lookup transformation (LUT), mapping contents of a buffer into the same or other
+/// Performs a lookup-table transformation, mapping contents of a buffer into the same or other
 /// memory region, taking a byte substitution value from the provided table.
 ///
 /// # Arguments
 ///
-/// * `buffer`: A mutable buffer to update inplace.
-/// * `table`: Lookup table of 256 substitution values.
+/// - `buffer`: A mutable buffer to update inplace.
+/// - `table`: Lookup table of 256 substitution values.
 ///
 /// # Examples
 ///
@@ -150,16 +153,16 @@ where
     }
 }
 
-/// Randomizes the contents of a given byte slice `text` using characters from
-/// a specified `alphabet`. This function mutates `text` in place, replacing each
-/// byte with a random one from `alphabet`. It is designed for situations where
-/// you need to generate random strings or data sequences based on a specific set
-/// of characters, such as generating random DNA sequences or testing inputs.
+/// Randomizes the contents of a given byte slice `text` using characters from a specified
+/// `alphabet`. This function mutates `text` in place, replacing each byte with a random one
+/// from `alphabet`. It is designed for situations where you need to generate random strings or
+/// data sequences based on a specific set of characters, such as generating random DNA
+/// sequences or testing inputs.
 ///
 /// # Arguments
 ///
-/// * `buffer`: A mutable reference to the data to randomize. This data will be mutated in place.
-/// * `nonce`: A 64-bit "number used once" (nonce) value to seed the random number generator.
+/// - `buffer`: A mutable reference to the data to randomize. This data will be mutated in place.
+/// - `nonce`: A 64-bit "number used once", or nonce, value to seed the random number generator.
 ///
 /// # Examples
 ///
@@ -248,7 +251,8 @@ where
         return Ok(replaced);
     }
 
-    // Case 3: replacement is longer – collect match positions once, resize once, then rewrite from the back.
+    // Case 3: replacement is longer – collect match positions once, resize once, then rewrite
+    // from the back.
     let mut match_count = 0usize;
     let mut search_from = 0;
     while let Some(pos) = find_next(buffer.as_slice(), search_from) {
@@ -330,7 +334,8 @@ pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) 
     )
 }
 
-/// Tries to replace all non-overlapping bytes in `buffer` that belong to `byteset` with `replacement`.
+/// Tries to replace all non-overlapping bytes in `buffer` that belong to
+/// `byteset` with `replacement`.
 ///
 /// Uses the same three-way strategy as [`try_replace_all`]. If the byteset is empty, the buffer is
 /// left untouched. Returns the number of replacements performed.

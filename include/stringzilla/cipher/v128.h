@@ -1,10 +1,12 @@
 /**
- *  @brief WebAssembly SIMD128 backend for AES-256 in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/v128.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief WebAssembly SIMD128 backend for AES-256 in counter and Galois/counter modes.
  *
  *  The round loop stays a loop, where every other backend writes its fourteen rounds out.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_V128_H_
 #define STRINGZILLA_CIPHER_V128_H_
@@ -16,35 +18,35 @@
 extern "C" {
 #endif
 
+/*  WebAssembly has @b no cipher instructions: no AES round, no carry-less multiply, not even
+ *  a variable byte rotate, so both halves are emulated and the bar is the serial backend
+ *  rather than hardware.
+ *
+ *  `i8x16.swizzle` is what makes that worth doing. The substitution box becomes nibble swizzles
+ *  over the tower-field decomposition of the inverse in GF(2⁸), substituting a whole block at
+ *  once, and every table is sixteen bytes read in full, so the address stream is constant and the
+ *  substitution is @b constant @b time where the serial 256-byte box is not.
+ *
+ *  The Galois hash stays table free for the same reason `serial.h` gives: a windowed multiplier
+ *  would index a table derived from the key. Key expansion is roughly twice slower than serial,
+ *  substituting a word at a time, and is kept vectorized anyway - it runs once per key on no
+ *  throughput path, and it is what keeps the secret out of a memory index on the one tier with
+ *  no hardware fallback. */
 #if SZ_USE_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-/*  WebAssembly has @b no cipher instructions: no AES round, no carry-less multiply, not even a variable
- *  byte rotate, so both halves are emulated and the bar is the serial backend rather than hardware.
- *
- *  `i8x16.swizzle` is what makes that worth doing. The substitution box becomes nibble swizzles over the
- *  tower-field decomposition of the inverse in `GF(2^8)`, substituting a whole block at once, and every
- *  table is sixteen bytes read in full, so the address stream is constant and the substitution is
- *  @b constant @b time where the serial 256-byte box is not.
- *
- *  The Galois hash stays table free for the same reason `serial.h` gives: a windowed multiplier would
- *  index a table derived from the key. Key expansion is roughly twice slower than serial, substituting a
- *  word at a time, and is kept vectorized anyway - it runs once per key on no throughput path, and it is
- *  what keeps the secret out of a memory index on the one tier with no hardware fallback.
- */
-
 #pragma region Substitution Box
 
-/** @brief Change of basis into the tower field `GF(2^4)^2`, as the low nibble's half of a linear map. */
+/** Change of basis into the tower field GF(2⁴)², as the low nibble's half of a linear map. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_tower_forward_low_v128_(void) {
     static sz_align_(64) sz_u8_t const forward_low[16] = {0x00, 0x01, 0x20, 0x21, 0x46, 0x47, 0x66, 0x67,
                                                           0x4c, 0x4d, 0x6c, 0x6d, 0x0a, 0x0b, 0x2a, 0x2b};
     return &forward_low[0];
 }
 
-/** @brief Change of basis into the tower field `GF(2^4)^2`, as the high nibble's half of a linear map. */
+/** Change of basis into the tower field GF(2⁴)², as the high nibble's half of a linear map. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_tower_forward_high_v128_(void) {
     static sz_align_(64) sz_u8_t const forward_high[16] = {0x00, 0x3c, 0xd5, 0xe9, 0x34, 0x08, 0xe1, 0xdd,
                                                            0xe5, 0xd9, 0x30, 0x0c, 0xd1, 0xed, 0x04, 0x38};
@@ -52,10 +54,11 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes256_tower_forward_high_v128_(void) {
 }
 
 /**
- *  @brief The way out of the tower field composed with the affine map, indexed by the inverse's low nibble.
+ *  @brief The way out of the tower field composed with the affine map, indexed by the
+ *      inverse's low nibble.
  *
- *  Leaving the tower field and applying the map of FIPS 197 are both linear over `GF(2)`, so their composition
- *  is one linear map and needs one pair of tables rather than two.
+ *  Leaving the tower field and applying the map of FIPS 197 are both linear over `GF(2)`, so their
+ *  composition is one linear map and needs one pair of tables rather than two.
  */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_substituted_low_v128_(void) {
     static sz_align_(64) sz_u8_t const substituted_low[16] = {0x63, 0x7c, 0xd1, 0xce, 0xc8, 0xd7, 0x7a, 0x65,
@@ -63,28 +66,29 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes256_substituted_low_v128_(void) {
     return &substituted_low[0];
 }
 
-/** @brief The way out of the tower field composed with the affine map, indexed by the inverse's high nibble. */
+/** The way out of the tower field composed with the affine map, indexed by the
+ *  inverse's high nibble. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_substituted_high_v128_(void) {
     static sz_align_(64) sz_u8_t const substituted_high[16] = {0x00, 0x52, 0x3e, 0x6c, 0x65, 0x37, 0x5b, 0x09,
                                                                0x60, 0x32, 0x5e, 0x0c, 0x05, 0x57, 0x3b, 0x69};
     return &substituted_high[0];
 }
 
-/** @brief Multiplicative inverse in `GF(2^4)` under `x^4 + x + 1`, with zero mapped to zero. */
+/** Multiplicative inverse in GF(2⁴) under x⁴ + x + 1, with zero mapped to zero. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_inverse_v128_(void) {
     static sz_align_(64) sz_u8_t const nibble_inverse[16] = {0x00, 0x01, 0x09, 0x0e, 0x0d, 0x0b, 0x07, 0x06,
                                                              0x0f, 0x02, 0x0c, 0x05, 0x0a, 0x04, 0x03, 0x08};
     return &nibble_inverse[0];
 }
 
-/** @brief Squaring in `GF(2^4)`. */
+/** Squaring in GF(2⁴). */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_square_v128_(void) {
     static sz_align_(64) sz_u8_t const nibble_square[16] = {0x00, 0x01, 0x04, 0x05, 0x03, 0x02, 0x07, 0x06,
                                                             0x0c, 0x0d, 0x08, 0x09, 0x0f, 0x0e, 0x0b, 0x0a};
     return &nibble_square[0];
 }
 
-/** @brief Squaring in `GF(2^4)` scaled by the tower field's norm constant. */
+/** Squaring in GF(2⁴) scaled by the tower field's norm constant. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_square_scaled_v128_(void) {
     static sz_align_(64) sz_u8_t const nibble_square_scaled[16] = {0x00, 0x08, 0x06, 0x0e, 0x0b, 0x03, 0x0d, 0x05,
                                                                    0x0a, 0x02, 0x0c, 0x04, 0x01, 0x09, 0x07, 0x0f};
@@ -92,7 +96,7 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_square_scaled_v128_(void) {
 }
 
 /**
- *  @brief Discrete logarithm in `GF(2^4)`, with zero sent far past every antilogarithm's reach.
+ *  @brief Discrete logarithm in GF(2⁴), with zero sent far past every antilogarithm's reach.
  *
  *  Zero has no logarithm, and the usual repair is a comparison and a mask on the product.
  */
@@ -102,14 +106,14 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_logarithm_v128_(void) {
     return &nibble_logarithm[0];
 }
 
-/** @brief Antilogarithm in `GF(2^4)` for exponents 0 through 15. */
+/** Antilogarithm in GF(2⁴) for exponents 0 through 15. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_exponent_low_v128_(void) {
     static sz_align_(64) sz_u8_t const nibble_exponent_low[16] = {0x01, 0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b,
                                                                   0x05, 0x0a, 0x07, 0x0e, 0x0f, 0x0d, 0x09, 0x01};
     return &nibble_exponent_low[0];
 }
 
-/** @brief Antilogarithm in `GF(2^4)` for exponents 16 through 28, indexed by the exponent less sixteen. */
+/** Antilogarithm in GF(2⁴) for exponents 16 through 28, indexed by the exponent less sixteen. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_exponent_high_v128_(void) {
     static sz_align_(64) sz_u8_t const nibble_exponent_high[16] = {0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b, 0x05,
                                                                    0x0a, 0x07, 0x0e, 0x0f, 0x0d, 0x09, 0x00, 0x00};
@@ -117,14 +121,15 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes256_nibble_exponent_high_v128_(void) {
 }
 
 /**
- *  @brief Evaluates a map linear over `GF(2)` on all sixteen lanes at once.
- *  @param low_table_u8x16 The map's value on each low nibble.
- *  @param high_table_u8x16 The map's value on each high nibble.
- *  @param bytes_u8x16 The sixteen inputs.
- *  @return `low_table_u8x16[byte & 0xF] ^ high_table_u8x16[byte >> 4]` in every lane.
+ *  @brief Evaluates a map linear over GF(2) on all sixteen lanes at once.
+ *  @param[in] low_table_u8x16 The map's value on each low nibble.
+ *  @param[in] high_table_u8x16 The map's value on each high nibble.
+ *  @param[in] bytes_u8x16 The sixteen inputs.
+ *  @return In every lane, @p low_table_u8x16 at the byte's low nibble, exclusive-ored with
+ *      @p high_table_u8x16 at its high nibble.
  *
- *  A map linear over `GF(2)` splits across the two nibbles of its argument, so a 256-entry table that no
- *  permute could reach collapses into two sixteen-entry tables that one swizzle each can.
+ *  A map linear over GF(2) splits across the two nibbles of its argument, so a 256-entry table
+ *  that no permute could reach collapses into two sixteen-entry tables that one swizzle each can.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128_(v128_t low_table_u8x16, v128_t high_table_u8x16,
                                                    v128_t bytes_u8x16) {
@@ -135,14 +140,15 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128_(v128_t low_table_u8x16, v128_
 }
 
 /**
- *  @brief Multiplies sixteen pairs of `GF(2^4)` elements under `x^4 + x + 1`.
- *  @param first_u8x16 One operand per lane, each below sixteen.
- *  @param second_u8x16 The other operand per lane, each below sixteen.
+ *  @brief Multiplies sixteen pairs of GF(2⁴) elements under x⁴ + x + 1.
+ *  @param[in] first_u8x16 One operand per lane, each below sixteen.
+ *  @param[in] second_u8x16 The other operand per lane, each below sixteen.
  *  @return The product per lane.
  *
- *  Logarithms turn the product into a sum that lands between zero and twenty-eight, which two antilogarithm
- *  swizzles cover between them: the low one answers exponents below sixteen and returns zero elsewhere, and
- *  the high one is fed the sum less sixteen so its own out-of-range indices fall away the same way.
+ *  Logarithms turn the product into a sum that lands between zero and twenty-eight, which two
+ *  antilogarithm swizzles cover between them: the low one answers exponents below sixteen and
+ *  returns zero elsewhere, and the high one is fed the sum less sixteen so its own out-of-range
+ *  indices fall away the same way.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128_(v128_t first_u8x16, v128_t second_u8x16) {
     v128_t const logarithm_table_u8x16 = wasm_v128_load(sz_aes256_nibble_logarithm_v128_());
@@ -157,11 +163,11 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128_(v128_t first_u8x16, v128
 
 /**
  *  @brief Applies the substitution box of FIPS 197 to all sixteen bytes of a block.
- *  @param bytes_u8x16 The sixteen inputs.
+ *  @param[in] bytes_u8x16 The sixteen inputs.
  *  @return The substituted bytes.
  *
- *  The byte is carried into `GF(2^4)^2`, where its inverse costs three four-bit multiplies, two squarings and
- *  one four-bit inversion, all of them sixteen-entry swizzles.
+ *  The byte is carried into GF(2⁴)², where its inverse costs three four-bit multiplies, two
+ *  squarings and one four-bit inversion, all of them sixteen-entry swizzles.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128_(v128_t bytes_u8x16) {
     v128_t const mapped_u8x16 = sz_aes256_nibble_map_v128_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
@@ -170,7 +176,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128_(v128_t bytes_u8x16) {
     v128_t const high_nibbles_u8x16 = wasm_u8x16_shr(mapped_u8x16, 4);
     v128_t const low_nibbles_u8x16 = wasm_v128_and(mapped_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
 
-    // The tower field's norm, `high^2 * N ^ high * low ^ low^2`, is what has to be inverted in `GF(2^4)`.
+    // The tower field's norm, high² × N ⊕ high × low ⊕ low², is what has to be inverted in GF(2⁴).
     v128_t const high_scaled_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(sz_aes256_nibble_square_scaled_v128_()),
                                                         high_nibbles_u8x16);
     v128_t const crossed_u8x16 = sz_aes256_nibble_multiply_v128_(high_nibbles_u8x16, low_nibbles_u8x16);
@@ -187,13 +193,13 @@ SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128_(v128_t bytes_u8x16) {
                          wasm_i8x16_swizzle(wasm_v128_load(sz_aes256_substituted_high_v128_()), high_inverse_u8x16));
 }
 
-#pragma endregion // Substitution Box
+#pragma endregion Substitution Box
 
 #pragma region Key Schedule
 
 /**
  *  @brief Shifts a register up by one schedule word, filling the vacated word with zeros.
- *  @param words_u8x16 The four schedule words.
+ *  @param[in] words_u8x16 The four schedule words.
  *  @return The same words moved one position later.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_key_carry_v128_(v128_t words_u8x16) {
@@ -202,13 +208,15 @@ SZ_HELPER_INLINE v128_t sz_aes256_key_carry_v128_(v128_t words_u8x16) {
 }
 
 /**
- *  @brief Folds a substituted schedule word into the round key eight words back, producing four more.
- *  @param previous_u8x16 The four schedule words eight positions back.
- *  @param substituted_u8x16 The substituted word, already broadcast across all four lanes.
+ *  @brief Folds a substituted schedule word into the round key eight words back,
+ *      producing four more.
+ *  @param[in] previous_u8x16 The four schedule words eight positions back.
+ *  @param[in] substituted_u8x16 The substituted word, already broadcast across all four lanes.
  *  @return The next four schedule words.
  *
- *  FIPS 197 writes `w[i] = w[i - 8] ^ temp` with `temp` carried forward through the quadruple, and that carry
- *  is exactly the cumulative exclusive-or three word-wise shifts produce in one register.
+ *  FIPS 197 writes `w[i] = w[i - 8] ^ temp` with @c temp carried forward through the
+ *  quadruple, and that carry is exactly the cumulative exclusive-or three word-wise shifts
+ *  produce in one register.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_key_fold_v128_(v128_t previous_u8x16, v128_t substituted_u8x16) {
     previous_u8x16 = wasm_v128_xor(previous_u8x16, sz_aes256_key_carry_v128_(previous_u8x16));
@@ -219,8 +227,8 @@ SZ_HELPER_INLINE v128_t sz_aes256_key_fold_v128_(v128_t previous_u8x16, v128_t s
 
 /**
  *  @brief Builds the schedule's rotated and substituted word against a round constant.
- *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
- *  @param round_constant The round constant for this step.
+ *  @param[in] previous_u8x16 The four schedule words immediately before the new quadruple.
+ *  @param[in] round_constant The round constant for this step.
  *  @return The finished word, broadcast across all four lanes.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128_(v128_t previous_u8x16, sz_u8_t round_constant) {
@@ -232,7 +240,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128_(v128_t previous_u8x16, sz_u8_t 
 
 /**
  *  @brief Builds the schedule's plainly substituted word, the step an AES-256 schedule interleaves.
- *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
+ *  @param[in] previous_u8x16 The four schedule words immediately before the new quadruple.
  *  @return The finished word, broadcast across all four lanes.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_key_half_turn_v128_(v128_t previous_u8x16) {
@@ -289,14 +297,14 @@ SZ_API_COMPTIME void sz_aes256_key_init_v128(sz_aes256_key_t *key, sz_u8_t const
     wasm_v128_store(&key->round_keys[56], even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
 /**
  *  @brief Reads one round key out of an expanded schedule.
- *  @param key The expanded schedule.
- *  @param round_index Which of the fifteen round keys to read, zero through fourteen.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] round_index Which of the fifteen round keys to read, zero through fourteen.
  *  @return The round key.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_round_key_v128_(sz_aes256_key_t const *key, sz_size_t round_index) {
@@ -304,8 +312,8 @@ SZ_HELPER_INLINE v128_t sz_aes256_round_key_v128_(sz_aes256_key_t const *key, sz
 }
 
 /**
- *  @brief Moves each row of the state left by its row index, as FIPS 197 defines `ShiftRows`.
- *  @param bytes_u8x16 The state.
+ *  @brief Moves each row of the state left by its row index, as FIPS 197 defines @c ShiftRows.
+ *  @param[in] bytes_u8x16 The state.
  *  @return The row-shifted state.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_shift_rows_v128_(v128_t bytes_u8x16) {
@@ -313,13 +321,14 @@ SZ_HELPER_INLINE v128_t sz_aes256_shift_rows_v128_(v128_t bytes_u8x16) {
 }
 
 /**
- *  @brief Applies `MixColumns` to all four columns at once.
- *  @param bytes_u8x16 The row-shifted state.
+ *  @brief Applies @c MixColumns to all four columns at once.
+ *  @param[in] bytes_u8x16 The row-shifted state.
  *  @return The mixed state.
  *
- *  Written as `s[j] ^ parity ^ xtime(s[j] ^ s[j + 1])`, the transform needs only the column's total parity and
- *  the doubled difference of adjacent entries, so three immediate shuffles supply every neighbour a lane could
- *  want and the doubling is a shift against a mask of the bytes that overflow.
+ *  Written as `s[j] ^ parity ^ xtime(s[j] ^ s[j + 1])`, the transform needs only the column's
+ *  total parity and the doubled difference of adjacent entries, so three immediate shuffles
+ *  supply every neighbour a lane could want and the doubling is a shift against a mask of the
+ *  bytes that overflow.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_mix_columns_v128_(v128_t bytes_u8x16) {
     v128_t const next_column_u8x16 = wasm_i8x16_shuffle(bytes_u8x16, bytes_u8x16, 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8,
@@ -338,8 +347,8 @@ SZ_HELPER_INLINE v128_t sz_aes256_mix_columns_v128_(v128_t bytes_u8x16) {
 
 /**
  *  @brief Encrypts one block with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param block_u8x16 The plaintext block.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128_(sz_aes256_key_t const *key, v128_t block_u8x16) {
@@ -353,13 +362,13 @@ SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128_(sz_aes256_key_t const *key
                          sz_aes256_round_key_v128_(key, 14));
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
 /**
  *  @brief Places the twelve nonce bytes in a counter block whose trailing index word is zero.
- *  @param nonce The twelve nonce bytes.
+ *  @param[in] nonce The twelve nonce bytes.
  *  @return The counter block for index zero.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_counter_base_v128_(sz_u8_t const *nonce) {
@@ -370,8 +379,8 @@ SZ_HELPER_INLINE v128_t sz_aes256_counter_base_v128_(sz_u8_t const *nonce) {
 
 /**
  *  @brief Completes a counter block with a big-endian block index in its trailing word.
- *  @param base_u8x16 A counter block carrying the nonce, whose trailing word is overwritten.
- *  @param block_index The block index.
+ *  @param[in] base_u8x16 A counter block carrying the nonce, whose trailing word is overwritten.
+ *  @param[in] block_index The block index.
  *  @return The counter block for that index.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_counter_block_v128_(v128_t base_u8x16, sz_u32_t block_index) {
@@ -415,29 +424,30 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128(sz_aes256_key_t const *key, sz_u8_t 
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
 /**
- *  @brief Smears bit @p bit_index of every lane, counting from the most significant, across that lane.
+ *  @brief Smears bit @p bit_index of every lane, counting from the most significant,
+ *      across that lane.
  *  @return All ones in a lane whose bit was set, all zeros otherwise.
  *
- *  Shifting the wanted bit into the sign position and arithmetic-shifting it back down replicates it, which is
- *  how a lane selects a value without a branch or a scalar extraction.
+ *  Shifting the wanted bit into the sign position and arithmetic-shifting it back down replicates
+ *  it, which is how a lane selects a value without a branch or a scalar extraction.
  */
 SZ_HELPER_INLINE v128_t sz_bit_smear_v128_(v128_t bytes_u8x16, sz_size_t bit_index) {
     return wasm_i8x16_shr(wasm_i8x16_shl(bytes_u8x16, (sz_u32_t)bit_index), 7);
 }
 
 /**
- *  @brief Multiplies a hash block by `x` in the Galois field the tag is built over.
- *  @param value_u8x16 The block, in the byte order the tag is defined over.
+ *  @brief Multiplies a hash block by @c x in the Galois field the tag is built over.
+ *  @param[in] value_u8x16 The block, in the byte order the tag is defined over.
  *  @return The product.
  *
- *  The field puts a block's leading bit at the polynomial's lowest coefficient, so multiplying by `x` moves
- *  every bit one place later and the bit that leaves the block at the far end comes back as the reduction
- *  polynomial `x^7 + x^2 + x + 1`.
+ *  The field puts a block's leading bit at the polynomial's lowest coefficient, so multiplying by
+ *  @c x moves every bit one place later and the bit that leaves the block at the far end comes back
+ *  as the reduction polynomial x⁷ + x² + x + 1.
  */
 SZ_HELPER_INLINE v128_t sz_ghash_double_v128_(v128_t value_u8x16) {
     v128_t const within_byte_u8x16 = wasm_u8x16_shr(value_u8x16, 1);
@@ -451,12 +461,12 @@ SZ_HELPER_INLINE v128_t sz_ghash_double_v128_(v128_t value_u8x16) {
 }
 
 /**
- *  @brief Multiplies a hash block by `x^8` in the Galois field the tag is built over.
- *  @param value_u8x16 The block, in the byte order the tag is defined over.
+ *  @brief Multiplies a hash block by x⁸ in the Galois field the tag is built over.
+ *  @param[in] value_u8x16 The block, in the byte order the tag is defined over.
  *  @return The product.
  *
- *  Eight places is a whole byte, so the shift itself is one immediate shuffle and only the byte that leaves
- *  the block needs work.
+ *  Eight places is a whole byte, so the shift itself is one immediate shuffle and only the byte
+ *  that leaves the block needs work.
  */
 SZ_HELPER_INLINE v128_t sz_ghash_double_byte_v128_(v128_t value_u8x16) {
     v128_t const zeros_u8x16 = wasm_u64x2_splat(0);
@@ -469,14 +479,15 @@ SZ_HELPER_INLINE v128_t sz_ghash_double_byte_v128_(v128_t value_u8x16) {
 }
 
 /**
- *  @brief Multiplies @p accumulator_u8x16 by @p subkey_u8x16 in the Galois field the tag is built over.
- *  @param accumulator_u8x16 The running hash.
- *  @param subkey_u8x16 One of the precomputed powers of the hash subkey.
+ *  @brief Multiplies @p accumulator_u8x16 by @p subkey_u8x16 in the Galois field the tag
+ *      is built over.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] subkey_u8x16 One of the precomputed powers of the hash subkey.
  *  @return The product.
  *
- *  Deliberately branch free and table free, for the reason the serial backend states: a windowed multiplier's
- *  table is derived from the subkey, and its cache footprint would leak the key on exactly the platforms with
- *  no cipher instructions to fall back on.
+ *  Deliberately branch free and table free, for the reason the serial backend states: a windowed
+ *  multiplier's table is derived from the subkey, and its cache footprint would leak the key on
+ *  exactly the platforms with no cipher instructions to fall back on.
  */
 SZ_HELPER_INLINE v128_t sz_ghash_multiply_v128_(v128_t accumulator_u8x16, v128_t subkey_u8x16) {
     v128_t shifted_subkeys_u8x16[8];
@@ -515,7 +526,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_load_padded_v128_(sz_u8_t const *block, sz_siz
     return wasm_v128_and(wasm_v128_load(block), keep_u8x16);
 }
 
-/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+/** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_v128_(sz_u8_t const *first, sz_u8_t const *second) {
     v128_t const matching_u8x16 = wasm_i8x16_eq(wasm_v128_load(first), wasm_v128_load(second));
     return wasm_i8x16_all_true(matching_u8x16) ? sz_true_k : sz_false_k;
@@ -523,9 +534,9 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_v128_(sz_u8_t const *first, sz_u8
 
 /**
  *  @brief Absorbs one block into the running hash.
- *  @param accumulator_u8x16 The running hash.
- *  @param block_u8x16 The block to absorb.
- *  @param subkey_u8x16 The hash subkey.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] block_u8x16 The block to absorb.
+ *  @param[in] subkey_u8x16 The hash subkey.
  *  @return The updated running hash.
  */
 SZ_HELPER_INLINE v128_t sz_ghash_absorb_v128_(v128_t accumulator_u8x16, v128_t block_u8x16, v128_t subkey_u8x16) {
@@ -546,15 +557,15 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128(sz_aes256_gcm_key_t *key, sz_u8
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time, so this is a straight-line fill through the widest store the target has
- *  rather than a length-driven loop, and both loops below fold away entirely.
+ *  The size is known at compile time, so this is a straight-line fill through the widest store the
+ *  target has rather than a length-driven loop, and both loops below fold away entirely.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_v128_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -565,7 +576,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_v128_(sz_aes256_gcm_state_t *sta
     sz_keep_alive_(state);
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                 sz_u8_t const nonce[sz_at_least_(12)]) {
     v128_t initial_u8x16;
@@ -587,7 +598,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128_(sz_aes256_gcm_state_t *state, sz
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_v128_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     v128_t const subkey_u8x16 = wasm_v128_load(state->key.powers);
@@ -622,17 +633,18 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_v128_(sz_aes256_gcm_state_t *state
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param state The state, whose two sixteen-byte counters advance together here.
- *  @param input The bytes to transform.
- *  @param output Receives the transformed bytes.
- *  @param count Bytes to consume, never more than the keystream block has left.
- *  @param accumulator_u8x16 The running hash.
- *  @param subkey_u8x16 The hash subkey.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in] input The bytes to transform.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] count Bytes to consume, never more than the keystream block has left.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] subkey_u8x16 The hash subkey.
+ *  @param[in] direction Which buffer the hash absorbs.
  *  @return The updated running hash.
  *
- *  Through the message the keystream offset and the hash offset are the same number, because every byte spends
- *  one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
+ *  Through the message the keystream offset and the hash offset are the same number, because
+ *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
+ *  this resumes both.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_gcm_spend_v128_(sz_aes256_gcm_state_t *state, sz_u8_t const *input, sz_u8_t *output,
                                                   sz_size_t count, v128_t accumulator_u8x16, v128_t subkey_u8x16,
@@ -659,15 +671,15 @@ SZ_HELPER_INLINE v128_t sz_aes256_gcm_spend_v128_(sz_aes256_gcm_state_t *state, 
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
- *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole
- *  blocks, then a trailing block that the next chunk will resume.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes
+ *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
+ *  block, then whole blocks, then a trailing block that the next chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                     sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -790,7 +802,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_v128(sz_aes256_gcm_de
     return sz_aes256_tag_equal_v128_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -822,7 +834,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_v128(sz_aes256_gcm_key_t const
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

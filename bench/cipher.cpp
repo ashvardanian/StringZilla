@@ -1,18 +1,21 @@
 /**
  *  @file bench/cipher.cpp
+ *  @author Ash Vardanian
+ *  @date August 4, 2026
  *  @brief Benchmarks AES-256 counter and Galois/counter mode against the serial reference.
  *
- *  Bulk shaped rather than token shaped, so this sits alongside `bench/memory.cpp`'s random fill rather
- *  than in `bench/token.cpp`. The corpus decides how long each message is drawn from, but the content is
- *  a deterministic fill: a cipher's cost depends on message length alone, never on the bytes themselves.
- *  Sizes sweep a short record up to a page-sized buffer, because that range is where the fixed cost of a
- *  key schedule and a tag stops dominating and the bulk kernels take over.
+ *  Bulk shaped rather than token shaped, so this sits alongside the random fill of
+ *  `bench/memory.cpp` rather than in `bench/token.cpp`. The corpus decides how long each message is
+ *  drawn from, but the content is a deterministic fill: a cipher's cost depends on message length
+ *  alone, never on the bytes themselves. Sizes sweep a short record up to a page-sized buffer,
+ *  because that range is where the fixed cost of a key schedule and a tag stops dominating and bulk
+ *  kernels take over.
  *
  *  Use the following environment variables to control the benchmark:
  *
- *  - `STRINGWARS_DATASET` : path to the input dataset, used to size the pool of messages.
- *  - `STRINGWARS_FILTER` : regular expression selecting which kernels to run.
- *  - `STRINGWARS_DURATION` : seconds per kernel.
+ *  - @c STRINGWARS_DATASET : path to the input dataset, used to size the pool of messages.
+ *  - @c STRINGWARS_FILTER : regular expression selecting which kernels to run.
+ *  - @c STRINGWARS_DURATION : seconds per kernel.
  */
 #include <cstring> // `std::memcmp`
 #include <string>  // `std::string`
@@ -24,13 +27,13 @@
 
 using namespace ashvardanian::stringzilla::bench;
 
-/** @brief The message sizes every kernel is measured at, from a short record to a page. */
+/** The message sizes every kernel is measured at, from a short record to a page. */
 static constexpr std::size_t cipher_message_sizes_[] = {256, 1024, 4096, 16384};
 
-/** @brief Bytes of messages cycled per size, large enough that no single message stays in a register file. */
+/** Bytes of messages cycled per size, so large that no single message stays in a register file. */
 static constexpr std::size_t cipher_pool_bytes_ = 1024ull * 1024ull;
 
-/** @brief Counter-mode throughput for one kernel, cycling a pool so each call touches fresh bytes. */
+/** Counter-mode throughput for one kernel, cycling a pool so each call touches fresh bytes. */
 template <sz_aes256_key_init_t init_, sz_aes256_ctr_xor_t transform_>
 struct ctr_from_sz {
 
@@ -66,7 +69,7 @@ struct ctr_from_sz {
     }
 };
 
-/** @brief Authenticated throughput for one kernel, one whole message per call. */
+/** Authenticated throughput for one kernel, one whole message per call. */
 template <sz_aes256_gcm_key_init_t init_, sz_aes256_gcm_encrypt_t encrypt_>
 struct gcm_from_sz {
 
@@ -103,7 +106,7 @@ struct gcm_from_sz {
     }
 };
 
-/** @brief Fills a pool with a deterministic pattern, since cipher cost never depends on the bytes. */
+/** Fills a pool with a deterministic pattern, since cipher cost never depends on the bytes. */
 static void fill_cipher_pool_(std::vector<char> &pool) noexcept {
     for (std::size_t index = 0; index != pool.size(); ++index) pool[index] = static_cast<char>(index * 31 + 7);
 }
@@ -166,7 +169,7 @@ void bench_cipher_ctr(environment_t const &env) {
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Counter Mode
 
@@ -232,18 +235,18 @@ void bench_cipher_gcm(environment_t const &env) {
     }
 }
 
-#pragma endregion // Galois Counter Mode
+#pragma endregion Galois Counter Mode
 
 #pragma region Streaming
 
-/** @brief The chunk sizes the streaming path is measured at, straddling the sixteen-byte block. */
+/** The chunk sizes the streaming path is measured at, straddling the sixteen-byte block. */
 static constexpr std::size_t cipher_chunk_sizes_[] = {1, 7, 16, 40};
 
 /**
  *  @brief Seals one message in fixed-size chunks, which is where the partial-block path dominates.
  *
- *  A chunk below the block width leaves bytes staged in the state between calls, so the cost per byte
- *  is the staging rather than the cipher. Sweeping across sixteen shows where the two cross over.
+ *  A chunk below the block width leaves bytes staged in the state between calls, so the cost per
+ *  byte is the staging rather than the cipher. Sweeping across sixteen shows where the two cross.
  */
 template <sz_aes256_gcm_key_init_t init_, sz_aes256_gcm_encryptor_init_t begin_,
           sz_aes256_gcm_encryptor_update_t update_, sz_aes256_gcm_encryptor_digest_t digest_>
@@ -367,7 +370,7 @@ void bench_cipher_stream(environment_t const &env) {
     }
 }
 
-#pragma endregion // Streaming
+#pragma endregion Streaming
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.

@@ -1,6 +1,15 @@
-/* StringZilla ISA probe: SVE (Armv8.2-A scalable vectors), mirroring `include/stringzilla/find/sve.h`.
- * SVE values cross function boundaries on purpose: the scalable-vector ABI is where fragile toolchains
- * break (some Clang builds ICE emitting it for Mach-O), which a body-only snippet would not expose. */
+/**
+ *  @file probes/arm_sve.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for SVE, the Armv8.2-A scalable vectors.
+ *
+ *  SVE values cross function boundaries on purpose: the scalable-vector ABI is where
+ *  fragile toolchains break, as some Clang builds ICE emitting it for Mach-O, which a
+ *  body-only snippet would not expose.
+ *
+ *  @sa include/stringzilla/find/sve.h
+ */
 #if defined(_MSC_VER)
 #error "SVE target attributes and intrinsics are unavailable under MSVC"
 #endif

@@ -1,7 +1,8 @@
 /**
- *  @brief The shared iterator machinery behind the four UAX segmenters.
  *  @file python/stringzilla/utf8_boundaries.c
  *  @author Ash Vardanian
+ *  @date August 7, 2026
+ *  @brief The shared iterator machinery behind the four UAX segmenters.
  */
 #include "stringzilla.h"
 

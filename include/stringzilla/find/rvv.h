@@ -1,7 +1,9 @@
 /**
- *  @brief RISC-V Vector (RVV 1.0) backend for find.
  *  @file include/stringzilla/find/rvv.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief RISC-V Vector (RVV 1.0) backend for find.
+ *
  *  @sa include/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_RVV_H_
@@ -38,11 +40,12 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystac
 }
 
 /**
- *  @brief Reverse a `u8m4` strip via 16-bit gather indices, lifting the byte-index ceiling.
- *      Backward search wants the highest match first, so we flip the strip and read it
- *      forward. `vrgatherei16` indexes 8-bit elements with a 16-bit vector, so a strip may
- *      span up to 65535 lanes — beyond the RVV 1.0 maximum `VLEN` of 64 Kib at `e8m4`
- *      (`VLMAX = VLEN/2`), so no software cap is ever needed.
+ *  @brief Reverse a @c u8m4 strip via 16-bit gather indices, lifting the byte-index ceiling.
+ *
+ *  Backward search wants the highest match first, so we flip the strip and read it forward.
+ *  @c vrgatherei16 indexes 8-bit elements with a 16-bit vector, so a strip may span up to 65535
+ *  lanes, beyond the RVV 1.0 maximum @c VLEN of 64 Kib at @c e8m4 where VLMAX = VLEN / 2, so no
+ *  software cap is ever needed.
  */
 SZ_HELPER_INLINE vuint8m4_t sz_reverse_strip_rvv_(vuint8m4_t strip_u8m4, sz_size_t vector_length) {
     vuint16m8_t iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
@@ -68,14 +71,15 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haysta
 
 /**
  *  @brief Build a per-lane byteset membership mask for a vector strip.
- *      Mirrors the NEON `_u8s[c>>3] & (1<<(c&7))` formulation. The set byte is fetched with an indexed
- *      memory load (`vluxei8`) straight from the 32-byte `_u8s` table, so the index `c >> 3` in [0, 31]
- *      is valid at any `VLEN` — no register-group capacity ceiling and no serial fallback.
  *
- *  @param haystack_u8m8 Vector of bytes to test.
- *  @param set_u8s The 32-byte byteset in memory.
- *  @param vector_length Vector length for this strip.
- *  @return Predicate mask where lane `i` is set if `haystack_u8m8[i]` is in the set.
+ *  Mirrors the NEON `_u8s[c >> 3] & (1 << (c & 7))` formulation. The set byte is fetched with an
+ *  indexed memory load, @c vluxei8, straight from the 32-byte @c _u8s table, so the index `c >> 3`
+ *  in [0, 31] is valid at any @c VLEN: no register-group capacity ceiling and no serial fallback.
+ *
+ *  @param[in] haystack_u8m8 Vector of bytes to test.
+ *  @param[in] set_u8s The 32-byte byteset in memory.
+ *  @param[in] vector_length Vector length for this strip.
+ *  @return Predicate mask where lane @c i is set if `haystack_u8m8[i]` is in the set.
  */
 SZ_HELPER_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
                                                        sz_size_t vector_length) {
@@ -88,9 +92,7 @@ SZ_HELPER_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8,
     return __riscv_vmsne_vx_u8m8_b1(anded_u8m8, 0, vector_length);
 }
 
-/**
- *  @brief `m4` sibling of @ref sz_find_byteset_rvv_mask_m8_, used on the reversed backward strip.
- */
+/** The @c m4 sibling of @ref sz_find_byteset_rvv_mask_m8_, used on the reversed backward strip. */
 SZ_HELPER_INLINE vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
                                                        sz_size_t vector_length) {
     vuint8m4_t byte_index_u8m4 = __riscv_vsrl_vx_u8m4(haystack_u8m4, 3, vector_length);   // c >> 3, in [0, 31]

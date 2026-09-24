@@ -1,7 +1,8 @@
 /**
- *  @brief UAX-29 grapheme cluster segmentation of UTF-8 text.
  *  @file python/stringzilla/utf8_graphemes.c
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief UAX-29 grapheme cluster segmentation of UTF-8 text.
  */
 #include "stringzilla.h"
 
@@ -39,14 +40,14 @@ static char const doc_Utf8Graphemes[] =                                         
     "Utf8Graphemes(string, ...)\n"                                                   //
     "\n"                                                                             //
     "UTF-8 aware grapheme cluster boundary iterator per Unicode UAX-29 algorithm.\n" //
-    "Yields grapheme clusters (user-perceived characters).\n"                        //
+    "Yields grapheme clusters, the user-perceived characters.\n"                     //
     "\n"                                                                             //
     "Created by:\n"                                                                  //
     "  - Str.utf8_graphemes()\n"                                                     //
     "  - sz.utf8_graphemes()\n"                                                      //
     "\n"                                                                             //
     "UAX-29 Grapheme_Cluster_Break rules implemented:\n"                             //
-    "  - GB3: CR x LF (no break)\n"                                                  //
+    "  - GB3: CR x LF, no break\n"                                                   //
     "  - GB4-GB5: Control/CR/LF breaks\n"                                            //
     "  - GB6-GB8: Hangul syllable sequences\n"                                       //
     "  - GB9-GB9c: Extend/ZWJ/SpacingMark, Indic conjuncts\n"                        //

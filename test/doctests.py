@@ -6,6 +6,10 @@ This keeps those examples honest: if an API changes, the example fails here.
 Run with::
 
     python -m pytest test/doctests.py -v
+
+File: test/doctests.py
+Author: Ash Vardanian
+Date: June 13, 2026
 """
 
 import doctest
@@ -13,9 +17,9 @@ import hashlib
 
 import stringzilla as sz
 
-# Names referenced by the docstring examples (e.g. ``>>> sz.Str(...)``). Doctests run in a
-# namespace seeded with these, mirroring how a user would ``import stringzilla as sz``.
 _OPTIONFLAGS = doctest.NORMALIZE_WHITESPACE | doctest.IGNORE_EXCEPTION_DETAIL
+"""Names referenced by the docstring examples, e.g. ``>>> sz.Str(...)``. Doctests run in a namespace
+seeded with these, mirroring how a user would ``import stringzilla as sz``."""
 
 
 def _run(module, extraglobs):

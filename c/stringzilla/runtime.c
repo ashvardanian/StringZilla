@@ -1,16 +1,16 @@
 /**
  *  @file c/stringzilla/runtime.c
- *  @brief StringZilla C library with dynamic backed dispatch for the most appropriate implementation.
  *  @author Ash Vardanian
  *  @date January 16, 2024
+ *  @brief StringZilla C library with dynamic dispatch to the most appropriate implementation.
  *
- *  This translation unit owns only the cross-cutting glue: the shared `sz_dispatch_cpu_table`
- *  definition, its one-time initialization, the version & capabilities exports, and the device and allocator
- *  constructors a binding reaches a GPU engine through. The
- *  per-domain backends and `SZ_API_RUNTIME` wrappers live in the sibling `compare.c`, `memory.c`,
- *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`, `utf8_tokens.c`,
- *  `utf8_wordbreaks.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`,
- *  and `utf8_uncased.c`.
+ *  This translation unit owns only the cross-cutting glue: the shared
+ *  @c sz_dispatch_cpu_table definition, its one-time initialization, the version &
+ *  capabilities exports, and the device and allocator constructors a binding reaches a GPU
+ *  engine through. The per-domain backends and @c SZ_API_RUNTIME wrappers live in sibling
+ *  translation units: `compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`,
+ *  `utf8_runes.c`, `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`,
+ *  `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`, and `utf8_uncased.c`.
  */
 #if defined(_WIN32)
 #include <windows.h> // `DllMain`
@@ -60,10 +60,8 @@ static void sz_dispatch_cpu_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_utf8_uncased_update_(caps);
 }
 
-/**
- *  @brief Initializes a global static "virtual table" of supported backends
- *         Run it just once to avoid unnecessary `if`-s.
- */
+/** Initializes a global static "virtual table" of supported backends. Run it just once to avoid
+ *  unnecessary @c if checks. */
 SZ_API_RUNTIME void sz_dispatch_cpu_table_init(void) {
     sz_capability_t caps = sz_capabilities();
     sz_dispatch_cpu_table_update_implementation_(caps);
@@ -76,8 +74,8 @@ SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) {
 /**
  *  @brief Fills every device slot, or leaves them null where no runtime is compiled in.
  *
- *  Called by the engines' @c _init_gpu rather than from the startup constructor, so a process that only ever
- *  scores on the host never initializes a driver it does not use.
+ *  Called by the engines' @c _init_gpu rather than from the startup constructor, so a process that
+ *  only ever scores on the host never initializes a driver it does not use.
  */
 SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void) {
     sz_dispatch_levenshtein_gpu_update_();
@@ -85,13 +83,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void) {
     sz_dispatch_substrings_gpu_update_();
 }
 
+/*  Makes sure the @c sz_dispatch_cpu_table_init function is called at startup, from either an
+ *  executable or when loading a DLL. The section name must be no more than 8 characters long, and
+ *  must sort strictly between `.CRT$XCA` and `.CRT$XCZ`. The Microsoft C++ compiler puts C++
+ *  initialisation code in `.CRT$XCU`, so avoid that section:
+ *  https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-initialization?view=msvc-170 */
 #if defined(_MSC_VER)
-/*
- *  Makes sure the `sz_dispatch_cpu_table_init` function is called at startup, from either an executable or when loading
- *  a DLL. The section name must be no more than 8 characters long, and must be between .CRT$XCA and .CRT$XCZ
- *  alphabetically (exclusive). The Microsoft C++ compiler puts C++ initialisation code in .CRT$XCU, so avoid that
- *  section: https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-initialization?view=msvc-170
- */
 #if defined(_WIN64)
 #pragma comment(linker, "/INCLUDE:sz_dispatch_cpu_table_init_")
 #else
@@ -100,7 +97,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void) {
 #pragma section(".CRT$XCS", read)
 __declspec(allocate(".CRT$XCS")) void (*sz_dispatch_cpu_table_init_)() = sz_dispatch_cpu_table_init;
 
-/*  Called either from CRT code or out own `_DLLMainCRTStartup`, when a DLL is loaded. */
+/*  Called either from CRT code or our own @c _DLLMainCRTStartup, when a DLL is loaded. */
 BOOL WINAPI DllMain(HINSTANCE instance_handle, DWORD reason, LPVOID reserved_pointer) {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
@@ -113,8 +110,8 @@ BOOL WINAPI DllMain(HINSTANCE instance_handle, DWORD reason, LPVOID reserved_poi
     return TRUE;
 }
 
-#if SZ_AVOID_LIBC
 /*  Called when the DLL is loaded, and there is no CRT code. */
+#if SZ_AVOID_LIBC
 BOOL WINAPI _DllMainCRTStartup(HINSTANCE instance_handle, DWORD reason, LPVOID reserved_pointer) {
     DllMain(instance_handle, reason, reserved_pointer);
     return TRUE;
@@ -143,9 +140,10 @@ SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return names;
 }
 
+/*  The device bodies live in `types.cuh`, so a header-only consumer inlines the same code these
+ *  exports call. */
 #pragma region Devices
 
-/*  The bodies live in `types.cuh`, so a header-only consumer inlines the same code these exports call. */
 #if SZ_USE_CUDA
 
 SZ_API_RUNTIME sz_status_t sz_cuda_device_init(int ordinal, sz_cuda_device_t *device) {
@@ -170,7 +168,7 @@ SZ_API_RUNTIME void sz_memory_allocator_init_pinned(sz_memory_allocator_t *alloc
     sz_memory_allocator_init_pinned_implementation_(allocator, device);
 }
 
-/*  The accessors' addresses are link-time device values, so only a device compilation can read them out. */
+/*  The accessors' addresses are link-time device values, readable only by a device compilation. */
 #ifdef __CUDACC__
 SZ_API_RUNTIME sz_status_t sz_sequence_from_string_views_cuda(sz_string_view_t const *views, sz_size_t count,
                                                               sz_sequence_t *sequence) {

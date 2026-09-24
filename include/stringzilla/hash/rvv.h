@@ -1,7 +1,9 @@
 /**
- *  @brief RISC-V Vector (RVV 1.0) backend for hash.
  *  @file include/stringzilla/hash/rvv.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief RISC-V Vector (RVV 1.0) backend for hash.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_RVV_H_
@@ -15,6 +17,16 @@
 extern "C" {
 #endif
 
+/*  Sum of all bytes, identical to @c sz_bytesum_serial. We process the buffer in strips capped at
+ *  256 elements so a single @c vwredsumu, a widening unsigned reduction from u8 to u16, cannot
+ *  overflow: the maximum per-strip sum is 256 × 255 = 65280, which still fits a u16 accumulator.
+ *  The per-strip partial is then promoted into a 64-bit running total.
+ *
+ *  Hoisting the reduction out of the loop (a per-lane @c u16 accumulator fed by `vwaddu.wv`,
+ *  reduced once at the end) was tried and measured ~2x slower: the widening add forces the
+ *  byte load down to @c u8m4 (half the per-strip throughput), and that loss dwarfs the
+ *  saving from a single cheap per-strip @c vwredsumu. So the cheap-reduction-per-strip form
+ *  below is kept deliberately. */
 #if SZ_USE_RVV
 
 #include <riscv_vector.h>
@@ -26,15 +38,6 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-/*  Sum of all bytes, identical to `sz_bytesum_serial`. We process the buffer in strips capped at
- *  256 elements so a single `vwredsumu` (widening unsigned reduction, u8 -> u16) cannot overflow:
- *  the maximum per-strip sum is 256 * 255 = 65280, which still fits a u16 accumulator. The per-strip
- *  partial is then promoted into a 64-bit running total.
- *
- *  Hoisting the reduction out of the loop (a per-lane `u16` accumulator fed by `vwaddu.wv`, reduced
- *  once at the end) was tried and measured ~2x slower: the widening add forces the byte load down to
- *  `u8m4` (half the per-strip throughput), and that loss dwarfs the saving from a single cheap
- *  per-strip `vwredsumu`. So the cheap-reduction-per-strip form below is kept deliberately. */
 SZ_API_COMPTIME sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_u64_t bytesum = 0;
@@ -51,43 +54,45 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
     return bytesum;
 }
 
-#pragma region RVV AES Round (vector permute tower field)
+/*  AES-based hashing on RVV without the optional @c Zvkned AES instructions.
+ *
+ *  The whole @c sz_hash family is built on a single AES encryption round,
+ *  @c sz_emulate_aesenc_si128_serial_, so every backend must reproduce the @b exact same digest.
+ *  The base RVV 1.0 profile, @c rv64gcv, has no AES opcodes, so we synthesize one round entirely
+ *  from byte permutes and finite-field arithmetic, using Mike Hamburg's "vector permute AES"
+ *  technique: the GF(2⁸) S-box is evaluated through the composite tower field GF((2⁴)²), turning
+ *  every 256-entry table into a handful of 16-entry nibble lookups served by `vrgather.vv` over a
+ *  single 16-lane @c u8m1 register, under `vsetvl e8m1, vector_length = 16`.
+ *
+ *  One round runs four stages, all on the 16 bytes of state. SubBytes maps each byte into the tower
+ *  field via two nibble gathers, a GF(2)-linear basis change split over the low and high input
+ *  nibbles; inverts in GF((2⁴)²) using gathers for the nibble square, the multiply by a constant,
+ *  the general multiply through log and antilog, and the GF(2⁴) inverse; then folds the inverse
+ *  isomorphism and the AES affine map, its 0x63 constant included, back into two output nibble
+ *  gathers. ShiftRows is a single @c vrgather permutation that also folds in the serial code's
+ *  combined ShiftRows byte ordering. MixColumns computes, per 4-byte group, u = a₀ ⊕ a₁ ⊕ a₂ ⊕ a₃
+ *  and then out[j] = a[j] ⊕ u ⊕ xtime(a[j] ⊕ a[j + 1]), with @c xtime as @c vsll plus a conditional
+ *  ⊕ 0x1b selected by @c vmsne and @c vmerge. AddRoundKey is a @c vxor with the round key.
+ *
+ *  The tower-field isomorphism, with subfield root r = 0x5c and minimal polynomial Y² = A × Y + B
+ *  for A = 2 and B = 6 over GF(2⁴) under the reduction polynomial x⁴ + x + 1, and all derived
+ *  tables are fixed compile-time constants. The construction is validated to be bit-exact against
+ *  @c sz_emulate_aesenc_si128_serial_ over millions of random inputs at @c vlen 128 and 256. */
+#pragma region RVV AES Round via Vector Permute Tower Field
 
-/*  AES-based hashing on RVV without the optional `Zvkned` AES instructions.
+/**
+ *  @brief Tower-field S-box tables, 16 entries each, indexed by a nibble.
  *
- *  The whole `sz_hash` family is built on a single AES encryption round
- *  (`sz_emulate_aesenc_si128_serial_`) so every backend must reproduce the *exact* same digest.
- *  RVV's base 1.0 profile (`rv64gcv`) has no AES opcodes, so we synthesize one round entirely from
- *  byte permutes and finite-field arithmetic, using Mike Hamburg's "vector permute AES" technique:
- *  the GF(2^8) S-box is evaluated through the composite (tower) field GF((2^4)^2), turning every
- *  256-entry table into a handful of 16-entry nibble lookups served by `vrgather.vv` over a single
- *  16-lane `u8m1` register (`vsetvl e8m1, vector_length = 16`).
- *
- *  Pipeline of one round, all on the 16 bytes of state:
- *    1. SubBytes  - map each byte into the tower field via two nibble gathers (a GF(2)-linear basis
- *                   change split over low/high input nibbles), invert in GF((2^4)^2) using nibble
- *                   square / multiply-by-constant / general-multiply (log+antilog) / GF(2^4)-inverse
- *                   gathers, then fold the inverse-isomorphism and the AES affine map (incl. the
- *                   `0x63` constant) back into two output nibble gathers.
- *    2. ShiftRows - a single `vrgather` permutation that also folds in the serial code's combined
- *                   ShiftRows byte ordering.
- *    3. MixColumns- per 4-byte group: `u = a0^a1^a2^a3`, then `out[j] = a[j] ^ u ^ xtime(a[j]^a[j+1])`
- *                   with `xtime` as `vsll` plus a conditional `^0x1b` selected by `vmsne`/`vmerge`.
- *    4. AddRoundKey - a `vxor` with the round key.
- *
- *  The tower-field isomorphism (subfield root `r = 0x5c`, minimal polynomial `Y^2 = A*Y + B` with
- *  `A = 2`, `B = 6` over GF(2^4) using reduction polynomial `x^4 + x + 1`) and all derived tables are
- *  fixed compile-time constants. The construction is validated to be bit-exact against
- *  `sz_emulate_aesenc_si128_serial_` over millions of random inputs at `vlen` 128 and 256. */
-
-/*  Tower-field S-box tables (16 entries each, indexed by a nibble):
- *  - `M*Tbl` : GF(2)-linear basis change from the AES field into GF((2^4)^2), split by input nibble.
- *  - `G*Tbl` : composition of the inverse basis change with the AES affine *linear* part, split by
- *              the packed tower nibble (the constant `0x63` is added once, separately).
- *  - `SQ`    : `x^2` in GF(2^4).
- *  - `INV4`  : multiplicative inverse in GF(2^4).
- *  - `LOG`/`ALOG` : discrete log / antilog (base the GF(2^4) generator `2`) for general multiply.
- *  - `MUL_A`/`MUL_B` : multiply-by-`A` (=2) and by-`B` (=6) in GF(2^4). */
+ *  @verbatim
+ *  M*Tbl         GF(2)-linear basis change from the AES field into GF((2⁴)²), split by input nibble
+ *  G*Tbl         inverse basis change composed with the linear part of the AES affine map, split
+ *                by the packed tower nibble; the constant 0x63 is added once, separately
+ *  SQ            x² in GF(2⁴)
+ *  INV4          multiplicative inverse in GF(2⁴)
+ *  LOG, ALOG     discrete log and antilog, base the GF(2⁴) generator 2, for general multiply
+ *  MUL_A, MUL_B  multiply by A = 2 and by B = 6 in GF(2⁴)
+ *  @endverbatim
+ */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes_tables_rvv_(void) {
     static sz_align_(16) sz_u8_t const tables[16 * 10] = {
         /* MlowTbl  */ 0, 1,   16,  17,  38,  39,  54,  55,  44,  45,  60,  61,  10,  11,  26,  27,
@@ -103,7 +108,8 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes_tables_rvv_(void) {
     return &tables[0];
 }
 
-/*  Combined ShiftRows permutation matching the serial code: `premix[j] = sbox[state[shiftrows[j]]]`. */
+/*  Combined ShiftRows permutation matching the serial code:
+ *  `premix[j] = sbox[state[shiftrows[j]]]`. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes_shiftrows_rvv_(void) {
     static sz_align_(16) sz_u8_t const order[16] = {0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11};
     return &order[0];
@@ -115,9 +121,9 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes_rot1_rvv_(void) {
     return &rot1[0];
 }
 
-/*  General GF(2^4) multiply of two vector operands via log/antilog, with the discrete-log sum
- *  reduced modulo 15 so the antilog gather index stays inside the 16 active lanes, and a zero-select
- *  for the `0 * x` and `x * 0` cases. */
+/*  General GF(2⁴) multiply of two vector operands via log/antilog, with the discrete-log sum
+ *  reduced modulo 15 so the antilog gather index stays inside the 16 active lanes, and a
+ *  zero-select for the `0 * x` and `x * 0` cases. */
 SZ_HELPER_INLINE vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1, vuint8m1_t log_table_u8m1,
                                              vuint8m1_t antilog_table_u8m1, sz_size_t vector_length) {
     vuint8m1_t log_a_u8m1 = __riscv_vrgather_vv_u8m1(log_table_u8m1, a_u8m1, vector_length);
@@ -133,10 +139,10 @@ SZ_HELPER_INLINE vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m
 }
 
 /**
- *  @brief Bit-exact RVV emulation of a single `_mm_aesenc_si128` round.
+ *  @brief Bit-exact RVV emulation of a single @c _mm_aesenc_si128 round.
  *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to
- *          `sz_emulate_aesenc_si128_serial_`.
- *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions" (CHES 2009).
+ *      @c sz_emulate_aesenc_si128_serial_.
+ *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions", CHES 2009: https://shiftleft.org/papers/vector_aes/vector_aes.pdf
  */
 SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
@@ -156,7 +162,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, s
     vuint8m1_t mul_b_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 9, vector_length);
 
     // SubBytes via tower-field inversion + affine.
-    // Map each byte into GF((2^4)^2) as a packed nibble pair (hi << 4 | lo).
+    // Map each byte into GF((2⁴)²) as a packed nibble pair (hi << 4 | lo).
     vuint8m1_t low_nibble_u8m1 = __riscv_vand_vx_u8m1(state_bytes_u8m1, 0x0f, vector_length);
     vuint8m1_t high_nibble_u8m1 = __riscv_vsrl_vx_u8m1(state_bytes_u8m1, 4, vector_length);
     vuint8m1_t tower_u8m1 = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(mlow_u8m1, low_nibble_u8m1, vector_length),
@@ -165,7 +171,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, s
     vuint8m1_t tower_high_u8m1 = __riscv_vsrl_vx_u8m1(tower_u8m1, 4, vector_length);
     vuint8m1_t tower_low_u8m1 = __riscv_vand_vx_u8m1(tower_u8m1, 0x0f, vector_length);
 
-    // Norm: norm = lo^2 + lo*hi*A + hi^2*B  (all in GF(2^4)).
+    // Norm: norm = lo^2 + lo*hi*A + hi^2*B  (all in GF(2⁴)).
     vuint8m1_t low_squared_u8m1 = __riscv_vrgather_vv_u8m1(square_u8m1, tower_low_u8m1, vector_length);
     vuint8m1_t high_squared_u8m1 = __riscv_vrgather_vv_u8m1(square_u8m1, tower_high_u8m1, vector_length);
     vuint8m1_t low_high_u8m1 = sz_gf16_mul_rvv_(tower_low_u8m1, tower_high_u8m1, log_u8m1, antilog_u8m1, vector_length);
@@ -228,13 +234,13 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, s
     return result_vec;
 }
 
-#pragma endregion // RVV AES Round
+#pragma endregion RVV AES Round via Vector Permute Tower Field
 
+/*  These drivers mirror the serial ones exactly, substituting @c sz_emulate_aesenc_rvv_
+ *  for the serial AES round. Every non-AES step, from the additive @c sum shuffle to
+ *  length folding and block layout, reuses the shared serial helpers, so the digests
+ *  are guaranteed value-identical. */
 #pragma region RVV Hash Drivers
-
-/*  These drivers mirror the serial ones exactly, substituting `sz_emulate_aesenc_rvv_` for the
- *  serial AES round. Every non-AES step (the additive `sum` shuffle, length folding, block layout)
- *  reuses the shared serial helpers, so the digests are guaranteed value-identical. */
 
 SZ_HELPER_INLINE void sz_hash_state_short_update_rvv_(sz_hash_state_aligned_for_short_t *state,
                                                       sz_u128_vec_t block_vec) {
@@ -254,23 +260,24 @@ SZ_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_rvv_(sz_hash_state_aligne
     return mixed_in_register_vec.u64s[0];
 }
 
-/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target_vec->u8s`,
- *          replacing a scalar byte loop. `source` must have a full block of readable bytes. */
+/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source into
+ *  `target_vec->u8s`, replacing a scalar byte loop. @p source must have a full block
+ *  of readable bytes. */
 SZ_HELPER_INLINE void sz_hash_load_block_rvv_(sz_u128_vec_t *target_vec, sz_cptr_t source) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target_vec->u8s));
     __riscv_vse8_v_u8m1(target_vec->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
 }
 
-/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source_vec` to `target`, the store
- *          counterpart of `sz_hash_load_block_rvv_`. `target` must have a full block of writable bytes. */
+/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source_vec to
+ *  @p target, the store counterpart of @c sz_hash_load_block_rvv_. @p target must have a full
+ *  block of writable bytes. */
 SZ_HELPER_INLINE void sz_hash_store_block_rvv_(sz_ptr_t target, sz_u128_vec_t source_vec) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(source_vec.u8s));
     __riscv_vse8_v_u8m1((sz_u8_t *)target, __riscv_vle8_v_u8m1(source_vec.u8s, vector_length), vector_length);
 }
 
-/**
- *  @brief Loads the packed public state into the aligned internal twin (one `vle8` block per 16-byte lane).
- */
+/** Loads the packed public state into the aligned internal twin (one @c vle8 block
+ *  per 16-byte lane). */
 SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvv_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
@@ -284,7 +291,8 @@ SZ_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvv_(sz_hash_state_t
     return state;
 }
 
-/** @brief Stores the aligned internal twin back into the packed public state (one `vse8` block per 16-byte lane). */
+/** Stores the aligned internal twin back into the packed public state (one @c vse8 block
+ *  per 16-byte lane). */
 SZ_HELPER_INLINE void sz_hash_state_store_rvv_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -402,8 +410,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_s
         sz_size_t const window = sizeof(state.ins.u8s); // the 64-byte hashing window
         sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte window EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_rvv_` to fold - the same deferral the streaming path uses.
+        // Absorb every full 64-byte window except the last; the final block (a full 64 or a partial
+        // tail) stays buffered in `ins` for `sz_hash_state_finalize_rvv_` to fold - the same
+        // deferral the streaming path uses.
         for (; state.ins_length + window < length; state.ins_length += window) {
             sz_size_t vector_length = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
             __riscv_vse8_v_u8m8(state.ins.u8s,
@@ -520,7 +529,7 @@ SZ_API_COMPTIME void sz_fill_random_rvv(sz_ptr_t text, sz_size_t length, sz_u64_
     }
 }
 
-#pragma endregion // RVV Hash Drivers
+#pragma endregion RVV Hash Drivers
 
 /*  SHA-256 has no AES structure to vectorize within RVV's base profile, so it stays serial. */
 SZ_API_COMPTIME void sz_sha256_state_init_rvv(sz_sha256_state_t *state_ptr) { sz_sha256_state_init_serial(state_ptr); }

@@ -1,16 +1,17 @@
 /**
- *  @brief Hardware-accelerated single-pass Unicode normalization (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm.h
  *  @author Ash Vardanian
+ *  @date June 14, 2026
+ *  @brief Hardware-accelerated single-pass Unicode normalization (NFD / NFC / NFKD / NFKC).
  *
  *  Includes core APIs:
  *
- *  - `sz_utf8_norm` - transform UTF-8 text into a Unicode normalization form
- *  - `sz_utf8_find_denormalized` - locate the first byte that breaks a normalization form (NULL if none)
+ *  - @c sz_utf8_norm - transform UTF-8 text into a Unicode normalization form
+ *  - @c sz_utf8_find_denormalized - locate the first byte that breaks a normalization form, if any
  *
  *  Normalization is built from three UAX #15 primitives - decomposition, canonical ordering, and
- *  composition - sharing one ISA-agnostic table set (`utf8_norm/tables.h`, generated from the UCD by
- *  the recipe embedded in that header). It is intentionally locale-independent.
+ *  composition - sharing one ISA-agnostic table set (`utf8_norm/tables.h`, generated from the UCD
+ *  by the recipe embedded in that header). It is intentionally locale-independent.
  */
 #ifndef STRINGZILLA_UTF8_NORM_H_
 #define STRINGZILLA_UTF8_NORM_H_
@@ -32,15 +33,15 @@ extern "C" {
  *  `source_length * 18` bytes for the worst single-codepoint compatibility decomposition. The
  *  composing forms (NFC, NFKC) never exceed the decomposed length, so the same bound is safe.
  *
- *  @param source UTF-8 string to normalize.
- *  @param source_length Number of bytes in @p source.
- *  @param form One of `sz_normal_form_nfd_k`, `_nfc_k`, `_nfkd_k`, `_nfkc_k`.
- *  @param destination Buffer to receive the normalized UTF-8 string.
- *  @return Number of bytes written to @p destination.
+ *  Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is
+ *  an opaque 1-byte barrier - it is passed through unchanged, does not decompose, compose, or take
+ *  part in canonical ordering, and processing resyncs at the next byte.
  *
- *  @note Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is
- *        an opaque 1-byte barrier - it is passed through unchanged, does not decompose, compose, or take
- *        part in canonical ordering, and processing resyncs at the next byte.
+ *  @param[in] source UTF-8 string to normalize.
+ *  @param[in] length Number of bytes in @p source.
+ *  @param[in] form One of @c sz_normal_form_nfd_k, @c _nfc_k, @c _nfkd_k, @c _nfkc_k.
+ *  @param[out] destination Buffer to receive the normalized UTF-8 string.
+ *  @return Number of bytes written to @p destination.
  *  @warning No bounds checking is performed on @p destination.
  */
 SZ_API_RUNTIME sz_size_t sz_utf8_norm(  //
@@ -49,13 +50,15 @@ SZ_API_RUNTIME sz_size_t sz_utf8_norm(  //
 
 /**
  *  @brief Locate the first byte that breaks a normalization form.
- *  @param source UTF-8 string to test.
- *  @param length Number of bytes in @p source.
- *  @param form One of `sz_normal_form_nfd_k`, `_nfc_k`, `_nfkd_k`, `_nfkc_k`.
- *  @return `SZ_NULL_CHAR` if @p source is already in @p form; otherwise a pointer to the first byte
- *          that begins a codepoint breaking the form (first non-Yes QC or canonical-order violation).
- *  @note Malformed UTF-8 is treated losslessly: any byte that does not begin a well-formed codepoint is
- *        an opaque 1-byte barrier that is inert (never a violation), and the scan resyncs at the next byte.
+ *
+ *  Malformed UTF-8 is treated losslessly: any byte that does not begin a well-formed codepoint is
+ *  an opaque, inert 1-byte barrier (never a violation), and the scan resyncs at the next byte.
+ *
+ *  @param[in] source UTF-8 string to test.
+ *  @param[in] length Number of bytes in @p source.
+ *  @param[in] form One of @c sz_normal_form_nfd_k, @c _nfc_k, @c _nfkd_k, @c _nfkc_k.
+ *  @return @c SZ_NULL_CHAR if @p source is already in @p form, else a pointer to the first byte
+ *      of a codepoint breaking the form: the first non-Yes QC or canonical-order violation.
  */
 SZ_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
@@ -178,7 +181,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#pragma endregion // Core API
+#pragma endregion
 
 #pragma region Backends
 
@@ -195,7 +198,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx( //
 #include "stringzilla/utf8_norm/lasx.h"
 #include "stringzilla/utf8_norm/powervsx.h"
 
-#pragma endregion // Backends
+#pragma endregion
 
 #pragma region Dynamic Dispatch
 
@@ -259,7 +262,7 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized(sz_cptr_t source, sz_size_t l
 
 #endif // !SZ_DYNAMIC_DISPATCH
 
-#pragma endregion // Dynamic Dispatch
+#pragma endregion
 
 #ifdef __cplusplus
 }

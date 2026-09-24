@@ -1,27 +1,34 @@
 /**
  *  @file bench/utf8_scan.cpp
- *  @brief Benchmarks the UTF-8 class-scan family (the `utf8_tokens` unit) against the serial baselines: the
- *         codepoint-class enumerators that emit every match of a character class. Every kernel is benchmarked
- *         across all available SIMD backends side-by-side, and each backend's result is validated (via a
- *         per-call checksum) against the serial reference — so this file doubles as a differential harness.
+ *  @author Ash Vardanian
+ *  @date June 8, 2026
+ *  @brief Benchmarks the UTF-8 class-scan family (the @c utf8_tokens unit) against the serial
+ *      baselines: the codepoint-class enumerators that emit every match of a character class.
  *
- *  Compute-bound: per-codepoint class scanning is branch-heavy, so a 64 MiB slice exercises every path.
+ *  Every kernel is benchmarked across all available SIMD backends side-by-side, and each backend's
+ *  result is validated (via a per-call checksum) against the serial reference — so this file
+ *  doubles as a differential harness.
+ *
+ *  Compute-bound: per-codepoint class scanning branches heavily, so a 64 MiB slice hits each path.
  *
  *  Benchmarks include:
  *  - Newline enumeration - @b utf8_newlines.
  *  - Whitespace enumeration - @b utf8_whitespaces (Unicode White_Space property).
  *  - Delimiter enumeration - @b utf8_delimiters (punctuation/symbol/separator/whitespace).
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for N-grams).
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for
+ *    N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -47,9 +54,9 @@ using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Wrappers
 
-/** @brief  Enumerates every match of a codepoint class (newline / whitespace / delimiter) across each token via
- *          the multistep "find boundaries" API, resuming through the whole token in
- *          `sz_iterators_default_steps_k`-sized batches; checksum = total number of matches. */
+/** Enumerates every match of a codepoint class (newline, whitespace, delimiter) across each token
+ *  via the multistep "find boundaries" API, resuming through the whole token in batches of
+ *  @c sz_iterators_default_steps_k; the checksum is the total number of matches. */
 template <sz_utf8_segmenter_t find_func_>
 struct utf8_enumerate_delimiters {
     environment_t const &env;

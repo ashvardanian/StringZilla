@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly relaxed-SIMD backend for compare (level above SIMD128).
  *  @file include/stringzilla/compare/v128relaxed.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly relaxed-SIMD backend for compare (level above SIMD128).
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_V128RELAXED_H_

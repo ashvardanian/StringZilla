@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: SVE2 (Armv9-A scalable vectors), mirroring `include/stringzilla/hash/sve2.h` */
+/**
+ *  @file probes/arm_sve2.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for SVE2, the Armv9-A scalable vectors.
+ *
+ *  @sa include/stringzilla/hash/sve2.h
+ */
 #if defined(_MSC_VER)
 #error "SVE target attributes and intrinsics are unavailable under MSVC"
 #endif

@@ -1,11 +1,12 @@
 /**
- *  @brief Cross-product Levenshtein edit distances over one prepared batch of queries.
  *  @file python/stringzilla/levenshtein.c
  *  @author Ash Vardanian
+ *  @date September 6, 2023
+ *  @brief Cross-product Levenshtein edit distances over one prepared batch of queries.
  */
 #include "stringzilla.h"
 
-/** @brief A batch of queries prepared once, scored against a fresh collection of candidates each round. */
+/** A batch of queries prepared once, scored against a fresh collection of candidates each round. */
 typedef struct {
     PyObject ob_base;
     sz_levenshtein_engine_t engine; //< Owned; freed in `tp_dealloc`, rebuilt by a second `__init__`.
@@ -14,7 +15,7 @@ typedef struct {
 
 #pragma region Construction
 
-/** @brief Reads the alphabet name a batch counts its distances in, defaulting to bytes. */
+/** Reads the alphabet name a batch counts its distances in, defaulting to bytes. */
 static int parse_levenshtein_symbol_(PyObject *symbol_obj, sz_levenshtein_symbol_t *result) {
     if (!symbol_obj || symbol_obj == Py_None) {
         *result = sz_levenshtein_bytes_k;
@@ -152,20 +153,20 @@ static PyObject *LevenshteinEngine_on_gpu(PyObject *type_obj, PyObject *const *a
 
 #pragma region Operations
 
-static char const doc_LevenshteinEngine_distances[] =                                              //
-    "distances(candidates, out) -> None\n"                                                         //
-    "\n"                                                                                           //
-    "Score every prepared query against every candidate, into `out`.\n"                            //
-    "\n"                                                                                           //
-    "Args:\n"                                                                                      //
-    "  candidates (Strs): Texts forming the matrix columns.\n"                                     //
-    "  out (buffer): Writable 2-D buffer of pointer-width unsigned integers (e.g. numpy.uintp),\n" //
-    "    at least (len(queries), len(candidates)), contiguous along its candidate axis.\n"         //
-    "Example:\n"                                                                                   //
-    "  >>> engine = sz.LevenshteinEngine(sz.Strs(['hello', 'world']))\n"                           //
-    "  >>> out = memoryview(bytearray(32)).cast('Q', (2, 2))\n"                                    //
-    "  >>> engine.distances(sz.Strs(['hallo', 'word']), out)\n"                                    //
-    "  >>> out[0, 0]\n"                                                                            //
+static char const doc_LevenshteinEngine_distances[] =                                            //
+    "distances(candidates, out) -> None\n"                                                       //
+    "\n"                                                                                         //
+    "Score every prepared query against every candidate, into `out`.\n"                          //
+    "\n"                                                                                         //
+    "Args:\n"                                                                                    //
+    "  candidates (Strs): Texts forming the matrix columns.\n"                                   //
+    "  out (buffer): Writable 2-D buffer of pointer-width unsigned integers like numpy.uintp,\n" //
+    "    at least (len(queries), len(candidates)), contiguous along its candidate axis.\n"       //
+    "Example:\n"                                                                                 //
+    "  >>> engine = sz.LevenshteinEngine(sz.Strs(['hello', 'world']))\n"                         //
+    "  >>> out = memoryview(bytearray(32)).cast('Q', (2, 2))\n"                                  //
+    "  >>> engine.distances(sz.Strs(['hallo', 'word']), out)\n"                                  //
+    "  >>> out[0, 0]\n"                                                                          //
     "  1";
 
 static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *const *args,

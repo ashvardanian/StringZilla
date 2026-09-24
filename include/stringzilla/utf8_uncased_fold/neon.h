@@ -1,7 +1,9 @@
 /**
- *  @brief Arm NEON backend for UTF-8 case folding.
  *  @file include/stringzilla/utf8_uncased_fold/neon.h
  *  @author Ash Vardanian
+ *  @date June 12, 2026
+ *  @brief Arm NEON backend for UTF-8 case folding.
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_NEON_H_
@@ -21,7 +23,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-/** @brief Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
+/** Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_ascii_(uint8x16_t source_u8x16) {
     // Unsigned wrap-around turns the two-sided 'A' ≤ x ≤ 'Z' test into one compare: bytes below
     // 'A' wrap past 0xE5 and bytes above 'Z' land at 26+, so only A-Z stay under 26.
@@ -31,19 +33,20 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_ascii_(uint8x16_t source_u8x16) {
 
 /**
  *  @brief Produces a movemask-style 64-bit value from a NEON comparison result.
- *      Each matching byte sets one bit (bit spacing is 4 bits per byte, at positions 3, 7, ..., 63).
  *
- *  NEON has no `movemask`; `vshrn` narrowing each 16-bit lane by 4 packs one nibble per byte,
- *  which a single `vget_lane_u64` moves to a scalar register - that vector → GPR hop is the
- *  serializing edge, so callers extract once per chunk and do the rest in scalar arithmetic.
- *  https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+ *  Each matching byte sets one bit, spaced 4 bits per byte at positions 3, 7, …, 63. NEON has no
+ *  @c movemask; @c vshrn narrowing each 16-bit lane by 4 packs one nibble per byte, which a single
+ *  @c vget_lane_u64 moves to a scalar register - that vector → GPR hop is the serializing edge, so
+ *  callers extract once per chunk and do the rest in scalar arithmetic.
+ *
+ *  @see Porting x86 vector bitmask optimizations to Arm NEON: https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
  */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_fold_neon_nibble_mask_(uint8x16_t mask_u8x16) {
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(mask_u8x16), 4)), 0) &
            0x8888888888888888ull;
 }
 
-/** @brief OR-reduces all 16 byte lanes of one register into a single byte of accumulated flags. */
+/** OR-reduces all 16 byte lanes of one register into a single byte of accumulated flags. */
 SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_neon_reduce_or_u8_(uint8x16_t flags_u8x16) {
     uint8x8_t flags_u8x8 = vorr_u8(vget_low_u8(flags_u8x16), vget_high_u8(flags_u8x16));
     sz_u64_t flags_u64 = vget_lane_u64(vreinterpret_u64_u8(flags_u8x8), 0);
@@ -51,10 +54,8 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_neon_reduce_or_u8_(uint8x16_t flags_u8x16)
     return (sz_u8_t)flags_u64;
 }
 
-/**
- *  @brief Maps every lead byte in one register onto its folding-family flag; non-leads map to zero.
- *      One `vqtbl4q_u8` covers the full 64-entry table - the NEON twin of Ice Lake's single VPERMB.
- */
+/** Maps every lead byte in one register onto its folding-family flag; non-leads map to zero. One
+ *  @c vqtbl4q_u8 covers the full 64-entry table - the NEON twin of Ice Lake's single VPERMB. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16,
                                                         uint8x16x4_t lead_families_lut_u8x16x4) {
     uint8x16_t is_non_ascii_u8x16 = vcgeq_u8(source_u8x16, vdupq_n_u8(0x80));
@@ -66,21 +67,22 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16,
 }
 
 /**
- *  @brief Per-lead well-formedness mirror of `sz_rune_decode`, computed branchlessly so every
- *      family handler can treat overlong, surrogate, truncated, and out-of-range leads as foreign and
- *      resync one byte at a time - byte-for-byte with the serial reference. The NEON twin of the
- *      Haswell `well_formed_lead_mask`: a lead is well-formed iff its declared continuations follow
- *      (the 2/3/4-byte-lead masks ANDed with the next 1/2/3 bytes all being continuations) AND it is
- *      not in the bad-special set - C0/C1, F5..FF, E0 with 2nd < 0xA0 (overlong), ED with 2nd >= 0xA0
- *      (surrogate), F0 with 2nd < 0x90 (overlong), F4 with 2nd >= 0x90 (> U+10FFFF). C0/C1 and F5..FF
- *      carry no width bit, so they never enter the width-keyed accept set and need no subtraction.
+ *  @brief Per-lead well-formedness mirror of @c sz_rune_decode, computed branchlessly.
  *
- *      `next_register_u8x16` supplies the bytes following this register's last lanes; at the
- *      superchunk's final lane it is zero-filled, so a multi-byte lead whose continuations spill past
- *      the superchunk reads as malformed - coinciding exactly with the existing incomplete-sequence
- *      trim, so valid output is unchanged.
+ *  Every family handler can then treat overlong, surrogate, truncated, and out-of-range leads as
+ *  foreign and resync one byte at a time - byte-for-byte with the serial reference. The NEON twin
+ *  of the Haswell @c well_formed_lead_mask: a lead is well-formed iff its declared continuations
+ *  follow (the 2/3/4-byte-lead masks ANDed with the next 1/2/3 bytes all being continuations) and
+ *  it is not in the bad-special set - C0/C1, F5..FF, overlong E0 (2nd < 0xA0) and F0 (2nd < 0x90),
+ *  surrogate ED (2nd ≥ 0xA0), and F4 (2nd ≥ 0x90) past U+10FFFF. C0/C1 and F5..FF carry no width
+ *  bit, so they never enter the width-keyed accept set and need not be subtracted from it.
  *
- *  @return Per-byte mask (0xFF) set on every lead byte that does NOT begin a well-formed rune.
+ *  @p next_register_u8x16 supplies the bytes following this register's last lanes; at the
+ *  superchunk's final lane it is zero-filled, so a multi-byte lead whose continuations spill past
+ *  the superchunk reads as malformed - coinciding exactly with the existing incomplete-sequence
+ *  trim, so valid output is unchanged.
+ *
+ *  @return Per-byte mask (0xFF) set on every lead byte that does not begin a well-formed rune.
  */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16, uint8x16_t next_register_u8x16) {
     uint8x16_t const continuation_low_u8x16 = vdupq_n_u8(0x80);
@@ -133,15 +135,16 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_
 
 /**
  *  @brief Folds a 64-byte superchunk containing only caseless multi-byte scripts mixed with ASCII.
- *      Folds ASCII A-Z in place and copies everything else, trimming an incomplete trailing sequence.
  *
- *  Mirrors `sz_utf8_uncased_fold_icelake_caseless_chunk_` at a fixed 64-byte chunk size: an
- *  incomplete sequence can only be a 2-byte lead in the last byte or a 3-byte lead in the last
- *  two bytes (4-byte leads carry the complex flag and never reach this handler), so only the
- *  last register's lead masks matter and one nibble-mask extraction covers both checks.
+ *  Folds ASCII A-Z in place and copies everything else, trimming an incomplete trailing sequence.
  *
- *  @return Bytes consumed; always 62..64, never zero - 62 bytes of any valid UTF-8 cover at
- *      least one complete sequence, so the superchunk cannot start with an incomplete one.
+ *  Mirrors @c sz_utf8_uncased_fold_icelake_caseless_chunk_ at a fixed 64-byte chunk size: an
+ *  incomplete sequence can only be a 2-byte lead in the last byte or a 3-byte lead in the last two
+ *  bytes (4-byte leads carry the complex flag and never reach this handler), so only the last
+ *  register's lead masks matter and one nibble-mask extraction covers both checks.
+ *
+ *  @return Bytes consumed; always 62..64, never zero - 62 bytes of any valid UTF-8 cover at least
+ *      one complete sequence, so the superchunk cannot start with an incomplete one.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_t source_u8x16x4, sz_ptr_t target) {
 
@@ -156,7 +159,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_
                                               vandq_u8(is_three_byte_lead_u8x16, last_two_lanes_u8x16));
     sz_u64_t incomplete_nibbles = sz_utf8_fold_neon_nibble_mask_(is_incomplete_u8x16);
 
-    // Nibble positions are byte positions ×4; lanes 14-15 of the last register are bytes 62-63
+    // Nibble positions are byte positions × 4; lanes 14-15 of the last register are bytes 62-63
     sz_size_t copy_length = incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz_neon_(incomplete_nibbles) / 4) : 64;
 
     // Caseless folding is length-preserving, so full-register stores are exact for the consumed
@@ -174,10 +177,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_
  *      Latin Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set
  *      of German, Czech, Vietnamese, and most other Latin-script languages.
  *
- *  Mirrors `sz_utf8_uncased_fold_icelake_latin_chunk_` at a fixed 64-byte chunk size. Latin
+ *  Mirrors @c sz_utf8_uncased_fold_icelake_latin_chunk_ at a fixed 64-byte chunk size. Latin
  *  Extended folding is parity-based: uppercase codepoints are even and fold to the next odd
  *  codepoint, and the codepoint's low bit lives in the last byte of its UTF-8 sequence, so the
- *  fold is an in-place masked +1. Per-codepoint deltas come from `vqtbl4q_u8` tables indexed by
+ *  fold is an in-place masked +1. Per-codepoint deltas come from @c vqtbl4q_u8 tables indexed by
  *  the continuation byte's low 6 bits; table entries flag the irregular codepoints (those that
  *  expand, shrink, or fold across blocks), which truncate the superchunk and route one rune to
  *  the serial fallback.
@@ -227,7 +230,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t s
         uint8x16_t is_e1_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xE1));
         uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
 
-        // Foreign leads stop the chunk: the handler triggers on family PRESENCE, so a German
+        // Foreign leads stop the chunk: the handler triggers on family presence, so a German
         // chunk mixing Latin words with E2 quotation marks folds its Latin prefix here and lets
         // the guarded handler take the next chunk - measured a sixth faster on such mixes than
         // pure subset dispatch on the AVX2 port.
@@ -321,7 +324,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t s
     }
 
     // Truncate at the first irregular codepoint or foreign E1 sub-family: nibble positions are
-    // byte positions ×4, and register k adds 16k bytes. The flagged byte is a continuation -
+    // byte positions × 4, and register k adds 16k bytes. The flagged byte is a continuation -
     // walk back to the lead (at most 2 steps for E1 thirds) so the consumed prefix ends on a
     // character boundary; landing on byte 0 returns zero and routes one rune to serial.
     if (vmaxvq_u8(any_stop_u8x16)) {
@@ -355,7 +358,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t s
  *  @brief Folds a 64-byte superchunk of basic Cyrillic mixed with ASCII.
  *
  *  All three uppercase sub-ranges are keyed by the second byte's high nibble, so one
- *  `vqtbl1q_u8` over a 16-entry table yields the offset (8 → +0x10, 9 → +0x20, A → −0x20)
+ *  @c vqtbl1q_u8 over a 16-entry table yields the offset (8 → +0x10, 9 → +0x20, A → −0x20)
  *  and the D0 → D1 lead rewrite is a masked +1 wherever the next byte falls in the two
  *  lead-changing ranges. Cyrillic Extended-A (D1 A0+) and any out-of-family lead stop the
  *  chunk; the consumed prefix always ends on a character boundary.
@@ -429,13 +432,13 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_
 /**
  *  @brief Folds a 64-byte superchunk of basic Greek mixed with ASCII.
  *
- *  'Α'-'Ο' (CE 91-9F) fold with +0x20 in place; 'Π'-'Ρ' and 'Σ'-'Ϋ' (CE A0-A1, A3-AB - 'Ϣ'-class
- *  A2 is unassigned) fold with −0x20 plus a CE → CF lead promotion (+1); final sigma 'ς' (CF 82)
- *  folds to 'σ' with +1. The fold-side exclusions are NARROWER than the finder's: accented
- *  uppercase (CE 84-90), 'ΰ' (CE B0, expands when folded), and the cross-block Greek symbols
- *  (CF 8F+: 'Ϗ' and the archaic letter pairs) stop the chunk for the serial path, as does any
- *  out-of-family lead. The accented lowercase vowels 'ό' 'ύ' 'ώ' (CF 8C-8E, identity-folding and
- *  very common in real Greek text) stay in the fast path - only CF 8F begins the symbol folds.
+ *  'Α'-'Ο' (CE 91-9F) fold with +0x20 in place; 'Π'-'Ρ' and 'Σ'-'Ϋ' (CE A0-A1, A3-AB - 'Ϣ'-class A2
+ *  is unassigned) fold with −0x20 plus a CE → CF lead promotion (+1); final sigma 'ς' (CF 82) folds
+ *  to 'σ' with +1. The fold-side exclusions are narrower than the finder's: accented uppercase (CE
+ *  84-90), 'ΰ' (CE B0, expands when folded), and the cross-block Greek symbols (CF 8F+: 'Ϗ' and the
+ *  archaic letter pairs) stop the chunk for the serial path, as does any out-of-family lead. The
+ *  accented lowercase vowels 'ό' 'ύ' 'ώ' (CF 8C-8E, identity-folding and very common in real Greek
+ *  text) stay in the fast path - only CF 8F begins the symbol folds.
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
@@ -457,7 +460,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t s
         uint8x16_t is_lead_u8x16 = vbicq_u8(vcgeq_u8(source_u8x16, vdupq_n_u8(0x80)), is_continuation_u8x16);
         uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, vorrq_u8(is_ce_u8x16, is_cf_u8x16));
 
-        // Exclusions, tested at the LEAD position so the walk-back lands on a boundary
+        // Exclusions, tested at the lead position so the walk-back lands on a boundary
         uint8x16_t ce_excluded_u8x16 = vandq_u8(is_ce_u8x16, vorrq_u8(vcltq_u8(next_byte_u8x16, vdupq_n_u8(0x91)),
                                                                       vceqq_u8(next_byte_u8x16, vdupq_n_u8(0xB0))));
         uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8F)));
@@ -517,11 +520,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t s
  *  @brief Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII.
  *
  *  Armenian uppercase spans two lead bytes and folds into three target blocks, reusing the exact
- *  math verified in the NEON finder's `sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_`:
+ *  math verified in the NEON finder's @c sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_:
  *  - D4 B1-BF: 'Ա'-'Ձ' → D5 A1-AF 'ա'-'ձ' (second −0x10, lead D4 → D5)
  *  - D5 80-8F: 'Ղ'-'Տ' → D5 B0-BF 'ղ'-'տ' (second +0x30, lead unchanged)
  *  - D5 90-96: 'Ր'-'Ֆ' → D6 80-86 'ր'-'ֆ' (second −0x10, lead D5 → D6)
- *  Both lead rewrites are a +1 increment, decided at the LEAD position from its own next byte; the
+ *
+ *  Both lead rewrites are a +1 increment, decided at the lead position from its own next byte; the
  *  three second-byte offsets fall on disjoint lanes, so they merge into one masked add. The −0x10
  *  is added as +0xF0 (two's-complement wrap), exactly as the finder does.
  *
@@ -555,7 +559,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_
         uint8x16_t is_armenian_lead_u8x16 = vorrq_u8(vorrq_u8(is_d4_u8x16, is_d5_u8x16), is_d6_u8x16);
         uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, is_armenian_lead_u8x16);
 
-        // Stops tested at the LEAD position so the walk-back lands on a character boundary:
+        // Stops tested at the lead position so the walk-back lands on a character boundary:
         // D4 with a Cyrillic-Supplement/reserved second byte (≤ B0) and the 'և' ligature (D6 87).
         uint8x16_t is_d4_stop_u8x16 = vandq_u8(is_d4_u8x16, vcltq_u8(next_byte_u8x16, vdupq_n_u8(0xB1)));
         uint8x16_t is_ligature_stop_u8x16 = vandq_u8(is_d6_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x87)));
@@ -615,17 +619,21 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_
 /**
  *  @brief Folds a 64-byte superchunk of Georgian (E1 82/83 content) mixed with ASCII.
  *
- *  Ordered AFTER the Latin handler: that one folds E1 B8-BB (Latin Extended Additional) and stops
+ *  Ordered after the Latin handler: that one folds E1 B8-BB (Latin Extended Additional) and stops
  *  at E1 82/83; this one picks up Georgian and stops at E1 BC-BF (Greek Extended) and every other
  *  non-Georgian E1 second byte. Ports the verified Ice Lake "3.1. Georgian fast path" - a uniform
  *  3-byte → 3-byte fold with a lead-byte rewrite:
- *  - E1 82 A0-BF: 'Ⴀ'-'Ⴟ' (U+10A0-10BF) → E2 B4 80-9F (lead E1→E2, second 82→B4, third −0x20)
- *  - E1 83 80-85: 'Ⴠ'-'Ⴥ' (U+10C0-10C5) → E2 B4 A0-A5 (lead E1→E2, second 83→B4, third +0x20)
- *  - E1 83 87:    'Ⴧ' (U+10C7)           → E2 B4 A7      (same rewrite, third +0x20)
- *  - E1 83 8D:    'Ⴭ' (U+10CD)           → E2 B4 AD      (same rewrite, third +0x20)
+ *
+ *  @verbatim
+ *  E1 82 A0-BF  'Ⴀ'-'Ⴟ' (U+10A0-10BF)  → E2 B4 80-9F  lead E1 → E2, second 82 → B4, third −0x20
+ *  E1 83 80-85  'Ⴠ'-'Ⴥ' (U+10C0-10C5)  → E2 B4 A0-A5  lead E1 → E2, second 83 → B4, third +0x20
+ *  E1 83 87     'Ⴧ' (U+10C7)          → E2 B4 A7     same rewrite, third +0x20
+ *  E1 83 8D     'Ⴭ' (U+10CD)          → E2 B4 AD     same rewrite, third +0x20
+ *  @endverbatim
+ *
  *  Lowercase Mkhedruli and reserved Georgian (E1 82 80-9F, E1 83 86/88-8C/8E-BF) copy unchanged.
  *
- *  The lead/second rewrites must fire only for the UPPERCASE subset, which is decided by the THIRD
+ *  The lead/second rewrites must fire only for the uppercase subset, which is decided by the third
  *  byte - so the lead position reads two bytes forward through `vextq_u8(.., .., 2)` and the
  *  uppercase flag is carried forward one lane to the second-byte rewrite and a second lane to the
  *  third-byte offset. The two third-byte offsets land on disjoint sequences, so −0x20 (added as
@@ -722,11 +730,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_
 }
 
 /**
- *  @brief Folds a 64-byte superchunk of caseless scripts mixed with SAFE guarded punctuation.
- *      Folds ASCII and copies the rest. The guarded leads are case-aware only for some second
- *      bytes: E2 is safe for 80-83 (General Punctuation quotes and dashes), EA for everything
- *      except 99-9F and AD-AE (Cyrillic Extended-B and Cherokee Supplement); E1 and EF always
- *      stop, as does any 2-byte lead outside the caseless D7-DF run and any 4-byte lead.
+ *  @brief Folds a 64-byte superchunk of caseless scripts mixed with safe guarded punctuation.
+ *
+ *  Folds ASCII and copies the rest. The guarded leads are case-aware only for some second bytes: E2
+ *  is safe for 80-83 (General Punctuation quotes and dashes), EA for everything except 99-9F and
+ *  AD-AE (Cyrillic Extended-B and Cherokee Supplement); E1 and EF always stop, as does any 2-byte
+ *  lead outside the caseless D7-DF run and any 4-byte lead.
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
@@ -803,7 +812,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
     while (source_length >= 64) {
         uint8x16x4_t source_u8x16x4 = vld1q_u8_x4((sz_u8_t const *)source);
 
-        // FAST PATH: pure ASCII - one OR-tree and one `vmaxvq_u8` decide for all 64 bytes,
+        // Fast path: pure ASCII - one OR-tree and one `vmaxvq_u8` decide for all 64 bytes,
         // before any classification masks are computed. Most common case for English text.
         uint8x16_t any_byte_u8x16 = vorrq_u8(vorrq_u8(source_u8x16x4.val[0], source_u8x16x4.val[1]),
                                              vorrq_u8(source_u8x16x4.val[2], source_u8x16x4.val[3]));
@@ -832,7 +841,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
             target += handled, source += handled, source_length -= handled;
             continue;
         }
-        // Handlers trigger on family PRESENCE in priority order and truncate at the first
+        // Handlers trigger on family presence in priority order and truncate at the first
         // out-of-family lead (validated on the AVX2 port: a sixth faster on Russian than pure
         // subset dispatch, because quotes and dashes no longer poison whole superchunks into
         // one-rune serial steps). A handler that cannot fold the first character returns zero
@@ -885,7 +894,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
             }
         }
         // Complex leads (4-byte emoji, rare 2-byte blocks) and zero-returning handlers advance
-        // by exactly ONE rune through the serial logic below: byte-for-byte the serial
+        // by exactly one rune through the serial logic below: byte-for-byte the serial
         // reference output, just slower. Georgian, fullwidth, and supplementary copy handlers
         // are candidates for the ARM-hardware tuning round if profiles justify them.
         //

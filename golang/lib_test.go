@@ -1,3 +1,6 @@
+// File: golang/lib_test.go
+// Author: Ash Vardanian
+
 package sz_test
 
 import (
@@ -99,7 +102,8 @@ func TestIndexByte(t *testing.T) {
 	}
 }
 
-// TestLastIndexByte compares our binding's LastIndexByte against the standard strings.LastIndexByte.
+// TestLastIndexByte compares our binding's LastIndexByte against the standard
+// strings.LastIndexByte.
 func TestLastIndexByte(t *testing.T) {
 	tests := []struct {
 		s string

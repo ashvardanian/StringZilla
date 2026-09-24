@@ -1,7 +1,9 @@
 /**
- *  @brief LoongArch LASX (256-bit) backend for memory.
  *  @file include/stringzilla/memory/lasx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief LoongArch LASX (256-bit) backend for memory.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_LASX_H_
@@ -19,8 +21,8 @@ extern "C" {
 /**
  *  @brief Broadcast a 16-byte slice of the 256-entry lookup table into both 128-bit lanes of a YMM.
  *
- *  @param lut 256-byte lookup table.
- *  @param offset Byte offset into `lut` at which to start the 16-byte slice.
+ *  @param[in] lut 256-byte lookup table.
+ *  @param[in] offset Byte offset into @p lut at which to start the 16-byte slice.
  *  @return A 256-bit LASX register with the 16-byte slice duplicated into both 128-bit lanes.
  */
 SZ_HELPER_INLINE __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {

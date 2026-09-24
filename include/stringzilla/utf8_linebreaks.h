@@ -1,7 +1,8 @@
 /**
- *  @brief Hardware-accelerated UAX-14 line break segmentation.
  *  @file include/stringzilla/utf8_linebreaks.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Hardware-accelerated UAX-14 line break segmentation.
  */
 #ifndef STRINGZILLA_UTF8_LINEBREAKS_H_
 #define STRINGZILLA_UTF8_LINEBREAKS_H_
@@ -15,28 +16,30 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Segment UTF-8 text into UAX-14 line-break opportunities in a single pass (dispatch function).
+ *  @brief Segment UTF-8 text into UAX-14 line-break opportunities in one pass (dispatch function).
  *
- *  Walks the whole input left-to-right and writes one entry per line segment into two parallel output arrays:
- *  `line_starts[i]` is the byte offset of the i-th segment and `line_lengths[i]` its byte length. Segments are
- *  the spans between consecutive UAX-14 break opportunities, so a single call segments the entire input without
- *  the caller having to loop and restart a scan for every break.
+ *  Walks the whole input left-to-right and writes one entry per line segment into two parallel
+ *  output arrays: `line_starts[i]` is the byte offset of the i-th segment and `line_lengths[i]`
+ *  its byte length. Segments are the spans between consecutive UAX-14 break opportunities, so a
+ *  single call segments the entire input without the caller having to loop and restart a scan
+ *  for every break.
  *
- *  This emits every wrap opportunity (both the mandatory LB4/LB5 hard breaks and the allowed soft-wrap points).
- *  To split only on the hard breaks (the `str.splitlines` behavior) use `sz_utf8_newlines` instead, which
- *  enumerates exactly the LB4/LB5 break positions.
+ *  This emits every wrap opportunity (both the mandatory LB4/LB5 hard breaks and the allowed
+ *  soft-wrap points). To split only on the hard breaks (the @c str.splitlines behavior) use
+ *  @c sz_utf8_newlines instead, which enumerates exactly the LB4/LB5 break positions.
  *
- *  @param text UTF-8 encoded text.
- *  @param length Byte length of @p text.
- *  @param line_starts Output array of segment byte offsets (at least @p lines_capacity entries).
- *  @param line_lengths Output array of segment byte lengths (at least @p lines_capacity entries).
- *  @param lines_capacity Capacity of the output arrays, in entries.
- *  @param bytes_consumed Optional output: byte offset up to which the input was segmented. Equals @p length
- *         when everything fit; otherwise it is the start of the first segment that did not fit (a break
- *         opportunity), so the caller may resume from @c text+*bytes_consumed.
+ *  @param[in] text UTF-8 encoded text.
+ *  @param[in] length Byte length of @p text.
+ *  @param[out] line_starts Segment byte offsets, at least @p lines_capacity entries.
+ *  @param[out] line_lengths Segment byte lengths, at least @p lines_capacity entries.
+ *  @param[in] lines_capacity Capacity of the output arrays, in entries.
+ *  @param[out] bytes_consumed Optional byte offset up to which the input was segmented: @p length
+ *      when everything fit, else the start of the first segment that did not fit (a break
+ *      opportunity), so the caller may resume from `text + *bytes_consumed`.
  *  @return Number of segments written (at most @p lines_capacity).
  *
- *  @note No zero-length segments are emitted; @p length == 0 returns 0. Line segmentation is forward-only.
+ *  @note No zero-length segments are emitted; @p length == 0 returns 0.
+ *  @note Line segmentation is forward-only.
  */
 SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(         //
     sz_cptr_t text, sz_size_t length,                //

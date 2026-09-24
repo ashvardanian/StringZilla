@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly SIMD128 backend for compare.
  *  @file include/stringzilla/compare/v128.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly SIMD128 backend for compare.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_V128_H_

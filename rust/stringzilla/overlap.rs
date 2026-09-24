@@ -1,4 +1,7 @@
 //! Window overlap between a batch of prepared queries and any number of candidate batches.
+//!
+//! File: rust/stringzilla/overlap.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
@@ -6,13 +9,13 @@ use core::mem::MaybeUninit;
 
 /// A forest of prepared query trees, probed by as many batches of candidates as a caller has.
 ///
-/// A window is a fixed-width byte n-gram, and the overlap of two texts at that width is the count of
-/// one's windows that occur in the other, over whichever of the two holds more. Every query is hashed
-/// and sorted into one B-tree over every width at construction, so the sort is paid once per batch
-/// rather than once per round, and nothing is stored per candidate.
+/// A window is a fixed-width byte n-gram, and the overlap of two texts at that width is the count
+/// of one's windows that occur in the other, over whichever of the two holds more. Every query is
+/// hashed and sorted into one B-tree over every width at construction, so the sort is paid once per
+/// batch rather than once per round, and nothing is stored per candidate.
 ///
-/// The score is asymmetric: a candidate's window occurrences count against a query's distinct windows,
-/// so swapping the two sides changes the answer whenever either repeats a window.
+/// The score is asymmetric: a candidate's window occurrences count against a query's distinct
+/// windows, so swapping the two sides changes the answer whenever either repeats a window.
 ///
 /// The fields mirror `sz_overlap_engine_t` one for one and only `count` and `widths_count` are read
 /// from Rust, so the layout is load-bearing and the engine travels to C by pointer. Owning raw
@@ -54,8 +57,8 @@ pub struct OverlapEngine {
 impl OverlapEngine {
     /// Sorts `queries` into one forest on the host, resolving the CPU tier once.
     ///
-    /// `window_widths` are n-gram widths in bytes and need not form a doubling chain; a width past a
-    /// text scores zero for every pair it spans. Zero widths are refused.
+    /// `window_widths` are n-gram widths in bytes and need not form a doubling chain; a width past
+    /// a text scores zero for every pair it spans. Zero widths are refused.
     pub fn new<Query>(queries: &[Query], window_widths: &[usize]) -> Result<Self, Status>
     where
         Query: AsRef<[u8]>,
@@ -78,8 +81,8 @@ impl OverlapEngine {
 
     /// Sorts `queries` into one forest on `stream`'s device, resolving the launch geometry once.
     ///
-    /// `stream` is a `cudaStream_t`, or null for the current device's default one. A width the device
-    /// backend's per-thread ring cannot hold is refused here rather than at the first round.
+    /// `stream` is a `cudaStream_t`, or null for the current device's default one. A width the
+    /// device backend's per-thread ring cannot hold is refused here rather than at the first round.
     ///
     /// A compute verb of a device engine also needs a candidate sequence whose accessors run on the
     /// device, which this crate cannot build yet, so such an engine is constructible here before it
@@ -88,9 +91,9 @@ impl OverlapEngine {
     /// # Safety
     ///
     /// `stream` must be a live stream of the current context, and it makes every later verb of this
-    /// engine asynchronous: [`OverlapEngine::scores`] enqueues and returns, so its output slice has to
-    /// be device-reachable, has to outlive the launch, and must not be read before the caller joins
-    /// `stream` itself.
+    /// engine asynchronous: [`OverlapEngine::scores`] enqueues and returns, so its output slice has
+    /// to be device-reachable, has to outlive the launch, and must not be read before the caller
+    /// joins `stream` itself.
     #[cfg(feature = "cuda")]
     pub unsafe fn new_on_gpu<Query>(
         queries: &[Query],
@@ -130,9 +133,10 @@ impl OverlapEngine {
     /// Window overlap of every prepared query with every candidate, at every width of the batch.
     ///
     /// `scores` receives a `[queries, candidates, widths]` block: share `[q, c, w]` lands at
-    /// `scores[q * scores_query_stride + c * scores_candidate_stride + w]`, each in `[0, 1]`, with the
-    /// width axis unit-strided. Both strides count entries rather than bytes, the candidate stride
-    /// being at least the width count and the query stride at least the candidates times that.
+    /// `scores[q * scores_query_stride + c * scores_candidate_stride + w]`, each in `[0, 1]`,
+    /// with the width axis unit-strided. Both strides count entries rather than bytes, the
+    /// candidate stride being at least the width count and the query stride at least the
+    /// candidates times that.
     pub fn scores<Candidate>(
         &mut self,
         candidates: &[Candidate],

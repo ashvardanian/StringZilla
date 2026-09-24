@@ -1,7 +1,9 @@
 /**
- *  @brief Ice Lake (AVX-512) backend for UTF-8 case folding.
  *  @file include/stringzilla/utf8_uncased_fold/icelake.h
  *  @author Ash Vardanian
+ *  @date November 28, 2025
+ *  @brief Ice Lake (AVX-512) backend for UTF-8 case folding.
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_
@@ -29,10 +31,7 @@ extern "C" {
                    "lzcnt", "popcnt")
 #endif
 
-/**
- *  Helper macros to reduce code duplication in fast-paths.
- *  Detect ASCII uppercase A-Z: returns mask where bytes are in range 0x41-0x5A.
- */
+/** Detects ASCII uppercase A-Z, returning a mask of the bytes in range 0x41-0x5A. */
 #define sz_icelake_is_ascii_upper_(src_u8x64) \
     _mm512_cmplt_epu8_mask(_mm512_sub_epi8((src_u8x64), a_upper_u8x64), subtract26_u8x64)
 
@@ -45,11 +44,8 @@ extern "C" {
     _mm512_mask_add_epi8((src_u8x64), sz_icelake_is_ascii_upper_(src_u8x64) & (prefix_mask), (src_u8x64), \
                          ascii_case_offset_u8x64)
 
-/**
- *  Georgian uppercase transformation: E1 82/83 XX → E2 B4 YY.
- *  Applies to lead byte positions (sets E2), second byte positions (sets B4),
- *  and adjusts third bytes (-0x20 for 82 sequences, +0x20 for 83 sequences).
- */
+/** Georgian uppercase transformation: E1 82/83 XX → E2 B4 YY. Sets E2 at lead byte positions and
+ *  B4 at second byte positions, and adjusts third bytes (−0x20 for 82 sequences, +0x20 for 83). */
 #define sz_icelake_transform_georgian_(folded, georgian_leads, is_82_upper, is_83_upper, prefix_mask)                \
     do {                                                                                                             \
         (folded) = _mm512_mask_blend_epi8((georgian_leads), (folded), _mm512_set1_epi8((char)0xE2));                 \
@@ -59,22 +55,24 @@ extern "C" {
     } while (0)
 
 /**
- *  @brief Find the first invalid position within load_mask, returning chunk_size if all valid.
- *      This safely handles the edge case where all 64 bytes are valid (i.e., ctz(0) which is undefined).
- *      The mask `~is_valid | ~load_mask` marks positions that are either invalid OR outside the loaded chunk.
- *      When all loaded bytes are valid, this mask becomes zero, so we return chunk_size instead of calling ctz(0).
+ *  @brief Finds the first invalid position within @p load_mask, or @p chunk_size if all are valid.
  *
- *  @param is_valid Bitmask where bit i is set if byte i passes the validity check.
- *  @param load_mask Bitmask of the bytes actually loaded from the source.
- *  @param chunk_size Number of bytes in the current chunk (returned when all loaded bytes are valid).
- *  @return Index of the first invalid byte, or chunk_size if all loaded bytes are valid.
+ *  This safely handles the edge case where all 64 bytes are valid, where ctz(0) is undefined.
+ *  Positions clear in @p is_valid or in @p load_mask are either invalid or outside the loaded
+ *  chunk. When all loaded bytes are valid, no such position exists, so @p chunk_size is returned
+ *  instead of calling ctz(0).
+ *
+ *  @param[in] is_valid Bitmask where bit i is set if byte i passes the validity check.
+ *  @param[in] load_mask Bitmask of the bytes actually loaded from the source.
+ *  @param[in] chunk_size Number of bytes in the current chunk, returned when all of them are valid.
+ *  @return Index of the first invalid byte, or @p chunk_size if all loaded bytes are valid.
  */
 SZ_HELPER_INLINE sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mask, sz_size_t chunk_size) {
     sz_u64_t invalid_mask = ~is_valid | ~load_mask;
     return invalid_mask ? (sz_size_t)_tzcnt_u64(invalid_mask) : chunk_size;
 }
 
-/** @brief OR-reduces all 64 byte lanes of a ZMM register into one byte of accumulated flags. */
+/** OR-reduces all 64 byte lanes of a ZMM register into one byte of accumulated flags. */
 SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x64) {
     __m256i upper_u8x32 = _mm512_extracti64x4_epi64(flags_u8x64, 1);
     __m256i or256_u8x32 = _mm256_or_si256(_mm512_castsi512_si256(flags_u8x64), upper_u8x32);
@@ -87,7 +85,9 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x64)
 
 /**
  *  @brief Folds a chunk containing only caseless multi-byte scripts mixed with ASCII.
- *      Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
+ *
+ *  Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
+ *
  *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
@@ -113,16 +113,15 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
 }
 
 /**
- *  @brief Folds a chunk of Latin text in place: ASCII, Latin-1 Supplement (C2-C3),
- *      Latin Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set
- *      of German, Czech, Vietnamese, and most other Latin-script languages.
+ *  @brief Folds a chunk of Latin text in place: ASCII, Latin-1 Supplement (C2-C3), Latin
+ *      Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set of German,
+ *      Czech, Vietnamese, and most other Latin-script languages.
  *
- *  Latin Extended folding is parity-based: uppercase codepoints are even and fold to the next
- *  odd codepoint. The codepoint's low bit lives in the last byte of its UTF-8 sequence, so the
- *  fold is an in-place masked +1. Per-codepoint deltas come from `VPERMB` tables indexed by the
- *  continuation byte's low 6 bits; table entries flag the irregular codepoints (those that
- *  expand, shrink, or fold across blocks), which truncate the chunk and route one rune to the
- *  serial fallback.
+ *  Latin Extended folding is parity-based: uppercase codepoints are even and fold to the next odd
+ *  codepoint. The codepoint's low bit lives in the last byte of its UTF-8 sequence, so the fold is
+ *  an in-place masked +1. Per-codepoint deltas come from @c VPERMB tables indexed by the
+ *  continuation byte's low 6 bits; table entries flag the irregular codepoints that expand, shrink,
+ *  or fold across blocks, and each truncates the chunk and routes one rune to the serial fallback.
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
@@ -191,9 +190,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
                                                               0xFE); // A | B | C
     irregular_m64 |= _mm512_test_epi8_mask(extended_deltas_u8x64, _mm512_set1_epi8((char)0x80));
 
-    // Truncate at the first irregular codepoint, foreign E1 sub-family, or malformed lead - the byte
-    // BEFORE a flagged continuation is the lead, so step back to the start of that sequence. A malformed
-    // lead is itself a lead, so the walk-back stays put and the strict serial fallback copies one byte.
+    // Truncate at the first irregular codepoint, foreign E1 sub-family, or malformed lead - the
+    // byte before a flagged continuation is the lead, so step back to the start of that sequence. A
+    // malformed lead is itself a lead, so the walk-back stays put and the strict serial fallback
+    // copies one byte.
     __mmask64 stop_m64 = (irregular_m64 | foreign_e1_second_m64 | malformed_lead_m64) & load_m64;
     sz_size_t fold_length = chunk_size;
     if (stop_m64) {
@@ -341,7 +341,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
         source_vec.zmm = _mm512_maskz_loadu_epi8(load_m64, source);
         __mmask64 is_non_ascii_m64 = _mm512_movepi8_mask(source_vec.zmm);
 
-        // FAST PATH: Check for pure ASCII FIRST, before computing any masks.
+        // Fast path: Check for pure ASCII first, before computing any masks.
         // This is the most common case for English and many other Latin-script texts.
         // Avoids computing 6+ masks that would be wasted on pure ASCII chunks.
         if (is_non_ascii_m64 == 0) {
@@ -382,13 +382,15 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
         // purity precondition and degrades to one short prefix per full cascade pass.
         __mmask64 is_lead_m64 = is_non_ascii_m64 & ~is_cont_m64 & load_m64;
 
-        // Branchless well-formedness gate, mirroring `sz_rune_decode`: a lead is well-formed iff its
-        // required continuations follow AND it is not overlong/surrogate/out-of-range. Shifting `is_cont_m64`
-        // down by 1/2/3 tests "the next 1/2/3 bytes are continuations"; the bad-special compares strip the
-        // overlong (E0<A0, F0<90), surrogate (ED>=A0) and out-of-range (F4>=90) leads, plus C0/C1 and F5..FF
-        // which never appear in `is_two_byte_lead_classifier_m64`/the 4-byte mask below. For VALID text every
-        // lead already has its continuations, so `well_formed_lead_m64 == is_lead_m64` and the handlers below
-        // are unchanged; only malformed leads are excluded and routed to the strict serial fallback.
+        // Branchless well-formedness gate, mirroring `sz_rune_decode`: a lead is well-formed iff
+        // its required continuations follow and it is not overlong/surrogate/out-of-range. Shifting
+        // `is_cont_m64` down by 1/2/3 tests "the next 1/2/3 bytes are continuations"; the
+        // bad-special compares strip the overlong (E0 < A0, F0 < 90), surrogate (ED ≥ A0) and
+        // out-of-range (F4 ≥ 90) leads, plus C0/C1 and F5..FF which never appear in
+        // `is_two_byte_lead_classifier_m64`/the 4-byte mask below. For valid text every lead
+        // already has its continuations, so `well_formed_lead_m64 == is_lead_m64` and the handlers
+        // below are unchanged; only the malformed leads are excluded and routed to the strict
+        // serial fallback path.
         __mmask64 is_two_byte_lead_classifier_m64 = is_lead_m64 & ~is_three_byte_lead_m64 & ~is_four_byte_lead_m64;
         __mmask64 next_is_cont_m64 = is_cont_m64 >> 1;
         __mmask64 next2_is_cont_m64 = is_cont_m64 >> 2;
@@ -497,11 +499,11 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                 // (84 Letterlike, 93 Enclosed Alphanumerics, B0-B3 Glagolitic/Coptic, etc.)
                 __mmask64 is_e2_m64 = _kand_mask64(is_e1_e2_m64, _knot_mask64(is_e1_m64));
                 __mmask64 e2_second_byte_positions_m64 = is_e2_m64 << 1;
-                // E2 folding needed if second byte is NOT in 80-83 range
+                // E2 folding needed if second byte is not in 80-83 range
                 __mmask64 is_e2_folding_m64 = e2_second_byte_positions_m64 &
                                               ~_mm512_cmplt_epu8_mask(
                                                   _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
-                                                  _mm512_set1_epi8(0x04)); // NOT 80-83
+                                                  _mm512_set1_epi8(0x04)); // not 80-83
                 // For EA, check if second byte is in problematic ranges
                 __mmask64 is_ea_m64 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEA));
                 __mmask64 ea_second_byte_positions_m64 = is_ea_m64 << 1;
@@ -551,7 +553,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
             __mmask64 prefix_m64 = sz_u64_mask_until_(latin1_length);
             __mmask64 latin1_second_bytes_m64 = latin1_second_byte_positions_m64 & prefix_m64;
 
-            // ASCII A-Z (0x41-0x5A) and Latin-1 À-Þ (second byte 0x80-0x9E excl. ×=0x97) both get +0x20
+            // ASCII A-Z (0x41-0x5A) and Latin-1 À-Þ (second byte 0x80-0x9E, excluding × at 0x97)
+            // both get +0x20 added.
             __mmask64 is_upper_ascii_m64 = sz_icelake_is_ascii_upper_(source_vec.zmm);
             __mmask64 is_latin1_upper_m64 = _mm512_mask_cmplt_epu8_mask(
                 latin1_second_bytes_m64, _mm512_sub_epi8(source_vec.zmm, utf8_cont_pattern_u8x64),
@@ -793,8 +796,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
         is_two_byte_lead_m64 &= ~is_latin1_lead_m64; // Exclude C3
         __mmask64 two_byte_second_positions_m64 = is_two_byte_lead_m64 << 1;
 
-        // Accept ALL well-formed 2-byte sequences; we'll detect singletons after decoding. A malformed lead
-        // truncates the run so the strict serial fallback copies it one byte at a time.
+        // Accept all well-formed 2-byte sequences, detecting singletons after decoding. A malformed
+        // lead truncates the run, so the strict serial fallback copies it one byte at a time.
         __mmask64 is_valid_two_byte_mix_m64 =
             (~is_non_ascii_m64 | is_two_byte_lead_m64 | two_byte_second_positions_m64) & ~malformed_lead_m64;
         sz_size_t two_byte_length = sz_icelake_first_invalid_(is_valid_two_byte_mix_m64, load_m64, chunk_size);
@@ -836,7 +839,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
             __m512i codepoints_u32x16 = _mm512_mask_blend_epi32(is_two_byte_char_m16, first_wide_u32x16,
                                                                 decoded_u32x16);
 
-            // Detect codepoints that need serial handling - ONLY ranges with case folding that
+            // Detect codepoints that need serial handling - only ranges with case folding that
             // our vectorized rules don't handle correctly. Ranges without case folding (Arabic,
             // Hebrew, etc.) can pass through unchanged since no folding rules will match.
             __mmask16 needs_serial_m16 =
@@ -940,7 +943,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
             // Use _mm512_test_epi32_mask for cleaner parity check: returns 1 where (a & b) != 0
             __mmask16 is_odd_m16 = _mm512_test_epi32_mask(codepoints_u32x16, _mm512_set1_epi32(1));
             __mmask16 is_even_m16 = ~is_odd_m16;
-            // Ranges where EVEN is uppercase (even → +1):
+            // Ranges where even is uppercase (even → +1):
             // 0x0100-0x012F, 0x0132-0x0137, 0x014A-0x0177
             __mmask16 is_latin_even_upper_m16 =
                 _mm512_cmplt_epu32_mask(_mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x0100)),
@@ -951,7 +954,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                                         _mm512_set1_epi32(0x2E));
             folded_u32x16 = _mm512_mask_add_epi32(folded_u32x16, is_latin_even_upper_m16 & is_even_m16, folded_u32x16,
                                                   _mm512_set1_epi32(1));
-            // Ranges where ODD is uppercase (odd → +1):
+            // Ranges where odd is uppercase (odd → +1):
             // 0x0139-0x0148, 0x0179-0x017E
             __mmask16 is_latin_odd_upper_m16 =
                 _mm512_cmplt_epu32_mask(_mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x0139)),
@@ -1073,7 +1076,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
             //   - E1 83 80-85: Uppercase (Ⴠ-Ⴥ) - folds to E2 B4 A0-A5
             //   - E1 83 86-BF: Lowercase/other (ა-ჿ) - no folding needed
             //
-            // We include ALL E1 82/83 content in the fast path, but only transform uppercase.
+            // We include all E1 82/83 content in the fast path, but only transform uppercase.
             if (is_e1_lead_m64 && source_length >= 3) {
                 // Check if E1 leads have Georgian second bytes (82 or 83)
                 __m512i georgian_second_bytes_u8x64 = _mm512_permutexvar_epi8(
@@ -1091,8 +1094,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
 
                 // Check if all E1 leads are Georgian (82/83) with no mixed content.
                 // Note: Both conditions are necessary, not redundant!
-                // - `!non_georgian_e1_m64`: ensures ALL E1 leads are Georgian (no Greek Extended, etc.)
-                // - `is_georgian_e1_m64`: ensures at least ONE Georgian exists (handles empty safe_e1_m64)
+                // - `!non_georgian_e1_m64`: every E1 lead is Georgian (no Greek Extended, etc.)
+                // - `is_georgian_e1_m64`: at least one Georgian exists (handles empty safe_e1_m64)
                 __mmask64 non_georgian_e1_m64 = safe_e1_m64 & ~is_georgian_e1_m64;
                 if (!non_georgian_e1_m64 && is_georgian_e1_m64) {
                     // All Georgian 3-byte sequences are valid (E1 82 80-BF, E1 83 80-BF)
@@ -1119,9 +1122,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                                                                          _mm512_set1_epi8((char)0x8D));
                     __mmask64 is_83_uppercase_m64 = is_83_range_m64 | is_83_c7_m64 | is_83_cd_m64;
 
-                    // Include ASCII, ALL Georgian E1 (not just uppercase), safe E2, continuations, safe EA
-                    // E2 80-83 are safe (General Punctuation), others have case folding (Glagolitic, Coptic, etc.)
-                    // Also include C2 leads (Latin-1 Supplement: U+0080-00BF) - no case folding needed
+                    // Include ASCII, all Georgian E1 (not just uppercase), safe E2, continuations,
+                    // safe EA E2 80-83 are safe (General Punctuation), others have case folding
+                    // (Glagolitic, Coptic, etc.) Also include C2 leads (Latin-1 Supplement:
+                    // U+0080-00BF) - no case folding needed
                     __mmask64 is_safe_ea_m64 = is_ea_lead_m64 & ~(is_ea_complex_m64 >> 1);
                     __mmask64 is_c2_lead_m64 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC2));
                     // E2 is only safe if second byte is 80-83 (General Punctuation quotes)
@@ -1333,8 +1337,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
 
                 // Check for problematic lead bytes in this prefix
 
-                // E2 leads: E2 80-83 are safe (General Punctuation), but others need folding.
-                // For safety and simplicity, treating ALL E2s here as unsafe forces serial fallback,
+                // E2 leads: E2 80-83 are safe (General Punctuation), but others need folding. For
+                // safety and simplicity, treating all E2s here as unsafe forces serial fallback,
                 // which handles both folding and identity cases correctly.
                 __mmask64 is_unsafe_e2_m64 = is_e2_lead_m64 & three_byte_leads_in_prefix_m64;
                 __mmask64 problematic_leads_m64 = (is_e1_lead_m64 | is_ef_lead_m64 | is_unsafe_e2_m64) &
@@ -1528,7 +1532,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                 }
 
                 // No special 3-byte cases found - fold ASCII A-Z, copy 3-byte unchanged
-                // But do NOT copy if we detected unsafe E2s that weren't handled!
+                // But do not copy if we detected unsafe E2s that weren't handled!
                 if (!is_unsafe_e2_m64) {
                     _mm512_mask_storeu_epi8(target, prefix_3_m64,
                                             sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, prefix_3_m64));

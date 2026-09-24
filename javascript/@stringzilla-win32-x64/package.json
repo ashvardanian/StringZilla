@@ -4,7 +4,7 @@
   "description": "Windows x64 native binary for StringZilla",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ashvardanian/stringzilla.git"
+    "url": "git+https://github.com/ashvardanian/StringZilla.git"
   },
   "homepage": "https://ashvardanian.com/posts/stringzilla/",
   "license": "Apache-2.0",

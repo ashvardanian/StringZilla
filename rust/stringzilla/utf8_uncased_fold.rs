@@ -1,17 +1,20 @@
 //! Unicode case folding of UTF-8 text.
+//!
+//! File: rust/stringzilla/utf8_uncased_fold.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::ffi::c_void;
 
 /// Applies Unicode case folding to a UTF-8 string, writing the result to a destination buffer.
 ///
-/// Case folding normalizes text for uncased comparisons by mapping uppercase letters
-/// to their lowercase equivalents and handling special cases like German U+00DF -> ss expansion.
+/// Case folding normalizes text for uncased comparisons by mapping uppercase letters to their
+/// lowercase equivalents and handling special cases like German U+00DF → ss expansion.
 ///
 /// # Arguments
 ///
-/// * `source`: The UTF-8 string to case-fold.
-/// * `destination`: The destination buffer to write the case-folded string.
+/// - `source`: The UTF-8 string to case-fold.
+/// - `destination`: The destination buffer to write the case-folded string.
 ///
 /// # Returns
 ///
@@ -59,14 +62,15 @@ mod tests {
 
     #[test]
     fn utf8_uncased_fold_golden_vectors() {
-        // One probe per kernel family: ASCII, Latin-1 (C3), Latin Extended (C4/C6),
-        // Greek (incl. final sigma), Cyrillic, Vietnamese (E1 BA), letterlike symbols,
-        // ligature expansions, and the post-Unicode-15 Garay block (4-byte sequences).
+        // One probe per kernel family: ASCII, Latin-1 at C3, Latin Extended at C4/C6, Greek with
+        // final sigma, Cyrillic, Vietnamese at E1 BA, letterlike symbols, ligature expansions, and
+        // the post-Unicode-15 Garay block of 4-byte sequences.
         let golden: &[(&str, &[u8])] = &[
             ("HeLLo", b"hello"),                                           // ASCII fast path
             ("ABCDEFGHIJKLMNOPQRSTUVWXYZ", b"abcdefghijklmnopqrstuvwxyz"), // >16B ASCII: SIMD fold loop
             ("Hello, WASM World! 12345.", b"hello, wasm world! 12345."),   // >16B mixed: only A-Z fold
-            // Long ASCII run, then a multi-byte codepoint, then more ASCII: SIMD → serial → scalar tail.
+            // Long ASCII run, then a multi-byte codepoint, then more ASCII: SIMD → serial
+            // → scalar tail.
             (
                 "LONG ASCII PREFIX \u{00C4} SUFFIX",
                 "long ascii prefix \u{00E4} suffix".as_bytes(),

@@ -1,13 +1,14 @@
 /**
- *  @brief  Multi-pattern search tests: known answers, a brute-force oracle, and the three verbs against it.
- *  @file   test/substrings.cpp
+ *  @file test/substrings.cpp
  *  @author Ash Vardanian
- *  @date   September 20, 2026
+ *  @date August 8, 2026
+ *  @brief Multi-pattern search tests: known answers, a brute-force oracle, and the three verbs
+ *      checked against it.
  *
- *  The oracle is a naive scan of every needle at every offset, which is what an Aho-Corasick automaton has
- *  to agree with by construction. Under case folding the oracle folds both sides with the library's own
- *  `sz_utf8_uncased_fold` and searches the folded haystack, then snaps the span it found back onto whole
- *  source codepoints - so it tests the automaton rather than re-deriving the fold.
+ *  The oracle is a naive scan of every needle at every offset, which is what an Aho-Corasick
+ *  automaton has to agree with by construction. Under case folding the oracle folds both sides with
+ *  the library's own @c sz_utf8_uncased_fold and searches the folded haystack, then snaps the span
+ *  it found back onto whole source codepoints, testing the automaton without re-deriving the fold.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -35,7 +36,7 @@ using namespace sz::test;
 
 #pragma region Helpers
 
-/** @brief One match as the oracle and the backends both spell it, so a differential is one comparison. */
+/** One match as the oracle and the backends both spell it, so a differential is one comparison. */
 struct substrings_case_t {
     std::size_t haystack_index;
     std::size_t needle_index;
@@ -54,7 +55,7 @@ struct substrings_case_t {
     }
 };
 
-/** @brief Binds a sequence over a vector of strings, which is what every verb here takes. */
+/** Binds a sequence over a vector of strings, which is what every verb here takes. */
 static sz_sequence_t sequence_over_(std::vector<std::string> const &strings, std::vector<sz_string_view_t> &views) {
     views.resize(strings.size());
     for (std::size_t index = 0; index != strings.size(); ++index)
@@ -64,7 +65,7 @@ static sz_sequence_t sequence_over_(std::vector<std::string> const &strings, std
     return sequence;
 }
 
-/** @brief Folds @p text with the library's own folder, which is the stream an uncased automaton walks. */
+/** Folds @p text with the library's own folder, which is the stream an uncased automaton walks. */
 static std::string folded_(std::string const &text) {
     std::string folded(text.size() * 4 + 4, '\0');
     std::size_t const written = sz_utf8_uncased_fold(text.data(), text.size(), &folded[0]);
@@ -75,13 +76,17 @@ static std::string folded_(std::string const &text) {
 /**
  *  @brief Where the source codepoint behind each folded byte starts and ends.
  *
- *  A folded match snaps outward onto whole codepoints, so a folded span `[first, last)` becomes the source
- *  span `[starts[first], ends[last - 1])`. Snapping the end onto the producing codepoint's own start
- *  instead would collapse a match ending inside an expansion to nothing.
+ *  A folded match snaps outward onto whole codepoints, so a folded span `[first, last)` becomes the
+ *  source span `[starts[first], ends[last - 1])`. Snapping the end onto the producing codepoint's
+ *  own start instead would collapse a match ending inside an expansion to nothing.
  */
 struct folded_origins_t {
-    std::vector<std::size_t> starts; /**< Source offset the codepoint behind each folded byte begins at. */
-    std::vector<std::size_t> ends;   /**< Source offset just past that codepoint. */
+
+    /** Source offset the codepoint behind each folded byte begins at. */
+    std::vector<std::size_t> starts;
+
+    /** Source offset just past that codepoint. */
+    std::vector<std::size_t> ends;
 };
 
 static folded_origins_t folded_origins_(std::string const &text) {
@@ -99,7 +104,7 @@ static folded_origins_t folded_origins_(std::string const &text) {
     return origins;
 }
 
-/** @brief Every match of every needle at every offset, which is what the automaton must agree with. */
+/** Every match of every needle at every offset, which is what the automaton must agree with. */
 static std::vector<substrings_case_t> oracle_overlapping_(std::vector<std::string> const &haystacks,
                                                           std::vector<std::string> const &needles,
                                                           sz_substrings_case_sensitivity_t sensitivity) {
@@ -142,7 +147,7 @@ static std::vector<substrings_case_t> oracle_overlapping_(std::vector<std::strin
     return found;
 }
 
-/** @brief The greedy cover the leftmost policies name, taken over the oracle's own overlapping matches. */
+/** The greedy cover the leftmost policies name, taken over the oracle's own overlapping matches. */
 static std::vector<substrings_case_t> oracle_leftmost_(std::vector<substrings_case_t> const &overlapping,
                                                        std::size_t haystacks_count,
                                                        sz_substrings_overlap_policy_t policy) {
@@ -176,7 +181,7 @@ static std::vector<substrings_case_t> oracle_leftmost_(std::vector<substrings_ca
     return kept;
 }
 
-/** @brief The rewrite that cover implies, spliced by the oracle rather than by the backend. */
+/** The rewrite that cover implies, spliced by the oracle rather than by the backend. */
 static std::string oracle_rewrite_(std::string const &haystack, std::size_t haystack_index,
                                    std::vector<substrings_case_t> const &cover,
                                    std::vector<std::string> const &replacements) {
@@ -192,7 +197,8 @@ static std::string oracle_rewrite_(std::string const &haystack, std::size_t hays
     return rewritten;
 }
 
-/** @brief The verbs one CPU tier exports, so every compiled tier meets the oracle, not only the dispatched one. */
+/** The verbs one CPU tier exports, so every compiled tier meets the oracle, not only
+ *  the dispatched one. */
 struct substrings_tier_t {
     decltype(&sz_substrings_counts_serial) counts;
     decltype(&sz_substrings_find_serial) find;
@@ -218,7 +224,7 @@ static std::vector<substrings_tier_t> substrings_tiers_() {
     return tiers;
 }
 
-/** @brief BM25 over the oracle's own overlapping matches, summed in double precision in any order. */
+/** BM25 over the oracle's own overlapping matches, summed in double precision in any order. */
 static std::vector<double> oracle_bm25_(std::vector<substrings_case_t> const &overlapping,
                                         std::vector<std::string> const &haystacks, std::size_t needles_count,
                                         std::vector<sz_f32_t> const &document_lengths,
@@ -244,8 +250,8 @@ static std::vector<double> oracle_bm25_(std::vector<substrings_case_t> const &ov
     return scores;
 }
 
-/** @brief The dispatched BM25 against the oracle, by byte lengths and by caller-given ones, with and without
- *         length normalization. */
+/** The dispatched BM25 against the oracle, by byte lengths and by caller-given ones, with and
+ *  without length normalization. */
 static void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *engine,
                         sz_sequence_t const *haystack_sequence, std::vector<std::string> const &haystacks,
                         std::vector<substrings_case_t> const &overlapping) {
@@ -274,7 +280,7 @@ static void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
     }
 }
 
-/** @brief Compiles @p needles, so a refusal can be asserted on without naming a sequence of its own. */
+/** Compiles @p needles, so a refusal can be asserted on without naming a sequence of its own. */
 static sz_status_t build_over_(std::vector<std::string> const &needles, sz_substrings_case_sensitivity_t sensitivity,
                                sz_memory_allocator_t *alloc, sz_substrings_engine_t *engine) {
     std::vector<sz_string_view_t> views;
@@ -283,11 +289,18 @@ static sz_status_t build_over_(std::vector<std::string> const &needles, sz_subst
                                          SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, alloc, engine);
 }
 
-/** An allocator granting its first @c grants requests and refusing the rest, tallying the bytes it holds. */
+/** An allocator granting its first @c grants requests and refusing the rest, tallying the
+ *  bytes it holds. */
 struct rationed_allocator_t {
-    std::size_t grants {};              /**< Requests still to be granted before every later one is refused. */
-    std::size_t bytes_held {};          /**< Bytes handed out and not yet returned. */
-    sz_memory_allocator_t allocator {}; /**< The C-side view, whose handle points back at this object. */
+
+    /** Requests still to be granted before every later one is refused. */
+    std::size_t grants {};
+
+    /** Bytes handed out and not yet returned. */
+    std::size_t bytes_held {};
+
+    /** The C-side view, whose handle points back at this object. */
+    sz_memory_allocator_t allocator {};
 
     explicit rationed_allocator_t(std::size_t granted) noexcept : grants(granted) {
         allocator.allocate = +[](sz_size_t length, void *handle) -> void * {
@@ -307,7 +320,8 @@ struct rationed_allocator_t {
     rationed_allocator_t &operator=(rationed_allocator_t const &) = delete;
 };
 
-/** Refuses the build's allocations one later each round, so every error path proves it frees what it took. */
+/** Refuses the build's allocations one later each round, so every error path proves it frees
+ *  what it took. */
 static void check_build_refusals_(std::vector<std::string> const &needles,
                                   sz_substrings_case_sensitivity_t sensitivity) {
     for (std::size_t granted = 0;; ++granted) {
@@ -325,7 +339,8 @@ static void check_build_refusals_(std::vector<std::string> const &needles,
     }
 }
 
-/** @brief Reads every match the engine reports, sizing the array from the report the sizing call leaves. */
+/** Reads every match the engine reports, sizing the array from the report the
+ *  sizing call leaves. */
 static std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tier, sz_substrings_engine_t *engine,
                                                     sz_sequence_t const *haystacks) {
     std::vector<sz_size_t> offsets(haystacks->count + 1, 0);
@@ -346,7 +361,8 @@ static std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tie
     return reported;
 }
 
-/** @brief One vocabulary against one corpus under one policy, compared with the oracle on all three verbs. */
+/** One vocabulary against one corpus under one policy, compared with the oracle on
+ *  all three verbs. */
 static void check_corpus_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                           sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
                           std::size_t hot_states = SZ_SUBSTRINGS_HOT_STATES_AUTO) {
@@ -416,7 +432,7 @@ static void check_corpus_(std::vector<std::string> const &haystacks, std::vector
     sz_substrings_engine_free(&engine);
 }
 
-/** @brief The same corpus under every policy, so one call covers a vocabulary's whole behaviour. */
+/** The same corpus under every policy, so one call covers a vocabulary's whole behaviour. */
 static void check_policies_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                             sz_substrings_case_sensitivity_t sensitivity,
                             std::size_t hot_states = SZ_SUBSTRINGS_HOT_STATES_AUTO) {
@@ -426,11 +442,11 @@ static void check_policies_(std::vector<std::string> const &haystacks, std::vect
 }
 
 /**
- *  @brief The same corpus at every tier split, which is the only way the cold tier is reached at all.
+ *  @brief The same corpus at every tier split, the only way the cold tier is reached at all.
  *
- *  A default build keeps thousands of states hot, so every vocabulary small enough to compare against a
- *  brute-force oracle is entirely hot and the double array is never read. Sweeping the split walks the same
- *  answers through the dense rows, through a mixed automaton, and through an all-cold one.
+ *  A default build keeps thousands of states hot, so every vocabulary small enough to compare
+ *  against a brute-force oracle is entirely hot and the double array is never read. Sweeping the
+ *  split walks the same answers through the dense rows, a mixed automaton, and an all-cold one.
  */
 static void check_tier_splits_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                                sz_substrings_case_sensitivity_t sensitivity) {
@@ -443,7 +459,7 @@ static void check_tier_splits_(std::vector<std::string> const &haystacks, std::v
 
 #pragma region Unit Cases
 
-/** @brief The textbook cases, where a wrong failure link or a missed output run shows up by name. */
+/** The textbook cases, where a wrong failure link or a missed output run shows up by name. */
 void test_substrings_unit() {
     // The canonical Aho-Corasick vocabulary: nested suffixes, so every state carries an inherited run.
     check_policies_({"ushers"}, {"he", "she", "his", "hers"}, sz_substrings_cased_k);
@@ -514,7 +530,7 @@ void test_substrings_unit() {
     }
 }
 
-/** @brief What the verbs refuse, which is as much of the contract as what they accept. */
+/** What the verbs refuse, which is as much of the contract as what they accept. */
 void test_substrings_safety() {
     sz_memory_allocator_t alloc;
     sz_memory_allocator_init_default(&alloc);
@@ -633,7 +649,8 @@ void test_substrings_safety() {
     }
 }
 
-/** @brief Random vocabularies over random corpora, which is what reaches the packing search's fallbacks. */
+/** Random vocabularies over random corpora, which is what reaches the
+ *  packing search's fallbacks. */
 void test_substrings_all() {
     char const *const alphabets[] = {"ab", "abcdefgh", "abcdefghijklmnopqrstuvwxyz"};
     std::size_t const rounds = scale_iterations(24);

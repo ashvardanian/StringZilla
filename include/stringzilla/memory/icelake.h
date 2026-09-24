@@ -1,7 +1,10 @@
 /**
- *  @brief AVX-512 VBMI backend for hardware-accelerated memory operations on Ice Lake and newer x86 CPUs.
  *  @file include/stringzilla/memory/icelake.h
  *  @author Ash Vardanian
+ *  @date October 11, 2024
+ *  @brief AVX-512 VBMI backend for hardware-accelerated memory operations on Ice Lake and
+ *      newer x86 CPUs.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_ICELAKE_H_

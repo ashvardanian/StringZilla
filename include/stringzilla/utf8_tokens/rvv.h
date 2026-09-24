@@ -1,7 +1,8 @@
 /**
- *  @brief RISC-V Vector backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/rvv.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief RISC-V Vector backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_RVV_H_
 #define STRINGZILLA_UTF8_TOKENS_RVV_H_
@@ -15,6 +16,8 @@
 extern "C" {
 #endif
 
+/*  Cap the logical tile so a @c u16 iota addresses every lane. RVV 1.0 allows @c VLEN up to 64 Kib,
+ *  so @c e8m4 @c VLMAX reaches at most 32768, well within a @c u16 index. */
 #if SZ_USE_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
@@ -23,14 +26,13 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-/*  Cap the logical tile so a `u16` iota addresses every lane. RVV 1.0 allows `VLEN` up to 64 Kib, i.e.
- *  `e8m4` `VLMAX` up to 32768 — well within `u16`. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_tile_bytes_rvv_(void) {
     sz_size_t vlmax = __riscv_vsetvlmax_e8m4();
     return vlmax < 4 ? 4 : vlmax; // need at least 4 lanes so the trusted region [0, tile-3] is non-empty
 }
 
-/** @brief Peel a window's first `emit_count` matches: compress lane offsets + lengths, widen-store absolute pairs. */
+/** Peels a window's first @p emit_count matches: compresses lane offsets and lengths, then
+ *  widen-stores the absolute pairs. */
 SZ_HELPER_INLINE void sz_utf8_iterate_peel_tile_rvv_(                        //
     vuint8m4_t length_u8m4, vbool2_t start_mask_b2, sz_size_t tile_position, //
     sz_size_t vector_length, sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -64,8 +66,9 @@ SZ_HELPER_INLINE void sz_utf8_iterate_peel_tile_rvv_(                        //
     }
 }
 
-/*  Classify a tile into a per-lane byte-length vector (0 = no delimiter starts here). The 2nd/3rd bytes are
- *  carried from the buffer via `next`/`after_next`; multi-byte masks are computed unconditionally. */
+/*  Classify a tile into a per-lane byte-length vector, where 0 means no delimiter starts here. The
+ *  2nd and 3rd bytes are carried from the buffer via @c next and @c after_next; multi-byte masks
+ *  are computed unconditionally. */
 SZ_HELPER_INLINE vuint8m4_t sz_utf8_classify_newlines_rvv_(sz_u8_t const *text_u8, sz_size_t position,
                                                            vuint8m4_t bytes_u8m4, vuint8m4_t next_u8m4,
                                                            vuint8m4_t after_next_u8m4, sz_size_t vector_length) {
@@ -148,8 +151,9 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_classify_whitespaces_rvv_(vuint8m4_t bytes_u
     return __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_e3_b2, vector_length);
 }
 
-/*  Shared window/carry/trusted-lane/peel scaffolding for both delimiter sets. `classify_newlines` selects the
- *  per-lane classifier and the post-loop CRLF straddle fixup; otherwise the two paths are identical. */
+/*  Shared window, carry, trusted-lane and peel scaffolding for both delimiter sets. The
+ *  @c classify_newlines flag selects the per-lane classifier and the post-loop CRLF straddle fixup;
+ *  otherwise the two paths are identical. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_multistep_rvv_( //
     sz_cptr_t text, sz_size_t length,                      //
     sz_size_t *match_offsets, sz_size_t *match_lengths,    //
@@ -220,11 +224,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_rvv(      //
 
 /*  UAX-29 word-boundary detection (TR29 Word_Break), byte-identical to the serial reference.
  *
- *  An outer window driver (`_rvv_` / `_rfind_`) slides an `e8m4` window anchored two bytes before the open
- *  boundary, so trusted lanes `[2, vl-2]` carry the full `i-2..i+1` neighbour context. An all-ASCII window is
- *  classified from its raw bytes and reduced to a per-lane boundary mask, compacted, biased to absolute
- *  offsets, and emitted as a shifted-difference `(start, length)` stream. Any non-ASCII / edge window takes
- *  one scalar codepoint step; malformed UTF-8 (which a single window scan cannot reproduce) is routed
+ *  An outer window driver, either the @c _rvv_ or the @c _rfind_ one, slides an @c e8m4 window
+ *  anchored two bytes before the open boundary, so trusted lanes [2, vl - 2] carry the full
+ *  neighbour context from i - 2 to i + 1. An all-ASCII window is classified from its raw bytes and
+ *  reduced to a per-lane boundary mask, compacted, biased to absolute offsets, and emitted as a
+ *  shifted-difference @b (start,length) stream. Any non-ASCII or edge window takes one scalar
+ *  codepoint step; malformed UTF-8, which a single window scan cannot reproduce, is routed
  *  wholesale to serial by the well-formedness gate below. */
 
 #if defined(__clang__)

@@ -1,12 +1,15 @@
 /**
- *  @brief AVX-512 (Ice Lake) backend for multi-pattern search: root skips through the VBMI2 byte-set search.
  *  @file include/stringzilla/substrings/icelake.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/substrings.h
+ *  @date August 8, 2026
+ *  @brief AVX-512 (Ice Lake) backend for multi-pattern search: root skips through the
+ *      VBMI2 byte-set search.
  *
- *  The transition stays scalar: a data-dependent chase has no vector form that beats eight scalar chains.
- *  This tier replaces the text-side stages around it, through @ref sz_substrings_walks_t, and inherits
- *  every other stage from the serial one.
+ *  The transition stays scalar: a data-dependent chase has no vector form that beats eight scalar
+ *  chains. This tier replaces the text-side stages around it, through @ref sz_substrings_walks_t,
+ *  and inherits every other stage from the serial one.
+ *
+ *  @sa include/stringzilla/substrings.h
  */
 #ifndef STRINGZILLA_SUBSTRINGS_ICELAKE_H_
 #define STRINGZILLA_SUBSTRINGS_ICELAKE_H_

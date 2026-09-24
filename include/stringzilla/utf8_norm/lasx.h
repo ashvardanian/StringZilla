@@ -1,21 +1,25 @@
 /**
- *  @brief LoongArch LASX (256-bit) backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/lasx.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 15, 2026
+ *  @brief LoongArch LASX 256-bit backend for the single-pass normalizer, NFD / NFC / NFKD / NFKC.
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
- *  `sz_utf8_norm_classify_lasx_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_lasx` / `sz_utf8_find_denormalized_lasx`) reuse the force-inlined engines
- *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
+ *  @c sz_utf8_norm_classify_lasx_, which locates the first non-inert byte for a form. The two
+ *  public entry points, @c sz_utf8_norm_lasx and @c sz_utf8_find_denormalized_lasx, reuse the
+ *  force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  that devirtualizes the call.
  *
  *  The scanner mirrors the Skylake structure at 256-bit width: a 32-byte all-ASCII gate via the
- *  `sz_xvmovemask_b_utf8_norm_lasx_` reduction, then a lead-byte classify over the shared 64-entry
- *  `sz_utf8_norm_lead_lut_`, then the shared cold per-codepoint verify (`sz_utf8_norm_verify_block_`).
- *  LASX has no 64-entry permute, so the lookup uses the even/odd two-table `__lasx_xvshuf_b` blend
- *  from `find/lasx.h`: `xvshuf_b(hi, lo, index)` is a 32-entry (two 16-byte tables) per-128-bit-lane
- *  select keyed on the low five index bits, and two such selects (index < 32 vs >= 32) are blended by
- *  `__lasx_xvbitsel_v` on bit five of the index to cover all 64 entries.
+ *  @c sz_xvmovemask_b_utf8_norm_lasx_ reduction, then a lead-byte classify over the shared 64-entry
+ *  @c sz_utf8_norm_lead_lut_, then the shared cold per-codepoint verify,
+ *  @c sz_utf8_norm_verify_block_. LASX has no 64-entry permute, so the lookup uses the even/odd
+ *  two-table @c __lasx_xvshuf_b blend from `find/lasx.h`: `xvshuf_b(hi, lo, index)` is a 32-entry
+ *  per-128-bit-lane select over two 16-byte tables, keyed on the low five index bits, and two such
+ *  selects, for index < 32 and index ≥ 32, are blended by @c __lasx_xvbitsel_v on bit five of the
+ *  index to cover all 64 entries.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_LASX_H_
 #define STRINGZILLA_UTF8_NORM_LASX_H_
@@ -29,8 +33,12 @@ extern "C" {
 
 #if SZ_USE_LASX
 
-/*  See `utf8_runes/lasx.h`: `__lasx_xvmskltz_b` packs each byte's sign bit into a per-128-bit-lane
- *  16-bit mask (word 0 = low lane, word 4 = high lane), recombined to match AVX2's `_mm256_movemask_epi8`. */
+/**
+ *  @brief Packs each byte's sign bit into a 32-bit mask, matching AVX2's @c _mm256_movemask_epi8.
+ *
+ *  See `utf8_runes/lasx.h`: @c __lasx_xvmskltz_b packs each byte's sign bit into a per-128-bit-lane
+ *  16-bit mask, word 0 for the low lane and word 4 for the high lane, recombined here.
+ */
 SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended_u8x32) {
     __m256i collected_u32x8 = __lasx_xvmskltz_b(sign_extended_u8x32);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected_u32x8, 0);
@@ -39,15 +47,16 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended_
 }
 
 /**
- *  @brief 64-entry lead lookup without a wide permute: two even/odd `__lasx_xvshuf_b` selects over the
- *         broadcast LUT halves, blended on bit five of the index. `families & form_flag` then identifies
- *         the form. @p index_u8x32 holds `byte & 0x3F` per lane.
+ *  @brief 64-entry lead lookup without a wide permute: two even/odd @c __lasx_xvshuf_b selects over
+ *      the broadcast LUT halves, blended on bit five of the index; `families & form_flag` then
+ *      picks the form.
  *
- *  `__lasx_xvshuf_b(high, low, index)` selects, per 128-bit lane, `low[index]` for `index` in [0, 16) and
- *  `high[index - 16]` for `index` in [16, 32), reading only the low five index bits. So one select covers
- *  index range [0, 32) (tables 0..15 and 16..31), a second covers [32, 64) because the discarded bit five
- *  re-bases the index onto [0, 32) over tables 32..47 and 48..63. `__lasx_xvbitsel_v` then picks the high
- *  select wherever bit five of the index is set (index >= 32).
+ *  @p index_u8x32 holds `byte & 0x3F` per lane. `__lasx_xvshuf_b(high, low, index)` selects, per
+ *  128-bit lane, `low[index]` for @c index in [0, 16) and `high[index - 16]` for @c index in [16,
+ *  32), reading only the low five index bits. So one select covers the index range [0, 32) over
+ *  tables 0..15 and 16..31, and a second covers [32, 64), because the discarded bit five re-bases
+ *  the index onto [0, 32) over tables 32..47 and 48..63. @c __lasx_xvbitsel_v then picks the high
+ *  select wherever bit five of the index is set, i.e. for indices of 32 and above.
  */
 SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u8x32, __m256i table_low_0_u8x32,
                                                         __m256i table_low_1_u8x32, __m256i table_high_0_u8x32,
@@ -60,11 +69,14 @@ SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u8x32, __m
 }
 
 /**
- *  @brief Scan primitive (LASX): first byte that begins a non-inert codepoint for @p form, else NULL.
+ *  @brief LASX scan primitive: finds the first byte starting a non-inert codepoint for @p form.
  *
- *  Matches `sz_utf8_norm_classify_serial_` semantics, computed from the unified props trie. The hot loop
- *  uses a 32-byte window gate plus the two-table `__lasx_xvshuf_b` lead-classify; the cold per-codepoint
- *  verify carries the combining class across windows and reports order or quick-check violations exactly.
+ *  Matches @c sz_utf8_norm_classify_serial_ semantics, computed from the unified props trie. The
+ *  hot loop uses a 32-byte window gate plus the two-table @c __lasx_xvshuf_b lead-classify; the
+ *  cold per-codepoint verify carries the combining class across windows and reports order or
+ *  quick-check violations exactly.
+ *
+ *  @return The first such byte, or NULL.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;

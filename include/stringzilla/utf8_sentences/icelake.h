@@ -1,7 +1,8 @@
 /**
- *  @brief Ice Lake backend for UAX-29 sentence boundaries.
  *  @file include/stringzilla/utf8_sentences/icelake.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Ice Lake backend for UAX-29 sentence boundaries.
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_ICELAKE_H_
 #define STRINGZILLA_UTF8_SENTENCES_ICELAKE_H_
@@ -33,13 +34,18 @@ extern "C" {
 
 #pragma region Sentence_Break classifier
 
-/** @brief  Start-compacting flat-lookup classify for the COLD `0x800..0xFFFF` residue (Devanagari, Bengali, Thai,
- *          Tamil, ...). Every cold lane is a 3-byte codepoint START, so a 64-byte window holds at most 21 of them:
- *          their `high`/`low` bytes are `vpcompressb`-compacted into the low lanes, widened to full 32-bit codepoints
- *          in up to two 16-lane registers, resolved by the shared @ref sz_utf8_rune_flat_lookup_icelake_ (page LUT
- *          `vpermb` + one `vpgatherdd` each), then `vpexpandb`-scattered back onto @p classes_u8x64 at their original
- *          byte-lane positions. The second half only runs when more than sixteen cold starts are present. Every other
- *          lane keeps its prior value. */
+/**
+ *  @brief Start-compacting flat-lookup classify for the cold `0x800..0xFFFF` residue: Devanagari,
+ *      Bengali, Thai, Tamil, and so on.
+ *
+ *  Every cold lane is a 3-byte codepoint start, so a 64-byte window holds at most 21 of them: their
+ *  high and low bytes are compacted into the low lanes by @c vpcompressb, widened to full 32-bit
+ *  codepoints in up to two 16-lane registers, resolved by the shared
+ *  @ref sz_utf8_rune_flat_lookup_icelake_ with a page LUT @c vpermb and one @c vpgatherdd each,
+ *  then scattered by @c vpexpandb back onto @p classes_u8x64 at their original byte-lane positions.
+ *  The second half only runs when more than sixteen cold starts are present. Every other lane keeps
+ *  its prior value.
+ */
 SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
     __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
     __mmask64 const cold_start_mask_m64 = _cvtu64_mask64(cold_starts);
@@ -66,35 +72,43 @@ SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
 }
 
 /**
- *  @brief  Classify up to 64 codepoints (held one-per-lane in the decoded @p high_u8x64 / @p low_u8x64 byte halves)
- *          into per-lane Sentence_Break properties. The dominant `cp < 0x800` region
- *          (Latin/Greek/Cyrillic/Arabic/Hebrew)
- *          is resolved by an in-register `vpermi2b` page network over `sz_utf8_sentence_break_flat_lut_0800_`; the big
- *          homogeneous OLetter blocks (CJK/Hangul/...) by arithmetic range compares (zero data); the cold 3-byte-BMP
- *          residue by a page-compressed flat table read with one `vpgatherdd` per sixteen lanes (see
- *          @ref sz_utf8_sentence_break_cold_compact_icelake_). No scalar per-lane loop, no stack round-trip. Astral
- *          (4-byte) lanes are reconstructed to full 21-bit codepoints in register (four 16-lane chunks) and resolved
- *          through the canonical sorted astral range list with arithmetic compares, all 64 lanes uniformly.
+ *  @brief Classifies up to 64 codepoints, held one per lane in the decoded @p high_u8x64 and
+ *      @p low_u8x64 byte halves, into per-lane Sentence_Break properties.
  *
- *  @param  raw_window_u8x64   The raw 64 input bytes (codepoint lead/continuation bytes, one lane each here).
- *  @param  raw_next1_u8x64    Byte at lane+1 (first continuation), @p raw_next2_u8x64 lane+2,
- *                             @p raw_next3_u8x64 lane+3.
- *  @param  high_u8x64         Per-lane high byte of the reconstructed codepoint (`cp >> 8`, BMP) from the driver.
- *  @param  low_u8x64          Per-lane low byte of the reconstructed codepoint (`cp & 0xFF`) from the driver.
- *  @param  four_byte_starts_m64  Lanes that begin a 4-byte UTF-8 sequence (gates the >= 0x10000 astral test).
- *  @param  codepoint_starts_m64  Lanes that begin any codepoint (non-continuation, in range).
+ *  The dominant `cp < 0x800` region, Latin, Greek, Cyrillic, Arabic, and Hebrew, is resolved by an
+ *  in-register @c vpermi2b page network over @c sz_utf8_sentence_break_flat_lut_0800_; the big
+ *  homogeneous OLetter blocks, CJK, Hangul, and so on, by arithmetic range compares with zero data;
+ *  the cold 3-byte-BMP residue by a page-compressed flat table read with one @c vpgatherdd per
+ *  sixteen lanes, as in @ref sz_utf8_sentence_break_cold_compact_icelake_. No scalar per-lane loop,
+ *  no stack round-trip. Astral 4-byte lanes are reconstructed to full 21-bit codepoints in
+ *  register, four 16-lane chunks, and resolved through the canonical sorted astral range list with
+ *  arithmetic compares, all 64 lanes uniformly.
+ *
+ *  @param[in] raw_window_u8x64 The raw 64 input bytes, codepoint lead and continuation bytes,
+ *      one lane each.
+ *  @param[in] raw_next1_u8x64 Byte at lane+1, the first continuation.
+ *  @param[in] raw_next2_u8x64 Byte at lane+2.
+ *  @param[in] raw_next3_u8x64 Byte at lane+3.
+ *  @param[in] high_u8x64 Per-lane high byte of the reconstructed BMP codepoint, `cp >> 8`,
+ *      from the driver.
+ *  @param[in] low_u8x64 Per-lane low byte of the reconstructed codepoint, `cp & 0xFF`,
+ *      from the driver.
+ *  @param[in] four_byte_starts_m64 Lanes that begin a 4-byte UTF-8 sequence, gating the ≥
+ *      0x10000 astral test.
+ *  @param[in] codepoint_starts_m64 Lanes that begin any codepoint, non-continuation and in range.
  */
 SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(                                //
     __m512i raw_window_u8x64, __m512i raw_next1_u8x64, __m512i raw_next2_u8x64, __m512i raw_next3_u8x64, //
     __m512i high_u8x64, __m512i low_u8x64,                                                               //
     __mmask64 four_byte_starts_m64, __mmask64 codepoint_starts_m64) {
 
-    // Partition the lanes FIRST so the expensive classify paths only run for lanes that need them.
-    // Dispatch by codepoint VALUE, not byte-length, so overlong / malformed sequences classify exactly like the
-    // serial reference: an n-byte lead whose blind value lands in a shorter range is resolved by that range's table.
-    // `is_astral` selects 4-byte leads whose value is truly >= 0x10000 (cp bit 16+ set, from `(b0 & 7) | (b1 & 0x30)`);
-    // every other lead is a BMP lane routed to the page LUT (high < 0x08) or the flat table gather (high >= 0x08).
-    // For well-formed UTF-8 the value split is identical to the byte-length split, so this leaves conformance
+    // Partition the lanes first so the expensive classify paths only run for lanes that need them.
+    // Dispatch by codepoint value, not byte-length, so overlong / malformed sequences classify
+    // exactly like the serial reference: an n-byte lead whose blind value lands in a shorter range
+    // is resolved by that range's table. `is_astral` selects 4-byte leads whose value is truly >=
+    // 0x10000 (cp bit 16+ set, from `(b0 & 7) | (b1 & 0x30)`); every other lead is a BMP lane
+    // routed to the page LUT (high < 0x08) or the flat table gather (high >= 0x08). For well-formed
+    // UTF-8 the value split is identical to the byte-length split, so this leaves conformance
     // untouched.
     __mmask64 const is_astral_m64 = four_byte_starts_m64 &
                                     (_mm512_test_epi8_mask(raw_window_u8x64, _mm512_set1_epi8(0x07)) |
@@ -147,9 +161,10 @@ SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(       
         classes_u8x64 = _mm512_mask_mov_epi8(classes_u8x64, small_lanes_m64, small_class_u8x64);
     }
 
-    // Flat page-LUT + gather lookup for the 0x800..0xFFFF residue, gated on a 3-byte lane the OLetter ranges did NOT
-    // already resolve, so CJK / Kana windows skip it entirely. When every 3-byte lane is OLetter the lookup's output
-    // would be overwritten by the OLetter overlay anyway, so skipping it is byte-identical.
+    // Flat page-LUT + gather lookup for the 0x800..0xFFFF residue, gated on a 3-byte lane the
+    // OLetter ranges did not already resolve, so CJK / Kana windows skip it entirely. When every
+    // 3-byte lane is OLetter the lookup's output would be overwritten by the OLetter overlay
+    // anyway, so skipping it is byte-identical.
     __mmask64 const cold_residual_m64 = cold_lanes_m64 & ~oletter_m64;
     if (cold_residual_m64)
         classes_u8x64 = sz_utf8_sentence_break_cold_compact_icelake_(classes_u8x64, high_u8x64, low_u8x64,
@@ -186,10 +201,10 @@ SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(       
             __mmask16 const lane_is_four_m16 = (__mmask16)((is_astral_m64 >> (chunk * 16)) & 0xFFFFu);
             __m512i astral_class_u32x16 = _mm512_setzero_si512();
             __mmask16 matched_m16 = 0;
-            // Big homogeneous OLetter blocks that live above the BMP (CJK Extension B+, astral Hangul/Kana, ...) are
-            // skipped by the BMP OLetter loop above and are NOT duplicated in the astral range list; the serial
-            // reference resolves them from `big_oletter` FIRST, so check them here before the astral list with the
-            // same first-match-wins precedence.
+            // Big homogeneous OLetter blocks that live above the BMP (CJK Extension B+, astral
+            // Hangul/Kana, ...) are skipped by the BMP OLetter loop above and are not duplicated in
+            // the astral range list; the serial reference resolves them from `big_oletter` first,
+            // so check them here before the astral list with the same first-match-wins precedence.
             for (int range = 0; range < sz_utf8_sentence_break_big_oletter_count_k; ++range) {
                 sz_u32_t const lo = sz_utf8_sentence_break_big_oletter_lo_[range];
                 sz_u32_t const hi = sz_utf8_sentence_break_big_oletter_hi_[range];
@@ -230,12 +245,14 @@ SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(       
 #pragma region Sentence_Break boundary algebra
 
 /**
- *  @brief  Ice Lake extractor for the portable dense rule engine: build the per-class membership frame from the dense
- *          codepoint-class register with fifteen `vpcmpeqb` masks (no scalar pass), store the dense class bytes for the
- *          engine's three trailing-context reads, then delegate every SB3-SB998 decision to
- *          @ref sz_utf8_sentence_break_decide_block_. The `__m512i`->mask contact lives here; the rule algebra is
- *          intrinsic-free and shared verbatim with serial / haswell. Force-inlined so the 24-byte window result stays
- *          in registers instead of spilling through an `sret`.
+ *  @brief Ice Lake extractor for the portable dense rule engine.
+ *
+ *  Builds the per-class membership frame from the dense codepoint-class register with fifteen
+ *  @c vpcmpeqb masks and no scalar pass, stores the dense class bytes for the engine's three
+ *  trailing-context reads, then delegates every SB3-SB998 decision to
+ *  @ref sz_utf8_sentence_break_decide_block_. The @c __m512i → mask contact lives here; the rule
+ *  algebra is intrinsic-free and shared verbatim with serial and Haswell. Force-inlined so the
+ *  24-byte window result stays in registers instead of spilling through an @c sret.
  */
 SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
     __m512i classes_u8x64, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {

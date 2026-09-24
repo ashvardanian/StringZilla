@@ -1,11 +1,14 @@
 /**
- *  @brief Ice Lake (AVX-512 + VAES + VPCLMULQDQ) backend for AES-256 encryption in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/icelake.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief Ice Lake (AVX-512 + VAES + VPCLMULQDQ) backend for AES-256 encryption in counter
+ *      and Galois/counter modes.
  *
- *  The fourteen rounds are written out rather than looped, and the block groups are named registers rather
- *  than an indexed array.
+ *  The fourteen rounds are written out rather than looped, and the block groups are named registers
+ *  rather than an indexed array.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_ICELAKE_H_
 #define STRINGZILLA_CIPHER_ICELAKE_H_
@@ -17,9 +20,10 @@
 extern "C" {
 #endif
 
+/*  @c avx512vbmi carries the byte permute the counter-mode head uses. The tier already implies
+ *  it, and `hash/icelake.h` and `utf8_graphemes/icelake.h` both name it; this string was
+ *  short, not narrower. */
 #if SZ_USE_ICELAKE
-/*  `avx512vbmi` carries the byte permute the counter-mode head uses. The tier already implies it, and
- *  `hash/icelake.h` and `utf8_graphemes/icelake.h` both name it; this string was short, not narrower. */
 #if defined(__clang__)
 #pragma clang attribute push(                                                                                         \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2,aes,vaes,pclmul,vpclmulqdq"))), \
@@ -30,27 +34,29 @@ extern "C" {
 #endif
 
 /*  Four counter blocks share one register, and counter mode keeps four such registers in flight, so
- *  sixteen blocks are encrypted per pass and the fourteen dependent rounds of AES-256 never stall on their
- *  own latency. The Galois hash reaches the same width through `vpclmulqdq`, whose four independent
- *  128-bit lanes let eight blocks accumulate as unreduced carry-less products before a single reduction
- *  closes them out. Authenticated mode runs both in one loop, because they contend for different ports.
+ *  sixteen blocks are encrypted per pass and the fourteen dependent rounds of AES-256 never stall
+ *  on their own latency. The Galois hash reaches the same width through @c vpclmulqdq, whose four
+ *  independent 128-bit lanes let eight blocks accumulate as unreduced carry-less products before a
+ *  single reduction closes them out. Authenticated mode runs both in one loop, because they contend
+ *  for different ports.
  *
- *  The counter is held with its trailing 32-bit field little-endian, because advancing four lanes is then
- *  one `vpaddd`, and byte-reversed into the big-endian block NIST specifies immediately before the cipher
- *  sees it. Both halves of that sentence are load-bearing: a keystream generated from an unswapped
- *  counter looks perfectly random and is simply not AES-CTR.
- */
+ *  The counter is held with its trailing 32-bit field little-endian, because advancing four lanes
+ *  is then one @c vpaddd, and byte-reversed into the big-endian block NIST specifies immediately
+ *  before the cipher sees it. Both halves of that sentence are load-bearing: a keystream generated
+ *  from an unswapped counter looks perfectly random and is simply not AES-CTR. */
 
 #pragma region Key Schedule
 
 /**
- *  @brief Folds one schedule step: the running exclusive-or of four words, then the substituted word.
- *  @param previous_u8x16 The four schedule words eight positions back.
- *  @param assisted_u8x16 The substituted word, already broadcast across all four lanes.
+ *  @brief Folds one schedule step: the running exclusive-or of four words, then
+ *      the substituted word.
+ *  @param[in] previous_u8x16 The four schedule words eight positions back.
+ *  @param[in] assisted_u8x16 The substituted word, already broadcast across all four lanes.
  *  @return The next four schedule words.
  *
- *  FIPS 197 writes `w[i] = w[i - 8] ^ temp` with `temp` carried forward through the quadruple, which is the
- *  cumulative exclusive-or that three byte-wise doublings of `_mm_slli_si128` produce.
+ *  FIPS 197 writes `w[i] = w[i - 8] ^ temp` with @c temp carried forward through the
+ *  quadruple, which is the cumulative exclusive-or that three byte-wise doublings of
+ *  @c _mm_slli_si128 produce.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_key_fold_icelake_(__m128i previous_u8x16, __m128i assisted_u8x16) {
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
@@ -108,14 +114,14 @@ SZ_API_COMPTIME void sz_aes256_key_init_icelake(sz_aes256_key_t *key, sz_u8_t co
     _mm_storeu_epi32(key->round_keys + 56, secret_low_words_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Counter Mode
 
 /**
  *  @brief Encrypts one 16-byte block with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param block_u8x16 The plaintext block.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_icelake_(sz_aes256_key_t const *key, __m128i block_u8x16) {
@@ -138,8 +144,8 @@ SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_icelake_(sz_aes256_key_t const 
 
 /**
  *  @brief Broadcasts each of the fifteen round keys across the four lanes of its own register.
- *  @param key The expanded schedule.
- *  @param wide_keys_vec Receives fifteen registers, one per round.
+ *  @param[in] key The expanded schedule.
+ *  @param[out] wide_keys_vec Receives fifteen registers, one per round.
  */
 SZ_HELPER_INLINE void sz_aes256_round_keys_wide_icelake_(sz_aes256_key_t const *key, sz_u512_vec_t *wide_keys_vec) {
     wide_keys_vec[0].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 0));
@@ -181,12 +187,12 @@ SZ_HELPER_INLINE __m512i sz_aes256_rounds_wide_icelake_(__m512i block_u8x64, sz_
     return _mm512_aesenclast_epi128(block_u8x64, wide_keys_vec[14].zmm);
 }
 
-/** @brief Lane identity `{0, 1, ..., 15}`, the base a byte-offset permutation is built from. */
+/** Lane identity `{0, 1, ..., 15}`, the base a byte-offset permutation is built from. */
 SZ_HELPER_INLINE __m128i sz_aes256_lane_iota_icelake_(void) {
     return _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 }
 
-/** @brief Reverses the trailing four bytes of each 128-bit lane, its own inverse. */
+/** Reverses the trailing four bytes of each 128-bit lane, its own inverse. */
 SZ_HELPER_INLINE sz_u8_t const *sz_aes256_counter_swap_icelake_(void) {
     static sz_align_(64) sz_u8_t const swap[64] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 14, 13, 12, //
                                                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 14, 13, 12, //
@@ -197,8 +203,8 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes256_counter_swap_icelake_(void) {
 
 /**
  *  @brief Builds four consecutive counter blocks, the trailing 32-bit field kept little-endian.
- *  @param nonce The 12 nonce bytes.
- *  @param block_index Index of the first of the four blocks.
+ *  @param[in] nonce The 12 nonce bytes.
+ *  @param[in] block_index Index of the first of the four blocks.
  *  @return Counters for blocks @p block_index through `block_index + 3`.
  */
 SZ_HELPER_INLINE __m512i sz_aes256_counters_icelake_(sz_u8_t const *nonce, sz_u32_t block_index) {
@@ -211,9 +217,10 @@ SZ_HELPER_INLINE __m512i sz_aes256_counters_icelake_(sz_u8_t const *nonce, sz_u3
 }
 
 /**
- *  @brief Restores the big-endian counter block held in the first lane of a little-endian counter register.
- *  @param counters_u8x64 Four counter blocks with their trailing field little-endian.
- *  @param counter_swap_u8x64 The trailing-field reversal pattern.
+ *  @brief Restores the big-endian counter block held in the first lane of a
+ *      little-endian counter register.
+ *  @param[in] counters_u8x64 Four counter blocks with their trailing field little-endian.
+ *  @param[in] counter_swap_u8x64 The trailing-field reversal pattern.
  *  @return The block NIST's counter mode feeds to the cipher.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_counter_block_icelake_(__m512i counters_u8x64, __m512i counter_swap_u8x64) {
@@ -222,15 +229,16 @@ SZ_HELPER_INLINE __m128i sz_aes256_counter_block_icelake_(__m512i counters_u8x64
 
 /**
  *  @brief Exclusive-ors @p length bytes against the keystream, starting on a block boundary.
- *  @param counters_u8x64 Four consecutive counter blocks, the trailing field little-endian.
- *  @param wide_keys_vec The fifteen round keys, each broadcast across four lanes.
- *  @param text The input bytes.
- *  @param output Receives @p length bytes; may equal @p text.
- *  @param length Bytes to transform, not necessarily a multiple of the block length.
+ *  @param[in] counters_u8x64 Four consecutive counter blocks, the trailing field little-endian.
+ *  @param[in] wide_keys_vec The fifteen round keys, each broadcast across four lanes.
+ *  @param[in] text The input bytes.
+ *  @param[out] output Receives @p length bytes; may equal @p text.
+ *  @param[in] length Bytes to transform, not necessarily a multiple of the block length.
  *  @return The counters advanced past every block the call consumed.
  *
- *  Sixteen blocks in flight is what saturates the two AES ports; the 64-byte and masked passes below it exist
- *  only to land the tail, and a caller reaching them has already run out of work to hide latency in.
+ *  Sixteen blocks in flight is what saturates the two AES ports; the 64-byte and masked passes
+ *  below it exist only to land the tail, and a caller reaching them has already run out of work to
+ *  hide latency in.
  */
 SZ_HELPER_INLINE __m512i sz_aes256_ctr_stride_icelake_(__m512i counters_u8x64, sz_u512_vec_t const *wide_keys_vec,
                                                        sz_u8_t const *text, sz_u8_t *output, sz_size_t length) {
@@ -335,11 +343,11 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_icelake(sz_aes256_key_t const *key, sz_u8
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
-/** @brief Reverses all sixteen bytes of each 128-bit lane, its own inverse. */
+/** Reverses all sixteen bytes of each 128-bit lane, its own inverse. */
 SZ_HELPER_INLINE sz_u8_t const *sz_ghash_byte_reverse_icelake_(void) {
     static sz_align_(64) sz_u8_t const reversal[64] = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, //
                                                        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, //
@@ -350,13 +358,13 @@ SZ_HELPER_INLINE sz_u8_t const *sz_ghash_byte_reverse_icelake_(void) {
 
 /**
  *  @brief Reduces a carry-less product into the field the authentication tag is built over.
- *  @param product_low_u8x16 The low 128 bits of the schoolbook product.
- *  @param product_middle_u8x16 The two cross terms, already exclusive-ored together.
- *  @param product_high_u8x16 The high 128 bits of the schoolbook product.
- *  @return The product modulo `x^128 + x^7 + x^2 + x + 1`, byte reversed like its operands.
+ *  @param[in] product_low_u8x16 The low 128 bits of the schoolbook product.
+ *  @param[in] product_middle_u8x16 The two cross terms, already exclusive-ored together.
+ *  @param[in] product_high_u8x16 The high 128 bits of the schoolbook product.
+ *  @return The product modulo x¹²⁸ + x⁷ + x² + x + 1, byte reversed like its operands.
  *
- *  Galois/counter mode numbers the bits of a block backwards relative to the way `pclmulqdq` reads them, which
- *  leaves the 256-bit product one position low; the shift by one puts it back.
+ *  Galois/counter mode numbers the bits of a block backwards relative to the way @c pclmulqdq reads
+ *  them, which leaves the 256-bit product one position low; the shift by one puts it back.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_reduce_icelake_(__m128i product_low_u8x16, __m128i product_middle_u8x16,
                                                   __m128i product_high_u8x16) {
@@ -380,8 +388,8 @@ SZ_HELPER_INLINE __m128i sz_ghash_reduce_icelake_(__m128i product_low_u8x16, __m
 
 /**
  *  @brief Multiplies two byte-reversed field elements.
- *  @param first_operand_u8x16 One operand, byte reversed.
- *  @param second_operand_u8x16 The other operand, byte reversed.
+ *  @param[in] first_operand_u8x16 One operand, byte reversed.
+ *  @param[in] second_operand_u8x16 The other operand, byte reversed.
  *  @return Their product, byte reversed.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_multiply_icelake_(__m128i first_operand_u8x16, __m128i second_operand_u8x16) {
@@ -408,7 +416,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_icelake(sz_aes256_gcm_key_t *key, sz
     }
 }
 
-/** @brief Exclusive-ors the four 128-bit lanes of a register into one, which the reduction then closes. */
+/** Exclusive-ors the four 128-bit lanes of a register into one, which the reduction then closes. */
 SZ_HELPER_INLINE __m128i sz_ghash_fold_lanes_icelake_(__m512i value_u8x64) {
     __m512i folded_u8x64 = _mm512_xor_si512(value_u8x64, _mm512_shuffle_i64x2(value_u8x64, value_u8x64, 0x4E));
     folded_u8x64 = _mm512_xor_si512(folded_u8x64, _mm512_shuffle_i64x2(folded_u8x64, folded_u8x64, 0xB1));
@@ -417,16 +425,16 @@ SZ_HELPER_INLINE __m128i sz_ghash_fold_lanes_icelake_(__m512i value_u8x64) {
 
 /**
  *  @brief Absorbs eight byte-reversed blocks and the running hash in one reduction.
- *  @param accumulator_u8x16 The running hash, byte reversed.
- *  @param blocks_low_u8x64 Blocks one through four, byte reversed.
- *  @param blocks_high_u8x64 Blocks five through eight, byte reversed.
- *  @param powers_high_u8x64 `H^8` through `H^5`, byte reversed, one per lane.
- *  @param powers_low_u8x64 `H^4` through `H^1`, byte reversed, one per lane.
- *  @param eighth_power_u8x16 `H^8` alone, byte reversed.
+ *  @param[in] accumulator_u8x16 The running hash, byte reversed.
+ *  @param[in] blocks_low_u8x64 Blocks one through four, byte reversed.
+ *  @param[in] blocks_high_u8x64 Blocks five through eight, byte reversed.
+ *  @param[in] powers_high_u8x64 H⁸ through H⁵, byte reversed, one per lane.
+ *  @param[in] powers_low_u8x64 H⁴ through H¹, byte reversed, one per lane.
+ *  @param[in] eighth_power_u8x16 H⁸ alone, byte reversed.
  *  @return The running hash after all eight blocks, byte reversed.
  *
- *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of one multiply
- *  per block.
+ *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of
+ *  one multiply per block.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_stage_icelake_(__m128i accumulator_u8x16, __m512i blocks_low_u8x64,
                                                  __m512i blocks_high_u8x64, __m512i powers_high_u8x64,
@@ -454,10 +462,10 @@ SZ_HELPER_INLINE __m128i sz_ghash_stage_icelake_(__m128i accumulator_u8x16, __m5
 }
 
 /**
- *  @brief Loads `H^8` through `H^1` descending and byte reversed, two lanes-worth per register.
- *  @param key The expanded key holding the powers ascending.
- *  @param powers_high_u8x64 Receives `H^8`, `H^7`, `H^6`, `H^5`.
- *  @param powers_low_u8x64 Receives `H^4`, `H^3`, `H^2`, `H^1`.
+ *  @brief Loads H⁸ through H¹ descending and byte reversed, two lanes-worth per register.
+ *  @param[in] key The expanded key holding the powers ascending.
+ *  @param[out] powers_high_u8x64 Receives H⁸, H⁷, H⁶, H⁵.
+ *  @param[out] powers_low_u8x64 Receives H⁴, H³, H², H¹.
  */
 SZ_HELPER_INLINE void sz_ghash_powers_icelake_(sz_aes256_gcm_key_t const *key, __m512i *powers_high_u8x64,
                                                __m512i *powers_low_u8x64) {
@@ -472,11 +480,11 @@ SZ_HELPER_INLINE void sz_ghash_powers_icelake_(sz_aes256_gcm_key_t const *key, _
 
 /**
  *  @brief Absorbs whole blocks into a byte-reversed running hash.
- *  @param accumulator_u8x16 The running hash, byte reversed.
- *  @param blocks The bytes to absorb, `count * 16` of them.
- *  @param count Number of whole blocks.
- *  @param powers_high_u8x64 `H^8` through `H^5`, byte reversed, one per lane.
- *  @param powers_low_u8x64 `H^4` through `H^1`, byte reversed, one per lane.
+ *  @param[in] accumulator_u8x16 The running hash, byte reversed.
+ *  @param[in] blocks The bytes to absorb, `count * 16` of them.
+ *  @param[in] count Number of whole blocks.
+ *  @param[in] powers_high_u8x64 H⁸ through H⁵, byte reversed, one per lane.
+ *  @param[in] powers_low_u8x64 H⁴ through H¹, byte reversed, one per lane.
  *  @return The running hash after every block, byte reversed.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_absorb_blocks_icelake_(__m128i accumulator_u8x16, sz_u8_t const *blocks,
@@ -503,15 +511,15 @@ SZ_HELPER_INLINE __m128i sz_ghash_absorb_blocks_icelake_(__m128i accumulator_u8x
     return accumulator_u8x16;
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time, so this is seven full-width stores and one masked tail rather than a
- *  length-driven loop.
+ *  The size is known at compile time, so this is seven full-width stores and one masked tail rather
+ *  than a length-driven loop.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_icelake_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -522,7 +530,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_icelake_(sz_aes256_gcm_state_t *
     sz_keep_alive_(state);
 }
 
-/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+/** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_icelake_(sz_u8_t const *first, sz_u8_t const *second) {
     __m128i const first_u8x16 = _mm_loadu_si128((__m128i const *)first);
     __m128i const second_u8x16 = _mm_loadu_si128((__m128i const *)second);
@@ -530,7 +538,7 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_icelake_(sz_u8_t const *first, sz
     return differing_m16 == 0 ? sz_true_k : sz_false_k;
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_icelake_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_u128_vec_t initial_vec;
@@ -555,7 +563,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_icelake_(sz_aes256_gcm_state_t *state,
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     __m128i const reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
@@ -600,7 +608,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_state_t *st
     _mm_mask_storeu_epi8(state->accumulator, (__mmask16)0xFFFFu, _mm_shuffle_epi8(accumulator_u8x16, reverse_u8x16));
 }
 
-/** @brief Absorbs whatever `partial` holds, zero padded to a full block, and empties it. */
+/** Absorbs whatever @c partial holds, zero padded to a full block, and empties it. */
 SZ_HELPER_INLINE void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gcm_state_t *state) {
     __m128i reverse_u8x16, subkey_u8x16, padded_u8x16, accumulator_u8x16;
     if (state->buffered == 0) return;
@@ -616,17 +624,17 @@ SZ_HELPER_INLINE void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gcm_state_t
 
 /**
  *  @brief Transforms bytes one at a time, absorbing the ciphertext side into @p accumulator_u8x16.
- *  @param state The state, whose keystream block and hash block both advance byte by byte.
- *  @param accumulator_u8x16 The running hash, byte reversed, updated in place.
- *  @param subkey_u8x16 `H^1`, byte reversed.
- *  @param reverse_u8x16 The byte reversal pattern.
- *  @param text The bytes to transform.
- *  @param length Number of bytes.
- *  @param output Receives @p length transformed bytes.
- *  @param direction Which side of the transformation the hash absorbs.
+ *  @param[inout] state The state, whose keystream block and hash block both advance byte by byte.
+ *  @param[inout] accumulator_u8x16 The running hash, byte reversed, updated in place.
+ *  @param[in] subkey_u8x16 H¹, byte reversed.
+ *  @param[in] reverse_u8x16 The byte reversal pattern.
+ *  @param[in] text The bytes to transform.
+ *  @param[in] length Number of bytes.
+ *  @param[out] output Receives @p length transformed bytes.
+ *  @param[in] direction Which side of the transformation the hash absorbs.
  *
- *  Serves the two edges of a chunk: the keystream block a previous call left half spent, and the trailing
- *  bytes of this one that do not fill a block.
+ *  Serves the two edges of a chunk: the keystream block a previous call left half spent, and the
+ *  trailing bytes of this one that do not fill a block.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_bytes_icelake_(sz_aes256_gcm_state_t *state, __m128i *accumulator_u8x16,
                                                    __m128i subkey_u8x16, __m128i reverse_u8x16, sz_u8_t const *text,
@@ -684,20 +692,22 @@ SZ_HELPER_INLINE void sz_aes256_gcm_bytes_icelake_(sz_aes256_gcm_state_t *state,
 }
 
 /**
- *  @brief Encrypts whole blocks and absorbs their ciphertext, the hash trailing the cipher by one stage.
- *  @param counters_out_u8x64 Four consecutive counter blocks, advanced past everything the call consumed.
- *  @param accumulator_u8x16 The running hash, byte reversed, updated in place.
- *  @param wide_keys_vec The fifteen round keys, each broadcast across four lanes.
- *  @param powers_high_u8x64 `H^8` through `H^5`, byte reversed, one per lane.
- *  @param powers_low_u8x64 `H^4` through `H^1`, byte reversed, one per lane.
- *  @param cipher_m8 All ones when the hash absorbs the output, zero when it absorbs the input.
- *  @param text The input blocks.
- *  @param output Receives the transformed blocks; may equal @p text.
- *  @param blocks Number of whole blocks, at least one.
+ *  @brief Encrypts whole blocks and absorbs their ciphertext, the hash trailing the cipher
+ *      by one stage.
+ *  @param[inout] counters_out_u8x64 Four consecutive counter blocks, advanced past everything
+ *      the call consumed.
+ *  @param[inout] accumulator_u8x16 The running hash, byte reversed, updated in place.
+ *  @param[in] wide_keys_vec The fifteen round keys, each broadcast across four lanes.
+ *  @param[in] powers_high_u8x64 H⁸ through H⁵, byte reversed, one per lane.
+ *  @param[in] powers_low_u8x64 H⁴ through H¹, byte reversed, one per lane.
+ *  @param[in] cipher_m8 All ones when the hash absorbs the output, zero when it absorbs the input.
+ *  @param[in] text The input blocks.
+ *  @param[out] output Receives the transformed blocks; may equal @p text.
+ *  @param[in] blocks Number of whole blocks, at least one.
  *
- *  The hash of a stage cannot begin until its ciphertext exists, so it is held one stage back and the
- *  carry-less multiplies then sit in the shadow of the next stage's substitution rounds, which occupy a
- *  different port and would otherwise stall on the reduction's latency.
+ *  The hash of a stage cannot begin until its ciphertext exists, so it is held one stage back and
+ *  the carry-less multiplies then sit in the shadow of the next stage's substitution rounds, which
+ *  occupy a different port and would otherwise stall on the reduction's latency.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_stride_icelake_(__m512i *counters_out_u8x64, __m128i *accumulator_u8x16,
                                                     sz_u512_vec_t const *wide_keys_vec, __m512i powers_high_u8x64,
@@ -783,15 +793,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_stride_icelake_(__m512i *counters_out_u8x64,
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which side of the transformation the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which side of the transformation the hash absorbs.
  *
- *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may restart at a
- *  chunk boundary, so the wide path is entered only once both stand at a block boundary and left with the same
- *  property.
+ *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may
+ *  restart at a chunk boundary, so the wide path is entered only once both stand at a block
+ *  boundary and left with the same property.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                        sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -846,8 +856,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_icelake_(sz_aes256_gcm_state_t *st
 
 /**
  *  @brief Closes the hash over whatever is still pending and masks it into the authentication tag.
- *  @param state The state, left untouched.
- *  @param tag Receives the sixteen tag bytes.
+ *  @param[in] state The state, left untouched.
+ *  @param[out] tag Receives the sixteen tag bytes.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     __m128i const reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
@@ -918,7 +928,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_icelake(sz_aes256_gcm
     return sz_aes256_tag_equal_icelake_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -951,7 +961,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_icelake(sz_aes256_gcm_key_t co
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

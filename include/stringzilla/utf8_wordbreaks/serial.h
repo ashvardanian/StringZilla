@@ -1,7 +1,8 @@
 /**
- *  @brief Serial backend for UAX-29 word boundaries.
  *  @file include/stringzilla/utf8_wordbreaks/serial.h
  *  @author Ash Vardanian
+ *  @date November 30, 2025
+ *  @brief Serial backend for UAX-29 word boundaries.
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_SERIAL_H_
 #define STRINGZILLA_UTF8_WORDBREAKS_SERIAL_H_
@@ -19,9 +20,9 @@ extern "C" {
 /**
  *  @brief Returns the UAX-29 Word_Break property (0-15) for a codepoint.
  *
- *  The oracle every SIMD Word_Break classifier is bit-exact against: arithmetic big ranges first, then a flat
- *  low-plane LUT for codepoint < 0x800, then a B=8 / SB=16 trie over the rest of the BMP, then a sorted astral
- *  range list, defaulting to Other for everything else.
+ *  The oracle every SIMD Word_Break classifier is bit-exact against: arithmetic big ranges first,
+ *  then a flat low-plane LUT for codepoint < 0x800, then a B=8 / SB=16 trie over the rest of the
+ *  BMP, then a sorted astral range list, defaulting to Other for everything else.
  */
 SZ_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_word_break_big_count_k; ++range)
@@ -48,9 +49,7 @@ SZ_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     return sz_utf8_word_break_other_k;
 }
 
-/**
- *  @brief Check if a codepoint is a "word character" (has a word-forming Word_Break property).
- */
+/** Checks if a codepoint is a "word character", having a word-forming Word_Break property. */
 SZ_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
     sz_u8_t property = sz_rune_word_break_property(rune);
     // Word characters: ALetter(8), Hebrew_Letter(9), Numeric(10), Katakana(11),
@@ -58,10 +57,8 @@ SZ_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
     return (sz_bool_t)(property >= sz_utf8_word_break_aletter_k);
 }
 
-/**
- *  @brief Check if @p rune is Extended_Pictographic (UAX-29 WB3c). Not part of the 4-bit Word_Break model, so it is
- *         resolved by binary search over the sorted Extended_Pictographic range table.
- */
+/** Check if @p rune is Extended_Pictographic (UAX-29 WB3c). Not part of the 4-bit Word_Break model,
+ *  so it is resolved by binary search over the sorted Extended_Pictographic range table. */
 SZ_API_COMPTIME sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
     int low = 0, high = (int)sz_utf8_word_break_pict_u32_count_k - 1;
     while (low <= high) {
@@ -73,7 +70,7 @@ SZ_API_COMPTIME sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
     return sz_false_k;
 }
 
-/** @brief Check if @p rune is WSegSpace (UAX-29 WB3d); resolved by range membership (six ranges). */
+/** Check if @p rune is WSegSpace (UAX-29 WB3d); resolved by range membership (six ranges). */
 SZ_API_COMPTIME sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
     for (int range = 0; range < (int)sz_utf8_word_break_wseg_u32_count_k; ++range)
         if ((sz_u32_t)rune >= sz_utf8_word_break_wseg_u32_lo_[range] &&
@@ -82,9 +79,9 @@ SZ_API_COMPTIME sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
     return sz_false_k;
 }
 
-/*  Each Word_Break property fits in 4 bits, so a 16-bit constant is a membership set: bit `p` marks property
- *  `p` as a member. Testing membership is then a shift-and-mask, replacing chains of equality comparisons in
- *  the hot WB4 skip loops. */
+/*  Each Word_Break property fits in 4 bits, so a 16-bit constant is a membership set: bit @c p
+ *  marks property @c p as a member. Testing membership is then a shift-and-mask, replacing chains
+ *  of equality comparisons in the hot WB4 skip loops. */
 enum {
     sz_utf8_word_break_ignorable_set_k = (1u << sz_utf8_word_break_extend_k) | (1u << sz_utf8_word_break_zwj_k) |
         (1u << sz_utf8_word_break_format_k),
@@ -93,54 +90,59 @@ enum {
     sz_utf8_word_break_mid_quotes_set_k = (1u << sz_utf8_word_break_mid_quotes_k),
 };
 
-/** @brief Check if a property is WB4-ignorable (Extend, Format, ZWJ). */
+/** Check if a property is WB4-ignorable (Extend, Format, ZWJ). */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_ignorable_set_k >> property) & 1u);
 }
 
-/** @brief Check if a property is AHLetter (ALetter or Hebrew_Letter). */
+/** Check if a property is AHLetter (ALetter or Hebrew_Letter). */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_aletter_or_hebrew_set_k >> property) & 1u);
 }
 
-/**
- *  @brief Check if a property is MidNumLetQ (MidNumLet or Single_Quote).
- *         In our encoding, MID_QUOTES (15) covers MidNumLet + quotes.
- */
+/** Checks if a property is MidNumLetQ (MidNumLet or Single_Quote). In this encoding,
+ *  @c sz_utf8_word_break_mid_quotes_k (15) covers MidNumLet and the quotes. */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_mid_quotes_set_k >> property) & 1u);
 }
 
 /**
- *  @brief One UAX-29 "element": a base codepoint together with the run of Extend/Format/ZWJ it absorbs (WB4).
+ *  @brief One UAX-29 "element": a base codepoint with the run of Extend/Format/ZWJ it absorbs.
  *
- *  The Word_Break rules WB5-WB16 operate on these elements, not raw codepoints: WB4 folds every Extend, Format,
- *  and ZWJ into the preceding base, EXCEPT when that base is sot, CR, LF, or a Newline (then the ignorable is
- *  "de-ignored" and starts its own element). `ends_in_zwj` records whether the element's LAST codepoint is a ZWJ,
- *  which is all WB3c (`ZWJ x Extended_Pictographic`) needs. `valid` is false for the sot/eot sentinels.
+ *  The Word_Break rules WB5-WB16 operate on these elements, not raw codepoints: WB4 folds every
+ *  Extend, Format, and ZWJ into the preceding base, except when that base is sot, CR, LF, or a
+ *  Newline (then the ignorable is "de-ignored" and starts its own element). @c ends_in_zwj records
+ *  whether the element's last codepoint is a ZWJ, which is all WB3c (`ZWJ x Extended_Pictographic`)
+ *  needs. @c valid is false for the sot/eot sentinels.
  */
 typedef struct sz_word_element_t {
+
     /** Word_Break property of the base codepoint. */
     sz_u8_t property;
+
     /** Base codepoint (disambiguates Single_Quote / Double_Quote and Extended_Pictographic). */
     sz_rune_t codepoint;
+
     /** Byte offset of the base codepoint. */
     sz_size_t start;
+
     /** The element's final codepoint is U+200D ZERO WIDTH JOINER. */
     sz_bool_t ends_in_zwj;
+
     /** False for the sot/eot sentinel. */
     sz_bool_t valid;
 } sz_word_element_t;
 
-/** @brief True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
+/** True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
 SZ_HELPER_AUTO sz_bool_t sz_word_is_newline_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_utf8_word_break_cr_k || property == sz_utf8_word_break_lf_k ||
                        property == sz_utf8_word_break_newline_k);
 }
 
-/*  The 4-bit model lumps Single_Quote (U+0027), Double_Quote (U+0022), and MidNumLet into MID_QUOTES, so the
- *  WB6/WB7/WB7a-c/WB11/WB12 distinctions are recovered from the codepoint. MidNumLetQ = MidNumLet + Single_Quote,
- *  i.e. every MID_QUOTES codepoint that is NOT the Double_Quote. */
+/*  The 4-bit model lumps Single_Quote (U+0027), Double_Quote (U+0022), and MidNumLet into
+ *  @c sz_utf8_word_break_mid_quotes_k, so the WB6/WB7/WB7a-c/WB11/WB12 distinctions are
+ *  recovered from the codepoint. MidNumLetQ = MidNumLet + Single_Quote, i.e. every such
+ *  codepoint except the Double_Quote. */
 SZ_HELPER_AUTO sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0027u);
 }
@@ -151,13 +153,15 @@ SZ_HELPER_AUTO sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t c
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint != 0x0022u);
 }
 
-/** @brief Byte offset of the codepoint start immediately before @p position (which must be > 0), using the canonical
- *         maximal-subpart partition so it agrees with the forward `sz_utf8_next_rune_` on malformed input: a run of
- *         continuation bytes is absorbed into the nearest preceding lead ONLY if that lead's sequence actually reaches
- *         @p position; otherwise the byte just before @p position is a stray continuation (its own U+FFFD). A naive
- *         continuation-skip would absorb a stray into the previous codepoint and SKIP it during the backward look-back,
- *         crossing a streamed resume point and forging a WB5/6/7 join the forward pass never sees - that asymmetry is
- *         the capacity-dependence. Treating every stray as its own non-skippable U+FFFD makes resume reproduce. */
+/** Byte offset of the codepoint start immediately before @p position (which must be > 0), using the
+ *  canonical maximal-subpart partition so it agrees with the forward @c sz_utf8_next_rune_ on
+ *  malformed input: a run of continuation bytes is absorbed into the nearest preceding lead only if
+ *  that lead's sequence actually reaches @p position; otherwise the byte just before @p position is
+ *  a stray continuation (its own U+FFFD). A naive continuation-skip would absorb a stray into the
+ *  previous codepoint and skip it during the backward look-back, crossing a streamed resume point
+ *  and forging a WB5/6/7 join the forward pass never sees - that asymmetry is the
+ *  capacity-dependence. Treating every stray as its own non-skippable U+FFFD makes a resumed call
+ *  reproduce the single pass. */
 SZ_HELPER_AUTO sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position) {
     sz_size_t lead = position - 1;
     while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
@@ -166,7 +170,8 @@ SZ_HELPER_AUTO sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t posit
     return reach == position ? lead : position - 1;
 }
 
-/** @brief The element whose final codepoint ends just before @p position (sot sentinel when @p position == 0). */
+/** The element whose final codepoint ends just before @p position, or the sot sentinel when
+ *  @p position is 0. */
 SZ_HELPER_AUTO sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
@@ -198,7 +203,7 @@ SZ_HELPER_AUTO sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_si
     return element;
 }
 
-/** @brief The element following the one whose base is at @p position (eot sentinel at end of text). */
+/** The element following the one whose base is at @p position (eot sentinel at end of text). */
 SZ_HELPER_INLINE sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
@@ -223,7 +228,8 @@ SZ_HELPER_INLINE sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size
     return element;
 }
 
-/** @brief Count of contiguous Regional_Indicator elements immediately before @p position (for WB15/WB16 parity). */
+/** Count of contiguous Regional_Indicator elements immediately before @p position (for WB15/WB16
+ *  parity). */
 SZ_HELPER_AUTO sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t position) {
     sz_size_t count = 0;
     sz_size_t cursor = position;
@@ -237,20 +243,21 @@ SZ_HELPER_AUTO sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t 
 }
 
 /**
- *  @brief Whether @p position is a UAX-29 word boundary. Direct, branch-per-rule transcription of WB1-WB16 over
- *         the WB4 element model, re-walking left context per position.
+ *  @brief Whether @p position is a UAX-29 word boundary. Direct, branch-per-rule transcription of
+ *      WB1-WB16 over the WB4 element model, re-walking left context per position.
  *
- *  Nothing in the library calls this: the segmenters run a streaming state machine instead, which carries that
- *  context forward. It is the independent second opinion the tests measure that machine against, which is what
- *  turns `sz_word_serial_boundary_`'s byte-identity claim into something checked rather than asserted.
+ *  Nothing in the library calls this: the segmenters run a streaming state machine instead, which
+ *  carries that context forward. It is the independent second opinion the tests measure that
+ *  machine against, which is what turns @c sz_word_serial_boundary_'s byte-identity claim into
+ *  something checked rather than asserted.
  */
 SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // WB1
     if (position >= length) return sz_true_k; // WB2
-    // Never split INSIDE a codepoint - but only a continuation byte genuinely covered by a preceding lead's
-    // maximal-subpart sequence is interior. A stray continuation (the lead stops short of it) is its OWN U+FFFD
-    // codepoint, so a boundary may fall before it; matching the canonical forward decode keeps streamed segmentation
-    // capacity-independent on malformed input.
+    // Never split inside a codepoint - but only a continuation byte genuinely covered by a
+    // preceding lead's maximal-subpart sequence is interior. A stray continuation (the lead stops
+    // short of it) is its own U+FFFD codepoint, so a boundary may fall before it; matching the
+    // canonical forward decode keeps streamed segmentation capacity-independent on malformed input.
     if (((sz_u8_t)text[position] & 0xC0) == 0x80) {
         sz_size_t lead = position;
         while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
@@ -280,8 +287,9 @@ SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_siz
 
     if (previous.ends_in_zwj && sz_rune_is_extended_pictographic(next_codepoint))
         return sz_false_k; // WB3c ZWJ x Extended_Pictographic
-    // WB3c/WB3d precede WB4, so they test RAW adjacency: WB3d needs the immediate predecessor codepoint (an
-    // intervening Extend, absorbed by WB4, must still force the break) rather than the folded element base.
+    // WB3c/WB3d precede WB4, so they test raw adjacency: WB3d needs the immediate predecessor
+    // codepoint (an intervening Extend, absorbed by WB4, must still force the break) rather than
+    // the folded element base.
     if (sz_rune_is_wsegspace(immediate_codepoint) && sz_rune_is_wsegspace(next_codepoint))
         return sz_false_k; // WB3d WSegSpace x WSegSpace
 
@@ -344,37 +352,47 @@ SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_siz
     return sz_true_k; // WB999
 }
 
-/**
- *  @brief Forward run-state carried across codepoints by the bulk segmenter so WB3..WB16 resolve without the
- *         per-position backward re-walks the `sz_utf8_is_word_boundary_serial` oracle performs. The oracle re-derives
- *         the WB4 effective-previous element, the element two bases back, and the Regional_Indicator run length
- *         BACKWARD on every position (the run re-count is O(n²) on long Regional_Indicator runs); here they are tracked
- *         forward. The forward WB6/WB7b/WB12 lookahead keeps reusing `sz_word_next_element_` (the same bounded forward
- *         fold the oracle uses), so only the backward rescans are removed. Fields mirror `sz_utf8_word_break_carry_t`.
- */
+/** Forward run-state carried across codepoints by the bulk segmenter so WB3..WB16 resolve without
+ *  the per-position backward re-walks the @c sz_utf8_is_word_boundary_serial oracle performs. The
+ *  oracle re-derives the WB4 effective-previous element, the element two bases back, and the
+ *  Regional_Indicator run length backward on every position (the run re-count is O(n²) on long
+ *  Regional_Indicator runs); here they are tracked forward. The forward WB6/WB7b/WB12 lookahead
+ *  keeps reusing @c sz_word_next_element_ (the same bounded forward fold the oracle uses), so only
+ *  the backward rescans are removed. Fields mirror @c sz_utf8_word_break_carry_t. */
 typedef struct sz_word_serial_state_t {
+
     /** Word_Break class of the WB4 effective-previous element's base codepoint. */
     sz_u8_t previous_property;
-    /** That base codepoint (disambiguates Single_Quote / Double_Quote and Extended_Pictographic). */
+
+    /** That base codepoint (disambiguates Single_Quote / Double_Quote and
+     *  Extended_Pictographic). */
     sz_rune_t previous_codepoint;
+
     /** Class of the element one base further back (the WB7 / WB11 / WB7c left context). */
     sz_u8_t before_property;
+
     /** That base codepoint. */
     sz_rune_t before_codepoint;
+
     /** The previous element's last codepoint is U+200D ZERO WIDTH JOINER (WB3c). */
     sz_bool_t previous_ends_in_zwj;
+
     /** Class of the raw immediately-previous codepoint (WB3 / WB3a / WB3d). */
     sz_u8_t previous_raw_property;
+
     /** That raw codepoint (WB3d WSegSpace x WSegSpace). */
     sz_rune_t previous_raw_codepoint;
+
     /** The Regional_Indicator run ending at the previous element has odd length (WB15 / WB16). */
     sz_bool_t regional_indicator_run_odd;
+
     /** A codepoint has been processed (clears the WB1 start-of-text state). */
     sz_bool_t has_previous;
 } sz_word_serial_state_t;
 
-/** @brief Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new element base,
- *         maintaining the two-back base chain, the Regional_Indicator parity, and the raw-previous fields. */
+/** Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new
+ *  element base, maintaining the two-back base chain, the Regional_Indicator parity, and
+ *  the raw-previous fields. */
 SZ_HELPER_AUTO void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
     sz_bool_t const after_newline = (sz_bool_t)(state->has_previous &&
                                                 sz_word_is_newline_(state->previous_raw_property));
@@ -396,9 +414,10 @@ SZ_HELPER_AUTO void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8
     state->has_previous = sz_true_k;
 }
 
-/** @brief Boundary decision (WB3..WB999) between @p state's previous codepoint and the @p next codepoint. The only
- *         right-context rules (WB6 / WB7b / WB12) reuse the bounded `sz_word_next_element_` forward fold; all left
- *         context comes from @p state. Byte-identical to `sz_utf8_is_word_boundary_serial`. */
+/** Boundary decision (WB3..WB999) between @p state's previous codepoint and the @p next codepoint.
+ *  The only right-context rules (WB6 / WB7b / WB12) reuse the bounded @c sz_word_next_element_
+ *  forward fold; all left context comes from @p state. Byte-identical to
+ *  @c sz_utf8_is_word_boundary_serial. */
 SZ_HELPER_AUTO sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *state, sz_u8_t next_property,
                                                   sz_rune_t next_codepoint, sz_cptr_t text, sz_size_t length,
                                                   sz_size_t position) {
@@ -474,12 +493,12 @@ SZ_HELPER_AUTO sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *
     return sz_true_k; // WB999
 }
 
-/*  Plural UAX-29 word segmentation: ONE left-to-right sweep emits every word into parallel `word_starts` /
- *  `word_lengths`, carrying the WB run-state so each codepoint is decoded once and no boundary re-walks its left
- *  context (O(n), no per-position backward rescans). Byte-identical to driving `sz_utf8_is_word_boundary_serial` per
- *  position. On a full buffer `*bytes_consumed` is the start of the first word that did not fit - always a true TR29
- *  boundary - so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder.
- */
+/*  Plural UAX-29 word segmentation: one left-to-right sweep emits every word into parallel
+ *  @c word_starts and @c word_lengths, carrying the WB run-state so each codepoint is decoded once
+ *  and no boundary re-walks its left context (O(n), no per-position backward rescans).
+ *  Byte-identical to driving @c sz_utf8_is_word_boundary_serial per position. On a full buffer
+ *  `*bytes_consumed` is the start of the first word that did not fit, always a true TR29 boundary,
+ *  so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder. */
 SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
@@ -543,12 +562,14 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
 #pragma region Portable Word_Break Codepoint Partition
 
 /**
- *  @brief  Canonical maximal-subpart codepoint partition (Unicode U+FFFD substitution, the serial reference's exact
- *          model after its malformed-UTF-8 fix). Implemented as a reachability fixpoint over the declared-length masks
- *          gated by @p claims_full; portable (intrinsic-free), shared by every backend.
+ *  @brief Canonical maximal-subpart codepoint partition, the serial reference's exact model of
+ *      Unicode U+FFFD substitution.
  *
- *  @param claims_full  Lead lanes whose full declared multi-byte sequence is well-formed; a length>=2 lead NOT in this
- *                      set collapses to a 1-byte U+FFFD.
+ *  Implemented as a reachability fixpoint over the declared-length masks gated by @p claims_full;
+ *  portable (intrinsic-free), shared by every backend.
+ *
+ *  @param[in] claims_full Lead lanes whose full declared multi-byte sequence is well-formed; a lead
+ *      of length ≥ 2 outside this set collapses to a 1-byte U+FFFD.
  */
 SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_subpart_starts_(sz_u64_t length_one, sz_u64_t length_two,
                                                            sz_u64_t length_three, sz_u64_t length_four,
@@ -569,27 +590,32 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_subpart_starts_(sz_u64_t length_one, 
     return reach & valid;
 }
 
-/** @brief  The codepoint partition of one window plus the lanes that must be reclassified to U+FFFD (Other). */
+/** The codepoint partition of one window plus the lanes that must be reclassified to U+FFFD
+ *  (Other). */
 typedef struct sz_utf8_word_break_partition_t {
+
     /** Codepoint-start lanes under the canonical maximal-subpart partition. */
     sz_u64_t start_bytes;
+
     /** Claimed continuation bytes (the interior of valid multi-byte codepoints). */
     sz_u64_t continuation;
+
     /** Lanes whose class must be forced to U+FFFD/Other: strays + short/ill-formed leads. */
     sz_u64_t forced_other;
-    /** High-nibble declared-length lead masks (two/three/four bytes), reused by the block resolver's truncation. */
+
+    /** High-nibble declared-length lead masks (two/three/four bytes), reused by the block
+     *  resolver's truncation. */
     sz_u64_t length_two;
     sz_u64_t length_three;
     sz_u64_t length_four;
 } sz_utf8_word_break_partition_t;
 
-/**
- *  @brief  Portable maximal-subpart partition resolver over precomputed `sz_u64_t` masks (the per-ISA extractor
- *          supplies @p real_continuation, the high-nibble declared-length masks, and @p bad_second_byte). A well-formed
- *          window collapses to the O(1) continuation-bit partition; only a stray continuation, a short lead, or an
- *          overlong/surrogate/range lead takes the data-dependent reachability fixpoint. @p at_end_of_text
- *          distinguishes a benign interior straddle from a true end-of-text truncation.
- */
+/** Portable maximal-subpart partition resolver over precomputed @c sz_u64_t masks (the per-ISA
+ *  extractor supplies @p real_continuation, the high-nibble declared-length masks, and
+ *  @p bad_second_byte). A well-formed window collapses to the O(1) continuation-bit partition; only
+ *  a stray continuation, a short lead, or an overlong/surrogate/range lead takes the data-dependent
+ *  reachability fixpoint. @p at_end_of_text distinguishes a benign interior straddle from a true
+ *  end-of-text truncation. */
 SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_from_masks_( //
     sz_u64_t real_continuation, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,
     sz_u64_t bad_second_byte, sz_u64_t valid, int at_end_of_text) {
@@ -635,56 +661,79 @@ SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_from_
 
 #pragma region Portable Word_Break Block Rule Engine
 
-/** @brief  Smear reach (steps): covers the widest 4-byte codepoint's continuation bytes for the WB3c/WB3d/RI
- *          adjacency smears (the letter/numeric reach uses unbounded `fill` instead). */
+/** Smear reach (steps): covers the widest 4-byte codepoint's continuation bytes for the
+ *  WB3c/WB3d/RI adjacency smears (the letter/numeric reach uses unbounded @c fill instead). */
 enum { sz_utf8_word_break_smear_steps_k = 12 };
 
-/** @brief  Bridge-shadow left-letter kind carried across the window edge for the deferred WB6/7/11/12 bridge. */
+/** Bridge-shadow left-letter kind carried across the window edge for the deferred WB6/7/11/12
+ *  bridge. */
 enum {
-    sz_utf8_word_break_bridge_none_k = 0,    /**< No open bridge shadow. */
-    sz_utf8_word_break_bridge_aletter_k = 1, /**< Letter Mid* awaiting an AHLetter (WB6/WB7). */
-    sz_utf8_word_break_bridge_numeric_k = 2, /**< Numeric Mid* awaiting a Numeric (WB11/WB12). */
-    sz_utf8_word_break_bridge_hebrew_k = 3,  /**< Hebrew " awaiting a Hebrew_Letter (WB7b/WB7c). */
+
+    /** No open bridge shadow. */
+    sz_utf8_word_break_bridge_none_k = 0,
+
+    /** Letter Mid* awaiting an AHLetter (WB6/WB7). */
+    sz_utf8_word_break_bridge_aletter_k = 1,
+
+    /** Numeric Mid* awaiting a Numeric (WB11/WB12). */
+    sz_utf8_word_break_bridge_numeric_k = 2,
+
+    /** Hebrew " awaiting a Hebrew_Letter (WB7b/WB7c). */
+    sz_utf8_word_break_bridge_hebrew_k = 3,
 };
 
-/**
- *  @brief  Cross-window left-context register carry: the effective `previous_property` at the next window's anchor,
- *          the open bridge-shadow run-state (`bridge_open` / `bridge_kind`), the open Regional_Indicator run parity
- *          (WB15/WB16), and the WB3d/WB3c raw-adjacency bits. Threaded forward so the vectorized path never re-walks
- *          a straddle, re-derives a carry, or calls the serial oracle.
- */
+/** Cross-window left-context register carry: the effective @c previous_property at the next
+ *  window's anchor, the open bridge-shadow run-state (bridge_open / @c bridge_kind), the
+ *  open Regional_Indicator run parity (WB15/WB16), and the WB3d/WB3c raw-adjacency bits.
+ *  Threaded forward so the vectorized path never re-walks a straddle, re-derives a carry, or
+ *  calls the serial oracle. */
 typedef struct sz_utf8_word_break_carry_t {
+
     /** 1 if a WB6/7/11/12 bridge shadow is open at the previous block's edge. */
     sz_u8_t bridge_open;
-    /** Which left letter opened the shadow (@ref sz_utf8_word_break_bridge_none_k ...). */
+
+    /** Which left letter opened the shadow, one of the @ref sz_utf8_word_break_bridge_none_k
+     *  family. */
     sz_u8_t bridge_kind;
-    /** Word_Break class of the consumed, still-unresolved Mid* (the left context if the bridge fails). */
+
+    /** Word_Break class of the consumed, still-unresolved Mid* (the left context if the bridge
+     *  fails). */
     sz_u8_t bridge_mid_class;
+
     /** 0 when WB7a (Hebrew_Letter x Single_Quote) forbids the deferred break at the mid. */
     sz_u8_t bridge_unprotected;
-    /** Effective `previous_property` at the next window's first emitted lane. */
+
+    /** Effective @c previous_property at the next window's first emitted lane. */
     sz_u8_t left_property;
+
     /** 0 only at the very start of the text (WB1 sot). */
     sz_u8_t have_prev;
+
     /** Parity of the contiguous Regional_Indicator run open at that lane (0 or 1). */
     sz_u8_t ri_parity;
+
     /** The codepoint immediately below lane 0 is a WSegSpace (WB3d across the edge). */
     sz_u8_t prev_is_wseg;
-    /** The previous element's LAST codepoint is a bare ZWJ (WB3c across the edge). */
+
+    /** The previous element's last codepoint is a bare ZWJ (WB3c across the edge). */
     sz_u8_t prev_ends_in_zwj;
 } sz_utf8_word_break_carry_t;
 
-/** @brief  One classified block resolved into per-lane boundary bits plus the byte the driver advances to. */
+/** One classified block resolved into per-lane boundary bits plus the byte the driver advances
+ *  to. */
 typedef struct sz_utf8_word_break_window_t {
-    /** Bit `i` set => a UAX-29 word boundary begins at codepoint-lead lane `i`. */
+
+    /** Bit @c i set => a UAX-29 word boundary begins at codepoint-lead lane @c i. */
     sz_u64_t breaks;
+
     /** Exclusive upper bound, in bytes, on lanes whose break bit is fully trusted. */
     sz_size_t resolved;
+
     /** 1 when a carried bridge failed: the driver emits one boundary at its anchored mid byte. */
     sz_u8_t deferred_break;
 } sz_utf8_word_break_window_t;
 
-/** @brief  Start-of-text carry: no previous element, all runs closed. */
+/** Start-of-text carry: no previous element, all runs closed. */
 SZ_HELPER_AUTO sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
     sz_utf8_word_break_carry_t carry;
     carry.bridge_open = 0;
@@ -699,13 +748,12 @@ SZ_HELPER_AUTO sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
     return carry;
 }
 
-/**
- *  @brief  WB15/WB16 join mask: within every maximal Regional_Indicator run, suppress the boundary before each RI
- *          whose index (counting from the run start, plus the inbound run parity) is odd. The per-lane parity is a
- *          segmented exclusive prefix-XOR of @p ri over its own runs, seeded by @p inbound_parity at the lowest
- *          lane, computed in log-depth Kogge-Stone doubling (no per-lane loop). @p ri lanes are RI codepoint
- *          starts; ignorables/continuations between two RIs are part of the same run via @p run_gate.
- */
+/** WB15/WB16 join mask: within every maximal Regional_Indicator run, suppress the boundary before
+ *  each RI whose index (counting from the run start, plus the inbound run parity) is odd. The
+ *  per-lane parity is a segmented exclusive prefix-XOR of @p ri over its own runs, seeded by
+ *  @p inbound_parity at the lowest lane, computed in log-depth Kogge-Stone doubling (no per-lane
+ *  loop). @p ri lanes are RI codepoint starts; ignorables/continuations between two RIs are part of
+ *  the same run via @p run_gate. */
 SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_ri_join_( //
     sz_u64_t ri, sz_u64_t run_gate, sz_u8_t inbound_parity, sz_u64_t *inclusive_parity_out) {
     sz_u64_t bits = ri;
@@ -719,46 +767,91 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_ri_join_( //
     return ri & (bits ^ ri);
 }
 
-/** @brief  Per-lane class membership of one decoded 64-byte window, precomputed by a per-ISA extractor so the portable
- *          rule engine sources every mask from `sz_u64_t` words without touching the codepoint vectors. Every class
- *          mask is raw (NOT yet `& start_bytes`); the truncated-edge U+FFFD reclassify has ALREADY been applied by the
- *          builder, so the masks (and @ref classes_byte) reflect post-truncation classes. The WB3c (Extended_Pictographic),
- *          WB3d (WSegSpace), and Single_Quote / Double_Quote distinctions live outside the 4-bit class model and arrive
- *          as their own raw-membership masks. */
+/** Per-lane class membership of one decoded 64-byte window, precomputed by a per-ISA extractor so
+ *  the portable rule engine sources every mask from @c sz_u64_t words without touching the
+ *  codepoint vectors. Every class mask is raw (not yet `& start_bytes`); the truncated-edge U+FFFD
+ *  reclassify has already been applied by the builder, so the masks (and @ref classes_byte) reflect
+ *  post-truncation classes. The WB3c (Extended_Pictographic), WB3d (WSegSpace), and Single_Quote /
+ *  Double_Quote distinctions live outside the 4-bit class model and arrive as their own
+ *  raw-membership masks. */
 typedef struct sz_utf8_word_break_frame_t {
-    sz_u64_t class_aletter;      /**< ALetter lanes (NOT including Hebrew_Letter). */
-    sz_u64_t class_hebrew;       /**< Hebrew_Letter lanes. */
-    sz_u64_t class_numeric;      /**< Numeric lanes. */
-    sz_u64_t class_katakana;     /**< Katakana lanes. */
-    sz_u64_t class_extendnumlet; /**< ExtendNumLet lanes. */
-    sz_u64_t class_extend;       /**< Extend lanes. */
-    sz_u64_t class_zwj;          /**< ZWJ lanes. */
-    sz_u64_t class_format;       /**< Format lanes. */
-    sz_u64_t class_midletter;    /**< MidLetter lanes. */
-    sz_u64_t class_midnum;       /**< MidNum lanes. */
-    sz_u64_t class_mid_quotes;   /**< MidNumLet/Quotes lanes (covers MidNumLet + ' + "). */
-    sz_u64_t class_cr;           /**< CR lanes. */
-    sz_u64_t class_lf;           /**< LF lanes. */
-    sz_u64_t class_newline;      /**< Newline lanes. */
-    sz_u64_t class_regional;     /**< Regional_Indicator lanes. */
-    sz_u64_t non_ascii_lanes;    /**< Bytes with the high bit set (within `loaded`). */
-    sz_u64_t wseg;               /**< WSegSpace raw membership (NOT yet `& start_bytes & ~truncated`). */
-    sz_u64_t double_quote_byte;  /**< Raw window byte == U+0022 (within `loaded`). */
-    sz_u64_t single_quote_byte;  /**< Raw window byte == U+0027 (within `loaded`). */
-    sz_u64_t pictographic;       /**< Extended_Pictographic raw membership (NOT yet `& start_bytes & ~truncated`). */
-    sz_u8_t classes_byte[64];    /**< Post-truncation Word_Break class byte per lane (for the carry edge reads). */
+
+    /** ALetter lanes, not including Hebrew_Letter. */
+    sz_u64_t class_aletter;
+
+    /** Hebrew_Letter lanes. */
+    sz_u64_t class_hebrew;
+
+    /** Numeric lanes. */
+    sz_u64_t class_numeric;
+
+    /** Katakana lanes. */
+    sz_u64_t class_katakana;
+
+    /** ExtendNumLet lanes. */
+    sz_u64_t class_extendnumlet;
+
+    /** Extend lanes. */
+    sz_u64_t class_extend;
+
+    /** ZWJ lanes. */
+    sz_u64_t class_zwj;
+
+    /** Format lanes. */
+    sz_u64_t class_format;
+
+    /** MidLetter lanes. */
+    sz_u64_t class_midletter;
+
+    /** MidNum lanes. */
+    sz_u64_t class_midnum;
+
+    /** MidNumLet/Quotes lanes (covers MidNumLet + ' + "). */
+    sz_u64_t class_mid_quotes;
+
+    /** CR lanes. */
+    sz_u64_t class_cr;
+
+    /** LF lanes. */
+    sz_u64_t class_lf;
+
+    /** Newline lanes. */
+    sz_u64_t class_newline;
+
+    /** Regional_Indicator lanes. */
+    sz_u64_t class_regional;
+
+    /** Bytes with the high bit set (within @c loaded). */
+    sz_u64_t non_ascii_lanes;
+
+    /** WSegSpace raw membership, not yet masked by `& start_bytes & ~truncated`. */
+    sz_u64_t wseg;
+
+    /** Raw window byte == U+0022 (within @c loaded). */
+    sz_u64_t double_quote_byte;
+
+    /** Raw window byte == U+0027 (within @c loaded). */
+    sz_u64_t single_quote_byte;
+
+    /** Extended_Pictographic raw membership, not yet masked by `& start_bytes & ~truncated`. */
+    sz_u64_t pictographic;
+
+    /** Post-truncation Word_Break class byte per lane (for the carry edge reads). */
+    sz_u8_t classes_byte[64];
 } sz_utf8_word_break_frame_t;
 
 /**
- *  @brief  Portable byte-level UAX-29 rule engine: decide a block of @p loaded classified bytes (per-lane masks in
- *          @p frame, the open bridge shadow / RI parity / left context arriving in @p carry) into per-lane word-break
- *          bits, mirroring the serial WB1-WB16 over the WB4 element model. Every WB3-WB16 rule is pure `sz_u64_t` bit
- *          algebra over the precomputed lane masks; the cross-window left context arrives as register-carry seeds at
- *          lane 0, so nothing is scalar re-walked.
+ *  @brief Portable byte-level UAX-29 rule engine: decide a block of @p loaded classified bytes
+ *      (per-lane masks in @p frame, the open bridge shadow / RI parity / left context arriving in
+ *      @p carry) into per-lane word-break bits, mirroring the serial WB1-WB16 over the WB4
+ *      element model. Every WB3-WB16 rule is pure @c sz_u64_t bit algebra over the precomputed
+ *      lane masks; the cross-window left context arrives as register-carry seeds at lane 0, so
+ *      nothing is scalar re-walked.
  *
- *  The bridge's right context is unbounded; the in-window `bridge` is exact unless an open shadow reaches the block
- *  edge undecided, in which case `resolved` is clamped before that lane so the next, fully-contextual window
- *  re-resolves it. @p carry is updated from the trailing run-state read at the block edge by plain shifts.
+ *  The bridge's right context is unbounded; the in-window @c bridge is exact unless an open shadow
+ *  reaches the block edge undecided, in which case @c resolved is clamped before that lane so the
+ *  next, fully-contextual window re-resolves it. @p carry is updated from the trailing run-state
+ *  read at the block edge by plain shifts.
  */
 SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( //
     sz_utf8_word_break_frame_t const *frame, sz_u64_t start_bytes_all, sz_u64_t continuation_all, sz_u64_t forced_other,
@@ -847,8 +940,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
     sz_u64_t const seed_numeric_pre = sz_u64_or_if_(0ull, edge_region, left_is_numeric);
     sz_u64_t const seed_hebrew_pre = sz_u64_or_if_(0ull, edge_region, left_is_hebrew);
 
-    // WB6/WB7 and WB11/WB12: a Mid* lane between two letters (or numerics) bridges the run. MidNumLetQ excludes
-    // Double_Quote, which bridges ONLY Hebrew x " x Hebrew (WB7b/WB7c) through a Hebrew-only bridge.
+    // WB6/WB7 and WB11/WB12: a Mid* lane between two letters (or numerics) bridges the run.
+    // MidNumLetQ excludes Double_Quote, which bridges only Hebrew x " x Hebrew (WB7b/WB7c) through
+    // a Hebrew-only bridge.
     sz_u64_t const double_quote = mid_quotes & frame->double_quote_byte;
     sz_u64_t const mid_letter_quotes_no_double = mid_letter_or_quotes & ~double_quote;
     sz_u64_t const mid_num_quotes_no_double = mid_num_or_quotes & ~double_quote;
@@ -880,8 +974,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
     sz_u64_t const katakana_left = sz_u64_fill_left_(class_katakana, flow);
     sz_u64_t const extendnumlet_left = sz_u64_fill_left_(class_extendnumlet, flow);
 
-    // WB3/WB3a/WB3b/WB3c: Newline (CR/LF/Newline) forces a break on both sides except CR x LF; ZWJ x suppresses the
-    // break after a ZWJ. Multi-byte newlines smear across their OWN continuation bytes (NOT the wider `flow`).
+    // WB3/WB3a/WB3b/WB3c: Newline (CR/LF/Newline) forces a break on both sides except CR x LF; ZWJ
+    // x suppresses the break after a ZWJ. Multi-byte newlines smear across their own continuation
+    // bytes (not the wider `flow`).
     sz_u64_t previous_newline = (sz_u64_smear_right_(class_newline, continuation, sz_utf8_word_break_smear_steps_k)
                                  << 1);
     sz_u64_t previous_cr = (sz_u64_smear_right_(class_cr, continuation, sz_utf8_word_break_smear_steps_k) << 1);
@@ -928,7 +1023,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
         join |= previous_zwj & pictographic; // WB3c
     }
 
-    // WB3d: WSegSpace x WSegSpace, raw adjacency over the space's OWN continuation bytes only.
+    // WB3d: WSegSpace x WSegSpace, raw adjacency over the space's own continuation bytes only.
     sz_u64_t const previous_wseg = (sz_u64_smear_right_(wseg, continuation, sz_utf8_word_break_smear_steps_k) << 1) |
                                    sz_u64_or_if_(0ull, 1ull, carry->prev_is_wseg != 0);
     join |= previous_wseg & wseg;
@@ -1039,7 +1134,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
 
 #pragma endregion Portable Word_Break Block Rule Engine
 
-#pragma endregion // UAX 29 Word Boundaries
+#pragma endregion UAX 29 Word Boundaries
 
 #ifdef __cplusplus
 }

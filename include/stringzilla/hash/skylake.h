@@ -1,7 +1,9 @@
 /**
- *  @brief Skylake (AVX-512) backend for string hashing and checksums.
  *  @file include/stringzilla/hash/skylake.h
  *  @author Ash Vardanian
+ *  @date December 1, 2024
+ *  @brief Skylake (AVX-512) backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_SKYLAKE_H_
@@ -257,42 +259,42 @@ SZ_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_
     sz_fill_random_westmere(text, length, nonce);
 }
 
-/*  `vpternlogd` collapses each bitwise primitive of SHA256 to a single instruction: `choice` is the select
- *  truth table, `majority` is the majority truth table, and the three-way exclusive or that both sigma
- *  families need is the parity truth table. */
+/*  @c vpternlogd collapses each bitwise primitive of SHA256 to a single instruction: @c choice is
+ *  the select truth table, @c majority is the majority truth table, and the three-way exclusive or
+ *  that both sigma families need is the parity truth table. */
 
-/** @brief Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 16 lanes. */
+/** Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16,
                                                    __m512i state_g_u32x16) {
     return _mm512_ternarylogic_epi32(state_e_u32x16, state_f_u32x16, state_g_u32x16, 0xCA);
 }
 
-/** @brief Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 16 lanes. */
+/** Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16,
                                                      __m512i state_c_u32x16) {
     return _mm512_ternarylogic_epi32(state_a_u32x16, state_b_u32x16, state_c_u32x16, 0xE8);
 }
 
-/** @brief Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 16 lanes. */
+/** Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_big_sigma0_skylake_(__m512i state_a_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_a_u32x16, 2), _mm512_ror_epi32(state_a_u32x16, 13),
                                      _mm512_ror_epi32(state_a_u32x16, 22), 0x96);
 }
 
-/** @brief Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 16 lanes. */
+/** Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_e_u32x16, 6), _mm512_ror_epi32(state_e_u32x16, 11),
                                      _mm512_ror_epi32(state_e_u32x16, 25), 0x96);
 }
 
-/** @brief Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 16 lanes. */
+/** Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 7),
                                      _mm512_ror_epi32(message_word_u32x16, 18),
                                      _mm512_srli_epi32(message_word_u32x16, 3), 0x96);
 }
 
-/** @brief Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 16 lanes. */
+/** Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 16 lanes. */
 SZ_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 17),
                                      _mm512_ror_epi32(message_word_u32x16, 19),
@@ -301,16 +303,17 @@ SZ_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u3
 
 /**
  *  @brief Exchanges eight 16-lane registers with sixteen 8-word lanes, in either direction.
- *  @param words Eight registers, rewritten in place.
+ *  @param[inout] words Eight registers, rewritten in place.
  *
- *  Going in, register `pair_index` holds lane `pair_index` in its low half and lane `pair_index + 8` in its
- *  high half; coming out, register `word_index` holds that word from all 16 lanes. The butterfly is its own
- *  inverse, so the same sequence serves the gather and the scatter and there is only one thing to get right.
+ *  Going in, register @c pair_index holds that lane in its low half and lane `pair_index + 8` in
+ *  its high half; coming out, register @c word_index holds that word from all 16 lanes. The
+ *  butterfly is its own inverse, so the same sequence serves the gather and the scatter and there
+ *  is only one thing to get right.
  *
- *  Built from `vpunpck` and `vpermt2d` rather than `vpgatherdd` and `vpscatterdd`: a 512-bit scatter is 36
- *  uops on Ice Lake and Sapphire Rapids, the shuffle form measures level with it there, and no cost model
- *  available for AMD parts describes their gather and scatter at all - so the form built from ordinary
- *  shuffles is the one whose cost is knowable everywhere.
+ *  Built from @c vpunpck and @c vpermt2d rather than @c vpgatherdd and @c vpscatterdd: a 512-bit
+ *  scatter is 36 uops on Ice Lake and Sapphire Rapids, the shuffle form measures level with it
+ *  there, and no cost model available for AMD parts describes their gather and scatter at all - so
+ *  the form built from ordinary shuffles is the one whose cost is knowable everywhere.
  */
 SZ_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8]) {
     __m512i const low_halves_u32x16 = _mm512_setr_epi32(0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27);
@@ -348,18 +351,19 @@ SZ_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8])
 
 /**
  *  @brief Transposes one 64-byte block from each of 16 lanes into word-major big-endian order.
- *  @param lane_blocks Pointers to 16 message blocks, one per lane.
- *  @param schedule Loaded with the 16 blocks and rewritten in place, so `schedule[word_index]` leaves
- *                  holding that word from all 16 lanes.
+ *  @param[in] lane_blocks Pointers to 16 message blocks, one per lane.
+ *  @param[inout] schedule Loaded with the 16 blocks and rewritten in place, so
+ *      `schedule[word_index]` leaves holding that word from all 16 lanes.
  *
- *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit sub-lane, two sub-lane
- *  exchange stages then move whole quarters across the register. The big-endian byte swap folds into the
- *  initial load, so it costs nothing beyond the shuffle that would happen anyway.
+ *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit sub-lane, two
+ *  sub-lane exchange stages then move whole quarters across the register. The big-endian byte swap
+ *  folds into the initial load, so it costs nothing beyond the shuffle that would happen anyway.
  *
- *  Every stage pairs off disjoint registers and rewrites exactly the two it read, so the window is its own
- *  staging area and no stage needs a second array - the same shape the 8x16 butterfly already has. Written
- *  with intermediate buffers instead, the four live arrays push this kernel's frame past 4 KB, and MSVC then
- *  reaches for the CRT's `__chkstk` to probe it, which the `SZ_AVOID_LIBC` build has no way to resolve.
+ *  Every stage pairs off disjoint registers and rewrites exactly the two it read, so the window is
+ *  its own staging area and no stage needs a second array - the same shape the 8x16 butterfly
+ *  already has. Written with intermediate buffers instead, the four live arrays push this kernel's
+ *  frame past 4 KB, and MSVC then reaches for the CRT's @c __chkstk to probe it, which the
+ *  @c SZ_AVOID_LIBC build has no way to resolve.
  */
 SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks,
                                                          __m512i schedule_u32x16[16]) {
@@ -408,10 +412,10 @@ SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *l
 
 /**
  *  @brief Extends the rolling message window by one word across 16 lanes.
- *  @param oldest_word_u32x16 The word being replaced, sixteen rounds behind.
- *  @param next_word_u32x16 The word one position ahead, feeding the low sigma.
- *  @param ninth_word_u32x16 The word nine positions ahead.
- *  @param fourteenth_word_u32x16 The word fourteen positions ahead, feeding the high sigma.
+ *  @param[in] oldest_word_u32x16 The word being replaced, sixteen rounds behind.
+ *  @param[in] next_word_u32x16 The word one position ahead, feeding the low sigma.
+ *  @param[in] ninth_word_u32x16 The word nine positions ahead.
+ *  @param[in] fourteenth_word_u32x16 The word fourteen positions ahead, feeding the high sigma.
  */
 SZ_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, __m512i next_word_u32x16,
                                                    __m512i ninth_word_u32x16, __m512i fourteenth_word_u32x16) {
@@ -423,10 +427,10 @@ SZ_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, _
 /**
  *  @brief Applies one SHA256 round to 16 lanes, writing the two working values that change.
  *
- *  The eight working variables rotate by one position per round, which the callers express by passing the
- *  same locals in a different order rather than by moving data. Only `state_d` and `state_h` are written:
- *  `state_d` becomes the next round's `state_e`, and `state_h` is dead on entry so it receives the next
- *  round's `state_a`.
+ *  The eight working variables rotate by one position per round, which the callers express by
+ *  passing the same locals in a different order rather than by moving data. Only @c state_d and
+ *  @c state_h are written: @c state_d becomes the next round's @c state_e, and @c state_h is dead
+ *  on entry so it receives the next round's @c state_a.
  */
 SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                                      //
     __m512i state_a_u32x16, __m512i state_b_u32x16, __m512i state_c_u32x16, __m512i *state_d_u32x16, //
@@ -445,30 +449,34 @@ SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                 
 }
 
 /**
- *  @brief Transposes and compresses one 64-byte block for each of 16 lanes into word-major hash registers.
- *  @param hashes Eight registers of word-major hash state, updated in place.
- *  @param lane_blocks Pointers to 16 message blocks, one per lane.
- *  @param active_m16 Lanes whose block counts; the rest keep their hash bit-for-bit.
+ *  @brief Transposes and compresses one 64-byte block for each of 16 lanes into
+ *      word-major hash registers.
+ *  @param[inout] hashes Eight registers of word-major hash state, updated in place.
+ *  @param[in] lane_blocks Pointers to 16 message blocks, one per lane.
+ *  @param[in] active_m16 Lanes whose block counts; the rest keep their hash bit-for-bit.
  *
- *  Masking rides on the closing accumulation rather than on a saved copy and a blend. Compression ends in
- *  `hash += working`, so withholding that one add per word is all a lane needs to sit out, which costs no
- *  extra register at a point where eight state and sixteen schedule registers are already live. The rounds
- *  still run for an inactive lane and produce a value nobody reads, so its block pointer only has to be
- *  readable - `sz_sha256_state_t::block` is always 64 valid bytes and serves that purpose.
+ *  Masking rides on the closing accumulation rather than on a saved copy and a blend. Compression
+ *  ends in `hash += working`, so withholding that one add per word is all a lane needs to sit out,
+ *  which costs no extra register at a point where eight state and sixteen schedule registers are
+ *  already live. The rounds still run for an inactive lane and produce a value nobody reads, so its
+ *  block pointer only has to be readable - @c sz_sha256_state_t::block is always 64 valid bytes and
+ *  serves that purpose.
  *
- *  The message window is a local rather than a parameter on purpose: crossing a function boundary forces the
- *  compiler to treat it as memory that may alias, which spills the whole window and the round constants to
- *  the stack. Fused like this it stays in registers.
+ *  The message window is a local rather than a parameter on purpose: crossing a function boundary
+ *  forces the compiler to treat it as memory that may alias, which spills the whole window and the
+ *  round constants to the stack. Fused like this it stays in registers.
  *
- *  Written as one straight-line turn of sixteen rounds, then three more turns of the same shape with the
- *  window extension folded in. Sixteen rounds return the eight working variables to their original names and
- *  advance the window exactly one full turn, so every index below is a compile-time constant.
+ *  Written as one straight-line turn of sixteen rounds, then three more turns of the same
+ *  shape with the window extension folded in. Sixteen rounds return the eight working
+ *  variables to their original names and advance the window exactly one full turn, so every
+ *  index below is a compile-time constant.
  *
- *  Out-of-line rather than fused into its callers, for the same 4 KB frame budget the transpose above keeps.
- *  The digest and update kernels each call this twice, and each already hold a 1 KB staging window and 512
- *  bytes of hash state; forced inline, MSVC gives every call site its own copy of the schedule below and the
- *  frame reaches 4640 bytes, past the page that makes it reach for the CRT's `__chkstk`. One turn of sixteen
- *  rounds is far too much work for a call to show up against, and the window stays local either way.
+ *  Out-of-line rather than fused into its callers, for the same 4 KB frame budget the transpose
+ *  above keeps. The digest and update kernels each call this twice, and each already hold a 1 KB
+ *  staging window and 512 bytes of hash state; forced inline, MSVC gives every call site its own
+ *  copy of the schedule below and the frame reaches 4640 bytes, past the page that makes it reach
+ *  for the CRT's @c __chkstk. One turn of sixteen rounds is far too much work for a call to show up
+ *  against, and the window stays local either way.
  */
 SZ_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
                                                     __mmask16 active_m16) {
@@ -609,22 +617,28 @@ SZ_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz
 }
 
 /**
- *  @brief Compresses each lane's own run of whole blocks, plus an optional buffered block ahead of them.
- *  @param states The lane states, whose hash words are gathered on entry and scattered on exit.
- *  @param active_lanes_count Lanes owning a state, 1 to 16; the rest borrow lane zero and are discarded.
- *  @param buffered_bitmask Lanes whose `block` the caller has just filled to 64 bytes, compressed first.
- *  @param cursors Per-lane read positions, advanced past every block consumed.
- *  @param blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs as far as the largest.
+ *  @brief Compresses each lane's own run of whole blocks, plus an optional buffered block
+ *      ahead of them.
+ *  @param[inout] states The lane states, whose hash words are gathered on entry and
+ *      scattered on exit.
+ *  @param[in] active_lanes_count Lanes owning a state, 1 to 16; the rest borrow lane zero
+ *      and are discarded.
+ *  @param[in] buffered_bitmask Lanes whose @c block the caller has just filled to 64
+ *      bytes, compressed first.
+ *  @param[inout] cursors Per-lane read positions, advanced past every block consumed.
+ *  @param[in] blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs as far
+ *      as the largest.
  *
- *  Lanes retire independently. `blocks_per_lane` rides in a register as a countdown, and two masks come off
- *  it each turn: `counts > 0` says whose accumulation lands, `counts > 1` says whose cursor steps. Splitting
- *  the two is what parks a retiring lane on its @b last full block instead of on a short tail, so every read
- *  stays in bounds with no per-block pointer select. A lane owning no blocks at all reads its own `block`
- *  buffer, which is always 64 valid bytes.
+ *  Lanes retire independently. @p blocks_per_lane rides in a register as a countdown, and two masks
+ *  come off it each turn: `counts > 0` says whose accumulation lands, `counts > 1` says whose
+ *  cursor steps. Splitting the two is what parks a retiring lane on its @b last full block instead
+ *  of on a short tail, so every read stays in bounds with no per-block pointer select. A lane
+ *  owning no blocks at all reads its own @c block buffer, which is always 64 valid bytes.
  *
- *  Kept apart from the lane bookkeeping so the block loop gets the whole register file to itself. The hash
- *  words move by real gather and scatter rather than by 128 scalar loads through a stack union, whose
- *  store-to-load forwarding was the largest fixed cost of a call and the one short messages cannot amortize.
+ *  Kept apart from the lane bookkeeping so the block loop gets the whole register file to itself.
+ *  The hash words move by real gather and scatter rather than by 128 scalar loads through a stack
+ *  union, whose store-to-load forwarding was the largest fixed cost of a call and the one short
+ *  messages cannot amortize.
  */
 SZ_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
                                                            sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
@@ -744,13 +758,14 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
 
 /**
  *  @brief Finalizes 16 already-gathered lanes into their digests.
- *  @param states The 16 lane states, left untouched.
- *  @param active_lanes_count Lanes to emit, 1 to 16; the rest ride along and are discarded.
- *  @param digests Receives `active_lanes_count` 32-byte big-endian digests.
+ *  @param[in] states The 16 lane states, left untouched.
+ *  @param[in] active_lanes_count Lanes to emit, 1 to 16; the rest ride along and are discarded.
+ *  @param[out] digests Receives @p active_lanes_count 32-byte big-endian digests.
  *
- *  Padding is per lane but compression is not. Both candidate blocks are built for every lane, and a k-mask
- *  decides which lanes actually consumed the carrier block, so a lane that needed only one block keeps its
- *  state bit-for-bit. Inactive lanes borrow lane zero's hash so the gather stays in bounds.
+ *  Padding is per lane but compression is not. Both candidate blocks are built for every lane, and
+ *  a k-mask decides which lanes actually consumed the carrier block, so a lane that needed only
+ *  one block keeps its state bit-for-bit. Inactive lanes borrow lane zero's hash so the gather
+ *  stays in bounds.
  */
 SZ_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
                                                                  sz_size_t active_lanes_count, sz_u8_t *digests) {

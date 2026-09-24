@@ -15,6 +15,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/utf8_codepoints.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/utf8_codepoints.py -q
+
+File: test/utf8_codepoints.py
+Author: Ash Vardanian
+Date: November 24, 2025
 """
 
 from random import Random

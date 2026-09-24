@@ -4,6 +4,10 @@ Shared Unicode data loading utilities for StringZilla tests and notebooks.
 This module provides functions to download and cache Unicode data files
 (UCD XML, CaseFolding.txt, DerivedNormalizationProps.txt) for use in
 tests and exploration notebooks.
+
+File: test/sz_helpers.py
+Author: Ash Vardanian
+Date: June 18, 2023
 """
 
 import os
@@ -17,8 +21,8 @@ from random import choice, randint, seed
 from string import ascii_lowercase
 from typing import Dict, List, Optional
 
-# NumPy is available on most platforms and is required for many tests. PyPy on some platforms raises a weird
-# error that is not an `ImportError`, so the naked `except` is a necessary evil mirrored from the old monolith.
+# NumPy is available on most platforms and is required for many tests. PyPy on some platforms raises
+# a weird error that is not an `ImportError`, so the naked `except` is a necessary evil.
 try:
     import numpy as np
 
@@ -79,8 +83,8 @@ def _parsed_or_raise(entries, cache_path: str, description: str):
     return entries
 
 
-# Unicode version used for all Unicode data files
 UNICODE_VERSION = "17.0.0"
+"""Unicode version used for all Unicode data files."""
 
 
 def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
@@ -1149,9 +1153,10 @@ def baseline_line_boundaries(text: str, properties: Dict[int, str] = None) -> Li
 
 # region Hardening extractors
 
-# Extractors that derive hard synthetic corner cases and authoritative oracles directly from the UCD, rather
-# than from a hand-picked palette: the official NormalizationTest.txt, emoji-data Extended_Pictographic, the
-# canonical combining classes and decomposition mappings, and a per-break-class representative inverter.
+# Extractors that derive hard synthetic corner cases and authoritative oracles directly from the
+# UCD, rather than from a hand-picked palette: the official NormalizationTest.txt, emoji-data
+# Extended_Pictographic, the canonical combining classes and decomposition mappings, and a
+# per-break-class representative inverter.
 
 
 def _download_ucd_text(filename: str, subdir: str, version: str = UNICODE_VERSION) -> str:
@@ -1298,16 +1303,16 @@ def representatives_by_class(
 
 # region General test scaffolding
 
-# General fixtures and seeded-RNG helpers shared by every per-family test module (the Python analog of the
-# C++ `test/stringzilla.hpp` harness). Kept here so a split test file imports one place for both the Unicode
-# data loaders above and the seeding / random-string utilities below. The NumPy / PyArrow availability flags
-# and their defensive imports live in the top import block.
+# General fixtures and seeded-RNG helpers shared by every per-family test module, the Python analog
+# of the C++ `test/stringzilla.hpp` harness. Kept here so a split test file imports one place for
+# both the Unicode data loaders above and the seeding / random-string utilities below. The NumPy /
+# PyArrow availability flags and their defensive imports live in the top import block.
 
-# A random seed generated once at import time for this test run, logged by the `log_test_environment` fixture.
-# `SystemRandom` gives true randomness independent of the seeded RNG state.
 _random_seed_for_run = int.from_bytes(os.urandom(4), "little")
+"""A random seed generated once at import time for this test run, logged by the
+`log_test_environment` fixture. `SystemRandom` gives true randomness independent of the seeded RNG
+state."""
 
-# Reproducible test seeds for consistent CI runs.
 SEED_VALUES = [
     42,  # Classic test seed
     0,  # Edge case: zero seed
@@ -1315,9 +1320,10 @@ SEED_VALUES = [
     314159,  # Pi digits
     _random_seed_for_run,  # Random seed for this run (logged at startup)
 ]
+"""Reproducible test seeds for consistent CI runs."""
 
-# Override SEED_VALUES with an environment variable if set (for reproducible CI fuzzing).
 _env_seed = os.environ.get("SZ_TESTS_SEED")
+"""Overrides SEED_VALUES when set, for reproducible CI fuzzing."""
 if _env_seed:
     try:
         _parsed_seed = int(_env_seed)
@@ -1382,8 +1388,9 @@ def is_equal_strings(native_strings, big_strings):
 
 DEGENERATE_HAYSTACKS = ["", "a", "hello world"]
 DEGENERATE_BOUNDS = [-16, -6, -5, -1, 0, 1, 2, 5, 6, 10, 11, 12, 16, 99]
-# `utf8_uncased_search` counts negative offsets from 0, not from the end, so its bounds are non-negative.
 UNCASED_DEGENERATE_BOUNDS = [0, 1, 3, 4, 5, 6, 7, 8, 11, 99]
+"""`utf8_uncased_search` counts negative offsets from 0, not from the end, so its bounds are
+non-negative."""
 
 
 # endregion General test scaffolding
@@ -1391,10 +1398,11 @@ UNCASED_DEGENERATE_BOUNDS = [0, 1, 3, 4, 5, 6, 7, 8, 11, 99]
 
 # region Backend differential sweep
 #
-# StringZilla picks a SIMD backend at runtime via a dispatch table. `reset_capabilities([...])` re-points
-# that table, so running the same input under `["serial"]` and under `["serial", "neon"]` exercises
-# different kernel code through one binding, so any divergence is a kernel bug, not a binding bug. The
-# helpers below drive that comparison over inputs engineered to stress the SIMD tail/boundary logic.
+# StringZilla picks a SIMD backend at runtime via a dispatch table. `reset_capabilities([...])`
+# re-points that table, so running the same input under `["serial"]` and under `["serial", "neon"]`
+# exercises different kernel code through one binding, and any divergence is a kernel bug, not a
+# binding bug. The helpers below drive that comparison over inputs engineered to stress the SIMD
+# tail/boundary logic.
 
 
 def capability_sweep():
@@ -1461,8 +1469,6 @@ def assert_backends_agree(results, *, oracle=None, format_inputs=None):
         assert baseline == oracle, f"kernels agree but disagree with the oracle{context}: {baseline!r} != {oracle!r}"
 
 
-# Lengths bracketing the 16/32/64-byte SIMD register widths (and a few larger tiers). Tail handling and
-# vector-boundary logic in the kernels is most likely to diverge from serial exactly at these sizes.
 VECTOR_WIDTH_LENGTHS = (
     [0, 1, 2, 3]  # Degenerate and sub-word inputs
     + [7, 8, 9]  # 64-bit SWAR
@@ -1472,6 +1478,8 @@ VECTOR_WIDTH_LENGTHS = (
     + [127, 128, 129, 255, 256, 257]  # Several whole windows
     + [1024, 4096]  # Bulk, where the tail is a small fraction
 )
+"""Lengths bracketing the 16/32/64-byte SIMD register widths, plus a few larger tiers. Tail handling
+and vector-boundary logic in the kernels is most likely to diverge from serial exactly at these sizes."""
 
 
 def boundary_strings(alphabet: str = "ab") -> List[str]:

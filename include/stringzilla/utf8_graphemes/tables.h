@@ -1,9 +1,12 @@
 /**
- *  @file   include/stringzilla/utf8_graphemes/tables.h
+ *  @file include/stringzilla/utf8_graphemes/tables.h
  *  @author Ash Vardanian
- *  @brief UAX-29 Grapheme_Cluster_Break property tables. Each codepoint resolves to a packed
- *  descriptor byte `gcb | incb << 4 | extended_pictographic << 6` (Grapheme_Cluster_Break in bits 0-3,
- *  Indic_Conjunct_Break in bits 4-5, Extended_Pictographic in bit 6), consumed by GB9c / GB11. Derived by:
+ *  @date June 20, 2026
+ *  @brief UAX-29 Grapheme_Cluster_Break property tables.
+ *
+ *  Each codepoint resolves to a packed descriptor byte with Grapheme_Cluster_Break in bits 0-3,
+ *  Indic_Conjunct_Break in bits 4-5, and Extended_Pictographic in bit 6, consumed by GB9c and GB11:
+ *  `gcb | incb << 4 | extended_pictographic << 6`. Derived by:
  *
  *  @code{.py}
  *  # GraphemeBreakProperty.txt  → gcb in {Other,CR,LF,Control,Extend,ZWJ,RI,Prepend,SpacingMark,L,V,T,LV,LVT}
@@ -51,37 +54,73 @@ extern "C" {
 /**
  *  @brief Unicode UAX-29 Grapheme_Cluster_Break property values (4-bit encoding, 0-13).
  *
- *  These values correspond to the Grapheme_Cluster_Break property from Unicode UAX-29.
- *  Used by `sz_rune_grapheme_break_property()` for full UAX-29-compliant grapheme cluster detection.
+ *  These values correspond to the Grapheme_Cluster_Break property from Unicode UAX-29. Used by
+ *  `sz_rune_grapheme_break_property()` for full UAX-29-compliant grapheme cluster detection.
  */
 enum sz_grapheme_break_t {
-    sz_grapheme_break_other_k = 0,              /**< Default - any non-special codepoint (GB999) */
-    sz_grapheme_break_cr_k = 1,                 /**< Carriage Return (U+000D) */
-    sz_grapheme_break_lf_k = 2,                 /**< Line Feed (U+000A) */
-    sz_grapheme_break_control_k = 3,            /**< Control characters (Cc, Cf, line/para separators) */
-    sz_grapheme_break_extend_k = 4,             /**< Combining marks and extenders (Grapheme_Extend) */
-    sz_grapheme_break_zwj_k = 5,                /**< Zero Width Joiner (U+200D) */
-    sz_grapheme_break_regional_indicator_k = 6, /**< Regional Indicator (U+1F1E6-U+1F1FF) */
-    sz_grapheme_break_prepend_k = 7,            /**< Prepended concatenation marks */
-    sz_grapheme_break_spacingmark_k = 8,        /**< Spacing combining marks (Mc, excluding exceptions) */
-    sz_grapheme_break_hangul_l_k = 9,           /**< Hangul leading consonant jamo (L) */
-    sz_grapheme_break_hangul_v_k = 10,          /**< Hangul vowel jamo (V) */
-    sz_grapheme_break_hangul_t_k = 11,          /**< Hangul trailing consonant jamo (T) */
-    sz_grapheme_break_hangul_lv_k = 12,         /**< Precomposed Hangul LV syllable */
-    sz_grapheme_break_hangul_lvt_k = 13,        /**< Precomposed Hangul LVT syllable */
+
+    /** Default - any non-special codepoint (GB999). */
+    sz_grapheme_break_other_k = 0,
+
+    /** Carriage Return (U+000D). */
+    sz_grapheme_break_cr_k = 1,
+
+    /** Line Feed (U+000A). */
+    sz_grapheme_break_lf_k = 2,
+
+    /** Control characters (Cc, Cf, line/para separators). */
+    sz_grapheme_break_control_k = 3,
+
+    /** Combining marks and extenders (Grapheme_Extend). */
+    sz_grapheme_break_extend_k = 4,
+
+    /** Zero Width Joiner (U+200D). */
+    sz_grapheme_break_zwj_k = 5,
+
+    /** Regional Indicator (U+1F1E6-U+1F1FF). */
+    sz_grapheme_break_regional_indicator_k = 6,
+
+    /** Prepended concatenation marks. */
+    sz_grapheme_break_prepend_k = 7,
+
+    /** Spacing combining marks (Mc, excluding exceptions). */
+    sz_grapheme_break_spacingmark_k = 8,
+
+    /** Hangul leading consonant jamo (L). */
+    sz_grapheme_break_hangul_l_k = 9,
+
+    /** Hangul vowel jamo (V). */
+    sz_grapheme_break_hangul_v_k = 10,
+
+    /** Hangul trailing consonant jamo (T). */
+    sz_grapheme_break_hangul_t_k = 11,
+
+    /** Precomposed Hangul LV syllable. */
+    sz_grapheme_break_hangul_lv_k = 12,
+
+    /** Precomposed Hangul LVT syllable. */
+    sz_grapheme_break_hangul_lvt_k = 13,
 };
 
 /**
  *  @brief Unicode UAX-29 Indic_Conjunct_Break (InCB) property values (2-bit encoding, 0-3).
  *
- *  These values support the GB9c rule for Indic conjunct sequences (consonant + linker + consonant).
+ *  These values support the GB9c rule for Indic conjunct sequences, consonant + linker + consonant.
  *  Carried alongside the Grapheme_Cluster_Break class in each codepoint's property descriptor.
  */
 enum sz_grapheme_incb_t {
-    sz_grapheme_incb_none_k = 0,      /**< Not part of an Indic conjunct sequence */
-    sz_grapheme_incb_consonant_k = 1, /**< InCB=Consonant (Indic consonant) */
-    sz_grapheme_incb_extend_k = 2,    /**< InCB=Extend (combining mark inside a conjunct) */
-    sz_grapheme_incb_linker_k = 3,    /**< InCB=Linker (virama joining two consonants) */
+
+    /** Not part of an Indic conjunct sequence. */
+    sz_grapheme_incb_none_k = 0,
+
+    /** InCB=Consonant (Indic consonant). */
+    sz_grapheme_incb_consonant_k = 1,
+
+    /** InCB=Extend (combining mark inside a conjunct). */
+    sz_grapheme_incb_extend_k = 2,
+
+    /** InCB=Linker (virama joining two consonants). */
+    sz_grapheme_incb_linker_k = 3,
 };
 
 #pragma region Grapheme_Break tables
@@ -382,9 +421,10 @@ static const sz_u8_t sz_utf8_grapheme_break_astral_id_[348] = {
     0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x1, 0x5, 0x1, 0x5, 0x1,
 };
 
-/* Ice Lake fast-path tables, generated by construction from sz_rune_grapheme_break_property(codepoint) for
- * every codepoint (byte-identical to the serial oracle). The cheap ASCII / 2-byte / astral paths front the
- * 3-stage BMP cascade so the per-window cost tracks content; see the embedded generator above. */
+/*  Ice Lake fast-path tables, generated by construction from
+ *  sz_rune_grapheme_break_property(codepoint) for every codepoint, byte-identical to the serial
+ *  oracle. The cheap ASCII, 2-byte, and astral paths front the 3-stage BMP cascade so the
+ *  per-window cost tracks content; see the embedded generator above. */
 sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_ascii_desc_[128] = {
     3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -625,12 +665,15 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_leaf_[2624] = {
 #if SZ_USE_HASWELL || SZ_USE_NEON
 
 /**
- *  @brief SIMD descriptor tables mapping a codepoint to its packed Grapheme_Cluster_Break descriptor byte
- *  (gcb | incb<<4 | extpict<<6), bit-exact with the serial oracle `sz_rune_grapheme_break_property`. `ascii_desc` is
- *  a 256-LUT over the raw byte (cp<0x80 fast path). `bmp_page_lut_` maps `cp >> 8` to a page index and doubles as the page
- *  LUT of the flat BMP classifier below. The astral 5-nibble `vpshufb` cascade covers cp-0x10000: leaf ids exceed 255
- *  so the leaf-id stages are emitted as two byte planes (lo/hi) and the final stage is grouped by `leaf>>4` so every
- *  per-lane index stays a byte. Derived by:
+ *  @brief SIMD descriptor tables mapping a codepoint to its packed Grapheme_Cluster_Break
+ *      descriptor byte, `gcb | incb << 4 | extpict << 6`.
+ *
+ *  Bit-exact with the serial oracle @c sz_rune_grapheme_break_property. @c ascii_desc is a 256-LUT
+ *  over the raw byte, the cp < 0x80 fast path. @c bmp_page_lut_ maps `cp >> 8` to a page index and
+ *  doubles as the page LUT of the flat BMP classifier below. The astral 5-nibble @c vpshufb cascade
+ *  covers cp - 0x10000: leaf ids exceed 255, so the leaf-id stages are emitted as two byte planes,
+ *  low and high, and the final stage is grouped by `leaf >> 4` so every per-lane index stays a
+ *  byte. Derived by:
  *
  *  @code{.py}
  *  # descriptor per cp dumped from sz_rune_grapheme_break_property; over offset=cp-0x10000 (nibbles n4..n0):
@@ -861,11 +904,13 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage4_groups_[2816] 
 // clang-format off
 
 /**
- *  @brief  Flat Grapheme_Cluster_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 54 distinct
- *          256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, one indexed lookup per
- *          codepoint, read by `vpgatherdd` on x86, `svld1_gather` on SVE2, and a bounded scalar leaf walk on NEON,
- *          which has no gather. The page LUT is `bmp_page_lut_` itself, reused rather than duplicated.
- *          Bit-exact with `sz_rune_grapheme_break_property` across the BMP by construction. Derived by:
+ *  @brief Flat Grapheme_Cluster_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 54
+ *      distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor.
+ *
+ *  One indexed lookup per codepoint, read by @c vpgatherdd on x86, @c svld1_gather on SVE2, and a
+ *  bounded scalar leaf walk on NEON, which has no gather. The page LUT is @c bmp_page_lut_ itself,
+ *  reused rather than duplicated. Bit-exact with @c sz_rune_grapheme_break_property across the BMP
+ *  by construction. Derived by:
  *
  *  @code{.py}
  *  # desc[cp] = sz_rune_grapheme_break_property(cp) for cp in range(0x110000), dumped from the serial oracle.
@@ -879,8 +924,12 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage4_groups_[2816] 
  *  @endcode
  */
 enum {
-    sz_utf8_grapheme_break_flat_pages_k = 54, /**< Distinct 256-byte pages the BMP compresses to. */
-    sz_utf8_grapheme_break_flat_count_k = 13824, /**< Logical entries of the flat leaf (the array is padded). */
+
+    /** Distinct 256-byte pages the BMP compresses to. */
+    sz_utf8_grapheme_break_flat_pages_k = 54,
+
+    /** Logical entries of the flat leaf (the array is padded). */
+    sz_utf8_grapheme_break_flat_count_k = 13824,
 };
 
 sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_flat_bmp_[13888] = {

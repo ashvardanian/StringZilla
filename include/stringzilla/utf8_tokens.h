@@ -1,7 +1,8 @@
 /**
- *  @brief Hardware-accelerated UTF-8 newline, whitespace, and general delimiter scanning.
  *  @file include/stringzilla/utf8_tokens.h
  *  @author Ash Vardanian
+ *  @date November 18, 2025
+ *  @brief Hardware-accelerated UTF-8 newline, whitespace, and general delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_H_
 #define STRINGZILLA_UTF8_TOKENS_H_
@@ -15,7 +16,14 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Skips to the first occurrence of a UTF-8 newline character in a string.
+ *  @brief Enumerates every UTF-8 newline delimiter in a string.
+ *
+ *  Enumerates every newline delimiter in a single sweep, mirroring @c sz_utf8_wordbreaks: writes
+ *  the byte offset and byte length of each match into the parallel @p match_offsets and
+ *  @p match_lengths arrays, a @c "\r\n" CRLF being one match of length 2. Returns the number of
+ *  delimiters emitted. When the output fills before the input is exhausted, @p bytes_consumed is
+ *  set to the resume offset, always past the last emitted delimiter and at a byte that begins fresh
+ *  content, so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder.
  *
  *  Here are all the UTF-8 newline characters we are looking for (7 characters + CRLF):
  *  - single-byte chars (4 total):
@@ -31,23 +39,16 @@ extern "C" {
  *  - double-character sequence:
  *    - U+000D U+000A for @c "\r\n" that should be treated as a single new line!
  *
- *  @note U+001C, U+001D, U+001E (FILE/GROUP/RECORD SEPARATOR) are NOT included.
- *        These are data structure delimiters used in formats like USV (Unicode Separated Values),
- *        not line breaks. Use @c sz_find_byte() if you need to find these separators.
+ *  U+001C, U+001D, U+001E (FILE/GROUP/RECORD SEPARATOR) are not included. These are data structure
+ *  delimiters used in formats like USV (Unicode Separated Values), not line breaks. Use
+ *  @c sz_find_byte if you need to find these separators.
  *
- *  Enumerates every newline delimiter in a single sweep, mirroring `sz_utf8_wordbreaks`: writes the
- *  byte offset and byte length of each match into the parallel `match_offsets` / `match_lengths` arrays (a
- *  @c "\r\n" CRLF is one match of length 2). Returns the number of delimiters emitted. When the output fills
- *  before the input is exhausted, `*bytes_consumed` is set to the resume offset - always past the last emitted
- *  delimiter and at a byte that begins fresh content - so a caller resumes from `text + *bytes_consumed` and
- *  obtains the identical remainder.
- *
- *  @param text String to be scanned.
- *  @param length Number of bytes in the string.
- *  @param match_offsets Output array of delimiter start offsets (at least @p matches_capacity entries).
- *  @param match_lengths Output array of delimiter byte lengths (at least @p matches_capacity entries).
- *  @param matches_capacity Capacity of the output arrays.
- *  @param bytes_consumed Output: byte offset to resume scanning from.
+ *  @param[in] text String to be scanned.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[out] match_offsets Delimiter start offsets, at least @p matches_capacity entries.
+ *  @param[out] match_lengths Delimiter byte lengths, at least @p matches_capacity entries.
+ *  @param[in] matches_capacity Capacity of the output arrays.
+ *  @param[out] bytes_consumed Byte offset to resume scanning from.
  *  @return Number of delimiters written to the output arrays.
  */
 SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
@@ -55,11 +56,17 @@ SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_s
                                           sz_size_t *bytes_consumed);
 
 /**
- *  @brief Skips to the first occurrence of a UTF-8 whitespace character in a string.
+ *  @brief Enumerates every UTF-8 whitespace delimiter in a string.
  *
- *  Implements the Unicode White_Space property (25 characters total).
- *  Per Unicode standard, whitespace includes all newline characters plus horizontal spaces.
- *  Matches the behavior of ICU's u_isspace() and Python's str.isspace().
+ *  Enumerates every whitespace delimiter in a single sweep, with the same contract as
+ *  @c sz_utf8_newlines: writes the byte offset and byte length of each match into the parallel
+ *  @p match_offsets and @p match_lengths arrays, returns the count, and sets @p bytes_consumed to
+ *  the resume offset. Each whitespace codepoint is one match: CR and LF are independent length-1
+ *  matches, as there is no CRLF merging in the whitespace set.
+ *
+ *  Implements the Unicode White_Space property, 25 characters in total. Per the Unicode standard,
+ *  whitespace includes all newline characters plus horizontal spaces. Matches the behavior of ICU's
+ *  `u_isspace()` and Python's `str.isspace()`.
  *
  *  - single-byte chars (6 total):
  *    - U+0009 tab @c "\t" (CHARACTER TABULATION)
@@ -93,25 +100,20 @@ SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_s
  *  The last one, the IDEOGRAPHIC SPACE (U+3000), is commonly used in East Asian typography,
  *  like Japanese formatted text or Chinese traditional poetry alignments.
  *
- *  @note NOT included (despite some implementations treating them as whitespace):
- *    - U+001C, U+001D, U+001E, U+001F (FILE/GROUP/RECORD/UNIT SEPARATOR):
- *      These are data structure delimiters for formats like USV (Unicode Separated Values).
- *      Only Java's Character.isWhitespace() includes them; Unicode, ICU, and Python do not.
- *    - U+200B, U+200C, U+200D (ZERO WIDTH SPACE/NON-JOINER/JOINER):
- *      These are Format characters, not whitespace. They have no width and affect rendering,
- *      not spacing.
+ *  Some implementations treat more codepoints as whitespace, but these are not included:
  *
- *  Enumerates every whitespace delimiter in a single sweep, with the same contract as `sz_utf8_newlines`:
- *  writes the byte offset and byte length of each match into the parallel `match_offsets` / `match_lengths`
- *  arrays, returns the count, and sets `*bytes_consumed` to the resume offset. Each whitespace codepoint is one
- *  match (CR and LF are independent length-1 matches; there is no CRLF merging in the whitespace set).
+ *  - U+001C, U+001D, U+001E, U+001F (FILE/GROUP/RECORD/UNIT SEPARATOR) are data structure
+ *    delimiters for formats like USV (Unicode Separated Values). Only Java's
+ *    `Character.isWhitespace()` includes them; Unicode, ICU, and Python do not.
+ *  - U+200B, U+200C, U+200D (ZERO WIDTH SPACE/NON-JOINER/JOINER) are Format characters, not
+ *    whitespace. They have no width and affect rendering rather than spacing.
  *
- *  @param text String to be scanned.
- *  @param length Number of bytes in the string.
- *  @param match_offsets Output array of delimiter start offsets (at least @p matches_capacity entries).
- *  @param match_lengths Output array of delimiter byte lengths (at least @p matches_capacity entries).
- *  @param matches_capacity Capacity of the output arrays.
- *  @param bytes_consumed Output: byte offset to resume scanning from.
+ *  @param[in] text String to be scanned.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[out] match_offsets Delimiter start offsets, at least @p matches_capacity entries.
+ *  @param[out] match_lengths Delimiter byte lengths, at least @p matches_capacity entries.
+ *  @param[in] matches_capacity Capacity of the output arrays.
+ *  @param[out] bytes_consumed Byte offset to resume scanning from.
  *  @return Number of delimiters written to the output arrays.
  */
 SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
@@ -121,19 +123,20 @@ SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, s
 /**
  *  @brief Enumerates every UTF-8 delimiter codepoint (punctuation, symbol, separator, whitespace).
  *
- *  The general superset of `sz_utf8_newlines` / `sz_utf8_whitespaces`: every codepoint whose Unicode
- *  general category is a punctuation (P*), symbol (S*), or separator (Z*) is a delimiter. Shares the
- *  segmenter contract: writes the byte offset and byte length of each match into the parallel
- *  `match_offsets` / `match_lengths` arrays, returns the count, and sets `*bytes_consumed` to the resume
- *  offset (always a fresh codepoint boundary) when the output fills before the input is exhausted. A byte
- *  that does not begin a well-formed codepoint is skipped and never reported.
+ *  The general superset of @c sz_utf8_newlines and @c sz_utf8_whitespaces: every codepoint whose
+ *  Unicode general category is a punctuation (P*), symbol (S*), or separator (Z*) is a delimiter.
+ *  Shares the segmenter contract: writes the byte offset and byte length of each match into the
+ *  parallel @p match_offsets and @p match_lengths arrays, returns the count, and sets
+ *  @p bytes_consumed to the resume offset (always a fresh codepoint boundary) when the output
+ *  fills before the input is exhausted. A byte that does not begin a well-formed codepoint is
+ *  skipped and never reported.
  *
- *  @param text String to be scanned.
- *  @param length Number of bytes in the string.
- *  @param match_offsets Output array of delimiter start offsets (at least @p matches_capacity entries).
- *  @param match_lengths Output array of delimiter byte lengths (at least @p matches_capacity entries).
- *  @param matches_capacity Capacity of the output arrays.
- *  @param bytes_consumed Output: byte offset to resume scanning from.
+ *  @param[in] text String to be scanned.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[out] match_offsets Delimiter start offsets, at least @p matches_capacity entries.
+ *  @param[out] match_lengths Delimiter byte lengths, at least @p matches_capacity entries.
+ *  @param[in] matches_capacity Capacity of the output arrays.
+ *  @param[out] bytes_consumed Byte offset to resume scanning from.
  *  @return Number of delimiters written to the output arrays.
  */
 SZ_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,

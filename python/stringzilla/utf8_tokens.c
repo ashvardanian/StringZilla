@@ -1,17 +1,20 @@
 /**
- *  @brief Newline, whitespace, and delimiter segmentation of UTF-8 text.
  *  @file python/stringzilla/utf8_tokens.c
  *  @author Ash Vardanian
+ *  @date November 24, 2025
+ *  @brief Newline, whitespace, and delimiter segmentation of UTF-8 text.
  */
 #include "stringzilla.h"
 
 /**
- *  @brief  Iterator splitting a UTF-8 string on the separators a segmenter kernel reports.
+ *  @brief Iterator splitting a UTF-8 string on the separators a segmenter kernel reports.
  *
- *  One shared layout behind every `utf8_split_*` / bare-separator iterator. The kernel's separator endpoints are
- *  the span boundaries `{0, s0.start, s0.end, ..., [region]}`; span `i` is `bounds[i] .. bounds[i+1]`, and `parts`
- *  selects which spans via a `(first, stride)` walk: `0` between-segments (lines/tokens/fields), `1` the separators
- *  themselves, `2` both interleaved (lossless). Batches refill the inline `bounds` buffer on demand.
+ *  One shared layout behind every `utf8_split_*` and bare-separator iterator. The kernel's
+ *  separator endpoints are the span boundaries `{0, s0.start, s0.end, ..., [region]}`; span @c i
+ *  is `bounds[i] .. bounds[i+1]`, and @c parts selects which spans via a @b (first,stride) walk:
+ *  `0` for the segments between separators - lines, tokens, or fields - `1` for the separators
+ *  themselves, and `2` for both interleaved losslessly. Batches refill the inline @c bounds
+ *  buffer on demand.
  *
  *  Termination: `suffix == end` after a drain, or `spans == 0`.
  */
@@ -30,21 +33,20 @@ typedef struct {
     sz_bool_t skip_empty; //< Should we skip empty (zero-length) spans?
     sz_bool_t primed;     //< Whether the first batch has been filled (lazy on first `__next__`).
 
-    /// @brief  Inline span boundaries for the current batch, relative to `origin`.
+    /** Inline span boundaries for the current batch, relative to @c origin. */
     sz_size_t bounds[2 * sz_iterators_default_steps_k + 2];
     sz_size_t spans; //< Number of yieldable spans; `spans == 0` is the end sentinel.
     sz_size_t index; //< Current boundary cursor (span is `bounds[index] .. bounds[index + 1]`).
 
 } Utf8Split;
 
-/** @brief  Allocates and lazily primes a `Utf8Split`. */
+/** Allocates and lazily primes a @c Utf8Split. */
 static PyObject *Utf8Split_make_(PyTypeObject *type, PyObject *text_obj, sz_string_view_t text,
                                  sz_utf8_segmenter_t kernel, int parts, int skip_empty);
 
-/**
- *  @brief  Shared body for the six `utf8_split_*` / bare-separator factories. Parses `skip_empty` (and, for the
- *          `split_*` variants, `with_separators`) and allocates a `Utf8Split` of `type` for `kernel` + `base_parts`.
- */
+/** Shared body for the six `utf8_split_*` and bare-separator factories. Parses @c skip_empty, plus
+ *  @c with_separators for the `split_*` variants, and allocates a @c Utf8Split of @p type that
+ *  runs @p kernel over @p base_parts. */
 static PyObject *Str_like_utf8_split_(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple, PyTypeObject *type, sz_utf8_segmenter_t kernel,
                                       int base_parts, int allow_with_separators) {
@@ -105,25 +107,25 @@ static PyObject *Str_like_utf8_split_(PyObject *self, PyObject *const *args, Py_
     return Utf8Split_make_(type, text_obj, text, kernel, parts, skip_empty);
 }
 
-char const doc_utf8_split_newlines[] =                                                                            //
-    "Create an iterator over the content between Unicode newlines (the lines).\n"                                 //
-    "\n"                                                                                                          //
-    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"                            //
-    "Unlike splitlines(), this returns an iterator for memory-efficient processing.\n"                            //
-    "\n"                                                                                                          //
-    "Args:\n"                                                                                                     //
-    "  text (Str or str or bytes): The string object.\n"                                                          //
-    "  skip_empty (bool, optional): Skip empty lines (default is False).\n"                                       //
-    "  with_separators (bool, optional): Interleave the newline separators too, losslessly (default is False).\n" //
-    "Returns:\n"                                                                                                  //
-    "  iterator: An iterator yielding the lines as Str objects.\n"                                                //
-    "\n"                                                                                                          //
-    "Recognized newlines:\n"                                                                                      //
-    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                                   //
-    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                                    //
-    "\n"                                                                                                          //
-    "Example:\n"                                                                                                  //
-    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_split_newlines())\n"                                               //
+char const doc_utf8_split_newlines[] =                                                                 //
+    "Create an iterator over the lines, the content between Unicode newlines.\n"                       //
+    "\n"                                                                                               //
+    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"                 //
+    "Unlike splitlines(), this returns an iterator for memory-efficient processing.\n"                 //
+    "\n"                                                                                               //
+    "Args:\n"                                                                                          //
+    "  text (Str or str or bytes): The string object.\n"                                               //
+    "  skip_empty (bool, optional): Skip empty lines, defaulting to False.\n"                          //
+    "  with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.\n" //
+    "Returns:\n"                                                                                       //
+    "  iterator: An iterator yielding the lines as Str objects.\n"                                     //
+    "\n"                                                                                               //
+    "Recognized newlines:\n"                                                                           //
+    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                        //
+    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                         //
+    "\n"                                                                                               //
+    "Example:\n"                                                                                       //
+    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_split_newlines())\n"                                    //
     "  2";
 PyObject *Str_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                        PyObject *args_names_tuple) {
@@ -131,24 +133,24 @@ PyObject *Str_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py
                                 sz_utf8_newlines, 0, 1);
 }
 
-char const doc_utf8_newlines[] =                                                                                    //
-    "Create an iterator over the Unicode newline separators themselves (one per codepoint, CR+LF kept together).\n" //
-    "\n"                                                                                                            //
-    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"                              //
-    "Yields each newline separator; utf8_split_newlines() yields the lines between them.\n"                         //
-    "\n"                                                                                                            //
-    "Args:\n"                                                                                                       //
-    "  text (Str or str or bytes): The string object.\n"                                                            //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                      //
-    "Returns:\n"                                                                                                    //
-    "  iterator: An iterator yielding the newline separators as Str objects.\n"                                     //
-    "\n"                                                                                                            //
-    "Recognized newlines:\n"                                                                                        //
-    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                                     //
-    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                                      //
-    "\n"                                                                                                            //
-    "Example:\n"                                                                                                    //
-    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_newlines())\n"                                                       //
+char const doc_utf8_newlines[] =                                                                        //
+    "Create an iterator over the Unicode newline separators, one per codepoint, CR+LF kept together.\n" //
+    "\n"                                                                                                //
+    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"                  //
+    "Yields each newline separator; utf8_split_newlines() yields the lines between them.\n"             //
+    "\n"                                                                                                //
+    "Args:\n"                                                                                           //
+    "  text (Str or str or bytes): The string object.\n"                                                //
+    "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                        //
+    "Returns:\n"                                                                                        //
+    "  iterator: An iterator yielding the newline separators as Str objects.\n"                         //
+    "\n"                                                                                                //
+    "Recognized newlines:\n"                                                                            //
+    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                         //
+    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                          //
+    "\n"                                                                                                //
+    "Example:\n"                                                                                        //
+    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_newlines())\n"                                           //
     "  1";
 PyObject *Str_like_utf8_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
@@ -156,27 +158,27 @@ PyObject *Str_like_utf8_newlines(PyObject *self, PyObject *const *args, Py_ssize
                                 sz_utf8_newlines, 1, 0);
 }
 
-char const doc_utf8_split_whitespaces[] =                                                                            //
-    "Create an iterator over the content between Unicode whitespace (the tokens).\n"                                 //
-    "\n"                                                                                                             //
-    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"                                    //
-    "Splits on whitespace, one separator per codepoint; pass skip_empty=True for str.split()-style tokens.\n"        //
-    "\n"                                                                                                             //
-    "Args:\n"                                                                                                        //
-    "  text (Str or str or bytes): The string object.\n"                                                             //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                       //
-    "  with_separators (bool, optional): Interleave the whitespace separators too, losslessly (default is False).\n" //
-    "Returns:\n"                                                                                                     //
-    "  iterator: An iterator yielding the non-whitespace tokens as Str objects.\n"                                   //
-    "\n"                                                                                                             //
-    "Recognized whitespace:\n"                                                                                       //
-    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                                          //
-    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                                         //
-    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                                                    //
-    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                                            //
-    "\n"                                                                                                             //
-    "Example:\n"                                                                                                     //
-    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_split_whitespaces())\n"                                         //
+char const doc_utf8_split_whitespaces[] =                                                              //
+    "Create an iterator over the tokens, the content between Unicode whitespace.\n"                    //
+    "\n"                                                                                               //
+    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"                      //
+    "Splits on each whitespace codepoint; pass skip_empty=True for str.split()-style tokens.\n"        //
+    "\n"                                                                                               //
+    "Args:\n"                                                                                          //
+    "  text (Str or str or bytes): The string object.\n"                                               //
+    "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                       //
+    "  with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.\n" //
+    "Returns:\n"                                                                                       //
+    "  iterator: An iterator yielding the non-whitespace tokens as Str objects.\n"                     //
+    "\n"                                                                                               //
+    "Recognized whitespace:\n"                                                                         //
+    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                            //
+    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                           //
+    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                                      //
+    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                              //
+    "\n"                                                                                               //
+    "Example:\n"                                                                                       //
+    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_split_whitespaces())\n"                           //
     "  3";
 PyObject *Str_like_utf8_split_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple) {
@@ -184,26 +186,26 @@ PyObject *Str_like_utf8_split_whitespaces(PyObject *self, PyObject *const *args,
                                 sz_utf8_whitespaces, 0, 1);
 }
 
-char const doc_utf8_whitespaces[] = //
-    "Create an iterator over the Unicode whitespace separators themselves (one per codepoint, CR+LF kept together).\n" //
-    "\n"                                                                                           //
-    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"                  //
-    "Yields each whitespace codepoint; utf8_split_whitespaces() yields the tokens between them.\n" //
-    "\n"                                                                                           //
-    "Args:\n"                                                                                      //
-    "  text (Str or str or bytes): The string object.\n"                                           //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                     //
-    "Returns:\n"                                                                                   //
-    "  iterator: An iterator yielding the whitespace separators as Str objects.\n"                 //
-    "\n"                                                                                           //
-    "Recognized whitespace:\n"                                                                     //
-    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                        //
-    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                       //
-    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                                  //
-    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                          //
-    "\n"                                                                                           //
-    "Example:\n"                                                                                   //
-    "  >>> sum(1 for _ in sz.Str('foo bar').utf8_whitespaces())\n"                                 //
+char const doc_utf8_whitespaces[] =                                                                    //
+    "Create an iterator over Unicode whitespace separators, one per codepoint, CR+LF kept together.\n" //
+    "\n"                                                                                               //
+    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"                      //
+    "Yields each whitespace codepoint; utf8_split_whitespaces() yields the tokens between them.\n"     //
+    "\n"                                                                                               //
+    "Args:\n"                                                                                          //
+    "  text (Str or str or bytes): The string object.\n"                                               //
+    "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                       //
+    "Returns:\n"                                                                                       //
+    "  iterator: An iterator yielding the whitespace separators as Str objects.\n"                     //
+    "\n"                                                                                               //
+    "Recognized whitespace:\n"                                                                         //
+    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                            //
+    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                           //
+    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                                      //
+    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                              //
+    "\n"                                                                                               //
+    "Example:\n"                                                                                       //
+    "  >>> sum(1 for _ in sz.Str('foo bar').utf8_whitespaces())\n"                                     //
     "  1";
 PyObject *Str_like_utf8_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple) {
@@ -211,22 +213,22 @@ PyObject *Str_like_utf8_whitespaces(PyObject *self, PyObject *const *args, Py_ss
                                 sz_utf8_whitespaces, 1, 0);
 }
 
-char const doc_utf8_split_delimiters[] =                                                                            //
-    "Create an iterator over the content between Unicode delimiters (the fields).\n"                                //
-    "\n"                                                                                                            //
-    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"                                 //
-    "separator/whitespace (Z*) codepoint - the superset of utf8_split_whitespaces().\n"                             //
-    "Splits on delimiters (one separator per codepoint) and yields the segments between them.\n"                    //
-    "\n"                                                                                                            //
-    "Args:\n"                                                                                                       //
-    "  text (Str or str or bytes): The string object.\n"                                                            //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                      //
-    "  with_separators (bool, optional): Interleave the delimiter separators too, losslessly (default is False).\n" //
-    "Returns:\n"                                                                                                    //
-    "  iterator: An iterator yielding the non-delimiter segments as Str objects.\n"                                 //
-    "\n"                                                                                                            //
-    "Example:\n"                                                                                                    //
-    "  >>> list(str(t) for t in sz.Str('Hi, world').utf8_split_delimiters(skip_empty=True))\n"                      //
+char const doc_utf8_split_delimiters[] =                                                               //
+    "Create an iterator over the fields, the content between Unicode delimiters.\n"                    //
+    "\n"                                                                                               //
+    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"                    //
+    "separator/whitespace (Z*) codepoint - the superset of utf8_split_whitespaces().\n"                //
+    "Splits on delimiters, one separator per codepoint, and yields the segments between them.\n"       //
+    "\n"                                                                                               //
+    "Args:\n"                                                                                          //
+    "  text (Str or str or bytes): The string object.\n"                                               //
+    "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                       //
+    "  with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.\n" //
+    "Returns:\n"                                                                                       //
+    "  iterator: An iterator yielding the non-delimiter segments as Str objects.\n"                    //
+    "\n"                                                                                               //
+    "Example:\n"                                                                                       //
+    "  >>> list(str(t) for t in sz.Str('Hi, world').utf8_split_delimiters(skip_empty=True))\n"         //
     "  ['Hi', 'world']";
 PyObject *Str_like_utf8_split_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple) {
@@ -234,21 +236,21 @@ PyObject *Str_like_utf8_split_delimiters(PyObject *self, PyObject *const *args, 
                                 sz_utf8_delimiters, 0, 1);
 }
 
-char const doc_utf8_delimiters[] =                                                                                    //
-    "Create an iterator over the Unicode delimiter separators themselves (one per codepoint, CR+LF kept together).\n" //
-    "\n"                                                                                                              //
-    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"                                   //
-    "separator/whitespace (Z*) codepoint. Yields each delimiter codepoint;\n"                                         //
-    "utf8_split_delimiters() yields the fields between them.\n"                                                       //
-    "\n"                                                                                                              //
-    "Args:\n"                                                                                                         //
-    "  text (Str or str or bytes): The string object.\n"                                                              //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                        //
-    "Returns:\n"                                                                                                      //
-    "  iterator: An iterator yielding the delimiter separators as Str objects.\n"                                     //
-    "\n"                                                                                                              //
-    "Example:\n"                                                                                                      //
-    "  >>> list(str(d) for d in sz.Str('a.b').utf8_delimiters())\n"                                                   //
+char const doc_utf8_delimiters[] =                                                                    //
+    "Create an iterator over Unicode delimiter separators, one per codepoint, CR+LF kept together.\n" //
+    "\n"                                                                                              //
+    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"                   //
+    "separator/whitespace (Z*) codepoint. Yields each delimiter codepoint;\n"                         //
+    "utf8_split_delimiters() yields the fields between them.\n"                                       //
+    "\n"                                                                                              //
+    "Args:\n"                                                                                         //
+    "  text (Str or str or bytes): The string object.\n"                                              //
+    "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                      //
+    "Returns:\n"                                                                                      //
+    "  iterator: An iterator yielding the delimiter separators as Str objects.\n"                     //
+    "\n"                                                                                              //
+    "Example:\n"                                                                                      //
+    "  >>> list(str(d) for d in sz.Str('a.b').utf8_delimiters())\n"                                   //
     "  ['.']";
 PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                    PyObject *args_names_tuple) {
@@ -256,10 +258,9 @@ PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssi
                                 sz_utf8_delimiters, 1, 0);
 }
 
-/**
- *  @brief  Refill the inline batch from `suffix`: fetch a separator batch and expand its endpoints into `bounds`.
- *          Span `i` is `bounds[i] .. bounds[i+1]`; `_settle_` / `_next` walk them by `parts`'s (first, stride).
- */
+/** Refill the inline batch from @c suffix: fetch a separator batch and expand its endpoints into
+ *  @c bounds. Span @c i is `bounds[i] .. bounds[i+1]`; @c _settle_ and @c _next walk them by the
+ *  @b (first,stride) of @c parts. */
 static void Utf8Split_refill_(Utf8Split *self) {
     sz_size_t base = (sz_size_t)(self->suffix - self->origin);
     sz_size_t region = (sz_size_t)(self->end - self->suffix);
@@ -288,10 +289,8 @@ static void Utf8Split_refill_(Utf8Split *self) {
     self->primed = sz_true_k;
 }
 
-/**
- *  @brief  Position `index` on the next yieldable span, refilling and (when `skip_empty`) skipping empty spans.
- *          Leaves `spans == 0` as the end sentinel.
- */
+/** Position @c index on the next yieldable span, refilling, and skipping empty spans when
+ *  @c skip_empty is set. Leaves `spans == 0` as the end sentinel. */
 static void Utf8Split_settle_(Utf8Split *self) {
     sz_size_t stride = self->parts == 2 ? 1 : 2;
     if (!self->primed) Utf8Split_refill_(self);
@@ -338,7 +337,8 @@ static PyObject *Utf8SplitType_iter(PyObject *self) {
     return self;
 }
 
-/** @brief  Allocates and lazily primes a `Utf8Split` of `type` over `text` for `kernel` + `parts`. */
+/** Allocates and lazily primes a @c Utf8Split of @p type over @p text, running @p kernel for the
+ *  spans @p parts selects. */
 static PyObject *Utf8Split_make_(PyTypeObject *type, PyObject *text_obj, sz_string_view_t text,
                                  sz_utf8_segmenter_t kernel, int parts, int skip_empty) {
     Utf8Split *result_obj = (Utf8Split *)type->tp_alloc(type, 0);

@@ -1,11 +1,12 @@
 /**
- *  @brief Multi-pattern substring search over one compiled vocabulary.
  *  @file python/stringzilla/substrings.c
  *  @author Ash Vardanian
+ *  @date August 8, 2026
+ *  @brief Multi-pattern substring search over one compiled vocabulary.
  */
 #include "stringzilla.h"
 
-/** @brief A vocabulary compiled once into an automaton, streamed over many collections of haystacks. */
+/** A vocabulary compiled once into an automaton, streamed over many collections of haystacks. */
 typedef struct {
     PyObject ob_base;
     sz_substrings_engine_t engine; //< Owned; freed in `tp_dealloc`, rebuilt by a second `__init__`.
@@ -14,7 +15,7 @@ typedef struct {
 
 #pragma region Construction
 
-/** @brief Reads whether both sides are folded before they meet, or compared byte for byte. */
+/** Reads whether both sides are folded before they meet, or compared byte for byte. */
 static int parse_case_sensitivity_(PyObject *sensitivity_obj, sz_substrings_case_sensitivity_t *result) {
     if (!sensitivity_obj || sensitivity_obj == Py_None) {
         *result = sz_substrings_cased_k;
@@ -36,7 +37,7 @@ static int parse_case_sensitivity_(PyObject *sensitivity_obj, sz_substrings_case
     return -1;
 }
 
-/** @brief Reads how matches that share bytes resolve, which is also what the round arena is sized for. */
+/** Reads how matches that share bytes resolve, which is also what the round arena is sized for. */
 static int parse_overlap_policy_(PyObject *policy_obj, sz_substrings_overlap_policy_t *result) {
     if (!policy_obj || policy_obj == Py_None) {
         *result = sz_substrings_overlapping_k;
@@ -63,7 +64,7 @@ static int parse_overlap_policy_(PyObject *policy_obj, sz_substrings_overlap_pol
     return -1;
 }
 
-/** @brief Reads a non-negative size, leaving @p result at @p fallback when the argument is absent. */
+/** Reads a non-negative size, leaving @p result at @p fallback when the argument is absent. */
 static int parse_optional_size_(PyObject *size_obj, char const *name, sz_size_t fallback, sz_size_t *result) {
     if (!size_obj || size_obj == Py_None) {
         *result = fallback;
@@ -78,7 +79,7 @@ static int parse_optional_size_(PyObject *size_obj, char const *name, sz_size_t 
     return 0;
 }
 
-/** @brief Reads the vocabulary and the four build-time knobs both constructors take. */
+/** Reads the vocabulary and the four build-time knobs both constructors take. */
 static int parse_build_arguments_(PyObject *needles_obj, PyObject *case_sensitivity_obj, PyObject *overlap_policy_obj,
                                   PyObject *hot_states_obj, PyObject *matches_budget_obj, sz_sequence_t *needles,
                                   sz_substrings_case_sensitivity_t *case_sensitivity,
@@ -276,7 +277,7 @@ static PyObject *SubstringsEngine_on_gpu(PyObject *type_obj, PyObject *const *ar
 
 #pragma region Operations
 
-/** @brief Refuses a verb called on an object whose vocabulary was never compiled. */
+/** Refuses a verb called on an object whose vocabulary was never compiled. */
 static int SubstringsEngine_ready_(SubstringsEngine *self) {
     if (self->engine.memory) return 0;
     PyErr_SetString(PyExc_ValueError, "SubstringsEngine holds no compiled vocabulary");
@@ -357,7 +358,7 @@ static char const doc_SubstringsEngine_find[] =                                 
     "Args:\n"                                                                                          //
     "  haystacks (Strs): Texts to search.\n"                                                           //
     "  matches (buffer or None): Writable, fully contiguous 2-D buffer of pointer-width unsigned\n"    //
-    "    integers, shaped (capacity, 4) - haystack index, needle index, byte offset, byte length.\n"   //
+    "    integers, shaped `(capacity, 4)` - haystack index, needle index, byte offset, byte length.\n" //
     "    None makes the call a pure size query.\n"                                                     //
     "  offsets (buffer): Writable, contiguous 1-D buffer of pointer-width unsigned integers holding\n" //
     "    len(haystacks) + 1 boundaries into `matches`, the last being the total.\n"                    //

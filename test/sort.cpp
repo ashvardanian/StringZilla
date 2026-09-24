@@ -1,43 +1,35 @@
 /**
- *  @brief  Sequence sort equivalence/backends/algorithms and intersection tests.
- *  @file   test/sort.cpp
+ *  @file test/sort.cpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date February 6, 2024
+ *  @brief Sequence sort equivalence/backends/algorithms and intersection tests.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development, to validate different ISA-specific backends:
+ *
+ *      #define SZ_USE_WESTMERE 0
+ *      #define SZ_USE_HASWELL 0
+ *      #define SZ_USE_GOLDMONT 0
+ *      #define SZ_USE_SKYLAKE 0
+ *      #define SZ_USE_ICELAKE 0
+ *      #define SZ_USE_NEON 0
+ *      #define SZ_USE_SVE 0
+ *      #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Include the StringZilla headers before anything else, to intercept missing @c #include
+ *  directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -76,7 +68,8 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/** @brief Runs one sequence arg-sort backend over `sequence` and asserts the produced permutation matches `expected`. */
+/** Runs one sequence arg-sort backend over @c sequence and asserts the produced permutation matches
+ *  @c expected. */
 static void check_sort_unit_(sz_sequence_argsort_t argsort, sz_sequence_t const *sequence,
                              std::vector<sz_sorted_idx_t> const &expected) {
     std::vector<sz_sorted_idx_t> order(expected.size());
@@ -84,7 +77,8 @@ static void check_sort_unit_(sz_sequence_argsort_t argsort, sz_sequence_t const 
     verify(order == expected);
 }
 
-/** @brief One matched pair from an intersection: `first_index` into the first sequence, `second_index` into the second. */
+/** One matched pair from an intersection: @c first_index into the first sequence, @c second_index
+ *  into the second. */
 struct intersect_match_t {
     std::size_t first_index;
     std::size_t second_index;
@@ -97,7 +91,7 @@ struct intersect_match_t {
     }
 };
 
-/** @brief Runs one sequence intersect backend over both inputs and asserts the matched (first, second) pairs. */
+/** Runs one sequence intersect backend over both inputs, asserting the matched index pairs. */
 static void check_intersect_unit_(sz_sequence_intersect_t intersect, sz_sequence_t const *first_sequence,
                                   sz_sequence_t const *second_sequence,
                                   std::set<intersect_match_t> const &expected_pairs) {
@@ -116,19 +110,19 @@ static void check_intersect_unit_(sz_sequence_intersect_t intersect, sz_sequence
     verify(produced == expected_pairs);
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Unit
 
 /**
- *  @brief Known-answer + coverage for the sequence sort & intersect family on hand-verifiable inputs.
+ *  @brief Known-answer and coverage tests for the sequence sort and intersect family.
  *
- *  Exercises each function through the dispatched C API (automatic kernel resolution), through the
- *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through the
- *  C++ `sz::argsort` / `sz::intersect` wrappers, so a regression that the serial-vs-SIMD agreement tests
- *  would miss - because both share the same wrong ordering - is still caught against an external ground truth.
- *  The randomized sweeps against `std::stable_sort` live in `test_sort_reference_equivalence`, since this
- *  tier has to cost the same at every multiplier.
+ *  Exercises each function through the dispatched C API with automatic kernel resolution, through
+ *  the natively-compiled backend kernels directly with manual propagation to a specific kernel, and
+ *  through the C++ @c sz::argsort and @c sz::intersect wrappers, so a regression that the
+ *  serial-vs-SIMD agreement tests would miss - because both share the same wrong ordering - is
+ *  still caught against an external ground truth. The randomized sweeps against @c std::stable_sort
+ *  live in @c test_sort_reference_equivalence, as this tier costs the same at any multiplier.
  */
 void test_sort_unit() {
     using strs_t = std::vector<std::string>;
@@ -273,7 +267,7 @@ void test_sort_unit() {
                result == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 }
 
-/** @brief Known-answer intersection pairs through the dispatched API, every native kernel, and the C++ wrapper. */
+/** Known-answer intersection pairs through the dispatched API, native kernels, and C++ wrapper. */
 void test_intersect_unit() {
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
@@ -347,10 +341,11 @@ void test_intersect_unit() {
 }
 
 /**
- *  @brief Randomized intersection sizes against `sz::intersect`, across dataset sizes and shapes.
+ *  @brief Randomized intersection sizes against @c sz::intersect, across dataset sizes and shapes.
  *
- *  Lives here rather than in `test_intersect_unit` because it draws fresh corpora every run: the `_unit` tier
- *  has to cost the same at every multiplier, and these sweeps are exactly what does not.
+ *  Lives here rather than in @c test_intersect_unit because it draws fresh corpora every run: the
+ *  @c _unit tier has to cost the same at every multiplier, and these sweeps are exactly the part
+ *  that does not.
  */
 void test_intersect_equivalence() {
     fmt::println("  - testing intersection sizes against random string sets...");
@@ -386,13 +381,14 @@ void test_intersect_equivalence() {
     }
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 /**
- *  @brief Randomized sorting against a `std::stable_sort` reference, across dataset sizes and shapes.
+ *  @brief Randomized sorting against a @c std::stable_sort reference, over many sizes and shapes.
  *
- *  Lives here rather than in `test_sort_unit` because it draws fresh corpora every run: the `_unit` tier
- *  has to cost the same at every multiplier, and these sweeps are exactly what does not.
+ *  Lives here rather than in @c test_sort_unit because it draws fresh corpora every run: the
+ *  @c _unit tier has to cost the same at every multiplier, and these sweeps are exactly the part
+ *  that does not.
  */
 void test_sort_reference_equivalence() {
     fmt::println("  - testing sorting against a std::stable_sort reference...");
@@ -546,10 +542,8 @@ void test_sort_reference_equivalence() {
 
 #pragma region Equivalence
 
-/**
- *  @brief One backend's byte + uncased sequence arg-sort kernels, stored by pointer so the differential driver can
- *         iterate a table.
- */
+/** One backend's byte + uncased sequence arg-sort kernels, stored by pointer so the differential
+ *  driver can iterate a table. */
 struct sort_backend_t {
     char const *name;
     sz_sequence_argsort_t argsort;
@@ -557,11 +551,12 @@ struct sort_backend_t {
 };
 
 /**
- *  @brief Demands a candidate sort backend produce results identical to the reference backend, where `inputs` is a
- *         baseline repetition count routed through `scale_iterations`, not a dataset size.
+ *  @brief Demands a candidate sort backend produce results identical to the reference backend.
+ *  @param[in] inputs Baseline repetition count, routed through @c scale_iterations, not a size.
  *
- *  Both the byte and uncased arg-sorts are @b stable, so for any input the permutation is unique - the candidate
- *  and reference `order` arrays must match exactly across ascending, descending, and top-K modes.
+ *  Both the byte and uncased arg-sorts are @b stable, so for any input the permutation is unique -
+ *  the candidate and reference @c order arrays must match exactly across the ascending, descending,
+ *  and top-K modes.
  */
 template <typename reference_, typename candidate_>
 void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -627,18 +622,18 @@ void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size
     }
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
 /**
- *  @brief Degenerate sequences for the sorting family, asserting the permutation stays a permutation.
+ *  @brief Degenerate sequences for the sorting family, asserting the output stays a permutation.
  *
- *  An empty sequence, a single element, and one where every string is identical each have a defensible
- *  answer, and what is asserted here is the shape of the reply rather than its order: the output must be a
- *  permutation of the input indices, every index present exactly once. An all-equal input is the one that
- *  catches a comparator returning a strict order where it should report a tie, since any ordering of it
- *  looks sorted and only the permutation property fails.
+ *  An empty sequence, a single element, and one where every string is identical each have a
+ *  defensible answer, and what is asserted here is the shape of the reply rather than its order:
+ *  the output must be a permutation of the input indices, every index present exactly once. An
+ *  all-equal input is the one that catches a comparator returning a strict order where it should
+ *  report a tie, since any ordering of it looks sorted and only the permutation property fails.
  */
 void test_sort_safety() {
     fmt::println("  - testing degenerate sequences of the sorting kernels...");
@@ -703,14 +698,12 @@ void test_sort_safety() {
     fmt::println("    degenerate-sequence safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/**
- *  @brief The sequence arg-sort backends compiled on this target. The always-present `dispatched` entry keeps the
- *         table non-empty on a baseline build.
- */
+/** The sequence arg-sort backends compiled on this target. The always-present @c dispatched entry
+ *  keeps the table non-empty on a baseline build. */
 static sort_backend_t const sequence_sort_backends[] = {
     {"dispatched", sz_sequence_argsort, sz_sequence_argsort_uncased},
 #if SZ_USE_HASWELL
@@ -730,7 +723,7 @@ static sort_backend_t const sequence_sort_backends[] = {
 #endif
 };
 
-/** @brief Runs `check_sort_equivalence_` (serial reference vs every compiled backend, dispatched first). */
+/** Runs @c check_sort_equivalence_ of serial against every compiled backend, dispatched first. */
 void test_sort_all() {
     sort_backend_t const serial {"serial", sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial};
     // Four repetitions at multiplier 1.0, one per top-K mode; `SZ_TESTS_MULTIPLIER` dials both ways from here.
@@ -738,4 +731,4 @@ void test_sort_all() {
     for (sort_backend_t const &backend : sequence_sort_backends) check_sort_equivalence_(serial, backend, repetitions);
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

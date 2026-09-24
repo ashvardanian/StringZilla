@@ -1,7 +1,9 @@
 /**
- *  @brief SVE backend for hardware-accelerated memory operations on Arm v9 CPUs.
  *  @file include/stringzilla/memory/sve.h
  *  @author Ash Vardanian
+ *  @date October 3, 2024
+ *  @brief SVE backend for hardware-accelerated memory operations on Arm v9 CPUs.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_SVE_H_

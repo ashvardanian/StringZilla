@@ -1,7 +1,9 @@
 /**
- *  @brief AVX-512 backend for hardware-accelerated memory operations on Skylake and newer x86 CPUs.
  *  @file include/stringzilla/memory/skylake.h
  *  @author Ash Vardanian
+ *  @date January 5, 2024
+ *  @brief AVX-512 backend for hardware-accelerated memory operations on Skylake and newer x86 CPUs.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_SKYLAKE_H_

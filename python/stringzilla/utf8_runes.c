@@ -1,17 +1,19 @@
 /**
- *  @brief Codepoint-level UTF-8 machinery — counting, seeking, decoding, and rune iteration.
  *  @file python/stringzilla/utf8_runes.c
  *  @author Ash Vardanian
+ *  @date November 24, 2025
+ *  @brief Codepoint-level UTF-8 machinery — counting, seeking, decoding, and rune iteration.
  */
 #include "stringzilla.h"
 
 /**
- *  @brief  Iterator yielding Unicode code points (as Python @c int) decoded from UTF-8 text.
+ *  @brief Iterator yielding Unicode code points (as Python @c int) decoded from UTF-8 text.
  *
- *  Streams code points by refilling a small inline buffer with @c sz_utf8_decode, which fills the whole
- *  buffer (or drains the input) per call regardless of script width, and substitutes U+FFFD for ill-formed bytes.
- *  The buffer lives in the iterator itself - no extra allocation. @c cursor advances by the bytes consumed on each
- *  refill. Mirrors the @c Utf8Boundaries batched model, but buffers decoded runes rather than (start, length) pairs.
+ *  Streams code points by refilling a small inline buffer with @c sz_utf8_decode, which fills the
+ *  whole buffer (or drains the input) per call regardless of script width, and substitutes U+FFFD
+ *  for ill-formed bytes. The buffer lives in the iterator itself - no extra allocation. @c cursor
+ *  advances by the bytes consumed on each refill. Mirrors the @c Utf8Boundaries batched model, but
+ *  buffers decoded runes rather than (start, length) pairs.
  */
 typedef struct {
     PyObject ob_base;
@@ -42,7 +44,7 @@ char const doc_utf8_count[] =                                                   
     "Example:\n"                                                                 //
     "  >>> sz.utf8_count('hello')  # 5 ASCII chars = 5\n"                        //
     "  5\n"                                                                      //
-    "  >>> sz.utf8_count('\xc3\xa9')  # 1 char (e-acute) = 1\n"                  //
+    "  >>> sz.utf8_count('\xc3\xa9')  # 1 e-acute char = 1\n"                    //
     "  1";
 
 PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -75,21 +77,21 @@ PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t 
     return PyLong_FromSize_t(count);
 }
 
-char const doc_utf8_codepoints[] =                                                     //
-    "utf8_codepoints(string)\n"                                                        //
-    "\n"                                                                               //
-    "Return an iterator yielding Unicode code points (as int) decoded from UTF-8.\n"   //
-    "Ill-formed bytes decode to U+FFFD (the replacement character), so iteration is\n" //
-    "total and never raises on malformed input.\n"                                     //
-    "\n"                                                                               //
-    "Args:\n"                                                                          //
-    "    string: The input UTF-8 string to decode into code points.\n"                 //
-    "\n"                                                                               //
-    "Returns:\n"                                                                       //
-    "    Iterator yielding int code points, one per Unicode scalar value.\n\n"         //
-    "\n"                                                                               //
-    "Example:\n"                                                                       //
-    "  >>> list(sz.utf8_codepoints('AB'))\n"                                           //
+char const doc_utf8_codepoints[] =                                                    //
+    "utf8_codepoints(string)\n"                                                       //
+    "\n"                                                                              //
+    "Return an iterator yielding Unicode code points as int, decoded from UTF-8.\n"   //
+    "Ill-formed bytes decode to U+FFFD, the replacement character, so iteration is\n" //
+    "total and never raises on malformed input.\n"                                    //
+    "\n"                                                                              //
+    "Args:\n"                                                                         //
+    "    string: The input UTF-8 string to decode into code points.\n"                //
+    "\n"                                                                              //
+    "Returns:\n"                                                                      //
+    "    Iterator yielding int code points, one per Unicode scalar value.\n\n"        //
+    "\n"                                                                              //
+    "Example:\n"                                                                      //
+    "  >>> list(sz.utf8_codepoints('AB'))\n"                                          //
     "  [65, 66]";
 
 PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,

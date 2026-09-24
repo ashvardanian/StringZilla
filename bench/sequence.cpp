@@ -1,24 +1,32 @@
 
 /**
  *  @file bench/sequence.cpp
+ *  @author Ash Vardanian
+ *  @date June 26, 2023
  *  @brief Benchmarks sorting, partitioning, and merging operations on string sequences.
- *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *         validating the SIMD-accelerated backends against the serial baselines.
  *
- *  Memory-bound: sort cost is dominated by cache-missing permutation over the whole collection, so it reads the whole file by default.
+ *  The program accepts a file path to a dataset, tokenizes it, and benchmarks the search
+ *  operations, validating the SIMD-accelerated backends against the serial baselines.
+ *
+ *  Memory-bound: sort cost is dominated by cache-missing permutation over the whole collection, so
+ *  it reads the whole file by default.
  *
  *  Benchmarks include:
  *  - String sequence sorting algorithms - @b argsort and @b pgrams_sort.
  *  - String sequences intersections - @b intersect.
  *
- *  For sorting, the number of operations per second are reported as the worst-case time complexity of a
- *  comparison-based sorting algorithm, meaning O(N*log(N)) for N elements. For intersections, the number of
- *  operations is estimated as the total number of characters in the two input sequences.
+ *  For sorting, the number of operations per second are reported as the worst-case time complexity
+ *  of a comparison-based sorting algorithm, meaning O(N × log(N)) for N elements. For
+ *  intersections, the number of operations is estimated as the total number of characters in the
+ *  two input sequences combined.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -27,7 +35,7 @@
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -37,9 +45,9 @@
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzilla_bench_sequence_cpp20
  *  @endcode
  *
- *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
- *  like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes (exactly 1 cache line),
- *  your last command may look like:
+ *  Alternatively, if you really want to stress-test a very specific function on a certain size
+ *  inputs, like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes
+ *  (exactly 1 cache line), your last command may look like:
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
@@ -47,8 +55,8 @@
  *  build_release/stringzilla_bench_sequence_cpp20
  *  @endcode
  *
- *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `find.cpp`, `token.cpp`, and `memory.cpp`.
+ *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
+ *  Google Benchmark. This file is the sibling of `find.cpp`, `token.cpp`, and `memory.cpp`.
  */
 #include <memory>        // `std::memcpy`
 #include <numeric>       // `std::iota`
@@ -76,14 +84,14 @@ using permute_t = std::vector<sz_sorted_idx_t>;
 #define SZ_HAS_QSORT_S_ 1
 #endif
 
-/** @brief Helper function to distill a large @b `permute_t` object down to a single comparable hash integer. */
+/** Helper function to distill a large @b permute_t object down to one comparable hash integer. */
 template <typename entries_type_>
 bool is_sorting_permutation(entries_type_ const &entries, permute_t const &permute) {
     return std::is_sorted(permute.begin(), permute.end(),
                           [&](std::size_t i, std::size_t j) { return entries[i] < entries[j]; });
 }
 
-/** @brief Helper function to accumulate the total length of all strings in a sequence. */
+/** Helper function to accumulate the total length of all strings in a sequence. */
 std::size_t accumulate_lengths(strings_t const &strings) {
     return std::accumulate(strings.begin(), strings.end(), (std::size_t)0,
                            [](std::size_t sum, std::string_view const &str) { return sum + str.size(); });
@@ -91,13 +99,13 @@ std::size_t accumulate_lengths(strings_t const &strings) {
 
 #pragma region C Callbacks
 
-/** @brief Trampoline function to access @b `sz_cptr_t[]` arrays via @b `sz_sequence_t::get_start`. */
+/** Trampoline function to access @b sz_cptr_t[] arrays via @c sz_sequence_t::get_start. */
 static sz_cptr_t get_start(void const *handle, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
     return array[i].data();
 }
 
-/** @brief Trampoline function to access @b `sz_cptr_t[]` arrays via @b `sz_sequence_t::get_length`. */
+/** Trampoline function to access @b sz_cptr_t[] arrays via @c sz_sequence_t::get_length. */
 static sz_size_t get_length(void const *handle, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
     return array[i].size();
@@ -106,8 +114,8 @@ static sz_size_t get_length(void const *handle, sz_size_t i) {
 #if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
 
 /**
- *  @brief Callback function for the @b `qsort_r` re-entrant sorting function.
- *  @note The `qsort_r` function is not available on all platforms, and is not part of the C standard.
+ *  @brief Callback function for the @b qsort_r re-entrant sorting function.
+ *  @note The @c qsort_r function is not available on all platforms, and is not in the C standard.
  */
 #if defined(_MSC_VER)
 static int _get_qsort_order(void *arg, void const *a, void const *b) {
@@ -211,7 +219,7 @@ struct argsort_strings_via_sz {
 
 /**
  *  @brief Find the array permutation that sorts the input strings.
- *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
+ *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
 void bench_sequencing_strings(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
@@ -251,8 +259,8 @@ void bench_sequencing_strings(environment_t const &env) {
 #endif
 }
 
-/** @brief Case-fold every token once so the uncased checksum can validate in folded-byte order
- *         without re-folding on every benchmarked call (which would dominate the measured throughput). */
+/** Case-fold every token once, so the uncased checksum can validate in folded-byte order without
+ *  re-folding on every benchmarked call, which would dominate the measured throughput. */
 std::vector<std::string> fold_tokens(strings_t const &tokens) {
     std::vector<std::string> folded(tokens.size());
     std::vector<char> scratch;
@@ -265,8 +273,9 @@ std::vector<std::string> fold_tokens(strings_t const &tokens) {
     return folded;
 }
 
-/** @brief Uncased analogue of `is_sorting_permutation`: validates the permutation orders the strings
- *         by their folded forms. UTF-8 byte order matches code-point order, so folded-byte `<` is the fold key. */
+/** Uncased analogue of @c is_sorting_permutation: validates the permutation orders the strings by
+ *  their folded forms. UTF-8 byte order matches code-point order, so the folded-byte `<` serves as
+ *  the fold key. */
 bool is_uncased_sorting_permutation(std::vector<std::string> const &folded, permute_t const &permute) {
     return std::is_sorted(permute.begin(), permute.end(),
                           [&](std::size_t i, std::size_t j) { return folded[i] < folded[j]; });
@@ -320,7 +329,7 @@ struct argsort_ci_strings_via_sz {
 
 /**
  *  @brief Find the array permutation that sorts the input strings in UTF-8 case-folded order.
- *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
+ *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
 void bench_sequencing_strings_uncased(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
@@ -408,7 +417,7 @@ struct sort_pgrams_via_sz {
 
 /**
  *  @brief Find the array permutation that sorts the input strings.
- *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
+ *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
 void bench_sequencing_pgrams(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
@@ -455,7 +464,7 @@ void bench_sequencing_pgrams(environment_t const &env) {
 
 #pragma region Intersections Benchmarks
 
-/** @brief Uses the STL's @b `std::unordered_map` to find the intersections between two string sequences. */
+/** Uses the STL's @c std::unordered_map to find the intersections between two string sequences. */
 struct intersect_strings_via_std_t {
     strings_t const &input_a;
     strings_t const &input_b;
@@ -534,7 +543,7 @@ struct intersect_strings_via_sz {
 
 /**
  *  @brief Find the array permutation that sorts the input strings.
- *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
+ *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
 void bench_intersections(environment_t const &env) {
 

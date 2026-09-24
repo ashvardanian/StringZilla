@@ -13,6 +13,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/hash.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/hash.py -q
+
+File: test/hash.py
+Author: Ash Vardanian
+Date: December 1, 2024
 """
 
 import hashlib

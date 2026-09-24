@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: Goldmont (x86-64 SHA-NI), mirroring `include/stringzilla/hash/goldmont.h` */
+/**
+ *  @file probes/x86_goldmont.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for Goldmont, the x86-64 SHA-NI tier.
+ *
+ *  @sa include/stringzilla/hash/goldmont.h
+ */
 #include <immintrin.h>
 
 #if defined(__clang__)

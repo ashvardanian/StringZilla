@@ -1,7 +1,9 @@
 /**
- *  @brief Arm SVE2 backend for UTF-8 case-insensitive substring search.
  *  @file include/stringzilla/utf8_uncased/sve2.h
  *  @author Ash Vardanian
+ *  @date July 17, 2026
+ *  @brief Arm SVE2 backend for UTF-8 case-insensitive substring search.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_SVE2_H_
@@ -15,6 +17,12 @@
 extern "C" {
 #endif
 
+/*  The scalable twin of the NEON uncased search. One Z register is the scan chunk, so the NEON
+ *  two-register boundary dance disappears: the previous-byte view is a single @c svtbl down-shift,
+ *  with lane 0 reading zero per the chunk-start convention every backend shares; the next-byte view
+ *  is one @c svext; and tail chunks load through predicated @c svld1, with no zero-padded stack
+ *  buffers at all. Candidate masks lower once per chunk through the predicate bridge and iterate
+ *  through the shared serial candidate pop. */
 #if SZ_USE_SVE2
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
@@ -23,36 +31,30 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-/*  The scalable twin of the NEON uncased search. One Z register is the scan chunk, so the NEON two-register
- *  boundary dance disappears: the previous-byte view is a single `svtbl` down-shift (lane 0 reads zero, the
- *  chunk-start convention every backend shares), the next-byte view one `svext`, and tail chunks load through
- *  predicated `svld1` - no zero-padded stack buffers at all. Candidate masks lower once per chunk through the
- *  predicate bridge and iterate through the shared serial candidate pop. */
-
-/** @brief Bytes in the unsigned range [start, start + span): one wrap-around subtract + compare. */
+/** Bytes in the unsigned range [start, start + span): one wrap-around subtract + compare. */
 SZ_HELPER_INLINE svbool_t sz_utf8_uncased_sve2_in_range_(svuint8_t values_u8x, sz_u8_t start, sz_u8_t span) {
     svbool_t const all_b8x = svptrue_b8();
     return svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, values_u8x, start), span);
 }
 
-/** @brief The previous byte per lane (lane 0 reads zero - a match never needs its lead's predecessor). */
+/** The previous byte per lane (lane 0 reads zero - a match never needs its lead's predecessor). */
 SZ_HELPER_INLINE svuint8_t sz_utf8_uncased_sve2_previous_(svuint8_t values_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     return svtbl_u8(values_u8x, svsub_n_u8_x(all_b8x, svindex_u8(0, 1), 1));
 }
 
-/** @brief The next byte per lane (the last lane reads zero; the overlapping scan re-derives it next chunk). */
+/** Next byte per lane; the last reads zero, as the overlapping scan re-derives it next chunk. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_uncased_sve2_next_(svuint8_t values_u8x) {
     return svext_u8(values_u8x, svdup_n_u8(0), 1);
 }
 
-/** @brief Folds ASCII A-Z down to a-z, leaving every other byte unchanged. */
+/** Folds ASCII A-Z down to a-z, leaving every other byte unchanged. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_uncased_search_sve2_ascii_fold_(svuint8_t text_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     return svadd_n_u8_m(svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, text_u8x, 'A'), 26), text_u8x, 0x20);
 }
 
-/** @brief View-signature ASCII fold: only the raw bytes matter. */
+/** View-signature ASCII fold: only the raw bytes matter. */
 SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_ascii_fold_views_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                            svuint8_t previous2_u8x,
                                                                            svuint8_t next_u8x) {
@@ -64,20 +66,18 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_ascii_fold_views_(svuin
 
 #pragma region Scripted Uncased Find
 
-/** @brief Folds one sub-vector of haystack text using script-specific rules; the driver supplies the
- *         previous-byte, previous-previous-byte, and next-byte views with cross-sub-vector carries. */
+/** Folds one sub-vector of haystack text using script-specific rules; the driver supplies the
+ *  previous-byte, previous-previous-byte, and next-byte views with cross-sub-vector carries. */
 typedef svuint8_t (*sz_utf8_uncased_fold_sve2_t)(svuint8_t text_u8x, svuint8_t previous_u8x, svuint8_t previous2_u8x,
                                                  svuint8_t next_u8x);
 
-/** @brief Non-zero when the sub-vector holds "danger" characters that fold to a different byte width. */
+/** Non-zero when the sub-vector holds "danger" characters that fold to a different byte width. */
 typedef int (*sz_utf8_uncased_alarm_sve2_t)(svuint8_t text_u8x, svuint8_t previous_u8x, svuint8_t next_u8x,
                                             svbool_t loaded_b8x);
 
-/**
- *  @brief  Shared scan loop behind all script-specific uncased searches - the SVE2 twin of
- *          @ref sz_utf8_uncased_search_neon_scripted_ over one-vector chunks. The driver is force-inlined into
- *          each thin per-script wrapper, so the callbacks resolve to direct calls.
- */
+/** Shared scan loop behind all script-specific uncased searches - the SVE2 twin of
+ *  @ref sz_utf8_uncased_search_neon_scripted_ over one-vector chunks. The driver is force-inlined
+ *  into each thin per-script wrapper, so the callbacks resolve to direct calls. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_scripted_( //
     sz_utf8_uncased_fold_sve2_t fold,                             //
     sz_utf8_uncased_alarm_sve2_t alarm,                           //
@@ -175,8 +175,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_scripted_( //
             sz_size_t const candidate_offset = sz_utf8_uncased_pop_candidate_(&matches);
             sz_cptr_t const haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
-            // Re-fold the candidate window through the SAME per-chunk semantics: a predicated load zeroes
-            // every byte past the window, so the fold sees a zero predecessor and successor at the edges.
+            // Re-fold the candidate window through the same per-chunk semantics: a predicated load
+            // zeroes every byte past the window, so the fold sees a zero predecessor and successor
+            // at the edges.
             sz_size_t const candidate_available = (sz_size_t)(haystack_end - haystack_candidate_ptr);
             svbool_t const window_load_b8x = svwhilelt_b8_u64(
                 0, (sz_u64_t)(candidate_available < folded_window_length ? candidate_available : folded_window_length));
@@ -209,8 +210,8 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_scripted_( //
     return SZ_NULL_CHAR;
 }
 
-/** @brief 3-probe ASCII uncased search: probes at 0, mid, last cover ALL bytes of windows up to 3 bytes,
- *         so candidates skip window verification and go straight to head/tail validation. */
+/** 3-probe ASCII uncased search: probes at 0, mid, and last cover all bytes of windows up to 3
+ *  bytes, so candidates skip window verification and go straight to head/tail validation. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_ascii_3probe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                    //
     sz_cptr_t needle, sz_size_t needle_length,                        //
@@ -275,7 +276,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_ascii_3probe_( //
 
 #pragma region Script Folds and Alarms
 
-/** @brief Western European fold: ASCII, Latin-1 uppercase +0x20 (minus multiply sign), Eszett to "ss". */
+/** Western European fold: ASCII, Latin-1 uppercase +0x20 (minus multiply sign), Eszett to "ss". */
 SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_western_europe_fold_(svuint8_t text_u8x,
                                                                               svuint8_t previous_u8x,
                                                                               svuint8_t previous2_u8x,
@@ -296,7 +297,7 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_western_europe_fold_(sv
     return svadd_n_u8_m(latin1_upper_b8x, result_u8x, 0x20);
 }
 
-/** @brief Western European alarm: width-changing folds route to the serial danger-zone scanner. */
+/** Western European alarm: width-changing folds route to the serial danger-zone scanner. */
 SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_western_europe_alarm_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                          svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -323,7 +324,7 @@ SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_western_europe_alarm_(svuint8
     return svptest_any(loaded_b8x, svand_b_z(loaded_b8x, danger_b8x, loaded_b8x));
 }
 
-/** @brief Central European fold: Latin-1 +0x20 and the Latin Extended-A parity via the shared delta LUTs. */
+/** Central European fold: Latin-1 +0x20 and Latin Extended-A parity via the shared delta LUTs. */
 SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_central_europe_fold_(svuint8_t text_u8x,
                                                                               svuint8_t previous_u8x,
                                                                               svuint8_t previous2_u8x,
@@ -354,7 +355,7 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_central_europe_fold_(sv
     return svadd_u8_x(all_b8x, result_u8x, deltas_u8x);
 }
 
-/** @brief Central European alarm: cross-block and width-changing folds. */
+/** Central European alarm: cross-block and width-changing folds. */
 SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_central_europe_alarm_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                          svuint8_t next_u8x, svbool_t loaded_b8x) {
     sz_unused_(next_u8x);
@@ -381,7 +382,7 @@ SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_central_europe_alarm_(svuint8
     return svptest_any(loaded_b8x, svand_b_z(loaded_b8x, danger_b8x, loaded_b8x));
 }
 
-/** @brief Cyrillic fold: second-byte high-nibble offsets after D0 plus the D0 -> D1 lead promotion. */
+/** Cyrillic fold: second-byte high-nibble offsets after D0 plus the D0 → D1 lead promotion. */
 SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_cyrillic_fold_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                         svuint8_t previous2_u8x, svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
@@ -400,7 +401,7 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_cyrillic_fold_(svuint8_
     return svadd_n_u8_m(needs_d1_b8x, result_u8x, 0x01);
 }
 
-/** @brief Cyrillic alarm: Cyrillic Extended-C (E1 B2 80-88) folds into basic 2-byte letters. */
+/** Cyrillic alarm: Cyrillic Extended-C (E1 B2 80-88) folds into basic 2-byte letters. */
 SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_cyrillic_alarm_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                    svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -410,7 +411,7 @@ SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_cyrillic_alarm_(svuint8_t tex
     return svptest_any(loaded_b8x, svand_b_z(loaded_b8x, danger_b8x, loaded_b8x));
 }
 
-/** @brief Greek fold: the shared CE delta / promotion LUTs, final sigma, and the micro sign join. */
+/** Greek fold: the shared CE delta / promotion LUTs, final sigma, and the micro sign join. */
 SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_greek_fold_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                      svuint8_t previous2_u8x, svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
@@ -448,7 +449,7 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_greek_fold_(svuint8_t t
     return svadd_u8_x(all_b8x, result_u8x, offsets_u8x);
 }
 
-/** @brief Greek alarm: expanding diaeresis vowels, Greek symbols, the Ohm sign, polytonic/archaic leads. */
+/** Greek alarm: expanding diaeresis vowels, Greek symbols, Ohm sign, polytonic/archaic leads. */
 SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_greek_alarm_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                 svuint8_t next_u8x, svbool_t loaded_b8x) {
     sz_unused_(next_u8x);
@@ -476,7 +477,7 @@ SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_greek_alarm_(svuint8_t text_u
     return svptest_any(loaded_b8x, svand_b_z(loaded_b8x, danger_b8x, loaded_b8x));
 }
 
-/** @brief Armenian fold: three second-byte offsets on disjoint lanes plus the two +1 lead promotions. */
+/** Armenian fold: three second-byte offsets on disjoint lanes plus the two +1 lead promotions. */
 SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_armenian_fold_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                         svuint8_t previous2_u8x, svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
@@ -502,7 +503,7 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_armenian_fold_(svuint8_
     return svadd_n_u8_m(svorr_b_z(all_b8x, promotes_d4_b8x, promotes_d5_b8x), result_u8x, 0x01);
 }
 
-/** @brief Armenian alarm: the Ech-Yiwn ligature (D6 87) and the presentation-form ligatures (EF AC xx). */
+/** Armenian alarm: the Ech-Yiwn ligature (D6 87) and the presentation-form ligatures (EF AC xx). */
 SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_armenian_alarm_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                    svuint8_t next_u8x, svbool_t loaded_b8x) {
     sz_unused_(next_u8x);
@@ -515,7 +516,7 @@ SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_armenian_alarm_(svuint8_t tex
     return svptest_any(loaded_b8x, svand_b_z(loaded_b8x, danger_b8x, loaded_b8x));
 }
 
-/** @brief Vietnamese fold: four Latin blocks folding in place, incl. the E1 B8-BB third-byte parity. */
+/** Vietnamese fold: four Latin blocks folding in place, incl. the E1 B8-BB third-byte parity. */
 SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_vietnamese_fold_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                           svuint8_t previous2_u8x, svuint8_t next_u8x) {
     sz_unused_(next_u8x);
@@ -553,7 +554,7 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_vietnamese_fold_(svuint
                         result_u8x, 0x01);
 }
 
-/** @brief Vietnamese alarm: the expanding E1 BA 96-9F block and the shared Latin width-changers. */
+/** Vietnamese alarm: the expanding E1 BA 96-9F block and the shared Latin width-changers. */
 SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_vietnamese_alarm_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                      svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -576,7 +577,7 @@ SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_vietnamese_alarm_(svuint8_t t
     return svptest_any(loaded_b8x, svand_b_z(loaded_b8x, danger_b8x, loaded_b8x));
 }
 
-/** @brief Georgian alarm: the historical scripts (Mtavruli, Asomtavruli, Nuskhuri) fold across blocks. */
+/** Georgian alarm: the historical scripts (Mtavruli, Asomtavruli, Nuskhuri) fold across blocks. */
 SZ_HELPER_NOINLINE int sz_utf8_uncased_search_sve2_georgian_alarm_(svuint8_t text_u8x, svuint8_t previous_u8x,
                                                                    svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();

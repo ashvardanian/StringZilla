@@ -1,20 +1,24 @@
 /**
- *  @brief SVE backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @file include/stringzilla/utf8_norm/sve.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 15, 2026
+ *  @brief SVE backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
- *  `sz_utf8_norm_classify_sve_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_sve` / `sz_utf8_find_denormalized_sve`) reuse the force-inlined engines
- *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
+ *  @c sz_utf8_norm_classify_sve_, which locates the first non-inert byte for a form. The two public
+ *  entry points, @c sz_utf8_norm_sve and @c sz_utf8_find_denormalized_sve, reuse the force-inlined
+ *  engines from `serial.h`, passing this scanner as the constant function address that
+ *  devirtualizes the call.
  *
- *  The scanner is the vector-length-agnostic sibling of the NEON kernel: a `svtbl_u8` lead-classify
- *  behind a per-vector ASCII/inert gate, with a cold per-codepoint verify. Because SVE's `svtbl_u8`
- *  indexes only the bottom slice of a scalable vector, the 64-entry `sz_utf8_norm_lead_lut_` is
- *  resolved with the proven 4-way `svsel_u8` range-blend from `memory/sve.h`: four sub-tables for
- *  index ranges 0-15 / 16-31 / 32-47 / 48-63, blended by `svcmplt` / `svcmpge` predicates. For a
- *  64-byte (or wider) vector the upper predicates fold away to a single `svtbl_u8`.
+ *  The scanner is the vector-length-agnostic sibling of the NEON kernel: a @c svtbl_u8
+ *  lead-classify behind a per-vector ASCII/inert gate, with a cold per-codepoint verify. Because
+ *  SVE's @c svtbl_u8 indexes only the bottom slice of a scalable vector, the 64-entry
+ *  @c sz_utf8_norm_lead_lut_ is resolved with the proven 4-way @c svsel_u8 range-blend from
+ *  `memory/sve.h`: four sub-tables for the index ranges 0-15, 16-31, 32-47 and 48-63, blended by
+ *  the @c svcmplt and @c svcmpge predicates. For a 64-byte or wider vector the upper predicates
+ *  fold away to a single @c svtbl_u8.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_SVE_H_
 #define STRINGZILLA_UTF8_NORM_SVE_H_
@@ -35,12 +39,15 @@ extern "C" {
 #endif
 
 /**
- *  @brief Scan primitive (SVE): first byte that begins a non-inert codepoint for @p form, else NULL.
+ *  @brief SVE scan primitive: finds the first byte starting a non-inert codepoint for @p form.
  *
- *  Matches `sz_utf8_norm_classify_serial_` semantics, computed from the unified props trie. The hot loop
- *  is vector-length-agnostic: a per-vector ASCII gate plus a `svtbl_u8` lead-classify (resolved with the
- *  4-way range-blend so the 64-entry LUT spans any VL); the cold per-codepoint verify carries the
- *  combining class across vectors and reports order or quick-check violations exactly.
+ *  Matches @c sz_utf8_norm_classify_serial_ semantics, computed from the unified props trie.
+ *  The hot loop is vector-length-agnostic: a per-vector ASCII gate plus a @c svtbl_u8
+ *  lead-classify, resolved with the 4-way range-blend so the 64-entry LUT spans any VL. The
+ *  cold per-codepoint verify carries the combining class across vectors, reporting any order or
+ *  quick-check violation exactly.
+ *
+ *  @return The first such byte, or NULL.
  */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;

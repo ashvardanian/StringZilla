@@ -1,19 +1,23 @@
 /**
- *  @brief Haswell (x86 AVX2) backend for sorting string collections.
  *  @file include/stringzilla/sort/haswell.h
  *  @author Ash Vardanian
+ *  @date June 14, 2026
+ *  @brief Haswell (x86 AVX2) backend for sorting string collections.
+ *
+ *  Mirrors the NEON backend's out-of-place 3-way QuickSort partition: AVX2 has no AVX-512
+ *  @c compressstore, so the per-block compaction uses a small `static const` left-pack table fed to
+ *  @c vpermd, the @c _mm256_permutevar8x32_epi32 intrinsic. A 4-u64 block is treated as 8 u32, and
+ *  row `[m]` of the table holds the 8 dword indices that gather the selected u64 lanes, of 4, to
+ *  the front. The 4-wide table is 16 × 32 = 512 bytes, small enough to keep @c const and warm in
+ *  cache, versus the 16 KB an 8-wide table would need. Compaction preserves lane order, so the
+ *  partition is @b stable, matching the stable-by-default contract, and the recursion, stability,
+ *  reverse, top-K and uncased machinery is reused verbatim from `sort/serial.h`.
+ *
+ *  AVX2 has only a @b signed 64-bit compare, @c _mm256_cmpgt_epi64, so unsigned pgram keys are
+ *  biased by the sign bit, an XOR with `0x8000...`, before comparing, which maps unsigned order
+ *  onto signed order.
+ *
  *  @sa include/stringzilla/sort.h
- *
- *  Mirrors the NEON backend's out-of-place 3-way QuickSort partition: AVX2 has no AVX-512 `compressstore`,
- *  so the per-block compaction uses a small `static const` left-pack table fed to `vpermd`
- *  (`_mm256_permutevar8x32_epi32`). A 4-u64 block is treated as 8 u32, and row `[m]` of the table holds the
- *  8 dword indices that gather the selected u64 lanes (of 4) to the front. The 4-wide table is 16x32 = 512
- *  bytes - small enough to keep `const` and warm in cache - versus the 16 KB an 8-wide table would need.
- *  Compaction preserves lane order, so the partition is @b stable - matching the stable-by-default contract -
- *  and the recursion/stability/reverse/top-K/uncased machinery is reused verbatim from `sort/serial.h`.
- *
- *  AVX2 has only a @b signed 64-bit compare (`_mm256_cmpgt_epi64`), so unsigned pgram keys are biased by the
- *  sign bit (XOR `0x8000...`) before comparing, which maps unsigned order onto signed order.
  */
 #ifndef STRINGZILLA_SORT_HASWELL_H_
 #define STRINGZILLA_SORT_HASWELL_H_
@@ -36,37 +40,38 @@ extern "C" {
 #pragma GCC target("avx2", "popcnt")
 #endif
 
-/**
- *  @brief Number of `sz_pgram_t` lanes in one AVX2 vector (4 on 64-bit) - the granularity at which the
- *      3-way partition loads, `vpermd`-permutes, and stores.
- */
+/** Number of @c sz_pgram_t lanes in one AVX2 vector (4 on 64-bit) - the granularity at which the
+ *  3-way partition loads, @c vpermd-permutes, and stores. */
 #define sz_sort_haswell_vector_lanes_ ((sz_size_t)(sizeof(__m256i) / sizeof(sz_pgram_t)))
 
 /**
- *  @brief Gap, in pgram lanes, that the out-of-place 3-way partition leaves between its scratch regions.
+ *  @brief Gap, in pgram lanes, that the out-of-place 3-way partition leaves between
+ *      its scratch regions.
  *
- *  AVX2 has @b no masked or compress store, so the compaction (`sz_sort_haswell_compact4_`) left-packs with
- *  `vpermd` and then stores a @b full vector, advancing the output cursor only by the surviving-lane count.
- *  A region's final store can therefore overrun its true end by up to one whole vector, so consecutive
- *  regions are separated by exactly one vector width to absorb that overrun. The gap is purely a consequence
- *  of the missing masked store - Skylake, whose `vpcompressstoreu` writes exactly the survivors, needs none.
+ *  AVX2 has @b no masked or compress store, so the compaction in @c sz_sort_haswell_compact4_
+ *  left-packs with @c vpermd and then stores a @b full vector, advancing the output cursor only by
+ *  the surviving-lane count. A region's final store can therefore overrun its true end by up to one
+ *  whole vector, so consecutive regions are separated by exactly one vector width to absorb that
+ *  overrun. The gap is purely a consequence of the missing masked store - Skylake, whose
+ *  @c vpcompressstoreu writes exactly the survivors, needs none.
  */
 #define sz_sort_haswell_region_gap_ sz_sort_haswell_vector_lanes_
 
-/** @brief Per-`count` scratch over-allocation: two inter-region gaps + the trailing region's overrun. */
+/** Scratch over-allocation per @c count: two inter-region gaps and the
+ *  trailing region's overrun. */
 #define sz_sort_haswell_partition_slack_ (3 * sz_sort_haswell_region_gap_)
 
-/** @brief Collapses a 64-bit-lane compare result (each lane 0 or ~0) into a 4-bit lane mask. */
+/** Collapses a 64-bit-lane compare result (each lane 0 or ~0) into a 4-bit lane mask. */
 SZ_HELPER_INLINE sz_u32_t sz_sort_haswell_lane_mask4_(__m256i const compared_u64x4) {
     return (sz_u32_t)_mm256_movemask_pd(_mm256_castsi256_pd(compared_u64x4));
 }
 
-/** @brief Left-packs the @p mask4 -selected lanes of one 4-u64 block (keys @p keys_u64x4 and order
- *         @p order_u64x4) to the @p out_pgrams / @p out_order cursors, preserving order; returns how many
- *         lanes were written. The full vector is stored unconditionally (the cursor only advances by the
- *         surviving count, so the unwritten tail is overwritten by the next call or lands in the region
- *         slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent
- *         "store only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
+/** Left-packs the @p mask4 -selected lanes of one 4-u64 block (keys @p keys_u64x4 and order
+ *  @p order_u64x4) to the @p out_pgrams / @p out_order cursors, preserving order; returns how many
+ *  lanes were written. The full vector is stored unconditionally (the cursor only advances by the
+ *  surviving count, so the unwritten tail is overwritten by the next call or lands in the region
+ *  slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent "store
+ *  only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
 SZ_HELPER_INLINE sz_size_t sz_sort_haswell_compact4_(    //
     __m256i const keys_u64x4, __m256i const order_u64x4, //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
@@ -100,22 +105,25 @@ SZ_HELPER_INLINE sz_size_t sz_sort_haswell_compact4_(    //
     return taken;
 }
 
-/** @brief Per-region pair of output cursors (keys and matching order) the 3-way partition left-packs into. */
+/** Per-region pair of output cursors (keys and matching order) the 3-way
+ *  partition left-packs into. */
 typedef struct sz_sort_haswell_region_cursor_t {
     sz_pgram_t *pgrams;
     sz_sorted_idx_t *order;
 } sz_sort_haswell_region_cursor_t;
 
-/** @brief The smaller/equal/greater lane masks of one 8-lane block, split into its lower and upper 4-lanes. */
+/** The smaller/equal/greater lane masks of one 8-lane block, split into its lower
+ *  and upper 4-lanes. */
 typedef struct sz_sort_haswell_block_masks_t {
     sz_u32_t smaller_lower, smaller_upper;
     sz_u32_t equal_lower, equal_upper;
     sz_u32_t greater_lower, greater_upper;
 } sz_sort_haswell_block_masks_t;
 
-/** @brief Classifies one 8-lane block (its two key vectors @p keys_lower_u64x4 / @p keys_upper_u64x4) against
- *         the sign-biased @p pivot_biased_u64x4, returning the smaller/equal/greater lane masks for both
- *         4-lane halves; the equal mask is the complement of (smaller | greater), so only four compares run. */
+/** Classifies one 8-lane block (its two key vectors @p keys_lower_u64x4 / @p keys_upper_u64x4)
+ *  against the sign-biased @p pivot_biased_u64x4, returning the smaller/equal/greater lane
+ *  masks for both 4-lane halves; the equal mask is the complement of (smaller | greater), so
+ *  only four compares run. */
 SZ_HELPER_INLINE sz_sort_haswell_block_masks_t sz_sort_haswell_classify_block_( //
     __m256i const keys_lower_u64x4, __m256i const keys_upper_u64x4,             //
     __m256i const pivot_biased_u64x4, __m256i const sign_u64x4) {
@@ -132,8 +140,9 @@ SZ_HELPER_INLINE sz_sort_haswell_block_masks_t sz_sort_haswell_classify_block_( 
     return masks;
 }
 
-/** @brief Left-packs both 4-lane halves of one 8-lane block into @p cursor under @p mask_lower / @p mask_upper,
- *         advancing the cursor by the surviving-lane counts (the lower half first, preserving lane order). */
+/** Left-packs both 4-lane halves of one 8-lane block into @p cursor under @p mask_lower /
+ *  @p mask_upper, advancing the cursor by the surviving-lane counts (the lower half first,
+ *  preserving lane order). */
 SZ_HELPER_INLINE void sz_sort_haswell_compact_block_into_(           //
     sz_sort_haswell_region_cursor_t *const cursor,                   //
     __m256i const keys_lower_u64x4, __m256i const order_lower_u64x4, //
@@ -149,11 +158,12 @@ SZ_HELPER_INLINE void sz_sort_haswell_compact_block_into_(           //
 
 /**
  *  @brief 3-way partition around the Sedgewick pivot using AVX2 table-compaction.
- *  @note Out-of-place into @p partitioned_* with three regions (smaller, equal, greater) laid out by the
- *        count pass and separated by one-vector slack gaps that absorb each region's trailing full-vector
- *        store overrun; the three regions are then copied back contiguously. A single block-major pass
- *        left-packs all three comparison kinds together, so each block is loaded once and the equal mask
- *        is derived for free.
+ *
+ *  Out-of-place into @p partitioned_* with three regions, smaller, equal and greater, laid out by
+ *  the count pass and separated by one-vector slack gaps that absorb each region's trailing
+ *  full-vector store overrun; the three regions are then copied back contiguously. A single
+ *  block-major pass left-packs all three comparison kinds together, so each block is loaded once
+ *  and the equal mask is derived for free.
  */
 SZ_HELPER_INLINE void sz_sequence_argsort_haswell_3way_partition_(                  //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
@@ -368,11 +378,9 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *seq
     return sz_success_k;
 }
 
-/**
- *  @brief Uncased twin of `sz_sequence_argsort_haswell_sort_byte_windows_`: the folded code-point export
- *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      AVX2 partition - which is where Haswell beats the fully-serial uncased path.
- */
+/** Uncased twin of @c sz_sequence_argsort_haswell_sort_byte_windows_: the folded code-point export
+ *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
+ *  the AVX2 partition - which is where Haswell beats the fully-serial uncased path. */
 SZ_API_COMPTIME void sz_sequence_argsort_haswell_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,

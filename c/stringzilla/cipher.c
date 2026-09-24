@@ -1,8 +1,8 @@
 /**
  *  @file c/stringzilla/cipher.c
- *  @brief Per-domain dispatch shim for AES-256 counter and Galois/counter mode encryption.
  *  @author Ash Vardanian
  *  @date August 3, 2026
+ *  @brief Per-domain dispatch shim for AES-256 counter and Galois/counter mode encryption.
  */
 #if !defined(SZ_OVERRIDE_LIBC)
 #define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC

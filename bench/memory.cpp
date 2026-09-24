@@ -1,15 +1,22 @@
 /**
  *  @file bench/memory.cpp
- *  @brief Benchmarks for memory operations like copying, moving, resetting, and converting with lookup tables.
- *         The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
- *         references to mimic real-world scenarios dealing with individual strings of different lengths.
+ *  @author Ash Vardanian
+ *  @date September 28, 2024
+ *  @brief Benchmarks memory operations: copying, moving, resetting, and lookup-table conversion.
  *
- *  Memory-bound: the copy, move, and fill primitives are pure bandwidth, so it reads the whole file by default and a larger buffer measures throughput truer.
+ *  The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
+ *  references to mimic real-world scenarios dealing with individual strings of different lengths.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Memory-bound: the copy, move, and fill primitives are pure bandwidth, so it reads the whole file
+ *  by default and a larger buffer measures throughput truer.
+ *
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -18,7 +25,7 @@
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -28,9 +35,9 @@
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_memory_cpp20
  *  @endcode
  *
- *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
- *  like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes (exactly 1 cache line),
- *  your last command may look like:
+ *  Alternatively, if you really want to stress-test a very specific function on a certain size
+ *  inputs, like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes
+ *  (exactly 1 cache line), your last command may look like:
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
@@ -38,8 +45,8 @@
  *  build_release/stringzilla_bench_memory_cpp20
  *  @endcode
  *
- *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `find.cpp`, `token.cpp`, and `sequence.cpp`.
+ *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
+ *  Google Benchmark. This file is the sibling of `find.cpp`, `token.cpp`, and `sequence.cpp`.
  */
 #include <memory>  // `std::unique_ptr`
 #include <numeric> // `std::iota`
@@ -59,10 +66,8 @@
 using namespace ashvardanian::stringzilla::bench;
 constexpr std::size_t max_shift_length = 299;
 
-/**
- *  @brief Wraps platform-specific @b aligned memory allocation and deallocation functions.
- *         Compatible with `std::unique_ptr` as the second template argument, to free the memory.
- */
+/** Wraps platform-specific @b aligned memory allocation and deallocation functions. Compatible with
+ *  @c std::unique_ptr as the second template argument, to free the memory. */
 struct page_alloc_and_free_t {
 #ifdef _WIN32
     inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
@@ -79,7 +84,7 @@ struct page_alloc_and_free_t {
 
 #pragma region MemCpy
 
-/** @brief Wraps a hardware-specific @b `memcpy`-like backend into something compatible with @b `bench_unary`. */
+/** Wraps a hardware-specific @b memcpy-like backend into a callable for @c bench_unary. */
 template <sz_copy_t copy_func_, int page_misalignment_ = 0>
 struct copy_from_sz {
 
@@ -104,14 +109,14 @@ struct copy_from_sz {
 void memcpy_like_sz(sz_ptr_t output, sz_cptr_t input, std::size_t length) { std::memcpy(output, input, length); }
 
 /**
- *  @brief Benchmarks `memcpy`-like operations in 2 modes: @b aligned output buffer and @b shifted misaligned.
+ *  @brief Benchmarks @c memcpy -like operations into @b aligned and @b shifted misaligned output.
  *
- *  In the aligned case we copy a random part of the input string into the start of a matching cache line in the output.
- *  In the unaligned case we also locate a matching cache line in the output, but shift by one to guarantee unaligned
- *  writes.
+ *  In the aligned case we copy a random part of the input string into the start of a matching cache
+ *  line in the output. In the unaligned case we also locate a matching cache line in the output,
+ *  but shift by one to guarantee unaligned writes.
  *
- *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
- *  So the kernels can be compared against the baseline `memcpy` function.
+ *  Multiple calls to the provided functions even with the same arguments won't change the input or
+ *  output. So the kernels can be compared against the baseline @c memcpy function.
  */
 void bench_copy(environment_t const &env) {
 
@@ -168,11 +173,11 @@ void bench_copy(environment_t const &env) {
     bench_unary(env, "std::memcpy(shift)", copy_from_sz<memcpy_like_sz, 1> {env, o}).log(align, shift);
 }
 
-#pragma endregion // MemCpy
+#pragma endregion MemCpy
 
 #pragma region MemMove
 
-/** @brief Wraps a hardware-specific @b `memmove`-like backend into something compatible with @b `bench_unary`. */
+/** Wraps a hardware-specific @b memmove-like backend into a callable for @c bench_unary. */
 template <sz_move_t move_func_, int shift_ = 0>
 struct move_from_sz {
 
@@ -196,11 +201,11 @@ struct move_from_sz {
 void memmove_like_sz(sz_ptr_t output, sz_cptr_t input, std::size_t length) { std::memmove(output, input, length); }
 
 /**
- *  @brief Benchmarks @b `memmove`-like operations shuffling back and forth the regions of output memory.
+ *  @brief Benchmarks @c memmove -like operations shuffling regions of output memory back and forth.
  *
- *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
- *  This is achieved by performing a combination of a forward and a backward move.
- *  So the kernels can be compared against the baseline `memmove` function.
+ *  Multiple calls to the provided functions even with the same arguments won't change the input or
+ *  output. This is achieved by performing a combination of a forward and a backward move. So the
+ *  kernels can be compared against the baseline @c memmove function.
  */
 void bench_move(environment_t const &env) {
 
@@ -259,11 +264,11 @@ void bench_move(environment_t const &env) {
     bench_unary(env, "std::memmove(by64)", move_from_sz<memmove_like_sz, 64> {env, o}).log(byte, page);
 }
 
-#pragma endregion // MemMove
+#pragma endregion MemMove
 
 #pragma region Broadcasting Constants with MemSet
 
-/** @brief Wraps a hardware-specific @b `memset`-like backend into something compatible with @b `bench_unary`. */
+/** Wraps a hardware-specific @b memset-like backend into a callable for @c bench_unary. */
 template <sz_fill_t fill_func_>
 struct fill_from_sz {
 
@@ -281,7 +286,7 @@ struct fill_from_sz {
     }
 };
 
-/** @brief Wraps a hardware-specific @b `std::generate`-like backend into something compatible with @b `bench_unary`. */
+/** Wraps a hardware-specific @c std::generate -like backend into a callable for @c bench_unary. */
 template <sz_fill_random_t fill_func_>
 struct fill_random_from_sz {
 
@@ -304,9 +309,10 @@ struct fill_random_from_sz {
 void memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value) { std::memset(output, value, length); }
 
 /**
- *  @brief The `std::` baseline for `sz_generate`, measuring generator throughput alone.
- *  Reseeding per call would put a Mersenne-Twister state fill inside the measured loop, so the nonce
- *  is dropped and this baseline is not byte-reproducible the way the `sz_generate` kernels are.
+ *  @brief The `std::` baseline for @c sz_generate, measuring generator throughput alone.
+ *
+ *  Reseeding per call would put a Mersenne-Twister state fill inside the measured loop, so the
+ *  nonce is dropped and, unlike the @c sz_generate kernels, this baseline is not byte-reproducible.
  */
 void generate_like_sz(sz_ptr_t output, sz_size_t length, [[maybe_unused]] sz_u64_t nonce) {
     uniform_u8_distribution_t distribution;
@@ -314,11 +320,11 @@ void generate_like_sz(sz_ptr_t output, sz_size_t length, [[maybe_unused]] sz_u64
 }
 
 /**
- *  @brief Benchmarks `memset`-like operations overwriting regions of output memory filling
- *         them with the first byte of the input regions or with random @b (reproducible) byte streams.
+ *  @brief Benchmarks @c memset -like operations overwriting regions of output memory filling them
+ *      with the first byte of the input regions or with random @b (reproducible) byte streams.
  *
- *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
- *  So the kernels can be compared against the baseline `memset` function.
+ *  Multiple calls to the provided functions even with the same arguments won't change the input or
+ *  output. So the kernels can be compared against the baseline @c memset function.
  */
 void bench_fill(environment_t const &env) {
 
@@ -397,11 +403,11 @@ void bench_fill(environment_t const &env) {
     bench_unary(env, "fill<std::random_device>", fill_random_from_sz<generate_like_sz> {env, o}).log(zeros, random);
 }
 
-#pragma endregion // Broadcasting Constants with MemSet
+#pragma endregion Broadcasting Constants with MemSet
 
 #pragma region Lookup Transformations
 
-/** @brief Wraps a hardware-specific lookup-table backend into something similar to @b `std::transform`. */
+/** Wraps a hardware-specific lookup-table backend into something similar to @c std::transform. */
 template <sz_lookup_t lookup_func_>
 struct lookup_from_sz {
 
@@ -481,7 +487,7 @@ void bench_lookup(environment_t const &env) {
     bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
 }
 
-#pragma endregion // Lookup Transformations
+#pragma endregion Lookup Transformations
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.

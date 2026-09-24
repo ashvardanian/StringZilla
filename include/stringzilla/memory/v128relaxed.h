@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly relaxed-SIMD backend for memory (level above SIMD128).
  *  @file include/stringzilla/memory/v128relaxed.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly relaxed-SIMD backend for memory (level above SIMD128).
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_V128RELAXED_H_
@@ -15,13 +17,12 @@
 extern "C" {
 #endif
 
+/*  @c copy, @c move, and @c fill are pure load/store streams with no shuffle or arithmetic, so
+ *  relaxed-simd offers nothing — delegate to the baseline SIMD128 kernels. */
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
-
-/*  `copy`, `move`, and `fill` are pure load/store streams with no shuffle or arithmetic, so
- *  relaxed-simd offers nothing — delegate to the baseline SIMD128 kernels. */
 
 SZ_API_COMPTIME void sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_copy_v128(target, source, length);
@@ -35,11 +36,12 @@ SZ_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u
     sz_fill_v128(target, length, value);
 }
 
-/*  `sz_lookup_v128relaxed` replaces every `wasm_i8x16_swizzle` with `wasm_i8x16_relaxed_swizzle`.
- *  The relaxed variant skips the out-of-range-index zeroing of the strict swizzle, which is cheaper
- *  on most engines (~21% faster in audit). The selector here is always the LOW NIBBLE of a byte, so
- *  indices are in `[0, 15]` and never trigger the strict variant's zeroing path — the result is
- *  therefore byte-for-byte identical to `sz_lookup_serial`. */
+/*  @c sz_lookup_v128relaxed replaces every @c wasm_i8x16_swizzle with
+ *  @c wasm_i8x16_relaxed_swizzle. The relaxed variant skips the out-of-range-index zeroing
+ *  of the strict swizzle, which is cheaper on most engines (~21% faster in audit). The
+ *  selector here is always the low nibble of a byte, so indices are in `[0, 15]` and never
+ *  trigger the strict variant's zeroing path — the result is therefore byte-for-byte
+ *  identical to @c sz_lookup_serial. */
 SZ_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                            char const lut[sz_at_least_(256)]) {
 

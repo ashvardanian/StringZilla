@@ -1,31 +1,37 @@
 /**
- *  @brief CUDA backend for multi-pattern search: one thread per haystack chunk, the automaton's hot head
- *      staged in shared memory, and the leftmost cover resolved after the walk rather than inside it.
  *  @file include/stringzilla/substrings/cuda.cuh
  *  @author Ash Vardanian
+ *  @date August 8, 2026
+ *  @brief CUDA backend for multi-pattern search: one thread per haystack chunk, the automaton's
+ *      hot head staged in shared memory, and the leftmost cover resolved after the walk rather
+ *      than inside it.
+ *
+ *  The transition is the serial tier's, reached from the device through `--expt-relaxed-constexpr`,
+ *  so both sides answer the same matches rather than similar ones.
+ *
+ *  Parallelism comes from @b chunks rather than from haystacks: a corpus of one long document and a
+ *  corpus of a million short ones then fill the device the same way. A chunk reports every match
+ *  @b ending inside it, priming itself from the `max_source_match_bytes - 1` bytes before its own
+ *  start - clamped to its haystack, never earlier - so every match is found exactly once and no
+ *  chunk reads a neighbour's text.
+ *
+ *  A cover is a property of the matches, not of the bytes, so it is resolved after the walk. Inside
+ *  the walk it would cost every thread a ring wide enough for the longest match, and a second walk
+ *  to find a safe place to start; both are gone.
+ *
+ *  No compute verb joins the stream. Every size a launch needs is either fixed when the engine is
+ *  built - the chunk and match budgets - or derived on the device from one the host never sees, and
+ *  what a round discovered reaches the caller through @c sz_substrings_report_t after the caller's
+ *  own join. When a round outruns its match budget the writing walk, the cover, the compaction and
+ *  the boundaries kernel each retire at their first instruction, so an output is left untouched
+ *  rather than truncated.
+ *
+ *  Written in C, as every `.cuh` in this library is: the only constructs here a C compiler would
+ *  not take are the `extern "C"` that lets a C dispatch unit link against it, and the kernels'
+ *  launches, which go through @c cudaLaunchKernel rather than the `<<< >>>` the language
+ *  reserves for C++.
+ *
  *  @sa include/stringzilla/substrings.h
- *
- *  The transition is the serial tier's, reached from the device through `--expt-relaxed-constexpr`, so both
- *  sides answer the same matches rather than similar ones.
- *
- *  Parallelism comes from @b chunks rather than from haystacks: a corpus of one long document and a corpus
- *  of a million short ones then fill the device the same way. A chunk reports every match @b ending inside
- *  it, priming itself from the `max_source_match_bytes - 1` bytes before its own start - clamped to its
- *  haystack, never earlier - so every match is found exactly once and no chunk reads a neighbour's text.
- *
- *  A cover is a property of the matches, not of the bytes, so it is resolved after the walk. Inside the walk
- *  it would cost every thread a ring wide enough for the longest match, and a second walk to find a safe
- *  place to start; both are gone.
- *
- *  No compute verb joins the stream. Every size a launch needs is either fixed when the engine is built -
- *  the chunk and match budgets - or derived on the device from one the host never sees, and what a round
- *  discovered reaches the caller through `sz_substrings_report_t` after the caller's own join. When a round
- *  outruns its match budget the writing walk, the cover, the compaction and the boundaries kernel each
- *  retire at their first instruction, so an output is left untouched rather than truncated.
- *
- *  Written in C, as every `.cuh` in this library is: the only constructs here a C compiler would not take
- *  are the `extern "C"` that lets a C dispatch unit link against it, and the kernels' launches, which go
- *  through @c cudaLaunchKernel rather than the @c <<< @c >>> the language reserves for C++.
  */
 #ifndef STRINGZILLA_SUBSTRINGS_CUDA_CUH_
 #define STRINGZILLA_SUBSTRINGS_CUDA_CUH_
@@ -42,42 +48,52 @@ extern "C" {
 
 #pragma region Shapes
 
-/** Threads every kernel here launches with; occupancy is shared-memory-bound rather than thread-bound, so a
- *  modest fixed block keeps the launch geometry simple and the block scan one power of two. */
+/** Threads every kernel here launches with; occupancy is shared-memory-bound rather than
+ *  thread-bound, so a modest fixed block keeps the launch geometry simple and the block scan one
+ *  power of two. */
 enum { sz_substrings_cuda_threads_per_block_k = 256 };
 
 /** Blocks one launch covers the device with, per multiprocessor, when the work is grid-strided. */
 enum { sz_substrings_cuda_blocks_per_multiprocessor_k = 8 };
 
-/** Tiles a scan cuts its input into. The carry across tiles is serial by construction, so past this a
- *  wider grid only lengthens the one block that walks it. */
+/** Tiles a scan cuts its input into. The carry across tiles is serial by construction, so past this
+ *  a wider grid only lengthens the one block that walks it. */
 enum { sz_substrings_cuda_scan_tiles_max_k = 1024 };
 
 /** Candidates one thread scans quadratically before a cover segment falls back to emitted order. */
 enum { sz_substrings_cuda_cover_segment_limit_k = 4096 };
 
-/** Output bytes one block of a rewrite's copy owns, so no block's work scales with one run's width. */
+/** Output bytes one block of a rewrite's copy owns, so no block's work scales with
+ *  one run's width. */
 enum { sz_substrings_cuda_rewrite_tile_bytes_k = 4096 };
 
-/** Whether the caller reads the emitted matches, or only the boundaries the sizing walk already scanned. */
+/** Whether the caller reads the emitted matches, or only the boundaries the sizing
+ *  walk already scanned. */
 typedef enum sz_substrings_cuda_matches_t {
+
     /** Counting under an overlapping policy: the scanned chunk slots are the whole answer. */
     sz_substrings_cuda_matches_unneeded_k = 0,
-    /** Finding, rewriting, or any cover: the list has to exist before anything can read or thin it. */
+
+    /** Finding, rewriting, or any cover: the list has to exist before anything can read
+     *  or thin it. */
     sz_substrings_cuda_matches_needed_k = 1,
 } sz_substrings_cuda_matches_t;
 
 /** What a chunk walk does at each match: size the output so the caller can scan it, or write it. */
 typedef enum sz_substrings_cuda_pass_t {
+
     /** Store each chunk's match count, so a scan can hand every chunk a private output range. */
     sz_substrings_cuda_sizing_k = 0,
+
     /** Write each match at the offset that scan left behind. */
     sz_substrings_cuda_writing_k = 1,
+
     /** Count each match against its needle in the block's tally, for scoring. */
     sz_substrings_cuda_tallying_k = 2,
 } sz_substrings_cuda_pass_t;
 
-/** Bits of a tally slot index: 4096 slots of a key and a count each, 32 KB of static shared memory. */
+/** Bits of a tally slot index: 4096 slots of a key and a count each, 32 KB of
+ *  static shared memory. */
 enum { sz_substrings_cuda_tally_slot_bits_k = 12 };
 
 /** Slots one block's tally holds. */
@@ -88,23 +104,34 @@ enum { sz_substrings_cuda_tally_probes_k = 16 };
 
 /** How a tally maps a needle to a slot. */
 typedef enum sz_substrings_cuda_tally_layout_t {
+
     /** The vocabulary fits the slots, so a needle's index is its slot. */
     sz_substrings_cuda_tally_direct_k = 0,
-    /** A larger vocabulary, hashed into the slots with linear probing and an overflow row behind them. */
+
+    /** A larger vocabulary, hashed into the slots with linear probing and an overflow
+     *  row behind them. */
     sz_substrings_cuda_tally_hashed_k = 1,
 } sz_substrings_cuda_tally_layout_t;
 
 /** One block's per-needle counts for the haystack it is scoring. */
 typedef struct sz_substrings_cuda_tally_t {
+
     /** How @c counts is indexed. */
     sz_substrings_cuda_tally_layout_t layout;
-    /** In shared memory: each hashed slot's needle index plus one, zero while free; @c SZ_NULL when direct. */
+
+    /** In shared memory: each hashed slot's needle index plus one, zero while free;
+     *  @c SZ_NULL when direct. */
     sz_u32_t *keys;
+
     /** In shared memory: each slot's occurrences, one slot per needle when direct. */
     sz_u32_t *counts;
-    /** The block's own @b [needles] global row for needles no probe could seat, @c SZ_NULL when direct. */
+
+    /** The block's own @b [needles] global row for needles no probe could seat,
+     *  @c SZ_NULL when direct. */
     sz_u32_t *overflow;
-    /** In shared memory: nonzero once anything reached @c overflow, so scoring scans it only then. */
+
+    /** In shared memory: nonzero once anything reached @c overflow, so scoring scans
+     *  it only then. */
     sz_u32_t *overflowed;
 } sz_substrings_cuda_tally_t;
 
@@ -122,10 +149,10 @@ SZ_DEVICE_INLINE sz_u32_t sz_substrings_cuda_load_quad_(sz_u8_t const *pointer) 
 /**
  *  @brief One byte's transition, staged-shared-memory-first.
  *
- *  The staged prefix resolves branch-free out of shared memory, and everything else - the hot tier beyond
- *  the prefix, and the whole cold tier - defers to @ref sz_substrings_step, the single transition definition
- *  every backend shares. A single cold lane still makes the whole warp pay that lane's failure-chase depth,
- *  which is the cost this staging exists to shrink.
+ *  The staged prefix resolves branch-free out of shared memory, and everything else - the hot tier
+ *  beyond the prefix, and the whole cold tier - defers to @ref sz_substrings_step, the single
+ *  transition definition every backend shares. A single cold lane still makes the whole warp pay
+ *  that lane's failure-chase depth, which is the cost this staging exists to shrink.
  */
 SZ_DEVICE_INLINE sz_u32_t sz_substrings_cuda_step_(sz_substrings_engine_t const *engine,
                                                    sz_u32_t const *staged_rows, sz_u32_t staged_count, sz_u32_t state,
@@ -136,10 +163,11 @@ SZ_DEVICE_INLINE sz_u32_t sz_substrings_cuda_step_(sz_substrings_engine_t const 
 }
 
 /**
- *  @brief Cooperatively stages the class map and the head of the hot tier, once per block, rebinding the
- *         block's own copy of @p engine to the staged map.
+ *  @brief Cooperatively stages the class map and the head of the hot tier, once per block,
+ *      rebinding the block's own copy of @p engine to the staged map.
  *
- *  The hot tier's out-degree ordering makes its head the best prefix to stage, and every step reads the map.
+ *  The hot tier's out-degree ordering makes its head the best prefix to stage, and every step
+ *  reads the map.
  */
 SZ_DEVICE_INLINE void sz_substrings_cuda_stage_(sz_substrings_engine_t *engine, sz_u8_t *staged_classes,
                                                 sz_u32_t *staged_rows, sz_u32_t staged_count) {
@@ -153,11 +181,12 @@ SZ_DEVICE_INLINE void sz_substrings_cuda_stage_(sz_substrings_engine_t *engine, 
 }
 
 /**
- *  @brief The block's exclusive prefix sum of @p value, with the block's own total left in @p total.
+ *  @brief The block's exclusive prefix sum of @p value, with the block's own total left
+ *      in @p total.
  *
- *  A Hillis-Steele scan over @p shared, which the caller sizes at one entry per thread. Thirty lines rather
- *  than a dependency: a block scan is the only collective this tier needs, and pulling a template library
- *  into a C tier for it would cost the property the tier exists for.
+ *  A Hillis-Steele scan over @p shared, which the caller sizes at one entry per thread. Thirty
+ *  lines rather than a dependency: a block scan is the only collective this tier needs, and pulling
+ *  a template library into a C tier for it would cost the property the tier exists for.
  */
 SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_block_scan_(sz_size_t value, sz_size_t *shared, sz_size_t *total) {
     unsigned const lane = threadIdx.x;
@@ -177,13 +206,14 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_block_scan_(sz_size_t value, sz_si
     return inclusive - value;
 }
 
-/** How many chunks of @p chunk_bytes a haystack of @p length bytes needs - at least one, so even an empty
- *  haystack still gets a thread and still lands its own boundary. */
+/** How many chunks of @p chunk_bytes a haystack of @p length bytes needs - at least one, so even an
+ *  empty haystack still gets a thread and still lands its own boundary. */
 SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_chunks_for_(sz_size_t length, sz_size_t chunk_bytes) {
     return length == 0 ? 1 : (length + chunk_bytes - 1) / chunk_bytes;
 }
 
-/** Which haystack owns global chunk @p chunk_index, from the exclusive prefix sum of per-haystack counts. */
+/** Which haystack owns global chunk @p chunk_index, from the exclusive prefix sum
+ *  of per-haystack counts. */
 SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_haystack_of_(sz_size_t const *chunk_offsets, sz_size_t haystacks_count,
                                                            sz_size_t chunk_index) {
     sz_size_t low = 0, high = haystacks_count;
@@ -235,7 +265,7 @@ SZ_DEVICE_INLINE void sz_substrings_cuda_tally_(sz_substrings_cuda_tally_t const
 
 #pragma region Scan Kernels
 
-/** Reduces one block's own contiguous tile into @c tile_sums[blockIdx.x]. */
+/** Reduces one block's own contiguous tile into @p tile_sums at @c blockIdx.x. */
 static __global__ void sz_substrings_cuda_scan_reduce_kernel_(sz_size_t const *values, sz_size_t count,
                                                               sz_size_t elements_per_tile, sz_size_t *tile_sums) {
     __shared__ sz_size_t shared[sz_substrings_cuda_threads_per_block_k];
@@ -253,7 +283,8 @@ static __global__ void sz_substrings_cuda_scan_reduce_kernel_(sz_size_t const *v
     if (threadIdx.x == 0) tile_sums[blockIdx.x] = running;
 }
 
-/** Scans @p tile_sums in place, on one block, carrying a running offset across as many tiles as it takes. */
+/** Scans @p tile_sums in place, on one block, carrying a running offset across as many tiles
+ *  as it takes. */
 static __global__ void sz_substrings_cuda_scan_carry_kernel_(sz_size_t *tile_sums, sz_size_t count) {
     __shared__ sz_size_t shared[sz_substrings_cuda_threads_per_block_k];
     __shared__ sz_size_t carry;
@@ -294,7 +325,8 @@ static __global__ void sz_substrings_cuda_scan_apply_kernel_(sz_size_t *values, 
 
 #pragma region Walk Kernels
 
-/** Sums the haystacks' lengths, so the host can size a chunk without reaching a device accessor itself. */
+/** Sums the haystacks' lengths, so the host can size a chunk without reaching a
+ *  device accessor itself. */
 static __global__ void sz_substrings_cuda_total_bytes_kernel_(sz_sequence_t haystacks, sz_size_t *total) {
     __shared__ sz_size_t shared[sz_substrings_cuda_threads_per_block_k];
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
@@ -308,13 +340,15 @@ static __global__ void sz_substrings_cuda_total_bytes_kernel_(sz_sequence_t hays
 /**
  *  @brief Derives this round's chunk width from the corpus the device just summed.
  *
- *  @param[in] chunk_budget Chunks the arena holds beyond one per haystack, which is what fixes the width.
- *  @param[in] floor_bytes Four times the longest match, so a warm-up never outgrows a quarter of a chunk.
+ *  @param[in] chunk_budget Chunks the arena holds beyond one per haystack, which is what
+ *      fixes the width.
+ *  @param[in] floor_bytes Four times the longest match, so a warm-up never outgrows a quarter
+ *      of a chunk.
  *
- *  There is no ceiling on the width, and that is what makes the budget a bound rather than a hope: a chunk
- *  holds at least @c total/budget bytes, so the corpus contributes at most @c budget chunks, and each
- *  haystack's own remainder contributes at most one more. A ceiling would let a large corpus outrun any
- *  fixed budget, which is the readback this inversion exists to remove.
+ *  There is no ceiling on the width, and that is what makes the budget a bound rather than a hope:
+ *  a chunk holds at least @c total/budget bytes, so the corpus contributes at most @c budget
+ *  chunks, and each haystack's own remainder contributes at most one more. A ceiling would let a
+ *  large corpus outrun any fixed budget, which is the readback this inversion exists to remove.
  */
 static __global__ void sz_substrings_cuda_chunk_bytes_kernel_(sz_size_t const *total_bytes, sz_size_t chunk_budget,
                                                               sz_size_t floor_bytes, sz_size_t *chunk_bytes) {
@@ -324,7 +358,8 @@ static __global__ void sz_substrings_cuda_chunk_bytes_kernel_(sz_size_t const *t
     *chunk_bytes = sz_max_of_two(sz_max_of_two(share, floor_bytes), (sz_size_t)1);
 }
 
-/** Writes how many chunks each haystack is cut into, which the scan then turns into its chunk range. */
+/** Writes how many chunks each haystack is cut into, which the scan then turns into
+ *  its chunk range. */
 static __global__ void sz_substrings_cuda_chunk_counts_kernel_(sz_sequence_t haystacks, sz_size_t const *chunk_bytes,
                                                                sz_size_t *chunk_offsets) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
@@ -335,10 +370,11 @@ static __global__ void sz_substrings_cuda_chunk_counts_kernel_(sz_sequence_t hay
 }
 
 /**
- *  @brief Reports every match ending at @p delta, writing them when @p pass asks, and returns how many.
+ *  @brief Reports every match ending at @p delta, writing them when @p pass asks, and
+ *      returns how many.
  *
- *  The acceptance bit answers "does anything end here" without touching the counts array, which at scale
- *  costs nearly as much as the tape read itself.
+ *  The acceptance bit answers "does anything end here" without touching the counts array, which at
+ *  scale costs nearly as much as the tape read itself.
  */
 SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_emit_(sz_substrings_engine_t const *engine, sz_u32_t state,
                                                     sz_size_t walk_begin, sz_u32_t delta, sz_size_t haystack_index,
@@ -369,12 +405,13 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_emit_(sz_substrings_engine_t const
 }
 
 /**
- *  @brief Walks one chunk of a byte-exact haystack, counting or writing every match ending inside it.
+ *  @brief Walks one chunk of a byte-exact haystack, counting or writing every match
+ *      ending inside it.
  *  @param[in] chunk_begin First byte of the chunk, relative to the haystack's own start.
  *  @return The number of matches the chunk holds.
  *
- *  The warm-up primes the state from before the chunk and reports nothing, so once it ends the emit test is
- *  gone from the loop rather than being re-asked on every byte.
+ *  The warm-up primes the state from before the chunk and reports nothing, so once it ends the emit
+ *  test is gone from the loop rather than being re-asked on every byte.
  */
 SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_cased_(
     sz_substrings_engine_t const *engine, sz_u32_t const *staged_rows, sz_u32_t staged_count, sz_cptr_t haystack,
@@ -423,10 +460,10 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_cased_(
 /**
  *  @brief Walks one chunk as folded bytes, the case-insensitive twin of the walk above.
  *
- *  Folding makes a walk restart-safe only at a codepoint start, so the warm-up snaps back to one before it
- *  begins - three bytes at most, and always earlier, so the extra transitions only prime state further.
- *  Match ends are reported at the source codepoint's end, which keeps chunk ownership comparable against
- *  the unsnapped chunk bounds the planner handed out.
+ *  Folding makes a walk restart-safe only at a codepoint start, so the warm-up snaps back to one
+ *  before it begins - three bytes at most, and always earlier, so the extra transitions only prime
+ *  state further. Match ends are reported at the source codepoint's end, which keeps chunk
+ *  ownership comparable against the unsnapped chunk bounds the planner handed out.
  */
 SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_uncased_(
     sz_substrings_engine_t const *engine, sz_u32_t const *staged_rows, sz_u32_t staged_count, sz_cptr_t haystack,
@@ -487,11 +524,13 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_uncased_(
 }
 
 /**
- *  @brief Walks every chunk of every haystack, one thread per chunk, in whichever pass @p pass names.
+ *  @brief Walks every chunk of every haystack, one thread per chunk, in whichever pass
+ *      @p pass names.
  *
- *  Both passes share @p chunk_slots, because the host's in-place exclusive scan already makes them one
- *  allocation: sizing writes each chunk's match count into its slot, and writing reads the exclusive offset
- *  the scan left there. Every chunk owns a private, non-overlapping output range, so a write needs no atomic.
+ *  Both passes share @p chunk_slots, because the host's in-place exclusive scan already makes them
+ *  one allocation: sizing writes each chunk's match count into its slot, and writing reads the
+ *  exclusive offset the scan left there. Every chunk owns a private, non-overlapping output range,
+ *  so a write needs no atomic.
  */
 static __global__ void sz_substrings_cuda_walk_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
                                                        sz_sequence_t haystacks, sz_size_t const *chunk_offsets,
@@ -539,10 +578,12 @@ static __global__ void sz_substrings_cuda_walk_kernel_(sz_substrings_engine_t en
 
 #pragma region Scoring Kernels
 
-/** Fixed-point scale of a BM25 sum: integer addition commutes, so the score never depends on thread order. */
+/** Fixed-point scale of a BM25 sum: integer addition commutes, so the score never depends
+ *  on thread order. */
 #define SZ_SUBSTRINGS_CUDA_BM25_SCALE (4294967296.0)
 
-/** Slots a block's tally takes: one per needle when the vocabulary fits, a hashed table otherwise. */
+/** Slots a block's tally takes: one per needle when the vocabulary fits, a
+ *  hashed table otherwise. */
 SZ_HELPER_AUTO sz_size_t sz_substrings_cuda_tally_slots_for_(sz_size_t needles_count) {
     return needles_count <= sz_substrings_cuda_tally_slots_k ? needles_count : sz_substrings_cuda_tally_slots_k;
 }
@@ -553,15 +594,16 @@ SZ_HELPER_AUTO sz_size_t sz_substrings_cuda_accepts_words_(sz_substrings_engine_
 }
 
 /**
- *  @brief Scores one haystack per block: its threads walk contiguous chunks into one shared tally, then
- *         sum the tallied terms in fixed point.
- *  @param[in] scores_stride Entries from one haystack's score to the next, so one launch writes one column.
+ *  @brief Scores one haystack per block: its threads walk contiguous chunks into one shared tally,
+ *      then sum the tallied terms in fixed point.
+ *  @param[in] scores_stride Entries from one haystack's score to the next, so one launch
+ *      writes one column.
  *  @param[in] staged_accepts_words Acceptance words staged in shared memory, all of them or zero.
  *  @param[in] staged_count Hot rows staged after them, a prefix of the tier.
  *
- *  Dynamic shared memory holds the counts, the keys when hashed, then the staged acceptance bitmap and
- *  rows. A block rather than a grid per haystack keeps the tally in shared memory, at the price of one long
- *  document spreading across one block's threads only.
+ *  Dynamic shared memory holds the counts, the keys when hashed, then the staged acceptance bitmap
+ *  and rows. A block rather than a grid per haystack keeps the tally in shared memory, at the price
+ *  of one long document spreading across one block's threads only.
  */
 static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t engine, sz_sequence_t haystacks,
                                                        sz_f32_t const *document_lengths,
@@ -658,8 +700,9 @@ static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t en
 
 #pragma region Cover Kernels
 
-/** Whether the boundary before @p index is real: nothing still to come starts before the maximum end
- *  already reached. Only matches ending within one match's length of it can, which bounds the look-ahead. */
+/** Whether the boundary before @p index is real: nothing still to come starts before the
+ *  maximum end already reached. Only matches ending within one match's length of it can, which
+ *  bounds the look-ahead. */
 SZ_DEVICE_INLINE sz_bool_t sz_substrings_cuda_boundary_before_(sz_substrings_match_t const *matches, sz_size_t count,
                                                                sz_size_t longest, sz_size_t index) {
     sz_size_t reached, ahead;
@@ -677,17 +720,18 @@ SZ_DEVICE_INLINE sz_bool_t sz_substrings_cuda_boundary_before_(sz_substrings_mat
 /**
  *  @brief Decides which overlapping matches survive a leftmost cover, one segment per thread.
  *
- *  Within a haystack the walk emits in non-decreasing end order, so the running maximum end is simply the
- *  previous match's end, and a boundary sits where nothing still to come reaches back across it. Nothing
- *  before such a boundary can reach past it, so each segment resolves against a cursor of zero,
- *  independently of every other.
+ *  Within a haystack the walk emits in non-decreasing end order, so the running maximum end is
+ *  simply the previous match's end, and a boundary sits where nothing still to come reaches back
+ *  across it. Nothing before such a boundary can reach past it, so each segment resolves against a
+ *  cursor of zero, independently of every other.
  *
- *  Segments are short in real text - a needle set drawn from a vocabulary leaves a median of one match
- *  between boundaries - so one thread takes a whole one. That is a measurement rather than a guarantee: a
- *  needle and its own suffixes over repetitive text make one segment of the whole document, and the greedy
- *  below is quadratic in a segment, so past @ref sz_substrings_cuda_cover_segment_limit_k candidates a
- *  segment falls back to accepting in emitted order - the same cover whenever starts ascend with ends, and
- *  a documented approximation when they do not. Without the cap one thread could hold the grid.
+ *  Segments are short in real text - a needle set drawn from a vocabulary leaves a median of one
+ *  match between boundaries - so one thread takes a whole one. That is a measurement rather than a
+ *  guarantee: a needle and its own suffixes over repetitive text make one segment of the whole
+ *  document, and the greedy below is quadratic in a segment, so past
+ *  @ref sz_substrings_cuda_cover_segment_limit_k candidates a segment falls back to accepting in
+ *  emitted order - the same cover whenever starts ascend with ends, and a documented approximation
+ *  when they do not. Without the cap one thread could hold the grid.
  */
 static __global__ void sz_substrings_cuda_cover_kernel_(sz_substrings_match_t const *matches,
                                                         sz_substrings_report_t const *report, sz_size_t longest,
@@ -746,10 +790,11 @@ static __global__ void sz_substrings_cuda_cover_kernel_(sz_substrings_match_t co
 
 /**
  *  @brief Gathers the surviving matches into their scanned slots, order preserved.
- *  @param[in] keep_offsets The scanned keep flags, one longer than @p count so the last has a successor.
+ *  @param[in] keep_offsets The scanned keep flags, one longer than @p count so the last
+ *      has a successor.
  *
- *  The scan overwrote the flags it summed, so survival is read back out of it: a match was kept exactly
- *  when the scan steps across it.
+ *  The scan overwrote the flags it summed, so survival is read back out of it: a match was kept
+ *  exactly when the scan steps across it.
  */
 static __global__ void sz_substrings_cuda_compact_kernel_(sz_substrings_match_t const *matches,
                                                           sz_substrings_report_t const *report,
@@ -764,10 +809,12 @@ static __global__ void sz_substrings_cuda_compact_kernel_(sz_substrings_match_t 
 }
 
 /**
- *  @brief Publishes what the sizing walk found, which is the one place a round learns whether it fit.
- *  @param[in] emitted_at The last entry of the scanned chunk slots, which every trailing zero carries.
- *  @param[in] emitting Whether the round reads the matches themselves, since a count that never does cannot
- *             overrun a match budget however many matches the corpus holds.
+ *  @brief Publishes what the sizing walk found, which is the one place a round learns
+ *      whether it fit.
+ *  @param[in] emitted_at The last entry of the scanned chunk slots, which every
+ *      trailing zero carries.
+ *  @param[in] emitting Whether the round reads the matches themselves, since a count that never
+ *      does cannot overrun a match budget however many matches the corpus holds.
  */
 static __global__ void sz_substrings_cuda_sized_kernel_(sz_size_t const *emitted_at, sz_size_t matches_budget,
                                                         sz_bool_t emitting, sz_substrings_report_t *report) {
@@ -779,7 +826,8 @@ static __global__ void sz_substrings_cuda_sized_kernel_(sz_size_t const *emitted
     report->shortfall = emitting && emitted > matches_budget ? emitted - matches_budget : 0;
 }
 
-/** Publishes how many matches the cover kept, which is what every later boundary is read against. */
+/** Publishes how many matches the cover kept, which is what every later boundary
+ *  is read against. */
 static __global__ void sz_substrings_cuda_covered_kernel_(sz_size_t const *kept_at, sz_substrings_report_t *report) {
     sz_size_t const kept = *kept_at;
     if (blockIdx.x || threadIdx.x) return;
@@ -811,10 +859,11 @@ static __global__ void sz_substrings_cuda_counts_kernel_(sz_size_t const *haysta
 }
 
 /**
- *  @brief Copies the surviving matches into the caller's array, clipped at a capacity only it knows.
+ *  @brief Copies the surviving matches into the caller's array, clipped at a capacity
+ *      only it knows.
  *
- *  The survivor count lives on the device, so a host-issued @c cudaMemcpyAsync cannot express the clip; one
- *  grid-strided kernel can, and it publishes what it stored in the same launch.
+ *  The survivor count lives on the device, so a host-issued @c cudaMemcpyAsync cannot express the
+ *  clip; one grid-strided kernel can, and it publishes what it stored in the same launch.
  */
 static __global__ void sz_substrings_cuda_store_matches_kernel_(sz_substrings_match_t const *reported,
                                                                 sz_substrings_report_t *report,
@@ -838,12 +887,13 @@ static __global__ void sz_substrings_cuda_store_matches_kernel_(sz_substrings_ma
  *  @brief Writes where each match's preceding gap lands, and how long each haystack becomes.
  *
  *  One block per haystack, threads striding its match range. A rewrite is a tiling of gaps and
- *  replacements, and every boundary in that tiling follows from one running quantity: how far the output
- *  has drifted from the input by the time a match is reached. So that drift is all this stores - one
- *  scanned offset per match - and the copy kernel derives the rest from the match list it already has.
+ *  replacements, and every boundary in that tiling follows from one running quantity: how far the
+ *  output has drifted from the input by the time a match is reached. So that drift is all this
+ *  stores - one scanned offset per match - and the copy kernel derives the rest from the match list
+ *  it already has.
  *
- *  Offsets are relative to the haystack's own start, because the base is only known after the scan across
- *  haystacks that this kernel feeds.
+ *  Offsets are relative to the haystack's own start, because the base is only known after the scan
+ *  across haystacks that this kernel feeds.
  */
 static __global__ void sz_substrings_cuda_rewrite_offsets_kernel_(sz_sequence_t haystacks, sz_sequence_t replacements,
                                                                   sz_size_t const *haystack_offsets,
@@ -900,12 +950,14 @@ SZ_DEVICE_INLINE void sz_substrings_cuda_copy_clipped_(sz_ptr_t output, sz_size_
 }
 
 /**
- *  @brief Copies the rewritten tape, one fixed-width output tile per block, one warp per gap or replacement.
+ *  @brief Copies the rewritten tape, one fixed-width output tile per block, one warp per
+ *      gap or replacement.
  *
- *  Tiling the output rather than the matches bounds how long any one block works: a corpus of one huge
- *  document with a single match and a corpus of a million tiny ones give every block the same slice. Within
- *  a block the warps take stretches in parallel, because a rewrite over prose has stretches of tens of bytes
- *  and striding a whole block across one of them would leave most lanes idle.
+ *  Tiling the output rather than the matches bounds how long any one block works: a corpus of
+ *  one huge document with a single match and a corpus of a million tiny ones give every block
+ *  the same slice. Within a block the warps take stretches in parallel, because a rewrite over
+ *  prose has stretches of tens of bytes and striding a whole block across one of them would
+ *  leave most lanes idle.
  */
 static __global__ void sz_substrings_cuda_rewrite_copy_kernel_(sz_sequence_t haystacks, sz_sequence_t replacements,
                                                                sz_size_t const *haystack_offsets,
@@ -999,7 +1051,8 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_multiprocessors_(void) {
     return (sz_size_t)sz_max_of_two(multiprocessors, 1);
 }
 
-/** Blocks of @p kernel this device holds resident per multiprocessor at @p shared_bytes of dynamic shared. */
+/** Blocks of @p kernel this device holds resident per multiprocessor at @p shared_bytes
+ *  of dynamic shared. */
 SZ_API_COMPTIME sz_size_t sz_substrings_cuda_resident_blocks_(void const *kernel, sz_size_t shared_bytes) {
     int blocks_per_multiprocessor = 0;
     if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -1008,17 +1061,20 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_resident_blocks_(void const *kernel
     return (sz_size_t)sz_max_of_two(blocks_per_multiprocessor, 1);
 }
 
-/** Threads the walk keeps resident across the whole device, which is what a chunk width is derived from. */
+/** Threads the walk keeps resident across the whole device, which is what a chunk width
+ *  is derived from. */
 SZ_API_COMPTIME sz_size_t sz_substrings_cuda_resident_threads_(void const *kernel, sz_size_t shared_bytes) {
     return sz_substrings_cuda_multiprocessors_() * sz_substrings_cuda_resident_blocks_(kernel, shared_bytes) *
            sz_substrings_cuda_threads_per_block_k;
 }
 
 /**
- *  @brief Grid for a grid-strided kernel over @p items, covering the device without exceeding the work.
+ *  @brief Grid for a grid-strided kernel over @p items, covering the device without
+ *      exceeding the work.
  *
- *  Capped at what @p kernel actually keeps resident rather than at a fixed blocks-per-multiprocessor guess,
- *  since a kernel's residency moves with its registers and its dynamic shared memory.
+ *  Capped at what @p kernel actually keeps resident rather than at a fixed
+ *  blocks-per-multiprocessor guess, since a kernel's residency moves with its registers and its
+ *  dynamic shared memory.
  */
 SZ_API_COMPTIME unsigned sz_substrings_cuda_grid_for_(void const *kernel, sz_size_t shared_bytes, sz_size_t items) {
     sz_size_t blocks = (items + sz_substrings_cuda_threads_per_block_k - 1) / sz_substrings_cuda_threads_per_block_k;
@@ -1052,17 +1108,19 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_tiles_(sz_size_t count) {
     return (count + sz_substrings_cuda_threads_per_block_k - 1) / sz_substrings_cuda_threads_per_block_k;
 }
 
-/** Entries a scan over @p count elements needs for its tile totals, which no corpus size can outgrow. */
+/** Entries a scan over @p count elements needs for its tile totals, which no corpus
+ *  size can outgrow. */
 SZ_API_COMPTIME sz_size_t sz_substrings_cuda_scan_scratch_(sz_size_t count) {
     return sz_min_of_two(sz_substrings_cuda_tiles_(count), (sz_size_t)sz_substrings_cuda_scan_tiles_max_k);
 }
 
 /**
- *  @brief Turns @p values into its own exclusive prefix sum, leaving the grand total in @c values[count].
+ *  @brief Turns @p values into its own exclusive prefix sum, leaving the grand total
+ *      in @c values[count].
  *  @param[in] tile_sums Scratch of one entry per tile the scan cuts @p values into.
  *
- *  Three launches - scan each tile, carry the tile totals across on one block, add each tile's base back -
- *  which is the shape a block scan composes into without a device-wide collective.
+ *  Three launches - scan each tile, carry the tile totals across on one block, add each tile's base
+ *  back - which is the shape a block scan composes into without a device-wide collective.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_cuda_scan_(sz_size_t *values, sz_size_t count, sz_size_t *tile_sums,
                                                      void *stream) {
@@ -1091,18 +1149,24 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_scan_(sz_size_t *values, sz_size_
 
 /** How many hot rows a kernel may stage in shared memory. */
 typedef enum sz_substrings_cuda_staging_t {
-    /** All of the hot tier or none of it: the walk pays no bounds test for a prefix most steps miss. */
+
+    /** All of the hot tier or none of it: the walk pays no bounds test for a prefix
+     *  most steps miss. */
     sz_substrings_cuda_stage_whole_k = 0,
-    /** The longest prefix that fits beside the reservation, for a kernel that shares its memory anyway. */
+
+    /** The longest prefix that fits beside the reservation, for a kernel that shares
+     *  its memory anyway. */
     sz_substrings_cuda_stage_prefix_k = 1,
 } sz_substrings_cuda_staging_t;
 
 /**
- *  @brief Hot rows one block of @p kernel stages beside @p reserved_bytes of its own dynamic shared memory.
+ *  @brief Hot rows one block of @p kernel stages beside @p reserved_bytes of its own
+ *      dynamic shared memory.
  *
- *  Rows are staged only while they displace no resident block: the walk is latency-bound, so warps are
- *  worth more than rows. The ceiling is the block's default, since raising it needs `cudaFuncSetAttribute`
- *  per kernel, and a launch asking for more than the default is rejected outright.
+ *  Rows are staged only while they displace no resident block: the walk is latency-bound, so
+ *  warps are worth more than rows. The ceiling is the block's default, since raising it
+ *  needs @c cudaFuncSetAttribute per kernel, and a launch asking for more than the default
+ *  is rejected outright.
  */
 SZ_API_COMPTIME sz_u32_t sz_substrings_cuda_staged_rows_(sz_substrings_engine_t const *engine, void const *kernel,
                                                          sz_size_t reserved_bytes,
@@ -1134,12 +1198,14 @@ SZ_API_COMPTIME sz_u32_t sz_substrings_cuda_staged_rows_(sz_substrings_engine_t 
     return (sz_u32_t)low;
 }
 
-/** Bytes a chunk never falls below: four times the longest match, capping its warm-up at a quarter of it. */
+/** Bytes a chunk never falls below: four times the longest match, capping its warm-up at a
+ *  quarter of it. */
 SZ_API_COMPTIME sz_size_t sz_substrings_cuda_chunk_floor_(sz_substrings_engine_t const *engine) {
     return sz_max_of_two(4 * (sz_size_t)engine->max_source_match_bytes, (sz_size_t)1);
 }
 
-/** Devices the runtime answers for, which is what decides whether the device table is filled at all. */
+/** Devices the runtime answers for, which is what decides whether the device table is
+ *  filled at all. */
 SZ_API_COMPTIME int sz_substrings_cuda_devices_(void) {
     int devices = 0;
     return cudaGetDeviceCount(&devices) == cudaSuccess ? devices : 0;
@@ -1154,8 +1220,9 @@ SZ_API_COMPTIME sz_u32_t sz_substrings_cuda_walk_rows_(sz_substrings_engine_t co
 /**
  *  @brief Global tally rows a hashed BM25 launch may spill into, which is zero for a direct one.
  *
- *  Occupancy is measured without the shared memory the launch will actually reserve, so the count is an
- *  upper bound on the blocks any later round can run - the one property an arena sized once needs.
+ *  Occupancy is measured without the shared memory the launch will actually reserve, so the
+ *  count is an upper bound on the blocks any later round can run - the one property an arena
+ *  sized once needs.
  */
 SZ_API_COMPTIME sz_size_t sz_substrings_cuda_bm25_rows_(sz_substrings_engine_t const *engine) {
     if (engine->needles_count <= (sz_u32_t)sz_substrings_cuda_tally_slots_k) return 0;
@@ -1166,10 +1233,12 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_bm25_rows_(sz_substrings_engine_t c
 /**
  *  @brief The tier-private head of the arena, which growth carries across and no kernel ever reads.
  *
- *  Host-readable because the arena is unified: the same allocator writes the vocabulary the host builder
- *  fills in place, so a block only the device could address would already have failed construction.
+ *  Host-readable because the arena is unified: the same allocator writes the vocabulary
+ *  the host builder fills in place, so a block only the device could address would already
+ *  have failed construction.
  */
 typedef struct sz_substrings_cuda_head_t {
+
     /** The stream @c _init_gpu bound, and the only one a round enqueues on. */
     void *stream;
 } sz_substrings_cuda_head_t;
@@ -1177,41 +1246,61 @@ typedef struct sz_substrings_cuda_head_t {
 /**
  *  @brief Byte offsets of the one arena every device round runs out of.
  *
- *  Everything past the boundaries is sized by the engine's budgets rather than by what a round discovers, so
- *  no launch waits on a count to reach the host first. Those two budget-sized halves are the whole reason
- *  the three readbacks that used to feed host allocations and grid dimensions are gone.
+ *  Everything past the boundaries is sized by the engine's budgets rather than by what a round
+ *  discovers, so no launch waits on a count to reach the host first. Those two budget-sized
+ *  halves are the whole reason the three readbacks that used to feed host allocations and grid
+ *  dimensions are gone.
  */
 typedef struct sz_substrings_cuda_arena_t {
+
     /** Offset of the tier-private head, which is always zero and is never memset by a round. */
     sz_size_t head;
+
     /** Offset of the round's report, which is the only thing a caller reads after its own join. */
     sz_size_t report;
+
     /** Offset of the corpus byte counter the first launch sums into. */
     sz_size_t corpus_bytes;
+
     /** Offset of this round's chunk width, derived on the device from the counter above. */
     sz_size_t chunk_bytes;
+
     /** Offset of the @b [haystacks + 1] exclusive chunk boundaries, per haystack. */
     sz_size_t chunk_offsets;
+
     /** Offset of the @b [haystacks + 1] boundaries of the reported matches, per haystack. */
     sz_size_t haystack_offsets;
-    /** Offset of the @b [slots_count] per-chunk counts, which the scan turns into output offsets. */
+
+    /** Offset of the @b [slots_count] per-chunk counts, which the scan turns
+     *  into output offsets. */
     sz_size_t chunk_slots;
+
     /** Offset of the scratch the three-launch scan carries tile totals through. */
     sz_size_t tile_sums;
+
     /** Offset of the @b [matches_budget] emitted matches, before any cover thins them. */
     sz_size_t emitted;
+
     /** Offset of the cover's survivors, equal to @c emitted when no cover runs. */
     sz_size_t reported;
+
     /** Offset of the @b [matches_budget + 1] scanned keep flags, unallocated without a cover. */
     sz_size_t keep_offsets;
+
     /** Offset of the @b [matches_budget] rewrite drifts, unallocated without a cover. */
     sz_size_t gap_offsets;
-    /** Offset of the hashed BM25 tally rows, unallocated for a vocabulary a block's own table holds. */
+
+    /** Offset of the hashed BM25 tally rows, unallocated for a vocabulary a block's
+     *  own table holds. */
     sz_size_t overflow_rows;
-    /** Entries of @c chunk_slots, which bounds the chunk count by construction rather than by hope. */
+
+    /** Entries of @c chunk_slots, which bounds the chunk count by construction rather
+     *  than by hope. */
     sz_size_t slots_count;
+
     /** Rows at @c overflow_rows, which caps how many blocks a hashed BM25 launch may run. */
     sz_size_t overflow_count;
+
     /** Bytes the whole arena takes. */
     sz_size_t total;
 } sz_substrings_cuda_arena_t;
@@ -1247,31 +1336,45 @@ SZ_API_COMPTIME sz_substrings_cuda_arena_t sz_substrings_cuda_arena_(sz_substrin
 
 /** What one round's launches read out of the arena, every pointer of it device-resident. */
 typedef struct sz_substrings_cuda_round_t {
+
     /** The corpus byte counter, summed by the first launch and read by no host code. */
     sz_size_t *corpus_bytes;
+
     /** This round's chunk width, derived on the device. */
     sz_size_t *chunk_bytes;
+
     /** The @b [haystacks + 1] exclusive chunk boundaries. */
     sz_size_t *chunk_offsets;
-    /** The @b [haystacks + 1] boundaries of the reported matches, which a verb may redirect to its output. */
+
+    /** The @b [haystacks + 1] boundaries of the reported matches, which a verb may redirect
+     *  to its output. */
     sz_size_t *haystack_offsets;
-    /** One slot per chunk: its match count from the sizing pass, then its exclusive output offset. */
+
+    /** One slot per chunk: its match count from the sizing pass, then its
+     *  exclusive output offset. */
     sz_size_t *chunk_slots;
+
     /** Scratch the three-launch scan carries tile totals through. */
     sz_size_t *tile_sums;
+
     /** Every emitted match, before any cover thins them. */
     sz_substrings_match_t *emitted;
+
     /** The matches a cover kept, which is @c emitted itself when no cover ran. */
     sz_substrings_match_t *reported;
+
     /** The scanned keep flags, or @c SZ_NULL when every match is reported. */
     sz_size_t *keep_offsets;
+
     /** One rewrite drift per reported match, or @c SZ_NULL when no rewrite can run. */
     sz_size_t *gap_offsets;
+
     /** Entries of @c chunk_slots, so the scan's grand total is its last one. */
     sz_size_t slots_count;
 } sz_substrings_cuda_round_t;
 
-/** Binds one round's pointers onto the engine's arena, which a compute verb does before it launches. */
+/** Binds one round's pointers onto the engine's arena, which a compute verb does
+ *  before it launches. */
 SZ_API_COMPTIME void sz_substrings_cuda_round_bind_(sz_substrings_engine_t const *engine, sz_size_t haystacks_count,
                                                     sz_substrings_cuda_round_t *round) {
     sz_substrings_cuda_arena_t const arena = sz_substrings_cuda_arena_(engine, haystacks_count);
@@ -1290,12 +1393,14 @@ SZ_API_COMPTIME void sz_substrings_cuda_round_bind_(sz_substrings_engine_t const
     round->slots_count = arena.slots_count;
 }
 
-/** The stream every round of this engine enqueues on, which lives in the arena's tier-private head. */
+/** The stream every round of this engine enqueues on, which lives in the
+ *  arena's tier-private head. */
 SZ_API_COMPTIME void *sz_substrings_cuda_stream_(sz_substrings_engine_t const *engine) {
     return ((sz_substrings_cuda_head_t *)engine->scratch)->stream;
 }
 
-/** Grows the engine's arena to hold one round over @p haystacks_count texts, and never shrinks it. */
+/** Grows the engine's arena to hold one round over @p haystacks_count texts, and
+ *  never shrinks it. */
 SZ_API_COMPTIME sz_status_t sz_substrings_cuda_arena_reserve_(sz_substrings_engine_t *engine,
                                                               sz_size_t haystacks_count) {
     sz_substrings_cuda_arena_t const arena = sz_substrings_cuda_arena_(engine, haystacks_count);
@@ -1318,7 +1423,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_arena_reserve_(sz_substrings_engi
     return sz_success_k;
 }
 
-/** Zeroes everything a round reads before it writes: the report, the counters and the boundaries. */
+/** Zeroes everything a round reads before it writes: the report, the counters
+ *  and the boundaries. */
 SZ_API_COMPTIME sz_status_t sz_substrings_cuda_arena_clear_(sz_substrings_engine_t const *engine,
                                                             sz_size_t haystacks_count, sz_bool_t covering,
                                                             void *stream) {
@@ -1345,15 +1451,15 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_clear_terminator_(sz_size_t *valu
 /**
  *  @brief Walks every chunk and settles the cover, leaving @p round holding what the verbs read.
  *
- *  Every size this needs is either fixed at construction or derived on the device from one the host never
- *  sees, so the whole pass enqueues without a single join: the corpus total feeds a chunk width the device
- *  computes, the chunk count is bounded by the engine's own budget, and the emitted count reaches the later
- *  launches through @c engine->report rather than through a copy back.
+ *  Every size this needs is either fixed at construction or derived on the device from one the host
+ *  never sees, so the whole pass enqueues without a single join: the corpus total feeds a chunk
+ *  width the device computes, the chunk count is bounded by the engine's own budget, and the
+ *  emitted count reaches the later launches through `engine->report`, not through a copy back.
  *
- *  @param[in] wanted Whether the caller reads the matches, since an overlapping count answers from the
- *             boundaries its sizing walk already scanned and never touches the match arena at all.
- *  @param[out] haystack_offsets Where the per-haystack boundaries land, or @c SZ_NULL to leave them in the
- *              arena; @ref sz_substrings_find points this straight at its own output.
+ *  @param[in] wanted Whether the caller reads the matches, since an overlapping count answers from
+ *      the boundaries its sizing walk already scanned and never touches the match arena at all.
+ *  @param[out] haystack_offsets Where the per-haystack boundaries land, or @c SZ_NULL to leave them
+ *      in the arena; @ref sz_substrings_find points this straight at its own output.
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_cuda_walk_(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                      sz_substrings_cuda_matches_t wanted,

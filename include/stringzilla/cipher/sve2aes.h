@@ -1,12 +1,14 @@
 /**
- *  @brief Arm SVE2-AES backend for AES-256 in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/sve2aes.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief Arm SVE2-AES backend for AES-256 in counter and Galois/counter modes.
  *
- *  The round instructions treat every 128-bit segment of a scalable vector as an independent block, so one
- *  `AESE` covers as many blocks as the vector happens to hold and counter mode only has to spread consecutive
- *  block indices across the segments.
+ *  The round instructions treat every 128-bit segment of a scalable vector as an independent block,
+ *  so one @c AESE covers as many blocks as the vector happens to hold and counter mode only has to
+ *  spread consecutive block indices across the segments.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_SVE2AES_H_
 #define STRINGZILLA_CIPHER_SVE2AES_H_
@@ -29,12 +31,13 @@ extern "C" {
 #pragma region Key Schedule
 
 /**
- *  @brief Substitutes every byte of a schedule word through the round instruction's substitution box.
- *  @param word The schedule word.
+ *  @brief Substitutes every byte of a schedule word through the round
+ *      instruction's substitution box.
+ *  @param[in] word The schedule word.
  *  @return The substituted word.
  *
- *  `AESE` applies `AddRoundKey`, `SubBytes` and `ShiftRows` in that order, so a zero round key leaves a
- *  substitution followed by a row shift.
+ *  @c AESE applies @c AddRoundKey, @c SubBytes and @c ShiftRows in that order, so a zero round key
+ *  leaves a substitution followed by a row shift.
  */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_sve2aes_(sz_u32_t word) {
     sz_u128_vec_t substituted_vec;
@@ -59,18 +62,19 @@ SZ_API_COMPTIME void sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, sz_u8_t co
     }
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
 /**
  *  @brief Encrypts one block per 128-bit segment with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param blocks_u8x One plaintext block per segment.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] blocks_u8x One plaintext block per segment.
  *  @return One ciphertext block per segment.
  *
- *  Arm folds `AddRoundKey` into the front of `AESE` rather than the end of the round, so the schedule is
- *  consumed one round early and the fifteenth round key is exclusive-ored on afterwards.
+ *  Arm folds @c AddRoundKey into the front of @c AESE rather than the end of the round,
+ *  so the schedule is consumed one round early and the fifteenth round key is
+ *  exclusive-ored on afterwards.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_blocks_encrypt_sve2aes_(sz_aes256_key_t const *key, svuint8_t blocks_u8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -96,8 +100,8 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_blocks_encrypt_sve2aes_(sz_aes256_key_t con
 
 /**
  *  @brief Moves one 128-bit segment of a vector into its leading segment.
- *  @param value_u8x The vector to read from.
- *  @param segment_index Which segment to bring forward.
+ *  @param[in] value_u8x The vector to read from.
+ *  @param[in] segment_index Which segment to bring forward.
  *  @return A vector whose leading segment holds that one, with the rest left undefined.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_segment_at_sve2aes_(svuint8_t value_u8x, sz_size_t segment_index) {
@@ -106,14 +110,14 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_segment_at_sve2aes_(svuint8_t value_u8x, sz
     return svreinterpret_u8_u64(svtbl_u64(svreinterpret_u64_u8(value_u8x), source_u64x));
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
 /**
  *  @brief Broadcasts one counter block, the nonce then a big-endian index word, into every segment.
- *  @param nonce The twelve nonce bytes.
- *  @param block_index The block index the whole vector starts from.
+ *  @param[in] nonce The twelve nonce bytes.
+ *  @param[in] block_index The block index the whole vector starts from.
  *  @return The same counter block in every segment.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_counter_broadcast_sve2aes_(sz_u8_t const *nonce, sz_u32_t block_index) {
@@ -131,7 +135,7 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_counter_broadcast_sve2aes_(sz_u8_t const *n
 
 /**
  *  @brief Builds the increment that adds the same step to the index word of every counter block.
- *  @param step The number of blocks to advance by.
+ *  @param[in] step The number of blocks to advance by.
  *  @return An increment word per lane, zero everywhere but the trailing lane of each segment.
  */
 SZ_HELPER_INLINE svuint32_t sz_aes256_counter_step_sve2aes_(sz_u32_t step) {
@@ -143,7 +147,8 @@ SZ_HELPER_INLINE svuint32_t sz_aes256_counter_step_sve2aes_(sz_u32_t step) {
 
 /**
  *  @brief Builds the increment that turns a broadcast counter block into consecutive block indices.
- *  @return An increment word per lane, the segment's own ordinal in its trailing lane and zero elsewhere.
+ *  @return An increment word per lane, the segment's own ordinal in its trailing lane
+ *      and zero elsewhere.
  */
 SZ_HELPER_INLINE svuint32_t sz_aes256_counter_spread_sve2aes_(void) {
     svbool_t const all_b32x = svptrue_b32();
@@ -154,12 +159,13 @@ SZ_HELPER_INLINE svuint32_t sz_aes256_counter_spread_sve2aes_(void) {
 
 /**
  *  @brief Adds a per-lane increment to the trailing index word of every counter block.
- *  @param counter_u8x One counter block per segment.
- *  @param increment_u32x An increment word per lane, zero outside the trailing lane of each segment.
+ *  @param[in] counter_u8x One counter block per segment.
+ *  @param[in] increment_u32x An increment word per lane, zero outside the trailing lane
+ *      of each segment.
  *  @return The advanced counter blocks.
  *
- *  The index is stored big-endian while the addition is not, so the words are byte reversed, added and
- *  reversed back.
+ *  The index is stored big-endian while the addition is not, so the words are byte reversed, added
+ *  and reversed back.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_counter_advance_sve2aes_(svuint8_t counter_u8x, svuint32_t increment_u32x) {
     svbool_t const all_b32x = svptrue_b32();
@@ -210,23 +216,23 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *key, sz_u8
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
 /**
  *  @brief Moves a hash block between the tag's bit order and the multiplier's.
- *  @param block_u8x The block in either order.
+ *  @param[in] block_u8x The block in either order.
  *  @return The same block in the other order.
  *
- *  The tag reads a field element's lowest coefficient from the leading bit of the leading byte, while a
- *  carry-less multiply reads it from the lowest bit of the lowest byte.
+ *  The tag reads a field element's lowest coefficient from the leading bit of the leading byte,
+ *  while a carry-less multiply reads it from the lowest bit of the lowest byte.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_reflect_sve2aes_(svuint8_t block_u8x) {
     return svrbit_u8_x(svptrue_b8(), block_u8x);
 }
 
-/** @brief Loads one hash block from the tag's bit order into the multiplier's, leaving the rest zero. */
+/** Loads one hash block from the tag's bit order into the multiplier's, leaving the rest zero. */
 SZ_HELPER_INLINE svuint8_t sz_ghash_load_sve2aes_(sz_u8_t const *block) {
     return sz_ghash_reflect_sve2aes_(svld1_u8(svptrue_pat_b8(SV_VL16), block));
 }
@@ -234,32 +240,32 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_load_sve2aes_(sz_u8_t const *block) {
 /**
  *  @brief Loads a pending block with everything past @p buffered forced to zero.
  *
- *  SVE loads are zeroing, so a predicated load makes the padding implicit: no byte loop, no staging buffer,
- *  and nothing written back into the caller's state.
+ *  SVE loads are zeroing, so a predicated load makes the padding implicit: no byte loop, no staging
+ *  buffer, and nothing written back into the caller's state.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_load_padded_sve2aes_(sz_u8_t const *block, sz_size_t buffered) {
     return sz_ghash_reflect_sve2aes_(svld1_u8(svwhilelt_b8_u64(0, buffered), block));
 }
 
-/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+/** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_sve2aes_(sz_u8_t const *first, sz_u8_t const *second) {
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     svbool_t const differing_b8x = svcmpne_u8(first_b8x, svld1_u8(first_b8x, first), svld1_u8(first_b8x, second));
     return svptest_any(first_b8x, differing_b8x) ? sz_false_k : sz_true_k;
 }
 
-/** @brief Stores the leading segment of a reflected value back in the tag's bit order. */
+/** Stores the leading segment of a reflected value back in the tag's bit order. */
 SZ_HELPER_INLINE void sz_ghash_store_sve2aes_(svuint8_t value_u8x, sz_u8_t *block) {
     svst1_u8(svptrue_pat_b8(SV_VL16), block, sz_ghash_reflect_sve2aes_(value_u8x));
 }
 
-/** @brief Exchanges the two halves of every 128-bit segment. */
+/** Exchanges the two halves of every 128-bit segment. */
 SZ_HELPER_INLINE svuint64_t sz_ghash_swap_halves_sve2aes_(svuint64_t value_u64x) {
     svbool_t const all_b64x = svptrue_b64();
     return svtbl_u64(value_u64x, sveor_n_u64_x(all_b64x, svindex_u64(0, 1), 1));
 }
 
-/** @brief The predicate selecting the low half of every 128-bit segment. */
+/** The predicate selecting the low half of every 128-bit segment. */
 SZ_HELPER_INLINE svbool_t sz_ghash_low_halves_sve2aes_(void) {
     svbool_t const all_b64x = svptrue_b64();
     return svcmpeq_n_u64(all_b64x, svand_n_u64_x(all_b64x, svindex_u64(0, 1), 1), 0);
@@ -267,12 +273,12 @@ SZ_HELPER_INLINE svbool_t sz_ghash_low_halves_sve2aes_(void) {
 
 /**
  *  @brief Sums every 128-bit segment of a vector into its leading segment.
- *  @param value_u64x The per-segment partial sums.
- *  @param lane_count The number of 64-bit lanes the vector holds.
+ *  @param[in] value_u64x The per-segment partial sums.
+ *  @param[in] lane_count The number of 64-bit lanes the vector holds.
  *  @return A vector whose leading segment holds the sum of them all.
  *
- *  A table lookup rather than an extract, because the distance halves each round and the vector length is not
- *  a compile-time constant.
+ *  A table lookup rather than an extract, because the distance halves each round and the vector
+ *  length is not a compile-time constant.
  */
 SZ_HELPER_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t value_u64x, sz_size_t lane_count) {
     svbool_t const all_b64x = svptrue_b64();
@@ -285,16 +291,17 @@ SZ_HELPER_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t value_u64
 }
 
 /**
- *  @brief Accumulates the 256-bit carry-less product of two reflected operands into a running triple.
- *  @param first_u64x One reflected operand per segment.
- *  @param second_u64x The other reflected operand per segment.
- *  @param low_u64x Accumulates the product of the two low halves.
- *  @param middle_u64x Accumulates both cross products.
- *  @param high_u64x Accumulates the product of the two high halves.
+ *  @brief Accumulates the 256-bit carry-less product of two reflected operands into
+ *      a running triple.
+ *  @param[in] first_u64x One reflected operand per segment.
+ *  @param[in] second_u64x The other reflected operand per segment.
+ *  @param[inout] low_u64x Accumulates the product of the two low halves.
+ *  @param[inout] middle_u64x Accumulates both cross products.
+ *  @param[inout] high_u64x Accumulates the product of the two high halves.
  *
- *  The bottom and top forms of the paired multiply reach the two halves of a segment, and Karatsuba's identity
- *  recovers the cross terms from a third product of the two folded operands, so three multiplies cover a
- *  schoolbook four.
+ *  The bottom and top forms of the paired multiply reach the two halves of a segment, and
+ *  Karatsuba's identity recovers the cross terms from a third product of the two folded operands,
+ *  so three multiplies cover a schoolbook four.
  */
 SZ_HELPER_INLINE void sz_ghash_accumulate_sve2aes_(svuint64_t first_u64x, svuint64_t second_u64x, svuint64_t *low_u64x,
                                                    svuint64_t *middle_u64x, svuint64_t *high_u64x) {
@@ -314,13 +321,14 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_sve2aes_(svuint64_t first_u64x, svuint
 
 /**
  *  @brief Sums an accumulated triple across the segments and folds it into one reflected block.
- *  @param low_u64x The accumulated low halves.
- *  @param middle_u64x The accumulated cross products.
- *  @param high_u64x The accumulated high halves.
- *  @param lane_count The number of 64-bit lanes the vector holds.
+ *  @param[in] low_u64x The accumulated low halves.
+ *  @param[in] middle_u64x The accumulated cross products.
+ *  @param[in] high_u64x The accumulated high halves.
+ *  @param[in] lane_count The number of 64-bit lanes the vector holds.
  *  @return The reduced product in the leading segment, with the rest left undefined.
  *
- *  The cross products straddle the halves, so they are split and merged into the two 128-bit words first.
+ *  The cross products straddle the halves, so they are split and merged into the two
+ *  128-bit words first.
  */
 SZ_HELPER_INLINE svuint64_t sz_ghash_reduce_sve2aes_(svuint64_t low_u64x, svuint64_t middle_u64x, svuint64_t high_u64x,
                                                      sz_size_t lane_count) {
@@ -346,8 +354,8 @@ SZ_HELPER_INLINE svuint64_t sz_ghash_reduce_sve2aes_(svuint64_t low_u64x, svuint
 
 /**
  *  @brief Multiplies one reflected block by one reflected subkey.
- *  @param accumulator_u8x The running hash in the leading segment, zero elsewhere.
- *  @param subkey_u8x The reflected subkey in the leading segment, zero elsewhere.
+ *  @param[in] accumulator_u8x The running hash in the leading segment, zero elsewhere.
+ *  @param[in] subkey_u8x The reflected subkey in the leading segment, zero elsewhere.
  *  @return The reduced product in the leading segment, zero elsewhere.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_multiply_sve2aes_(svuint8_t accumulator_u8x, svuint8_t subkey_u8x) {
@@ -357,7 +365,7 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_multiply_sve2aes_(svuint8_t accumulator_u8x,
     return svreinterpret_u8_u64(sz_ghash_reduce_sve2aes_(low_u64x, middle_u64x, high_u64x, 2));
 }
 
-/** @brief Absorbs one reflected block into the running hash. */
+/** Absorbs one reflected block into the running hash. */
 SZ_HELPER_INLINE svuint8_t sz_ghash_absorb_sve2aes_(svuint8_t accumulator_u8x, svuint8_t block_u8x,
                                                     svuint8_t subkey_u8x) {
     return sz_ghash_multiply_sve2aes_(sveor_u8_x(svptrue_b8(), accumulator_u8x, block_u8x), subkey_u8x);
@@ -381,25 +389,26 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_sve2aes(sz_aes256_gcm_key_t *key, sz
     }
 }
 
-/*  A hash group spans one block per segment, so a wider vector retires more blocks between reductions.
- *  Eight is the ceiling whatever the width, because the key carries only `H^1` through `H^8` and a group
- *  of `n` blocks needs `H^n`; a hypothetical 2048-bit vector therefore leaves half its segments idle in
- *  the hash while counter mode still uses all of them. */
+/*  A hash group spans one block per segment, so a wider vector retires more blocks between
+ *  reductions. Eight is the ceiling whatever the width, because the key carries only H¹ through H⁸
+ *  and a group of @c n blocks needs Hⁿ; a hypothetical 2048-bit vector therefore leaves half its
+ *  segments idle in the hash while counter mode still uses all of them. */
 
-/** @brief Blocks one hash group covers: one per segment, capped by the eight precomputed subkey powers. */
+/** Blocks one hash group covers: one per segment, capped by the eight precomputed subkey powers. */
 SZ_HELPER_INLINE sz_size_t sz_ghash_group_blocks_sve2aes_(void) {
     sz_size_t const segment_count = svcntb() / SZ_AES_BLOCK_LENGTH;
     return segment_count < 8 ? segment_count : 8;
 }
 
 /**
- *  @brief Loads the leading subkey powers descending, so segment `j` pairs with block `j` of a group.
- *  @param powers The eight subkey powers in the tag's bit order, ascending.
- *  @param group_blocks Blocks in a group, which is how many powers are wanted.
- *  @return The reflected powers `H^n` down to `H^1`, one per segment, zero beyond the group.
+ *  @brief Loads the leading subkey powers descending, so segment @c j pairs with block @c j
+ *      of a group.
+ *  @param[in] powers The eight subkey powers in the tag's bit order, ascending.
+ *  @param[in] group_blocks Blocks in a group, which is how many powers are wanted.
+ *  @return The reflected powers Hⁿ down to H¹, one per segment, zero beyond the group.
  *
- *  The powers ascend in memory and a group wants them descending, so the segments are mirrored by a table
- *  lookup.
+ *  The powers ascend in memory and a group wants them descending, so the segments are mirrored by
+ *  a table lookup.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_descending_powers_sve2aes_(sz_u8_t const *powers, sz_size_t group_blocks) {
     svbool_t const all_b64x = svptrue_b64();
@@ -415,13 +424,14 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_descending_powers_sve2aes_(sz_u8_t const *po
 
 /**
  *  @brief Absorbs a whole group of reflected blocks into the running hash with one field reduction.
- *  @param accumulator_u8x The running hash in the leading segment, zero elsewhere.
- *  @param blocks_u8x One reflected block per segment, in the order they arrived, zero beyond the group.
- *  @param powers_u8x The reflected powers `H^n` down to `H^1`, one per segment.
- *  @param lane_count The number of 64-bit lanes the vector holds.
+ *  @param[in] accumulator_u8x The running hash in the leading segment, zero elsewhere.
+ *  @param[in] blocks_u8x One reflected block per segment, in the order they arrived, zero
+ *      beyond the group.
+ *  @param[in] powers_u8x The reflected powers Hⁿ down to H¹, one per segment.
+ *  @param[in] lane_count The number of 64-bit lanes the vector holds.
  *  @return The updated running hash in the leading segment, zero elsewhere.
  *
- *  A group of `n` absorbed blocks expands to `(Y ^ X1) H^n ^ X2 H^(n-1) ^ ...
+ *  A group of @c n absorbed blocks expands to (Y ⊕ X₁) Hⁿ ⊕ X₂ Hⁿ⁻¹ ⊕ … ⊕ Xₙ H.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t accumulator_u8x, svuint8_t blocks_u8x,
                                                           svuint8_t powers_u8x, sz_size_t lane_count) {
@@ -434,15 +444,15 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t accumulator_
     return svsel_u8(svptrue_pat_b8(SV_VL16), reduced_u8x, svdup_n_u8(0));
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time but the vector length is not, so the fill runs one predicated store per
- *  vector and the trailing predicate covers a size that is a multiple of no vector width.
+ *  The size is known at compile time but the vector length is not, so the fill runs one predicated
+ *  store per vector and the trailing predicate covers a size that is a multiple of no vector width.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_sve2aes_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -454,7 +464,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_sve2aes_(sz_aes256_gcm_state_t *
     sz_keep_alive_(state);
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_sve2aes_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
@@ -480,7 +490,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_sve2aes_(sz_aes256_gcm_state_t *state,
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_size_t const lane_count = svcntb() / 8;
@@ -532,17 +542,18 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *st
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param state The state, whose two sixteen-byte rhythms advance together here.
- *  @param input The bytes to transform.
- *  @param output Receives the transformed bytes.
- *  @param count Bytes to consume, never more than the keystream block has left.
- *  @param accumulator_u8x The running hash, reflected.
- *  @param subkey_u8x The reflected hash subkey.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state, whose two sixteen-byte rhythms advance together here.
+ *  @param[in] input The bytes to transform.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] count Bytes to consume, never more than the keystream block has left.
+ *  @param[in] accumulator_u8x The running hash, reflected.
+ *  @param[in] subkey_u8x The reflected hash subkey.
+ *  @param[in] direction Which buffer the hash absorbs.
  *  @return The updated running hash, reflected.
  *
- *  Through the message the keystream offset and the hash offset are the same number, because every byte spends
- *  one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
+ *  Through the message the keystream offset and the hash offset are the same number, because
+ *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
+ *  this resumes both.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
                                                         sz_u8_t *output, sz_size_t count, svuint8_t accumulator_u8x,
@@ -588,15 +599,16 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t *s
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
- *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole blocks
- *  a group at a time, then a trailing block that the next chunk will resume.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk
+ *  sizes and neither may restart at a chunk boundary: whatever the previous chunk left of its
+ *  keystream block, then whole blocks a group at a time, then a trailing block that the next
+ *  chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                        sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -687,9 +699,10 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *st
 }
 
 /**
- *  @brief Pads whatever the state still carries, absorbs the length block and unmasks the running hash.
- *  @param state The state, left untouched, so a caller may digest and keep streaming.
- *  @param tag Receives the sixteen tag bytes.
+ *  @brief Pads whatever the state still carries, absorbs the length block and unmasks
+ *      the running hash.
+ *  @param[in] state The state, left untouched, so a caller may digest and keep streaming.
+ *  @param[out] tag Receives the sixteen tag bytes.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     svbool_t const all_b8x = svptrue_b8();
@@ -759,7 +772,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_sve2aes(sz_aes256_gcm
                                                                                 : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -792,7 +805,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_sve2aes(sz_aes256_gcm_key_t co
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

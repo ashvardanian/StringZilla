@@ -1,43 +1,35 @@
 /**
- *  @brief  UTF-8 normalization (NFC/NFD/NFKC/NFKD) known-answer, serial-vs-ISA equivalence, and safety.
- *  @file   test/utf8_norm.cpp
+ *  @file test/utf8_norm.cpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date June 15, 2026
+ *  @brief UTF-8 normalization (NFC/NFD/NFKC/NFKD) known-answer, serial-vs-ISA, and safety tests.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  ! Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development to validate ISA-specific implementations.
+ *
+ *  #define SZ_USE_WESTMERE 0
+ *  #define SZ_USE_HASWELL 0
+ *  #define SZ_USE_GOLDMONT 0
+ *  #define SZ_USE_SKYLAKE 0
+ *  #define SZ_USE_ICELAKE 0
+ *  #define SZ_USE_NEON 0
+ *  #define SZ_USE_SVE 0
+ *  #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Make sure to include the StringZilla headers before anything else, to intercept missing
+ *  `#include` directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -68,11 +60,12 @@ using sz::literals::operator""_sv; // for `sz::string_view_t`
 /**
  *  @brief Known-answer unit tests for UTF-8 normalization on simple, hand-verifiable inputs.
  *
- *  Exercises the normalizer and the normalization-violation finder through the dispatched C API (automatic
- *  kernel resolution) and through the natively-compiled backend kernels directly, plus the C++
- *  `sz::string_t`/`sz::string_view_t` wrappers (`try_utf8_normalize`, `is_normalized`, `utf8_find_denormalized`),
- *  so a regression that the serial-vs-SIMD agreement tests would miss - because both share a wrong constant -
- *  is still caught against an external ground truth.
+ *  Exercises the normalizer and the normalization-violation finder through the dispatched C API
+ *  (automatic kernel resolution), through the natively-compiled backend kernels directly, and
+ *  through the C++ @c sz::string_t and @c sz::string_view_t wrappers @c try_utf8_normalize,
+ *  @c is_normalized and @c utf8_find_denormalized, so a regression that the serial-vs-SIMD
+ *  agreement tests would miss - because both share a wrong constant - is still caught against an
+ *  external ground truth.
  */
 void test_utf8_norm_unit() {
     fmt::println("  - testing UTF-8 normalization known-answer vectors...");
@@ -107,7 +100,7 @@ void test_utf8_norm_unit() {
 #endif
     }
 
-    // C++ binding round-trip: NFC -> NFD -> NFC should recover the original NFC string.
+    // C++ binding round-trip: NFC → NFD → NFC should recover the original NFC string.
     sz::string_t nfc_str {cafe_nfc};
     verify(nfc_str.try_utf8_normalize(sz_normal_form_nfd_k));
     verify(nfc_str.try_utf8_normalize(sz_normal_form_nfc_k));
@@ -137,15 +130,13 @@ void test_utf8_norm_unit() {
     fmt::println("    normalization known-answer vectors passed!");
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
-/**
- *  @brief One backend's UTF-8 normalization + violation kernels, stored by pointer so the differential driver can
- *         iterate a table. The members are named for the call sites (`reference.form(...)`,
- *         `reference.violation(...)`), so each function-pointer member is invoked directly — the harness is unchanged.
- */
+/** One backend's UTF-8 normalization + violation kernels, stored by pointer so the differential
+ *  driver can iterate a table. The members are named for the call sites, `reference.form(...)` and
+ *  `reference.violation(...)`, so each function-pointer member is invoked directly. */
 struct utf8_norm_backend_t {
     char const *name;
     sz_utf8_norm_t form;
@@ -155,10 +146,10 @@ struct utf8_norm_backend_t {
 /**
  *  @brief Tests UTF-8 normalization across SIMD backends against the serial implementation.
  *
- *  Encodes every assigned Unicode codepoint, shuffles the order, and normalizes the full corpus under all
- *  four normal forms, so the comparison stresses canonical ordering, every decomposition/composition path,
- *  and SIMD-block straddles. Below a multiplier of 1.0 the codepoint space is strided, not truncated, so the
- *  astral planes stay reachable on a cheap run.
+ *  Encodes every assigned Unicode codepoint, shuffles the order, and normalizes the full corpus
+ *  under all four normal forms, so the comparison stresses canonical ordering, every
+ *  decomposition/composition path, and SIMD-block straddles. Below a multiplier of 1.0 the
+ *  codepoint space is strided, not truncated, so the astral planes stay reachable on a cheap run.
  */
 template <typename reference_, typename candidate_>
 void check_utf8_norm_equivalence_(reference_ reference, candidate_ candidate, std::size_t iterations) {
@@ -207,21 +198,22 @@ void check_utf8_norm_equivalence_(reference_ reference, candidate_ candidate, st
     fmt::println("    normalization fuzzing passed!");
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
 /**
- *  @brief Drives the normalization-violation finder and the normalizer through the malformed-byte battery.
+ *  @brief Drives the normalization-violation finder and the normalizer through malformed bytes.
  *
- *  `sz_utf8_find_denormalized` is bounds-safe on arbitrary bytes, so it faces the full malformed battery: the
- *  only requirements are that it survives and that any returned violation pointer stays inside
- *  `[text, text + length]`. `sz_utf8_norm` instead documents a valid-UTF-8 precondition (the decoder
- *  "performs no validity checks") and asserts internally on garbage, so it is only exercised on the
- *  `sz_utf8_find_malformed` subset of the same adversarial shapes - the normalizer's output must stay within its
- *  documented 18x bound; `with_guarded_buffer_` brackets the destination with canaries and asserts they
- *  survive, like `test_uncased_safety`. The exhaustive byte sweeps below are strided by the multiplier too,
- *  since they cost more than the random garbage buffers and re-run once per compiled backend.
+ *  @c sz_utf8_find_denormalized is bounds-safe on arbitrary bytes, so it faces the full malformed
+ *  battery: the only requirements are that it survives and that any returned violation pointer
+ *  stays inside `[text, text + length]`. @c sz_utf8_norm instead documents a valid-UTF-8
+ *  precondition (the decoder "performs no validity checks") and asserts internally on garbage, so
+ *  it only faces the @c sz_utf8_find_malformed subset of the same adversarial shapes - the
+ *  normalizer's output must stay within its documented 18× bound; @c with_guarded_buffer_ brackets
+ *  the destination with canaries and asserts they survive, like @c test_uncased_safety. The
+ *  exhaustive byte sweeps below are strided by the multiplier too, since they cost more than the
+ *  random garbage buffers and re-run once per compiled backend.
  */
 static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormalized_t violation,
                                     std::size_t random_inputs = scale_iterations(10000)) {
@@ -267,7 +259,7 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
     for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
 }
 
-/** @brief Drive the malformed-input normalization safety probe through serial, dispatched, and every backend. */
+/** Malformed-input normalization safety probe through serial, dispatched, and every backend. */
 void test_utf8_norm_safety() {
     fmt::println("  - testing malformed-input safety of UTF-8 normalization kernels...");
 
@@ -312,14 +304,12 @@ void test_utf8_norm_safety() {
     fmt::println("    normalization safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/**
- *  @brief The UTF-8 normalization backends compiled on this target. The always-present `dispatched` entry keeps the
- *         table non-empty on a baseline build; the differential below runs serial vs each.
- */
+/** The UTF-8 normalization backends compiled on this target. The always-present @c dispatched entry
+ *  keeps the table non-empty on a baseline build; the differential below runs serial vs each. */
 static utf8_norm_backend_t const utf8_norm_backends[] = {
     {"dispatched", sz_utf8_norm, sz_utf8_find_denormalized},
 #if SZ_USE_HASWELL
@@ -357,7 +347,7 @@ static utf8_norm_backend_t const utf8_norm_backends[] = {
 #endif
 };
 
-/** @brief Run the normalization differential fuzz against every compiled backend (dispatched first). */
+/** Run the normalization differential fuzz against every compiled backend (dispatched first). */
 void test_utf8_norm_all() {
     utf8_norm_backend_t const serial {"serial", sz_utf8_norm_serial, sz_utf8_find_denormalized_serial};
     // One iteration pushes every assigned codepoint through 4 forms x 4 kernel calls, once per compiled backend.
@@ -366,4 +356,4 @@ void test_utf8_norm_all() {
         check_utf8_norm_equivalence_(serial, backend, scale_iterations(3));
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

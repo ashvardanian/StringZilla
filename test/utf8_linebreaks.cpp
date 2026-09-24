@@ -1,8 +1,9 @@
 /**
- *  @brief  UAX-14 line-break (linewrap) tests: known-answer goldens, malformed-input safety, and the
- *          serial-vs-ISA differential over hardened corpora.
- *  @file   test/utf8_linebreaks.cpp
+ *  @file test/utf8_linebreaks.cpp
  *  @author Ash Vardanian
+ *  @date June 22, 2026
+ *  @brief UAX-14 line-break (linewrap) tests: known-answer goldens, malformed-input safety, and the
+ *      serial-vs-ISA differential over hardened corpora.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -27,7 +28,7 @@
 
 #pragma region Unit
 
-/** @brief Hand-checked UAX-14 line-break golden vectors: each source text and its expected line segments. */
+/** Hand-checked UAX-14 line-break golden vectors: each source text and its expected lines. */
 static utf8_unit_case_t const utf8_linebreaks_unit_cases[] = {
     {""_sv, {}},
     {"hello world"_sv, {"hello "_sv, "world"_sv}},          // soft wrap after the space
@@ -37,11 +38,9 @@ static utf8_unit_case_t const utf8_linebreaks_unit_cases[] = {
     {"a\xE2\x80\xA9" "b"_sv, {"a\xE2\x80\xA9"_sv, "b"_sv}}, // U+2029 PARAGRAPH SEPARATOR
 };
 
-/**
- *  @brief The UTF-8 line-break segmenters compiled on this target. The always-present `dispatched` entry keeps the
- *         table non-empty on a baseline build; the unit / rule-coverage / safety / equivalence drivers all iterate
- *         this one ladder so their ISA coverage stays in lockstep.
- */
+/** The UTF-8 line-break segmenters compiled on this target. The always-present @c dispatched entry
+ *  keeps the table non-empty on a baseline build; the unit / rule-coverage / safety / equivalence
+ *  drivers all iterate this one ladder so their ISA coverage stays in lockstep. */
 static utf8_segment_backend_t const utf8_linebreaks_backends[] = {
     {"dispatched", sz_utf8_linebreaks},
 #if SZ_USE_HASWELL
@@ -58,7 +57,7 @@ static utf8_segment_backend_t const utf8_linebreaks_backends[] = {
 #endif
 };
 
-/** @brief Known-answer line-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
+/** Known-answer line-break vectors via dispatched, serial, each ISA, and the C++ range. */
 void test_utf8_linebreaks_unit() {
     fmt::println("  - testing UTF-8 line-break known-answer vectors...");
 
@@ -80,11 +79,11 @@ void test_utf8_linebreaks_unit() {
            "news_lede linebreaks");
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
-/** @brief UAX-14 line-break corner motifs (sprinkled into the random corpus): mandatory breaks, OP/CL, HY, GL, NU. */
+/** UAX-14 line-break corner motifs for the random corpus: mandatory breaks, OP/CL, HY, GL, NU. */
 static sz::string_view_t const utf8_linebreaks_motifs[] = {
     "a\nb"_sv,              // LF mandatory break
     "a\rb"_sv,              // CR mandatory break
@@ -104,15 +103,16 @@ static sz::string_view_t const utf8_linebreaks_motifs[] = {
     "12345"_sv,             // NU numbers
     "$50"_sv,               // PR prefix
     "3,000"_sv,             // numeric grouping comma
-    // Regression motifs for fuzzer-found icelake-vs-serial divergences (sprinkled at window-edge offsets so the
-    // cross-window carry is exercised):
+    // Regression motifs for fuzzer-found icelake-vs-serial divergences, sprinkled at window-edge
+    // offsets so the cross-window carry is exercised:
     "\xD7\x90-a"_sv,               // LB21a: HL (U+05D0) HY x AL -- no break before the AL, incl. when HL carries
     "\xD7\x90\xE2\x80\x90" "a"_sv, // LB21a with HH (U+2010) instead of HY
     "\xE3\x80\xAF\xE2\x80\x98" "a"_sv, // LB10/LB19: lone CM (U+302F, East-Asian) then Pi quote (U+2018) -- side bits cleared
     "\xCC\x88\xE2\x80\x9C"_sv,         // lone combining diaeresis (U+0308) then QU (U+201C)
 };
 
-/** @brief Mandatory-break-dense line run cycling CRLF/U+2028/U+2029/U+000B, @p link_count cycles (LB4/5), into @p out. */
+/** Mandatory-break-dense line run cycling CRLF/U+2028/U+2029/U+000B, @p link_count cycles (LB4/5),
+ *  into @p out. */
 static void utf8_linebreaks_dense_mandatory_breaks_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
@@ -126,20 +126,22 @@ static void utf8_linebreaks_dense_mandatory_breaks_(std::string &out, std::size_
     }
 }
 
-/** @brief OP/CL/QU/HY/BA/GL nesting cycled @p link_count times (LB13/14/15/18 adjacency), into @p out. */
+/** OP/CL/QU/HY/BA/GL nesting cycled @p link_count times (LB13/14/15/18 adjacency), into @p out. */
 static void utf8_linebreaks_dense_nesting_(std::string &out, std::size_t link_count) {
     out.clear();
     static char const *cycle[] = {"(", "word", ")", "\"", "-", " ", "\xC2\xA0"}; // OP CL QU HY BA SP GL(NBSP)
     for (std::size_t index = 0; index != link_count; ++index) out.append(cycle[index % 7u]);
 }
 
-/** @brief Numeric `NU` runs interleaved with IS (`.`) and SY (`/`), @p link_count groups (LB25 numbers), into @p out. */
+/** Numeric @c NU runs interleaved with IS (`.`) and SY (`/`), @p link_count groups (LB25 numbers),
+ *  into @p out. */
 static void utf8_linebreaks_dense_numeric_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) out.append("1.234/56 ");
 }
 
-/** @brief Stream the linewrap family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+/** Stream the linewrap family's high-density homogeneous runs (each spans several 64-byte windows)
+ *  to @p sink. */
 static void utf8_linebreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
@@ -148,7 +150,7 @@ static void utf8_linebreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t
     utf8_linebreaks_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Stream the linewrap family's long-range straddling constructions for a given @p gap to @p sink. */
+/** Stream the linewrap family's long-range straddling constructions for @p gap to @p sink. */
 static void utf8_linebreaks_straddles_(std::mt19937 & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
                                        void *context) {
     std::string scratch;
@@ -156,7 +158,7 @@ static void utf8_linebreaks_straddles_(std::mt19937 & /*generator*/, std::size_t
     utf8_linebreaks_dense_nesting_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Linewrap-biased random-corpus snippets: mandatory breaks, separators, NBSP/GL, nesting, hyphen, numeric. */
+/** Linewrap-biased snippets: mandatory breaks, separators, NBSP/GL, nesting, hyphen, numeric. */
 static char const *const utf8_linebreaks_snippets[] = {
     "a\r\nb",        // mandatory break (CRLF)
     "a\x0C" "b",     // mandatory break (form feed, BK)
@@ -173,14 +175,14 @@ static char const *const utf8_linebreaks_snippets[] = {
     "\xC2\xAB\xD0\x9C\xD0\xB8\xD1\x80\xC2\xBB\xCE\x91",                         // Cyrillic in guillemets (QU) + Greek
 };
 
-/** @brief Linewrap family alphabet: weights bias toward family snippets and motifs (LB mandatory/GL/HY/NU/nesting). */
+/** Linewrap alphabet, biased toward family snippets and motifs (LB mandatory/GL/HY/NU/nesting). */
 static utf8_corpus_alphabet_t const utf8_linebreaks_alphabet = {
     span_over(utf8_linebreaks_snippets),
     span_over(utf8_default_boundary_codepoints),
     {{45, 15, 5, 30, 5}}, // snippet, boundary, astral, motif, malformed
 };
 
-/** @brief Assemble the linewrap family's differential corpora (motifs + dense + straddle + alphabet). */
+/** Assemble the linewrap family's differential corpora (motifs + dense + straddle + alphabet). */
 static utf8_segment_corpora_t utf8_linebreaks_corpora_() {
     utf8_segment_corpora_t corpora = {
         "linewrap", span_over(utf8_linebreaks_motifs), &utf8_linebreaks_dense_runs_, &utf8_linebreaks_straddles_,
@@ -188,11 +190,11 @@ static utf8_segment_corpora_t utf8_linebreaks_corpora_() {
     return corpora;
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Rule coverage
 
-/** @brief Rule-coverage gate: every LB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
+/** Rule-coverage gate: every LB rule motif runs and agrees serial-vs-ISA at window phases. */
 void test_utf8_linebreaks_rules() {
     fmt::println("  - testing UTF-8 line-break rule-coverage matrix...");
 
@@ -206,7 +208,7 @@ void test_utf8_linebreaks_rules() {
         {"LB8", utf8_rule_breaks_k, "a\xE2\x80\x8B" "b"_sv},                     // ZW SP* / break after ZWSP
         {"LB8a", utf8_rule_joins_k, "a\xE2\x80\x8D\xF0\x9F\x98\x80"_sv},         // ZWJ x (no break)
         {"LB9", utf8_rule_joins_k, "a\xCC\x81"_sv},                              // treat X CM* as X
-        {"LB10", utf8_rule_joins_k, "\xCC\x81" "a"_sv},                          // lone CM -> AL
+        {"LB10", utf8_rule_joins_k, "\xCC\x81" "a"_sv},                          // lone CM → AL
         {"LB11", utf8_rule_joins_k, "a\xE2\x81\xA0" "b"_sv},                     // x WJ / WJ x (Word Joiner, no break)
         {"LB12", utf8_rule_joins_k, "\xC2\xA0" "a"_sv},                          // GL x (no break after NBSP)
         {"LB12a", utf8_rule_joins_k, "a\xC2\xA0"_sv},                            // [^SP BA HY] x GL
@@ -238,9 +240,9 @@ void test_utf8_linebreaks_rules() {
         {"LB30b", utf8_rule_joins_k, "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBB"_sv},     // EB x EM (base + modifier, no break)
         {"LB31", utf8_rule_breaks_k, "\xE4\xB8\xAD\xE4\xB8\xAD"_sv},             // break everywhere else (ideographs)
         // Opposite-direction motifs (E1): the same rule firing the other way.
-        {"LB28", utf8_rule_breaks_k, "a b"_sv}, // AL SP AL -> break at the space
-        {"LB25", utf8_rule_breaks_k, "1 2"_sv}, // numerals split by space -> break
-        {"LB30a", utf8_rule_breaks_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI -> break
+        {"LB28", utf8_rule_breaks_k, "a b"_sv}, // AL SP AL → break at the space
+        {"LB25", utf8_rule_breaks_k, "1 2"_sv}, // numerals split by space → break
+        {"LB30a", utf8_rule_breaks_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI → break
     };
     // Every Line_Break rule id the gate requires a motif for (spec-derived checklist).
     char const *const required_rules[] = {
@@ -253,11 +255,11 @@ void test_utf8_linebreaks_rules() {
                                   span_over(required_rules));
 }
 
-#pragma endregion // Rule coverage
+#pragma endregion Rule coverage
 
 #pragma region Safety
 
-/** @brief Malformed-input safety of the UTF-8 line kernels (serial / dispatched / icelake). */
+/** Malformed-input safety of the UTF-8 line kernels (serial / dispatched / icelake). */
 void test_utf8_linebreaks_safety() {
     fmt::println("  - testing malformed-input safety of UTF-8 line kernels...");
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_linebreaks_serial}};
@@ -266,15 +268,15 @@ void test_utf8_linebreaks_safety() {
     fmt::println("    linewrap safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/** @brief Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
+/** Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
 void test_utf8_linebreaks_all() {
     utf8_segment_corpora_t const corpora = utf8_linebreaks_corpora_();
     check_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
                                     scale_iterations(25)); // This family's share of the suite budget
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

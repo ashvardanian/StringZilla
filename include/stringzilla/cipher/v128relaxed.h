@@ -1,10 +1,12 @@
 /**
- *  @brief WebAssembly relaxed-SIMD backend for AES-256 in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/v128relaxed.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief WebAssembly relaxed-SIMD backend for AES-256 in counter and Galois/counter modes.
  *
  *  The round loop stays a loop, for the reason `cipher/v128.h` spells out.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_V128RELAXED_H_
 #define STRINGZILLA_CIPHER_V128RELAXED_H_
@@ -17,30 +19,30 @@
 extern "C" {
 #endif
 
+/*  Relaxed SIMD adds one usable thing: a swizzle that need not answer zero for an out-of-range
+ *  index, which spares the engine a saturating clamp. Thirteen of the substitution box's nineteen
+ *  swizzles carry indices provably in zero through fifteen and become relaxed here. The six
+ *  antilogarithm lookups stay baseline - they are fed sums past twenty-eight and a deliberately
+ *  negative index, and rely on an out-of-range index answering zero, so relaxing them would make
+ *  the result engine dependent. Everything with no relaxed opportunity calls the @c _v128 kernel
+ *  rather than restating it. */
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-/*  Relaxed SIMD adds one usable thing: a swizzle that need not answer zero for an out-of-range index,
- *  which spares the engine a saturating clamp. Thirteen of the substitution box's nineteen swizzles
- *  carry indices provably in zero through fifteen and become relaxed here. The six antilogarithm
- *  lookups stay baseline - they are fed sums past twenty-eight and a deliberately negative index, and
- *  rely on an out-of-range index answering zero, so relaxing them would make the result engine
- *  dependent. Everything with no relaxed opportunity calls the `_v128` kernel rather than restating it.
- */
-
 #pragma region Substitution Box
 
 /**
- *  @brief Evaluates a map linear over `GF(2)` on all sixteen lanes at once.
- *  @param low_table_u8x16 The map's value on each low nibble.
- *  @param high_table_u8x16 The map's value on each high nibble.
- *  @param bytes_u8x16 The sixteen inputs.
- *  @return `low_table_u8x16[byte & 0xF] ^ high_table_u8x16[byte >> 4]` in every lane.
+ *  @brief Evaluates a map linear over GF(2) on all sixteen lanes at once.
+ *  @param[in] low_table_u8x16 The map's value on each low nibble.
+ *  @param[in] high_table_u8x16 The map's value on each high nibble.
+ *  @param[in] bytes_u8x16 The sixteen inputs.
+ *  @return In every lane, @p low_table_u8x16 at the byte's low nibble, exclusive-ored with
+ *      @p high_table_u8x16 at its high nibble.
  *
- *  Both index vectors are nibbles by construction, so neither swizzle can go out of range and the relaxed
- *  form's implementation-defined case is unreachable.
+ *  Both index vectors are nibbles by construction, so neither swizzle can go out of range and the
+ *  relaxed form's implementation-defined case is unreachable.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16, v128_t high_table_u8x16,
                                                           v128_t bytes_u8x16) {
@@ -51,9 +53,9 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16
 }
 
 /**
- *  @brief Multiplies sixteen pairs of `GF(2^4)` elements under `x^4 + x + 1`.
- *  @param first_u8x16 One operand per lane, each below sixteen.
- *  @param second_u8x16 The other operand per lane, each below sixteen.
+ *  @brief Multiplies sixteen pairs of GF(2⁴) elements under x⁴ + x + 1.
+ *  @param[in] first_u8x16 One operand per lane, each below sixteen.
+ *  @param[in] second_u8x16 The other operand per lane, each below sixteen.
  *  @return The product per lane.
  *
  *  The two logarithm lookups take nibbles and may be relaxed.
@@ -71,11 +73,11 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x1
 
 /**
  *  @brief Applies the substitution box of FIPS 197 to all sixteen bytes of a block.
- *  @param bytes_u8x16 The sixteen inputs.
+ *  @param[in] bytes_u8x16 The sixteen inputs.
  *  @return The substituted bytes.
  *
- *  The same tower-field construction the `_v128` kernel uses, with every provably in-range swizzle taken in
- *  its relaxed form.
+ *  The same tower-field construction the @c _v128 kernel uses, with every provably in-range swizzle
+ *  taken in its relaxed form.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
     v128_t const mapped_u8x16 = sz_aes256_nibble_map_v128relaxed_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
@@ -84,7 +86,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
     v128_t const high_nibbles_u8x16 = wasm_u8x16_shr(mapped_u8x16, 4);
     v128_t const low_nibbles_u8x16 = wasm_v128_and(mapped_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
 
-    // The tower field's norm, `high^2 * N ^ high * low ^ low^2`, is what has to be inverted in `GF(2^4)`.
+    // The tower field's norm, high² × N ⊕ high × low ⊕ low², is what has to be inverted in GF(2⁴).
     v128_t const high_scaled_u8x16 = wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_nibble_square_scaled_v128_()),
                                                                 high_nibbles_u8x16);
     v128_t const crossed_u8x16 = sz_aes256_nibble_multiply_v128relaxed_(high_nibbles_u8x16, low_nibbles_u8x16);
@@ -103,14 +105,14 @@ SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
         wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_substituted_high_v128_()), high_inverse_u8x16));
 }
 
-#pragma endregion // Substitution Box
+#pragma endregion Substitution Box
 
 #pragma region Key Schedule
 
 /**
  *  @brief Builds the schedule's rotated and substituted word against a round constant.
- *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
- *  @param round_constant The round constant for this step.
+ *  @param[in] previous_u8x16 The four schedule words immediately before the new quadruple.
+ *  @param[in] round_constant The round constant for this step.
  *  @return The finished word, broadcast across all four lanes.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, sz_u8_t round_constant) {
@@ -122,7 +124,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, s
 
 /**
  *  @brief Builds the schedule's plainly substituted word, the step an AES-256 schedule interleaves.
- *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
+ *  @param[in] previous_u8x16 The four schedule words immediately before the new quadruple.
  *  @return The finished word, broadcast across all four lanes.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_key_half_turn_v128relaxed_(v128_t previous_u8x16) {
@@ -179,14 +181,14 @@ SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_
     wasm_v128_store(&key->round_keys[56], even_round_key_u8x16);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
 /**
  *  @brief Encrypts one block with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param block_u8x16 The plaintext block.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const *key, v128_t block_u8x16) {
@@ -200,7 +202,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t con
                          sz_aes256_round_key_v128_(key, 14));
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
@@ -240,7 +242,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
@@ -259,11 +261,11 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                        sz_u8_t const nonce[sz_at_least_(12)]) {
     v128_t initial_u8x16;
@@ -287,15 +289,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *st
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
- *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole
- *  blocks, then a trailing block that the next chunk will resume.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes
+ *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
+ *  block, then whole blocks, then a trailing block that the next chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
                                                            sz_size_t length, sz_ptr_t output,
@@ -403,7 +405,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_v128relaxed(sz_aes256
     return sz_aes256_gcm_decryptor_verify_v128(decryptor, tag);
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -437,7 +439,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

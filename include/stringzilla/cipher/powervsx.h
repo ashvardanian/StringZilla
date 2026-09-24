@@ -1,11 +1,13 @@
 /**
- *  @brief IBM Power VSX backend for AES-256 in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/powervsx.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/cipher.h
+ *  @date August 4, 2026
+ *  @brief IBM Power VSX backend for AES-256 in counter and Galois/counter modes.
  *
- *  The fourteen rounds are written out rather than looped, for the same reason the eight lanes are and the one
- *  `cipher/icelake.h` spells out.
+ *  The fourteen rounds are written out rather than looped, for the same reason the eight lanes are
+ *  and the one `cipher/icelake.h` spells out.
+ *
+ *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_POWERVSX_H_
 #define STRINGZILLA_CIPHER_POWERVSX_H_
@@ -17,6 +19,29 @@
 extern "C" {
 #endif
 
+/*  Power is the only target here with both a native round instruction and a native carry-less
+ *  multiply, and both of them read a register in big-endian order no matter which endianness the
+ *  translation unit is built for. That is what the @c _be in @c vec_cipher_be and @c vec_pmsum_be
+ *  means: the instruction is not endian-adjusted the way @c vec_perm and @c vec_splat are, so
+ *  element zero of a little-endian vector is the @b last byte the round function sees.
+ *
+ *  Every sixteen-byte value in this file therefore lives in one single representation, called
+ *  big-endian register order below: block byte zero occupies the most significant register byte.
+ *  @c vec_xl_be and @c vec_xst_be move between memory and that order on both endiannesses in one
+ *  instruction each, so the choice costs nothing, and the round keys, counter blocks, keystream,
+ *  hash blocks and subkey powers all share it. Two consequences are worth spelling out.
+ *
+ *  The Galois hash needs @b no byte reflection here. A carry-less multiplier wants the field
+ *  element's lowest coefficient in the most significant bit, which is exactly where the tag's byte
+ *  order already puts it once the block is in big-endian register order; the byte shuffle that the
+ *  x86 backends spend on every block is simply absent. The multiplier's remaining single-bit offset
+ *  is still made up by the leftward shift inside the reduction.
+ *
+ *  Only the round-key array is genuinely endian-dependent, because @c sz_aes256_key_t stores words
+ *  as @c sz_u32_t and the byte image of a word differs between the two targets. That one conversion
+ *  is the sole @c SZ_IS_BIG_ENDIAN_ branch below. Everything else is expressed through @c vec_sld,
+ *  which is a raw big-endian @c vsldoi, or through lane-wise operations whose meaning does not
+ *  depend on element numbering, so the two branches cannot drift apart. */
 #if SZ_USE_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
@@ -25,36 +50,11 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-/*  Power is the only target here with both a native round instruction and a native carry-less multiply,
- *  and both of them read a register in big-endian order no matter which endianness the translation unit
- *  is built for. That is what the `_be` in `vec_cipher_be` and `vec_pmsum_be` means: the instruction is
- *  not endian-adjusted the way `vec_perm` and `vec_splat` are, so element zero of a little-endian vector
- *  is the @b last byte the round function sees.
- *
- *  Every sixteen-byte value in this file therefore lives in one single representation, called big-endian
- *  register order below: block byte zero occupies the most significant register byte. `vec_xl_be` and
- *  `vec_xst_be` move between memory and that order on both endiannesses in one instruction each, so the
- *  choice costs nothing, and the round keys, counter blocks, keystream, hash blocks and subkey powers all
- *  share it. Two consequences are worth spelling out.
- *
- *  The Galois hash needs @b no byte reflection here. A carry-less multiplier wants the field element's
- *  lowest coefficient in the most significant bit, which is exactly where the tag's byte order already
- *  puts it once the block is in big-endian register order; the byte shuffle that the x86 backends spend
- *  on every block is simply absent. The multiplier's remaining single-bit offset is still made up by the
- *  leftward shift inside the reduction.
- *
- *  Only the round-key array is genuinely endian-dependent, because `sz_aes256_key_t` stores words as
- *  `sz_u32_t` and the byte image of a word differs between the two targets. That one conversion is the
- *  sole `SZ_IS_BIG_ENDIAN_` branch below. Everything else is expressed through `vec_sld`, which is a raw
- *  big-endian `vsldoi`, or through lane-wise operations whose meaning does not depend on element
- *  numbering, so the two branches cannot drift apart.
- */
-
 #pragma region Byte Order
 
 /**
  *  @brief Loads sixteen bytes into big-endian register order.
- *  @param bytes The sixteen bytes, in the order the cipher defines them.
+ *  @param[in] bytes The sixteen bytes, in the order the cipher defines them.
  *  @return The block, with byte zero in the most significant register byte.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_block_load_powervsx_(sz_u8_t const *bytes) {
@@ -63,28 +63,28 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_block_load_powervsx_(sz_u8_t c
 
 /**
  *  @brief Stores a block held in big-endian register order back to sixteen bytes.
- *  @param block_u8x16 The block.
- *  @param bytes Receives the sixteen bytes in the order the cipher defines them.
+ *  @param[in] block_u8x16 The block.
+ *  @param[out] bytes Receives the sixteen bytes in the order the cipher defines them.
  */
 SZ_HELPER_INLINE void sz_aes256_block_store_powervsx_(__vector unsigned char block_u8x16, sz_u8_t *bytes) {
     vec_xst_be(block_u8x16, 0, (unsigned char *)bytes);
 }
 
-/** @brief An all-zero block, the second operand of every `vec_sld` used as a shift. */
+/** An all-zero block, the second operand of every @c vec_sld used as a shift. */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_zero_powervsx_(void) { return vec_splats((unsigned char)0); }
 
-#pragma endregion // Byte Order
+#pragma endregion Byte Order
 
 #pragma region Key Schedule
 
 /**
  *  @brief Reads one round key out of an expanded schedule into big-endian register order.
- *  @param key The expanded schedule.
- *  @param round_index Which of the fifteen round keys to read, zero through fourteen.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] round_index Which of the fifteen round keys to read, zero through fourteen.
  *  @return The round key.
  *
- *  A schedule word packs its first byte into the least significant position, so on a little-endian target the
- *  word array's byte image already is the round key's byte sequence.
+ *  A schedule word packs its first byte into the least significant position, so on a little-endian
+ *  target the word array's byte image already is the round key's byte sequence.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_round_key_powervsx_(sz_aes256_key_t const *key,
                                                                       sz_size_t round_index) {
@@ -98,9 +98,10 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_round_key_powervsx_(sz_aes256_
 }
 
 /**
- *  @brief Writes one round key back into an expanded schedule, undoing @ref sz_aes256_round_key_powervsx_.
- *  @param round_key_u8x16 The round key in big-endian register order.
- *  @param words The four schedule words that receive it.
+ *  @brief Writes one round key back into an expanded schedule,
+ *      undoing @ref sz_aes256_round_key_powervsx_.
+ *  @param[in] round_key_u8x16 The round key in big-endian register order.
+ *  @param[out] words The four schedule words that receive it.
  */
 SZ_HELPER_INLINE void sz_aes256_round_key_store_powervsx_(__vector unsigned char round_key_u8x16, sz_u32_t *words) {
 #if SZ_IS_BIG_ENDIAN_
@@ -113,11 +114,12 @@ SZ_HELPER_INLINE void sz_aes256_round_key_store_powervsx_(__vector unsigned char
 
 /**
  *  @brief Broadcasts a round key's last word across all four words.
- *  @param round_key_u8x16 The round key in big-endian register order.
+ *  @param[in] round_key_u8x16 The round key in big-endian register order.
  *  @return The last word in every lane.
  *
- *  The schedule's recurrence reads only the word that comes last, and `vec_splat` is one of the intrinsics the
- *  compiler renumbers for little-endian, so the lane that holds the most significant word moves.
+ *  The schedule's recurrence reads only the word that comes last, and @c vec_splat is one of the
+ *  intrinsics the compiler renumbers for little-endian, so the lane that holds the most
+ *  significant word moves.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_key_broadcast_powervsx_(__vector unsigned char round_key_u8x16) {
     return (__vector unsigned char)vec_splat((__vector unsigned int)round_key_u8x16, SZ_IS_BIG_ENDIAN_ ? 3 : 0);
@@ -125,7 +127,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_key_broadcast_powervsx_(__vect
 
 /**
  *  @brief Substitutes a round key's last word and broadcasts it, the schedule's plain step.
- *  @param round_key_u8x16 The round key in big-endian register order.
+ *  @param[in] round_key_u8x16 The round key in big-endian register order.
  *  @return The substituted word in every lane.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_key_substitute_powervsx_(__vector unsigned char round_key_u8x16) {
@@ -133,14 +135,15 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_key_substitute_powervsx_(__vec
 }
 
 /**
- *  @brief Rotates, substitutes and offsets a round key's last word, the schedule's round-constant step.
- *  @param round_key_u8x16 The round key in big-endian register order.
- *  @param round_constant The round constant for this step.
+ *  @brief Rotates, substitutes and offsets a round key's last word, the
+ *      schedule's round-constant step.
+ *  @param[in] round_key_u8x16 The round key in big-endian register order.
+ *  @param[in] round_constant The round constant for this step.
  *  @return The transformed word in every lane.
  *
- *  Broadcasting before rotating is what makes the rotation a single instruction: once all four words hold the
- *  same value, sliding the whole register one byte leaves every word holding its own bytes rotated, the last
- *  word borrowing the byte that wraps around.
+ *  Broadcasting before rotating is what makes the rotation a single instruction: once all four
+ *  words hold the same value, sliding the whole register one byte leaves every word holding its own
+ *  bytes rotated, the last word borrowing the byte that wraps around.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_key_rotate_substitute_powervsx_(
     __vector unsigned char round_key_u8x16, sz_u32_t round_constant) {
@@ -151,9 +154,10 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_key_rotate_substitute_powervsx
 }
 
 /**
- *  @brief Folds a substituted schedule word into the round key four words back, producing the next one.
- *  @param previous_u8x16 The round key four words back, all four of its words in one register.
- *  @param substituted_u8x16 The substituted word, already broadcast across every lane.
+ *  @brief Folds a substituted schedule word into the round key four words back, producing
+ *      the next one.
+ *  @param[in] previous_u8x16 The round key four words back, all four of its words in one register.
+ *  @param[in] substituted_u8x16 The substituted word, already broadcast across every lane.
  *  @return The next round key.
  *
  *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it.
@@ -218,11 +222,11 @@ SZ_API_COMPTIME void sz_aes256_key_init_powervsx(sz_aes256_key_t *key, sz_u8_t c
     sz_aes256_round_key_store_powervsx_(even_round_key_u8x16, schedule + 14 * 4);
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
-/** @brief Applies one middle round to all eight chains, so the eight issue back to back. */
+/** Applies one middle round to all eight chains, so the eight issue back to back. */
 SZ_HELPER_INLINE void sz_aes256_blocks_round_powervsx_(__vector unsigned char *blocks_u8x16,
                                                        __vector unsigned char round_key_u8x16) {
     blocks_u8x16[0] = vec_cipher_be(blocks_u8x16[0], round_key_u8x16);
@@ -237,8 +241,8 @@ SZ_HELPER_INLINE void sz_aes256_blocks_round_powervsx_(__vector unsigned char *b
 
 /**
  *  @brief Encrypts one block with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param block_u8x16 The plaintext block in big-endian register order.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block_u8x16 The plaintext block in big-endian register order.
  *  @return The ciphertext block in big-endian register order.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_block_encrypt_powervsx_(sz_aes256_key_t const *key,
@@ -262,11 +266,11 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_block_encrypt_powervsx_(sz_aes
 
 /**
  *  @brief Encrypts eight blocks with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param blocks_u8x16 The eight plaintext blocks, replaced by their ciphertexts.
+ *  @param[in] key The expanded schedule.
+ *  @param[inout] blocks_u8x16 The eight plaintext blocks, replaced by their ciphertexts.
  *
- *  One round instruction has several cycles of latency and issues every cycle, so a single chain of fourteen
- *  dependent rounds leaves most of that throughput idle.
+ *  One round instruction has several cycles of latency and issues every cycle, so a single chain of
+ *  fourteen dependent rounds leaves most of that throughput idle.
  */
 SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_t const *key,
                                                          __vector unsigned char *blocks_u8x16) {
@@ -304,13 +308,13 @@ SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_t const *
     blocks_u8x16[7] = vec_cipherlast_be(blocks_u8x16[7], round_key_u8x16);
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
 /**
  *  @brief Places the twelve nonce bytes in a counter block whose trailing index word is zero.
- *  @param nonce The twelve nonce bytes.
+ *  @param[in] nonce The twelve nonce bytes.
  *  @return The counter block for index zero, in big-endian register order.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_counter_base_powervsx_(sz_u8_t const *nonce) {
@@ -326,8 +330,8 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_counter_base_powervsx_(sz_u8_t
 
 /**
  *  @brief Completes a counter block with a big-endian block index in its trailing word.
- *  @param base_u8x16 A counter block carrying the nonce, whose trailing word is overwritten.
- *  @param block_index The block index.
+ *  @param[in] base_u8x16 A counter block carrying the nonce, whose trailing word is overwritten.
+ *  @param[in] block_index The block index.
  *  @return The counter block for that index, in big-endian register order.
  *
  *  A broadcast index lands in every word, and the selection mask keeps only the last of them.
@@ -342,7 +346,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_counter_block_powervsx_(__vect
 
 /**
  *  @brief Reads the block index back out of a counter block's trailing four bytes.
- *  @param counter The counter block, in the order the cipher defines it.
+ *  @param[in] counter The counter block, in the order the cipher defines it.
  *  @return The block index.
  */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_counter_index_powervsx_(sz_u8_t const *counter) {
@@ -352,9 +356,9 @@ SZ_HELPER_INLINE sz_u32_t sz_aes256_counter_index_powervsx_(sz_u8_t const *count
 
 /**
  *  @brief Exclusive-ors one keystream block into one block of the message.
- *  @param input The sixteen input bytes.
- *  @param output Receives the sixteen output bytes; may alias @p input.
- *  @param keystream_u8x16 The keystream block.
+ *  @param[in] input The sixteen input bytes.
+ *  @param[out] output Receives the sixteen output bytes; may alias @p input.
+ *  @param[in] keystream_u8x16 The keystream block.
  */
 SZ_HELPER_INLINE void sz_aes256_ctr_lane_powervsx_(sz_u8_t const *input, sz_u8_t *output,
                                                    __vector unsigned char keystream_u8x16) {
@@ -429,20 +433,20 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *key, sz_u
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
 /**
  *  @brief Accumulates the 256-bit carry-less product of two blocks into a running triple.
- *  @param block_u8x16 One operand, in big-endian register order.
- *  @param subkey_u8x16 The other operand, one of the subkey powers.
- *  @param low_u8x16 Accumulates the product of the two low halves.
- *  @param middle_u8x16 Accumulates both cross products.
- *  @param high_u8x16 Accumulates the product of the two high halves.
+ *  @param[in] block_u8x16 One operand, in big-endian register order.
+ *  @param[in] subkey_u8x16 The other operand, one of the subkey powers.
+ *  @param[inout] low_u8x16 Accumulates the product of the two low halves.
+ *  @param[inout] middle_u8x16 Accumulates both cross products.
+ *  @param[inout] high_u8x16 Accumulates the product of the two high halves.
  *
- *  The polynomial multiplier here sums two doubleword products rather than producing one, which is a different
- *  shape from the single-product multipliers the other backends use.
+ *  The polynomial multiplier here sums two doubleword products rather than producing one, which is
+ *  a different shape from the single-product multipliers the other backends use.
  */
 SZ_HELPER_INLINE void sz_ghash_accumulate_powervsx_(__vector unsigned char block_u8x16,
                                                     __vector unsigned char subkey_u8x16,
@@ -466,9 +470,9 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_powervsx_(__vector unsigned char block
 
 /**
  *  @brief Folds an accumulated triple into one block.
- *  @param low_u8x16 The accumulated low halves.
- *  @param middle_u8x16 The accumulated cross products.
- *  @param high_u8x16 The accumulated high halves.
+ *  @param[in] low_u8x16 The accumulated low halves.
+ *  @param[in] middle_u8x16 The accumulated cross products.
+ *  @param[in] high_u8x16 The accumulated high halves.
  *  @return The reduced product, in big-endian register order.
  *
  *  The cross products straddle the halves, so they are split and merged first.
@@ -517,8 +521,8 @@ SZ_HELPER_INLINE __vector unsigned char sz_ghash_reduce_powervsx_(__vector unsig
 
 /**
  *  @brief Multiplies two blocks in the Galois field the tag is built over.
- *  @param accumulator_u8x16 The running hash.
- *  @param subkey_u8x16 One of the subkey powers.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] subkey_u8x16 One of the subkey powers.
  *  @return The reduced product, in big-endian register order.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_ghash_multiply_powervsx_(__vector unsigned char accumulator_u8x16,
@@ -544,7 +548,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_powervsx(sz_aes256_gcm_key_t *key, s
     }
 }
 
-/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+/** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_powervsx_(sz_u8_t const *first, sz_u8_t const *second) {
     __vector unsigned char const first_u8x16 = vec_xl(0, (unsigned char const *)first);
     __vector unsigned char const second_u8x16 = vec_xl(0, (unsigned char const *)second);
@@ -553,9 +557,9 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_powervsx_(sz_u8_t const *first, s
 
 /**
  *  @brief Absorbs one block into the running hash.
- *  @param accumulator_u8x16 The running hash.
- *  @param block_u8x16 The block to absorb, in big-endian register order.
- *  @param subkey_u8x16 The hash subkey.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] block_u8x16 The block to absorb, in big-endian register order.
+ *  @param[in] subkey_u8x16 The hash subkey.
  *  @return The updated running hash.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_ghash_absorb_powervsx_(__vector unsigned char accumulator_u8x16,
@@ -565,9 +569,10 @@ SZ_HELPER_INLINE __vector unsigned char sz_ghash_absorb_powervsx_(__vector unsig
 }
 
 /**
- *  @brief Loads the eight subkey powers, descending, so power `j` pairs with block `j` of a group.
- *  @param powers The eight subkey powers, ascending.
- *  @param powers_u8x16 Receives `H^8` down to `H^1`.
+ *  @brief Loads the eight subkey powers, descending, so power @c j pairs with block @c j
+ *      of a group.
+ *  @param[in] powers The eight subkey powers, ascending.
+ *  @param[out] powers_u8x16 Receives H⁸ down to H¹.
  */
 SZ_HELPER_INLINE void sz_ghash_descending_powers_powervsx_(sz_u8_t const *powers,
                                                            __vector unsigned char *powers_u8x16) {
@@ -583,12 +588,12 @@ SZ_HELPER_INLINE void sz_ghash_descending_powers_powervsx_(sz_u8_t const *powers
 
 /**
  *  @brief Absorbs eight blocks into the running hash with a single field reduction.
- *  @param accumulator_u8x16 The running hash.
- *  @param blocks_u8x16 The eight blocks, in the order they arrived.
- *  @param powers_u8x16 The powers `H^8` through `H^1`.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] blocks_u8x16 The eight blocks, in the order they arrived.
+ *  @param[in] powers_u8x16 The powers H⁸ through H¹.
  *  @return The updated running hash.
  *
- *  Eight absorbed blocks expand to `(Y ^ X1) H^8 ^ X2 H^7 ^ ...
+ *  Eight absorbed blocks expand to (Y ⊕ X₁) H⁸ ⊕ X₂ H⁷ ⊕ … ⊕ X₈ H.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_ghash_absorb_eight_powervsx_(__vector unsigned char accumulator_u8x16,
                                                                         __vector unsigned char const *blocks_u8x16,
@@ -609,14 +614,15 @@ SZ_HELPER_INLINE __vector unsigned char sz_ghash_absorb_eight_powervsx_(__vector
     return sz_ghash_reduce_powervsx_(low_u8x16, middle_u8x16, high_u8x16);
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time, so this is a straight-line fill rather than a length-driven loop.
+ *  The size is known at compile time, so this is a straight-line fill rather than
+ *  a length-driven loop.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_powervsx_(sz_aes256_gcm_state_t *state) {
     __vector unsigned char const zero_u8x16 = sz_aes256_zero_powervsx_();
@@ -656,7 +662,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_powervsx_(sz_aes256_gcm_state_t 
     sz_keep_alive_(state);
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_powervsx_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                     sz_u8_t const nonce[sz_at_least_(12)]) {
     __vector unsigned char const zero_u8x16 = sz_aes256_zero_powervsx_();
@@ -680,7 +686,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_powervsx_(sz_aes256_gcm_state_t *state
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
                                                         sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
@@ -731,14 +737,14 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *s
 
 /**
  *  @brief Absorbs whatever the hash block holds, zero padded to a full block.
- *  @param partial The pending hash bytes.
- *  @param buffered How many of them are valid.
- *  @param accumulator_u8x16 The running hash.
- *  @param subkey_u8x16 The hash subkey.
+ *  @param[in] partial The pending hash bytes.
+ *  @param[in] buffered How many of them are valid.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] subkey_u8x16 The hash subkey.
  *  @return The updated running hash.
  *
- *  Emptying the block is left to the caller, because the digest reads a state it may not modify while the
- *  transform owns one it must.
+ *  Emptying the block is left to the caller, because the digest reads a state it may not modify
+ *  while the transform owns one it must.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_gcm_flush_partial_powervsx_(sz_u8_t const *partial,
                                                                               sz_size_t buffered,
@@ -757,17 +763,18 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_gcm_flush_partial_powervsx_(sz
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param state The state, whose two sixteen-byte counters advance together here.
- *  @param input The bytes to transform.
- *  @param output Receives the transformed bytes.
- *  @param count Bytes to consume, never more than the keystream block has left.
- *  @param accumulator_u8x16 The running hash.
- *  @param subkey_u8x16 The hash subkey.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in] input The bytes to transform.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] count Bytes to consume, never more than the keystream block has left.
+ *  @param[in] accumulator_u8x16 The running hash.
+ *  @param[in] subkey_u8x16 The hash subkey.
+ *  @param[in] direction Which buffer the hash absorbs.
  *  @return The updated running hash.
  *
- *  Through the message the keystream offset and the hash offset are the same number, because every byte spends
- *  one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
+ *  Through the message the keystream offset and the hash offset are the same number, because
+ *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
+ *  this resumes both.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_gcm_spend_powervsx_(sz_aes256_gcm_state_t *state,
                                                                       sz_u8_t const *input, sz_u8_t *output,
@@ -812,14 +819,14 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_gcm_spend_powervsx_(sz_aes256_
 
 /**
  *  @brief Transforms one whole block and hands back the ciphertext the hash must absorb.
- *  @param input The sixteen input bytes.
- *  @param output Receives the sixteen output bytes; may alias @p input.
- *  @param keystream_u8x16 The keystream block.
- *  @param cipher_mask_u8x16 All ones when decrypting, all zeros when encrypting.
+ *  @param[in] input The sixteen input bytes.
+ *  @param[out] output Receives the sixteen output bytes; may alias @p input.
+ *  @param[in] keystream_u8x16 The keystream block.
+ *  @param[in] cipher_mask_u8x16 All ones when decrypting, all zeros when encrypting.
  *  @return The ciphertext, which is the output when encrypting and the input when decrypting.
  *
- *  The ciphertext leaves in a register rather than being read back from @p output, because a caller may pass
- *  one pointer for both and the tag would then be built over plaintext.
+ *  The ciphertext leaves in a register rather than being read back from @p output, because a caller
+ *  may pass one pointer for both and the tag would then be built over plaintext.
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_gcm_lane_powervsx_(sz_u8_t const *input, sz_u8_t *output,
                                                                      __vector unsigned char keystream_u8x16,
@@ -832,15 +839,15 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_gcm_lane_powervsx_(sz_u8_t con
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
- *  @param direction Which buffer the hash absorbs.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
+ *  @param[in] direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
- *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole blocks
- *  eight at a time, then a trailing block that the next chunk will resume.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes
+ *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
+ *  block, then whole blocks eight at a time, then a trailing block that the next chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                         sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -947,8 +954,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_state_t *s
 
 /**
  *  @brief Finishes the payload both directions share, emitting the masked hash.
- *  @param state The state, left unmodified so a caller may keep appending.
- *  @param tag Receives the sixteen tag bytes.
+ *  @param[in] state The state, left unmodified so a caller may keep appending.
+ *  @param[out] tag Receives the sixteen tag bytes.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state,
                                                      sz_u8_t tag[sz_at_least_(16)]) {
@@ -1015,7 +1022,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_powervsx(sz_aes256_gc
                                                                              : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -1049,7 +1056,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_powervsx(sz_aes256_gcm_key_t c
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

@@ -1,7 +1,9 @@
 /**
- *  @brief IBM Power VSX backend for compare.
  *  @file include/stringzilla/compare/powervsx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief IBM Power VSX backend for compare.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_POWERVSX_H_

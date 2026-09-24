@@ -1,14 +1,17 @@
 /**
- *  @brief Ice Lake (AVX-512 VBMI/VBMI2/GFNI) backend for the single-pass Unicode normalizer.
  *  @file include/stringzilla/utf8_norm/icelake.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_norm.h
+ *  @date June 14, 2026
+ *  @brief Ice Lake (AVX-512 VBMI/VBMI2/GFNI) backend for the single-pass Unicode normalizer.
  *
- *  Ice Lake reuses the Skylake scan skeleton (`sz_utf8_norm_classify_avx512_`) and overrides only the
- *  lead classifier: a single `_mm512_permutexvar_epi8` (AVX-512 VBMI) reads the 64-byte
- *  `sz_utf8_norm_lead_lut_` verbatim, replacing Skylake's four `vpshufb` + select. The scanner returns the
- *  first non-inert byte (no compaction), so VBMI2 `vpcompressb` is unused; a GFNI affine classifier is a
- *  possible future micro-opt but a true 64-entry table is not affine, so `vpermb` is the right primitive.
+ *  Ice Lake reuses the Skylake scan skeleton, @c sz_utf8_norm_classify_avx512_, and overrides only
+ *  the lead classifier: a single AVX-512 VBMI @c _mm512_permutexvar_epi8 reads the 64-byte
+ *  @c sz_utf8_norm_lead_lut_ verbatim, replacing Skylake's four @c vpshufb + select. The scanner
+ *  returns the first non-inert byte without compaction, so VBMI2 @c vpcompressb is unused; a GFNI
+ *  affine classifier is a possible future micro-optimization, but a true 64-entry table is not
+ *  affine, so @c vpermb is the right primitive.
+ *
+ *  @sa include/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_ICELAKE_H_
 #define STRINGZILLA_UTF8_NORM_ICELAKE_H_
@@ -35,7 +38,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
 #endif
 
-/** @brief 64-entry lead lookup in one `vpermb` (AVX-512 VBMI), reading the shared LUT verbatim. */
+/** 64-entry lead lookup in one AVX-512 VBMI @c vpermb, reading the shared LUT verbatim. */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
                                                                       sz_u8_t form_flag) {
     __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
@@ -45,7 +48,7 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i by
     return is_lead_m64 & has_flag_m64;
 }
 
-/** @brief Scan primitive (Ice Lake): the Skylake skeleton with the single-`vpermb` lead classifier. */
+/** Ice Lake scan primitive: the Skylake skeleton with the single @c vpermb lead classifier. */
 SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_icelake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_vbmi_icelake_);
 }

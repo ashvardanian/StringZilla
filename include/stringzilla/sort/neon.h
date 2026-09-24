@@ -1,16 +1,19 @@
 /**
- *  @brief NEON (Arm) backend for sorting string collections.
  *  @file include/stringzilla/sort/neon.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/sort.h
+ *  @date June 13, 2026
+ *  @brief NEON (Arm) backend for sorting string collections.
  *
- *  Mirrors the SVE backend's out-of-place 3-way QuickSort partition, but NEON has no `svcompact`, so the
- *  per-block compaction uses a small `static const` left-pack table fed to `vqtbl2q_u8` (4 u64 = 32 bytes =
- *  exactly one `uint8x16x2_t`, so one table lookup gathers any subset of 4 lanes to the front; a second
- *  moves the order indices). The 4-wide table is 16x32 = 512 bytes - small enough to keep `const` and warm
- *  in cache - versus the 16 KB an 8-wide table would need. Compaction preserves lane order, so the partition
- *  is @b stable - matching the stable-by-default contract - and the recursion/stability/reverse/top-K/
- *  uncased machinery is reused verbatim from `sort/serial.h`.
+ *  Mirrors the SVE backend's out-of-place 3-way QuickSort partition, but NEON has no @c svcompact,
+ *  so the per-block compaction uses a small `static const` left-pack table fed to @c vqtbl2q_u8
+ *  (four u64 values, 32 bytes, exactly one @c uint8x16x2_t, so one table lookup gathers any subset
+ *  of 4 lanes to the front; a second moves the order indices). At 16 × 32 = 512 bytes, the 4-wide
+ *  table is small enough to keep @c const and warm in cache, versus the 16 KB an 8-wide table would
+ *  need. Compaction preserves lane order, so the partition is @b stable - matching the
+ *  stable-by-default contract - and the recursion/stability/reverse/top-K/uncased machinery is
+ *  reused verbatim from `sort/serial.h`.
+ *
+ *  @sa include/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_NEON_H_
 #define STRINGZILLA_SORT_NEON_H_
@@ -33,19 +36,19 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-/** @brief Collapses two `uint64x2_t` compare results (lanes are 0 or ~0) into a 4-bit lane mask. */
+/** Collapses two @c uint64x2_t compare results (lanes are 0 or ~0) into a 4-bit lane mask. */
 SZ_HELPER_INLINE sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
     static sz_u16_t const lane_weights[4] = {1, 2, 4, 8};
     uint16x4_t flags_u16x4 = vmovn_u32(vcombine_u32(vmovn_u64(lower_u64x2), vmovn_u64(upper_u64x2)));
     return (sz_u32_t)vaddv_u16(vand_u16(flags_u16x4, vld1_u16(lane_weights)));
 }
 
-/** @brief Left-packs the @p mask4 -selected lanes of one 4-u64 block (keys @p keys_u8x16x2 and order
- *         @p order_u8x16x2) to the @p out_pgrams / @p out_order cursors, preserving order; returns how many
- *         lanes were written. Both half-vectors are stored unconditionally (the cursor only advances by the
- *         surviving count, so the unwritten tail is overwritten by the next call or lands in the region
- *         slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent
- *         "store only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
+/** Left-packs the @p mask4 -selected lanes of one 4-u64 block (keys @p keys_u8x16x2 and order
+ *  @p order_u8x16x2) to the @p out_pgrams / @p out_order cursors, preserving order; returns how
+ *  many lanes were written. Both half-vectors are stored unconditionally (the cursor only advances
+ *  by the surviving count, so the unwritten tail is overwritten by the next call or lands in the
+ *  region slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent
+ *  "store only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
 SZ_HELPER_INLINE sz_size_t sz_sort_neon_compact4_(                     //
     uint8x16x2_t const keys_u8x16x2, uint8x16x2_t const order_u8x16x2, //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
@@ -93,10 +96,11 @@ SZ_HELPER_INLINE sz_size_t sz_sort_neon_compact4_(                     //
 
 /**
  *  @brief 3-way partition around the Sedgewick pivot using NEON table-compaction.
- *  @note Out-of-place into @p partitioned_* with three regions (smaller, equal, greater) laid out by the
- *        count pass and separated by 8-lane slack gaps that absorb each region's trailing full-vector spill;
- *        the three regions are then copied back contiguously. A single block-major pass left-packs all three
- *        comparison kinds together, so each block is loaded once and the equal mask is derived for free.
+ *
+ *  Out-of-place into @p partitioned_* with three regions, smaller, equal and greater, laid out by
+ *  the count pass and separated by 8-lane slack gaps that absorb each region's trailing full-vector
+ *  spill; the three regions are then copied back contiguously. A single block-major pass left-packs
+ *  all three comparison kinds together, so each block is loaded once and the equal mask is free.
  */
 SZ_HELPER_INLINE void sz_sequence_argsort_neon_3way_partition_(                     //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
@@ -335,11 +339,9 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequen
     return sz_success_k;
 }
 
-/**
- *  @brief Uncased twin of `sz_sequence_argsort_neon_sort_byte_windows_`: the folded code-point export
- *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      NEON partition - which is where NEON beats the fully-serial uncased path.
- */
+/** Uncased twin of @c sz_sequence_argsort_neon_sort_byte_windows_: the folded code-point export
+ *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
+ *  the NEON partition - which is where NEON beats the fully-serial uncased path. */
 SZ_API_COMPTIME void sz_sequence_argsort_neon_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,

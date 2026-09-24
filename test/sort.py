@@ -16,6 +16,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/sort.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/sort.py -q
+
+File: test/sort.py
+Author: Ash Vardanian
+Date: September 24, 2023
 """
 
 from random import randint
@@ -253,9 +257,9 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, see
 # region Backend differential
 
 
-# Batch sizes bracketing: a single element, a pair, just past a typical SIMD/threading tile (33, 64),
-# and a size large enough to engage any parallel/chunked sort path (1000).
 BATCH_SIZES = [1, 2, 33, 64, 1000]
+"""Batch sizes bracketing: a single element, a pair, just past a typical SIMD/threading tile at 33
+and 64, and a size large enough to engage any parallel/chunked sort path at 1000."""
 
 
 def random_batch(size: int) -> list:

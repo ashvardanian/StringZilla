@@ -1,7 +1,8 @@
 /**
  *  @file c/stringzilla/utf8_wordbreaks.c
- *  @brief Per-domain dispatch shim for UAX-29 word boundary segmentation.
  *  @author Ash Vardanian
+ *  @date November 30, 2025
+ *  @brief Per-domain dispatch shim for UAX-29 word boundary segmentation.
  */
 #include <stringzilla/utf8_wordbreaks.h>
 

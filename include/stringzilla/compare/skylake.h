@@ -1,7 +1,9 @@
 /**
- *  @brief Skylake (AVX-512) backend for string comparison utilities.
  *  @file include/stringzilla/compare/skylake.h
  *  @author Ash Vardanian
+ *  @date December 11, 2023
+ *  @brief Skylake (AVX-512) backend for string comparison utilities.
+ *
  *  @sa include/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_SKYLAKE_H_

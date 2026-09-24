@@ -1,19 +1,22 @@
 /**
- *  @brief RISC-V Vector (RVV 1.0) backend for sorting string collections.
  *  @file include/stringzilla/sort/rvv.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/sort.h
+ *  @date June 14, 2026
+ *  @brief RISC-V Vector (RVV 1.0) backend for sorting string collections.
  *
- *  Mirrors the SVE backend's length-agnostic, out-of-place 3-way QuickSort partition. RVV has an exact
- *  `__riscv_vcompress_vm_u64m*` (the analogue of SVE's `svcompact_u64`), so each `vsetvl` strip's smaller /
- *  equal / greater lanes are packed to the front and stored contiguously with no left-pack table and no
- *  region slack (unlike NEON's `vqtbl2q` compaction). `__riscv_vcpop_m_b64` counts the surviving lanes for
- *  the cursor advance. Compaction preserves lane order, so the partition is @b stable - matching the
+ *  Mirrors the SVE backend's length-agnostic, out-of-place 3-way QuickSort partition. RVV has an
+ *  exact `__riscv_vcompress_vm_u64m*` (the analogue of SVE's @c svcompact_u64), so each
+ *  @c vsetvl strip's smaller / equal / greater lanes are packed to the front and stored
+ *  contiguously with no left-pack table and no region slack (unlike NEON's @c vqtbl2q
+ *  compaction). @c __riscv_vcpop_m_b64 counts the surviving lanes for the cursor advance.
+ *  Compaction preserves lane order, so the partition is @b stable - matching the
  *  stable-by-default contract - and the recursion / stability / reverse / top-K / uncased
  *  machinery is reused verbatim from `sort/serial.h`.
  *
- *  Vector-length-agnostic: correct at VLEN 128 / 256 / 512 / 1024, because every strip is bounded by
- *  `__riscv_vsetvl_e64m1` and stores are masked to the per-strip surviving count.
+ *  Vector-length-agnostic: correct at VLEN 128 / 256 / 512 / 1024, because every strip is bounded
+ *  by @c __riscv_vsetvl_e64m1 and stores are masked to the per-strip surviving count.
+ *
+ *  @sa include/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_RVV_H_
 #define STRINGZILLA_SORT_RVV_H_
@@ -37,19 +40,21 @@ extern "C" {
 #endif
 
 /**
- *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
- *  @note Unlike the serial algorithm, uses compressed stores to filter and move the elements around the pivot.
- *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV `vsetvl` strips and the
- *      `__riscv_vcompress_vm_u64m1` primitive in place of `svcompact_u64`.
+ *  @brief The most important part of the QuickSort algorithm partitioning the elements
+ *      around the pivot.
+ *  @note Unlike the serial algorithm, uses compressed stores to filter and move the elements
+ *      around the pivot.
+ *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV @c vsetvl
+ *      strips and the @c __riscv_vcompress_vm_u64m1 primitive in place of @c svcompact_u64.
  *
- *  @param initial_pgrams Source pgram array; updated in place after copy-back.
- *  @param initial_order Corresponding order array; updated in place after copy-back.
- *  @param partitioned_pgrams Temporary output buffer for the three-way partitioned pgrams.
- *  @param partitioned_order Temporary output buffer for the corresponding order entries.
- *  @param start_in_sequence First index (inclusive) of the range to partition.
- *  @param end_in_sequence One-past-the-last index of the range to partition.
- *  @param first_pivot_offset Receives the index of the first element equal to the pivot.
- *  @param last_pivot_offset Receives the index of the last element equal to the pivot.
+ *  @param[inout] initial_pgrams Source pgram array; updated in place after copy-back.
+ *  @param[inout] initial_order Corresponding order array; updated in place after copy-back.
+ *  @param[out] partitioned_pgrams Temporary output buffer for the three-way partitioned pgrams.
+ *  @param[out] partitioned_order Temporary output buffer for the corresponding order entries.
+ *  @param[in] start_in_sequence First index (inclusive) of the range to partition.
+ *  @param[in] end_in_sequence One-past-the-last index of the range to partition.
+ *  @param[out] first_pivot_offset Receives the index of the first element equal to the pivot.
+ *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  */
 SZ_HELPER_INLINE void sz_sequence_argsort_rvv_3way_partition_(
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order, sz_pgram_t *const partitioned_pgrams,
@@ -142,17 +147,21 @@ SZ_HELPER_INLINE void sz_sequence_argsort_rvv_3way_partition_(
 }
 
 /**
- *  @brief Recursive Quick-Sort implementation backing both the `sz_sequence_argsort_rvv` and
- *      `sz_pgrams_sort_rvv`, and using the `sz_sequence_argsort_rvv_3way_partition_` under the hood.
- *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV `vsetvl` strips.
+ *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort_rvv
+ *      and @c sz_pgrams_sort_rvv, and using the @c sz_sequence_argsort_rvv_3way_partition_
+ *      under the hood.
+ *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV
+ *      @c vsetvl strips.
  *
- *  @param initial_pgrams Pgram array to sort in place.
- *  @param initial_order Corresponding order array, permuted in sync with `initial_pgrams`.
- *  @param temporary_pgrams Scratch buffer of the same size as `initial_pgrams`, used during partitioning.
- *  @param temporary_order Scratch buffer of the same size as `initial_order`, used during partitioning.
- *  @param start_in_sequence First index (inclusive) of the range to sort.
- *  @param end_in_sequence One-past-the-last index of the range to sort.
- *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
+ *  @param[inout] initial_pgrams Pgram array to sort in place.
+ *  @param[inout] initial_order Corresponding order array, permuted in sync with @p initial_pgrams.
+ *  @param[out] temporary_pgrams Scratch buffer of the same size as @p initial_pgrams,
+ *      used during partitioning.
+ *  @param[out] temporary_order Scratch buffer of the same size as @p initial_order,
+ *      used during partitioning.
+ *  @param[in] start_in_sequence First index (inclusive) of the range to sort.
+ *  @param[in] end_in_sequence One-past-the-last index of the range to sort.
+ *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  */
 SZ_API_COMPTIME void sz_sequence_argsort_rvv_quicksort_pgrams_(
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order, sz_pgram_t *temporary_pgrams,
@@ -201,21 +210,23 @@ SZ_API_COMPTIME sz_status_t sz_pgrams_sort_rvv(sz_pgram_t *pgrams, sz_size_t cou
 }
 
 /**
- *  @brief Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
- *      It combines `sz_sequence_argsort_serial_export_byte_window_` and `sz_sequence_argsort_rvv_quicksort_pgrams_`,
- *      recursively diving into groups of identical pgrams.
- *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV `vsetvl` strips.
+ *  @brief Recursive Quick-Sort adaptation for strings, processing them a few N-grams at a time.
  *
- *  @param sequence The collection of strings to sort.
- *  @param global_pgrams Working pgram array, length at least `sequence->count`.
- *  @param global_order Current permutation array, updated in place.
- *  @param temporary_pgrams Scratch buffer of the same size as `global_pgrams`.
- *  @param temporary_order Scratch buffer of the same size as `global_order`.
- *  @param start_in_sequence First index (inclusive) of the range to process.
- *  @param end_in_sequence One-past-the-last index of the range to process.
- *  @param start_character Byte offset into each string for the current pgram window.
- *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
- *  @param reverse Whether to export complemented keys for descending order.
+ *  Combines @c sz_sequence_argsort_serial_export_byte_window_ with
+ *  @c sz_sequence_argsort_rvv_quicksort_pgrams_, then recurses into every group of equal pgrams.
+ *
+ *  Identical in shape to the @b SVE implementation, but uses variable-length RVV @c vsetvl strips.
+ *
+ *  @param[in] sequence The collection of strings to sort.
+ *  @param[inout] global_pgrams Working pgram array, length at least `sequence->count`.
+ *  @param[inout] global_order Current permutation array, updated in place.
+ *  @param[out] temporary_pgrams Scratch buffer of the same size as @p global_pgrams.
+ *  @param[out] temporary_order Scratch buffer of the same size as @p global_order.
+ *  @param[in] start_in_sequence First index (inclusive) of the range to process.
+ *  @param[in] end_in_sequence One-past-the-last index of the range to process.
+ *  @param[in] start_character Byte offset into each string for the current pgram window.
+ *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
+ *  @param[in] reverse Whether to export complemented keys for descending order.
  */
 SZ_API_COMPTIME void sz_sequence_argsort_rvv_sort_byte_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
@@ -295,11 +306,9 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequenc
     return sz_success_k;
 }
 
-/**
- *  @brief Uncased twin of `sz_sequence_argsort_rvv_sort_byte_windows_`: the folded code-point export
- *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      RVV partition - which is where RVV beats the fully-serial uncased path.
- */
+/** Uncased twin of @c sz_sequence_argsort_rvv_sort_byte_windows_: the folded code-point export
+ *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
+ *  the RVV partition - which is where RVV beats the fully-serial uncased path. */
 SZ_API_COMPTIME void sz_sequence_argsort_rvv_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,

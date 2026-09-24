@@ -1,7 +1,9 @@
 /**
- *  @brief Haswell (AVX2) backend for string hashing and checksums.
  *  @file include/stringzilla/hash/haswell.h
  *  @author Ash Vardanian
+ *  @date December 1, 2024
+ *  @brief Haswell (AVX2) backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_HASWELL_H_
@@ -102,25 +104,26 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
     }
 }
 
-/*  Without `vpternlogd` every bitwise primitive expands, and without `vprord` every rotation becomes a shift
- *  pair and an or. Both are cheaper than the instruction counts suggest: logic issues on all three vector
- *  ports on this class of core, so the round mix stays throughput-bound rather than shift-bound. */
+/*  Without @c vpternlogd every bitwise primitive expands, and without @c vprord every rotation
+ *  becomes a shift pair and an or. Both are cheaper than the instruction counts suggest: logic
+ *  issues on all three vector ports on this class of core, so the round mix stays throughput-bound
+ *  rather than shift-bound. */
 
-/** @brief Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 8 lanes. */
+/** Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_choice_haswell_(__m256i state_e_u32x8, __m256i state_f_u32x8,
                                                    __m256i state_g_u32x8) {
     return _mm256_xor_si256(state_g_u32x8,
                             _mm256_and_si256(state_e_u32x8, _mm256_xor_si256(state_f_u32x8, state_g_u32x8)));
 }
 
-/** @brief Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 8 lanes. */
+/** Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_majority_haswell_(__m256i state_a_u32x8, __m256i state_b_u32x8,
                                                      __m256i state_c_u32x8) {
     return _mm256_xor_si256(_mm256_and_si256(_mm256_xor_si256(state_a_u32x8, state_b_u32x8), state_c_u32x8),
                             _mm256_and_si256(state_a_u32x8, state_b_u32x8));
 }
 
-/** @brief Evaluates `ror(state_a_u32x8, 2) ^ ror(state_a_u32x8, 13) ^ ror(state_a_u32x8, 22)` across 8 lanes. */
+/** Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_u32x8) {
     __m256i const rotated_by_2_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_a_u32x8, 2),
                                                        _mm256_slli_epi32(state_a_u32x8, 30));
@@ -131,7 +134,7 @@ SZ_HELPER_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_u32x8) {
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_2_u32x8, rotated_by_13_u32x8), rotated_by_22_u32x8);
 }
 
-/** @brief Evaluates `ror(state_e_u32x8, 6) ^ ror(state_e_u32x8, 11) ^ ror(state_e_u32x8, 25)` across 8 lanes. */
+/** Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_u32x8) {
     __m256i const rotated_by_6_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_e_u32x8, 6),
                                                        _mm256_slli_epi32(state_e_u32x8, 26));
@@ -142,7 +145,7 @@ SZ_HELPER_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_u32x8) {
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_6_u32x8, rotated_by_11_u32x8), rotated_by_25_u32x8);
 }
 
-/** @brief Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 8 lanes. */
+/** Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_7_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 7),
                                                        _mm256_slli_epi32(message_word_u32x8, 25));
@@ -152,7 +155,7 @@ SZ_HELPER_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_u3
                             _mm256_srli_epi32(message_word_u32x8, 3));
 }
 
-/** @brief Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 8 lanes. */
+/** Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 8 lanes. */
 SZ_HELPER_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_17_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 17),
                                                         _mm256_slli_epi32(message_word_u32x8, 15));
@@ -164,12 +167,13 @@ SZ_HELPER_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_u3
 
 /**
  *  @brief Transposes eight 32-byte halves into word-major big-endian order.
- *  @param lanes_u32x8 The eight per-lane halves, byte-swapped on entry.
- *  @param words_u32x8 Receives eight registers, where `words_u32x8[index]` holds that word from all 8 lanes.
+ *  @param[in] lanes_u32x8 The eight per-lane halves, byte-swapped on entry.
+ *  @param[out] words_u32x8 Receives eight registers, where `words_u32x8[index]` holds that word
+ *      from all 8 lanes.
  *
- *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit half, and a final
- *  cross-half permute completes the exchange. Transposition is its own inverse, so this also carries the
- *  hash state the other way, from word-major registers back to one 32-byte lane each.
+ *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit half, and a
+ *  final cross-half permute completes the exchange. Transposition is its own inverse, so this also
+ *  carries the hash state the other way, from word-major registers back to one 32-byte lane each.
  */
 SZ_HELPER_INLINE void sz_sha256_transpose_8x8_haswell_(__m256i const lanes_u32x8[8], __m256i words_u32x8[8]) {
     __m256i const paired0_u32x8 = _mm256_unpacklo_epi32(lanes_u32x8[0], lanes_u32x8[1]);
@@ -202,10 +206,10 @@ SZ_HELPER_INLINE void sz_sha256_transpose_8x8_haswell_(__m256i const lanes_u32x8
 
 /**
  *  @brief Extends the rolling message window by one word across 8 lanes.
- *  @param oldest_word_u32x8 The word being replaced, sixteen rounds behind.
- *  @param next_word_u32x8 The word one position ahead, feeding the low sigma.
- *  @param ninth_word_u32x8 The word nine positions ahead.
- *  @param fourteenth_word_u32x8 The word fourteen positions ahead, feeding the high sigma.
+ *  @param[in] oldest_word_u32x8 The word being replaced, sixteen rounds behind.
+ *  @param[in] next_word_u32x8 The word one position ahead, feeding the low sigma.
+ *  @param[in] ninth_word_u32x8 The word nine positions ahead.
+ *  @param[in] fourteenth_word_u32x8 The word fourteen positions ahead, feeding the high sigma.
  */
 SZ_HELPER_INLINE __m256i sz_sha256_extend_haswell_(__m256i oldest_word_u32x8, __m256i next_word_u32x8,
                                                    __m256i ninth_word_u32x8, __m256i fourteenth_word_u32x8) {
@@ -216,10 +220,10 @@ SZ_HELPER_INLINE __m256i sz_sha256_extend_haswell_(__m256i oldest_word_u32x8, __
 /**
  *  @brief Applies one SHA256 round to 8 lanes, writing the two working values that change.
  *
- *  The eight working variables rotate by one position per round, which the callers express by passing the
- *  same locals in a different order rather than by moving data. Only `state_d` and `state_h` are written:
- *  `state_d` becomes the next round's `state_e`, and `state_h` is dead on entry so it receives the next
- *  round's `state_a`.
+ *  The eight working variables rotate by one position per round, which the callers express by
+ *  passing the same locals in a different order rather than by moving data. Only @c state_d and
+ *  @c state_h are written: @c state_d becomes the next round's @c state_e, and @c state_h is dead
+ *  on entry so it receives the next round's @c state_a.
  */
 SZ_HELPER_INLINE void sz_sha256_round_haswell_(                                                  //
     __m256i state_a_u32x8, __m256i state_b_u32x8, __m256i state_c_u32x8, __m256i *state_d_u32x8, //
@@ -238,21 +242,24 @@ SZ_HELPER_INLINE void sz_sha256_round_haswell_(                                 
 }
 
 /**
- *  @brief Transposes and compresses one 64-byte block for each of 8 lanes into word-major hash registers.
- *  @param hashes Eight registers of word-major hash state, updated in place.
- *  @param lane_blocks Pointers to 8 message blocks, one per lane.
- *  @param active_u32x8 All-ones per lane whose block counts; the rest keep their hash bit-for-bit.
+ *  @brief Transposes and compresses one 64-byte block for each of 8 lanes into
+ *      word-major hash registers.
+ *  @param[inout] hashes Eight registers of word-major hash state, updated in place.
+ *  @param[in] lane_blocks Pointers to 8 message blocks, one per lane.
+ *  @param[in] active_u32x8 All-ones per lane whose block counts; the rest keep
+ *      their hash bit-for-bit.
  *
- *  Masking rides on the closing accumulation rather than on a saved copy and a blend. Compression ends in
- *  `hash += working`, so clearing the addend for a lane is all it needs to sit out, which costs one `vpand`
- *  per word and one live mask register at a point where the state and the message window are already
- *  competing for sixteen. AVX2 has no write mask, hence the gated addend rather than a masked add. The
- *  rounds still run for an inactive lane and produce a value nobody reads, so its block pointer only has to
- *  be readable - `sz_sha256_state_t::block` is always 64 valid bytes and serves that purpose.
+ *  Masking rides on the closing accumulation rather than on a saved copy and a blend. Compression
+ *  ends in `hash += working`, so clearing the addend for a lane is all it needs to sit out, which
+ *  costs one @c vpand per word and one live mask register at a point where the state and the
+ *  message window are already competing for sixteen. AVX2 has no write mask, hence the gated addend
+ *  rather than a masked add. The rounds still run for an inactive lane and produce a value nobody
+ *  reads, so its block pointer only has to be readable - @c sz_sha256_state_t::block is always 64
+ *  valid bytes and serves that purpose.
  *
- *  A 64-byte block is two 256-bit registers per lane, so the sixteen message words come from two independent
- *  eight-by-eight transposes. The window lives in a local rather than a parameter so it is not forced to
- *  memory across a call boundary.
+ *  A 64-byte block is two 256-bit registers per lane, so the sixteen message words come from two
+ *  independent eight-by-eight transposes. The window lives in a local rather than a parameter so it
+ *  is not forced to memory across a call boundary.
  */
 SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8_t const *const *lane_blocks,
                                                   __m256i active_u32x8) {
@@ -387,21 +394,26 @@ SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8
 }
 
 /**
- *  @brief Compresses each lane's own run of whole blocks, plus an optional buffered block ahead of them.
- *  @param states The lane states, whose hash words are gathered on entry and scattered on exit.
- *  @param active_lanes_count Lanes owning a state, 1 to 8; the rest borrow lane zero and are discarded.
- *  @param buffered_bitmask Lanes whose `block` the caller has just filled to 64 bytes, compressed first.
- *  @param cursors Per-lane read positions, advanced past every block consumed.
- *  @param blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs as far as the largest.
+ *  @brief Compresses each lane's own run of whole blocks, plus an optional buffered block
+ *      ahead of them.
+ *  @param[inout] states The lane states, whose hash words are gathered on entry and
+ *      scattered on exit.
+ *  @param[in] active_lanes_count Lanes owning a state, 1 to 8; the rest borrow lane zero
+ *      and are discarded.
+ *  @param[in] buffered_bitmask Lanes whose @c block the caller has just filled to 64
+ *      bytes, compressed first.
+ *  @param[inout] cursors Per-lane read positions, advanced past every block consumed.
+ *  @param[in] blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs as far
+ *      as the largest.
  *
- *  Lanes retire independently. `blocks_per_lane` rides in a register as a countdown, and two masks come off
- *  it each turn: `counts > 0` says whose accumulation lands, `counts > 1` says whose cursor steps. Splitting
- *  the two is what parks a retiring lane on its @b last full block instead of on a short tail, so every read
- *  stays in bounds with no per-block pointer select. A lane owning no blocks at all reads its own `block`
- *  buffer, which is always 64 valid bytes.
+ *  Lanes retire independently. @p blocks_per_lane rides in a register as a countdown, and two masks
+ *  come off it each turn: `counts > 0` says whose accumulation lands, `counts > 1` says whose
+ *  cursor steps. Splitting the two is what parks a retiring lane on its @b last full block instead
+ *  of on a short tail, so every read stays in bounds with no per-block pointer select. A lane
+ *  owning no blocks at all reads its own @c block buffer, which is always 64 valid bytes.
  *
- *  The gather and scatter go through one 32-byte temporary rather than a 256-byte array, since neither is
- *  live across the loop between them.
+ *  The gather and scatter go through one 32-byte temporary rather than a 256-byte array, since
+ *  neither is live across the loop between them.
  *
  */
 SZ_HELPER_INLINE void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
@@ -517,12 +529,12 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *stat
 
 /**
  *  @brief Finalizes 8 already-gathered lanes into their digests.
- *  @param states The 8 lane states, left untouched.
- *  @param active_lanes_count Lanes to emit, 1 to 8; the rest ride along and are discarded.
- *  @param digests Receives `active_lanes_count` 32-byte big-endian digests.
+ *  @param[in] states The 8 lane states, left untouched.
+ *  @param[in] active_lanes_count Lanes to emit, 1 to 8; the rest ride along and are discarded.
+ *  @param[out] digests Receives @p active_lanes_count 32-byte big-endian digests.
  *
- *  Same two-pass shape as the Skylake path, except the lane select is a blend vector rather than a k-mask,
- *  since AVX2 has no mask registers.
+ *  Same two-pass shape as the Skylake path, except the lane select is a blend vector rather than a
+ *  k-mask, since AVX2 has no mask registers.
  */
 SZ_HELPER_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states,
                                                                  sz_size_t active_lanes_count, sz_u8_t *digests) {

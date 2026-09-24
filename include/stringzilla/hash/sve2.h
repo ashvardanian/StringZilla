@@ -1,7 +1,9 @@
 /**
- *  @brief SVE2 backend for string hashing and checksums.
  *  @file include/stringzilla/hash/sve2.h
  *  @author Ash Vardanian
+ *  @date March 13, 2025
+ *  @brief SVE2 backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_SVE2_H_

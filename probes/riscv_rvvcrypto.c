@@ -1,5 +1,11 @@
-/* StringZilla ISA probe: RISC-V Vector Crypto (Zvkned AES + Zvknhb SHA-2), mirroring
- * `include/stringzilla/hash/rvvcrypto.h` */
+/**
+ *  @file probes/riscv_rvvcrypto.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for RISC-V Vector Crypto: Zvkned AES and Zvknhb SHA-2.
+ *
+ *  @sa include/stringzilla/hash/rvvcrypto.h
+ */
 #include <riscv_vector.h>
 
 #if defined(__clang__)

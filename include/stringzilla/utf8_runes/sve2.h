@@ -1,7 +1,8 @@
 /**
- *  @brief SVE2 backend for UTF-8 codepoint mechanics.
  *  @file include/stringzilla/utf8_runes/sve2.h
  *  @author Ash Vardanian
+ *  @date November 22, 2025
+ *  @brief SVE2 backend for UTF-8 codepoint mechanics.
  */
 #ifndef STRINGZILLA_UTF8_RUNES_SVE2_H_
 #define STRINGZILLA_UTF8_RUNES_SVE2_H_
@@ -26,7 +27,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
     sz_size_t const step = svcntb();
     sz_size_t char_count = 0;
 
-    // Count bytes that are NOT continuation bytes: (byte & 0xC0) != 0x80
+    // Count bytes that are not continuation bytes: (byte & 0xC0) != 0x80
     for (sz_size_t offset = 0; offset < length; offset += step) {
         svbool_t pg_b8x = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
         svuint8_t bytes_u8x = svld1_u8(pg_b8x, text_u8 + offset);
@@ -36,11 +37,15 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
-/** @brief  Return a pointer to the start byte of the `n`-th UTF-8 codepoint, or `SZ_NULL_CHAR` if absent.
+/**
+ *  @brief Return a pointer to the start byte of the @p n-th UTF-8 codepoint, or
+ *      @c SZ_NULL_CHAR if absent.
  *
- *  Full byte-vector windows skip by lead popcount at `svcntb()` bytes per step; the window holding the target
- *  walks its 32-bit quarters (SVE2 has no `svcompact_u8`), compacting the lead-lane iota of the one quarter the
- *  `n`-th lead falls in and reading it with `svlastb`. Byte-exact to serial. */
+ *  Full byte-vector windows skip by lead popcount at `svcntb()` bytes per step; the window
+ *  holding the target walks its 32-bit quarters (SVE2 has no @c svcompact_u8), compacting the
+ *  lead-lane iota of the one quarter the @p n-th lead falls in and reading it with @c svlastb.
+ *  Byte-exact to serial.
+ */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const window_bytes = svcntb();
@@ -78,9 +83,10 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz
 
 #pragma region Codepoint unpack
 
-/** @brief  Lower a byte predicate over up to 64 lanes to a `sz_u64_t` lane mask, fully in-register: eight 0/1 bytes
- *          pack into each 64-bit lane's top byte via one multiply (every partial product lands on a distinct bit, so
- *          no carries), and a lane-indexed shift + `svaddv` folds the disjoint per-lane bytes into one scalar. */
+/** Lower a byte predicate over up to 64 lanes to a @c sz_u64_t lane mask, fully in-register: eight
+ *  0/1 bytes pack into each 64-bit lane's top byte via one multiply (every partial product lands on
+ *  a distinct bit, so no carries), and a lane-indexed shift + @c svaddv folds the disjoint per-lane
+ *  bytes into one scalar. */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_rune_pred_to_u64_sve2_(svbool_t mask_b8x) {
     svbool_t const all_b64x = svptrue_b64();
     svuint64_t const flag_bytes_u64x = svreinterpret_u64_u8(svdup_u8_z(mask_b8x, 1));
@@ -89,9 +95,10 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_rune_pred_to_u64_sve2_(svbool_t mask_b8x) {
     return svaddv_u64(all_b64x, svlsl_u64_x(all_b64x, packed_u64x, svindex_u64(0, 8)));
 }
 
-/** @brief  Raise a `sz_u64_t` lane mask back to a byte predicate: each lane picks its mask byte with `svtbl` over
- *          the broadcast word and tests its bit. The inverse of @ref sz_utf8_rune_pred_to_u64_sve2_; for a chunked
- *          window pass the mask pre-shifted so bit 0 is the chunk's first lane. */
+/** Raise a @c sz_u64_t lane mask back to a byte predicate: each lane picks its mask byte with
+ *  @c svtbl over the broadcast word and tests its bit. The inverse of
+ *  @ref sz_utf8_rune_pred_to_u64_sve2_; for a chunked window pass the mask pre-shifted so bit 0 is
+ *  the chunk's first lane. */
 SZ_HELPER_INLINE svbool_t sz_utf8_rune_u64_to_pred_sve2_(sz_u64_t mask, svuint8_t lane_iota_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const mask_bytes_u8x = svtbl_u8(svreinterpret_u8_u64(svdup_n_u64(mask)),
@@ -100,10 +107,10 @@ SZ_HELPER_INLINE svbool_t sz_utf8_rune_u64_to_pred_sve2_(sz_u64_t mask, svuint8_
     return svcmpne_n_u8(all_b8x, svand_u8_x(all_b8x, mask_bytes_u8x, bit_select_u8x), 0);
 }
 
-/** @brief  Left-shift a per-byte-lane value vector by @p amount lanes (toward higher indices) across a chunk
- *          boundary: low lanes fill from the top of @p carry_u8x (the previous chunk), the SVE2 value-domain twin of
- *          the icelake `mask << amount` with a cross-window carry. Out-of-range `svtbl` indices resolve to 0, so
- *          each lane reads exactly one of the two sources. */
+/** Left-shift a per-byte-lane value vector by @p amount lanes (toward higher indices) across a
+ *  chunk boundary: low lanes fill from the top of @p carry_u8x (the previous chunk), the SVE2
+ *  value-domain twin of the icelake `mask << amount` with a cross-window carry. Out-of-range
+ *  @c svtbl indices resolve to 0, so each lane reads exactly one of the two sources. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_pair_sve2_(svuint8_t carry_u8x, svuint8_t value_u8x, sz_u8_t amount,
                                                              svuint8_t lane_iota_u8x, sz_u8_t chunk_lanes) {
     svbool_t const all_b8x = svptrue_b8();
@@ -111,12 +118,11 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_pair_sve2_(svuint8_t carry_u8x
                       svtbl_u8(carry_u8x, svadd_n_u8_x(all_b8x, lane_iota_u8x, (sz_u8_t)(chunk_lanes - amount))));
 }
 
-/**
- *  @brief  One widened quarter of @ref sz_utf8_rune_flat_lookup_sve2_: two chained `svld1ub_gather_u32offset_u32`
- *          resolve `flat[page_lut[high] * 256 + low]` for `svcntw()` lanes on the load pipes. Every offset is
- *          in-bounds by construction (the page offset is a byte, and `page * 256 + low` stays under `pages * 256`),
- *          so `svptrue_b32()` governs even the tail lanes.
- */
+/** One widened quarter of @ref sz_utf8_rune_flat_lookup_sve2_: two chained
+ *  @c svld1ub_gather_u32offset_u32 resolve `flat[page_lut[high] * 256 + low]` for `svcntw()`
+ *  lanes on the load pipes. Every offset is in-bounds by construction (the page offset is a
+ *  byte, and `page * 256 + low` stays under `pages * 256`), so `svptrue_b32()` governs even
+ *  the tail lanes. */
 SZ_HELPER_INLINE svuint32_t sz_utf8_rune_flat_lookup_quarter_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint32_t high_bytes_u32x, svuint32_t low_bytes_u32x) {
     svbool_t const all_words_b32x = svptrue_b32();
@@ -126,13 +132,12 @@ SZ_HELPER_INLINE svuint32_t sz_utf8_rune_flat_lookup_quarter_sve2_( //
     return svld1ub_gather_u32offset_u32(all_words_b32x, flat, flat_offsets_u32x);
 }
 
-/**
- *  @brief  Class byte per lane from a page-compressed flat table: `page_lut[cp >> 8]` selects a 256-byte page, then
- *          `flat[page * 256 + (cp & 0xFF)]` yields the descriptor, both stages gathered by real `LD1B` byte gathers.
- *          The SVE2 twin of @ref sz_utf8_rune_flat_lookup_haswell_ and @ref sz_utf8_rune_flat_lookup_icelake_. An
- *          `svtbl_u8` scan of the 256-entry page LUT would cost sixteen shuffle-pipe lookups at the architectural
- *          minimum vector length, while gathering both stages stays length-agnostic with no VL-dependent branch.
- */
+/** Class byte per lane from a page-compressed flat table: `page_lut[cp >> 8]` selects a 256-byte
+ *  page, then `flat[page * 256 + (cp & 0xFF)]` yields the descriptor, both stages gathered by real
+ *  @c LD1B byte gathers. The SVE2 twin of @ref sz_utf8_rune_flat_lookup_haswell_ and
+ *  @ref sz_utf8_rune_flat_lookup_icelake_. An @c svtbl_u8 scan of the 256-entry page LUT would cost
+ *  sixteen shuffle-pipe lookups at the architectural minimum vector length, while gathering both
+ *  stages stays length-agnostic with no VL-dependent branch. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t high_bytes_u8x, svuint8_t low_bytes_u8x) {
 
@@ -162,8 +167,9 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
     return svuzp1_u8(svreinterpret_u8_u16(packed_low_half_u16x), svreinterpret_u8_u16(packed_high_half_u16x));
 }
 
-/** @brief  Read up to 256 LUT entries by per-lane u8 index via overlapping `svtbl_u8` chunks (gather-free); lanes
- *          outside a chunk's span select zero and OR away. Serves the astral cascade stage-1 tables. */
+/** Read up to 256 LUT entries by per-lane u8 index via overlapping @c svtbl_u8 chunks
+ *  (gather-free); lanes outside a chunk's span select zero and OR away. Serves the astral
+ *  cascade stage-1 tables. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count, svuint8_t index_u8x) {
     svbool_t const all_bytes_b8x = svptrue_b8();
     int const vector_length = (int)svcntb();
@@ -178,12 +184,13 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int coun
     return result_u8x;
 }
 
-/** @brief  ASCII-gated class lookup for a page-compressed flat table. When the WHOLE chunk is ASCII, the class
- *          bytes come from page 0 (`flat[page_lut[0]*256 + byte]`, bit-identical to the gather at high=0,
- *          low=byte) with a cheap `svtbl` LUT and the eight-gather cascade is skipped entirely; any non-ASCII lane
- *          falls to the full gather unchanged (so mixed/multibyte chunks pay only one compare + `ptest`, never an
- *          extra LUT). Requires inactive lanes of @p bytes_u8x to be zero-filled (any `svld1` with a `whilelt`
- *          predicate is), so the whole-chunk ASCII test never trips on tail garbage. */
+/** ASCII-gated class lookup for a page-compressed flat table. When the whole chunk is ASCII, the
+ *  class bytes come from page 0 (`flat[page_lut[0]*256 + byte]`, bit-identical to the gather at
+ *  high=0, low=byte) with a cheap @c svtbl LUT and the eight-gather cascade is skipped entirely;
+ *  any non-ASCII lane falls to the full gather unchanged (so mixed/multibyte chunks pay only one
+ *  compare + @c ptest, never an extra LUT). Requires inactive lanes of @p bytes_u8x to be
+ *  zero-filled (any @c svld1 with a @c whilelt predicate is), so the whole-chunk ASCII test never
+ *  trips on tail garbage. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t bytes_u8x, svuint8_t high_u8x, svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -192,8 +199,8 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
     return sz_utf8_rune_flat_lookup_sve2_(page_lut, flat, high_u8x, low_u8x);
 }
 
-/** @brief  Select one of `tile_count` 16-entry rows by `selector` and index it by `within` (nibble cascade tile),
- *          serving the astral cascade stages on every property. */
+/** Select one of @p tile_count 16-entry rows by @c selector and index it by @c within (nibble
+ *  cascade tile), serving the astral cascade stages on every property. */
 SZ_HELPER_INLINE svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count, svuint8_t selector_u8x,
                                                       svuint8_t within_u8x) {
     svbool_t const all_bytes_b8x = svptrue_b8();
@@ -206,7 +213,8 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int 
     return result_u8x;
 }
 
-/** @brief  Select and widen one 32-bit quarter of a byte-lane vector given its two unpacked 16-bit halves. */
+/** Select and widen one 32-bit quarter of a byte-lane vector given its two
+ *  unpacked 16-bit halves. */
 SZ_HELPER_INLINE svuint32_t sz_utf8_rune_quarter_words_sve2_(svuint16_t half_lo_u16x, svuint16_t half_hi_u16x,
                                                              int high_half, int high_quarter) {
     svuint16_t const half_u16x = high_half ? half_hi_u16x : half_lo_u16x;
@@ -214,16 +222,21 @@ SZ_HELPER_INLINE svuint32_t sz_utf8_rune_quarter_words_sve2_(svuint16_t half_lo_
 }
 
 /**
- *  @brief  Emit the classified starts of one chunk as sequential UTF-32 runes, one 32-bit quarter at a time - the
- *          rune-valued SVE2 twin of @ref sz_utf8_rune_drain_icelake_. Each quarter compacts only two vectors: the
- *          start byte-offsets and the packed `ill << 7 | subpart_length` flags. Each start's lead and three
- *          trailing bytes come back in ONE `svtbl2` over the (chunk, peek) register pair - `offset * 0x01010101 +
- *          0x03020100` spreads every offset into its four byte indices - so the width-blend reads all operands
- *          from a single gathered little-endian word. Ill-formed lanes collapse to U+FFFD over their maximal
- *          ill-formed subpart. The cursor delta is the last emitted start's offset plus its subpart length, so an
- *          ill-formed trailing lane never skips bytes owing their own next U+FFFD.
+ *  @brief Emit the classified starts of one chunk as sequential UTF-32 runes, one 32-bit quarter at
+ *      a time - the rune-valued SVE2 twin of @ref sz_utf8_rune_drain_icelake_.
  *
- *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
+ *  Each quarter compacts only two vectors: the start byte-offsets and the
+ *  packed `ill << 7 | subpart_length` flags. Each start's lead and three
+ *  trailing bytes come back in one @c svtbl2 over the (chunk, peek) register
+ *  pair - `offset * 0x01010101 + 0x03020100` spreads every offset into its four
+ *  byte indices - so the width-blend reads all operands from a single gathered
+ *  little-endian word. Ill-formed lanes collapse to U+FFFD over their maximal
+ *  ill-formed subpart. The cursor delta is the last emitted start's offset plus
+ *  its subpart length, so an ill-formed trailing lane never skips bytes owing
+ *  their own next U+FFFD.
+ *
+ *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the
+ *      resume cursor delta).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_sve2_( //
     svuint8_t bytes_u8x, svuint8_t peek_u8x,         //
@@ -296,10 +309,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_sve2_( //
 }
 
 /**
- *  @brief  Emit precomputed 16-bit codepoints for one clean chunk (the ASCII+2-byte and ASCII+3-byte fast lanes):
- *          each quarter compacts just two vectors - the packed codepoint halves and `offset | length << 8` - with
- *          no per-start byte gathering and no width blend.
- *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
+ *  @brief Emit precomputed 16-bit codepoints for one clean chunk (the ASCII+2-byte and ASCII+3-byte
+ *      fast lanes): each quarter compacts just two vectors - the packed codepoint halves and
+ *      `offset | length << 8` - with no per-start byte gathering and no width blend.
+ *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the
+ *      resume cursor delta).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_packed_sve2_(                                   //
     svuint8_t cp_lo_u8x, svuint8_t cp_hi_u8x, svuint8_t length_u8x, svbool_t emit_starts_b8x, //
@@ -352,18 +366,17 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_packed_sve2_(                     
     return produced;
 }
 
-/**
- *  @brief  Decode one multi-chunk window of @p text into dense UTF-32 @p runes by the uniform "classify -> per-lane
- *          well-formed + orphan promotion -> compact emitted starts -> gather -> width-blend -> blend U+FFFD" path,
- *          emitting at most @p runes_capacity runes and returning the resume cursor. The window is 64 bytes walked
- *          as `64 / svcntb()` streaming register chunks (4 at VL=128, 2 at 256, 1 at 512+), each peeking one vector
- *          ahead so `svext` supplies cross-chunk neighbours and maximal-subpart coverage carries across the edge in
- *          the value domain. The decode is TOTAL: clean and dirty bytes are handled in-vector, one U+FFFD per
- *          maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with @ref sz_utf8_decode_serial. Only a
- *          start whose declared sequence crosses the WINDOW edge defers to the next call; the step declines
- *          (`*runes_unpacked == 0`, cursor unchanged) ONLY when that happens on the very first lead (a boundary
- *          truncation), which the public entry finalizes without a serial re-decode.
- */
+/** Decode one multi-chunk window of @p text into dense UTF-32 @p runes by the uniform "classify →
+ *  per-lane well-formed + orphan promotion → compact emitted starts → gather → width-blend → blend
+ *  U+FFFD" path, emitting at most @p runes_capacity runes and returning the resume cursor. The
+ *  window is 64 bytes walked as `64 / svcntb()` streaming register chunks (4 at VL=128, 2 at 256, 1
+ *  at 512+), each peeking one vector ahead so @c svext supplies cross-chunk neighbours and
+ *  maximal-subpart coverage carries across the edge in the value domain. The decode is total: clean
+ *  and dirty bytes are handled in-vector, one U+FFFD per maximal ill-formed subpart (Unicode 17.0
+ *  §3.9 / W3C), bit-exact with @ref sz_utf8_decode_serial. Only a start whose declared sequence
+ *  crosses the window edge defers to the next call; the step declines (`*runes_unpacked == 0`,
+ *  cursor unchanged) only when that happens on the very first lead (a boundary truncation), which
+ *  the public entry finalizes without a serial re-decode. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
     sz_cptr_t text, sz_size_t length,                 //
     sz_rune_t *runes, sz_size_t runes_capacity,       //
@@ -483,17 +496,19 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
             continue;
         }
 
-        // Single-source classification: per-lane length from the lead's high nibble via a 16-entry `svtbl_u8` LUT
-        // (`{1x12,2,2,3,4}`, the SAME table the serial / NEON references use), so a lead and its length can never
-        // disagree and 0xF8..0xFF map to length 4 and cannot slip the gate.
+        // Single-source classification: per-lane length from the lead's high nibble via a 16-entry
+        // `svtbl_u8` LUT (`{1x12,2,2,3,4}`, the same table the serial / NEON references use), so a
+        // lead and its length can never disagree, and 0xF8..0xFF map to length 4 and so cannot
+        // slip past the gate.
         svbool_t const is_continuation_b8x = svcmpeq_n_u8(loaded_b8x, svand_n_u8_x(loaded_b8x, bytes_u8x, 0xC0), 0x80);
         svbool_t const starts_b8x = svbic_b_z(loaded_b8x, loaded_b8x, is_continuation_b8x);
         svuint8_t const high_nibble_u8x = svlsr_n_u8_x(all_b8x, bytes_u8x, 4);
         svuint8_t const length_per_lane_u8x = svtbl_u8(length_lut_u8x, high_nibble_u8x);
 
-        // Defer EVERY start whose declared sequence would cross the WINDOW edge (never a mere chunk edge - the peek
-        // vector covers those); the FIRST overrunning start bounds the decodable prefix and the loop breaks after
-        // this chunk so its bytes resume in the next call. Overruns can only exist within reach of the window edge.
+        // Defer every start whose declared sequence would cross the window edge (never a mere chunk
+        // edge - the peek vector covers those); the first overrunning start bounds the decodable
+        // prefix and the loop breaks after this chunk so its bytes resume in the next call.
+        // Overruns can only exist within reach of the window edge.
         sz_size_t decodable_end = chunk_span;
         svbool_t decodable_b8x = loaded_b8x;
         if (ahead <= chunk_bytes + 3) {
@@ -711,7 +726,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
 
         // First-continuation bounds per lead: default [0x80, 0xBF] (== "is a continuation"), E0 lifts the floor to
         // 0xA0 and F0 to 0x90 (overlong), ED drops the ceiling to 0x9F (surrogates) and F4 to 0x8F (> U+10FFFF).
-        // One in-range test subsumes the presence check AND the E0/ED/F0/F4 range rules.
+        // One in-range test subsumes the presence check and the E0/ED/F0/F4 range rules.
         svuint8_t min1_u8x = svdup_n_u8(0x80);
         min1_u8x = svorr_n_u8_m(svcmpeq_n_u8(all_b8x, bytes_u8x, 0xE0), min1_u8x, 0x20);
         min1_u8x = svorr_n_u8_m(svcmpeq_n_u8(all_b8x, bytes_u8x, 0xF0), min1_u8x, 0x10);
@@ -750,9 +765,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
         svbool_t const step3_b8x = svand_b_z(starts_b8x, svand_b_z(starts_b8x, step2_b8x, len_ge3_b8x), cont2_b8x);
         svbool_t const step4_b8x = svand_b_z(starts_b8x, svand_b_z(starts_b8x, step3_b8x, len_ge4_b8x), cont3_b8x);
 
-        // Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span becomes its own
-        // 1-byte U+FFFD. Coverage is the decodable steps smeared UP by their offset, with the previous chunk's
-        // steps carried across the edge so a sequence straddling two chunks covers its trailing bytes.
+        // Orphan promotion: a continuation byte not covered by any lead's maximal-subpart span
+        // becomes its own 1-byte U+FFFD. Coverage is the decodable steps smeared UP by their
+        // offset, with the previous chunk's steps carried across the edge so a sequence straddling
+        // two chunks covers its trailing bytes.
         svuint8_t const step2_u8x = svdup_u8_z(svand_b_z(decodable_b8x, step2_b8x, decodable_b8x), 1);
         svuint8_t const step3_u8x = svdup_u8_z(svand_b_z(decodable_b8x, step3_b8x, decodable_b8x), 1);
         svuint8_t const step4_u8x = svdup_u8_z(svand_b_z(decodable_b8x, step4_b8x, decodable_b8x), 1);
@@ -794,13 +810,12 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
     return text + consumed_total;
 }
 
-/**
- *  @brief  Decode @p text into dense UTF-32 @p runes (SVE2). Drives @ref sz_utf8_decode_once_sve2_ window by
- *          window. The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very
- *          first lead declares a sequence crossing the window edge (a boundary truncation). A resumable truncation
- *          breaks and awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its
- *          maximal ill-formed subpart - a bounded <=3-byte finalize, never a serial window re-decode.
- */
+/** Decode @p text into dense UTF-32 @p runes (SVE2). Drives @ref sz_utf8_decode_once_sve2_ window
+ *  by window. The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when
+ *  the very first lead declares a sequence crossing the window edge (a boundary truncation). A
+ *  resumable truncation breaks and awaits more bytes; a bad/overlong truncated lead at the edge
+ *  finalizes to one U+FFFD over its maximal ill-formed subpart - a bounded <=3-byte finalize, never
+ *  a serial window re-decode. */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //

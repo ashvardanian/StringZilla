@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: NEON (AArch64 baseline SIMD), mirroring `include/stringzilla/find/neon.h` */
+/**
+ *  @file probes/arm_neon.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for NEON, the AArch64 baseline SIMD.
+ *
+ *  @sa include/stringzilla/find/neon.h
+ */
 #include <arm_neon.h>
 
 #if defined(__clang__)

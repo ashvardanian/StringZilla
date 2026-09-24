@@ -1,43 +1,38 @@
 /**
- *  @brief  Arithmetic/struct plumbing, ASCII utilities, memory, STL-compat, conversions, extensions, and the string class.
- *  @file   test/string.cpp
+ *  @file test/string.cpp
  *  @author Ash Vardanian
- *  @date June 16, 2026
+ *  @date December 21, 2023
+ *  @brief Tests for the string class and the utilities beneath it.
+ *
+ *  Covers arithmetic and struct plumbing, ASCII utilities, memory, STL compatibility, conversions
+ *  and the extensions beyond the STL.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/**
- *  The Visual C++ run-time library detects incorrect iterator use,
- *  and asserts and displays a dialog box at run time on Windows.
- */
+/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
+ *  dialog box at run time on Windows. */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/**
- *  ! Overload the following with caution.
- *  ! Those parameters must never be explicitly set during releases,
- *  ! but they come handy during development, if you want to validate
- *  ! different ISA-specific implementations.
-
- #define SZ_USE_WESTMERE 0
- #define SZ_USE_HASWELL 0
- #define SZ_USE_GOLDMONT 0
- #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICELAKE 0
- #define SZ_USE_NEON 0
- #define SZ_USE_SVE 0
- #define SZ_USE_SVE2 0
- */
+/*  Overload the following with caution. Those parameters must never be explicitly set during
+ *  releases, but they come handy during development, to validate different ISA-specific backends:
+ *
+ *      #define SZ_USE_WESTMERE 0
+ *      #define SZ_USE_HASWELL 0
+ *      #define SZ_USE_GOLDMONT 0
+ *      #define SZ_USE_SKYLAKE 0
+ *      #define SZ_USE_ICELAKE 0
+ *      #define SZ_USE_NEON 0
+ *      #define SZ_USE_SVE 0
+ *      #define SZ_USE_SVE2 0 */
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/**
- *  Make sure to include the StringZilla headers before anything else,
- *  to intercept missing `#include` directives and other issues.
- */
+/*  Include the StringZilla headers before anything else, to intercept missing @c #include
+ *  directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
@@ -77,7 +72,7 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/** @brief Compares two byte ranges and aborts with a localized diagnostic on the first mismatch. */
+/** Compares two byte ranges and aborts with a localized diagnostic on the first mismatch. */
 inline void expect_equality(char const *first, char const *second, std::size_t size) {
     if (std::memcmp(first, second, size) == 0) return;
     std::size_t mismatch_position = 0;
@@ -100,7 +95,7 @@ inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size
     return sum;
 }
 
-/** A stateful allocator charging every byte to the counter it points at, so two over different counters differ. */
+/** Stateful allocator charging each byte to its counter, so two over distinct counters differ. */
 struct accounting_allocator_t {
     using value_type = char;
     std::size_t *live_bytes = nullptr;
@@ -130,9 +125,9 @@ void assert_balanced_memory(std::size_t const &live_bytes, callback_type_ callba
 /**
  *  @brief Runs one movement backend (copy/move/fill) through hand-verifiable known-answer vectors.
  *
- *  Mirrors the SHA256 known-answer helper in `hash.cpp`: each ISA tier feeds its kernel pointers here,
- *  so the dispatched C API and every natively-compiled backend share a single ground-truth check. Guard bytes
- *  past `length` catch stray writes.
+ *  Mirrors the SHA256 known-answer helper in `hash.cpp`: each ISA tier feeds its kernel pointers
+ *  here, so the dispatched C API and every natively-compiled backend share a single ground-truth
+ *  check. Guard bytes past @c length catch stray writes.
  */
 static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
 
@@ -170,8 +165,8 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
 /**
  *  @brief Runs one byte-lookup backend through a hand-verifiable known-answer vector.
  *
- *  The upper-casing table maps "Hello, World!" to "HELLO, WORLD!" while leaving punctuation and digits intact;
- *  a guard byte past `length` catches stray writes.
+ *  The upper-casing table maps "Hello, World!" to "HELLO, WORLD!" while leaving punctuation and
+ *  digits intact; a guard byte past @c length catches stray writes.
  */
 static void check_lookup_unit_(sz_lookup_t lookup) {
     // An ASCII upper-casing table, built locally so the known-answer is verified against an external ground truth.
@@ -190,14 +185,12 @@ static void check_lookup_unit_(sz_lookup_t lookup) {
     verify(target[length] == '#' && "Lookup backend wrote past the requested length");
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Arithmetic
 
-/**
- *  @brief Several string processing operations rely on computing integer logarithms.
- *         Failures in such operations will result in wrong `resize` outcomes and heap corruption.
- */
+/** Several string processing operations rely on computing integer logarithms. Failures in such
+ *  operations will result in wrong @c resize outcomes and heap corruption. */
 void test_arithmetic_unit() {
 
     verify(sz_u64_clz(0x0000000000000001ull) == 63);
@@ -258,11 +251,11 @@ void test_arithmetic_unit() {
 #endif
 }
 
-#pragma endregion // Arithmetic
+#pragma endregion Arithmetic
 
 #pragma region Sequence
 
-/** @brief Validates `sz_sequence_t` and related construction utilities. */
+/** Validates @c sz_sequence_t and related construction utilities. */
 void test_sequence_unit() {
     // Make sure the sequence helper functions work as expected
     // for both trivial c-style arrays and more complicated STL containers.
@@ -316,11 +309,9 @@ void test_sequence_unit() {
     }
 }
 
-/**
- *  @brief Validates that `arrow_strings_tape::try_assign` works with multi-pass forward iterators.
- *         It walks the range twice, once to measure and once to copy, so single-pass input
- *         iterators like `std::istream_iterator` are rejected at compile time.
- */
+/** Validates that @c arrow_strings_tape::try_assign works with multi-pass forward iterators. It
+ *  walks the range twice, once to measure and once to copy, so single-pass input iterators like
+ *  @c std::istream_iterator are rejected at compile time. */
 void test_strings_tape_assign_unit() {
     sz::arrow_strings_tape<char, std::uint32_t, std::allocator<char>> tape;
 
@@ -333,7 +324,7 @@ void test_strings_tape_assign_unit() {
     verify(sz::string_view_t(tape[2].data(), tape[2].size()) == "gamma"_sv);
 }
 
-/** @brief Validates that `arrow_strings_tape` refuses to grow past the range of its offset type. */
+/** Validates that @c arrow_strings_tape refuses to grow past the range of its offset type. */
 void test_strings_tape_overflow_unit() {
     // 8-bit offsets hit the same code path as 32-bit offsets past 4 GiB, but already at 256 bytes.
     using tape_t = sz::arrow_strings_tape<char, std::uint8_t, std::allocator<char>>;
@@ -364,11 +355,11 @@ void test_strings_tape_overflow_unit() {
     }
 }
 
-#pragma endregion // Sequence
+#pragma endregion Sequence
 
 #pragma region Allocator
 
-/** @brief Validates `sz_memory_allocator_t` and related construction utilities. */
+/** Validates @c sz_memory_allocator_t and related construction utilities. */
 void test_allocator_unit() {
     // Our behavior for `malloc(0)` is to return a NULL pointer,
     // while the standard is implementation-defined.
@@ -398,11 +389,11 @@ void test_allocator_unit() {
     }
 }
 
-#pragma endregion // Allocator
+#pragma endregion Allocator
 
 #pragma region Byteset
 
-/** @brief Validates `sz_byteset_t` and related construction utilities. */
+/** Validates @c sz_byteset_t and related construction utilities. */
 void test_byteset_unit() {
     sz_byteset_t s;
     sz_byteset_init(&s);
@@ -419,11 +410,8 @@ void test_byteset_unit() {
     verify(sz_byteset_contains(&s, 'A') == sz_true_k);
 }
 
-/**
- *  @brief Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
- *         provided by `sz::string_t` and `sz::string_view_t`.
- */
-/** @brief Known-answer coverage for ASCII classification methods (`is_alpha`, `is_digit`, `contains_only`, ...). */
+/** Known-answer coverage for the ASCII classification methods of @c sz::string_t and
+ *  @c sz::string_view_t, such as @c is_alpha, @c is_digit and @c contains_only. */
 template <typename string_type>
 void test_ascii_unit() {
 
@@ -475,20 +463,21 @@ void test_ascii_unit() {
     verify(!str("abcd").contains_only("abc"_bs));
 }
 
-#pragma endregion // Byteset
+#pragma endregion Byteset
 
 #pragma region Memory
 
 /**
- *  @brief Known-answer + coverage for the memory primitives - the C-level building blocks of the string class.
+ *  @brief Known-answer and coverage tests for the memory primitives, the C-level string blocks.
  *
- *  Starts with known-answer vectors that exercise each function through the dispatched C API (automatic
- *  kernel resolution), through the natively-compiled backend kernels directly (manual propagation to a specific
- *  kernel), and through the C++ `sz::` wrappers, so a regression that the serial-vs-SIMD agreement tests would miss -
- *  because both share a wrong constant - is still caught against an external ground truth. It then mirrors a large set
- *  of `sz::memcpy`, `sz::memset`, and `sz::memmove` operations against their `std::` counterparts, using a large
- *  heap-allocated buffer to cover the larger-than-L2-cache code paths, various chunk sizes, overlapping regions, and
- *  both forward and backward traversals.
+ *  Starts with known-answer vectors that exercise each function through the dispatched C API with
+ *  automatic kernel resolution, through the natively-compiled backend kernels directly with manual
+ *  propagation to a specific kernel, and through the C++ `sz::` wrappers, so a regression that the
+ *  serial-vs-SIMD agreement tests would miss - because both share a wrong constant - is still
+ *  caught against an external ground truth. It then mirrors a large set of @c sz::memcpy,
+ *  @c sz::memset, and @c sz::memmove operations against their `std::` counterparts, using a large
+ *  heap-allocated buffer to cover the larger-than-L2-cache code paths, various chunk sizes,
+ *  overlapping regions, and both forward and backward traversals.
  */
 void test_memory_unit(std::size_t max_l2_size) {
 
@@ -675,11 +664,8 @@ void test_memory_unit(std::size_t max_l2_size) {
     }
 }
 
-/**
- *  @brief Tests memory utilities on large buffers (>1MB) that trigger special code paths
- *         in AVX2/AVX512 implementations. This specifically tests the bidirectional
- *         traversal optimization used for huge buffers.
- */
+/** Tests memory utilities on buffers over 1 MB, which take special code paths in the AVX2 and
+ *  AVX-512 implementations: the bidirectional traversal optimization used for huge buffers. */
 void test_memory_large_unit() {
     // Test sizes that trigger the "huge buffer" path (> 1MB)
     std::vector<std::size_t> test_sizes = {
@@ -752,14 +738,12 @@ void test_memory_large_unit() {
     }
 }
 
-#pragma endregion // Memory
+#pragma endregion Memory
 
 #pragma region STL Reads
 
-/**
- *  @brief Invokes different C++ member methods of immutable strings to cover all STL APIs.
- *         This test guarantees API @b compatibility with STL `std::basic_string` template.
- */
+/** Invokes different C++ member methods of immutable strings to cover all STL APIs. This test
+ *  guarantees API @b compatibility with STL @c std::basic_string template. */
 template <typename string_type>
 void test_stl_reads_unit() {
 
@@ -1001,10 +985,10 @@ void test_stl_reads_unit() {
     verify(str("C++20").ends_with('3') == false);
 
     // Prefix and suffix checks against C-style strings.
-    verify(str("string_view_t").starts_with("string") == true);
-    verify(str("string_view_t").starts_with("String") == false);
-    verify(str("string_view_t").ends_with("view") == true);
-    verify(str("string_view_t").ends_with("View") == false);
+    verify(str("string_view").starts_with("string") == true);
+    verify(str("string_view").starts_with("String") == false);
+    verify(str("string_view").ends_with("view") == true);
+    verify(str("string_view").ends_with("View") == false);
 
 #if defined(__cpp_lib_string_contains)
     // Checking basic substring presence.
@@ -1042,14 +1026,12 @@ void test_stl_reads_unit() {
     verify(std::less<str> {}("hello", "world") == true);
 }
 
-#pragma endregion // STL Reads
+#pragma endregion STL Reads
 
 #pragma region STL Updates
 
-/**
- *  @brief Invokes different C++ member methods of the memory-owning string class to make sure they all pass
- *         compilation. This test guarantees API compatibility with STL `std::basic_string` template.
- */
+/** Invokes different C++ member methods of the memory-owning string class to make sure they all
+ *  pass compilation, guaranteeing API compatibility with the STL @c std::basic_string template. */
 template <typename string_type>
 void test_stl_updates_unit() {
 
@@ -1199,7 +1181,7 @@ void test_stl_updates_unit() {
     let_verify(str s = "123", str("hello").append(s.begin(), s.end()) == "hello123");
 }
 
-/** @brief Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working. */
+/** Constructs StringZilla classes from STL and vice-versa, ensuring the conversions work. */
 void test_stl_conversions_unit() {
     // From a mutable STL string to StringZilla and vice-versa.
     {
@@ -1249,7 +1231,7 @@ void test_stl_conversions_unit() {
     }
 }
 
-/** @brief Tests STL containers keyed by StringZilla strings, and STL containers ordered & hashed by `sz` functors. */
+/** Tests STL containers keyed by StringZilla strings, and ordered and hashed by @c sz functors. */
 void test_stl_containers_unit() {
 
     // Byte order and length disagree across these: "Zebra" wins on its first byte despite being longer,
@@ -1337,14 +1319,11 @@ void test_stl_containers_unit() {
     verify(words_stl.at("") == -1);
 }
 
-#pragma endregion // STL Updates
+#pragma endregion STL Updates
 
 #pragma region Extensions
 
-/**
- *  @brief Invokes different C++ member methods of immutable strings to cover
- *         extensions beyond the STL API.
- */
+/** Invokes C++ member methods of immutable strings, covering extensions beyond the STL API. */
 template <typename string_type>
 void test_extensions_reads_unit() {
     using str = string_type;
@@ -1408,7 +1387,7 @@ void test_extensions_reads_unit() {
                s.bytesum() == accumulate_bytes(s));
 }
 
-/** @brief Exercises StringZilla's non-STL mutating string extensions on `sz::string_t`. */
+/** Exercises StringZilla's non-STL mutating string extensions on @c sz::string_t. */
 void test_extensions_updates_unit() {
     using str = sz::string_t;
 
@@ -1521,16 +1500,18 @@ void test_extensions_updates_unit() {
     verify(str::random(4, 42).size() == 4);
 }
 
-#pragma endregion // Extensions
+#pragma endregion Extensions
 
 /**
- *  @brief The lazy search ranges and their inverses - `find_all`, `rfind_all`, `split`, `rsplit`, `partition`.
+ *  @brief The lazy search ranges and their inverses - @c find_all, @c rfind_all, @c split,
+ *      @c rsplit, @c partition.
  *
- *  Not a template over the string type, unlike its neighbours: these cases deliberately mix owning strings,
- *  borrowed views and literals in one expression, because what they pin is how the range holds its operands.
- *  A haystack passed as an lvalue is borrowed, so a match's `data()` must land inside the caller's own buffer
- *  and not inside a private copy - which under the small-string optimization would still produce plausible
- *  offsets. A needle, by contrast, is copied into the matcher, so a temporary one may outlive the expression.
+ *  Not a template over the string type, unlike its neighbours: these cases deliberately mix owning
+ *  strings, borrowed views and literals in one expression, because what they pin is how the range
+ *  holds its operands. A haystack passed as an lvalue is borrowed, so a match's `data()` must land
+ *  inside the caller's own buffer and not inside a private copy - which under the small-string
+ *  optimization would still produce plausible offsets. A needle, by contrast, is copied into the
+ *  matcher, so a temporary one may outlive the expression.
  */
 void test_extensions_ranges_unit() {
     fmt::println("  - testing lazy search ranges and splitting...");
@@ -1692,7 +1673,7 @@ void test_extensions_ranges_unit() {
 
 #pragma region String Class
 
-/** @brief Tests copy constructor and copy-assignment constructor of `sz::string_t`. */
+/** Tests copy constructor and copy-assignment constructor of @c sz::string_t. */
 void test_string_constructors_unit() {
     std::string alphabet {sz::ascii_printables(), sizeof(sz::ascii_printables())};
     std::vector<sz::string_t> strings;
@@ -1717,10 +1698,8 @@ void test_string_constructors_unit() {
     verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
-/**
- *  @brief Validates that shrinking `reserve` calls are harmless no-ops, just like in the STL.
- *         Regression test: shrinking used to overflow the heap buffer in release builds.
- */
+/** Validates that shrinking @c reserve calls are harmless no-ops, just like in the STL. Regression
+ *  test: shrinking used to overflow the heap buffer in release builds. */
 void test_string_reserve_unit() {
     // C API: grow, then shrink - the buffer, length, and contents must stay intact.
     {
@@ -1755,7 +1734,7 @@ void test_string_reserve_unit() {
     }
 }
 
-/** Checks for memory leaks in the string class, and that each block returns to the allocator that granted it. */
+/** Checks the string class for leaks, and that blocks return to the allocator that granted them. */
 void test_memory_stability_equivalence(std::size_t length, std::size_t iterations) {
     using accounting_string_t = sz::basic_string<accounting_allocator_t>;
     static_assert(sizeof(accounting_string_t) == sizeof(sz::string_t) + sizeof(std::size_t *),
@@ -1844,7 +1823,7 @@ void test_memory_stability_equivalence(std::size_t length, std::size_t iteration
     verify(live_bytes == 0 && "Allocator counter did not return to zero after clearing");
 }
 
-/** @brief Tests the correctness of the string class update methods, such as `push_back` and `erase`. */
+/** Tests the correctness of the string class update methods, such as @c push_back and @c erase. */
 void test_string_updates_equivalence(std::size_t repetitions) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
@@ -1872,14 +1851,12 @@ void test_string_updates_equivalence(std::size_t repetitions) {
     }
 }
 
-#pragma endregion // String Class
+#pragma endregion String Class
 
 #pragma region Equivalence
 
-/**
- *  @brief One backend's memory-movement primitives (copy/move/fill), stored by pointer so the differential driver
- *         can iterate a table. Members are named for the call sites (`reference.copy(...)` etc.), invoked directly.
- */
+/** One backend's copy, move and fill primitives, stored by pointer so the differential driver can
+ *  iterate a table. Its members are named for the call sites, as in `reference.copy(...)`. */
 struct memory_backend_t {
     char const *name;
     sz_copy_t copy;
@@ -1887,28 +1864,27 @@ struct memory_backend_t {
     sz_fill_t fill;
 };
 
-/** @brief One backend's byte-lookup (transform) kernel, stored by pointer; `reference.lookup(...)` invokes it. */
+/** One backend's byte-lookup kernel, stored by pointer; `reference.lookup(...)` invokes it. */
 struct lookup_backend_t {
     char const *name;
     sz_lookup_t lookup;
 };
 
-/**
- *  @brief A representative spread of lengths covering 0, tiny, the SWAR/SIMD-width neighborhood, and larger,
- *         so a kernel's head/body/tail handling is exercised on every backend.
- */
+/** A representative spread of lengths covering 0, tiny, the SWAR/SIMD-width neighborhood, and
+ *  larger, so a kernel's head/body/tail handling is exercised on every backend. */
 inline std::vector<sz_size_t> memory_equivalence_lengths() noexcept {
     return {0,  1,  2,  3,  7,  8,  9,   15,  16,  17,  31,  32,  33,   47,
             48, 63, 64, 65, 95, 96, 127, 128, 129, 255, 256, 257, 1024, 4096};
 }
 
 /**
- *  @brief Copies/moves/fills a buffer and compares the output between a reference and a candidate movement backend.
+ *  @brief Copies, moves or fills a buffer, comparing a reference and a candidate movement backend.
+ *  @param[in] inputs Number of random source patterns fuzzed at each length.
  *
- *  Runs over `for_each_cacheline_offset_` so the destination (and source) buffers are exercised at every
- *  sub-cache-line alignment, across the representative length set, with embedded-NUL content and overlapping
- *  `move` regions, so a misaligned head/tail bug on any backend is caught against the reference.
- *  `inputs` is the number of random source patterns fuzzed at each length.
+ *  Runs over @c for_each_cacheline_offset_ so the destination and source buffers are exercised at
+ *  every sub-cache-line alignment, across the representative length set, with embedded-NUL content
+ *  and overlapping @c move regions, so a misaligned head or tail bug on any backend is caught
+ *  against the reference.
  */
 template <typename reference_, typename candidate_>
 void check_memory_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -1973,11 +1949,12 @@ void check_memory_equivalence_(reference_ reference, candidate_ candidate, sz_si
 }
 
 /**
- *  @brief Applies a byte-lookup table and compares the output between a reference and a candidate backend.
+ *  @brief Applies a byte-lookup table, comparing the output of a reference and a candidate backend.
+ *  @param[in] inputs Number of random source patterns fuzzed at each length.
  *
- *  Runs over `for_each_cacheline_offset_` so the destination and source buffers are exercised at every
- *  sub-cache-line alignment, across the representative length set, against a shared case-mapping table.
- *  `inputs` is the number of random source patterns fuzzed at each length.
+ *  Runs over @c for_each_cacheline_offset_ so the destination and source buffers are exercised at
+ *  every sub-cache-line alignment, across the representative length set, against one case-mapping
+ *  table they share.
  */
 template <typename reference_, typename candidate_>
 void check_lookup_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -2019,14 +1996,12 @@ void check_lookup_equivalence_(reference_ reference, candidate_ candidate, sz_si
         }
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Safety
 
-/**
- *  @brief Runs one movement backend through adversarial inputs guarded by canary bytes, asserting no
- *         out-of-bounds write occurs (the canaries stay intact) and the operation does not crash.
- */
+/** Runs one movement backend through adversarial inputs guarded by canary bytes, asserting no
+ *  out-of-bounds write occurs (the canaries stay intact) and the operation does not crash. */
 static void check_memory_safety_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
 
     // Zero-length: copy/move/fill must touch nothing, including NULL targets.
@@ -2056,10 +2031,8 @@ static void check_memory_safety_(sz_copy_t copy, sz_move_t move, sz_fill_t fill)
     }
 }
 
-/**
- *  @brief Runs one lookup backend through adversarial inputs guarded by canary bytes, asserting no
- *         out-of-bounds write occurs (the canaries stay intact) and the operation does not crash.
- */
+/** Runs one lookup backend through adversarial inputs guarded by canary bytes, asserting no
+ *  out-of-bounds write occurs (the canaries stay intact) and the operation does not crash. */
 static void check_lookup_safety_(sz_lookup_t lookup) {
 
     char upper_table[256], lower_table[256], ascii_table[256];
@@ -2081,11 +2054,9 @@ static void check_lookup_safety_(sz_lookup_t lookup) {
     }
 }
 
-/**
- *  @brief Adversarial safety driver: feeds zero-length, tiny, overlapping, and embedded-NUL inputs through
- *         the dispatched, serial, and every natively-compiled movement/lookup kernel, asserting that canary
- *         bytes guarding both sides of the destination remain intact and that nothing crashes.
- */
+/** Adversarial safety driver: feeds zero-length, tiny, overlapping, and embedded-NUL inputs through
+ *  the dispatched, serial, and every natively-compiled movement/lookup kernel, asserting that
+ *  canary bytes guarding both sides of the destination remain intact and that nothing crashes. */
 void test_memory_safety() {
 
     // Dispatched (automatic kernel resolution).
@@ -2155,14 +2126,12 @@ void test_memory_safety() {
 #endif
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/**
- *  @brief The memory-movement (copy/move/fill) backends compiled on this target. The always-present `dispatched`
- *         entry keeps the table non-empty on a baseline build. This tier set has Skylake but no Icelake.
- */
+/** The copy, move and fill backends compiled on this target. The always-present @c dispatched entry
+ *  keeps the table non-empty on a baseline build. This tier set has Skylake, but not Icelake. */
 static memory_backend_t const memory_backends[] = {
     {"dispatched", sz_copy, sz_move, sz_fill},
 #if SZ_USE_HASWELL
@@ -2194,10 +2163,8 @@ static memory_backend_t const memory_backends[] = {
 #endif
 };
 
-/**
- *  @brief The byte-lookup (transform) backends compiled on this target. The always-present `dispatched` entry keeps
- *         the table non-empty on a baseline build. This tier set has Icelake but no Skylake.
- */
+/** The byte-lookup transform backends compiled on this target. The always-present @c dispatched
+ *  entry keeps the table non-empty on a baseline build. This tier set has Icelake, not Skylake. */
 static lookup_backend_t const lookup_backends[] = {
     {"dispatched", sz_lookup},
 #if SZ_USE_HASWELL
@@ -2229,10 +2196,8 @@ static lookup_backend_t const lookup_backends[] = {
 #endif
 };
 
-/**
- *  @brief Drives the serial-vs-SIMD movement and lookup differential tests across every backend compiled on this
- *         target (dispatched first). Copy/move/fill and lookup carry their own (differing) tier sets.
- */
+/** Drives the serial-vs-SIMD movement and lookup differential tests across every backend compiled
+ *  on this target, dispatched first. Copy, move and fill carry a tier set differing from lookup. */
 void test_memory_all() {
     sz_size_t const inputs = (sz_size_t)scale_iterations(2);
 
@@ -2243,9 +2208,9 @@ void test_memory_all() {
     for (lookup_backend_t const &backend : lookup_backends) check_lookup_equivalence_(lookup_serial, backend, inputs);
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers
 
-// Explicit template instantiations for the entry points invoked from `main()` (see `stringzilla.cpp`).
+/** Explicit template instantiations for the entry points invoked from @c main(). */
 template void test_ascii_unit<sz::string_t>();
 template void test_ascii_unit<sz::string_view_t>();
 template void test_stl_reads_unit<std::string_view>();

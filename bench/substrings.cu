@@ -1,29 +1,35 @@
 /**
  *  @file bench/substrings.cu
+ *  @author Ash Vardanian
+ *  @date August 8, 2026
  *  @brief Benchmarks multi-pattern search on CUDA GPUs, against the CPU backend this build carries.
  *
- *  Memory-bound: every haystack byte is one data-dependent load into the automaton, and the device is filled
- *  by haystack chunks rather than haystacks, so a corpus fills it by its byte count rather than its item count.
+ *  Memory-bound: every haystack byte is one data-dependent load into the automaton, and the device
+ *  is filled by haystack chunks rather than haystacks, so a corpus fills it by its byte count
+ *  rather than its item count.
  *
- *  The environment loads the dataset into unified memory, so the haystacks are already device-reachable and
- *  every call searches them in place. A corpus cutting into fewer chunks than one residency wave, or one whose
- *  match arrays would not fit the device, is refused rather than recorded. There is no Standard
- *  row: the platform ships no GPU multi-pattern search, so the baseline is the CPU backend, which is the
- *  comparison a dispatch decision actually turns on. Every row reports the corpus bytes one call walks as its
- *  bytes and operations, and its haystacks as inputs.
+ *  The environment loads the dataset into unified memory, so the haystacks are already
+ *  device-reachable and every call searches them in place. A corpus cutting into fewer chunks than
+ *  one residency wave, or one whose match arrays would not fit the device, is refused rather than
+ *  recorded. There is no Standard row: the platform ships no GPU multi-pattern search, so the
+ *  baseline is the CPU backend, which is the comparison a dispatch decision actually turns on.
+ *  Every row reports the corpus bytes one call walks as its bytes and operations, and its haystacks
+ *  as its inputs.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are
- *  used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test the GPU backend against the serial baseline.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
@@ -54,7 +60,7 @@ static sz_sequence_t substrings_device_sequence(unified_vector<sz_string_view_t>
     return sequence;
 }
 
-/** Moves the corpus's managed pages to the device, so the first round does not time their migration. */
+/** Moves the corpus's managed pages to the device, so the first round does not time migration. */
 static void substrings_prefetch(substrings_corpus_t const &corpus) {
     cudaMemLocation where {};
     where.type = cudaMemLocationTypeDevice;
@@ -65,10 +71,11 @@ static void substrings_prefetch(substrings_corpus_t const &corpus) {
 }
 
 /**
- *  @brief Whether the corpus cuts into at least one residency wave of chunks, by the engine's own budget.
+ *  @brief Whether the corpus cuts into a residency wave of chunks or more, by the engine's budget.
  *
- *  The width is reproduced here rather than read back, because the device derives it from the corpus total
- *  the same way: at least the corpus over the budget, and never under the warm-up a chunk has to pay.
+ *  The width is reproduced here rather than read back, because the device derives it from the
+ *  corpus total the same way: at least the corpus over the budget, and never under the warm-up a
+ *  chunk has to pay.
  */
 static bool substrings_fills_a_wave(sz_substrings_engine_t const &engine, substrings_corpus_t const &corpus) {
     std::size_t const budget = engine.chunk_budget ? engine.chunk_budget : 1;
@@ -88,7 +95,7 @@ static bool substrings_fills_a_wave(sz_substrings_engine_t const &engine, substr
     return false;
 }
 
-/** Whether the corpus's overlapping matches fit the engine's own match budget, and that budget the device. */
+/** Whether overlapping matches fit the engine's match budget, and that budget fits the device. */
 static bool substrings_fits_the_budget(sz_substrings_engine_t &engine, substrings_corpus_t const &corpus,
                                        sz_sequence_t const &device_haystacks) {
     std::size_t free_bytes = 0, total_bytes = 0;
@@ -158,7 +165,7 @@ static void bench_substrings_bm25(environment_t const &env, substrings_engine_t 
         .log(base);
 }
 
-/** One vocabulary slice, walked by every verb under every policy it accepts, once the round is sound. */
+/** One vocabulary slice walked by each verb under each accepted policy, once the round is sound. */
 static void bench_substrings_slice(environment_t const &env, substrings_corpus_t const &corpus,
                                    sz_sequence_t const &device_haystacks, substrings_slice_t slice,
                                    sz_substrings_case_sensitivity_t sensitivity) {

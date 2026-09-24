@@ -1,7 +1,8 @@
 /**
- *  @brief SVE2 (AArch64 scalable) backend for UAX-14 line-break opportunities.
  *  @file include/stringzilla/utf8_linebreaks/sve2.h
  *  @author Ash Vardanian
+ *  @date July 17, 2026
+ *  @brief SVE2 (AArch64 scalable) backend for UAX-14 line-break opportunities.
  */
 #ifndef STRINGZILLA_UTF8_LINEBREAKS_SVE2_H_
 #define STRINGZILLA_UTF8_LINEBREAKS_SVE2_H_
@@ -25,8 +26,14 @@ extern "C" {
 
 #pragma region UAX 14 Line Boundaries forward kernel
 
-/** @brief  Flat-palette index for one chunk of ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
- *          cascade), the SVE2 twin of @ref sz_line_break_classify_astral_neon_. Returns 62-entry palette indices. */
+/**
+ *  @brief Flat-palette index for one chunk of astral codepoints over the 20-bit offset = cp -
+ *      0x10000, a 5-nibble cascade.
+ *
+ *  The SVE2 twin of @ref sz_line_break_classify_astral_neon_.
+ *
+ *  @return 62-entry palette indices.
+ */
 SZ_HELPER_INLINE svuint8_t sz_line_break_classify_astral_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
                                                                svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -60,9 +67,9 @@ SZ_HELPER_INLINE svuint8_t sz_line_break_classify_astral_sve2_(svuint8_t plane_u
     return result_u8x;
 }
 
-/** @brief  Split one chunk of flat-palette indices into the low and high bytes of their 16-bit Line_Break
- *          descriptors, gathered straight from the 64-word palette by one `svld1uh_gather` per 32-bit quarter -
- *          the SVE2 stand-in for the NEON resident `vqtbl4q` pair and the AVX2 `vpgatherdd`. */
+/** Split one chunk of flat-palette indices into the low and high bytes of their 16-bit Line_Break
+ *  descriptors, gathered straight from the 64-word palette by one @c svld1uh_gather per 32-bit
+ *  quarter: the SVE2 stand-in for the NEON resident @c vqtbl4q pair and the AVX2 @c vpgatherdd. */
 SZ_HELPER_INLINE void sz_line_break_flat_descriptors_sve2_(svuint8_t palette_indices_u8x,
                                                            svuint8_t *descriptor_low_out_u8x,
                                                            svuint8_t *descriptor_high_out_u8x) {
@@ -93,10 +100,14 @@ SZ_HELPER_INLINE void sz_line_break_flat_descriptors_sve2_(svuint8_t palette_ind
     *descriptor_high_out_u8x = svuzp1_u8(svreinterpret_u8_u16(high_first_u16x), svreinterpret_u8_u16(high_second_u16x));
 }
 
-/** @brief  Expand one chunk of flat-palette indices to the LB1-resolved class byte, the engine side byte and the
- *          DottedCircle predicate - the SVE2 twin of @ref sz_line_break_flat_palette_unpack_neon_. Applies the
- *          serial resolution aliasing (SA -> AL/CM, AI/SG/XX -> AL, CJ -> NS); RI/ZWJ side bits come from the RAW
- *          class, the mark side bit from the resolved class. */
+/**
+ *  @brief Expand one chunk of flat-palette indices to the LB1-resolved class byte, the engine side
+ *      byte and the DottedCircle predicate.
+ *
+ *  The SVE2 twin of @ref sz_line_break_flat_palette_unpack_neon_. Applies the serial resolution
+ *  aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); the RI and ZWJ side bits come from the raw class,
+ *  the mark side bit from the resolved class.
+ */
 SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_sve2_(svuint8_t palette_indices_u8x, svuint8_t *classes_out_u8x,
                                                               svuint8_t *side_out_u8x, svbool_t *dotted_out_b8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -140,7 +151,7 @@ SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_sve2_(svuint8_t palette_
     *dotted_out_b8x = svcmpne_n_u8(all_b8x, svand_n_u8_x(all_b8x, descriptor_high_u8x, 1 << 5), 0);
 }
 
-/** @brief  Membership mask of class @p cls over the six class bit-planes (class ids are < 64). */
+/** Membership mask of class @p cls over the six class bit-planes, as class ids are below 64. */
 SZ_HELPER_INLINE sz_u64_t sz_line_break_plane_class_sve2_(sz_u64_t const *planes, sz_u8_t cls) {
     sz_u64_t members = ~0ull;
     for (int bit = 0; bit < 6; ++bit) members &= ((cls >> bit) & 1) ? planes[bit] : ~planes[bit];
@@ -148,16 +159,19 @@ SZ_HELPER_INLINE sz_u64_t sz_line_break_plane_class_sve2_(sz_u64_t const *planes
 }
 
 /**
- *  @brief  Forward UAX-14 line-break-opportunity kernel (SVE2, vector-length agnostic). Bit-exact with
- *          `sz_utf8_linebreaks_serial` and the other ISA fronts: a chunked-window classify + mask-lowering
- *          front-end feeds the shared portable rule engine @ref sz_line_break_decide_window_.
+ *  @brief Forward UAX-14 line-break-opportunity kernel for SVE2, vector-length agnostic.
  *
- *  Two streaming passes per 64-byte window. The first lowers the byte-shape predicates (continuation, lead
- *  lengths, the dangerous-lead validity refinements) to `sz_u64_t` masks, so the serial "consume-1 U+FFFD"
- *  malformed policy resolves as plain window-wide mask algebra. The second classifies every byte lane in-register
- *  - the BMP flat leaf through gathered byte loads, descriptors through gathered 16-bit loads, astral leads
- *  through the nibble cascade - stores the per-lane class/side bytes the engine's carry extraction reads, and
- *  lowers the class bit-planes and side masks the frame needs; fifteen-plus per-class masks then assemble from
+ *  Bit-exact with @c sz_utf8_linebreaks_serial and the other ISA fronts: a
+ *  chunked-window classify and mask-lowering front-end feeds the shared portable rule
+ *  engine @ref sz_line_break_decide_window_.
+ *
+ *  Two streaming passes run per 64-byte window. The first lowers the byte-shape predicates -
+ *  continuation, lead lengths, the dangerous-lead validity refinements - to @c sz_u64_t masks, so
+ *  the serial "consume-1 U+FFFD" malformed policy resolves as plain window-wide mask algebra. The
+ *  second classifies every byte lane in-register, with the BMP flat leaf through gathered byte
+ *  loads, descriptors through gathered 16-bit loads, and astral leads through the nibble cascade.
+ *  It stores the per-lane class and side bytes the engine's carry extraction reads, and lowers the
+ *  class bit-planes and side masks the frame needs; fifteen-plus per-class masks then assemble from
  *  six bit-planes with scalar mask algebra instead of one compare per class.
  */
 SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2( //

@@ -1,43 +1,46 @@
 /**
- *  @brief The module-init glue — `PyModuleDef`, type registration, and `PyInit_stringzilla`.
  *  @file python/stringzilla/stringzilla.c
  *  @author Ash Vardanian
+ *  @date September 2, 2023
+ *  @brief The module-init glue: @c PyModuleDef, type registration, and @c PyInit_stringzilla.
  *
  *  - Doesn't use PyBind11, NanoBind, Boost.Python, or any other high-level libs, only CPython API.
- *  - To minimize latency this implementation avoids `PyArg_ParseTupleAndKeywords` calls.
- *  - Reimplements all of the `str` functionality in C as a `Str` type.
- *  - Provides a highly generic `Strs` class for handling collections of strings, Arrow-style or not.
+ *  - To minimize latency this implementation avoids @c PyArg_ParseTupleAndKeywords calls.
+ *  - Reimplements all of the @c str functionality in C as a @c Str type.
+ *  - Provides a highly generic @c Strs class for collections of strings, Arrow-style or not.
  *
- *  Pandas doesn't provide a C API, and even in the 2.0 the Apache Arrow representation is opt-in, not default.
- *  PyCapsule protocol in conjunction with @b `__arrow_c_array__` dunder methods can be used to extract strings.
- *  @see https://arrow.apache.org/docs/python/generated/pyarrow.array.html
+ *  Pandas doesn't provide a C API, and even in 2.0 the Apache Arrow representation is opt-in, not
+ *  the default. The PyCapsule protocol, together with the @b __arrow_c_array__ dunder methods, can
+ *  be used to extract strings.
  *
- *  This module exports C functions via `PyCapsule` of `PyAPI`, for another extension to import:
- *  - `sz_py_export_string_like`.
- *  - `sz_py_export_strings_as_sequence`.
- *  - `sz_py_export_strings_as_u32tape`.
- *  - `sz_py_export_strings_as_u64tape`.
- *  - `sz_py_replace_strings_allocator`.
+ *  This module exports C functions via a @c PyCapsule of @c PyAPI, for another extension to import:
+ *  - @c sz_py_export_string_like.
+ *  - @c sz_py_export_strings_as_sequence.
+ *  - @c sz_py_export_strings_as_u32tape.
+ *  - @c sz_py_export_strings_as_u64tape.
+ *  - @c sz_py_replace_strings_allocator.
  *
  *  Function Naming Convention:
- *  - `Str_like_*`: Functions that can be called both as module-level functions AND as member methods.
+ *  - `Str_like_*`: Functions callable both as module-level functions and as member methods.
  *  - `Str_*`: Functions that are member-only methods or have simpler calling conventions.
  *
- *  This translation unit owns the module-init glue - `PyModuleDef`, the type-registration table, and
- *  `PyInit_stringzilla` - plus the argument plumbing the three engine files share. The `File`/`Str`/`Strs`
- *  struct layouts and the `PyTypeObject` forward declarations every domain file needs live in `stringzilla.h`;
- *  the domains themselves are split across `shared.c`, `file.c`, `str.c`, `strs.c`, `memory.c`, `hash.c`,
- *  `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`, `overlap.c`, `substrings.c`,
- *  and the `utf8_*.c` files.
+ *  This translation unit owns the module-init glue - @c PyModuleDef, the type-registration table,
+ *  and @c PyInit_stringzilla - plus the argument plumbing the three engine files share. The
+ *  @c File, @c Str, and @c Strs struct layouts and the @c PyTypeObject forward declarations every
+ *  domain file needs live in `stringzilla.h`; the domains themselves are split across `shared.c`,
+ *  `file.c`, `str.c`, `strs.c`, `memory.c`, `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`,
+ *  `intersect.c`, `levenshtein.c`, `overlap.c`, `substrings.c`, and the `utf8_*.c` files.
+ *
+ *  @see PyArrow arrays: https://arrow.apache.org/docs/python/generated/pyarrow.array.html
  */
 #include "stringzilla.h"
 
 /**
- *  @brief  The function table an importing extension reads out of this module's `_sz_py_api` capsule.
+ *  @brief The function table an importing extension reads out of the @c _sz_py_api capsule.
  *
- *  An importer carries its own copy of this layout and casts the capsule pointer to it, so the two must stay
- *  identical: a field added, removed, or reordered on one side alone makes the other misread memory with no
- *  diagnostic, since the capsule carries no version tag.
+ *  An importer carries its own copy of this layout and casts the capsule pointer to it, so the two
+ *  must stay identical: a field added, removed, or reordered on one side alone makes the other
+ *  misread memory with no diagnostic, since the capsule carries no version tag.
  */
 typedef struct PyAPI {
     sz_bool_t (*sz_py_export_string_like)(PyObject *, sz_cptr_t *, sz_size_t *);
@@ -47,7 +50,7 @@ typedef struct PyAPI {
     sz_bool_t (*sz_py_replace_strings_allocator)(PyObject *, sz_memory_allocator_t *);
 } PyAPI;
 
-/** @brief  Builds a tuple of the capability names in @p caps, or @c NULL with a Python exception set. */
+/** Builds a tuple of the capability names in @p caps, or @c NULL with a Python exception set. */
 static PyObject *capabilities_to_tuple(sz_capability_t caps) {
     sz_cptr_t cap_strings[SZ_CAPABILITIES_COUNT];
     sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
@@ -353,8 +356,8 @@ PyModuleDef stringzilla_module = {
 /**
  *  @brief Every type the module readies, and the name it is exported under.
  *
- *  A `NULL` name means the type is readied but not exported: the UTF-8 iterators are returned by methods
- *  and never constructed by name, so they need `tp_dict` filled but no module attribute.
+ *  A @c NULL name means the type is readied but not exported: the UTF-8 iterators are returned by
+ *  methods and never constructed by name, so they need @c tp_dict filled but no module attribute.
  */
 static struct {
     char const *name;

@@ -1,7 +1,8 @@
 /**
- *  @brief Serial backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/serial.h
  *  @author Ash Vardanian
+ *  @date November 18, 2025
+ *  @brief Serial backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_SERIAL_H_
 #define STRINGZILLA_UTF8_TOKENS_SERIAL_H_
@@ -17,8 +18,9 @@ extern "C" {
 /**
  *  @brief Scalar newline scan emitting every delimiter into parallel offset/length arrays.
  *
- *  A @c "\r\n" CRLF is one match of length 2 (its trailing LF is never emitted alone). `base` is added to every
- *  emitted offset and to `*bytes_consumed`, the resume offset, which is always a true delimiter boundary.
+ *  A @c "\r\n" CRLF is one match of length 2, and its trailing LF is never emitted alone. @p base
+ *  is added to every emitted offset and to `*bytes_consumed`, the resume offset, which is always a
+ *  true delimiter boundary.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_(    //
     sz_cptr_t text, sz_size_t length, sz_size_t base,   //
@@ -56,10 +58,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_(    //
 }
 
 /**
- *  @brief Scalar multistep whitespace scan: classify each codepoint inline and emit every delimiter.
+ *  @brief Scalar multistep whitespace scan: classify each codepoint inline, emit every delimiter.
  *
- *  Same contract as `sz_utf8_newlines_serial_` but for the Unicode White_Space set. There is no CRLF
- *  merging here - CR and LF are independent length-1 matches.
+ *  Same contract as @ref sz_utf8_newlines_serial_ but for the Unicode White_Space set. There is no
+ *  CRLF merging here - CR and LF are independent length-1 matches.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
     sz_cptr_t text, sz_size_t length, sz_size_t base,   //
@@ -127,9 +129,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial(   //
 
 #pragma region Serial
 
-/** @brief  Largest byte prefix of a 64-lane decode window whose multi-byte leads are fully loaded: the first
- *          2-/3-/4-byte start whose declared span runs past @p loaded defers to the next window. Shared u64 mask
- *          math for every windowed ISA front-end. */
+/** Largest byte prefix of a 64-lane decode window whose multi-byte leads are fully loaded: the
+ *  first 2-/3-/4-byte start whose declared span runs past @p loaded defers to the next window.
+ *  Shared u64 mask math for every windowed ISA front-end. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
                                                             sz_u64_t four_byte_starts, sz_size_t loaded) {
     sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
@@ -138,9 +140,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_st
     return overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
 }
 
-/** @brief  Emit already-decided delimiter starts from a vector tile's lane mask: bit `i` of @p hits marks a
- *          verified match at `base + i`, and its byte length rereads only the lead's high nibble. The portable
- *          ctz-drain twin of @ref sz_utf8_rune_drain_forward_serial_; returns the appended match count. */
+/** Emits already-decided delimiter starts from a vector tile's lane mask and returns how many it
+ *  appended, as the portable ctz-drain twin of @ref sz_utf8_rune_drain_forward_serial_. Bit @c i of
+ *  @p hits marks a verified match at `base + i`, its length read from the lead's high nibble. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
     sz_u8_t const *text, sz_size_t base, sz_u64_t hits, sz_size_t *match_offsets, sz_size_t *match_lengths,
     sz_size_t capacity) {
@@ -159,11 +161,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
 /**
  *  @brief Reference scan emitting every delimiter codepoint into parallel offset/length arrays.
  *
- *  Decodes each codepoint with the bounds-checked `sz_rune_decode`, so a truncated trailing UTF-8
- *  sequence never over-reads past @p text + @p length. A byte that does not begin a well-formed
- *  codepoint (lone continuation, overlong, surrogate, truncated tail) is skipped one byte at a time
- *  and is never reported as a delimiter. `base` is added to every emitted offset and to
- *  `*bytes_consumed`, the resume offset, which is always a true codepoint boundary.
+ *  Decodes each codepoint with the bounds-checked @ref sz_rune_decode, so a truncated trailing
+ *  UTF-8 sequence never over-reads past @p text + @p length. A byte that does not begin a
+ *  well-formed codepoint (lone continuation, overlong, surrogate, truncated tail) is skipped one
+ *  byte at a time and is never reported as a delimiter. @p base is added to every emitted offset
+ *  and to `*bytes_consumed`, the resume offset, which is always a true codepoint boundary.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_delimiters_serial_(    //
     sz_cptr_t text, sz_size_t length, sz_size_t base,   //
@@ -197,7 +199,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_serial(    //
     return sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }
 
-#pragma endregion // Serial
+#pragma endregion Serial
 
 #ifdef __cplusplus
 }

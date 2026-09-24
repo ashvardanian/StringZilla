@@ -1,7 +1,9 @@
 /**
- *  @brief Serial (scalar) backend for AES-256 encryption in counter and Galois/counter modes.
  *  @file include/stringzilla/cipher/serial.h
  *  @author Ash Vardanian
+ *  @date August 4, 2026
+ *  @brief Serial (scalar) backend for AES-256 encryption in counter and Galois/counter modes.
+ *
  *  @sa include/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_SERIAL_H_
@@ -18,8 +20,8 @@ extern "C" {
 /*  Optimize this tier for size. The round function is a table-driven scalar loop that no amount of
  *  unrolling makes competitive with AES-NI, so what it expands into is pure footprint - 41 KB of
  *  `.text` under GCC, 6 KB under Clang, against 3 KB apiece once the compilers stop widening it.
- *  The scope is exact: the annotation reaches functions alone, leaving the types and tables untouched,
- *  and neither compiler moves a byte of the vector backends that include them. */
+ *  The scope is exact: the annotation reaches functions alone, leaving the types and tables
+ *  untouched, and neither compiler moves a byte of the vector backends that include them. */
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((minsize)), apply_to = function)
 #elif defined(__GNUC__)
@@ -27,26 +29,31 @@ extern "C" {
 #pragma GCC optimize("Os")
 #endif
 
-/*  This backend exists so every target has a correct implementation, and so the vector backends have a
- *  reference to be differentiated against. It is not the fast path anywhere.
+/*  This backend exists so every target has a correct implementation, and so the vector backends
+ *  have a reference to be differentiated against. It is not the fast path anywhere.
  *
- *  The substitution box is a lookup table, which means the round function's timing depends on the key
- *  through the cache. That is acceptable for `sz_hash`, whose inputs are public, and it is not
- *  acceptable in principle for a cipher. Platforms with AES instructions never reach this code; those
- *  without it have no constant-time alternative short of bit-slicing, which costs an order of magnitude.
- *  The Galois hash below deliberately does @b not follow suit: its subkey is derived from the key, so a
- *  subkey-indexed table would leak the key directly, and it uses a branch-free shift-and-add instead.
- */
+ *  The substitution box is a lookup table, which means the round function's timing depends on the
+ *  key through the cache. That is acceptable for @c sz_hash, whose inputs are public, and it is
+ *  not acceptable in principle for a cipher. Platforms with AES instructions never reach this
+ *  code; those without it have no constant-time alternative short of bit-slicing, which costs an
+ *  order of magnitude. The Galois hash below deliberately does @b not follow suit: its subkey is
+ *  derived from the key, so a subkey-indexed table would leak the key directly, and it uses a
+ *  branch-free shift-and-add instead. */
 
 /**
  *  @brief Which buffer the Galois hash absorbs, for the one transform both directions share.
- *  @see sz_aes256_gcm_encryptor_t, sz_aes256_gcm_decryptor_t.
  *
- *  Internal vocabulary, which is why it lives here rather than in the hub: it appears in no public signature.
+ *  It is internal vocabulary, absent from every public signature, so it lives here, not in the hub.
+ *
+ *  @sa sz_aes256_gcm_encryptor_t, sz_aes256_gcm_decryptor_t.
  */
 typedef enum sz_aes256_gcm_direction_t {
-    sz_aes256_gcm_encrypting_k = 0, ///< The hash absorbs the transformed bytes, which are the output
-    sz_aes256_gcm_decrypting_k = 1, ///< The hash absorbs the untransformed bytes, which are the input
+
+    /** The hash absorbs the transformed bytes, which are the output. */
+    sz_aes256_gcm_encrypting_k = 0,
+
+    /** The hash absorbs the untransformed bytes, which are the input. */
+    sz_aes256_gcm_decrypting_k = 1,
 } sz_aes256_gcm_direction_t;
 
 #pragma region Key Schedule
@@ -55,13 +62,13 @@ typedef enum sz_aes256_gcm_direction_t {
  *  @brief Packs four schedule bytes into one word, byte zero in the least significant position.
  *  @return The packed word.
  *
- *  FIPS 197 writes a key-schedule word as the byte quadruple `(a0, a1, a2, a3)`.
+ *  FIPS 197 writes a key-schedule word as the byte quadruple @b (a0,a1,a2,a3).
  */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_word_pack_serial_(sz_u8_t const *bytes) {
     return (sz_u32_t)bytes[0] | ((sz_u32_t)bytes[1] << 8) | ((sz_u32_t)bytes[2] << 16) | ((sz_u32_t)bytes[3] << 24);
 }
 
-/** @brief Substitutes every byte of a schedule word through the substitution box. */
+/** Substitutes every byte of a schedule word through the substitution box. */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_serial_(sz_u32_t word) {
     sz_u8_t const *sbox = sz_aes_sbox_();
     return (sz_u32_t)sbox[word & 0xFFu] |                 //
@@ -70,7 +77,7 @@ SZ_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_serial_(sz_u32_t word) {
            ((sz_u32_t)sbox[(word >> 24) & 0xFFu] << 24);
 }
 
-/** @brief Rotates a schedule word so `(a0, a1, a2, a3)` becomes `(a1, a2, a3, a0)`. */
+/** Rotates a schedule word so @b (a0,a1,a2,a3) becomes @b (a1,a2,a3,a0). */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_word_rotate_serial_(sz_u32_t word) { return (word >> 8) | (word << 24); }
 
 SZ_API_COMPTIME void sz_aes256_key_init_serial(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
@@ -89,14 +96,14 @@ SZ_API_COMPTIME void sz_aes256_key_init_serial(sz_aes256_key_t *key, sz_u8_t con
     }
 }
 
-#pragma endregion // Key Schedule
+#pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
 /**
- *  @brief Applies `SubBytes` and `ShiftRows` to a block, writing the column-major result.
- *  @param block The 16 input bytes.
- *  @param shifted Receives the substituted and row-shifted bytes.
+ *  @brief Applies @c SubBytes and @c ShiftRows to a block, writing the column-major result.
+ *  @param[in] block The 16 input bytes.
+ *  @param[out] shifted Receives the substituted and row-shifted bytes.
  */
 SZ_HELPER_INLINE void sz_aes256_substitute_and_shift_serial_(sz_u8_t const *block, sz_u8_t *shifted) {
     sz_u8_t const *sbox = sz_aes_sbox_();
@@ -113,16 +120,16 @@ SZ_HELPER_INLINE void sz_aes256_substitute_and_shift_serial_(sz_u8_t const *bloc
  */
 SZ_HELPER_INLINE sz_u8_t sz_u8_top_bit_smear_(sz_u8_t value) { return (sz_u8_t)(0u - (sz_u8_t)(value >> 7)); }
 
-/** @brief Doubles a byte in `GF(2^8)` under the AES reduction polynomial. */
+/** Doubles a byte in GF(2⁸) under the AES reduction polynomial. */
 SZ_HELPER_INLINE sz_u8_t sz_aes256_gf_double_serial_(sz_u8_t value) {
     return (sz_u8_t)((sz_u8_t)(value << 1) ^ (sz_u8_t)(0x1Bu & sz_u8_top_bit_smear_(value)));
 }
 
 /**
  *  @brief Encrypts one 16-byte block with the expanded schedule.
- *  @param key The expanded schedule.
- *  @param block The 16 plaintext bytes.
- *  @param output Receives the 16 ciphertext bytes; may alias @p block.
+ *  @param[in] key The expanded schedule.
+ *  @param[in] block The 16 plaintext bytes.
+ *  @param[out] output Receives the 16 ciphertext bytes; may alias @p block.
  */
 SZ_HELPER_INLINE void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key, sz_u8_t const *block,
                                                       sz_u8_t *output) {
@@ -160,11 +167,11 @@ SZ_HELPER_INLINE void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key
     }
 }
 
-#pragma endregion // Block Encryption
+#pragma endregion Block Encryption
 
 #pragma region Counter Mode
 
-/** @brief Builds the counter block for a given block index: the nonce then a big-endian 32-bit counter. */
+/** Builds the counter block for a given block index: the nonce then a big-endian 32-bit counter. */
 SZ_HELPER_INLINE void sz_aes256_counter_block_serial_(sz_u8_t const *nonce, sz_u32_t block_index, sz_u8_t *block) {
     for (sz_size_t byte_index = 0; byte_index != 12; ++byte_index) block[byte_index] = nonce[byte_index];
     block[12] = (sz_u8_t)(block_index >> 24);
@@ -194,14 +201,14 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_serial(sz_aes256_key_t const *key, sz_u8_
     }
 }
 
-#pragma endregion // Counter Mode
+#pragma endregion Counter Mode
 
 #pragma region Galois Hashing
 
 /**
  *  @brief Multiplies @p accumulator by @p subkey in the Galois field the tag is built over.
- *  @param accumulator The running hash, replaced by the product.
- *  @param subkey One of the precomputed powers of the hash subkey.
+ *  @param[inout] accumulator The running hash, replaced by the product.
+ *  @param[in] subkey One of the precomputed powers of the hash subkey.
  *
  *  Deliberately branch free and table free.
  */
@@ -227,7 +234,7 @@ SZ_HELPER_AUTO void sz_ghash_multiply_serial_(sz_u8_t *accumulator, sz_u8_t cons
     for (byte_index = 0; byte_index != 16; ++byte_index) accumulator[byte_index] = product[byte_index];
 }
 
-/** @brief Absorbs one whole block into the running hash. */
+/** Absorbs one whole block into the running hash. */
 SZ_HELPER_AUTO void sz_ghash_absorb_serial_(sz_u8_t *accumulator, sz_u8_t const *block, sz_u8_t const *subkey) {
     for (sz_size_t byte_index = 0; byte_index != 16; ++byte_index) accumulator[byte_index] ^= block[byte_index];
     sz_ghash_multiply_serial_(accumulator, subkey);
@@ -250,7 +257,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_serial(sz_aes256_gcm_key_t *key, sz_
     }
 }
 
-#pragma endregion // Galois Hashing
+#pragma endregion Galois Hashing
 
 #pragma region Streaming Interface
 
@@ -258,8 +265,8 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_serial(sz_aes256_gcm_key_t *key, sz_
  *  @brief Compares two authentication tags in time that does not depend on their contents.
  *  @return `sz_true_k` when all sixteen bytes match.
  *
- *  Accumulates every difference instead of returning at the first one, so an attacker cannot recover a forged
- *  tag byte by byte from how long the comparison ran.
+ *  Accumulates every difference instead of returning at the first one, so an attacker cannot
+ *  recover a forged tag byte by byte from how long the comparison ran.
  */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_u8_t const *second) {
     sz_u8_t difference = 0;
@@ -270,10 +277,11 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_
 }
 
 /**
- *  @brief Fills the closing hash block with the associated-data and message bit lengths, big-endian.
- *  @param lengths_vec Receives the sixteen bytes.
- *  @param associated_length Bytes of associated data absorbed.
- *  @param text_length Bytes of message absorbed.
+ *  @brief Fills the closing hash block with the associated-data and message
+ *      bit lengths, big-endian.
+ *  @param[out] lengths_vec Receives the sixteen bytes.
+ *  @param[in] associated_length Bytes of associated data absorbed.
+ *  @param[in] text_length Bytes of message absorbed.
  *
  *  Every backend closes its hash with this block, so it lives here rather than eight times over.
  */
@@ -292,8 +300,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_lengths_serial_(sz_u128_vec_t *lengths_vec, 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  Ordinary stores followed by one barrier, rather than writes through a `volatile` view: `volatile` forbids
- *  vectorization, so that form would cost 472 single-byte stores on every one-shot call.
+ *  Ordinary stores followed by one barrier, rather than writes through a @c volatile view:
+ *  @c volatile forbids vectorization, so that form would cost 472 single-byte stores on
+ *  every one-shot call.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_serial_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -302,7 +311,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_serial_(sz_aes256_gcm_state_t *s
     sz_keep_alive_(state);
 }
 
-/** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
+/** Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_serial_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_size_t byte_index;
@@ -324,13 +333,13 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_serial_(sz_aes256_gcm_state_t *state, 
     state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
-/** @brief Advances the big-endian counter occupying the last four bytes of the counter block. */
+/** Advances the big-endian counter occupying the last four bytes of the counter block. */
 SZ_HELPER_INLINE void sz_aes256_counter_advance_serial_(sz_u8_t *counter) {
     for (sz_size_t byte_index = 16; byte_index-- != 12;)
         if (++counter[byte_index] != 0) break;
 }
 
-/** @brief Absorbs associated data into the payload both directions share. */
+/** Absorbs associated data into the payload both directions share. */
 SZ_HELPER_INLINE void sz_aes256_gcm_associate_serial_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_size_t consumed = 0;
@@ -351,7 +360,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_serial_(sz_aes256_gcm_state_t *sta
     }
 }
 
-/** @brief Absorbs whatever `partial` holds, zero padded to a full block, and empties it. */
+/** Absorbs whatever @c partial holds, zero padded to a full block, and empties it. */
 SZ_HELPER_AUTO void sz_aes256_gcm_flush_partial_serial_(sz_aes256_gcm_state_t *state) {
     if (state->buffered == 0) return;
     for (sz_size_t byte_index = state->buffered; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
@@ -360,7 +369,7 @@ SZ_HELPER_AUTO void sz_aes256_gcm_flush_partial_serial_(sz_aes256_gcm_state_t *s
     state->buffered = 0;
 }
 
-/** @brief Appends one ciphertext byte to the hash block, absorbing whenever it fills. */
+/** Appends one ciphertext byte to the hash block, absorbing whenever it fills. */
 SZ_HELPER_INLINE void sz_aes256_gcm_hash_byte_serial_(sz_aes256_gcm_state_t *state, sz_u8_t byte) {
     state->partial[state->buffered++] = byte;
     if (state->buffered == SZ_AES_BLOCK_LENGTH) {
@@ -371,13 +380,13 @@ SZ_HELPER_INLINE void sz_aes256_gcm_hash_byte_serial_(sz_aes256_gcm_state_t *sta
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param state The state.
- *  @param text The chunk to transform.
- *  @param length Bytes in the chunk.
- *  @param output Receives the transformed bytes.
+ *  @param[inout] state The state.
+ *  @param[in] text The chunk to transform.
+ *  @param[in] length Bytes in the chunk.
+ *  @param[out] output Receives the transformed bytes.
  *
- *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may restart at a
- *  chunk boundary.
+ *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may
+ *  restart at a chunk boundary.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                       sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -407,7 +416,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *sta
     }
 }
 
-/** @brief Pads whatever is still pending, folds in the length block, and masks out the tag. */
+/** Pads whatever is still pending, folds in the length block, and masks out the tag. */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_serial_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_state_t finishing = *state;
     sz_u128_vec_t lengths_vec;
@@ -469,7 +478,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_serial(sz_aes256_gcm_
     return sz_aes256_tag_equal_serial_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
 
-#pragma endregion // Streaming Interface
+#pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
@@ -501,7 +510,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_serial(sz_aes256_gcm_key_t con
     return verdict;
 }
 
-#pragma endregion // One Shot Interface
+#pragma endregion One Shot Interface
 
 #if defined(__clang__)
 #pragma clang attribute pop

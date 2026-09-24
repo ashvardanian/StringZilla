@@ -1,7 +1,9 @@
 /**
- *  @brief WebAssembly SIMD128 backend for UTF-8 case folding.
  *  @file include/stringzilla/utf8_uncased_fold/v128.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief WebAssembly SIMD128 backend for UTF-8 case folding.
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_V128_H_
@@ -14,23 +16,24 @@
 extern "C" {
 #endif
 
+/*  Byte-for-byte equivalent to @c sz_utf8_uncased_fold_serial, mirroring the RISC-V Vector kernel's
+ *  "stop-and-serial" structure on fixed 16-byte windows. Maximal ASCII runs fold in-vector; Latin,
+ *  Cyrillic, Greek, Armenian and Georgian text fold in place by their @c _strip_v128_ handlers
+ *  (dispatched on the lead byte); any other script or length-changing fold (ß → "ss", ΐ → 3 runes,
+ *  final sigma, ligatures, …) is a "stop" that the handler stops before, deferring that one
+ *  codepoint to the serial decode/fold/encode. RVV uses a 64-entry @c vrgather; wasm has only a
+ *  16-entry swizzle, so the Latin delta tables are split into 4×16 sub-tables selected by the
+ *  index's high two bits. */
 #if SZ_USE_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-/*  Byte-for-byte equivalent to `sz_utf8_uncased_fold_serial`, mirroring the RISC-V Vector kernel's
- *  "stop-and-serial" structure on fixed 16-byte windows. Maximal ASCII runs fold in-vector; Latin,
- *  Cyrillic, Greek, Armenian and Georgian text fold in place by their `_strip_v128_` handlers
- *  (dispatched on the lead byte); any other script or length-changing fold (ß→"ss", ΐ→3 runes, final
- *  sigma, ligatures, …) is a "stop" that the handler stops before, deferring that one codepoint to the
- *  serial decode/fold/encode. RVV uses a 64-entry `vrgather`; wasm has only a 16-entry swizzle, so the
- *  Latin delta tables are split into 4×16 sub-tables selected by the index's high two bits. */
-
 #pragma region Helpers
 
-/** @brief Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's low
- *  6 bits: 0x00 identity, 0x01 fold by +1, 0x80 irregular (route to serial). Identical to the RVV/NEON LUTs. */
+/** Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's low
+ *  6 bits: 0x00 identity, 0x01 fold by +1, 0x80 irregular (route to serial). Identical to the RVV
+ *  and NEON lookup tables. */
 static sz_align_(16) sz_u8_t const sz_utf8_fold_latin_c4_deltas_v128_[64] = {
     1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
     1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
@@ -47,35 +50,39 @@ static sz_align_(16) sz_u8_t const sz_utf8_fold_latin_c6_deltas_v128_[64] = {
     1,    0,    1,    0,    1,    0, 0x80, 1,    0, 0x80, 0,    0, 1,    0,    0x80, 1,    //
     0,    0x80, 0x80, 1,    0,    1, 0,    0x80, 1, 0,    0,    0, 1,    0,    0,    0};
 
-/** @brief Fold 16 ASCII bytes: lowercase `A`..`Z` by +0x20, identical to `sz_ascii_fold_`. */
+/** Fold 16 ASCII bytes: lowercase @c A..Z by +0x20, identical to @c sz_ascii_fold_. */
 SZ_HELPER_INLINE v128_t sz_ascii_fold_v128_(v128_t bytes_u8x16) {
     // `(c - 'A') <= 25` (unsigned) == `c >= 'A' && c <= 'Z'`; add 0x20 there, nowhere else.
     v128_t is_upper_u8x16 = wasm_u8x16_le(wasm_i8x16_sub(bytes_u8x16, wasm_i8x16_splat('A')), wasm_i8x16_splat(25));
     return wasm_i8x16_add(bytes_u8x16, wasm_v128_and(is_upper_u8x16, wasm_i8x16_splat(0x20)));
 }
 
-/** @brief `result[0] = 0`, `result[i] = vector[i-1]` — the constant-shuffle twin of RVV `vslide1up(vector, 0)`. */
+/** Shifts lanes up by one: `result[0] = 0`, `result[i] = vector[i-1]`. The constant-shuffle twin
+ *  of RVV `vslide1up(vector, 0)`. */
 SZ_HELPER_INLINE v128_t sz_utf8_slide1up_v128_(v128_t vector_u8x16) {
     return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat(0), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
 }
-/** @brief `result[i] = vector[i+1]`, `result[15] = carry` — the twin of RVV `vslide1down(vector, carry)`. */
+
+/** Shifts lanes down by one: `result[i] = vector[i+1]`, `result[15] = carry`. The twin of RVV
+ *  `vslide1down(vector, carry)`. */
 SZ_HELPER_INLINE v128_t sz_utf8_slide1down_v128_(v128_t vector_u8x16, sz_u8_t carry) {
     return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat((sz_i8_t)carry), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
                               14, 15, 16);
 }
 
-/** @brief 0xFF where `(byte - start)` is unsigned-`< length`, i.e. `byte` in `[start, start+length)`. */
+/** 0xFF where `(byte - start)` is unsigned-`< length`, i.e. @c byte in `[start, start+length)`. */
 SZ_HELPER_INLINE v128_t sz_utf8_in_range_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
     return wasm_u8x16_lt(wasm_i8x16_sub(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)start)),
                          wasm_i8x16_splat((sz_i8_t)length));
 }
 
-/** @brief Add `value` to the lanes flagged by `mask` (0xFF), leave the rest — twin of RVV `vadd_vx_m`. */
+/** Adds @p value to the lanes flagged by @p mask_u8x16 as 0xFF, leaving the rest. The twin of
+ *  RVV @c vadd_vx_m. */
 SZ_HELPER_INLINE v128_t sz_utf8_masked_add_v128_(v128_t bytes_u8x16, v128_t mask_u8x16, sz_u8_t value) {
     return wasm_i8x16_add(bytes_u8x16, wasm_v128_and(mask_u8x16, wasm_i8x16_splat((sz_i8_t)value)));
 }
 
-/** @brief 64-entry table lookup via four 16-entry swizzles selected by the index's high two bits. */
+/** 64-entry table lookup via four 16-entry swizzles selected by the index's high two bits. */
 SZ_HELPER_INLINE v128_t sz_utf8_gather64_v128_(v128_t lut0_u8x16, v128_t lut1_u8x16, v128_t lut2_u8x16,
                                                v128_t lut3_u8x16, v128_t index_u8x16) {
     v128_t local_u8x16 = wasm_v128_and(index_u8x16, wasm_i8x16_splat(0x0F));
@@ -90,28 +97,32 @@ SZ_HELPER_INLINE v128_t sz_utf8_gather64_v128_(v128_t lut0_u8x16, v128_t lut1_u8
     return result_u8x16;
 }
 
-/** @brief Index of the first set lane in `mask` among the low `valid` lanes, or -1 — twin of RVV `vfirst_m`. */
+/** Index of the first set lane in @p mask_u8x16 among the low @p vector_length lanes, or -1. The
+ *  twin of RVV @c vfirst_m. */
 SZ_HELPER_INLINE int sz_utf8_first_set_v128_(v128_t mask_u8x16, sz_size_t vector_length) {
     sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(mask_u8x16);
     if (vector_length < 16) bits &= ((sz_u32_t)1 << vector_length) - 1;
     return bits ? (int)sz_u32_ctz(bits) : -1;
 }
 
-/** @brief Load up to 16 bytes (zero-padded past `available`), so strip handlers never over-read. */
+/** Load up to 16 bytes (zero-padded past @p available), so strip handlers never over-read. */
 SZ_HELPER_INLINE v128_t sz_utf8_load_window_v128_(sz_u8_t const *source_ptr, sz_size_t available) {
     return available >= 16 ? wasm_v128_load(source_ptr) : sz_load_partial_v128_((sz_cptr_t)source_ptr, available);
 }
 
-/** @brief Lanes set (0xFF) on every malformed lead byte, mirroring `sz_rune_decode` branchlessly.
+/**
+ *  @brief Lanes set (0xFF) on every malformed lead byte, mirroring @c sz_rune_decode branchlessly.
  *
- *  A lead is well-formed iff its declared continuations follow AND it escapes the bad-special set: C0/C1,
- *  F5..FF (no width bit, auto-excluded), E0 with 2nd < 0xA0 (overlong), ED with 2nd >= 0xA0 (surrogate),
- *  F0 with 2nd < 0x90 (overlong), F4 with 2nd >= 0x90 (> U+10FFFF). The continuation-status of the bytes
- *  at +1/+2/+3 comes from sliding @p is_continuation_u8x16 down (carry 0): at the window boundary the slide reads
- *  zeros past the last lane, so a multi-byte lead whose continuations spill into the next window reads as
- *  malformed - coinciding with the incomplete-sequence trim, leaving valid output unchanged. The family
- *  handlers OR this into their stop mask so overlong, surrogate, truncated, and out-of-range leads are
- *  treated as foreign and resync one byte at a time, byte-for-byte with the serial reference. */
+ *  A lead is well-formed iff its declared continuations follow and it escapes the bad-special set:
+ *  C0/C1, F5..FF (no width bit, auto-excluded), E0 with 2nd < 0xA0 (overlong), ED with 2nd ≥ 0xA0
+ *  (surrogate), F0 with 2nd < 0x90 (overlong), F4 with 2nd ≥ 0x90 (> U+10FFFF). The
+ *  continuation-status of the bytes at +1/+2/+3 comes from sliding @p is_continuation_u8x16 down
+ *  (carry 0): at the window boundary the slide reads zeros past the last lane, so a multi-byte lead
+ *  whose continuations spill into the next window reads as malformed - coinciding with the
+ *  incomplete-sequence trim, leaving valid output unchanged. The family handlers OR this into their
+ *  stop mask so overlong, surrogate, truncated, and out-of-range leads are treated as foreign and
+ *  resync one byte at a time, byte-for-byte with the serial reference.
+ */
 SZ_HELPER_INLINE v128_t sz_utf8_malformed_lead_v128_(v128_t source_u8x16, v128_t next_u8x16,
                                                      v128_t is_continuation_u8x16, v128_t is_lead_u8x16) {
     v128_t continuation_plus1_u8x16 = sz_utf8_slide1down_v128_(is_continuation_u8x16, 0);
@@ -146,7 +157,7 @@ SZ_HELPER_INLINE v128_t sz_utf8_malformed_lead_v128_(v128_t source_u8x16, v128_t
     return wasm_v128_andnot(is_lead_u8x16, well_formed_u8x16);
 }
 
-/** @brief Largest prefix of a window that does not split a trailing multi-byte sequence (twin of RVV trim). */
+/** Largest window prefix that does not split a trailing multi-byte sequence; twin of RVV trim. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_trim_incomplete_v128_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                          sz_size_t remaining) {
     if (vector_length >= remaining) return vector_length;
@@ -158,7 +169,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_trim_incomplete_v128_(sz_u8_t const *source_p
     return ((boundary - 1) + needed > vector_length) ? (boundary - 1) : vector_length;
 }
 
-/** @brief Common tail of every strip handler: resolve `consumed` from the first stop, store, set the flag. */
+/** Shared tail of strip handlers: resolve @c consumed from the first stop, store, set the flag. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                       sz_size_t remaining, v128_t folded_u8x16, int first_stop,
                                                       sz_u8_t *destination_ptr, int *needs_serial) {
@@ -176,11 +187,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr,
     return consumed;
 }
 
-#pragma endregion // Helpers
+#pragma endregion Helpers
 
 #pragma region Per script strip handlers
 
-/** @brief Fold one window of Latin (ASCII + Latin-1 C2/C3 + Latin Extended-A/B C4-C6). @sa RVV latin strip. */
+/** Fold one window of Latin (ASCII + Latin-1 C2/C3 + Latin Extended-A/B C4-C6). Twin of
+ *  @ref sz_utf8_fold_latin_strip_rvv_. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_latin_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                           sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
@@ -257,7 +269,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_latin_strip_v128_(sz_u8_t const *source_
                                       needs_serial);
 }
 
-/** @brief Fold one window of basic Cyrillic (D0/D1 leads). @sa RVV cyrillic strip. */
+/** Fold one window of basic Cyrillic (D0/D1 leads), the twin of
+ *  @ref sz_utf8_fold_cyrillic_strip_rvv_. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_cyrillic_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                              sz_u8_t *destination_ptr, int *needs_serial) {
     static
@@ -299,7 +312,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_cyrillic_strip_v128_(sz_u8_t const *sour
                                       needs_serial);
 }
 
-/** @brief Fold one window of basic Greek (CE/CF leads). @sa RVV greek strip. */
+/** Fold one window of basic Greek (CE/CF leads). Twin of @ref sz_utf8_fold_greek_strip_rvv_. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                           sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
@@ -350,7 +363,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_
                                       needs_serial);
 }
 
-/** @brief Fold one window of Armenian (D4/D5/D6 leads). @sa RVV armenian strip. */
+/** Fold one window of Armenian (D4/D5/D6 leads). Twin of @ref sz_utf8_fold_armenian_strip_rvv_. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_armenian_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                              sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
@@ -396,7 +409,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_armenian_strip_v128_(sz_u8_t const *sour
                                       needs_serial);
 }
 
-/** @brief Fold one window of Georgian (3-byte E1 82/83 sequences, uppercase keyed by the third byte). @sa RVV. */
+/** Fold one window of Georgian (3-byte E1 82/83 sequences, uppercase keyed by the third byte). Twin
+ *  of @ref sz_utf8_fold_georgian_strip_rvv_. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                              sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
@@ -455,7 +469,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *sour
                                       needs_serial);
 }
 
-#pragma endregion // Per script strip handlers
+#pragma endregion Per script strip handlers
 
 SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 

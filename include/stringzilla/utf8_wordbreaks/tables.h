@@ -1,14 +1,15 @@
 /**
- *  @file   include/stringzilla/utf8_wordbreaks/tables.h
+ *  @file include/stringzilla/utf8_wordbreaks/tables.h
  *  @author Ash Vardanian
+ *  @date November 30, 2025
  *  @brief UAX-29 Word_Break property tables. A codepoint maps to one of the 16
- *  `sz_utf8_word_break_t` values (see the walk in `sz_rune_word_break_property`).
+ *      @c sz_utf8_word_break_t values (see the walk in @c sz_rune_word_break_property).
  *
- *  ! The SIMD kernels resolve the BMP through the page-compressed FLAT table in the `Flat BMP classifier tables`
- *  ! region (one indexed lookup per codepoint, `vpgatherdd` on x86). The tables below feed the serial oracle and
- *  ! the SIMD astral cascade.
+ *  ! The SIMD kernels resolve the BMP through the page-compressed flat table in the !
+ *  `Flat BMP classifier tables` region (one indexed lookup per codepoint, @c vpgatherdd on x86). !
+ *  The tables below feed the serial oracle and the SIMD astral cascade.
  *
- *  Derived from the UCD by:
+ *  Derived from the UCD WordBreakProperty.txt, linked below, by:
  *
  *  @code{.py}
  *  import urllib.request, re
@@ -54,6 +55,8 @@
  *  leaf_cells = pad64(astral_leaf)
  *  astral_leaf_packed = pad64([leaf_cells[2 * i] | (leaf_cells[2 * i + 1] << 4) for i in range(len(leaf_cells) // 2)])
  *  @endcode
+ *
+ *  @see WordBreakProperty.txt: https://www.unicode.org/Public/17.0.0/ucd/auxiliary/WordBreakProperty.txt
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_TABLES_H_
 #define STRINGZILLA_UTF8_WORDBREAKS_TABLES_H_
@@ -67,26 +70,58 @@ extern "C" {
 /**
  *  @brief Unicode TR29 Word_Break property values (4-bit encoding, 0-15).
  *
- *  These values correspond to the Word_Break property from Unicode TR29.
- *  Used by `sz_rune_word_break_property()` for full TR29-compliant boundary detection.
+ *  These values correspond to the Word_Break property from Unicode TR29, used by
+ *  `sz_rune_word_break_property()` for full TR29-compliant boundary detection.
  */
 enum sz_utf8_word_break_t {
-    sz_utf8_word_break_other_k = 0,         /**< Default - creates word boundary */
-    sz_utf8_word_break_cr_k = 1,            /**< Carriage Return (U+000D) */
-    sz_utf8_word_break_lf_k = 2,            /**< Line Feed (U+000A) */
-    sz_utf8_word_break_newline_k = 3,       /**< Other newlines (VT, FF, NEL, LS, PS) */
-    sz_utf8_word_break_extend_k = 4,        /**< Combining marks (Mn, Me, Mc) */
-    sz_utf8_word_break_zwj_k = 5,           /**< Zero Width Joiner (U+200D) */
-    sz_utf8_word_break_format_k = 6,        /**< Format characters (Cf) */
-    sz_utf8_word_break_regional_ind_k = 7,  /**< Regional Indicator (U+1F1E6-U+1F1FF) */
-    sz_utf8_word_break_aletter_k = 8,       /**< Alphabetic letters */
-    sz_utf8_word_break_hebrew_letter_k = 9, /**< Hebrew script letters */
-    sz_utf8_word_break_numeric_k = 10,      /**< Digits (0-9 and other scripts) */
-    sz_utf8_word_break_katakana_k = 11,     /**< Japanese Katakana */
-    sz_utf8_word_break_extendnumlet_k = 12, /**< Underscore, connector punctuation */
-    sz_utf8_word_break_midletter_k = 13,    /**< Mid-letter punctuation (colon, etc.) */
-    sz_utf8_word_break_midnum_k = 14,       /**< Mid-number punctuation (comma, etc.) */
-    sz_utf8_word_break_mid_quotes_k = 15,   /**< MidNumLet + Single_Quote + Double_Quote */
+
+    /** Default - creates word boundary. */
+    sz_utf8_word_break_other_k = 0,
+
+    /** Carriage Return (U+000D). */
+    sz_utf8_word_break_cr_k = 1,
+
+    /** Line Feed (U+000A). */
+    sz_utf8_word_break_lf_k = 2,
+
+    /** Other newlines (VT, FF, NEL, LS, PS). */
+    sz_utf8_word_break_newline_k = 3,
+
+    /** Combining marks (Mn, Me, Mc). */
+    sz_utf8_word_break_extend_k = 4,
+
+    /** Zero Width Joiner (U+200D). */
+    sz_utf8_word_break_zwj_k = 5,
+
+    /** Format characters (Cf). */
+    sz_utf8_word_break_format_k = 6,
+
+    /** Regional Indicator (U+1F1E6-U+1F1FF). */
+    sz_utf8_word_break_regional_ind_k = 7,
+
+    /** Alphabetic letters. */
+    sz_utf8_word_break_aletter_k = 8,
+
+    /** Hebrew script letters. */
+    sz_utf8_word_break_hebrew_letter_k = 9,
+
+    /** Digits (0-9 and other scripts). */
+    sz_utf8_word_break_numeric_k = 10,
+
+    /** Japanese Katakana. */
+    sz_utf8_word_break_katakana_k = 11,
+
+    /** Underscore, connector punctuation. */
+    sz_utf8_word_break_extendnumlet_k = 12,
+
+    /** Mid-letter punctuation (colon, etc.). */
+    sz_utf8_word_break_midletter_k = 13,
+
+    /** Mid-number punctuation (comma, etc.). */
+    sz_utf8_word_break_midnum_k = 14,
+
+    /** MidNumLet + Single_Quote + Double_Quote. */
+    sz_utf8_word_break_mid_quotes_k = 15,
 };
 
 #pragma region Word_Break tables
@@ -368,11 +403,10 @@ static const sz_u8_t sz_utf8_word_break_trie_l1_[496] = {
     0x4D, 0x4E,
 };
 
-/**
- *  @brief Word_Break property of every ASCII codepoint U+0000..U+007F (the 128-entry slice of
- *  `sz_utf8_word_break_flat_lut_0800_`). Used by the per-ISA all-ASCII fast paths (Ice Lake, Haswell, NEON,
- *  SVE2, RVV) that classify a 64-byte window by a register-resident table permute.
- */
+/** Word_Break property of every ASCII codepoint U+0000..U+007F, the 128-entry slice of
+ *  @c sz_utf8_word_break_flat_lut_0800_. Used by the per-ISA all-ASCII fast paths (Ice
+ *  Lake, Haswell, NEON, SVE2, RVV) that classify a 64-byte window by a
+ *  register-resident table permute. */
 static const sz_u8_t sz_utf8_word_break_property_ascii_[128] = {
     0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x3, 0x3, 0x1, 0x0, 0x0, //
     0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, //
@@ -384,9 +418,10 @@ static const sz_u8_t sz_utf8_word_break_property_ascii_[128] = {
     0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x0, 0x0, 0x0, 0x0, 0x0, //
 };
 
-/* Auxiliary Word_Break ranges (WSegSpace WB3d, Extended_Pictographic WB3c) — generated from Unicode 17.0
- * WordBreakProperty.txt + emoji-data.txt. Kept as sorted [lo,hi] u16 pairs for branchless in-register
- * range membership; SMP ranges are plane-1 low-16 bits (all Extended_Pictographic SMP is in plane 1). */
+/*  Auxiliary Word_Break ranges (WSegSpace WB3d, Extended_Pictographic WB3c) — generated from
+ *  Unicode 17.0 WordBreakProperty.txt + emoji-data.txt. Kept as sorted [lo,hi] u16 pairs for
+ *  branchless in-register range membership; SMP ranges are plane-1 low-16 bits (all
+ *  Extended_Pictographic SMP is in plane 1). */
 enum {
     sz_utf8_word_break_wseg_count_k = 6,
     sz_utf8_word_break_pict_bmp_count_k = 87,
@@ -436,7 +471,8 @@ static const sz_u16_t sz_utf8_word_break_pict_smp_hi_[69] = {
     0xF84F, 0xF85F, 0xF88F, 0xF8AF, 0xF8BF, 0xF8CF, 0xF8FF, 0xF93A, 0xF945, 0xF9FF, 0xFA5F, 0xFAFF, 0xFFFD,
 };
 
-/* Full-codepoint u32 range tables for the scalar WSegSpace (WB3d) / Extended_Pictographic (WB3c) predicates. */
+/*  Full-codepoint u32 range tables for the scalar WSegSpace (WB3d) and
+ *  Extended_Pictographic (WB3c) predicates. */
 enum { sz_utf8_word_break_wseg_u32_count_k = 6, sz_utf8_word_break_pict_u32_count_k = 156 };
 static const sz_u32_t sz_utf8_word_break_wseg_u32_lo_[6] = {
     0x000020, 0x001680, 0x002000, 0x002008, 0x00205F, 0x003000,
@@ -482,10 +518,10 @@ static const sz_u32_t sz_utf8_word_break_pict_u32_hi_[156] = {
     0x01FAFF, 0x01FFFD,
 };
 
-/* Register-resident codepoint classifier: astral (8/4/4/4) stage trie, generated from
- * sz_rune_word_break_property(codepoint) for every codepoint (byte-identical to the serial oracle by construction).
- * The BMP fast paths (ASCII permute, arithmetic ranges, 2-byte page LUT, flat-table gather) classify the common
- * scripts without touching it. */
+/*  Register-resident codepoint classifier: astral (8/4/4/4) stage trie, generated from
+ *  `sz_rune_word_break_property(codepoint)` for every codepoint, byte-identical to the serial
+ *  oracle by construction. The BMP fast paths (ASCII permute, arithmetic ranges, 2-byte page LUT,
+ *  flat-table gather) classify the common scripts without touching it. */
 sz_align_(64) static const sz_u8_t sz_utf8_word_break_astral_s0_[256] = {
     0, 1, 2, 3, 4, 5, 6, 5, 5, 5, 7, 8, 9, 10, 11, 12, 5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -649,7 +685,8 @@ sz_align_(64) static const sz_u8_t sz_utf8_word_break_astral_leaf_packed_[1600] 
     0x0,  0x0,  0x0,  0x0,
 };
 
-/* Auxiliary astral ranges consumed by the serial Word_Break oracle (sz_rune_word_break_property). */
+/*  Auxiliary astral ranges consumed by the serial Word_Break oracle,
+ *  @c sz_rune_word_break_property. */
 static const sz_u32_t sz_utf8_word_break_astral_lo_[476] = {
     0x10000, 0x1000D, 0x10028, 0x1003C, 0x1003F, 0x10050, 0x10080, 0x10140, 0x101FD, 0x10280, 0x102A0, 0x102E0, 0x10300,
     0x1032D, 0x10350, 0x10376, 0x10380, 0x103A0, 0x103C8, 0x103D1, 0x10400, 0x104A0, 0x104B0, 0x104D8, 0x10500, 0x10530,
@@ -755,9 +792,11 @@ static const sz_u8_t sz_utf8_word_break_astral_cls_[476] = {
 };
 
 /**
- *  @brief  SIMD Word_Break lookup tables, bit-exact with `sz_rune_word_break_property`. `bmp_page_lut_` maps `cp >> 8` to
- *          a page index and doubles as the page LUT of the flat BMP classifier below; the astral 5-nibble `vpshufb`
- *          cascade classifies cp-0x10000 in-register.
+ *  @brief SIMD Word_Break lookup tables, bit-exact with @c sz_rune_word_break_property.
+ *
+ *  @c bmp_page_lut_ maps `cp >> 8` to a page index and doubles as the page LUT of the flat BMP
+ *  classifier below; the astral 5-nibble @c vpshufb cascade classifies cp − 0x10000 in-register.
+ *
  *  @code{.py}
  *  # ASTRAL: over offset=cp-0x10000 (nibbles n4..n0): page=astral_stage1[n4*16+n3];
  *  #         leaf2=astral_stage2_lo[page*16+n2]; leaf_lo=astral_stage3_lo[leaf2*16+n1]; leaf_hi=astral_stage3_hi[...];
@@ -1015,11 +1054,14 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage4_groups_[3328] = {
 // clang-format off
 
 /**
- *  @brief  Flat Word_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 52 distinct
- *          256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, one indexed lookup per
- *          codepoint, read by `vpgatherdd` on x86, `svld1_gather` on SVE2, `vluxei16` on RVV, and a bounded
- *          scalar leaf walk on NEON, WASM, LASX, and POWER VSX, which have no gathers. The page LUT is `bmp_page_lut_` itself, reused rather than duplicated.
- *          Bit-exact with `sz_rune_word_break_property` across the BMP by construction. Derived by:
+ *  @brief Flat Word_Break classifier table, bit-exact with @c sz_rune_word_break_property across
+ *      the BMP by construction.
+ *
+ *  The page index `bmp_page_lut_[cp >> 8]` selects one of 52 distinct 256-byte pages, then
+ *  `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, one indexed lookup per codepoint, read
+ *  by @c vpgatherdd on x86, @c svld1_gather on SVE2, @c vluxei16 on RVV, and a bounded scalar leaf
+ *  walk on NEON, WASM, LASX, and POWER VSX, which have no gathers. The page LUT is @c bmp_page_lut_
+ *  itself, reused rather than duplicated. Derived by:
  *
  *  @code{.py}
  *  # desc[cp] = sz_rune_word_break_property(cp) for cp in range(0x110000), dumped from the serial oracle.
@@ -1033,8 +1075,12 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage4_groups_[3328] = {
  *  @endcode
  */
 enum {
-    sz_utf8_word_break_flat_pages_k = 52, /**< Distinct 256-byte pages the BMP compresses to. */
-    sz_utf8_word_break_flat_count_k = 13312, /**< Logical entries of the flat leaf (the array is padded). */
+
+    /** Distinct 256-byte pages the BMP compresses to. */
+    sz_utf8_word_break_flat_pages_k = 52,
+
+    /** Logical entries of the flat leaf (the array is padded). */
+    sz_utf8_word_break_flat_count_k = 13312,
 };
 
 sz_align_(64) static const sz_u8_t sz_utf8_word_break_flat_bmp_[13376] = {

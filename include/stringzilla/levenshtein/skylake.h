@@ -1,11 +1,14 @@
 /**
- *  @brief Skylake-X (AVX-512F) backend for Levenshtein edit distances: eight candidates per ZMM, one 64-bit Myers
- *      word per candidate, the Myers booleans folded into @c VPTERNLOGQ and the score deltas into masked adds.
- *
- *  Every intrinsic here is AVX-512F, so Skylake-SP, Cascade Lake and Cooper Lake run the eight-wide kernel too.
- *
  *  @file include/stringzilla/levenshtein/skylake.h
  *  @author Ash Vardanian
+ *  @date September 6, 2023
+ *  @brief Skylake-X (AVX-512F) backend for Levenshtein edit distances: eight candidates per ZMM,
+ *      one 64-bit Myers word per candidate, the Myers booleans folded into @c VPTERNLOGQ and the
+ *      score deltas into masked adds.
+ *
+ *  Every intrinsic here is AVX-512F, so Skylake-SP, Cascade Lake and Cooper Lake run the
+ *  eight-wide kernel too.
+ *
  *  @sa include/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_SKYLAKE_H_
@@ -31,16 +34,23 @@ extern "C" {
 
 /** Eight candidates' running scores, one per 64-bit ZMM position. */
 typedef struct sz_levenshtein_u64x8_state_skylake_t {
-    sz_u512_vec_t scores_vec; /**< The running edit distance per candidate. */
+
+    /** The running edit distance per candidate. */
+    sz_u512_vec_t scores_vec;
 } sz_levenshtein_u64x8_state_skylake_t;
 
 /** One query word of eight candidates' Myers states - the vertical deltas of that word. */
 typedef struct sz_levenshtein_u64x8_vertical_skylake_t {
-    sz_u512_vec_t positive_vec; /**< Myers' VP per candidate. */
-    sz_u512_vec_t negative_vec; /**< Myers' VN per candidate. */
+
+    /** Myers' VP per candidate. */
+    sz_u512_vec_t positive_vec;
+
+    /** Myers' VN per candidate. */
+    sz_u512_vec_t negative_vec;
 } sz_levenshtein_u64x8_vertical_skylake_t;
 
-/** Starts eight candidates: the scores at the query's length, and @p words verticals at the top boundary. */
+/** Starts eight candidates: the scores at the query's length, and @p words verticals at
+ *  the top boundary. */
 SZ_API_COMPTIME void sz_levenshtein_u64x8_init_skylake(sz_levenshtein_u64x8_state_skylake_t *state,
                                                        sz_levenshtein_u64x8_vertical_skylake_t *verticals,
                                                        sz_size_t words, sz_levenshtein_query_t const *query) {
@@ -65,8 +75,9 @@ SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u32_skylake(sz_u32_t 
     return classes_vec;
 }
 
-/** Advances eight candidates one symbol through exactly @p words verticals; the score moves on the last word.
- *  A candidate past its text keeps stepping whatever class the transpose emits; its score is read where its text ends. */
+/** Advances eight candidates one symbol through exactly @p words verticals; the score moves on the
+ *  last word. A candidate past its text keeps stepping whatever class the transpose emits; its
+ *  score is read where its text ends. */
 SZ_API_COMPTIME void sz_levenshtein_u64x8_step_skylake(sz_levenshtein_u64x8_state_skylake_t *state,
                                                        sz_levenshtein_u64x8_vertical_skylake_t *verticals,
                                                        sz_size_t words, sz_levenshtein_query_t const *query,
@@ -115,8 +126,9 @@ SZ_API_COMPTIME void sz_levenshtein_u64x8_step_skylake(sz_levenshtein_u64x8_stat
     }
 }
 
-/** Whether any of the eight candidates can still come under @p radius at @p position: a score falls by at most one
- *  per remaining symbol. Monotone, so once false it stays false; @c SZ_SSIZE_MAX bounds nothing. */
+/** Whether any of the eight candidates can still come under @p radius at @p position: a score
+ *  falls by at most one per remaining symbol. Monotone, so once false it stays false;
+ *  @c SZ_SSIZE_MAX bounds nothing. */
 SZ_API_COMPTIME sz_bool_t sz_levenshtein_u64x8_any_active_skylake(sz_levenshtein_u64x8_state_skylake_t const *state,
                                                                   sz_u512_vec_t symbol_counts_vec, sz_size_t position,
                                                                   sz_ssize_t radius) {
@@ -134,8 +146,9 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x8_score_skylake(sz_levenshtein_u64x
     return state->scores_vec.u64s[candidate];
 }
 
-/** The byte transpose for eight candidates: eight positions per eight loads and three rounds of unpacks while every
- *  candidate has eight bytes left, one byte at a time after that; emits the @c sz_u8_t class of every byte. */
+/** The byte transpose for eight candidates: eight positions per eight loads and three rounds of
+ *  unpacks while every candidate has eight bytes left, one byte at a time after that; emits the
+ *  @c sz_u8_t class of every byte. */
 SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x8_transpose_skylake(sz_levenshtein_query_t const *query,
                                                                 sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                                 sz_size_t candidates, sz_size_t *cursors,
@@ -187,8 +200,9 @@ enum {
     sz_levenshtein_skylake_u64x8_registers_per_position_k = 1
 };
 
-/** Sweeps eight candidates through every transpose; @p words is a constant, keeping short queries' verticals in registers.
- *  A candidate's score is read where its text ends; @p symbol_counts seeds as byte counts, refined by the transpose. */
+/** Sweeps eight candidates through every transpose; @p words is a constant, keeping short queries'
+ *  verticals in registers. A candidate's score is read where its text ends; @p symbol_counts seeds
+ *  as byte counts, refined by the transpose. */
 SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t const *shared_query,
                                                           sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                           sz_u64_t *symbol_counts, sz_size_t sweep_count,
@@ -242,8 +256,8 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t
     }
 }
 
-/** Streams every candidate through a prepared @p query, eight at a time, with @p transpose emitting their
- *  classes at @p width; @p verticals holds enough for a runtime word count. */
+/** Streams every candidate through a prepared @p query, eight at a time, with @p transpose emitting
+ *  their classes at @p width; @p verticals holds enough for a runtime word count. */
 SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
     sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x8_vertical_skylake_t *verticals, sz_size_t *distances) {

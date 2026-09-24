@@ -1,13 +1,14 @@
 /**
- *  @brief  Extensive @b stress-testing suite for the StringZilla families that reach a GPU, written in CUDA C++.
- *  @see    The CPU backends of the same families are driven by @c test/stringzilla.cpp.
- *
- *  @file   test/stringzilla.cu
+ *  @file test/stringzilla.cu
  *  @author Ash Vardanian
- *  @date   September 15, 2026
+ *  @date September 15, 2026
+ *  @brief Extensive @b stress-testing suite for the StringZilla families that reach a GPU.
  *
- *  One launcher per family's GPU cases, the way @c test/stringzilla.cpp aggregates the CPU ones. Each family's
- *  cases live beside its CPU test - @c test/overlap.cu next to @c test/overlap.cpp - and are registered here.
+ *  One launcher per family's GPU cases, the way @c test/stringzilla.cpp aggregates the CPU ones.
+ *  Each family's cases live beside its CPU test - @c test/overlap.cu next to @c test/overlap.cpp -
+ *  and are registered here.
+ *
+ *  @sa test/stringzilla.cpp for the CPU backends of the same families.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 

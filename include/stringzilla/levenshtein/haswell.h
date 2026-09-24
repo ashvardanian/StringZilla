@@ -1,8 +1,10 @@
 /**
- *  @brief Haswell (AVX2) backend for Levenshtein edit distances: four candidates per YMM, one 64-bit Myers
- *      word per candidate, every candidate reading the same query's match masks.
  *  @file include/stringzilla/levenshtein/haswell.h
  *  @author Ash Vardanian
+ *  @date September 6, 2023
+ *  @brief Haswell (AVX2) backend for Levenshtein edit distances: four candidates per YMM, one
+ *      64-bit Myers word per candidate, every candidate reading the same query's match masks.
+ *
  *  @sa include/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_HASWELL_H_
@@ -26,21 +28,28 @@ extern "C" {
 
 /** Four candidates' running scores, one per 64-bit YMM position. */
 typedef struct sz_levenshtein_u64x4_state_haswell_t {
-    sz_u256_vec_t scores_vec; /**< The running edit distance per candidate. */
+
+    /** The running edit distance per candidate. */
+    sz_u256_vec_t scores_vec;
 } sz_levenshtein_u64x4_state_haswell_t;
 
 /** One query word of four candidates' Myers states - the vertical deltas of that word. */
 typedef struct sz_levenshtein_u64x4_vertical_haswell_t {
-    sz_u256_vec_t positive_vec; /**< Myers' VP per candidate. */
-    sz_u256_vec_t negative_vec; /**< Myers' VN per candidate. */
+
+    /** Myers' VP per candidate. */
+    sz_u256_vec_t positive_vec;
+
+    /** Myers' VN per candidate. */
+    sz_u256_vec_t negative_vec;
 } sz_levenshtein_u64x4_vertical_haswell_t;
 
-/** @c first | ~(second | third) - the AVX2 lowering of the shared Myers @c Ph / @c Pv' shape. */
+/** The AVX2 lowering of the shared Myers @c Ph and @c Pv' shape: first | ~(second | third). */
 SZ_HELPER_INLINE __m256i sz_levenshtein_haswell_or_nor_(__m256i first, __m256i second, __m256i third) {
     return _mm256_or_si256(first, _mm256_andnot_si256(_mm256_or_si256(second, third), _mm256_set1_epi64x(-1)));
 }
 
-/** Starts four candidates: the scores at the query's length, and @p words verticals at the top boundary. */
+/** Starts four candidates: the scores at the query's length, and @p words verticals at
+ *  the top boundary. */
 SZ_API_COMPTIME void sz_levenshtein_u64x4_init_haswell(sz_levenshtein_u64x4_state_haswell_t *state,
                                                        sz_levenshtein_u64x4_vertical_haswell_t *verticals,
                                                        sz_size_t words, sz_levenshtein_query_t const *query) {
@@ -66,9 +75,11 @@ SZ_API_COMPTIME sz_u256_vec_t sz_levenshtein_u64x4_classes_u32_haswell(sz_u32_t 
 }
 
 /**
- *  @brief Advances four candidates one symbol through exactly @p words verticals; the score moves on the last word.
- *      A candidate past its text keeps stepping whatever class the transpose emits; its score is read where its text ends.
- *  @param[in] words Exactly @c sz_levenshtein_query_words(query->length); a constant keeps the verticals in registers.
+ *  @brief Advances four candidates one symbol through exactly @p words verticals; the score moves
+ *      on the last word. A candidate past its text keeps stepping whatever class the transpose
+ *      emits; its score is read where its text ends.
+ *  @param[in] words Exactly `sz_levenshtein_query_words(query->length)`; a constant keeps the
+ *      verticals in registers.
  *  @param[in] classes_vec The four candidates' classes at this position, one gather index each.
  */
 SZ_API_COMPTIME void sz_levenshtein_u64x4_step_haswell(sz_levenshtein_u64x4_state_haswell_t *state,
@@ -117,8 +128,9 @@ SZ_API_COMPTIME void sz_levenshtein_u64x4_step_haswell(sz_levenshtein_u64x4_stat
     }
 }
 
-/** @brief Whether any of the four candidates can still come under @p radius at @p position: a score falls by at
- *      most one per remaining symbol. Monotone, so once false it stays false; @c SZ_SSIZE_MAX bounds nothing. */
+/** Whether any of the four candidates can still come under @p radius at @p position: a score
+ *  falls by at most one per remaining symbol. Monotone, so once false it stays false;
+ *  @c SZ_SSIZE_MAX bounds nothing. */
 SZ_API_COMPTIME sz_bool_t sz_levenshtein_u64x4_any_active_haswell(sz_levenshtein_u64x4_state_haswell_t const *state,
                                                                   sz_u256_vec_t symbol_counts_vec, sz_size_t position,
                                                                   sz_ssize_t radius) {
@@ -136,8 +148,9 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x4_score_haswell(sz_levenshtein_u64x
     return state->scores_vec.u64s[candidate];
 }
 
-/** The byte transpose for four candidates: eight positions per four loads and three unpacks while every candidate has
- *  eight bytes left, one byte at a time after that; emits the @c sz_u8_t class of every byte. */
+/** The byte transpose for four candidates: eight positions per four loads and three unpacks while
+ *  every candidate has eight bytes left, one byte at a time after that; emits the @c sz_u8_t class
+ *  of every byte. */
 SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x4_transpose_haswell(sz_levenshtein_query_t const *query,
                                                                 sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                                 sz_size_t candidates, sz_size_t *cursors,
@@ -178,14 +191,16 @@ SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x4_transpose_haswell(sz_levenshtein_q
     return filled;
 }
 
-/** One YMM register per position: a second measured no faster on one-word queries and slower on two. */
+/** One YMM register per position: a second measured no faster on one-word queries and
+ *  slower on two. */
 enum {
     sz_levenshtein_haswell_u64x4_candidates_per_step_k = 4,
     sz_levenshtein_haswell_u64x4_registers_per_position_k = 1
 };
 
-/** Sweeps four candidates through every transpose; @p words is a constant, keeping short queries' verticals in registers.
- *  A candidate's score is read where its text ends; @p symbol_counts seeds as byte counts, refined by the transpose. */
+/** Sweeps four candidates through every transpose; @p words is a constant, keeping short queries'
+ *  verticals in registers. A candidate's score is read where its text ends; @p symbol_counts seeds
+ *  as byte counts, refined by the transpose. */
 SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t const *shared_query,
                                                           sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                           sz_u64_t *symbol_counts, sz_size_t sweep_count,
@@ -239,8 +254,8 @@ SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t
     }
 }
 
-/** Streams every candidate through a prepared @p query, four at a time, with @p transpose emitting their
- *  classes at @p width; @p verticals holds enough for a runtime word count. */
+/** Streams every candidate through a prepared @p query, four at a time, with @p transpose emitting
+ *  their classes at @p width; @p verticals holds enough for a runtime word count. */
 SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_distances_(
     sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x4_vertical_haswell_t *verticals, sz_size_t *distances) {

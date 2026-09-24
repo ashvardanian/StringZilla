@@ -1,28 +1,31 @@
 /**
- *  @file   include/stringzilla/utf8_wordbreaks/rvv.h
+ *  @file include/stringzilla/utf8_wordbreaks/rvv.h
  *  @author Ash Vardanian
- *  @brief  Fully-vectorized UAX-29 Word_Break segmentation for RVV 1.0 (RISC-V). The RVV twin of the AVX2 (Haswell),
- *          Ice Lake, and NEON kernels: no path scalar-walks codepoints or calls the serial oracle.
+ *  @date June 7, 2026
+ *  @brief Fully-vectorized UAX-29 Word_Break segmentation for RVV 1.0 (RISC-V).
  *
- *  Each 64-byte window lives at `e8m4` — the one SEW/LMUL pair whose VLMAX is exactly 64 lanes at VLEN=128 (wider
- *  machines clamp `vl` to 64) AND the maximum data LMUL admitting the 16-bit indexed `vluxei16` byte gather. Every
- *  per-codepoint BMP Word_Break property resolves through the shared page-compressed flat table via
- *  @ref sz_utf8_rune_flat_lookup_rvv_ (a real masked vector gather, unlike NEON's bounded scalar walk), and the
- *  Supplementary Plane through the same 5-nibble cascade as chained indexed loads, bit-identical to
- *  `sz_rune_word_break_property` over the whole code space.
+ *  The RVV twin of the AVX2 (Haswell), Ice Lake, and NEON kernels: no path scalar-walks codepoints
+ *  or calls the serial oracle. Each 64-byte window lives at @c e8m4 — the one SEW/LMUL pair whose
+ *  VLMAX is exactly 64 lanes at VLEN=128 (wider machines clamp @c vl to 64) and the maximum data
+ *  LMUL admitting the 16-bit indexed @c vluxei16 byte gather. Every per-codepoint BMP Word_Break
+ *  property resolves through the shared page-compressed flat table via
+ *  @ref sz_utf8_rune_flat_lookup_rvv_ (a real masked vector gather, unlike NEON's bounded scalar
+ *  walk), and the Supplementary Plane through the same 5-nibble cascade as chained indexed loads,
+ *  bit-identical to @c sz_rune_word_break_property over the whole code space.
  *
- *  The classified window is lowered to the portable @ref sz_utf8_word_break_frame_t and handed to the SHARED
- *  `sz_utf8_word_break_decide_window_` rule engine, so WB1-WB16 (including the cross-window bridge shadow / RI
- *  parity / left-context carry / WB3c neighbour coupling) run once in portable `sz_u64_t` bit algebra. Malformed
- *  input is handled in-vector: ill-formed leads and strays become `forced_other` in the portable partition
- *  resolver, truncated-edge leads are reclassified in the frame builder — no well-formedness prepass, no serial
- *  routing.
+ *  The classified window is lowered to the portable @ref sz_utf8_word_break_frame_t and handed to
+ *  the SHARED @c sz_utf8_word_break_decide_window_ rule engine, so WB1-WB16 (including the
+ *  cross-window bridge shadow / RI parity / left-context carry / WB3c neighbour coupling) run once
+ *  in portable @c sz_u64_t bit algebra. Malformed input is handled in-vector: ill-formed leads and
+ *  strays become @c forced_other in the portable partition resolver, truncated-edge leads are
+ *  reclassified in the frame builder — no well-formedness prepass, no serial routing.
  *
- *  Mask-domain discipline: the classify leaves stay entirely in `vbool2_t` mask registers, recomputing the lead
- *  classes from the threaded raw window instead of round-tripping the window struct's `sz_u64_t` fields back through
- *  memory. The only `sz_u64_t` -> mask raises (`vlm.v`) that survive are the genuine engine/portable boundaries: the
- *  truncated-edge reclassify (mixes the scalar `loaded` clamp), the driver's `forced_other` merge (partition-resolver
- *  origin), and the drain's boundary compaction (engine `breaks` origin).
+ *  Mask-domain discipline: the classify leaves stay entirely in @c vbool2_t mask registers,
+ *  recomputing the lead classes from the threaded raw window instead of round-tripping the window
+ *  struct's @c sz_u64_t fields back through memory. The only @c sz_u64_t → mask raises (`vlm.v`)
+ *  that survive are the genuine engine/portable boundaries: the truncated-edge reclassify (mixes
+ *  the scalar @c loaded clamp), the driver's @c forced_other merge (partition-resolver origin), and
+ *  the drain's boundary compaction (engine @c breaks origin).
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_RVV_H_
 #define STRINGZILLA_UTF8_WORDBREAKS_RVV_H_
@@ -48,9 +51,9 @@ extern "C" {
 
 #pragma region In register vectorized classifier
 
-/** @brief  Word_Break class byte for the ASCII lanes (cp < 0x80) via the 128-entry property table, one masked
- *          `vluxei8` gather (index `byte & 0x7F` is always in-bounds); masked-off lanes keep @p inactive_u8m4.
- *          The window byte equals the codepoint on ASCII lanes. */
+/** Word_Break class byte for the ASCII lanes (cp < 0x80) via the 128-entry property table, one
+ *  masked @c vluxei8 gather (index `byte & 0x7F` is always in-bounds); masked-off lanes keep
+ *  @p inactive_u8m4. The window byte equals the codepoint on ASCII lanes. */
 SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_ascii_class_rvv_(vuint8m4_t raw_u8m4, vbool2_t active_b2,
                                                                 vuint8m4_t inactive_u8m4) {
     vuint8m4_t const indices_u8m4 = __riscv_vand_vx_u8m4(raw_u8m4, 0x7F, 64);
@@ -58,12 +61,13 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_ascii_class_rvv_(vuint8m4_t raw_u
                                      64);
 }
 
-/** @brief  Word_Break class byte for the ASTRAL lanes over the 20-bit offset = cp - 0x10000 (5-nibble cascade), the
- *          RVV twin of @ref sz_utf8_word_break_astral_class_neon_ with the four table stages resolved by chained
- *          indexed loads instead of `vqtbl` scans. Garbage lanes stay in-bounds by stage-table totality (stage-1
- *          values < 14, stage-2 values below the stage-3 row count) except at stage 4, where `leaf_group` is
- *          clamped for the address and the result zeroed on out-of-range groups, matching the NEON blend loop.
- *          Bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. */
+/** Word_Break class byte for the astral lanes over the 20-bit offset = cp - 0x10000 (5-nibble
+ *  cascade), the RVV twin of @ref sz_utf8_word_break_astral_class_neon_ with the four table stages
+ *  resolved by chained indexed loads instead of @c vqtbl scans. Garbage lanes stay in-bounds by
+ *  stage-table totality (stage-1 values < 14, stage-2 values below the stage-3 row count) except at
+ *  stage 4, where @c leaf_group is clamped for the address and the result zeroed on out-of-range
+ *  groups, matching the NEON blend loop. Bit-exact with @c sz_rune_word_break_property over the
+ *  Supplementary Planes. */
 SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
     vuint8m4_t plane_off_u8m4, vuint8m4_t high_u8m4, vuint8m4_t low_u8m4) {
     vuint8m4_t const n4_u8m4 = __riscv_vand_vx_u8m4(plane_off_u8m4, 0x0F, 64);
@@ -104,16 +108,20 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
     return __riscv_vmerge_vxm_u8m4(gathered_u8m4, 0, group_bad_b2, 64);
 }
 
-/** @brief  Per-window byte-lane classification (RVV): the Word_Break class byte per lane, valid only on
- *          codepoint-start lanes (the engine reads classes only at starts). The RVV twin of
- *          @ref sz_utf8_word_break_classify_window_neon_, bit-identical on every start lane.
+/**
+ *  @brief Per-window byte-lane classification (RVV): the Word_Break class byte per lane, valid only
+ *      on codepoint-start lanes (the engine reads classes only at starts). The RVV twin of
+ *      @ref sz_utf8_word_break_classify_window_neon_, bit-identical on every start lane.
  *
- *  The lead-class lane masks are recomputed here in `vbool2_t` registers straight from the threaded @p raw_u8m4
- *  (four `vand`/`vmseq` compares), rather than raising the window struct's `sz_u64_t` fields back through memory —
- *  `vbool2_t` is sizeless and cannot ride the struct, and the compares are cheaper than a `vlm.v` round-trip. The
- *  `loaded` clamp is an in-register `vid < loaded` compare (lane indices <= 63 fit `u8`). ASCII and BMP resolve
- *  through UNCONDITIONAL masked gathers — inactive lanes perform no memory access, and index safety comes from table
- *  totality, never from the mask — so only the rare 4-gather astral cascade keeps a branch. */
+ *  The lead-class lane masks are recomputed here in @c vbool2_t registers straight from the
+ *  threaded @p raw_u8m4 (four @c vand/vmseq compares), rather than raising the window struct's
+ *  @c sz_u64_t fields back through memory — @c vbool2_t is sizeless and cannot ride the struct,
+ *  and the compares are cheaper than a `vlm.v` round-trip. The @c loaded clamp is an in-register
+ *  compare of @c vid against @c loaded, as lane indices ≤ 63 fit @c u8. ASCII and BMP resolve
+ *  through unconditional masked gathers — inactive lanes perform no memory access, and index
+ *  safety comes from table totality, never from the mask — so only the rare 4-gather astral
+ *  cascade keeps a branch.
+ */
 SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_classify_window_rvv_(vuint8m4_t const raw_u8m4,
                                                                     sz_utf8_rune_window_rvv_t const *window) {
     // In-register lead classes and the `loaded` clamp, mirroring the struct fields `decode_window` lowered for the
@@ -166,28 +174,30 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_classify_window_rvv_(vuint8m4_t c
 
 #pragma region Mask algebra extractor
 
-/** @brief  A 64-bit "class byte == @p value" lane mask over the classified window (`vmseq` -> mask bits). */
+/** A 64-bit "class byte == @p value" lane mask over the classified window (vmseq → mask bits). */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_rvv_(vuint8m4_t classes_u8m4, sz_u8_t value) {
     return sz_utf8_rune_mask_to_bits_rvv_(__riscv_vmseq_vx_u8m4_b2(classes_u8m4, value, 64));
 }
 
-/** @brief  A 64-bit "raw window byte == @p value" lane mask. */
+/** A 64-bit "raw window byte == @p value" lane mask. */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_rvv_(vuint8m4_t raw_u8m4, sz_u8_t value) {
     return sz_utf8_rune_mask_to_bits_rvv_(__riscv_vmseq_vx_u8m4_b2(raw_u8m4, value, 64));
 }
 
-/** @brief  A 64-bit "raw window byte >= @p bound" (unsigned) lane mask. */
+/** A 64-bit "raw window byte >= @p bound" (unsigned) lane mask. */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_rvv_(vuint8m4_t raw_u8m4, sz_u8_t bound) {
     return sz_utf8_rune_mask_to_bits_rvv_(__riscv_vmsgeu_vx_u8m4_b2(raw_u8m4, bound, 64));
 }
 
-/** @brief  Assemble the per-lane BMP codepoint `(high << 8) | low` at `e16m8` for the 16-bit range scans. */
+/** Assemble the per-lane BMP codepoint `(high << 8) | low` at @c e16m8 for the 16-bit range
+ *  scans. */
 SZ_HELPER_INLINE vuint16m8_t sz_utf8_word_break_codepoint16_rvv_(vuint8m4_t high_u8m4, vuint8m4_t low_u8m4) {
     return __riscv_vwaddu_wv_u16m8(__riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(high_u8m4, 64), 8, 64), low_u8m4, 64);
 }
 
-/** @brief  A 64-bit "codepoint16 in any sorted `[lo, hi]` range" lane mask, the RVV twin of
- *          @ref sz_utf8_word_break_range16_mask_neon_ over native 16-bit lanes (WSegSpace / Extended_Pictographic). */
+/** A 64-bit "codepoint16 in any sorted `[lo, hi]` range" lane mask, the RVV twin of
+ *  @ref sz_utf8_word_break_range16_mask_neon_ over native 16-bit lanes (WSegSpace /
+ *  Extended_Pictographic). */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
     vuint16m8_t values_u16m8, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
     vbool2_t hit_b2 = __riscv_vmclr_m_b2(64);
@@ -203,9 +213,9 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
 
 #pragma region Codepoint partition
 
-/** @brief  Resolve one window into the maximal-subpart partition — the RVV twin of
- *          @ref sz_utf8_word_break_partition_neon_: compute the per-ISA `sz_u64_t` masks and delegate to the
- *          portable @ref sz_utf8_word_break_partition_from_masks_. */
+/** Resolve one window into the maximal-subpart partition — the RVV twin of
+ *  @ref sz_utf8_word_break_partition_neon_: compute the per-ISA @c sz_u64_t masks and delegate to
+ *  the portable @ref sz_utf8_word_break_partition_from_masks_. */
 SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv_( //
     vuint8m4_t const raw_u8m4, sz_utf8_rune_window_rvv_t const *window, sz_u64_t valid, int at_end_of_text) {
     sz_u64_t const real_continuation = window->continuation & valid;
@@ -240,11 +250,11 @@ SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv
 
 #pragma region Mask algebra frame builder
 
-/** @brief  Per-ISA extractor: lower one classified 64-byte window to the portable
- *          @ref sz_utf8_word_break_frame_t — the RVV twin of @ref sz_utf8_word_break_build_frame_neon_. Applies
- *          the truncated-edge U+FFFD reclassify to the class lanes, materializes every per-class lane mask + the
- *          raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range scan), and the per-lane
- *          class byte array. */
+/** Per-ISA extractor: lower one classified 64-byte window to the portable
+ *  @ref sz_utf8_word_break_frame_t — the RVV twin of @ref sz_utf8_word_break_build_frame_neon_.
+ *  Applies the truncated-edge U+FFFD reclassify to the class lanes, materializes every per-class
+ *  lane mask + the raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range
+ *  scan), and the per-lane class byte array. */
 SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_( //
     vuint8m4_t const raw_u8m4, sz_utf8_rune_window_rvv_t const *window, vuint8m4_t classes_u8m4,
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
@@ -290,10 +300,11 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_(
     frame.single_quote_byte = sz_utf8_word_break_byte_equal_rvv_(raw_u8m4, 0x27) & valid;
 
     // One shared BMP codepoint derivation for both 16-bit range scans: WB3d WSegSpace and the WB3c
-    // Extended_Pictographic BMP scan read the SAME `codepoint16`, differing only in the range table, so the
-    // `bmp_halves` -> `codepoint16` chain is built once. `pictographic_bmp` only survives on non-ASCII, non-4-byte
-    // lanes, so gating the whole block on `non_ascii_lanes` loses nothing. The single live `codepoint16` group dies
-    // before the SMP path forms its own, so the two never coexist and the compiler spills only the raw window.
+    // Extended_Pictographic BMP scan read the same `codepoint16`, differing only in the range
+    // table, so the `bmp_halves` → `codepoint16` chain is built once. `pictographic_bmp` only
+    // survives on non-ASCII, non-4-byte lanes, so gating the whole block on `non_ascii_lanes` loses
+    // nothing. The single live `codepoint16` group dies before the SMP path forms its own, so the
+    // two never coexist and the compiler spills only the raw window.
     sz_u64_t wseg_multibyte = 0ull;
     sz_u64_t pictographic_bmp = 0ull;
     if (non_ascii_lanes) {
@@ -345,11 +356,10 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_(
 
 #pragma region Forward driver
 
-/**
- *  @brief  Forward UAX-29 word segmentation over `[0, length)` (RVV 1.0): the overlap-free advancing driver,
- *          mirroring @ref sz_utf8_wordbreaks_neon over the RVV window/classify/partition/decide/drain leaves.
- *          Bit-exact with `sz_utf8_wordbreaks_serial` and every other windowed backend.
- */
+/** Forward UAX-29 word segmentation over `[0, length)` (RVV 1.0): the overlap-free advancing
+ *  driver, mirroring @ref sz_utf8_wordbreaks_neon over the RVV
+ *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
+ *  every other windowed backend. */
 SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(    //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
@@ -369,8 +379,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(    //
     sz_utf8_word_break_carry_t carry = sz_utf8_word_break_carry_sot_();
 
     while (position < length) {
-        // The ONE raw-window materialization: the `loaded` clamp stays adjacent to the load so the zero-tail
-        // invariant every downstream `vslidedown` neighbour depends on flows from this single point.
+        // The one raw-window materialization: the `loaded` clamp stays adjacent to the load, so the
+        // zero-tail invariant that every downstream `vslidedown` neighbour depends on flows from
+        // this one place alone.
         sz_size_t const loaded = (length - position) < 64 ? (length - position) : 64;
         vuint8m4_t const raw_u8m4 = sz_utf8_rune_load64_rvv_(text_u8 + position, loaded);
         sz_utf8_rune_window_rvv_t const window = sz_utf8_rune_decode_window_rvv_(raw_u8m4, loaded);

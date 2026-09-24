@@ -1,7 +1,23 @@
 /**
- *  @brief Haswell (AVX2) backend for UAX-29 sentence boundaries.
  *  @file include/stringzilla/utf8_sentences/haswell.h
  *  @author Ash Vardanian
+ *  @date June 24, 2026
+ *  @brief Haswell AVX2 backend for UAX-29 sentence boundaries.
+ *
+ *  The AVX2 twin of the Ice Lake Sentence_Break classifier: a contiguous run of codepoints resolves
+ *  to per-codepoint Sentence_Break class bytes with no per-lane scalar loop and no serial deferral.
+ *  Each 64-byte window lives as two @c __m256i halves. The BMP is one indexed lookup per codepoint
+ *  into a page-compressed flat table - `bmp_page_lut_[cp >> 8]` picks one of 57 distinct 256-byte
+ *  pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the class - fetched with @c vpgatherdd;
+ *  4-byte leads still ride a 4-stage astral @c vpshufb cascade. Both emit the Sentence_Break class
+ *  byte directly, bit-identical with @c sz_rune_sentence_break_property over the entire code space.
+ *
+ *  The flat table is chosen for port pressure, not instruction count: @c vpshufb cross-lane
+ *  shuffles are port-5-only, so any dependent shuffle cascade saturates that single port, while
+ *  @c vpgatherdd issues on the load ports and leaves the shuffle port to the decode. Gathers pay
+ *  off on multi-KB tables in general, as the less_slow.cpp benchmark below measures.
+ *
+ *  @see less_slow.cpp v0.3.0 Gather and Scatter: https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_HASWELL_H_
 #define STRINGZILLA_UTF8_SENTENCES_HASWELL_H_
@@ -27,30 +43,19 @@ extern "C" {
 
 #pragma region In register vectorized classifier
 
-/*  The AVX2 twin of the Ice Lake Sentence_Break classifier: a contiguous run of codepoints resolves to per-codepoint
- *  Sentence_Break class bytes with ZERO per-lane scalar loop and NO serial deferral. Each 64-byte window lives as two
- *  `__m256i` halves. The BMP is ONE indexed lookup per codepoint into a page-compressed flat table - `bmp_page_lut_[cp >> 8]`
- *  picks one of 57 distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the class - fetched with
- *  `vpgatherdd`; 4-byte leads still ride a 4-stage astral `vpshufb` cascade. Both emit the Sentence_Break class byte
- *  directly, bit-identical with `sz_rune_sentence_break_property` over the entire code space.
- *
- *  The flat table is chosen for port pressure, not instruction count: `vpshufb` cross-lane shuffles are port-5-only,
- *  so any dependent shuffle cascade saturates that single port, while `vpgatherdd` issues on the load ports and
- *  leaves the shuffle port to the decode. Gathers pay off on multi-KB tables in general - see less_slow.cpp v0.3.0
- *  "Gather and Scatter": https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0 */
-
-/** @brief  Sentence_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the
- *          `bmp_page_lut_` page LUT selects one of the 57 distinct 256-byte pages, then `flat_bmp_` is fetched by
- *          `vpgatherdd`. Bit-exact with `sz_rune_sentence_break_property` over the whole BMP. */
+/** Sentence_Break class byte for thirty-two BMP codepoints, with per-lane high = cp >> 8 and low
+ *  = cp & 0xFF. The @c bmp_page_lut_ page LUT selects one of the 57 distinct 256-byte pages, then
+ *  @c flat_bmp_ is fetched by @c vpgatherdd. Bit-exact with
+ *  @c sz_rune_sentence_break_property over the whole BMP. */
 SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
 
-/** @brief  Sentence_Break class byte for thirty-two ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
- *          cascade). Per-lane bytes: @p plane_u8x32 = (offset>>16)&0xFF (low nibble meaningful), @p high_u8x32 =
- *          (offset>>8)&0xFF, @p low_u8x32 = offset&0xFF. Bit-exact with `sz_rune_sentence_break_property` over all
- *          astral. */
+/** Sentence_Break class byte for thirty-two astral codepoints over the 20-bit offset = cp -
+ *  0x10000 with a 5-nibble cascade. Per-lane bytes: @p plane_u8x32 = (offset >> 16) & 0xFF with
+ *  only the low nibble meaningful, @p high_u8x32 = (offset >> 8) & 0xFF, @p low_u8x32 = offset &
+ *  0xFF. Bit-exact with @c sz_rune_sentence_break_property over all of the astral planes. */
 SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
                                                                       __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
@@ -86,13 +91,18 @@ SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i pl
     return result_u8x32;
 }
 
-/** @brief  Per-byte-lane Sentence_Break class for one decoded window half, fully in-register and zero-scalar - the
- *          AVX2 twin of @ref sz_utf8_sentence_break_classify_window_icelake_. The decoded window only carries the
- *          2-/3-byte (high, low) reconstruction; this leaf rebuilds the ASCII (`low_u8x32 = raw_u8x32`,
- *          `high_u8x32 = 0`) and 4-byte (`high_u8x32`/`low_u8x32` from the four-byte formula) codepoint bytes before
- *          the cascade, exactly as the icelake driver reconstructs them. BMP lanes go through the BMP cascade;
- *          4-byte lanes are routed by reconstructed plane through the astral cascade. The class on non-codepoint-start
- *          lanes is irrelevant (the dense compaction only reads start lanes), so those lanes are never selected. */
+/**
+ *  @brief Per-byte-lane Sentence_Break class for one decoded window half, fully in-register and
+ *      zero-scalar: the AVX2 twin of @ref sz_utf8_sentence_break_classify_window_icelake_.
+ *
+ *  The decoded window only carries the 2- and 3-byte high and low reconstruction; this leaf
+ *  rebuilds the ASCII codepoint bytes, `low_u8x32 = raw_u8x32` and `high_u8x32 = 0`, and the
+ *  4-byte ones, @c high_u8x32 and @c low_u8x32 from the four-byte formula, before the cascade,
+ *  exactly as the Ice Lake driver reconstructs them. BMP lanes go through the BMP cascade; 4-byte
+ *  lanes are routed by reconstructed plane through the astral cascade. The class on
+ *  non-codepoint-start lanes is irrelevant, as the dense compaction only reads start lanes, so
+ *  those lanes are never selected.
+ */
 SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
     __m256i window_high_u8x32, __m256i window_low_u8x32, __m256i raw_u8x32, __m256i next1_u8x32, __m256i next2_u8x32,
     __m256i next3_u8x32, sz_u32_t four_byte_bits) {
@@ -100,13 +110,15 @@ SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
     __m256i const low_four_bits_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const low_six_bits_u8x32 = _mm256_set1_epi8(0x3F);
 
-    //  Raw-byte reconstruction (codepoint == raw byte: low = raw, high = 0) for every lane that is NOT a 2-/3-/4-byte
-    //  lead: ASCII (`raw < 0x80`), continuation bytes `0x80..0xBF` (a lone continuation forced to a start at position 0
-    //  decodes to its raw value, e.g. `0x85` -> U+0085 NEL), and the non-lead bytes `0xF8..0xFF`. The decode window
-    //  pre-folds the 2-byte arithmetic into high/low on ALL lanes, so these must be overwritten — serial's blind
-    //  decode gives `rune = lead` for every such byte, matching icelake whose driver seats `low_u8x32 = raw_u8x32`,
-    //  `high_u8x32 = 0` on every non-2/3/4-byte lane. The 2-/3-/4-byte leads are exactly `0xC0..0xF7`, so raw
-    //  treatment is the complement `raw < 0xC0 || raw >= 0xF8`.
+    //  Raw-byte reconstruction (codepoint == raw byte: low = raw, high = 0) for every lane that is
+    //  not a 2-/3-/4-byte lead: ASCII (`raw < 0x80`), continuation bytes `0x80..0xBF` (a lone
+    //  continuation forced to a start at position 0 decodes to its raw value, e.g. `0x85` → U+0085
+    //  NEL), and the non-lead bytes `0xF8..0xFF`. The decode window pre-folds the 2-byte arithmetic
+    //  into high/low on all lanes, so these must be overwritten — serial's blind decode gives
+    //  `rune = lead` for every such byte, matching icelake whose driver seats
+    //  `low_u8x32 = raw_u8x32`, `high_u8x32 = 0` on every non-2/3/4-byte lane. The 2-/3-/4-byte
+    //  leads are exactly `0xC0..0xF7`, so raw treatment is the complement
+    //  `raw < 0xC0 || raw >= 0xF8`.
     __m256i const below_c0_u8x32 = _mm256_cmpeq_epi8(_mm256_min_epu8(raw_u8x32, _mm256_set1_epi8((char)0xC0)),
                                                      raw_u8x32);
     __m256i const at_least_f8_u8x32 = _mm256_cmpeq_epi8(_mm256_max_epu8(raw_u8x32, _mm256_set1_epi8((char)0xF8)),
@@ -117,10 +129,11 @@ SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
     __m256i high_u8x32 = _mm256_andnot_si256(raw_select_u8x32, window_high_u8x32);
 
     if (four_byte_bits) {
-        //  4-byte lead: reconstruct the blind codepoint's low-16 bits cp = (mid<<8)|alo with mid = ((b1&0xF)<<4) |
-        //  ((b2>>2)&0xF), alo = ((b2&0x3)<<6) | (b3&0x3F) — the cp's high/low bytes, NOT the offset domain (so a
-        //  4-byte lead whose blind plane is 0, e.g. the overlong `F0 80 8D A9` -> U+0369, lands on the BMP path with
-        //  the right value). Mirrors icelake's `four_high_u8x32`/`four_low_u8x32` exactly.
+        //  4-byte lead: reconstruct the blind codepoint's low-16 bits `cp = (mid<<8)|alo` with
+        //  `mid = ((b1&0xF)<<4) | ((b2>>2)&0xF)` and `alo = ((b2&0x3)<<6) | (b3&0x3F)` — the cp's
+        //  high/low bytes, not the offset domain (so a 4-byte lead whose blind plane is 0, e.g. the
+        //  overlong `F0 80 8D A9` → U+0369, lands on the BMP path with the right value). Mirrors
+        //  icelake's `four_high_u8x32`/`four_low_u8x32` exactly.
         __m256i const four_low_u8x32 = _mm256_or_si256(
             _mm256_slli_epi16(_mm256_and_si256(next2_u8x32, low_two_bits_u8x32), 6),
             _mm256_and_si256(next3_u8x32, low_six_bits_u8x32));
@@ -131,14 +144,16 @@ SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
         low_u8x32 = _mm256_blendv_epi8(low_u8x32, four_low_u8x32, four_select_u8x32);
         high_u8x32 = _mm256_blendv_epi8(high_u8x32, four_high_u8x32, four_select_u8x32);
 
-        //  Split the 4-byte lanes on their blind plane (cp bits[16..20]) by VALUE, matching serial/icelake:
+        //  Split the 4-byte lanes on their blind plane (cp bits[16..20]) by value, matching
+        //  serial/icelake:
         //    plane == 0      -> BMP codepoint (cp = (mid<<8)|alo); resolved by the BMP cascade above.
         //    plane in [1,16]  -> genuine astral (cp in 0x10000..0x10FFFF); routed to the astral cascade.
         //    plane >= 17      -> cp >= 0x110000 (e.g. `F4 A0 ..`, `F5 ..`); neither BMP nor astral, class Other (0).
-        //  The astral cascade is addressed by the OFFSET plane nibble `plane_u8x32 - 1` (cp - 0x10000) and only its
-        //  low nibble is consumed, so a plane >= 17 lane would alias a valid offset — it MUST be excluded, not just
-        //  left to the cascade. `four_high_u8x32`/`four_low_u8x32` already carry the offset's low 16 bits (== cp's
-        //  low 16 bits).
+        //  The astral cascade is addressed by the offset plane nibble `plane_u8x32 - 1` (cp -
+        //  0x10000) and only its low nibble is consumed, so a plane >= 17 lane would alias a valid
+        //  offset — it must be excluded, not just left to the cascade.
+        //  The `four_high_u8x32`/`four_low_u8x32` pair already carries the offset's low 16 bits,
+        //  which equal the low 16 bits of the codepoint itself.
         __m256i const plane_u8x32 = _mm256_or_si256(
             _mm256_slli_epi16(_mm256_and_si256(raw_u8x32, _mm256_set1_epi8(0x07)), 2),
             sz_utf8_srl8_haswell_(next1_u8x32, 4, 0x03));
@@ -161,12 +176,16 @@ SZ_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
     return sz_utf8_sentence_break_bmp_class_haswell_(high_u8x32, low_u8x32);
 }
 
-/** @brief  Reconstruct the BMP (2-/3-byte) codepoint high/low bytes for one 32-lane half from edge-masked forward
- *          neighbours, matching the rune-window decode's arithmetic but with `next1_u8x32`/`next2_u8x32` already
- *          zeroed past the loaded edge. Lanes that are neither a 2- nor a 3-byte lead keep `low_u8x32 = raw_u8x32`,
- *          `high_u8x32 = 0` (the classifier re-seats raw / 4-byte lanes anyway). Used by the sentence driver so a
- *          truncated trailing multi-byte lead reads its missing continuations as zero, exactly like serial / icelake
- *          (no mod-64 wrap aliasing). */
+/**
+ *  @brief Reconstructs the BMP 2- and 3-byte codepoint high and low bytes for one 32-lane half from
+ *      edge-masked forward neighbours.
+ *
+ *  Matches the rune-window decode's arithmetic but with @p next1_u8x32 and @p next2_u8x32 already
+ *  zeroed past the loaded edge. Lanes that are neither a 2- nor a 3-byte lead keep @p raw_u8x32 as
+ *  the low byte and zero as the high byte, as the classifier re-seats raw and 4-byte lanes anyway.
+ *  Used by the sentence driver so a truncated trailing multi-byte lead reads its missing
+ *  continuations as zero, exactly like serial and Ice Lake, with no mod-64 wrap aliasing.
+ */
 SZ_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_haswell_( //
     __m256i raw_u8x32, __m256i next1_u8x32, __m256i next2_u8x32, sz_u32_t two_byte_bits, sz_u32_t three_byte_bits,
     __m256i *out_high_u8x32, __m256i *out_low_u8x32) {
@@ -196,8 +215,9 @@ SZ_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_haswell_( //
     *out_high_u8x32 = high_u8x32, *out_low_u8x32 = low_u8x32;
 }
 
-/** @brief  Third forward neighbour `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the AVX2 twin of
- *          icelake's `_mm512_permutexvar_epi8(lane_identity+3)`. Same idiom as the substrate `forward_neighbours_`. */
+/** Third forward neighbour `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the
+ *  AVX2 twin of the Ice Lake `_mm512_permutexvar_epi8(lane_identity+3)`, the idiom of the
+ *  substrate @c forward_neighbours_. */
 SZ_HELPER_INLINE void sz_utf8_sentence_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
                                                             __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
     __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
@@ -210,9 +230,10 @@ SZ_HELPER_INLINE void sz_utf8_sentence_break_next3_haswell_(__m256i window_lo_u8
 
 #pragma region Dense compaction and scatter
 
-/** @brief  Build the per-class membership frame from the dense class byte stream with AVX2 compares: each class is one
- *          `vpcmpeqb` per 32-lane half OR-combined to a u64, the AVX2 twin of the icelake fifteen-`vpcmpeqb` build (no
- *          scalar pass). The dense stream is at most 64 lanes, held as two `__m256i`. */
+/** Builds the per-class membership frame from the dense class byte stream with AVX2 compares:
+ *  each class is one @c vpcmpeqb per 32-lane half OR-combined to a u64, the AVX2 twin of the Ice
+ *  Lake build of fifteen @c vpcmpeqb with no scalar pass. The dense stream is at most 64 lanes,
+ *  held as two @c __m256i. */
 SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_haswell_(sz_u8_t const *dense_classes,
                                                                                       sz_u64_t valid) {
     __m256i const dense_lo_u8x32 = _mm256_loadu_si256((__m256i const *)(dense_classes + 0));
@@ -227,7 +248,8 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_has
     return frame;
 }
 
-/** @brief  Run the portable rule engine over a dense class stream, building the frame with AVX2 compares first. */
+/** Runs the portable rule engine over a dense class stream, building the frame with
+ *  AVX2 compares first. */
 SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_haswell_( //
     sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
@@ -235,8 +257,9 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_d
     return sz_utf8_sentence_break_decide_block_(&frame, dense_classes, count, carry, more_text);
 }
 
-/** @brief  Largest byte prefix of the window whose codepoints are all fully loaded — the AVX2 twin of the icelake
- *          driver's effective-window<64 trim. Never below 1 when the window is non-empty. */
+/** Largest byte prefix of the window whose codepoints are all fully loaded, the AVX2 twin
+ *  of the Ice Lake driver's effective-window trim below 64 bytes. Never below 1 when the
+ *  window is non-empty. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
                                                                           sz_u8_t const *bytes_after,
                                                                           sz_bool_t more_text) {
@@ -264,11 +287,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf
 
 #pragma region Forward driver
 
-/**
- *  @brief  Forward UAX-29 sentence segmentation kernel (Haswell AVX2). Bit-exact with `sz_utf8_sentences_serial` and
- *          `sz_utf8_sentences_icelake`: an AVX2 window/classify/dense-compaction front-end feeds the shared portable
- *          rule engine @ref sz_utf8_sentence_break_decide_block_, whose dense breaks are scattered back to byte lanes.
- */
+/** Forward UAX-29 sentence segmentation kernel for Haswell AVX2. Bit-exact with
+ *  @c sz_utf8_sentences_serial and @c sz_utf8_sentences_icelake: an AVX2 window,
+ *  classify, and dense-compaction front-end feeds the shared portable rule engine
+ *  @ref sz_utf8_sentence_break_decide_block_, whose dense breaks are scattered back
+ *  to byte lanes. */
 SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(         //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //

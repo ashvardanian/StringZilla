@@ -1,10 +1,13 @@
 //! Byte-level equality and ordering.
+//!
+//! File: rust/stringzilla/compare.rs
+//! Author: Ash Vardanian
 
 use super::*;
 use core::cmp::Ordering;
 use core::ffi::c_void;
 
-/// Lexicographic (byte-order) comparison of two strings, SIMD-accelerated.
+/// Lexicographic byte-order comparison of two strings, SIMD-accelerated.
 ///
 /// Mirrors `Ord` on `&[u8]` but uses StringZilla's vectorized `sz_order`.
 ///

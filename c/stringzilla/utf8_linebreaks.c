@@ -1,7 +1,8 @@
 /**
  *  @file c/stringzilla/utf8_linebreaks.c
- *  @brief Per-domain dispatch shim for UAX-14 line break segmentation.
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Per-domain dispatch shim for UAX-14 line break segmentation.
  */
 #include <stringzilla/utf8_linebreaks.h>
 

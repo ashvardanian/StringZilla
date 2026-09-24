@@ -1,7 +1,9 @@
 /**
- *  @brief LoongArch LASX uncased UTF-8 search, comparison & invariance backend.
  *  @file include/stringzilla/utf8_uncased/lasx.h
  *  @author Ash Vardanian
+ *  @date June 7, 2026
+ *  @brief LoongArch LASX uncased UTF-8 search, comparison & invariance backend.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_LASX_H_
@@ -13,11 +15,9 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
-
 /*  This ISA has no dedicated uncased UTF-8 kernels yet; it delegates to the serial
  *  scaffolding so the per-backend symbol set stays uniform across all targets. */
-
+#if SZ_USE_LASX
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_lasx( //
     sz_cptr_t haystack, sz_size_t haystack_length,     //
     sz_cptr_t needle, sz_size_t needle_length,         //

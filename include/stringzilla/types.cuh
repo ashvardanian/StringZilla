@@ -1,22 +1,26 @@
 /**
- *  @brief Core types on a CUDA device: the memory both sides address, the device that owns it, and the
- *      sequence a kernel can call.
  *  @file include/stringzilla/types.cuh
  *  @author Ash Vardanian
+ *  @date September 20, 2026
+ *  @brief Core types on a CUDA device: the memory both sides address, the device that owns it, and
+ *      the sequence a kernel can call.
+ *
+ *  Every family with a CUDA backend needs the same three things before its own kernel is reached,
+ *  and none of them is a property of the family: a way to tell device-reachable memory from host
+ *  memory, allocators handing back memory of each residency, and a @ref sz_sequence_t whose
+ *  accessors run on the device. They live here for the same reason
+ *  @ref sz_sequence_from_string_views lives in `types.h` rather than in a family.
+ *
+ *  Written in C, as every `.cuh` in this library is: the only constructs here a C compiler would
+ *  not take are the `extern "C"` that lets a C dispatch unit link against it, and the kernels'
+ *  launches, which go through @c cudaLaunchKernel rather than the triple-chevron syntax the
+ *  language reserves for C++.
+ *
+ *  Only the Device Sequences region needs a device compiler. Everything above it is host code
+ *  calling the driver and runtime APIs, so a plain C or C++ translation unit in a CUDA build can
+ *  allocate and probe without being handed to @c nvcc.
+ *
  *  @sa include/stringzilla/types.h
- *
- *  Every family with a CUDA backend needs the same three things before its own kernel is reached, and none of
- *  them is a property of the family: a way to tell device-reachable memory from host memory, allocators handing
- *  back memory of each residency, and a @ref sz_sequence_t whose accessors run on the device. They live here for
- *  the same reason @ref sz_sequence_from_string_views lives in @c types.h rather than in a family.
- *
- *  Written in C, as every @c .cuh in this library is: the only constructs here a C compiler would not take are
- *  the @c extern @c "C" that lets a C dispatch unit link against it, and the kernels' launches, which go
- *  through @c cudaLaunchKernel rather than the @c <<< @c >>> the language reserves for C++.
- *
- *  Only the Device Sequences region needs a device compiler. Everything above it is host code calling the
- *  driver and runtime APIs, so a plain C or C++ translation unit in a CUDA build can allocate and probe
- *  without being handed to @c nvcc.
  */
 #ifndef STRINGZILLA_TYPES_CUH_
 #define STRINGZILLA_TYPES_CUH_
@@ -33,67 +37,88 @@ extern "C" {
 
 #pragma region Device Memory
 
-
 /**
  *  @brief One device and the primary context it was retained through, owned by whoever declared it.
  *
- *  `cuDevicePrimaryCtxRetain` bumps a reference count that only `sz_cuda_device_free` releases, so the retain
- *  belongs to an object with a lifetime rather than to a cache nothing ever drains.
+ *  @c cuDevicePrimaryCtxRetain bumps a reference count that only @ref sz_cuda_device_free releases,
+ *  so the retain belongs to an object with a lifetime rather than to a cache nothing ever drains.
  */
 typedef struct sz_cuda_device_t {
-    int ordinal;   /**< The device this context belongs to, as @c cuDeviceGet numbers them. */
-    void *context; /**< The retained @c CUcontext, released by @ref sz_cuda_device_free. */
+
+    /** The device this context belongs to, as @c cuDeviceGet numbers them. */
+    int ordinal;
+
+    /** The retained @c CUcontext, released by @ref sz_cuda_device_free. */
+    void *context;
 } sz_cuda_device_t;
 
 /**
- *  @brief Retains @p ordinal 's primary context into @p device, which the caller releases.
+ *  @brief Retains the primary context of device @p ordinal into @p device, which
+ *      the caller releases.
+ *
+ *  @param[in] ordinal The device to retain, as @c cuDeviceGet numbers them.
  *  @param[out] device Left untouched unless the call succeeds.
- *  @retval sz_device_code_mismatch_k when the driver will not hand back that device's context.
+ *  @return @c sz_success_k, or @c sz_device_code_mismatch_k when the driver will not hand back
+ *      that device's context.
  */
 SZ_API_RUNTIME sz_status_t sz_cuda_device_init(int ordinal, sz_cuda_device_t *device);
 
-/** @brief Releases the primary context @ref sz_cuda_device_init retained, and leaves @p device empty. */
+/** Releases the primary context @ref sz_cuda_device_init retained, and leaves @p device empty. */
 SZ_API_RUNTIME void sz_cuda_device_free(sz_cuda_device_t *device);
 
 /**
- *  @brief Whether the device can dereference @p pointer - managed or device memory, never host, pinned or not.
+ *  @brief Whether the device can dereference @p pointer: managed or device memory, never host,
+ *      pinned or not.
  *
- *  Page-locked host memory is the case a caller is most likely to expect to work: the driver reports it as host,
- *  a kernel cannot address it, and this answers @c sz_false_k for it.
+ *  Page-locked host memory is the case a caller is most likely to expect to work: the driver
+ *  reports it as host, a kernel cannot address it, and this answers @c sz_false_k for it.
  */
 SZ_API_RUNTIME sz_bool_t sz_memory_reaches_device(void const *pointer);
 
 /**
  *  @brief Initializes an allocator handing back memory both the host and the device address.
- *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's own current one.
+ *  @param[out] allocator The allocator to initialize.
+ *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's
+ *      own current one.
  */
 SZ_API_RUNTIME void sz_memory_allocator_init_unified(sz_memory_allocator_t *allocator, sz_cuda_device_t *device);
 
 /**
  *  @brief Initializes an allocator handing back memory only the device addresses.
- *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's own current one.
+ *  @param[out] allocator The allocator to initialize.
+ *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's
+ *      own current one.
  */
 SZ_API_RUNTIME void sz_memory_allocator_init_device(sz_memory_allocator_t *allocator, sz_cuda_device_t *device);
 
 /**
- *  @brief Initializes an allocator handing back page-locked host memory the driver copies from at the bus rate.
- *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's own current one.
+ *  @brief Initializes an allocator handing back page-locked host memory the driver copies from at
+ *      the bus rate.
+ *  @param[out] allocator The allocator to initialize.
+ *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's
+ *      own current one.
  */
 SZ_API_RUNTIME void sz_memory_allocator_init_pinned(sz_memory_allocator_t *allocator, sz_cuda_device_t *device);
 
 /**
  *  @brief Binds a sequence over device-resident @p views whose accessors a kernel can call.
- *  @param[in] views The @b [count] views, device-reachable, each pointing at device-reachable text.
+ *  @param[in] views The @p count views, device-reachable, each pointing at device-reachable text.
+ *  @param[in] count Number of views.
  *  @param[out] sequence Left untouched unless the call succeeds.
- *  @retval sz_device_code_mismatch_k when the accessors' addresses cannot be read off the device.
+ *  @return @c sz_success_k, or @c sz_device_code_mismatch_k when the accessors' addresses cannot be
+ *      read off the device.
  */
 SZ_API_RUNTIME sz_status_t sz_sequence_from_string_views_cuda(sz_string_view_t const *views, sz_size_t count,
                                                               sz_sequence_t *sequence);
 
 /**
- *  @brief Retains @p ordinal 's primary context into @p device, which the caller releases.
+ *  @brief Retains the primary context of device @p ordinal into @p device, which
+ *      the caller releases.
+ *
+ *  @param[in] ordinal The device to retain, as @c cuDeviceGet numbers them.
  *  @param[out] device Left untouched unless the call succeeds.
- *  @retval sz_device_code_mismatch_k when the driver will not hand back that device's context.
+ *  @return @c sz_success_k, or @c sz_device_code_mismatch_k when the driver will not hand back
+ *      that device's context.
  */
 SZ_API_COMPTIME sz_status_t sz_cuda_device_init_implementation_(int ordinal, sz_cuda_device_t *device) {
     CUcontext context = SZ_NULL;
@@ -106,7 +131,7 @@ SZ_API_COMPTIME sz_status_t sz_cuda_device_init_implementation_(int ordinal, sz_
     return sz_success_k;
 }
 
-/** @brief Releases the primary context @ref sz_cuda_device_init retained, and leaves @p device empty. */
+/** Releases the primary context @ref sz_cuda_device_init retained, and leaves @p device empty. */
 SZ_API_COMPTIME void sz_cuda_device_free_implementation_(sz_cuda_device_t *device) {
     if (!device->context) return;
     CUdevice handle = 0;
@@ -114,7 +139,8 @@ SZ_API_COMPTIME void sz_cuda_device_free_implementation_(sz_cuda_device_t *devic
     device->ordinal = 0, device->context = SZ_NULL;
 }
 
-/** Makes @p device 's context current, or leaves the thread's own current context alone when it is @c SZ_NULL. */
+/** Makes the context of @p device current, or leaves the thread's own current context alone when
+ *  @p device is @c SZ_NULL. */
 SZ_API_COMPTIME sz_bool_t sz_cuda_device_bind_(sz_cuda_device_t const *device) {
     CUcontext current = SZ_NULL;
     if (device) return cuCtxSetCurrent((CUcontext)device->context) == CUDA_SUCCESS ? sz_true_k : sz_false_k;
@@ -122,10 +148,11 @@ SZ_API_COMPTIME sz_bool_t sz_cuda_device_bind_(sz_cuda_device_t const *device) {
 }
 
 /**
- *  @brief Whether the device can dereference @p pointer - managed or device memory, never host, pinned or not.
+ *  @brief Whether the device can dereference @p pointer: managed or device memory, never host,
+ *      pinned or not.
  *
- *  Page-locked host memory is the case a caller is most likely to expect to work: the driver reports it as host,
- *  a kernel cannot address it, and this answers @c sz_false_k for it.
+ *  Page-locked host memory is the case a caller is most likely to expect to work: the driver
+ *  reports it as host, a kernel cannot address it, and this answers @c sz_false_k for it.
  */
 SZ_API_COMPTIME sz_bool_t sz_memory_reaches_device_implementation_(void const *pointer) {
     cudaPointerAttributes attributes;
@@ -171,9 +198,13 @@ SZ_API_COMPTIME void sz_memory_free_pinned_(void *pointer, sz_size_t bytes, void
 /**
  *  @brief Initializes an allocator handing back memory both the host and the device address.
  *
- *  What a family's scratch needs when the host prepares it and a kernel reads it - a prepared query's B-tree, a
- *  Myers mask table - and what the convenience verbs stage a host-resident caller's arguments into.
- *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's own current one.
+ *  What a family's scratch needs when the host prepares it and a kernel reads it - a prepared
+ *  query's B-tree, a Myers mask table - and what the convenience verbs stage a host-resident
+ *  caller's arguments into.
+ *
+ *  @param[out] allocator The allocator to initialize.
+ *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's
+ *      own current one.
  *  @sa sz_memory_allocator_init_default
  */
 SZ_API_COMPTIME void sz_memory_allocator_init_unified_implementation_(sz_memory_allocator_t *allocator,
@@ -186,9 +217,12 @@ SZ_API_COMPTIME void sz_memory_allocator_init_unified_implementation_(sz_memory_
 /**
  *  @brief Initializes an allocator handing back memory only the device addresses.
  *
- *  What a round's scratch needs when no host code ever reads it, and what a unified block would otherwise pay
- *  page migration for on every access from the wrong side.
- *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's own current one.
+ *  What a round's scratch needs when no host code ever reads it, and what a unified block would
+ *  otherwise pay page migration for on every access from the wrong side.
+ *
+ *  @param[out] allocator The allocator to initialize.
+ *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's
+ *      own current one.
  */
 SZ_API_COMPTIME void sz_memory_allocator_init_device_implementation_(sz_memory_allocator_t *allocator,
                                                                     sz_cuda_device_t *device) {
@@ -198,11 +232,15 @@ SZ_API_COMPTIME void sz_memory_allocator_init_device_implementation_(sz_memory_a
 }
 
 /**
- *  @brief Initializes an allocator handing back page-locked host memory the driver copies from at the bus rate.
+ *  @brief Initializes an allocator handing back page-locked host memory the driver copies from at
+ *      the bus rate.
  *
- *  A kernel cannot address what this returns - @ref sz_memory_reaches_device answers @c sz_false_k for it - so
- *  it is the staging side of a transfer rather than anything a launch reads.
- *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's own current one.
+ *  A kernel cannot address what this returns - @ref sz_memory_reaches_device answers @c sz_false_k
+ *  for it - so it is the staging side of a transfer rather than anything a launch reads.
+ *
+ *  @param[out] allocator The allocator to initialize.
+ *  @param[in] device Whose context every allocation binds, or @c SZ_NULL to use the thread's
+ *      own current one.
  */
 SZ_API_COMPTIME void sz_memory_allocator_init_pinned_implementation_(sz_memory_allocator_t *allocator,
                                                                     sz_cuda_device_t *device) {
@@ -228,16 +266,19 @@ static __device__ sz_size_t sz_sequence_cuda_view_length_(void const *handle, sz
     return views[index].length;
 }
 
-/*  A device function's address is a link-time value, so the host cannot take it with `&` - it has to read it out
- *  of a device variable that already holds it. One pair per translation unit, which is what `static` buys. */
+/*  A device function's address is a link-time value, so the host cannot take it with `&` - it has
+ *  to read it out of a device variable that already holds it. One pair per translation unit, which
+ *  is what @c static buys. */
 static __device__ sz_sequence_member_start_t sz_sequence_cuda_view_start_symbol_ = &sz_sequence_cuda_view_start_;
 static __device__ sz_sequence_member_length_t sz_sequence_cuda_view_length_symbol_ = &sz_sequence_cuda_view_length_;
 
 /**
  *  @brief Binds a sequence over device-resident @p views whose accessors a kernel can call.
- *  @param[in] views The @b [count] views, device-reachable, each pointing at device-reachable text.
+ *  @param[in] views The @p count views, device-reachable, each pointing at device-reachable text.
+ *  @param[in] count Number of views.
  *  @param[out] sequence Left untouched unless the call succeeds.
- *  @retval sz_device_code_mismatch_k when the accessors' addresses cannot be read off the device.
+ *  @return @c sz_success_k, or @c sz_device_code_mismatch_k when the accessors' addresses cannot be
+ *      read off the device.
  *  @sa sz_sequence_from_string_views
  */
 SZ_API_COMPTIME sz_status_t sz_sequence_from_string_views_cuda_implementation_(sz_string_view_t const *views,

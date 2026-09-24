@@ -1,12 +1,14 @@
 /**
- *  @brief NEON backend for multi-pattern search: root skips through the NEON byte-set search.
  *  @file include/stringzilla/substrings/neon.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/substrings.h
+ *  @date August 8, 2026
+ *  @brief NEON backend for multi-pattern search: root skips through the NEON byte-set search.
  *
- *  The transition stays scalar: a data-dependent chase has no vector form that beats eight scalar chains.
- *  This tier replaces the text-side stages around it, through @ref sz_substrings_walks_t, and inherits
- *  every other stage from the serial one.
+ *  The transition stays scalar: a data-dependent chase has no vector form that beats eight scalar
+ *  chains. This tier replaces the text-side stages around it, through @ref sz_substrings_walks_t,
+ *  and inherits every other stage from the serial one.
+ *
+ *  @sa include/stringzilla/substrings.h
  */
 #ifndef STRINGZILLA_SUBSTRINGS_NEON_H_
 #define STRINGZILLA_SUBSTRINGS_NEON_H_

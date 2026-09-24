@@ -1,7 +1,9 @@
 /**
- *  @brief NEON backend for hardware-accelerated memory operations on 64-bit Arm CPUs.
  *  @file include/stringzilla/memory/neon.h
  *  @author Ash Vardanian
+ *  @date October 3, 2024
+ *  @brief NEON backend for hardware-accelerated memory operations on 64-bit Arm CPUs.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_NEON_H_
@@ -64,10 +66,11 @@ SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t l
     // When moving small buffers, using a small buffer on stack as a temporary storage is faster.
 
     if (target < source || target >= source + length) {
-        // Forward copy. We inline it rather than call `sz_copy_neon`: that function finishes its tail with a
-        // single 16-byte store reaching BACK from the cursor, which on an actual overlap (`source < target +
-        // length`) re-reads tail bytes this forward pass already overwrote. The 16/64-byte forward stores trail
-        // their reads, so the bulk is overlap-safe; only the tail must avoid reaching backward, hence the scalar.
+        // Forward copy. We inline it rather than call `sz_copy_neon`: that function finishes its
+        // tail with a single 16-byte store reaching back from the cursor, which on an actual
+        // overlap (`source < target + length`) re-reads tail bytes this forward pass already
+        // overwrote. The 16/64-byte forward stores trail their reads, so the bulk is overlap-safe;
+        // only the tail must avoid reaching backward, hence the scalar.
         for (; length >= 64; target += 64, source += 64, length -= 64) {
             vst1q_u8((sz_u8_t *)(target + 0), vld1q_u8((sz_u8_t const *)(source + 0)));
             vst1q_u8((sz_u8_t *)(target + 16), vld1q_u8((sz_u8_t const *)(source + 16)));

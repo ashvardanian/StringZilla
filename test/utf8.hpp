@@ -1,26 +1,29 @@
 /**
- *  @brief  Shared harness for the UTF-8 segmentation family tests (words / graphemes / sentences / linebreaks).
- *  @file   test/utf8.hpp
+ *  @file test/utf8.hpp
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Shared harness for the UTF-8 word, grapheme, sentence and linebreak segmentation tests.
  *
- *  Each segmentation family lives in its own translation unit (`utf8_<family>.cpp`) and pulls its substrate
- *  from here. The four layers are:
- *    - known-answer goldens (`check_utf8_segment_unit_`), compared lazily against expected literals;
- *    - the malformed-input safety sweep (`check_utf8_segment_safety_`);
- *    - the serial-vs-ISA differential (`check_utf8_segment_equivalence_`), a short orchestrator over named
- *      deterministic and randomized stressors;
- *    - the rule-coverage sweep (`check_utf8_rule_coverage_`), which the `_rules` tier drivers use to confirm
- *      every named UAX boundary rule fires at least once.
+ *  Each segmentation family lives in its own translation unit, @c utf8_<family>.cpp, and pulls its
+ *  substrate from here. The four layers are:
  *
- *  Two segmentation backends are compared by STREAMING them in lockstep through @ref utf8_segment_cursor_t (a
- *  fixed-capacity batch pull with `bytes_consumed` resume) and asserting each emitted segment agrees — no
- *  `std::vector<std::string>` is ever materialized, and the comparison stops at the first divergence with a full
- *  reproduction dump (seed + iteration + stressor + capacity + hex). Random corpora are produced from a per-family
- *  @ref utf8_corpus_alphabet_t (named weighted categories via `std::discrete_distribution`), and the family's
- *  high-density / long-range generators emit runs through a @ref utf8_run_sink_t callback rather than returning
- *  containers.
+ *  - known-answer goldens, @c check_utf8_segment_unit_, compared lazily against expected literals;
+ *  - the malformed-input safety sweep, @c check_utf8_segment_safety_;
+ *  - the serial-vs-ISA differential, @c check_utf8_segment_equivalence_, a short orchestrator over
+ *    named deterministic and randomized stressors;
+ *  - the rule-coverage sweep, @c check_utf8_rule_coverage_, which the @c _rules tier drivers use to
+ *    confirm every named UAX boundary rule fires at least once.
  *
- *  Everything here is `inline`, since the header is included into four translation units.
+ *  Two segmentation backends are compared by streaming them in lockstep through
+ *  @ref utf8_segment_cursor_t, a fixed-capacity batch pull with @c bytes_consumed resume, and
+ *  asserting each emitted segment agrees — no `std::vector<std::string>` is ever materialized, and
+ *  the comparison stops at the first divergence with a full reproduction dump: seed, iteration,
+ *  stressor, capacity and hex. Random corpora are produced from a per-family
+ *  @ref utf8_corpus_alphabet_t, named weighted categories via @c std::discrete_distribution, and
+ *  the family's high-density and long-range generators emit runs through a @ref utf8_run_sink_t
+ *  callback rather than returning containers.
+ *
+ *  Everything here is @c inline, since the header is included into four translation units.
  */
 #ifndef STRINGZILLA_TEST_UTF8_HPP_
 #define STRINGZILLA_TEST_UTF8_HPP_
@@ -53,27 +56,24 @@ using sz::test::span_over;                  // views a C array as a `sz::span`, 
 using sz::test::sweep_stride;               // scales exhaustive sweeps by `SZ_TESTS_MULTIPLIER`
 using sz::literals::operator""_sv;
 
+/*  Realistic multi-script paragraphs shared by the segmentation family tests. Each accessor returns
+ *  an ASCII-source string view, with non-ASCII bytes spelled as \xHH so no editor or formatter can
+ *  renormalize the load-bearing codepoints. The code block shows the rendered text, and the
+ *  per-family segment counts asserted against it are oracle-locked by ICU root and uniseg. */
 #pragma region Prose fixtures
-
-/**
- *  @brief Realistic multi-script paragraphs shared by the segmentation family tests.
- *
- *  Each accessor returns an ASCII-source string view (non-ASCII bytes spelled as \xHH so no editor or
- *  formatter can renormalize the load-bearing codepoints); the @code block shows the rendered text, and
- *  the per-family segment counts asserted against it are oracle-locked (ICU root / uniseg).
- */
 
 /**
  *  @brief German + Japanese hotel review that exercises every UTF-8 axis in one paragraph.
  *
- *  An NFD "cafe" (e + U+0301), no-break spaces gluing "3,50 EUR" and "333 m", an abbreviation period that
- *  still ends a sentence under default UAX-29 ("Dr."), a space-free CJK run, and a trailing ellipsis.
+ *  An NFD "cafe" spelled e + U+0301, no-break spaces gluing "3,50 EUR" and "333 m", an abbreviation
+ *  period that still ends a sentence under default UAX-29 in "Dr.", a space-free CJK run, and an
+ *  ellipsis at the very end.
  *
- *  @code{.txt}
+ *  @verbatim
  *  Last spring we strolled down Münchner Straße; the café cortado cost 3,50 € and was unreal.
  *  Dr. Vogel, our guide, swore it's the city's finest. Worth the detour?! Absolutely — and
  *  東京タワー the next week, all 333 m of it, was breathtaking at dusk…
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_hotel_review() noexcept {
     static char const result[] =                                                                   //
@@ -88,14 +88,15 @@ using sz::literals::operator""_sv;
 /**
  *  @brief Pride caption built from grapheme-cluster torture cases.
  *
- *  A ZWJ family and a VS16 rainbow flag, a skin-tone modifier, a keycap, an odd-length regional-indicator
- *  run (US, JP, then a lone F), and text- versus emoji-presentation selectors (VS15 versus VS16).
+ *  A ZWJ family and a VS16 rainbow flag, a skin-tone modifier, a keycap, an odd-length run of
+ *  regional indicators - US, JP, then a lone F - and text- versus emoji-presentation selectors,
+ *  VS15 versus VS16.
  *
- *  @code{.txt}
+ *  @verbatim
  *  Best Pride yet 🏳️‍🌈 — the whole crew showed up. Even my parents 👨‍👩‍👧‍👦 and grandma 👍🏽 came
  *  through! We met at booth 5️⃣, then waved every flag we packed 🇺🇸🇯🇵🇫. Texting ☎︎ over calling
  *  ✈️ all day; 10/10, would march again.
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_pride_caption() noexcept {
     static char const result[] =                                                                   //
@@ -112,14 +113,14 @@ using sz::literals::operator""_sv;
 /**
  *  @brief K-pop fan post mixing Korean, Japanese, and English.
  *
- *  The first syllable is stored as conjoining L+V+T jamo, a Katakana run stays one word while Kanji and
- *  Hiragana break per character, an ideographic full stop terminates, and "11 p.m. sharp" does not break
- *  (the period is followed by a lowercase word).
+ *  The first syllable is stored as conjoining L+V+T jamo, a Katakana run stays one word while Kanji
+ *  and Hiragana break per character, an ideographic full stop terminates, and "11 p.m. sharp" does
+ *  not break, as the period is followed by a lowercase word.
  *
- *  @code{.txt}
+ *  @verbatim
  *  오늘 콘서트, 진짜 미쳤다!! 한국 팬들이 다 모였고, the staff bowed and said 안녕히 가세요. Setlist was pure ハードコア;
  *  今日は最高だった。 We screamed 사랑해 till 11 p.m. sharp.
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_concert_post() noexcept {
     static char const result[] =                                                                   //
@@ -140,11 +141,11 @@ using sz::literals::operator""_sv;
  *  A consonant + virama + consonant conjunct as one cluster, the ZWJ and ZWNJ half-forms, a longer
  *  conjunct word, a spacing vowel sign, and a vulgar fraction whose NFKC form spells out "1/2".
  *
- *  @code{.txt}
+ *  @verbatim
  *  Quick Devanagari tip: क्ष is one cluster (क + ् + ष), not three. Force the half-form with
  *  ZWJ — क्‍ष — or split it with ZWNJ — क्‌ष. The same logic hits क्षत्रिय and spacing vowel
  *  signs like की. Renderers disagree, so test (½ the bugs are font bugs) before you ship!
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_devanagari_tip() noexcept {
     static char const result[] =                                                                   //
@@ -161,14 +162,15 @@ using sz::literals::operator""_sv;
 /**
  *  @brief Materials-science abstract that is dense with NFKC normalization.
  *
- *  An "fi" ligature, superscripts, a Roman numeral, a full-width letter and a circled digit, the Kelvin and
- *  Angstrom singleton signs, no-break spaces before units, and a word-joiner plus zero-width space in a DOI.
+ *  An "fi" ligature, superscripts, a Roman numeral, a full-width letter and a circled digit, the
+ *  Kelvin and Angstrom singleton signs, no-break spaces before units, and a word-joiner plus
+ *  zero-width space in a DOI.
  *
- *  @code{.txt}
+ *  @verbatim
  *  The ﬁlm grew at 300 K on a 5 Å buffer (≈ 2² monolayers). Section Ⅻ covers the Ａ-phase; see
  *  Fig. 2 for the Σ-band dispersion. Resistivity scaled as T², vanishing at the 4.2 K
  *  transition. Full dataset: doi:10.1000⁠/​xyz (mirror in Box ②).
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_science_abstract() noexcept {
     static char const result[] =                                                                   //
@@ -183,14 +185,14 @@ using sz::literals::operator""_sv;
 /**
  *  @brief US news lede stressing sentence boundaries and numbers.
  *
- *  "U.S.A." followed by a lowercase word (no break), curly quotation marks around quoted sentences, a
- *  thousands separator, a currency amount, and a slash-and-en-dash date range.
+ *  "U.S.A." followed by a lowercase word without a break, curly quotation marks around quoted
+ *  sentences, a thousands separator, a currency amount, and a slash-and-en-dash date range.
  *
- *  @code{.txt}
+ *  @verbatim
  *  The U.S.A. wasn't ready, analysts said. “We lost 1,000 jobs,” the mayor warned. “Recovery
  *  starts now.” Filings spiked 2024/06–2024/09, topping $1,000 per claim. Will it hold?! No one
  *  knows for sure.
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_news_lede() noexcept {
     static char const result[] =                                                                   //
@@ -207,11 +209,11 @@ using sz::literals::operator""_sv;
  *  A Greek word ending in a final sigma carrying a tonos, Cyrillic upper/lower pairs, the Croatian
  *  titlecase digraph in all three cases, and a German pair that only matches once case-folded.
  *
- *  @code{.txt}
+ *  @verbatim
  *  Greek lesson: ΟΔΟΣ becomes οδός when lowercased, ending in a final ς. Russian's easy too —
  *  МОСКВА ↔ москва, no drama. Croatian has the digraph Ǆ: titlecase ǅ, lowercase ǆ. Quiz — does
  *  “straße” match STRASSE? Yes, once you fold.
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_language_lesson() noexcept {
     static char const result[] =                                                                   //
@@ -227,15 +229,15 @@ using sz::literals::operator""_sv;
 /**
  *  @brief Right-to-left note spanning Hebrew, Arabic, and Malayalam.
  *
- *  Hebrew acronyms with gershayim, Arabic text, an Arabic number sign (a Prepend), niqqud stored out of
- *  canonical order so NFC reorders it, and a Malayalam dot-reph (another Prepend). Offsets stay in logical
- *  order, not visual order.
+ *  Hebrew acronyms with gershayim, Arabic text, an Arabic number sign, which is a Prepend, niqqud
+ *  stored out of canonical order so NFC reorders it, and a Malayalam dot-reph, another Prepend.
+ *  Offsets stay in logical order, not visual order.
  *
- *  @code{.txt}
+ *  @verbatim
  *  Hebrew acronyms take gershayim: צה״ל and ארה״ב aren't typos. Arabic flows right-to-left too
  *  — مرحبا بالعالم — and finance text can carry the number sign ؀٤. Niqqud stacks marks:
  *  שָׁלוֹם must reorder under NFC. Malayalam even has a true prepend, the dot-reph ൎക.
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_rtl_scripts() noexcept {
     static char const result[] =                                                                   //
@@ -252,9 +254,9 @@ using sz::literals::operator""_sv;
 /**
  *  @brief A U+2019 contraction tiles as a single word, exactly like the ASCII apostrophe.
  *
- *  @code{.txt}
+ *  @verbatim
  *  it’s worth it
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_micro_apostrophe() noexcept {
     static char const result[] = //
@@ -265,11 +267,11 @@ using sz::literals::operator""_sv;
 /**
  *  @brief Two Prepend characters: an Arabic number sign and a Malayalam dot-reph.
  *
- *  Each attaches to the following base, so the grapheme-cluster count stays below the codepoint count.
+ *  Each attaches to the following base, so the grapheme-cluster count stays below the codepoints.
  *
- *  @code{.txt}
+ *  @verbatim
  *  ؀٤ ൎക
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_micro_prepend() noexcept {
     static char const result[] = //
@@ -282,9 +284,9 @@ using sz::literals::operator""_sv;
  *
  *  Both are Sep, forcing sentence and line breaks, while the CR-LF stays a single grapheme cluster.
  *
- *  @code{.txt}
+ *  @verbatim
  *  A.\r\nB.\u2028C.
- *  @endcode
+ *  @endverbatim
  */
 [[maybe_unused]] static sz::string_view_t utf8_prose_micro_hardbreaks() noexcept {
     static char const result[] = //
@@ -294,65 +296,90 @@ using sz::literals::operator""_sv;
     return result;
 }
 
-#pragma endregion // Prose fixtures
+#pragma endregion Prose fixtures
 
 #pragma region Shared constants and types
 
-/** @brief The 64-byte window every SIMD backend processes; phase sweeps and gaps are sized from it. */
+/** The 64-byte window every SIMD backend processes; phase sweeps and gaps are sized from it. */
 static constexpr sz_size_t utf8_window_k = 64;
-/** @brief Upper bound on the inputs the unit/safety layers feed (<=70 bytes, so <=70 segments). */
+
+/** Upper bound on the inputs the unit and safety layers feed: ≤ 70 bytes, so ≤ 70 segments. */
 static constexpr sz_size_t utf8_unit_capacity_k = 70;
-/** @brief Fixed lazy-cursor batch buffer; also the largest swept caller capacity (the "whole-input" pass). */
+
+/** Fixed lazy-cursor batch buffer; also the largest swept caller capacity, the whole-input one. */
 static constexpr sz_size_t utf8_segment_batch_k = 128;
 
-/** @brief Whether a generated corpus must stay well-formed UTF-8 or may have malformed classes mixed in. */
+/** Whether a generated corpus must stay well-formed UTF-8 or may mix in malformed classes. */
 enum class utf8_corpus_flavor_t { valid_k, malformed_k };
 
-/** @brief One hand-checked segmentation golden vector: the source text and its expected segment list (borrowed). */
+/** One hand-checked segmentation golden vector: source text and its borrowed expected segments. */
 struct utf8_unit_case_t {
     sz::string_view_t text;
     std::initializer_list<sz::string_view_t> expected;
 };
 
-/** @brief Named weighted categories the random corpus draws from (a `std::discrete_distribution` over the weights). */
+/** Named weighted categories the random corpus draws from via a @c std::discrete_distribution. */
 enum utf8_corpus_category_t {
-    utf8_corpus_snippet_k = 0,   /**< family-biased snippet strings */
-    utf8_corpus_boundary_k,      /**< single byte-length-boundary / format codepoints */
-    utf8_corpus_astral_k,        /**< the shared SMP/astral fixtures (RI / ZWJ / emoji) */
-    utf8_corpus_motif_k,         /**< the family's own corner-case motifs */
-    utf8_corpus_malformed_k,     /**< a malformed UTF-8 class (only for the malformed flavor) */
-    utf8_corpus_category_count_k /**< category count (weight-array length) */
+
+    /** Family-biased snippet strings. */
+    utf8_corpus_snippet_k = 0,
+
+    /** Single byte-length-boundary or format codepoints. */
+    utf8_corpus_boundary_k,
+
+    /** The shared SMP/astral fixtures: RI, ZWJ, emoji. */
+    utf8_corpus_astral_k,
+
+    /** The family's own corner-case motifs. */
+    utf8_corpus_motif_k,
+
+    /** A malformed UTF-8 class, only for the malformed flavor. */
+    utf8_corpus_malformed_k,
+
+    /** Category count, the weight-array length. */
+    utf8_corpus_category_count_k
 };
 
-/** @brief A family's random-corpus alphabet: its own snippet table, boundary codepoints, and category weights so
- *         each family biases generation toward its own rules instead of one shared grab-bag. */
+/** A family's random-corpus alphabet: snippet table, boundary codepoints and category weights, so
+ *  each family biases generation toward its own rules instead of one shared grab-bag. */
 struct utf8_corpus_alphabet_t {
     sz::span<char const *const> snippets;
     sz::span<sz_rune_t const> boundary_codepoints;
-    /** Draw weights in `utf8_corpus_category_t` order: snippet / boundary / astral / motif / malformed. */
+
+    /** Draw weights for snippet, boundary, astral, motif and malformed, in
+     *  @c utf8_corpus_category_t order. */
     std::array<std::size_t, utf8_corpus_category_count_k> category_weights;
 };
 
-/** @brief Sink invoked once per generated corpus run with its bytes (a reused scratch buffer the generator owns),
- *         so the high-density / long-range generators stream runs instead of returning `std::vector<std::string>`. */
+/** Sink invoked once per generated corpus run with its bytes, in a reused scratch buffer the
+ *  generator owns, so the high-density and long-range generators stream their runs rather than
+ *  return a `std::vector<std::string>`. */
 typedef void (*utf8_run_sink_t)(void *context, sz_cptr_t data, sz_size_t length);
 
-/**
- *  @brief A family's corpora, passed to the shared differential driver. Each family TU fills this with its own
- *         corner-case motifs, its high-density / long-range run generators (visitor style), and its alphabet.
- */
+/** A family's corpora, passed to the shared differential driver. Each family TU fills this with its
+ *  own alphabet, corner-case motifs, and generators of high-density and long-range runs. */
 struct utf8_segment_corpora_t {
-    char const *family_name;                  /**< human label printed by the driver (e.g. "word") */
-    sz::span<sz::string_view_t const> motifs; /**< the family's own corner-case motifs */
-    /** Streams the family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+
+    /** Human label printed by the driver, e.g. "word". */
+    char const *family_name;
+
+    /** The family's own corner-case motifs. */
+    sz::span<sz::string_view_t const> motifs;
+
+    /** Streams the family's high-density runs, each over several 64-byte windows, to @p sink. */
     void (*dense_runs)(std::mt19937 &generator, utf8_run_sink_t sink, void *context);
+
     /** Streams the family's long-range straddling constructions for a given @p gap to @p sink. */
     void (*straddles)(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context);
-    sz::span<sz::string_view_t const> regressions; /**< optional fixed hand-found regression inputs */
-    utf8_corpus_alphabet_t const *alphabet; /**< per-family random-corpus alphabet (null -> the shared default) */
+
+    /** Optional fixed hand-found regression inputs. */
+    sz::span<sz::string_view_t const> regressions;
+
+    /** Per-family random-corpus alphabet; null selects the shared default. */
+    utf8_corpus_alphabet_t const *alphabet;
 };
 
-/** @brief Identifies a fuzz case for replay: which family, which stressor, the iteration, capacity and flavor. */
+/** Identifies a fuzz case for replay: family, stressor, iteration, capacity and flavor. */
 struct utf8_repro_t {
     char const *family;
     char const *stressor;
@@ -361,25 +388,25 @@ struct utf8_repro_t {
     utf8_corpus_flavor_t flavor;
 };
 
-/** @brief A per-position boundary rule, as `sz_utf8_is_word_boundary_serial` and its grapheme twin spell it.
- *         Declared here rather than beside `sz_utf8_segmenter_t` because only the tests call one. */
+/** A per-position boundary rule, as @c sz_utf8_is_word_boundary_serial and its grapheme twin spell
+ *  it. Declared here rather than beside @c sz_utf8_segmenter_t because only the tests call one. */
 typedef sz_bool_t (*utf8_boundary_oracle_t)(sz_cptr_t, sz_size_t, sz_size_t);
 
-#pragma endregion // Shared constants and types
+#pragma endregion Shared constants and types
 
 #pragma region Shared helpers
 
-/** @brief Prints one labeled hex dump line to `stderr`; used by the safety sweep and the divergence repro. */
+/** Prints one labeled hex dump line to @c stderr, for the safety sweep and the divergence repro. */
 inline void print_utf8_test_bytes_(char const *label, char const *bytes, std::size_t length) {
     fmt::println(stderr, "  {} ({} bytes): {:02X}", label, length, sz::test::hex_bytes({bytes, length}));
 }
 
 /**
- *  @brief One codepoint encoded as UTF-8 via `sz_rune_encode`; empty when the rune is unencodable.
+ *  @brief One codepoint encoded as UTF-8 via @c sz_rune_encode; empty when the rune is unencodable.
  *
- *  Short-string optimization keeps the four bytes in the returned object, so the corpus builders that call this
- *  once per codepoint never reach the allocator. Returning rather than appending is what lets every arm of a
- *  corpus `switch` read as one `out.append(...)`.
+ *  Short-string optimization keeps the four bytes in the returned object, so the corpus builders
+ *  that call this once per codepoint never reach the allocator. Returning rather than appending is
+ *  what lets every arm of a corpus @c switch read as one @c out.append(...).
  */
 inline std::string encoded_rune_(sz_rune_t codepoint) {
     sz_u8_t bytes[4];
@@ -388,10 +415,9 @@ inline std::string encoded_rune_(sz_rune_t codepoint) {
     return std::string((char const *)bytes, (std::size_t)length);
 }
 
-/**
- *  @brief SMP/astral fixtures the pure-BMP random corpora miss (Regional-Indicator pairs, ZWJ sequences, lone
- *         astral codepoints). Borrowed `sz::string_view_t` table — reused by every family's safety + differential.
- */
+/** SMP/astral fixtures the pure-BMP random corpora miss: Regional-Indicator pairs, ZWJ sequences,
+ *  lone astral codepoints. A borrowed @c sz::string_view_t table, reused by every family's safety
+ *  and differential layers. */
 static sz::string_view_t const utf8_astral_fixtures[] = {
     "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv,                                         // RI(U) RI(S) flag pair
     "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8\xF0\x9F\x87\xAB\xF0\x9F\x87\xB7"_sv,         // two flags
@@ -403,17 +429,16 @@ static sz::string_view_t const utf8_astral_fixtures[] = {
     "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv,                                     // RI ASCII RI - RI parity must reset
 };
 
-/** @brief Append @p link_count Regional-Indicator codepoints to @p out (cleared first); cross-family run builder. */
+/** Appends @p link_count Regional-Indicator codepoints to @p out, cleared first, for any family. */
 inline void utf8_dense_regional_indicators_(std::string &out, std::mt19937 &generator, std::size_t link_count) {
     out.clear();
     std::uniform_int_distribution<sz_rune_t> indicator(0x1F1E6, 0x1F1FF); // U+1F1E6..U+1F1FF
     for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(indicator(generator)));
 }
 
-/**
- *  @brief Random well-formed UTF-8 of @p target_codepoints codepoints, spanning all four byte-widths and every
- *         1->2->3->4 transition, so the count / find-nth / unpack / scan kernels hit their mixed-width paths.
- */
+/** Random well-formed UTF-8 of @p target_codepoints codepoints, spanning all four byte-widths and
+ *  every 1 → 2 → 3 → 4 transition, so the count, find-nth, unpack and scan kernels all hit their
+ *  mixed-width code paths. */
 inline std::string random_valid_utf8_(std::size_t target_codepoints, std::mt19937 &generator) {
     // Disjoint ranges, one per byte-width, chosen to avoid surrogates and noncharacters.
     static struct {
@@ -437,7 +462,7 @@ inline std::string random_valid_utf8_(std::size_t target_codepoints, std::mt1993
     return text;
 }
 
-/** @brief Well-formed UTF-8 of exactly @p target_bytes bytes, ASCII-padded to land on the mark. */
+/** Well-formed UTF-8 of exactly @p target_bytes bytes, ASCII-padded to land on the mark. */
 inline std::string random_valid_utf8_bytes_(std::size_t target_bytes, std::mt19937 &generator) {
     std::string text;
     text.reserve(target_bytes);
@@ -450,11 +475,9 @@ inline std::string random_valid_utf8_bytes_(std::size_t target_bytes, std::mt199
     return text;
 }
 
-/**
- *  @brief The malformed-UTF-8 sample pool: overlong encodings, surrogates, lone continuations, invalid leads,
- *         truncated tails, out-of-range leads, and noncharacters. Exposed so a test can sweep every class
- *         deterministically instead of hoping a scaled-down random draw reaches all of them.
- */
+/** The malformed-UTF-8 sample pool: overlong encodings, surrogates, lone continuations, invalid
+ *  leads, truncated tails, out-of-range leads, and noncharacters. Exposed so a test can sweep every
+ *  class deterministically instead of hoping a scaled-down random draw reaches all of them. */
 inline sz::span<char const *const> malformed_classes_() {
     static char const *const malformed[] = {
         "\xC0\x80",         // overlong 2-byte encoding of NUL
@@ -481,17 +504,16 @@ inline sz::span<char const *const> malformed_classes_() {
     return span_over(malformed);
 }
 
-/** @brief One entry of `malformed_classes_()`, drawn from @p generator. */
+/** One entry of @c malformed_classes_(), drawn from @p generator. */
 inline char const *random_malformed_class_(std::mt19937 &generator) {
     sz::span<char const *const> const pool = malformed_classes_();
     std::uniform_int_distribution<std::size_t> pick(0, pool.size() - 1);
     return pool[pick(generator)];
 }
 
-/**
- *  @brief Apply structural mutation passes to @p text: NUL injection (10%), random byte-swap (10%), a
- *         truncate-last-codepoint pass, and a stray-continuation insertion. Randomness flows through @p generator.
- */
+/** Applies structural mutation passes to @p text: NUL injection and random byte-swaps at 10% each,
+ *  a truncate-last-codepoint pass, and a stray-continuation insertion. Randomness flows through
+ *  @p generator. */
 inline void apply_mutation_passes_(std::string &text, std::mt19937 &generator) {
     if (text.empty()) return;
     std::uniform_int_distribution<std::size_t> byte_index(0, text.size() - 1);
@@ -513,7 +535,7 @@ inline void apply_mutation_passes_(std::string &text, std::mt19937 &generator) {
     }
 }
 
-/** @brief Byte-length boundaries, BOM, ZWJ, VS16, and one codepoint per byte length — the shared default boundaries. */
+/** Shared default boundaries: byte-length edges, BOM, ZWJ, VS16, and a codepoint per length. */
 static sz_rune_t const utf8_default_boundary_codepoints[] = {
     0x007F, 0x0080, 0x07FF, 0x0800,  0xFFFF, 0x10000, 0x10FFFF, // byte-length boundaries
     0xFEFF,                                                     // BOM U+FEFF
@@ -522,7 +544,7 @@ static sz_rune_t const utf8_default_boundary_codepoints[] = {
     0x0041, 0x00DF, 0x4E2D, 0x1F600,                            // one codepoint per byte length
 };
 
-/** @brief A generic mixed-script snippet grab-bag — the shared default a family uses when it has no own alphabet. */
+/** A mixed-script snippet grab-bag, the default for a family with no alphabet of its own. */
 static char const *const utf8_default_snippets[] = {
     "a",
     "Hello, world! ",
@@ -541,18 +563,17 @@ static char const *const utf8_default_snippets[] = {
     "\xE2\x80\xA9",
 };
 
-/** @brief The shared default alphabet, weighting the snippet, boundary, astral, motif and malformed mix. */
+/** The shared default alphabet, weighting snippets, boundaries, astral, motifs and malformed. */
 static utf8_corpus_alphabet_t const utf8_default_alphabet = {
     span_over(utf8_default_snippets),
     span_over(utf8_default_boundary_codepoints),
     {{35, 20, 15, 20, 10}}, // snippet, boundary, astral, motif, malformed
 };
 
-/**
- *  @brief Build a random UTF-8 corpus into @p out (cleared first) from @p alphabet's weighted categories plus the
- *         family's @p motifs, until at least @p min_length bytes. The malformed category is muted for @p valid_k;
- *         empty tables are muted so `std::discrete_distribution` never selects an unpopulated category.
- */
+/** Builds a random UTF-8 corpus of at least @p min_length bytes into @p out, cleared first, from
+ *  @p alphabet's weighted categories plus the family's @p motifs. The malformed category is muted
+ *  for @c valid_k, and empty tables are muted so that @c std::discrete_distribution never selects
+ *  an unpopulated category. */
 inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_length, utf8_corpus_flavor_t flavor,
                                              utf8_corpus_alphabet_t const &alphabet,
                                              sz::span<sz::string_view_t const> motifs, std::mt19937 &generator) {
@@ -593,20 +614,19 @@ inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_l
     }
 }
 
-#pragma endregion // Shared helpers
+#pragma endregion Shared helpers
 
 #pragma region Lazy streaming comparison
 
-/**
- *  @brief Streams one backend at a fixed @ref capacity, yielding one (absolute start, length) segment at a time and
- *         refilling from the C finder (`bytes_consumed` resume). Bounded memory: a single batch buffer, no heap.
- */
+/** Streams one backend at a fixed @ref capacity, yielding one segment at a time as an absolute
+ *  start and a length, and refilling from the C finder with @c bytes_consumed resume. Bounded
+ *  memory: a single batch buffer, no heap. */
 struct utf8_segment_cursor_t {
     sz_utf8_segmenter_t finder;
     sz_cptr_t data;
     sz_size_t length;
     sz_size_t capacity;   // caller capacity passed to the finder (<= utf8_segment_batch_k)
-    sz_size_t next_base;  // absolute offset where the NEXT batch refill starts
+    sz_size_t next_base;  // absolute offset where the next batch refill starts
     sz_size_t batch_base; // absolute base of the CURRENT batch (for absolute segment offsets)
     sz_size_t count;      // segments buffered in the current batch
     sz_size_t index;      // next segment within the current batch
@@ -615,7 +635,7 @@ struct utf8_segment_cursor_t {
     sz_size_t lengths[utf8_segment_batch_k];
 };
 
-/** @brief Make a cursor over @p finder, clamping the caller @p capacity to the batch buffer. */
+/** Makes a cursor over @p finder, clamping the caller @p capacity to the batch buffer. */
 inline utf8_segment_cursor_t utf8_segment_cursor_make_(sz_utf8_segmenter_t finder, sz_cptr_t data, sz_size_t length,
                                                        sz_size_t capacity) {
     utf8_segment_cursor_t cursor;
@@ -625,7 +645,8 @@ inline utf8_segment_cursor_t utf8_segment_cursor_make_(sz_utf8_segmenter_t finde
     return cursor;
 }
 
-/** @brief Pull the next segment; returns sz_false_k at end of stream, else fills @p out_start (absolute) / @p out_length. */
+/** Pulls the next segment; returns @c sz_false_k at end of stream, else fills the absolute
+ *  @p out_start and @p out_length. */
 inline sz_bool_t utf8_segment_cursor_next_(utf8_segment_cursor_t &cursor, sz_size_t &out_start, sz_size_t &out_length) {
     while (cursor.index == cursor.count) {
         if (cursor.exhausted || cursor.next_base >= cursor.length) return sz_false_k;
@@ -646,8 +667,9 @@ inline sz_bool_t utf8_segment_cursor_next_(utf8_segment_cursor_t &cursor, sz_siz
     return sz_true_k;
 }
 
-/** @brief Assert one segmenter's output stands on its own: segments tile `[0, length)` and, for well-formed input,
- *         start on a codepoint boundary — needing no reference, so a rule both backends get wrong is still caught. */
+/** Asserts one segmenter's output stands on its own: segments tile `[0, length)` and, for
+ *  well-formed input, start on a codepoint boundary — needing no reference, so a rule both backends
+ *  get wrong is still caught. */
 inline void utf8_check_segment_invariants_(sz_utf8_segmenter_t finder, sz_size_t capacity, sz_cptr_t data,
                                            sz_size_t length, utf8_corpus_flavor_t flavor) {
     utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(finder, data, length, capacity);
@@ -661,7 +683,7 @@ inline void utf8_check_segment_invariants_(sz_utf8_segmenter_t finder, sz_size_t
     verify(running_cursor == length && "segments do not cover the whole input");
 }
 
-/** @brief Emit a full reproduction record to `stderr` then abort; called on the first segment divergence. */
+/** Emits a full reproduction record to @c stderr, then aborts; called on the first divergence. */
 inline void utf8_report_divergence_(utf8_repro_t const &repro, sz_cptr_t data, sz_size_t length,
                                     std::size_t segment_index, sz_bool_t reference_more, sz_size_t reference_start,
                                     sz_size_t reference_length, sz_bool_t candidate_more, sz_size_t candidate_start,
@@ -684,11 +706,9 @@ inline void utf8_report_divergence_(utf8_repro_t const &repro, sz_cptr_t data, s
     verify(false && "UTF-8 segmentation backends diverged (see stderr for the reproduction record)");
 }
 
-/**
- *  @brief Stream @p reference and @p candidate in lockstep, asserting an identical (start,length) per segment and
- *         emitting a full repro on the first divergence. No heap; stops at the first mismatch. @p reference and
- *         @p candidate may be the same finder at different capacities (capacity-independence) or two backends.
- */
+/** Streams @p reference and @p candidate in lockstep, asserting an identical start and length per
+ *  segment and emitting a full repro on the first divergence. No heap; stops at the first mismatch.
+ *  The two may be distinct backends, or one finder at two capacities. */
 inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t reference,
                                   sz_size_t reference_capacity, sz_utf8_segmenter_t candidate,
                                   sz_size_t candidate_capacity, sz_cptr_t data, sz_size_t length) {
@@ -709,14 +729,16 @@ inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t
     }
 }
 
-#pragma endregion // Lazy streaming comparison
+#pragma endregion Lazy streaming comparison
 
 /**
- *  @brief One segmentation backend (its named `sz_utf8_segmenter_t`) for a kernel family. Each family builds a
- *         file-local table of these — one entry per ISA compiled in, plus an always-present `dispatched` entry so
- *         the table is never empty on a baseline target — and its unit / rule-coverage / safety / equivalence
- *         drivers all iterate the SAME table. That keeps the four drivers' ISA coverage in lockstep and removes the
- *         per-driver `#if` ladders (and the dead-code they create when no SIMD tier is compiled).
+ *  @brief One segmentation backend, a named @c sz_utf8_segmenter_t, for a kernel family.
+ *
+ *  Each family builds a file-local table of these — one entry per ISA compiled in, plus an
+ *  always-present @c dispatched entry so the table is never empty on a baseline target — and its
+ *  unit, rule-coverage, safety and equivalence drivers all iterate the same table. That keeps the
+ *  four drivers' ISA coverage in lockstep and removes the per-driver @c #if ladders, along with the
+ *  dead code they create when no SIMD tier is compiled.
  */
 struct utf8_segment_backend_t {
     char const *name;
@@ -725,11 +747,10 @@ struct utf8_segment_backend_t {
 
 #pragma region Unit driver
 
-/**
- *  @brief Drive one segmentation backend over the hand-checked goldens, streaming its segments and comparing each
- *         lazily against the next expected literal (no materialized container). The caller invokes it once per
- *         backend, so a wrong constant shared by serial and SIMD is still caught against external ground truth.
- */
+/** Drives one segmentation backend over the hand-checked goldens, streaming its segments and
+ *  comparing each lazily against the next expected literal, with no materialized container. The
+ *  caller invokes it once per backend, so a wrong constant shared by serial and SIMD is still
+ *  caught against external ground truth. */
 inline void check_utf8_segment_unit_(char const *family, sz_utf8_segmenter_t forward,
                                      sz::span<utf8_unit_case_t const> cases) {
     for (utf8_unit_case_t const &golden : cases) {
@@ -749,25 +770,34 @@ inline void check_utf8_segment_unit_(char const *family, sz_utf8_segmenter_t for
     }
 }
 
-#pragma endregion // Unit driver
+#pragma endregion Unit driver
 
 #pragma region Rule coverage
 
-/** @brief Whether a rule-coverage motif fires the rule in its break or its no-break (join) direction. */
+/** Whether a rule-coverage motif fires the rule in its break or its no-break, joining, sense. */
 enum utf8_rule_direction_t { utf8_rule_breaks_k, utf8_rule_joins_k };
 
-/** @brief One UAX rule-coverage motif: a short input that exercises a named spec rule in a given direction. */
+/** One UAX rule-coverage motif: a short input exercising a named spec rule in a given direction. */
 struct utf8_rule_case_t {
-    char const *rule_id;             /**< UAX rule id this motif exercises, e.g. "WB6", "GB9c", "SB8", "LB21a". */
-    utf8_rule_direction_t direction; /**< whether the motif demonstrates the rule breaking or joining. */
-    sz::string_view_t text;          /**< short input that fires the rule. */
+
+    /** UAX rule id this motif exercises, e.g. "WB6", "GB9c", "SB8", "LB21a". */
+    char const *rule_id;
+
+    /** Whether the motif demonstrates the rule breaking or joining. */
+    utf8_rule_direction_t direction;
+
+    /** Short input that fires the rule. */
+    sz::string_view_t text;
 };
 
 /**
- *  @brief Per-family rule-coverage gate. Two obligations:
- *         (1) every motif segments identically on @p reference and @p candidate, one-shot AND re-anchored at the
- *             window-edge phases 61/62/63 so a rule firing across the 64-byte boundary is exercised too; and
- *         (2) every id in @p required_rule_ids is exercised by at least one motif, so no spec rule is left untested.
+ *  @brief Per-family rule-coverage gate with two obligations.
+ *
+ *  1. Every motif segments identically on @p reference and @p candidate, one-shot and re-anchored
+ *     at the window-edge phases 61, 62 and 63, so a rule firing across the 64-byte boundary gets
+ *     exercised as well.
+ *  2. Every id in @p required_rule_ids is exercised by at least one motif, so no rule of the spec
+ *     is left untested.
  */
 inline void check_utf8_rule_coverage_(char const *family, sz_utf8_segmenter_t reference, sz_utf8_segmenter_t candidate,
                                       sz::span<utf8_rule_case_t const> cases,
@@ -796,14 +826,16 @@ inline void check_utf8_rule_coverage_(char const *family, sz_utf8_segmenter_t re
     }
 }
 
-#pragma endregion // Rule coverage
+#pragma endregion Rule coverage
 
 #pragma region Safety sweep
 
 /**
- *  @brief Feed the full adversarial-byte battery (4 named shapes, the astral fixtures, all 256 single bytes, all
- *         65 536 byte pairs, and random garbage at every sub-cache-line offset) to @p callback as `(bytes, length)`.
- *         Factored so each family's `_safety` runs one shared sweep instead of three copies of the 65 536-pair loop.
+ *  @brief Feeds the full adversarial-byte battery to @p callback as @b (bytes,length).
+ *
+ *  The battery holds 4 named shapes, the astral fixtures, all 256 single bytes, all 65 536 byte
+ *  pairs, and random garbage at every sub-cache-line offset. Factored so each family's @c _safety
+ *  runs one shared sweep instead of three copies of the 65 536-pair loop.
  */
 template <typename callback_type_>
 inline void for_each_adversarial_utf8_input_(std::mt19937 &generator, std::size_t random_input_count,
@@ -843,10 +875,9 @@ inline void for_each_adversarial_utf8_input_(std::mt19937 &generator, std::size_
     }
 }
 
-/**
- *  @brief Feed the adversarial battery through every @p finders entry, asserting each survives, every emitted segment
- *         is in-bounds, and `bytes_consumed <= length`. One battery drives all backends over the same bytes.
- */
+/** Feeds the adversarial battery through every @p finders entry, asserting each survives, every
+ *  emitted segment is in-bounds, and no finder consumes past the input. One battery drives all
+ *  backends over the same bytes. */
 inline void check_utf8_segment_safety_(char const *family, sz::span<utf8_segment_backend_t const> finders,
                                        std::size_t random_inputs = scale_iterations(10000)) {
     sz_size_t offsets[utf8_unit_capacity_k + 1], lengths[utf8_unit_capacity_k + 1];
@@ -871,10 +902,10 @@ inline void check_utf8_segment_safety_(char const *family, sz::span<utf8_segment
 /**
  *  @brief Holds a streaming segmenter to the per-position rule oracle over one text.
  *
- *  The segmenters carry left context forward in a state machine; the oracles re-walk it at every position.
- *  Both transcribe the same annex, and the headers only ever claimed they agree - this is where that is
- *  checked. Inputs the segmenter could not drain in one call are skipped, since the oracle reads the whole
- *  text and a truncated prefix would ask the two a different question.
+ *  The segmenters carry left context forward in a state machine; the oracles re-walk it at every
+ *  position. Both transcribe the same annex, and the headers only ever claimed they agree - this is
+ *  where that is checked. Inputs the segmenter could not drain in one call are skipped, since the
+ *  oracle reads the whole text and a truncated prefix would ask the two a different question.
  */
 inline void check_utf8_segment_against_oracle_(char const *family, sz_utf8_segmenter_t segmenter,
                                                utf8_boundary_oracle_t oracle, char const *text, std::size_t length) {
@@ -900,27 +931,26 @@ inline void check_utf8_segment_against_oracle_(char const *family, sz_utf8_segme
     }
 }
 
-#pragma endregion // Safety sweep
+#pragma endregion Safety sweep
 
 #pragma region Differential stressors
 
-/** @brief Caller capacities swept per differential input: small values exercise the window-loop resume at every
- *         phase; the window-adjacent values (32/33/63/64/65) catch resume-seam bugs; the batch value is the
- *         whole-input single-shot. */
+/** Caller capacities swept per differential input: small values exercise the window-loop resume at
+ *  every phase; the window-adjacent values 32, 33, 63, 64 and 65 catch resume-seam bugs; the batch
+ *  value is the whole-input single-shot. */
 static sz_size_t const utf8_sweep_capacities[] = {1, 2, 3, 16, 17, 32, 33, 63, 64, 65, utf8_segment_batch_k};
 
-/** @brief Long-range straddle gaps: each places the decisive rule context past one window from the boundary, sweeping
- *         the seam across >=2 / >=3 windows at every phase. */
+/** Long-range straddle gaps: each places the decisive rule context past one window from the
+ *  boundary, sweeping the seam across ≥ 2 and ≥ 3 windows at every phase. */
 static std::size_t const utf8_straddle_gaps[] = {64, 65, 95, 96, 127, 128, 129, 191, 192, 256};
 
-/** @brief Marathon run length cap: every rule-critical unit is repeated past several 64-byte windows. */
+/** Marathon run length cap: every rule-critical unit is repeated past several 64-byte windows. */
 static constexpr std::size_t utf8_marathon_length_k = 320;
 
-/**
- *  @brief Long homogeneous carry units (the cross-window register-carry stressor): a single rule-critical unit
- *         repeated far past one 64-byte window. Family-agnostic — each stresses some family's carry (RI parity,
- *         ZWJ/Extend chains, NU runs, SATerm shadows, SP/ZW/QU runs, Hebrew-Hyphen, Hangul).
- */
+/** Long homogeneous carry units for the cross-window register-carry stressor: a single
+ *  rule-critical unit repeated far past one 64-byte window. Family-agnostic — each stresses some
+ *  family's carry, be it RI parity, ZWJ/Extend chains, NU runs, SATerm shadows, SP/ZW/QU runs,
+ *  Hebrew-Hyphen or Hangul. */
 static char const *const utf8_marathon_units[] = {
     ".",
     ":",
@@ -946,7 +976,7 @@ static char const *const utf8_marathon_units[] = {
 static char const *const utf8_marathon_prefixes[] = {"", "x", "5", "\xD7\x90"}; // none / letter / digit / Hebrew
 static char const *const utf8_marathon_terminators[] = {"", "A", "b", "9", ".", "\n"};
 
-/** @brief Malformed fragments dropped exactly at a rule-critical seam (not standalone noise). */
+/** Malformed fragments dropped exactly at a rule-critical seam, not as standalone noise. */
 static char const *const utf8_malformed_seam_fragments[] = {
     "\xC0\x80",         // overlong NUL
     "\xED\xA0\x80",     // surrogate U+D800
@@ -955,13 +985,15 @@ static char const *const utf8_malformed_seam_fragments[] = {
     "\x80",             // stray continuation
     "\xF5\x80\x80\x80", // out-of-range lead > U+10FFFF
 };
-/** @brief (prefix, suffix) hosts placing the fragment at a rule-critical seam across the families. */
+
+/** Prefix and suffix hosts placing the fragment at a rule-critical seam across the families. */
 static char const *const utf8_malformed_seam_prefixes[] = {"ab'", "a ", "a.", "a", "1,", "\xD7\x90-", "(\xC2\xA0"};
 static char const *const utf8_malformed_seam_suffixes[] = {"cd", " b", " B", "\xCC\x81", "2", "a", ")"};
 static sz_size_t const utf8_malformed_seam_phases[] = {0, 60, 61, 62, 63};
 
-/** @brief The differential's shared state: the reference, every candidate backend, the corpora, the RNG, and a reused
- *         corpus scratch. Each generated input is compared against all candidates before the next one is built. */
+/** The differential's shared state: the reference, every candidate backend, the corpora, the RNG,
+ *  and a reused corpus scratch. Each generated input is compared against all candidates before the
+ *  next one is built. */
 struct utf8_differential_context_t {
     sz_utf8_segmenter_t reference;
     sz::span<utf8_segment_backend_t const> candidates;
@@ -972,12 +1004,12 @@ struct utf8_differential_context_t {
     std::size_t input_index; // rotates the capacity sweep when the multiplier samples instead of exhausts
 };
 
-/** @brief The family's alphabet, or the shared default when it supplies none. */
+/** The family's alphabet, or the shared default when it supplies none. */
 inline utf8_corpus_alphabet_t const &utf8_context_alphabet_(utf8_differential_context_t const &context) {
     return context.corpora->alphabet ? *context.corpora->alphabet : utf8_default_alphabet;
 }
 
-/** @brief Every candidate against the reference at @p capacity, plus each candidate against itself at full batch. */
+/** Every candidate against the reference at @p capacity, and against itself at full batch. */
 inline void utf8_compare_candidates_(utf8_differential_context_t &context, char const *stressor, std::size_t iteration,
                                      sz_size_t capacity, sz_cptr_t data, sz_size_t length,
                                      utf8_corpus_flavor_t flavor) {
@@ -990,9 +1022,10 @@ inline void utf8_compare_candidates_(utf8_differential_context_t &context, char 
     }
 }
 
-/** @brief The per-input check: the reference's own invariants, then the candidates across the capacity sweep. At
- *         multiplier 1.0 each input walks the whole capacity table; below it one capacity per input, advanced by an
- *         extra step each full turn so consecutive inputs still cover every (alignment, capacity) pair. */
+/** The per-input check: the reference's own invariants, then the candidates across the capacity
+ *  sweep. At multiplier 1.0 each input walks the whole capacity table; below it one capacity per
+ *  input, advanced by an extra step each full turn so consecutive inputs still cover every
+ *  alignment and capacity pair. */
 inline void utf8_differential_input_(utf8_differential_context_t &context, char const *stressor, std::size_t iteration,
                                      sz_cptr_t data, sz_size_t length, utf8_corpus_flavor_t flavor) {
     utf8_check_segment_invariants_(context.reference, utf8_segment_batch_k, data, length, flavor);
@@ -1003,7 +1036,7 @@ inline void utf8_differential_input_(utf8_differential_context_t &context, char 
     utf8_compare_candidates_(context, stressor, iteration, capacity, data, length, flavor);
 }
 
-/** @brief Visitor context for the run sinks; forwards each produced run to `utf8_differential_input_`. */
+/** Visitor context for the run sinks; forwards each produced run to @c utf8_differential_input_. */
 struct utf8_sink_context_t {
     utf8_differential_context_t *context;
     char const *stressor;
@@ -1012,7 +1045,7 @@ struct utf8_sink_context_t {
     std::string buffer; // prefix+run scratch
 };
 
-/** @brief Run sink: prepend an ASCII filler so the run's content lands at a shifted window phase, then compare. */
+/** Run sink: prepends an ASCII filler to shift the run's window phase, then compares. */
 inline void utf8_sink_run_(void *context, sz_cptr_t data, sz_size_t length) {
     utf8_sink_context_t *sink = (utf8_sink_context_t *)context;
     sink->buffer.assign(sink->filler, 'x');
@@ -1021,15 +1054,15 @@ inline void utf8_sink_run_(void *context, sz_cptr_t data, sz_size_t length) {
                              utf8_corpus_flavor_t::valid_k);
 }
 
-/** @brief Fixed regression inputs (hand-found seam bugs, each > one window): must agree serial-vs-ISA exactly. */
+/** Fixed hand-found seam-bug inputs, each over one window long, that must agree serial-vs-ISA. */
 inline void utf8_differential_regressions_(utf8_differential_context_t &context) {
     for (std::size_t index = 0; index != context.corpora->regressions.size(); ++index)
         utf8_differential_input_(context, "regression", index, (sz_cptr_t)context.corpora->regressions[index].data(),
                                  context.corpora->regressions[index].size(), utf8_corpus_flavor_t::valid_k);
 }
 
-/** @brief Randomized fuzz: per iteration a 400-byte valid corpus, an occasional ~4096-byte wide tier, a mutated copy,
- *         and a malformed corpus — each compared serial-vs-ISA across the capacity sweep. */
+/** Randomized fuzz: per iteration a 400-byte valid corpus, an occasional ~4096-byte wide tier, a
+ *  mutated copy, and a malformed corpus — each compared serial-vs-ISA across the capacity sweep. */
 inline void utf8_differential_fuzz_corpus_(utf8_differential_context_t &context, std::size_t iterations) {
     fmt::println("  - fuzzing {} random corpus (serial-vs-ISA)...", context.corpora->family_name);
     utf8_corpus_alphabet_t const &alphabet = utf8_context_alphabet_(context);
@@ -1062,7 +1095,7 @@ inline void utf8_differential_fuzz_corpus_(utf8_differential_context_t &context,
     }
 }
 
-/** @brief Randomized fuzz: the family's high-density homogeneous runs (one long single-rule blob per run). */
+/** Randomized fuzz: the family's high-density homogeneous runs, one long single-rule blob each. */
 inline void utf8_differential_fuzz_dense_runs_(utf8_differential_context_t &context, std::size_t iterations) {
     if (!context.corpora->dense_runs) return;
     fmt::println("  - fuzzing {} dense runs...", context.corpora->family_name);
@@ -1073,7 +1106,7 @@ inline void utf8_differential_fuzz_dense_runs_(utf8_differential_context_t &cont
     }
 }
 
-/** @brief Randomized fuzz: the family's long-range straddles, gap-swept and phase-shifted by a random ASCII filler. */
+/** Randomized fuzz: the family's long-range straddles, gap-swept and shifted by ASCII filler. */
 inline void utf8_differential_fuzz_straddles_(utf8_differential_context_t &context, std::size_t iterations) {
     if (!context.corpora->straddles) return;
     fmt::println("  - fuzzing {} long-range straddles...", context.corpora->family_name);
@@ -1087,8 +1120,9 @@ inline void utf8_differential_fuzz_straddles_(utf8_differential_context_t &conte
         }
 }
 
-/** @brief Deterministic: a corpus driven at every sub-cache-line offset so the load alignment is swept. A fresh
- *         corpus per round restores the (offset, capacity) cross product when the multiplier samples one capacity. */
+/** Deterministic: a corpus driven at every sub-cache-line offset so the load alignment is swept. A
+ *  fresh corpus per round restores the offset × capacity cross product when the multiplier samples
+ *  only a single capacity per input. */
 inline void utf8_differential_alignment_sweep_(utf8_differential_context_t &context) {
     fmt::println("  - testing {} alignment sweep...", context.corpora->family_name);
     utf8_corpus_alphabet_t const &alphabet = utf8_context_alphabet_(context);
@@ -1104,8 +1138,8 @@ inline void utf8_differential_alignment_sweep_(utf8_differential_context_t &cont
     }
 }
 
-/** @brief Deterministic: each marathon unit repeated past several windows, behind every prefix, closed by every
- *         terminator — the shape that exposes open-bridge / parity / shadow / pending carry bugs. */
+/** Deterministic: each marathon unit repeated past several windows, behind every prefix, closed by
+ *  every terminator — the shape that exposes open-bridge, parity, shadow and pending carry bugs. */
 inline void utf8_differential_marathon_runs_(utf8_differential_context_t &context) {
     fmt::println("  - testing {} marathon carry runs...", context.corpora->family_name);
     std::size_t const unit_count = span_over(utf8_marathon_units).size();
@@ -1125,8 +1159,8 @@ inline void utf8_differential_marathon_runs_(utf8_differential_context_t &contex
     }
 }
 
-/** @brief Deterministic: place each family motif at every byte offset 0..63 within ASCII filler so it straddles the
- *         64-byte window edge at every alignment (phase 0 lands the motif at true start-of-text). */
+/** Deterministic: places each family motif at every byte offset 0 to 63 within ASCII filler so it
+ *  straddles the 64-byte window edge at every alignment; phase 0 lands it at true start-of-text. */
 inline void utf8_differential_phase_sweep_(utf8_differential_context_t &context) {
     fmt::println("  - testing {} all-phase straddle sweep...", context.corpora->family_name);
     for (std::size_t motif_index = 0; motif_index != context.corpora->motifs.size(); ++motif_index) {
@@ -1141,9 +1175,10 @@ inline void utf8_differential_phase_sweep_(utf8_differential_context_t &context)
     }
 }
 
-/** @brief Deterministic: drop a malformed fragment at a rule-critical seam (after MidLetter, inside an SP-run, after
- *         an ATerm, between a base and a combining mark, ...) at the window-edge phases. Both backends apply the same
- *         U+FFFD substitution, so they must still agree (malformed flavor relaxes the alignment invariant). */
+/** Deterministic: drops a malformed fragment at a rule-critical seam at the window-edge phases,
+ *  e.g. after MidLetter, inside an SP-run, after an ATerm, or between a base and a combining mark.
+ *  Both backends apply the same U+FFFD substitution, so they must still agree; the malformed flavor
+ *  relaxes the alignment invariant. */
 inline void utf8_differential_malformed_seams_(utf8_differential_context_t &context) {
     fmt::println("  - testing {} malformed-at-seam injection...", context.corpora->family_name);
     std::size_t const host_count = span_over(utf8_malformed_seam_prefixes).size();
@@ -1160,10 +1195,12 @@ inline void utf8_differential_malformed_seams_(utf8_differential_context_t &cont
 }
 
 /**
- *  @brief Deterministic exhaustive window-edge byte partition: place every byte value of a (possibly multi-byte,
- *         possibly truncated) lead and its continuations at the TOP lanes of a full 64-byte window — exactly where a
- *         declared multi-byte span crosses the window edge — and assert serial-vs-ISA agreement. Guarantees coverage
- *         of the edge handling the random fuzz only hits probabilistically. Compared at full batch (single call).
+ *  @brief Deterministic exhaustive window-edge byte partition, asserting serial-vs-ISA agreement.
+ *
+ *  Places every byte value of a lead, possibly multi-byte and possibly truncated, and its
+ *  continuations at the top lanes of a full 64-byte window — exactly where a declared multi-byte
+ *  span crosses the window edge. Guarantees coverage of the edge handling the random fuzz only hits
+ *  probabilistically. Compared at full batch, in a single call.
  */
 inline void utf8_differential_byte_edge_exhaustive_(utf8_differential_context_t &context) {
     fmt::println("  - testing {} window-edge byte partition (exhaustive)...", context.corpora->family_name);
@@ -1197,15 +1234,17 @@ inline void utf8_differential_byte_edge_exhaustive_(utf8_differential_context_t 
         }
 }
 
-#pragma endregion // Differential stressors
+#pragma endregion Differential stressors
 
 #pragma region Differential driver
 
 /**
- *  @brief Differential of every ISA finder against the serial reference: a short orchestrator over the randomized fuzz
- *         stressors and the deterministic exhaustive stressors. Each input is generated once and driven through
- *         `utf8_differential_input_` for all @p candidates, asserting serial≡ISA, capacity-independence, and the
- *         reference's own tiling/alignment invariants, and aborts with a full repro record at the first divergence.
+ *  @brief Differential of every ISA finder against the serial reference.
+ *
+ *  A short orchestrator over the randomized fuzz stressors and the deterministic exhaustive
+ *  stressors. Each input is generated once and driven through @c utf8_differential_input_ for all
+ *  @p candidates, asserting serial ≡ ISA, capacity-independence, and the reference's own tiling and
+ *  alignment invariants, and aborts with a full repro record at the first divergence.
  */
 inline void check_utf8_segment_equivalence_(sz_utf8_segmenter_t reference,
                                             sz::span<utf8_segment_backend_t const> candidates,
@@ -1229,6 +1268,6 @@ inline void check_utf8_segment_equivalence_(sz_utf8_segmenter_t reference,
     utf8_differential_byte_edge_exhaustive_(context);
 }
 
-#pragma endregion // Differential driver
+#pragma endregion Differential driver
 
 #endif // STRINGZILLA_TEST_UTF8_HPP_

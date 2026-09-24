@@ -1,7 +1,9 @@
 /**
- *  @brief AVX2 backend for hardware-accelerated memory operations on Haswell and newer x86 CPUs.
  *  @file include/stringzilla/memory/haswell.h
  *  @author Ash Vardanian
+ *  @date January 15, 2024
+ *  @brief AVX2 backend for hardware-accelerated memory operations on Haswell and newer x86 CPUs.
+ *
  *  @sa include/stringzilla/memory.h
  */
 #ifndef STRINGZILLA_MEMORY_HASWELL_H_

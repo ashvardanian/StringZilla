@@ -1,23 +1,31 @@
 /**
  *  @file bench/utf8_uncased.cpp
- *  @brief Benchmarks the @b `sz_utf8_uncased_*` family — case folding and uncased search.
- *         The program accepts a file path to a dataset and benchmarks the case folding operations,
- *         validating the SIMD-accelerated backends against the serial baselines.
+ *  @author Ash Vardanian
+ *  @date November 28, 2025
+ *  @brief Benchmarks the @b sz_utf8_uncased_* family — case folding and uncased search.
  *
- *  Compute-bound: case-folded search is table- and branch-heavy per codepoint, so a 64 MiB slice exercises every path.
+ *  The program accepts a file path to a dataset and benchmarks the case folding operations,
+ *  validating the SIMD-accelerated backends against the serial baselines.
+ *
+ *  Compute-bound: case-folded search is table- and branch-heavy per codepoint, so a 64 MiB slice
+ *  exercises every path.
  *
  *  Benchmarks include:
  *  - Case folding for Unicode text - @b utf8_uncased_fold.
  *  - Uncased substring search for Unicode text - @b utf8_uncased_search.
  *
- *  Its siblings @b `utf8_traverse.cpp`, @b `utf8_scan.cpp`, and @b `utf8_segment.cpp` cover the
- *  @b `sz_utf8_*` iteration/segmentation family (codepoint counting, Nth-codepoint, newline/whitespace
- *  scanning, UAX-29 word/grapheme/sentence boundaries, UAX-14 line breaking, transcoding).
+ *  Its siblings @b utf8_traverse.cpp, @b utf8_scan.cpp, and @b utf8_segment.cpp cover the
+ *  @b sz_utf8_* iteration and segmentation family: codepoint counting, Nth-codepoint, newline and
+ *  whitespace scanning, UAX-29 word, grapheme and sentence boundaries, UAX-14 line breaks, and
+ *  transcoding between UTFs.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
+ *    [1:200] for N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -26,8 +34,8 @@
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
  *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
- *  - `STRINGWARS_UNIQUE=1` : Deduplicates tokens, sorting the set and dropping duplicates before benchmarking.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_UNIQUE=1` : Deduplicates tokens, sorting the set and dropping duplicates first.
  *
  *  Here are a few build & run commands:
  *
@@ -38,8 +46,8 @@
  *      build_release/stringzilla_bench_utf8_uncased_cpp20
  *  @endcode
  *
- *  This file is the sibling of `utf8_traverse.cpp`, `utf8_scan.cpp`, `utf8_segment.cpp`, `token.cpp`,
- *  `find.cpp`, `sequence.cpp`, and `memory.cpp`.
+ *  This file is the sibling of `utf8_traverse.cpp`, `utf8_scan.cpp`, `utf8_segment.cpp`,
+ *  `token.cpp`, `find.cpp`, `sequence.cpp`, and `memory.cpp`.
  */
 #include <fmt/format.h>
 
@@ -50,7 +58,7 @@ using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Case Folding Functions
 
-/** @brief Wraps a hardware-specific UTF-8 case folding backend. */
+/** Wraps a hardware-specific UTF-8 case folding backend. */
 template <sz_utf8_uncased_fold_t func_>
 struct utf8_uncased_fold_from_sz {
 
@@ -128,7 +136,7 @@ void bench_utf8_uncased_fold(environment_t const &env) {
 
 #pragma region Uncased Find Functions
 
-/** @brief Wraps a hardware-specific UTF-8 uncased find backend. */
+/** Wraps a hardware-specific UTF-8 uncased find backend. */
 template <sz_utf8_uncased_search_t func_>
 struct utf8_uncased_search_from_sz {
 
@@ -219,7 +227,7 @@ void bench_utf8_uncased_search(environment_t const &env) {
 
 #pragma region Uncased Order Functions
 
-/** @brief Wraps a hardware-specific UTF-8 uncased ordering backend. */
+/** Wraps a hardware-specific UTF-8 uncased ordering backend. */
 template <sz_utf8_uncased_order_t func_>
 struct utf8_uncased_order_from_sz {
 

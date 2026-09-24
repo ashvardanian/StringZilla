@@ -1,7 +1,9 @@
 /**
- *  @brief Serial backend for sorting string collections.
  *  @file include/stringzilla/sort/serial.h
  *  @author Ash Vardanian
+ *  @date February 15, 2025
+ *  @brief Serial backend for sorting string collections.
+ *
  *  @sa include/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_SERIAL_H_
@@ -18,10 +20,8 @@ extern "C" {
 
 #pragma region Generic Public Helpers
 
-/**
- *  @brief Quadratic complexity @b stable insertion sort adjust for our @b argsort usecase.
- *         Needs no extra memory and is used as a fallback for small inputs.
- */
+/** Quadratic complexity @b stable insertion sort adjust for our @b argsort usecase. Needs no extra
+ *  memory and is used as a fallback for small inputs. */
 SZ_API_COMPTIME void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
     // Assume `order` is already initialized with 0, 1, 2, ... N.
     for (sz_size_t element_index = 1; element_index < sequence->count; ++element_index) {
@@ -49,11 +49,8 @@ SZ_API_COMPTIME void sz_sequence_argsort_with_insertion(sz_sequence_t const *seq
     }
 }
 
-/**
- *  @brief Quadratic complexity @b stable insertion sort adjust for our @b pgram-sorting usecase.
- *         Needs no extra memory and is used as a fallback for small inputs.
- */
-
+/** Quadratic complexity @b stable insertion sort adjust for our @b pgram-sorting usecase. Needs no
+ *  extra memory and is used as a fallback for small inputs. */
 SZ_API_COMPTIME void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
 
     // Assume `order` is already initialized with 0, 1, 2, ... N.
@@ -83,12 +80,13 @@ SZ_API_COMPTIME void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t
 #endif
 }
 
-#pragma endregion // Generic Public Helpers
+#pragma endregion Generic Public Helpers
 
 #pragma region Generic Internal Helpers
 
 /**
- *  @brief Convenience macro for of conditional swap of "pgrams" and their indices for a sorting network.
+ *  @brief Convenience macro for of conditional swap of "pgrams" and their indices for
+ *      a sorting network.
  *  @see https://en.wikipedia.org/wiki/Sorting_network
  */
 #define sz_sequence_sorting_network_conditional_swap_(i, j)    \
@@ -99,9 +97,7 @@ SZ_API_COMPTIME void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t
         }                                                      \
     } while (0)
 
-/**
- *  @brief Sorting network for 2 elements is just a single compare-swap.
- */
+/** Sorting network for 2 elements is just a single compare-swap. */
 SZ_HELPER_INLINE void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
     sz_sequence_sorting_network_conditional_swap_(0, 1);
 }
@@ -132,10 +128,12 @@ SZ_HELPER_INLINE void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sor
  *
  *  The network uses 5 compare-swap operations:
  *
- *      Stage 1: (0, 1) and (2, 3)
- *      Stage 2: (0, 2)
- *      Stage 3: (1, 3)
- *      Stage 4: (1, 2)
+ *  @verbatim
+ *  Stage 1: (0, 1) and (2, 3)
+ *  Stage 2: (0, 2)
+ *  Stage 3: (1, 3)
+ *  Stage 4: (1, 2)
+ *  @endverbatim
  */
 SZ_HELPER_AUTO void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
@@ -159,18 +157,19 @@ SZ_HELPER_AUTO void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorte
 }
 
 /**
- *  @brief A scalar sorting network for 8 elements that reorders both the pgrams
- *         and their corresponding offsets in only 19 comparisons, the most efficient
- *         variant currently known.
+ *  @brief A scalar sorting network for 8 elements that reorders both the pgrams and their
+ *      corresponding offsets in only 19 comparisons, the most efficient variant known.
  *
  *  The network consists of 6 stages with the following compare-swap pairs:
  *
- *      Stage 1: (0,1), (2,3), (4,5), (6,7)
- *      Stage 2: (0,2), (1,3), (4,6), (5,7)
- *      Stage 3: (1,2), (5,6)
- *      Stage 4: (0,4), (1,5), (2,6), (3,7)
- *      Stage 5: (2,4), (3,5)
- *      Stage 6: (1,2), (3,4), (5,6)
+ *  @verbatim
+ *  Stage 1: (0,1), (2,3), (4,5), (6,7)
+ *  Stage 2: (0,2), (1,3), (4,6), (5,7)
+ *  Stage 3: (1,2), (5,6)
+ *  Stage 4: (0,4), (1,5), (2,6), (3,7)
+ *  Stage 5: (2,4), (3,5)
+ *  Stage 6: (1,2), (3,4), (5,6)
+ *  @endverbatim
  */
 SZ_HELPER_AUTO void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
@@ -216,13 +215,14 @@ SZ_HELPER_AUTO void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorte
 #undef sz_sequence_sorting_network_conditional_swap_
 
 /**
- *  @brief Stable in-place ascending sort of an @p order slice by original index. Restores stable order
- *      within a terminal run of byte-identical (or fold-identical) strings, whose pgrams are all equal
- *      and carry no further ordering information.
+ *  @brief Stable in-place ascending sort of an @p order slice by original index. Restores stable
+ *      order within a terminal run of byte-identical (or fold-identical) strings, whose pgrams are
+ *      all equal and carry no further ordering information.
  *
- *  Uses an iterative QuickSort with a median-of-three pivot and an insertion-sort base case. A plain
- *  insertion sort would be quadratic on large runs of one repeated string (e.g. a very common word),
- *  so the indices - which are distinct integers - get the same log-linear treatment as the pgrams.
+ *  Uses an iterative QuickSort with a median-of-three pivot and an insertion-sort base case. A
+ *  plain insertion sort would be quadratic on large runs of one repeated string (e.g. a very
+ *  common word), so the indices - which are distinct integers - get the same log-linear treatment
+ *  as the pgrams.
  */
 SZ_HELPER_AUTO void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t count) {
     // A small explicit stack of deferred half-open ranges; always recursing into the smaller side and
@@ -278,19 +278,22 @@ SZ_HELPER_AUTO void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_
     }
 }
 
-#pragma endregion // Generic Internal Helpers
+#pragma endregion Generic Internal Helpers
+
 /**
- *  @brief Exports the next N-gram (pgram) slice for each string in the given range, storing the results
- *      as byte-reversed integers so that simple integer comparisons yield lexicographic ordering.
+ *  @brief Exports the next N-gram (pgram) slice for each string in the given range,
+ *      storing the results as byte-reversed integers so that simple integer comparisons
+ *      yield lexicographic ordering.
  *
- *  @param sequence The sequence of strings to export pgrams from.
- *  @param global_pgrams Output array of pgram integers, indexed by position in the sequence.
- *  @param global_order Current permutation of sequence indices (identity on the first call).
- *  @param start_in_sequence First index (inclusive) in the sequence range to process.
- *  @param end_in_sequence One-past-the-last index in the sequence range to process.
- *  @param start_character Byte offset into each string from which to begin exporting.
- *  @param reverse If set, exports the bitwise-complement of each pgram, so that an ascending integer
- *      sort of the complemented keys yields a descending lexicographic order of the strings.
+ *  @param[in] sequence The sequence of strings to export pgrams from.
+ *  @param[out] global_pgrams Output array of pgram integers, indexed by position in the sequence.
+ *  @param[in] global_order Current permutation of sequence indices (identity on the first call).
+ *  @param[in] start_in_sequence First index (inclusive) in the sequence range to process.
+ *  @param[in] end_in_sequence One-past-the-last index in the sequence range to process.
+ *  @param[in] start_character Byte offset into each string from which to begin exporting.
+ *  @param[in] reverse If set, exports the bitwise-complement of each pgram, so that an
+ *      ascending integer sort of the complemented keys yields a descending lexicographic order
+ *      of the strings.
  */
 SZ_HELPER_AUTO void sz_sequence_argsort_serial_export_byte_window_(             //
     sz_sequence_t const *const sequence,                                        //
@@ -376,11 +379,12 @@ SZ_HELPER_AUTO void sz_sequence_argsort_serial_export_byte_window_(             
 }
 
 /**
- *  @brief Picks the "pivot" value for the QuickSort algorithm's partitioning step using Robert Sedgewick's method,
- *      the median of three elements - the first, the middle, and the last element of the given range.
+ *  @brief Picks the "pivot" value for the QuickSort algorithm's partitioning step using Robert
+ *      Sedgewick's method, the median of three elements - the first, the middle, and the last
+ *      element of the given range.
  *
- *  @param pgrams Pointer to the array of pgrams to choose a pivot from.
- *  @param count Number of pgrams in the array.
+ *  @param[in] pgrams Pointer to the array of pgrams to choose a pivot from.
+ *  @param[in] count Number of pgrams in the array.
  *  @return Pointer to the chosen pivot pgram within the array.
  */
 SZ_HELPER_AUTO sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *pgrams, sz_size_t count) {
@@ -401,18 +405,19 @@ SZ_HELPER_AUTO sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t cons
 }
 
 /**
- *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
+ *  @brief The most important part of the QuickSort algorithm partitioning the elements
+ *      around the pivot.
  *
- *  The classical variant uses the normal 2-way partitioning, but it will scatter the values equal to the pivot
- *  into the left and right partitions. Instead we use the Dutch National Flag @b 3-way partitioning, outputting
- *  the range of values equal to the pivot.
+ *  The classical variant uses the normal 2-way partitioning, but it will scatter the values equal
+ *  to the pivot into the left and right partitions. Instead we use the Dutch National Flag @b 3-way
+ *  partitioning, outputting the range of values equal to the pivot.
  *
- *  @param global_pgrams Pgram array to partition in place.
- *  @param global_order Corresponding order array, permuted in sync with `global_pgrams`.
- *  @param start_in_sequence First index (inclusive) of the range to partition.
- *  @param end_in_sequence One-past-the-last index of the range to partition.
- *  @param first_pivot_offset Receives the index of the first element equal to the pivot.
- *  @param last_pivot_offset Receives the index of the last element equal to the pivot.
+ *  @param[inout] global_pgrams Pgram array to partition in place.
+ *  @param[inout] global_order Corresponding order array, permuted in sync with @c global_pgrams.
+ *  @param[in] start_in_sequence First index (inclusive) of the range to partition.
+ *  @param[in] end_in_sequence One-past-the-last index of the range to partition.
+ *  @param[out] first_pivot_offset Receives the index of the first element equal to the pivot.
+ *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
 SZ_HELPER_AUTO void sz_sequence_argsort_serial_3way_partition_(           //
@@ -464,16 +469,19 @@ SZ_HELPER_AUTO void sz_sequence_argsort_serial_3way_partition_(           //
 }
 
 /**
- *  @brief Recursive Quick-Sort implementation backing both the `sz_sequence_argsort` and `sz_pgrams_sort`,
- *      and using the `sz_sequence_argsort_serial_3way_partition_` under the hood.
+ *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort and
+ *      @c sz_pgrams_sort, and using the @c sz_sequence_argsort_serial_3way_partition_
+ *      under the hood.
  *
- *  @param global_pgrams Pgram array to sort in place.
- *  @param global_order Corresponding order array, permuted in sync with `global_pgrams`.
- *  @param start_in_sequence First index (inclusive) of the range to sort.
- *  @param end_in_sequence One-past-the-last index of the range to sort.
- *  @param top_count Global cut-off: partitions starting at or beyond this index are left unsorted.
- *      Pass 0 to fully sort the range. With the complement trick the wanted elements (smallest, or
- *      largest under reverse) always fall in `[0, top_count)`, so one cut-off serves both directions.
+ *  @param[inout] global_pgrams Pgram array to sort in place.
+ *  @param[inout] global_order Corresponding order array, permuted in sync with @p global_pgrams.
+ *  @param[in] start_in_sequence First index (inclusive) of the range to sort.
+ *  @param[in] end_in_sequence One-past-the-last index of the range to sort.
+ *  @param[in] top_count Global cut-off: partitions starting at or beyond this index are left
+ *      unsorted. Pass 0 to fully sort the range.
+ *
+ *  With the complement trick the wanted elements, the smallest or the largest under reverse, always
+ *  fall in `[0, top_count)`, so one cut-off serves both directions.
  */
 SZ_API_COMPTIME void sz_sequence_argsort_serial_quicksort_pgrams_(        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
@@ -498,18 +506,19 @@ SZ_API_COMPTIME void sz_sequence_argsort_serial_quicksort_pgrams_(        //
 }
 
 /**
- *  @brief Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
- *      It combines `sz_sequence_argsort_serial_export_byte_window_` and `sz_sequence_argsort_serial_quicksort_pgrams_`,
- *      recursively diving into the identical pgrams.
+ *  @brief Recursive Quick-Sort adaptation for strings, processing them a few N-grams at a time.
  *
- *  @param sequence The collection of strings to sort.
- *  @param global_pgrams Working pgram array, length at least `sequence->count`.
- *  @param global_order Current permutation array, updated in place.
- *  @param start_in_sequence First index (inclusive) of the range to process.
- *  @param end_in_sequence One-past-the-last index of the range to process.
- *  @param start_character Byte offset into each string for the current pgram window.
- *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
- *  @param reverse Whether to export complemented keys for descending order.
+ *  Combines @c sz_sequence_argsort_serial_export_byte_window_ with
+ *  @c sz_sequence_argsort_serial_quicksort_pgrams_, then recurses into every group of equal pgrams.
+ *
+ *  @param[in] sequence The collection of strings to sort.
+ *  @param[inout] global_pgrams Working pgram array, length at least `sequence->count`.
+ *  @param[inout] global_order Current permutation array, updated in place.
+ *  @param[in] start_in_sequence First index (inclusive) of the range to process.
+ *  @param[in] end_in_sequence One-past-the-last index of the range to process.
+ *  @param[in] start_character Byte offset into each string for the current pgram window.
+ *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
+ *  @param[in] reverse Whether to export complemented keys for descending order.
  */
 SZ_API_COMPTIME void sz_sequence_argsort_serial_sort_byte_windows_(       //
     sz_sequence_t const *const sequence,                                  //
@@ -623,33 +632,36 @@ SZ_API_COMPTIME sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t 
 
 #pragma region Case Insensitive
 
-/** @brief Bit-width of one packed folded code-point: `code-point + 1` for any Unicode scalar (<= U+10FFFF). */
+/** Bit-width of one packed folded code-point: `code-point + 1` for any Unicode
+ *  scalar (<= U+10FFFF). */
 #define sz_argsort_casefold_field_bits_ ((sz_size_t)21)
 
-/** @brief Number of folded code-points packed into one pgram (3 on 64-bit, 1 on 32-bit). */
+/** Number of folded code-points packed into one pgram (3 on 64-bit, 1 on 32-bit). */
 #define sz_argsort_casefold_fields_(pgram_type) ((sz_size_t)(sizeof(pgram_type) * 8) / sz_argsort_casefold_field_bits_)
 
 /**
- *  @brief Uncased counterpart of `sz_sequence_argsort_serial_export_byte_window_`.
- *      Packs the folded @b code-points of each string at recursion depth @p folded_skip_count into a pgram -
- *      three 21-bit fields on 64-bit targets, MSB-first, each holding `code-point + 1` so a zero field means
- *      "no code-point here". Because `0` sorts below every real `code-point + 1`, a string that ends sorts
- *      before a longer one sharing its prefix - no length byte and no byte-reversal are needed.
+ *  @brief Uncased counterpart of @c sz_sequence_argsort_serial_export_byte_window_.
  *
- *      Like the byte sort's `start_character`, @p folded_skip_count is the shared recursion depth, only
- *      measured in @b folded code-points. The export is @b stateless: it re-folds each string from the start,
- *      drops the first @p folded_skip_count folded code-points, and emits the next window's worth. Folding is
- *      counted per folded code-point, so one-to-many expansions (e.g. ß→ss) need no special carry. This trades
- *      a per-string heap cursor for re-folding the shared prefix - cheap in the common case of short strings
- *      that diverge early (the prefix is a handful of code-points), and only quadratic for pathologically deep
- *      shared prefixes.
+ *  Packs the folded @b code-points of each string at recursion depth @p folded_skip_count into a
+ *  pgram: three 21-bit fields on 64-bit targets, MSB-first, each holding `code-point + 1` so a zero
+ *  field means "no code-point here". Because `0` sorts below every real `code-point + 1`, a string
+ *  that ends sorts before a longer one sharing its prefix, with no length byte or byte-reversal.
  *
- *      Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is treated
- *      as a single literal field equal to its raw byte value (so it sorts by byte value, like any one-byte
- *      unit) and processing resyncs at the next byte. Valid input folds and sorts byte-identically to before.
+ *  Like the byte sort's @c start_character, @p folded_skip_count is the shared recursion depth,
+ *  only measured in @b folded code-points. The export is @b stateless: it re-folds each string from
+ *  the start, drops the first @p folded_skip_count folded code-points, and emits the next window's
+ *  worth. Folding is counted per folded code-point, so one-to-many expansions such as ß → ss need
+ *  no special carry. This trades a per-string heap cursor for re-folding the shared prefix: cheap
+ *  in the common case of short strings that diverge early, where the prefix is a handful of
+ *  code-points, and only quadratic for pathologically deep shared prefixes.
  *
- *  @param folded_skip_count Number of leading folded code-points to skip (recursion depth x fields-per-pgram).
- *  @param reverse Whether to export complemented keys for descending order.
+ *  Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is
+ *  treated as a single literal field equal to its raw byte value, so it sorts by byte value like
+ *  any one-byte unit, and processing resyncs at the next byte. Valid input is unaffected.
+ *
+ *  @param[in] folded_skip_count Number of leading folded code-points to skip, the recursion depth
+ *      times the fields per pgram.
+ *  @param[in] reverse Whether to export complemented keys for descending order.
  */
 SZ_HELPER_AUTO void sz_sequence_argsort_serial_export_casefold_window_(         //
     sz_sequence_t const *const sequence,                                        //
@@ -718,11 +730,10 @@ SZ_HELPER_AUTO void sz_sequence_argsort_serial_export_casefold_window_(         
     }
 }
 
-/**
- *  @brief Uncased counterpart of `sz_sequence_argsort_serial_sort_byte_windows_`: sorts a range by its
- *      folded pgram window at depth @p folded_skip_count, then recurses into fold-equal groups one window
- *      deeper. Stateless - only the shared @p folded_skip_count is threaded, exactly like `start_character`.
- */
+/** Uncased counterpart of @c sz_sequence_argsort_serial_sort_byte_windows_: sorts a range by
+ *  its folded pgram window at depth @p folded_skip_count, then recurses into fold-equal groups
+ *  one window deeper. Stateless - only the shared @p folded_skip_count is threaded, exactly
+ *  like @c start_character. */
 SZ_API_COMPTIME void sz_sequence_argsort_serial_sort_casefold_windows_(   //
     sz_sequence_t const *const sequence,                                  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
@@ -788,21 +799,23 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_serial(  //
     return sz_success_k;
 }
 
-#pragma endregion // Case Insensitive
+#pragma endregion Case Insensitive
 
 /**
- *  @brief Helper function similar to `std::set_union` over pairs of integers and their original indices.
- *      Merges two sorted pgram arrays into a single sorted result, deduplicating equal keys by keeping the
- *      entry from the first array (stable with respect to the first input).
+ *  @brief Helper function similar to @c std::set_union over pairs of integers and their original
+ *      indices. Merges two sorted pgram arrays into a single sorted result, deduplicating equal
+ *      keys by keeping the entry from the first array (stable with respect to the first input).
  *
- *  @param first_pgrams Sorted pgram array from the first input.
- *  @param first_indices Corresponding index array for the first input.
- *  @param first_count Number of elements in the first input.
- *  @param second_pgrams Sorted pgram array from the second input.
- *  @param second_indices Corresponding index array for the second input.
- *  @param second_count Number of elements in the second input.
- *  @param result_pgrams Output array for merged pgrams; must hold at least `first_count + second_count` entries.
- *  @param result_indices Output array for merged indices; must hold at least `first_count + second_count` entries.
+ *  @param[in] first_pgrams Sorted pgram array from the first input.
+ *  @param[in] first_indices Corresponding index array for the first input.
+ *  @param[in] first_count Number of elements in the first input.
+ *  @param[in] second_pgrams Sorted pgram array from the second input.
+ *  @param[in] second_indices Corresponding index array for the second input.
+ *  @param[in] second_count Number of elements in the second input.
+ *  @param[out] result_pgrams Output array for merged pgrams; must hold at least
+ *      `first_count + second_count` entries.
+ *  @param[out] result_indices Output array for merged indices; must hold at least
+ *      `first_count + second_count` entries.
  *  @see https://en.cppreference.com/w/cpp/algorithm/set_union
  */
 SZ_HELPER_AUTO void sz_pgrams_union_serial_(                                                        //

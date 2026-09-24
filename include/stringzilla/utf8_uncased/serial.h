@@ -1,7 +1,9 @@
 /**
- *  @brief Uncased UTF-8 search, comparison & invariance checks: serial scaffolding.
  *  @file include/stringzilla/utf8_uncased/serial.h
  *  @author Ash Vardanian
+ *  @date November 23, 2025
+ *  @brief Uncased UTF-8 search, comparison & invariance checks: serial scaffolding.
+ *
  *  @sa include/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_SERIAL_H_
@@ -16,32 +18,34 @@
 extern "C" {
 #endif
 
-#pragma region Case Invariance & Ordering
+#pragma region Case Invariance and Ordering
 
 /**
  *  @brief Internal helper: checks if a single Unicode codepoint is case-agnostic.
  *
- *  A codepoint is case-agnostic if ALL of the following are true:
+ *  A codepoint is case-agnostic if all of the following are true:
+ *
  *  1. It folds to exactly itself (no transformation, no expansion)
- *  2. It does NOT belong to any bicameral (cased) script
- *  3. It does NOT appear in any case fold expansion as a target character
+ *  2. It does not belong to any bicameral (cased) script
+ *  3. It does not appear in any case fold expansion as a target character
  *
  *  The third condition is critical. Consider 'ʾ' (U+02BE, CA BE):
+ *
  *  - It has no case variant and folds to itself
  *  - However, 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
  *  - A needle containing 'ʾ' must match at position 1 of the folded expansion of 'ẚ'
  *  - Binary search cannot handle this - it only sees 'ẚ' as a 3-byte sequence (E1 BA 9A)
- *  - Therefore 'ʾ' must NOT be treated as case-agnostic
+ *  - Therefore 'ʾ' must not be treated as case-agnostic
  *
- *  This function implements the check via explicit range exclusions for all bicameral
- *  scripts and all Unicode blocks containing case fold expansion target characters.
+ *  This function implements the check via explicit range exclusions for all bicameral scripts and
+ *  all Unicode blocks containing case fold expansion target characters.
  *
- *  @param rune Unicode codepoint to check.
- *  @return sz_true_k if the codepoint is case-agnostic, sz_false_k otherwise.
+ *  @param[in] rune Unicode codepoint to check.
+ *  @return @c sz_true_k if the codepoint is case-agnostic, @c sz_false_k otherwise.
  *
- *  @warning This is an internal function. Use sz_utf8_find_cased_serial() for string checking.
- *  @see sz_utf8_find_cased_serial
- *  @see sz_unicode_fold_codepoint_
+ *  @warning This is an internal function. Use @ref sz_utf8_find_cased_serial for string checking.
+ *  @sa sz_utf8_find_cased_serial
+ *  @sa sz_unicode_fold_codepoint_
  */
 SZ_HELPER_AUTO sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
 
@@ -57,10 +61,10 @@ SZ_HELPER_AUTO sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
     // because uppercase versions fold TO them. We must mark entire bicameral
     // script ranges as "not caseless" to enable proper uncased matching.
     //
-    // Important: Combining diacritical marks (U+0300-U+036F) can appear as non-first
-    // runes in multi-rune case fold expansions. Example: ǰ (U+01F0) → j + ̌ (U+030C).
-    // A needle starting with combining caron could match inside such an expansion,
-    // so combining marks must NOT be treated as case-agnostic.
+    // Important: Combining diacritical marks (U+0300-U+036F) can appear as non-first runes in
+    // multi-rune case fold expansions. Example: ǰ (U+01F0) → j + ̌ (U+030C). A needle starting with
+    // a combining caron could match inside such an expansion, so combining marks must not be
+    // treated as case-agnostic.
     //
     // Bicameral scripts organized by UTF-8 lead byte for efficient checking:
     //
@@ -172,24 +176,22 @@ SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_
     }
 }
 
-#pragma endregion // Case Invariance & Ordering
+#pragma endregion Case Invariance and Ordering
 
-/** @brief  Pops the lowest candidate position from @p matches and returns its bit index - the shared scalar
- *          walk behind every ISA probe filter, so the vector kernels never materialize their own bit scans. */
+/** Pops the lowest candidate position from @p matches, returning its bit index: the scalar walk
+ *  shared by every ISA probe filter, so vector kernels never materialize their own bit scans. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_pop_candidate_(sz_u64_t *matches) {
     sz_size_t const position = (sz_size_t)sz_u64_ctz(*matches);
     *matches &= *matches - 1;
     return position;
 }
 
-/**
- *  Per-codepoint Latin Extended-A fold deltas after a C4/C5 lead, indexed by the continuation
- *  byte's low 6 bits (`text & 0x3F`). Entry value is the in-place add: 0 = identity, 1 = fold by
- *  +1. The cross-block irregulars that the case-fold tables flag with 0x80 ('İ' C4 B0, 'Ŀ' C4 BF,
- *  'Ÿ' C5 B8, 'ſ' C5 BF) are 0 here because the alarm routes them to the danger-zone handler, so
- *  the fold leaves them untouched. Same parity that the explicit range checks used to compute, but
- *  resolved in one `vqtbl4q_u8` per lead family. Verified against the serial reference in tests.
- */
+/** Per-codepoint Latin Extended-A fold deltas after a C4/C5 lead, indexed by the continuation
+ *  byte's low 6 bits, `text & 0x3F`. Entry value is the in-place add: 0 = identity, 1 = fold by +1.
+ *  The cross-block irregulars that the case-fold tables flag with 0x80 ('İ' C4 B0, 'Ŀ' C4 BF, 'Ÿ'
+ *  C5 B8, 'ſ' C5 BF) are 0 here because the alarm routes them to the danger-zone handler, so the
+ *  fold leaves them untouched. The parity matches explicit range checks but resolves in one
+ *  @c vqtbl4q_u8 per lead family, verified against the serial reference in tests. */
 static sz_u8_t const sz_utf8_uncased_central_c4_deltas_lut_[64] = {
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 80-8F: 'Ā'-'ď' even-parity pairs
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 90-9F
@@ -197,17 +199,18 @@ static sz_u8_t const sz_utf8_uncased_central_c4_deltas_lut_[64] = {
     0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C4 B0-BF: 'İ'/'ĸ'/'Ŀ' caseless or cross-block
 };
 static sz_u8_t const sz_utf8_uncased_central_c5_deltas_lut_[64] = {
-    0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, // C5 80-8F: odd head, 'ŉ' (C5 89) irregular -> 0
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, // C5 80-8F: odd head, 'ŉ' (C5 89) irregular → 0
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 90-9F
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 A0-AF
-    1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C5 B0-BF: 'Ÿ'/'ſ' cross-block -> 0
+    1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C5 B0-BF: 'Ÿ'/'ſ' cross-block → 0
 };
 
 /**
- *  Monotonic-Greek second-byte fold deltas after a CE lead, indexed by `text & 0x3F`. The deltas
- *  the per-rule range checks used to assemble, resolved in one `vqtbl4q_u8`:
- *  'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A) +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20,
- *  'Π'-'Ω' (A0-A9) and 'Ϊ'/'Ϋ' (AA-AB) −0x20. 'Ό' (8C) keeps its byte (lead-only change).
+ *  @brief Monotonic-Greek second-byte fold deltas after a CE lead, indexed by `text & 0x3F`.
+ *
+ *  The per-rule range-check deltas, resolved in one @c vqtbl4q_u8: 'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A)
+ *  +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20, 'Π'-'Ω' (A0-A9) and 'Ϊ'/'Ϋ' (AA-AB) −0x20. 'Ό'
+ *  (8C) keeps its byte, as only its lead changes.
  */
 static sz_u8_t const sz_utf8_uncased_greek_ce_deltas_lut_[64] = {
     0,    0,    0,    0,    0,    0,    0x26, 0,
@@ -220,11 +223,9 @@ static sz_u8_t const sz_utf8_uncased_greek_ce_deltas_lut_[64] = {
     0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF (already lowercase)
 };
 
-/**
- *  Lead-promotion flags (+1, CE → CF) for the second-byte classes whose lowercase lands in the CF
- *  block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F), 'Π'-'Ω' (A0-A9), 'Ϊ'/'Ϋ' (AA-AB). 'Α'-'Ο' (91-9F) stay
- *  under CE, so they do not promote. Propagated one lane back through `next_bytes` onto the lead.
- */
+/** Lead-promotion flags (+1, CE → CF) for the second-byte classes whose lowercase lands in the CF
+ *  block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F), 'Π'-'Ω' (A0-A9), 'Ϊ'/'Ϋ' (AA-AB). 'Α'-'Ο' (91-9F) stay under
+ *  CE, so they do not promote. Propagated one lane back through @c next_bytes onto the lead. */
 static sz_u8_t const sz_utf8_uncased_greek_ce_promotes_lut_[64] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, // CE 80-8F: 8C, 8E, 8F promote
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE 90-9F: stay under CE
@@ -235,16 +236,16 @@ static sz_u8_t const sz_utf8_uncased_greek_ce_promotes_lut_[64] = {
 #pragma region Substring Search
 
 /**
- *  @brief Verify head region uncasedly (backward iteration).
+ *  @brief Verify head region uncasedly, iterating backward.
  *
- *  Walks backward from needle_end/haystack_end, comparing folded runes.
- *  Returns true if needle region exhausts (matched), with haystack bytes consumed.
+ *  Walks backward from @p needle_end and @p haystack_end, comparing folded runes. Returns true if
+ *  the needle region exhausts (matched), with haystack bytes consumed.
  *
- *  @param needle_start Start of needle head region.
- *  @param needle_end End of needle head region (where safe window begins).
- *  @param haystack_start Start of haystack (lower bound for backward scan).
- *  @param haystack_end End of haystack head region (where safe window was found).
- *  @param match_length Haystack bytes consumed by this match.
+ *  @param[in] needle_start Start of needle head region.
+ *  @param[in] needle_end End of needle head region, where the safe window begins.
+ *  @param[in] haystack_start Start of haystack, the lower bound for the backward scan.
+ *  @param[in] haystack_end End of haystack head region, where the safe window was found.
+ *  @param[out] match_length Haystack bytes consumed by this match.
  */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz_cptr_t needle_end,
                                                       sz_cptr_t haystack_start, sz_cptr_t haystack_end,
@@ -278,15 +279,15 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz
 }
 
 /**
- *  @brief Verify tail region uncasedly (forward iteration).
+ *  @brief Verify tail region uncasedly, iterating forward.
  *
- *  Walks forward, comparing folded runes. Returns true if needle exhausts.
+ *  Walks forward, comparing folded runes. Returns true if the needle exhausts.
  *
- *  @param needle_start Start of needle tail region.
- *  @param needle_end End of needle tail region (= needle + needle_length).
- *  @param haystack_start Start of haystack tail region.
- *  @param haystack_end End of haystack (upper bound for forward scan).
- *  @param match_length Haystack bytes consumed by this match.
+ *  @param[in] needle_start Start of needle tail region.
+ *  @param[in] needle_end End of needle tail region, equal to `needle + needle_length`.
+ *  @param[in] haystack_start Start of haystack tail region.
+ *  @param[in] haystack_end End of haystack, the upper bound for the forward scan.
+ *  @param[out] match_length Haystack bytes consumed by this match.
  */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz_cptr_t needle_end,
                                                       sz_cptr_t haystack_start, sz_cptr_t haystack_end,
@@ -323,21 +324,20 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz
 /**
  *  @brief Verify a complete match around a SIMD-detected window.
  *
- *  Verifies two regions: "head" (before window) and "tail" (after window).
- *  It's important to note that the middle part may still be in part unprocessed, if its larger
- *  than the "folded slice" of the needle. We handle it as part of the "tail" and the `needle_tail_bytes`
- *  must be calculated accordingly.
+ *  Verifies two regions: "head" before the window and "tail" after it. The middle part may still be
+ *  partly unprocessed if it is larger than the "folded slice" of the needle; it is handled as part
+ *  of the "tail", and @p needle_tail_bytes must be calculated accordingly.
  *
- *  @param haystack Haystack start pointer, arbitrary case.
- *  @param haystack_length Haystack length in bytes.
- *  @param needle Needle start pointer, arbitrary case.
- *  @param needle_length Needle length in bytes.
- *  @param haystack_matched_offset Start offset of matched safe window in haystack in bytes.
- *  @param haystack_matched_length Length of matched safe window in haystack in bytes.
- *  @param needle_head_bytes Start of matched safe window in needle in bytes.
- *  @param needle_tail_bytes Number of bytes in the needle remaining after the matched part.
- *  @param match_length Total length of the verified match in haystack bytes.
- *  @return Match start pointer, or SZ_NULL_CHAR if validation fails.
+ *  @param[in] haystack Haystack start pointer, arbitrary case.
+ *  @param[in] haystack_length Haystack length in bytes.
+ *  @param[in] needle Needle start pointer, arbitrary case.
+ *  @param[in] needle_length Needle length in bytes.
+ *  @param[in] haystack_matched_offset Start offset of matched safe window in haystack in bytes.
+ *  @param[in] haystack_matched_length Length of matched safe window in haystack in bytes.
+ *  @param[in] needle_head_bytes Start of matched safe window in needle in bytes.
+ *  @param[in] needle_tail_bytes Number of bytes in the needle remaining after the matched part.
+ *  @param[out] match_length Total length of the verified match in haystack bytes.
+ *  @return Match start pointer, or @c SZ_NULL_CHAR if validation fails.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_match_(                   //
     sz_cptr_t haystack, sz_size_t haystack_length,                        //
@@ -374,16 +374,17 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_match_(                   //
 
 /**
  *  @brief Hash-free uncased search for needles that fold to exactly 1 rune.
- *      Examples: 'a', 'A', 'б', 'Б' (but NOT 'ß' (U+00DF, C3 9F) → "ss" = 2 runes).
  *
- *  Single-pass algorithm: parses each source rune, folds it, checks if it produces
- *  exactly one rune matching the target. No iterator overhead, no verification needed.
+ *  Examples: 'a', 'A', 'б', 'Б', but not 'ß' (U+00DF, C3 9F) → "ss", which is 2 runes.
  *
- *  @param haystack Pointer to the haystack string to search within.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param needle_folded The single folded rune to search for.
- *  @param match_length Output: length of the matched rune in haystack bytes on success.
- *  @return Pointer to the first matching rune, or SZ_NULL_CHAR if not found.
+ *  Single-pass algorithm: parses each source rune, folds it, checks if it produces exactly one rune
+ *  matching the target. No iterator overhead, no verification needed.
+ *
+ *  @param[in] haystack Pointer to the haystack string to search within.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle_folded The single folded rune to search for.
+ *  @param[out] match_length Length of the matched rune in haystack bytes on success.
+ *  @return Pointer to the first matching rune, or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_1folded_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,               //
@@ -429,33 +430,16 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_1folded_serial_( //
 }
 
 /**
- *  @brief Search a "danger zone" region using 1-folded candidate search + validation.
+ *  @brief Verifies the needle anchored at folded rune @p anchor_index of a danger-zone codepoint.
  *
- *  When SIMD kernels detect potentially problematic bytes (ligatures, Greek Extended, etc.),
- *  they fall back to this serial search within the affected chunk. This function:
- *  1. Extracts the first folded rune from the needle's safe window
- *  2. Searches for candidates matching that rune
- *  3. Validates each candidate using the full verification pipeline
+ *  The codepoint starts at @p danger_cursor. Anchoring on rune zero starts on a codepoint boundary,
+ *  which the shared validator already handles. Past that, the runes of this one codepoint on either
+ *  side of the anchor never reach a folded iterator, as the iterators step over the codepoint
+ *  whole, so they are compared against the image directly.
  *
- *  @param haystack Full haystack string, arbitrary case.
- *  @param haystack_length Full haystack length in bytes.
- *  @param needle Full needle string, arbitrary case.
- *  @param needle_length Full needle length.
- *  @param danger_cursor Start of the danger zone region to search.
- *  @param danger_length Length of the danger zone region in bytes.
- *  @param needle_first_safe_folded_rune The first rune of the safe window, folded.
- *  @param needle_first_safe_folded_rune_offset Offset of the safe window within the needle.
- *  @param match_length Haystack bytes consumed by the match.
- *  @return Pointer to match start, or SZ_NULL_CHAR if not found in this region.
- */
-/**
- *  @brief  Verifies the needle anchored at folded rune @p anchor_index of the codepoint at @p danger_cursor.
- *  @param  haystack_folded_runes The codepoint's folded image; @p anchor_index selects the rune to anchor on.
- *  @return Match start, or `SZ_NULL_CHAR` when this anchor carries no match.
- *
- *  Anchoring on rune zero starts on a codepoint boundary, which the shared validator already handles. Past
- *  that, the runes of this one codepoint on either side of the anchor never reach a folded iterator - the
- *  iterators step over the codepoint whole - so they are compared against the image directly.
+ *  @param[in] haystack_folded_runes The codepoint's folded image; @p anchor_index selects the rune
+ *      to anchor on.
+ *  @return Match start, or @c SZ_NULL_CHAR when this anchor carries no match.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                   //
     sz_cptr_t haystack, sz_size_t haystack_length,                                 //
@@ -538,6 +522,27 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                
     return haystack_match_start;
 }
 
+/**
+ *  @brief Search a "danger zone" region using 1-folded candidate search and validation.
+ *
+ *  When SIMD kernels detect potentially problematic bytes (ligatures, Greek Extended, etc.), they
+ *  fall back to this serial search within the affected chunk. This function:
+ *
+ *  1. Extracts the first folded rune from the needle's safe window
+ *  2. Searches for candidates matching that rune
+ *  3. Validates each candidate using the full verification pipeline
+ *
+ *  @param[in] haystack Full haystack string, arbitrary case.
+ *  @param[in] haystack_length Full haystack length in bytes.
+ *  @param[in] needle Full needle string, arbitrary case.
+ *  @param[in] needle_length Full needle length.
+ *  @param[in] danger_cursor Start of the danger zone region to search.
+ *  @param[in] danger_length Length of the danger zone region in bytes.
+ *  @param[in] needle_first_safe_folded_rune The first rune of the safe window, folded.
+ *  @param[in] needle_first_safe_folded_rune_offset Offset of the safe window within the needle.
+ *  @param[out] match_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start, or @c SZ_NULL_CHAR if not found in this region.
+ */
 SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
     sz_cptr_t haystack, sz_size_t haystack_length,               //
     sz_cptr_t needle, sz_size_t needle_length,                   //
@@ -600,17 +605,18 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
 
 /**
  *  @brief Hash-free uncased search for needles that fold to exactly 2 runes.
- *      Examples: 'ab', 'AB', 'ß' (U+00DF) → "ss", 'ﬁ' (U+FB01) → "fi".
  *
- *  Single-pass sliding window over the folded rune stream. Handles expansions
- *  by buffering folded runes from each source and tracking source boundaries.
+ *  Examples: 'ab', 'AB', 'ß' (U+00DF) → "ss", 'ﬁ' (U+FB01) → "fi".
  *
- *  @param haystack Pointer to the haystack string to search within.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param first_needle_folded First folded rune of the 2-rune needle.
- *  @param second_needle_folded Second folded rune of the 2-rune needle.
- *  @param match_length Output: length of the matched region in haystack bytes on success.
- *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
+ *  Single-pass sliding window over the folded rune stream. Handles expansions by buffering folded
+ *  runes from each source and tracking source boundaries.
+ *
+ *  @param[in] haystack Pointer to the haystack string to search within.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] first_needle_folded First folded rune of the 2-rune needle.
+ *  @param[in] second_needle_folded Second folded rune of the 2-rune needle.
+ *  @param[out] match_length Length of the matched region in haystack bytes on success.
+ *  @return Pointer to the first match, or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_2folded_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,               //
@@ -685,18 +691,19 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_2folded_serial_( //
 
 /**
  *  @brief Hash-free uncased search for needles that fold to exactly 3 runes.
- *      Examples: 'abc', 'ABC', "aß" → "ass", "ﬁa" (U+FB01) → "fia".
  *
- *  Single-pass sliding window of 3 folded runes over the haystack's folded stream.
- *  Handles expansions by buffering folded runes and tracking source boundaries.
+ *  Examples: 'abc', 'ABC', "aß" → "ass", "ﬁa" (U+FB01) → "fia".
  *
- *  @param haystack Pointer to the haystack string to search within.
- *  @param haystack_length Length of the haystack in bytes.
- *  @param first_needle_folded First folded rune of the 3-rune needle.
- *  @param second_needle_folded Second folded rune of the 3-rune needle.
- *  @param third_needle_folded Third folded rune of the 3-rune needle.
- *  @param match_length Output: length of the matched region in haystack bytes on success.
- *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
+ *  Single-pass sliding window of 3 folded runes over the haystack's folded stream. Handles
+ *  expansions by buffering folded runes and tracking source boundaries.
+ *
+ *  @param[in] haystack Pointer to the haystack string to search within.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] first_needle_folded First folded rune of the 3-rune needle.
+ *  @param[in] second_needle_folded Second folded rune of the 3-rune needle.
+ *  @param[in] third_needle_folded Third folded rune of the 3-rune needle.
+ *  @param[out] match_length Length of the matched region in haystack bytes on success.
+ *  @return Pointer to the first match, or @c SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_3folded_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,               //
@@ -923,7 +930,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
                     *match_length = (sz_size_t)(window_end - window_start);
                     return window_start;
                 }
-                // Long needle: verify FULL needle from window_start, skipping runes if match
+                // Long needle: verify full needle from window_start, skipping runes if match
                 // starts mid-expansion. Example: ẚ→"aʾ", needle starting with "ʾ" must skip "a".
                 sz_utf8_folded_iter_t verify_haystack_iter;
                 sz_utf8_folded_iter_init_(&verify_haystack_iter, window_start,
@@ -983,39 +990,39 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Substring Search
-
-#pragma region Character Safety Profiles
+#pragma endregion Substring Search
 
 /*  The character safety classifier and needle-metadata builder are ISA-agnostic: they only depend
- *  on the serial Unicode core (rune parsing & folding). The SIMD kernels (Ice Lake, etc.) consume
+ *  on the serial Unicode core (rune parsing and folding). The SIMD kernels (Ice Lake, etc.) consume
  *  the metadata it produces, so it lives here in the serial scaffolding rather than behind any
  *  `SZ_USE_*` gate, keeping it reachable for every backend including pure serial builds. */
+#pragma region Character Safety Profiles
 
 /**
  *  @brief Determine safety profile for a character across all script contexts.
  *
- *  This function encodes the contextual safety rules from the ASCII selector
- *  and applies them consistently to all paths that include ASCII.
+ *  This function encodes the contextual safety rules from the ASCII selector and applies them
+ *  consistently to all paths that include ASCII.
  *
- *  @param rune The decoded codepoint.
- *  @param rune_bytes UTF-8 byte length of this codepoint (1-4).
- *  @param prev_rune Previous codepoint (0 if at start).
- *  @param next_rune Next codepoint (0 if at end).
- *  @param prev_prev_rune Codepoint before prev_rune (0 if prev is at start).
- *  @param next_next_rune Codepoint after next_rune (0 if next is at end).
- *  @param safety_profiles Safety flags for each script path.
+ *  Using 0 for boundary markers is safe even though NUL (U+0000) is a valid codepoint in
+ *  StringZilla's length-based strings. This works because:
+ *
+ *  1. NUL is valid ASCII (< 0x80), so boundary and actual NUL are treated identically
+ *  2. Ligature checks use inequality (lower_prev ≠ 'f'), and 0 never matches letters
+ *  3. NUL doesn't participate in any Unicode case folding or ligature expansions
+ *
+ *  The neighbor-of-neighbor context, @p prev_prev_rune and @p next_next_rune, enables position-1
+ *  and position-N-2 detection for the 's' rule: if prev_prev = 0 and prev ≠ 0, we're at position 1;
+ *  if next_next = 0 and next ≠ 0, we're at position N-2.
+ *
+ *  @param[in] rune The decoded codepoint.
+ *  @param[in] rune_bytes UTF-8 byte length of this codepoint (1-4).
+ *  @param[in] prev_rune Previous codepoint, 0 if at start.
+ *  @param[in] next_rune Next codepoint, 0 if at end.
+ *  @param[in] prev_prev_rune Codepoint before @p prev_rune, 0 if prev is at start.
+ *  @param[in] next_next_rune Codepoint after @p next_rune, 0 if next is at end.
+ *  @param[out] safety_profiles Safety flags for each script path.
  *  @return The primary fast path preferred for this rune.
- *
- *  @note Using 0 for boundary markers is safe even though NUL (U+0000) is a valid
- *        codepoint in StringZilla's length-based strings. This works because:
- *        1. NUL is valid ASCII (< 0x80), so boundary and actual NUL are treated identically
- *        2. Ligature checks use inequality (lower_prev != 'f'), and 0 never matches letters
- *        3. NUL doesn't participate in any Unicode case folding or ligature expansions
- *
- *  @note The neighbor-of-neighbor context (prev_prev, next_next) enables position-1 and
- *        position-N-2 detection for the 's' rule: if prev_prev==0 && prev!=0, we're at
- *        position 1; if next_next==0 && next!=0, we're at position N-2.
  */
 SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety_profile_( //
     sz_rune_t rune, sz_size_t rune_bytes,                                                  //
@@ -1080,14 +1087,14 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             case 'z': safety |= strict_ascii_group | central_viet_group | western_group; break;
 
             // 'k':
-            // - Strict: UNSAFE. 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B).
-            // - Western/Central/Viet: SAFE. Kelvin sign detected in haystack.
+            // - Strict: unsafe. 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B).
+            // - Western/Central/Viet: safe. Kelvin sign detected in haystack.
             case 'k': safety |= central_viet_group | western_group; break;
 
             // 'a':
             // - Strict/Central/Viet: Contextual. Can't be last; can't precede 'ʾ' (U+02BE, CA BE).
             //   Avoids: 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE).
-            // - Western: SAFE. Expansion detected in haystack.
+            // - Western: safe. Expansion detected in haystack.
             case 'a':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
                 safety |= western_group;
@@ -1096,7 +1103,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             // 'h':
             // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̱' (U+0331, CC B1).
             //   Avoids: 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1).
-            // - Western: SAFE. Expansion detected in haystack.
+            // - Western: safe. Expansion detected in haystack.
             case 'h':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
                 safety |= western_group;
@@ -1105,7 +1112,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             // 'j':
             // - All: Contextual. Can't be last; can't precede '̌' (U+030C).
             //   Avoids: 'ǰ' (U+01F0) → "ǰ" (U+006A U+030C, 6A CC 8C).
-            //   Western profile does NOT detect this in haystack scan.
+            //   Western profile does not detect this in haystack scan.
             case 'j':
                 if (at_end == sz_false_k && next_ascii)
                     safety |= strict_ascii_group | central_viet_group | western_group;
@@ -1114,7 +1121,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             // 'w':
             // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
             //   Avoids: 'ẘ' (U+1E98) → "ẘ" (U+0077 U+030A, 77 CC 8A).
-            // - Western: SAFE. Expansion detected in haystack.
+            // - Western: safe. Expansion detected in haystack.
             case 'w':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
                 safety |= western_group;
@@ -1123,7 +1130,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             // 'y':
             // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
             //   Avoids: 'ẙ' (U+1E99) → "ẙ" (U+0079 U+030A, 79 CC 8A).
-            // - Western: SAFE. Expansion detected in haystack.
+            // - Western: safe. Expansion detected in haystack.
             case 'y':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
                 safety |= western_group;
@@ -1132,10 +1139,11 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             // 'n':
             // - ASCII/Cyrillic/Greek: Contextual. Can't be first; can't follow 'ʼ' (U+02BC, CA BC).
             //   Avoids: 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
-            // - Armenian: UNSAFE. Armenian kernel cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
-            //   The character 'n' can match the 2nd part of the expansion, causing false positives.
+            // - Armenian: unsafe. The Armenian kernel cannot handle the expansion of 'ŉ' (U+0149,
+            //   C5 89) into "ʼn" (U+02BC U+006E, CA BC 6E), and the character 'n' can match its 2nd
+            //   part, causing false positives.
             // - Western/Central/Viet: Contextual, same as above.
-            //   Western profile does NOT detect this in haystack scan.
+            //   Western profile does not detect this in haystack scan.
             case 'n':
                 // Exclude Armenian - it cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
                 if (at_start == sz_false_k && prev_ascii) {
@@ -1151,7 +1159,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             // - All: Contextual. Can't be first or last; can't follow 'f'; can't precede '̇' (U+0307, CC 87).
             //   Avoids: 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87),
             //   and 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69).
-            //   Western profile does NOT detect Turkish 'İ' expansion.
+            //   Western profile does not detect Turkish 'İ' expansion.
             case 'i':
                 if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 'f')
                     safety |= strict_ascii_group | central_viet_group | western_group;
@@ -1160,7 +1168,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             // 'l':
             // - Strict/Central/Viet: Contextual. Can't be first; can't follow 'f'.
             //   Avoids: 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C).
-            // - Western: SAFE. Ligatures detected in haystack.
+            // - Western: safe. Ligatures detected in haystack.
             case 'l':
                 if (at_start == sz_false_k && lower_prev != 'f') safety |= strict_ascii_group | central_viet_group;
                 safety |= western_group;
@@ -1172,7 +1180,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             //   Avoids: 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
             //   'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74),
             //   and 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88).
-            // - Western: SAFE. Ligatures/expansion detected in haystack.
+            // - Western: safe. Ligatures/expansion detected in haystack.
             case 't':
                 if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 's')
                     safety |= strict_ascii_group | central_viet_group;
@@ -1188,7 +1196,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
             //   - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
             //   - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
             //   - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-            // - Western: SAFE. Ligatures detected in haystack.
+            // - Western: safe. Ligatures detected in haystack.
             case 'f':
                 if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 'f' &&
                     lower_next != 'f' && lower_next != 'i' && lower_next != 'l')
@@ -1197,7 +1205,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
                 break;
 
             // 's'
-            // - Strict: UNSAFE. 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
+            // - Strict: unsafe. 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
             // - Central/Vietnamese: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
             //   Avoids: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73),
             //   'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
@@ -1233,8 +1241,8 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
         return sz_utf8_uncased_rune_ascii_invariant_k;
     }
 
-    // 2-byte UTF-8 (U+0080 to U+07FF)
-    // Must check EXACT ranges that the fold functions handle, not just lead bytes
+    // 2-byte UTF-8 (U+0080 to U+07FF):
+    // Must check exact ranges that the fold functions handle, not just lead bytes
     if (rune_bytes == 2) {
         sz_u8_t lead = (rune >> 6) | 0xC0;     // Reconstruct lead byte
         sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
@@ -1280,11 +1288,11 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
 
         // Greek - check exact ranges handled by sz_utf8_uncased_search_icelake_greek_fold_zmm_
         // CE 86-8F: accented uppercase Ά-Ώ (with gaps at 87, 8B, 8D)
-        //   - EXCLUDE CE 90: 'ΐ' (U+0390) expands to 3 codepoints
+        //   - exclude CE 90: 'ΐ' (U+0390) expands to 3 codepoints.
         // CE 91-A9: basic uppercase Α-Ω
         // CE AA-AB: dialytika uppercase Ϊ-Ϋ
         // CE AC-AF: accented lowercase ά-ί
-        //   - EXCLUDE CE B0: 'ΰ' (U+03B0) expands to 3 codepoints
+        //   - exclude CE B0: 'ΰ' (U+03B0) expands to 3 codepoints.
         // CE B1-BF: basic lowercase α-ο
         // CF 80-89: basic lowercase π-ω (includes final sigma at 82, sigma at 83)
         // CF 8A-8E: accented/dialytika lowercase ϊ-ώ
@@ -1434,12 +1442,11 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
 /**
  *  @brief Compute diversity score for a byte sequence.
  *
- *  Uses a 256-bit bitmap to efficiently count distinct byte values.
- *  Higher scores indicate more diverse byte values, which lead to better
- *  filtering during SIMD search (fewer false positives).
+ *  Uses a 256-bit bitmap to efficiently count distinct byte values. Higher scores indicate more
+ *  diverse byte values, which lead to better filtering during SIMD search (fewer false positives).
  *
- *  @param data Pointer to byte sequence.
- *  @param length Length of byte sequence.
+ *  @param[in] data Pointer to byte sequence.
+ *  @param[in] length Length of byte sequence.
  *  @return Count of distinct byte values (0-256).
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_size_t length) {
@@ -1461,62 +1468,64 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_
 /**
  *  @brief Find the "best safe window" in the needle for each script path.
  *
- *  The objective is as follows. For a given needle, find a slice, that when folded fits into 16 bytes
- *  and where all characters are "safe" with respect to a certain path. If no such path can be found,
- *  an empty result is returned. It might be the case for a search query like "s" or "n", that by itself
- *  isn't safe for any path given the number of Unicode characters expanding into multiple 's'- or 'n'-containing
- *  sequences. The selected safe folded slice will never begin mid-character in the needle, so if it starts with
- *  an 'ŉ' (U+0149, C5 89), we can't choose - 'n' (6E) - the second half of its folded sequence as a starting point.
+ *  The objective is as follows. For a given needle, find a slice that, when folded, fits into 16
+ *  bytes and where all characters are "safe" with respect to a certain path. If no such path can be
+ *  found, an empty result is returned. It might be the case for a search query like "s" or "n",
+ *  that by itself isn't safe for any path given the number of Unicode characters expanding into
+ *  multiple 's'- or 'n'-containing sequences. The selected safe folded slice will never begin
+ *  mid-character in the needle, so if it starts with an 'ŉ' (U+0149, C5 89), we can't choose 'n'
+ *  (6E), the second half of its folded sequence, as a starting point.
  *
- *  The algorithm is as follows. Iterate through the arbitrary-case "ŉEeDlE_WITH_LONG_SUFFIX", unpacking runes.
- *  For each input rune, perform folding, expanding into a sequence, like:
+ *  The algorithm is as follows. Iterate through the arbitrary-case "ŉEeDlE_WITH_LONG_SUFFIX",
+ *  unpacking runes. For each input rune, perform folding, expanding into a sequence, like 'ŉ'
+ *  (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E). Continue unpacking the rest, until we reach a
+ *  16-byte limit, like:
  *
- *      'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
+ *  @verbatim
+ *  ʼ     n  e  e  d  l  e  _  w  i  t  h  _  l  o  n  g
+ *  CA BC 6E 45 45 44 4C 45 5F 57 49 54 48 5F 4C 4F 4E 47
+ *  @endverbatim
  *
- *  Continue unpacking the rest, until we reach a 16-byte limit, like:
+ *  At this point, we need to trim it to make sure its characters satisfy boundary conditions.
+ *  Assuming at the next step we'll move the iterator to the next input rune to point to the 'E'
+ *  (U+0045) input character, we only trim from the end, but also invalidate the whole starting
+ *  position if a bad character is chosen at start. For a safe window starting position we can have
+ *  multiple length variants, assuming different safe paths can have different rules for the last
+ *  symbol in the safe sequence.
  *
- *      ʼ     n  e  e  d  l  e  _  w  i  t  h  _  l  o  n  g
- *      CA BC 6E 45 45 44 4C 45 5F 57 49 54 48 5F 4C 4F 4E 47
+ *  Once we have a safe window for a certain script, we evaluate its diversity score - the number of
+ *  distinct byte values in the folded window. The more diverse, the better! We keep track of the
+ *  best seen window for each script.
  *
- *  At this point, we need to trim it to make sure - its characters satisfy boundary conditions.
- *  Assuming at the next step we'll move the iterator to the next input rune to point to 'E' (U+0045) input character,
- *  we only trim from the end. But also invalidate the whole starting position if a bad character is chosen at start.
- *  For safe window starting position we can have multiple length variants, assuming different safe paths can have
- *  different rules for the last symbol in the safe sequence.
+ *  We also track not only the safety with respect to a certain profile, but also applicability. For
+ *  example, the needle "xyz" is safe with respect to the Western European path, as well as Central
+ *  European, Vietnamese, and potentially others. But it's pure ASCII, and we shouldn't pay the cost
+ *  of complex Vietnamese case-folding of triple-byte Latin extensions for just "xyz". So we must
+ *  invalidate the "safe path" if it's just "safe", but not ideal.
  *
- *  Once we have safe window for a certain script, we evaluate its diversity score - the number of distinct byte
- *  values in the folded window. The more diverse - the better! We keep track of best seen window for each script.
+ *  In the end, we'll have up to 7 best safe windows, one per script path. The heuristic is:
  *
- *  We also track not only the safety with respect to a certain profile, but also applicability. For example,
- *  the needle "xyz" is safe with respect to the Western European path, as well as Central European, Vietnamese,
- *  and potentially others. But it's pure ASCII. We shouldn't pay the cost of complex Vietnamese case-folding of
- *  triple-byte Latin extensions for just "xyz". So we must invalidate the "safe path" if its just "safe", but
- *  not ideal.
+ *  - Prefer ASCII, if there is an ASCII-safe path at least 4 bytes wide with at least 4 distinct
+ *    byte values. It's only one subtraction, a comparison, and a masked addition. Cheapest of all.
+ *  - Pick the most diverse variant from all others, if the ASCII variant isn't good enough.
  *
- *  In the end, we'll have up to 7 best safe windows, one per script path.
- *  The heuristic is:
- *
- *  - Prefer ASCII, if there is an ASCII-safe path at least 4 bytes wide with at least 4 distinct byte values.
- *    It's only one subtraction, a comparison, and a masked addition. Cheapest of all kernels.
- *  - Pick the most diverse variant from all others, if ASCII variant isn't good enough.
- *
- *  We then identify the four "probe" positions within the <= 16 byte folded safe window, one more than
- *  in exact substring search kernels with Raita heuristics:
+ *  We then identify the four "probe" positions within the ≤ 16 byte folded safe window, one more
+ *  than in exact substring search kernels with Raita heuristics:
  *
  *  1. implicit at `refined->folded_slice[0]`
  *  2. stored in `refined->probe_second` - targets last byte of 2nd character when 4+ chars
  *  3. stored in `refined->probe_third` - targets last byte of 3rd character when 4+ chars
  *  4. implicit at `refined->folded_slice[refined->folded_slice_length - 1]`
  *
- *  By aiming at the last byte of each UTF-8 codepoint we maximize diversity, as in a Russian text almost
- *  all letters will have the same first byte, but mostly different second byte. The same is true for many
- *  other languages. For short strings (< 4 bytes), probes will necessarily overlap - this is expected.
- *  The function also sets `offset_in_unfolded` and `length_in_unfolded` to track where the
- *  selected folded slice came from in the original unfolded input.
+ *  By aiming at the last byte of each UTF-8 codepoint we maximize diversity, as in a Russian text
+ *  almost all letters will have the same first byte, but mostly different second byte. The same is
+ *  true for many other languages. For short strings (< 4 bytes), probes will necessarily overlap -
+ *  this is expected. The function also sets @c offset_in_unfolded and @c length_in_unfolded to
+ *  track where the selected folded slice came from in the original unfolded input.
  *
- *  @param needle Pointer to needle string (original, not folded).
- *  @param needle_length Length in bytes.
- *  @param refined Output metadata structure to populate.
+ *  @param[in] needle Pointer to needle string (original, not folded).
+ *  @param[in] needle_length Length in bytes.
+ *  @param[out] refined Output metadata structure to populate.
  */
 SZ_HELPER_AUTO void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
                                                      sz_utf8_uncased_needle_metadata_t *refined) {
@@ -1797,7 +1806,7 @@ SZ_HELPER_AUTO void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t
     }
 }
 
-#pragma endregion // Character Safety Profiles
+#pragma endregion Character Safety Profiles
 
 #ifdef __cplusplus
 }

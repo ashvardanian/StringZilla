@@ -15,6 +15,10 @@ Run:
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/utf8_delimiters.py -q
     SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/utf8_delimiters.py -q
+
+File: test/utf8_delimiters.py
+Author: Ash Vardanian
+Date: June 26, 2026
 """
 
 from random import Random

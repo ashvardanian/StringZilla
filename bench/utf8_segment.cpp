@@ -1,11 +1,15 @@
 /**
  *  @file bench/utf8_segment.cpp
- *  @brief Benchmarks the UTF-8 boundary-segmentation family against the serial baselines: the UAX-29 / UAX-14
- *         boundary engines. Every kernel is benchmarked across all available SIMD backends side-by-side, and
- *         each backend's result is validated (via a per-call checksum) against the serial reference — so this
- *         file doubles as a differential correctness harness.
+ *  @author Ash Vardanian
+ *  @date June 8, 2026
+ *  @brief Benchmarks the UTF-8 boundary-segmentation family against the serial baselines: the
+ *      UAX-29 / UAX-14 boundary engines.
  *
- *  Compute-bound: UTF-8 segmentation is branch-heavy per codepoint, so a 64 MiB slice exercises every path.
+ *  Every kernel is benchmarked across all available SIMD backends side-by-side, and each backend's
+ *  result is validated (via a per-call checksum) against the serial reference — so this file
+ *  doubles as a differential correctness harness.
+ *
+ *  Compute-bound: UTF-8 segmentation branches per codepoint, so a 64 MiB slice covers all paths.
  *
  *  Benchmarks include:
  *  - UAX-29 word-boundary segmentation - @b utf8_wordbreaks.
@@ -13,16 +17,19 @@
  *  - UAX-29 sentence-boundary segmentation - @b utf8_sentences.
  *  - UAX-14 line-break segmentation - @b utf8_linebreaks.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
- *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for N-grams).
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
+ *  variables are used:
+ *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
+ *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
+ *    file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for
+ *    N-grams).
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -51,8 +58,8 @@ using namespace ashvardanian::stringzilla::bench;
 
 #pragma region Wrappers
 
-/** @brief  Segments each token into UAX-29 words/graphemes/sentences or UAX-14 line breaks forward;
- *          checksum = number of segments. */
+/** Segments each token into UAX-29 words, graphemes, sentences, or UAX-14 line breaks forward; the
+ *  checksum is the number of segments. */
 template <auto func_>
 struct utf8_word_forward_from_sz {
     environment_t const &env;

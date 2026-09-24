@@ -1,7 +1,9 @@
 /**
- *  @brief Serial backend for UTF-8 case folding.
  *  @file include/stringzilla/utf8_uncased_fold/serial.h
  *  @author Ash Vardanian
+ *  @date November 23, 2025
+ *  @brief Serial backend for UTF-8 case folding.
+ *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_SERIAL_H_
@@ -13,25 +15,26 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/**
- *  @brief Branchless ASCII case fold - converts A-Z to a-z.
- *  Uses unsigned subtraction trick: (c - 'A') <= 25 is true only for uppercase letters.
- */
+
+/** Branchless ASCII case fold, converting A-Z to a-z. Uses the unsigned subtraction trick:
+ *  (c − 'A') ≤ 25 holds only for uppercase letters. */
 SZ_HELPER_AUTO sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
 
 enum {
-    /** @brief Most source bytes one folded byte can come from - the Kelvin sign's three, folding to `k`. */
+
+    /** Most source bytes one folded byte comes from - the Kelvin sign's three, folding to 'k'. */
     sz_utf8_fold_max_contraction_k = 3,
-    /** @brief Most folded bytes one source byte can produce; the mirror bound. */
+
+    /** Most folded bytes one source byte can produce; the mirror bound. */
     sz_utf8_fold_max_expansion_k = 3,
 };
 
 /**
  *  @brief Whether any codepoint beginning with @p lead folds to something other than itself.
  *
- *  49 of the 256 lead bytes qualify, so the answer is a bit in a 256-bit mask carried as four immediates -
- *  no table, and therefore no memory access on either a CPU or a GPU. Generated from
- *  `sz_unicode_fold_codepoint_`, so it cannot disagree with the fold it guards:
+ *  49 of the 256 lead bytes qualify, so the answer is a bit in a 256-bit mask carried as four
+ *  immediates - no table, and therefore no memory access on either a CPU or a GPU. Generated from
+ *  @c sz_unicode_fold_codepoint_, so it cannot disagree with the fold it guards:
  *
  *  @code{.py}
  *  for codepoint in range(0x110000):
@@ -54,20 +57,19 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_lead_may_fold_(sz_u8_t lead) {
 /**
  *  @brief Folded-rune representation of a byte that does not begin a well-formed codepoint.
  *
- *  A malformed byte folds to itself and is matched/compared byte-for-byte, never as a Unicode codepoint.
- *  Tagging it above the valid Unicode range (0x10FFFF) keeps it distinct from every real folded rune, so a
- *  lone malformed byte 0xFC can only match another malformed 0xFC - never the valid rune U+00FC ('ü'). Two
- *  equal malformed bytes still produce equal tagged runes, preserving byte-for-byte matching.
+ *  A malformed byte folds to itself and is matched/compared byte-for-byte, never as a Unicode
+ *  codepoint. Tagging it above the valid Unicode range (0x10FFFF) keeps it distinct from every real
+ *  folded rune, so a lone malformed byte 0xFC can only match another malformed 0xFC - never the
+ *  valid rune U+00FC ('ü'). Two equal malformed bytes still produce equal tagged runes, preserving
+ *  byte-for-byte matching.
  */
 SZ_HELPER_AUTO sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
 
-/**
- *  Bit flags describing which UTF-8 lead-byte families occur in a chunk, shared by every back-end.
+/** Bit flags describing which UTF-8 lead-byte families occur in a chunk, shared by every back-end.
  *  Each family shares one folding strategy, so the union of flags picks the chunk handler in a
  *  single dispatch - instead of sequentially probing per-script fast paths, which degrades on
  *  mixed-script text. The flags themselves are ISA-neutral; only the way a back-end derives them
- *  differs - a `VPERMB` lookup on Ice Lake, `vqtbl4q_u8` on NEON, a compare tree on Haswell.
- */
+ *  differs - a @c VPERMB lookup on Ice Lake, @c vqtbl4q_u8 on NEON, a compare tree on Haswell. */
 enum sz_utf8_fold_lead_family_t {
     sz_utf8_fold_lead_caseless_flag_k = 1 << 0,       // D7-DF, E0, E3-E9, EB-EE: scripts with no case
     sz_utf8_fold_lead_latin_flag_k = 1 << 1,          // C2-C3: Latin-1 Supplement
@@ -79,15 +81,14 @@ enum sz_utf8_fold_lead_family_t {
     sz_utf8_fold_lead_complex_flag_k = 1 << 7,        // C0-C1, C7-CD, D2-D6, F0-FF: decode or serial paths
 };
 
-/**
- *  Lead-byte family table indexed by the low 6 bits of the lead byte: leads 0xC0-0xFF map onto
+/** Lead-byte family table indexed by the low 6 bits of the lead byte: leads 0xC0-0xFF map onto
  *  indices 0x00-0x3F injectively, and ASCII/continuation bytes are masked out before the lookup.
- *  Byte-for-byte the same 64 values as the Ice Lake `lead_families_lut`, but laid out in
- *  ascending index order: `vqtbl4q_u8` reads its `uint8x16x4_t` table in memory order, whereas
- *  `_mm512_set_epi8` lists lanes 0x3F → 0x00.
- */
+ *  Byte-for-byte the same 64 values as the Ice Lake @c lead_families_lut, but laid out in
+ *  ascending index order: @c vqtbl4q_u8 reads its @c uint8x16x4_t table in memory order, whereas
+ *  @c _mm512_set_epi8 lists lanes 0x3F → 0x00. */
 static sz_u8_t const sz_utf8_fold_lead_families_lut_[64] = {
     // clang-format off
+
     // Indices 0x00-0x0F (leads C0-CF): C2-C3 Latin, C4-C6 Latin Ext, C7-CD complex, CE-CF Greek
     0x80, 0x80, 0x02, 0x02, 0x04, 0x04, 0x04, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x10, 0x10,
     // Indices 0x10-0x1F (leads D0-DF): D0-D1 Cyrillic, D2-D6 complex, D7-DF caseless
@@ -99,28 +100,28 @@ static sz_u8_t const sz_utf8_fold_lead_families_lut_[64] = {
     // clang-format on
 };
 
-/**
- *  Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's
- *  low 6 bits: 0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (serial fallback). The same
- *  64 values as the Ice Lake `c4_deltas_lut`, but in ascending index order: `vqtbl4q_u8` reads
- *  its table in memory order, whereas `_mm512_set_epi8` lists lanes 0x3F → 0x00.
- *  Generated from Unicode full case folding; verified against the serial reference in tests.
- */
+/** Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's
+ *  low 6 bits: 0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (serial fallback). The same 64
+ *  values as the Ice Lake @c c4_deltas_lut, but in ascending index order: @c vqtbl4q_u8 reads its
+ *  table in memory order, whereas @c _mm512_set_epi8 lists lanes 0x3F → 0x00. Generated from
+ *  Unicode full case folding; verified against the serial reference in tests. */
 static sz_u8_t const sz_utf8_fold_c4_deltas_lut_[64] = {
-    // Latin Ext-A U+0100-013F: 'Ā'-'Ŀ'
     // clang-format off
+
+    // Latin Ext-A U+0100-013F: 'Ā'-'Ŀ'
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // 0x00-0x0F: even-parity pairs
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // 0x10-0x1F
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // 0x20-0x2F
-    // 0x30-0x3F: 'İ' (U+0130, C4 B0) expands to "i" + combining dot, and 'Ŀ' (U+013F, C4 BF)
-    // folds to 'ŀ' (U+0140, C5 80) - the +1 crosses into the next lead byte, so neither can
-    // fold in place and both are flagged irregular; 'ĸ' (U+0138) is caseless, parity flips after.
+    // 0x30-0x3F: 'İ' (U+0130, C4 B0) expands to "i" + combining dot, and 'Ŀ' (U+013F, C4 BF) folds
+    // to 'ŀ' (U+0140, C5 80) - the +1 crosses into the next lead byte, so neither can fold in place
+    // and both are flagged irregular; 'ĸ' (U+0138) is caseless, parity flips after.
     0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0x80,
     // clang-format on
 };
 static sz_u8_t const sz_utf8_fold_c5_deltas_lut_[64] = {
-    // Latin Ext-A U+0140-017F: 'ŀ'-'ſ'
     // clang-format off
+
+    // Latin Ext-A U+0140-017F: 'ŀ'-'ſ'
     0, 1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0, // 0x00-0x0F: odd head, 'ŉ' (U+0149) irregular
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,    // 0x10-0x1F
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,    // 0x20-0x2F
@@ -130,8 +131,10 @@ static sz_u8_t const sz_utf8_fold_c5_deltas_lut_[64] = {
     // clang-format on
 };
 static sz_u8_t const sz_utf8_fold_c6_deltas_lut_[64] = {
-    // Latin Ext-B U+0180-01BF: 'ƀ'-'ƿ'
     // clang-format off
+
+    // Latin Ext-B U+0180-01BF: 'ƀ'-'ƿ'
+    //
     // Latin Extended-B mixes +1 parity pairs with uppercase letters whose lowercase lives in
     // the IPA Extensions block (U+0250+) - those 20 cross-block folds are flagged irregular.
     0, 0x80, 1, 0, 1, 0, 0x80, 1, 0, 0x80, 0x80, 1, 0, 0, 0x80, 0x80, // 0x00-0x0F
@@ -141,16 +144,17 @@ static sz_u8_t const sz_utf8_fold_c6_deltas_lut_[64] = {
     // clang-format on
 };
 
-/** @brief  Character boundary of the first stop lane in a 64-byte superchunk: takes the lowest set bit of
- *          @p stop_lanes and walks back over continuation bytes so the consumed prefix ends on a boundary.
- *          Shared u64 mask math for the windowed ISA fold handlers; landing on byte 0 routes one rune to the
- *          serial fallback. */
+/** Character boundary of the first stop lane in a 64-byte superchunk: takes the lowest set bit of
+ *  @p stop_lanes and walks back over continuation bytes so the consumed prefix ends on a boundary.
+ *  Shared u64 mask math for the windowed ISA fold handlers; landing on byte 0 routes one rune to
+ *  the serial fallback path. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_fold_stop_boundary_serial_(sz_u64_t stop_lanes, sz_cptr_t source) {
     sz_size_t first_flagged_position = (sz_size_t)sz_u64_ctz(stop_lanes);
     while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80) --first_flagged_position;
     return first_flagged_position;
 }
-/**  Helper macro for readable assertions - use for SIMD implementation reference */
+
+/** Helper macro for readable assertions, used as the SIMD implementation reference. */
 #define sz_is_in_range_(x, low, high) ((x) >= (low) && (x) <= (high))
 
 /**
@@ -163,7 +167,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_stop_boundary_serial_(sz_u64_t stop_lane
  *  - Hierarchical by UTF-8 byte width for early exit on common cases
  *  - Per-section switches for irregular mappings (better compiler optimization)
  *
- *  Each range check includes an assertion with traditional bounds for SIMD implementation reference.
+ *  Each range check has an assertion with traditional bounds for SIMD implementation reference.
  */
 SZ_HELPER_AUTO sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *folded) {
 
@@ -1406,16 +1410,16 @@ SZ_HELPER_AUTO sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *f
 }
 
 /**
- *  @brief Helper function performing case-folding under the constraint, that no output may be incomplete.
+ *  @brief Case-folds under the constraint that no output may be incomplete.
  *
- *  @param source Pointer to the source UTF-8 data, must be valid UTF-8.
- *  @param source_length Length of the source data in bytes.
- *  @param destination Pointer to the destination buffer.
- *  @param destination_length Length of the destination buffer in bytes.
- *  @param codepoints_consumed Number of codepoints read from source.
- *  @param codepoints_exported Number of codepoints written to destination.
- *  @param bytes_consumed Number of bytes read from source.
- *  @param bytes_exported Number of bytes written to destination.
+ *  @param[in] source Pointer to the source UTF-8 data, must be valid UTF-8.
+ *  @param[in] source_length Length of the source data in bytes.
+ *  @param[out] destination Pointer to the destination buffer.
+ *  @param[in] destination_length Length of the destination buffer in bytes.
+ *  @param[out] codepoints_consumed Number of codepoints read from source.
+ *  @param[out] codepoints_exported Number of codepoints written to destination.
+ *  @param[out] bytes_consumed Number of bytes read from source.
+ *  @param[out] bytes_exported Number of bytes written to destination.
  */
 SZ_HELPER_INLINE void sz_utf8_uncased_fold_upto_(                   //
     sz_cptr_t source, sz_size_t source_length,                      //
@@ -1514,10 +1518,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_
 
 #pragma region Folded Iterators
 
-/**
- *  @brief Iterator state for streaming through folded UTF-8 runes.
- *  Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently.
- */
+/** Iterator state for streaming through folded UTF-8 runes. Handles one-to-many case folding
+ *  expansions transparently, such as 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73). */
 typedef struct {
     sz_cptr_t ptr;              // Current position in UTF-8 string
     sz_cptr_t end;              // End of string
@@ -1528,7 +1530,7 @@ typedef struct {
     sz_size_t codepoint_length; // Its length in bytes, so its span is `[begin, begin + length)`
 } sz_utf8_folded_iter_t;
 
-/** @brief Initialize a folded rune iterator. */
+/** Initializes a folded rune iterator. */
 SZ_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iterator, sz_cptr_t string, sz_size_t length) {
     iterator->ptr = string;
     iterator->end = string + length;
@@ -1539,12 +1541,14 @@ SZ_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iterator, s
 }
 
 /**
- *  @brief Get next folded rune. Returns `sz_false_k` when exhausted.
- *  Malformed UTF-8 is handled losslessly: a byte that does not begin a well-formed codepoint is emitted as a
- *  single literal byte (tagged so it compares byte-for-byte and never collides with a real folded codepoint) and
- *  the iterator resyncs by one byte, never reading past `end`.
- *  `codepoint_begin` and `codepoint_length` name the source span every rune of one codepoint comes from, and
- *  stay put while the expansion drains - `ptr` cannot serve, having already moved past the codepoint.
+ *  @brief Gets the next folded rune, or returns @c sz_false_k when exhausted.
+ *
+ *  Malformed UTF-8 is handled losslessly: a byte that does not begin a well-formed codepoint is
+ *  emitted as a single literal byte (tagged so it compares byte-for-byte and never collides with a
+ *  real folded codepoint) and the iterator resyncs by one byte, never reading past @c end.
+ *  @c codepoint_begin and @c codepoint_length name the source span every rune of one codepoint
+ *  comes from, and stay put while the expansion drains - @c ptr cannot serve, having already moved
+ *  past the codepoint.
  */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_rune_t *out_rune) {
     // Refill pending buffer if exhausted
@@ -1597,20 +1601,18 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz
     return sz_true_k;
 }
 
-/**
- *  @brief Reverse iterator state for streaming through folded UTF-8 runes backwards.
- *  Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently
- *  in reverse order.
- */
+/** Reverse iterator state for streaming through folded UTF-8 runes backwards. Handles one-to-many
+ *  case folding expansions transparently in reverse order, such as 'ß' (U+00DF, C3 9F) → "ss"
+ *  (U+0073 U+0073, 73 73). */
 typedef struct {
-    sz_cptr_t ptr;           // Current position (points to byte AFTER current sequence)
+    sz_cptr_t ptr;           // Current position (points to byte after current sequence)
     sz_cptr_t start;         // Start of string (stop when ptr reaches this)
     sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions (in reverse order)
     sz_size_t pending_count; // Number of pending folded runes
     sz_size_t pending_idx;   // Current index into pending buffer
 } sz_utf8_folded_reverse_iter_t;
 
-/** @brief Initialize a reverse folded rune iterator. Iterates from end towards start. */
+/** Initializes a reverse folded rune iterator, which iterates from end towards start. */
 SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t *it, sz_cptr_t start,
                                                       sz_cptr_t end) {
     it->ptr = end;
@@ -1620,11 +1622,13 @@ SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_ite
 }
 
 /**
- *  @brief Get previous folded rune (walking backwards). Returns `sz_false_k` when exhausted.
- *  When a codepoint folds to multiple runes (like 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)), returns them in
- *  reverse order ('s', then 's'). Malformed UTF-8 is handled losslessly and byte-identically to the forward
- *  iterator: a byte that does not begin/end a well-formed codepoint is emitted as a single tagged literal byte and
- *  the iterator resyncs by one byte, so the backward rune stream is exactly the reverse of the forward stream.
+ *  @brief Gets the previous folded rune walking backwards, or returns @c sz_false_k when exhausted.
+ *
+ *  When a codepoint folds to multiple runes (like 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73
+ *  73)), returns them in reverse order ('s', then 's'). Malformed UTF-8 is handled losslessly and
+ *  byte-identically to the forward iterator: a byte that does not begin/end a well-formed codepoint
+ *  is emitted as a single tagged literal byte and the iterator resyncs by one byte, so the backward
+ *  rune stream is exactly the reverse of the forward stream.
  */
 SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t *it, sz_rune_t *out_rune) {
     // Return pending runes if any (stored in reverse order, consumed in reverse)
@@ -1659,9 +1663,10 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_revers
     for (sz_size_t back = 0; back < 3 && candidate > it->start && (*(sz_u8_t const *)candidate & 0xC0) == 0x80; ++back)
         candidate--;
 
-    // Multi-byte UTF-8: decode (bounded) and fold only if the bytes from the candidate lead form a well-formed
-    // codepoint that ends EXACTLY at `sequence_end`. Otherwise the last byte does not begin/end a valid rune, so
-    // treat it as a literal folded-to-itself byte and resync by one - matching the forward iterator byte-for-byte.
+    // Multi-byte UTF-8: decode (bounded) and fold only if the bytes from the candidate lead form a
+    // well-formed codepoint that ends exactly at `sequence_end`. Otherwise the last byte does not
+    // begin/end a valid rune, so treat it as a literal folded-to-itself byte and resync by one -
+    // matching the forward iterator byte-for-byte.
     sz_rune_t rune;
     sz_rune_length_t const rune_length = sz_rune_decode(candidate, sequence_end, &rune);
     if (rune_length == sz_rune_invalid_k || candidate + rune_length != sequence_end) {
@@ -1681,7 +1686,7 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_revers
     it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
     it->pending_idx = 1; // We'll return the last one now, then the rest in subsequent calls
 
-    // Return the LAST folded rune first (since we're going backwards)
+    // Return the last folded rune first (since we're going backwards)
     *out_rune = it->pending[it->pending_count - 1];
     return sz_true_k;
 }

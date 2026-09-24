@@ -1,7 +1,8 @@
 /**
- *  @brief NEON backend for UTF-8 codepoint mechanics.
  *  @file include/stringzilla/utf8_runes/neon.h
  *  @author Ash Vardanian
+ *  @date November 19, 2025
+ *  @brief NEON backend for UTF-8 codepoint mechanics.
  */
 #ifndef STRINGZILLA_UTF8_RUNES_NEON_H_
 #define STRINGZILLA_UTF8_RUNES_NEON_H_
@@ -28,11 +29,11 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec_u8x16
            0x8888888888888888ull;
 }
 
+/*  Multistep newline / whitespace iteration (NEON / AArch64): each full 16-byte tile is
+ *  classified branchlessly into per-length delimiter-start masks, narrowed to a nibble bitmask
+ *  (stride 4, one set bit per match), and the trusted lanes [0,13] are SIMD left-packed by the
+ *  peel; the `< 16`-byte remainder goes to the serial helper. */
 #pragma region Multistep newline and whitespace iteration
-
-/*  Multistep newline / whitespace iteration (NEON / AArch64): each full 16-byte tile is classified branchlessly
- *  into per-length delimiter-start masks, narrowed to a nibble bitmask (stride 4, one set bit per match), and the
- *  trusted lanes [0,13] are SIMD left-packed by the peel; the `< 16`-byte remainder goes to the serial helper. */
 
 SZ_API_COMPTIME sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
     sz_u128_vec_t text_vec, headers_vec, continuation_vec;
@@ -59,10 +60,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
-/**
- *  @brief  Locate the start byte of the @p n -th codepoint (0-indexed) in @p text, or `SZ_NULL_CHAR` if
- *          @p n is past the codepoint count. Byte-exact to `sz_utf8_seek_serial`.
- */
+/** Locate the start byte of the @p n-th codepoint (0-indexed) in @p text, or @c SZ_NULL_CHAR if
+ *  @p n is past the codepoint count. Byte-exact to @c sz_utf8_seek_serial. */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     uint8x16_t continuation_mask_u8x16 = vdupq_n_u8(0xC0);
     uint8x16_t continuation_pattern_u8x16 = vdupq_n_u8(0x80);
@@ -87,36 +86,55 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz
 
 #pragma endregion Multistep newline and whitespace iteration
 
+/*  Family-agnostic NEON (AArch64) leaf helpers shared by every UTF-8 segmentation kernel (word /
+ *  grapheme / sentence / line / delimiters). The exact twin of the Ice Lake
+ *  @ref sz_utf8_rune_window_t substrate and the AVX2 @ref sz_utf8_rune_window_haswell_t backend: a
+ *  64-byte window held as four @c uint8x16_t quarters, masks reduced to one-bit-per-byte
+ *  @c sz_u64_t lane masks (bit @c i ↔ lane @c i), in-register @c vqtbl table reads, and the
+ *  flat-table leaf walk (see @ref sz_utf8_rune_flat_lookup_neon_). The portable rule algebra in
+ *  `serial.h` consumes the @c sz_u64_t masks unchanged across all three backends. */
 #pragma region Shared SIMD leaf substrate
 
-/*  Family-agnostic NEON (AArch64) leaf helpers shared by every UTF-8 segmentation kernel (word / grapheme /
- *  sentence / line / delimiters). The exact twin of the Ice Lake @ref sz_utf8_rune_window_t substrate and the
- *  AVX2 @ref sz_utf8_rune_window_haswell_t backend: a 64-byte window held as four `uint8x16_t` quarters, masks
- *  reduced to one-bit-per-byte `sz_u64_t` lane masks (bit `i` <=> lane `i`), in-register `vqtbl` table reads, and
- *  the flat-table leaf walk (@ref sz_utf8_rune_flat_lookup_neon_). The portable rule algebra in `serial.h` consumes
- *  the `sz_u64_t` masks unchanged across all three backends. */
-
-/** @brief  The decoded 64-byte window for the NEON backend. The 64 bytes live as four `uint8x16_t` quarters
- *          (`window[0]` = lanes [0, 16), ... `window[3]` = lanes [48, 64)); the per-lane byte-domain codepoint
- *          halves `high`/`low` share that shape. Masks are `sz_u64_t` (one bit per byte-lane: the NEON movemask of
- *          each quarter placed at bit positions [0,16)/[16,32)/[32,48)/[48,64)) rather than the Ice Lake
- *          `__mmask64`. Field names and semantics match @ref sz_utf8_rune_window_t so the portable rule
- *          algebra is unchanged. */
+/** The decoded 64-byte window for the NEON backend. The 64 bytes live as four @c uint8x16_t
+ *  quarters (`window[0]` = lanes [0, 16), ... `window[3]` = lanes [48, 64)); the per-lane
+ *  byte-domain codepoint halves @c high and @c low share that shape. Masks are @c sz_u64_t (one bit
+ *  per byte-lane: the NEON movemask of each quarter placed at bit positions
+ *  [0,16)/[16,32)/[32,48)/[48,64)) rather than the Ice Lake @c __mmask64. Field names and semantics
+ *  match @ref sz_utf8_rune_window_t so the portable rule algebra is unchanged. */
 typedef struct sz_utf8_rune_window_neon_t {
-    uint8x16_t window_u8x16s[4];    /**< Raw input bytes for lanes [16*q, 16*q+16). */
-    uint8x16_t high_byte_u8x16s[4]; /**< Per-lane `codepoint >> 8`. */
-    uint8x16_t low_byte_u8x16s[4];  /**< Per-lane `codepoint & 0xFF`. */
-    sz_u64_t continuation;          /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
-    sz_u64_t codepoint_starts;      /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
-    sz_u64_t two_byte_starts;       /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
-    sz_u64_t three_byte_starts;     /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
-    sz_u64_t four_byte_starts;      /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;               /**< Number of bytes actually loaded (<= 64). */
+
+    /** Raw input bytes for lanes [16*q, 16*q+16). */
+    uint8x16_t window_u8x16s[4];
+
+    /** Per-lane `codepoint >> 8`. */
+    uint8x16_t high_byte_u8x16s[4];
+
+    /** Per-lane `codepoint & 0xFF`. */
+    uint8x16_t low_byte_u8x16s[4];
+
+    /** Bit @c i is set when lane @c i is a continuation byte `10xxxxxx`. */
+    sz_u64_t continuation;
+
+    /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
+    sz_u64_t codepoint_starts;
+
+    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    sz_u64_t two_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    sz_u64_t three_byte_starts;
+
+    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    sz_u64_t four_byte_starts;
+
+    /** Number of bytes actually loaded (at most 64). */
+    sz_size_t loaded;
 } sz_utf8_rune_window_neon_t;
 
-/** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the NEON twin of `srl8_`.
- *          `vshrq_n_u8` needs an immediate shift; the shift amounts used by the segmentation classifiers (2 for the
- *          decode 3-byte high reconstruction, 4 for the line-break 4-byte plane reconstruction) are spelled out. */
+/** Per-byte logical right shift by @p shift keeping the low @p keep bits — the NEON twin of
+ *  @c srl8_. @c vshrq_n_u8 needs an immediate shift; the shift amounts used by the segmentation
+ *  classifiers (2 for the decode 3-byte high reconstruction, 4 for the line-break 4-byte plane
+ *  reconstruction) are spelled out. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value_u8x16, int shift, sz_u8_t keep) {
     uint8x16_t shifted_u8x16;
     switch (shift) {
@@ -128,13 +146,16 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value_u8x16, int shift
 }
 
 /**
- *  @brief  Reduce one `uint8x16_t` whose lanes are 0x00/0xFF booleans into a 16-bit lane mask (bit `i` <=> lane `i`).
+ *  @brief Reduce one @c uint8x16_t whose lanes are 0x00/0xFF booleans into a 16-bit lane mask (bit
+ *      @c i ↔ lane @c i).
  *
- *  The crux of the NEON substrate. `vshrn_n_u16(.., 4)` (the existing `sz_utf8_vreinterpretq_u8_u4_neon_`) yields four
- *  bits per byte (only 16 bytes per 64-bit word), which does NOT match the `vpmovmskb` one-bit-per-byte layout the
- *  shared rule engine consumes. Instead AND each lane's 0xFF with its bit position {1,2,4,..,128} (repeated per 8-lane
- *  half), then `vaddv` each half to collapse the eight in-position bits into one byte: the low half becomes mask bits
- *  [0,8), the high half bits [8,16). No multiply, no `vshrn`; two `vaddv_u8` horizontal adds.
+ *  The crux of the NEON substrate. `vshrn_n_u16(.., 4)` (the existing
+ *  @c sz_utf8_vreinterpretq_u8_u4_neon_) yields four bits per byte (only 16 bytes per 64-bit
+ *  word), which does not match the @c vpmovmskb one-bit-per-byte layout the shared rule engine
+ *  consumes. Instead AND each lane's 0xFF with its bit position {1,2,4,..,128} (repeated per
+ *  8-lane half), then @c vaddv each half to collapse the eight in-position bits into one byte: the
+ *  low half becomes mask bits [0,8), the high half bits [8,16). No multiply, no @c vshrn; two
+ *  @c vaddv_u8 horizontal adds.
  */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes_u8x16) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
@@ -145,8 +166,9 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes_u8x1
     return low_bits | (high_bits << 8);
 }
 
-/** @brief  Combine the four per-quarter NEON movemasks into one 64-bit lane mask: quarter `q` -> bits [16*q, 16*q+16).
- *          The NEON twin of @ref sz_utf8_mask_combine_haswell_ (which OR-combines two 32-bit halves). */
+/** Combine the four per-quarter NEON movemasks into one 64-bit lane mask: quarter @c q → bits
+ *  [16*q, 16*q+16). The NEON twin of @ref sz_utf8_mask_combine_haswell_ (which OR-combines
+ *  two 32-bit halves). */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_neon_( //
     uint8x16_t quarter0_u8x16, uint8x16_t quarter1_u8x16, uint8x16_t quarter2_u8x16, uint8x16_t quarter3_u8x16) {
     sz_u64_t mask = sz_utf8_movemask16_neon_(quarter0_u8x16);
@@ -156,9 +178,9 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_neon_( //
     return mask;
 }
 
-/** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero (the NEON stand-in for
- *          `_mm512_maskz_loadu_epi8`). A zero-initialized vector union stages the partial tail so we never read past
- *          `text + loaded`. Mirrors @ref sz_utf8_load_window_haswell_. */
+/** Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero (the NEON stand-in for
+ *  @c _mm512_maskz_loadu_epi8). A zero-initialized vector union stages the partial tail so we never
+ *  read past `text + loaded`. Mirrors @ref sz_utf8_load_window_haswell_. */
 SZ_HELPER_INLINE void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out_u8x16) {
     if (loaded >= 64) {
         out_u8x16[0] = vld1q_u8(text + 0);
@@ -176,14 +198,13 @@ SZ_HELPER_INLINE void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t l
     out_u8x16[3] = window_vec.u8x16s[3];
 }
 
-/**
- *  @brief  Forward neighbours `next1_u8x16[i] = window_u8x16[i+1]`, `next2_u8x16[i] = window_u8x16[i+2]`,
- *          `next3_u8x16[i] = window_u8x16[i+3]` over all 64 lanes, with the lanes past the window WRAPPING modulo 64
- *          to match Ice Lake's `_mm512_permutexvar_epi8` (so `next1_u8x16[63]==window_u8x16[0]`, etc.). NEON
- *          `vextq_u8` concatenates two adjacent quarters and extracts the shifted span; the successor of the last
- *          quarter wraps to quarter 0 (byte 64 aliases byte 0). The three neighbour distances are provided because
- *          the family classifiers need up to `next3_u8x16` (4-byte sequences).
- */
+/** Forward neighbours `next1_u8x16[i] = window_u8x16[i+1]`, `next2_u8x16[i] = window_u8x16[i+2]`,
+ *  `next3_u8x16[i] = window_u8x16[i+3]` over all 64 lanes, with the lanes past the window wrapping
+ *  modulo 64 to match Ice Lake's @c _mm512_permutexvar_epi8 (so
+ *  `next1_u8x16[63]==window_u8x16[0]`, etc.). NEON @c vextq_u8 concatenates two adjacent quarters
+ *  and extracts the shifted span; the successor of the last quarter wraps to quarter 0 (byte 64
+ *  aliases byte 0). The three neighbour distances are provided because the family classifiers need
+ *  up to @p next3_u8x16 (4-byte sequences). */
 SZ_HELPER_INLINE void sz_utf8_forward_neighbours_neon_( //
     uint8x16_t const *window_u8x16, uint8x16_t *next1_u8x16, uint8x16_t *next2_u8x16, uint8x16_t *next3_u8x16) {
     for (int quarter = 0; quarter < 4; ++quarter) {
@@ -195,8 +216,8 @@ SZ_HELPER_INLINE void sz_utf8_forward_neighbours_neon_( //
     }
 }
 
-/** @brief  Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the NEON twin of
- *          @ref sz_utf8_rune_decode_window_, bit-identical to it (and to `_haswell_`) on every lane. */
+/** Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the NEON twin
+ *  of @ref sz_utf8_rune_decode_window_, bit-identical to it (and to @c _haswell_) on every lane. */
 SZ_HELPER_INLINE sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
     sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_neon_t result;
@@ -268,12 +289,14 @@ SZ_HELPER_INLINE sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
     return result;
 }
 
-/** @brief  One nibble-cascade stage with a sub-256 selector: `result[lane] = table[selector[lane]*16 + within[lane]]`.
- *          Each of @p tile_count 16-byte rows is one selector value; @p within_u8x16 is the addressing nibble
- *          (caller-masked to `[0,16)`). The NEON twin of the AVX2 cascade and VBMI `vpermi2b`: each resident row is
- *          loaded into a `uint8x16_t` and shuffled by @p within_u8x16 via `vqtbl1q_u8`, then blended in for the lanes
- *          whose @p selector_u8x16 picks that row. Gather-free — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`.
- *          @p within_u8x16 / @p selector_u8x16 address one quarter; the caller iterates the four quarters. */
+/** One nibble-cascade stage with a sub-256 selector:
+ *  `result[lane] = table[selector[lane]*16 + within[lane]]`. Each of @p tile_count 16-byte rows
+ *  is one selector value; @p within_u8x16 is the addressing nibble (caller-masked to `[0,16)`).
+ *  The NEON twin of the AVX2 cascade and VBMI @c vpermi2b: each resident row is loaded into a
+ *  @c uint8x16_t and shuffled by @p within_u8x16 via @c vqtbl1q_u8, then blended in for the
+ *  lanes whose @p selector_u8x16 picks that row. Gather-free — only @c vld1q, @c vqtbl1q,
+ *  @c vceqq and @c vbslq. @p within_u8x16 / @p selector_u8x16 address one quarter; the caller
+ *  iterates the four quarters. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     sz_u8_t const *table, int tile_count, uint8x16_t selector_u8x16, uint8x16_t within_u8x16) {
     // Each lane reads table[selector[lane] * 16 + within[lane]] when selector < tile_count, else 0 (no tile matched).
@@ -294,10 +317,11 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     return vandq_u8(vld1q_u8(gathered_lanes), in_range_u8x16);
 }
 
-/** @brief  256-entry byte LUT addressed by a per-lane byte index in `[0,256)`: `result[lane] = group_base[index[lane]]`.
- *          Four `vqtbl4q_u8` reads over the four resident 64-byte quads; `vqtbl4q_u8` returns zero for indices >= 64,
- *          so subtracting 64/128/192 routes each lane to exactly one quad and the four results OR together. The NEON
- *          twin of the substrate `lut256` leaf. @p index_u8x16 addresses one quarter. */
+/** 256-entry byte LUT at @p group_base addressed by a per-lane byte index in `[0,256)`, each lane
+ *  reading the entry its index names. Four @c vqtbl4q_u8 reads over the four resident 64-byte
+ *  quads; @c vqtbl4q_u8 returns zero for indices ≥ 64, so subtracting 64/128/192 routes each lane
+ *  to exactly one quad and the four results OR together. The NEON twin of the substrate @c lut256
+ *  leaf. @p index_u8x16 addresses one quarter. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index_u8x16) {
     uint8x16x4_t const quad0_u8x16x4 = vld1q_u8_x4(group_base + 0 * 64);
     uint8x16x4_t const quad1_u8x16x4 = vld1q_u8_x4(group_base + 1 * 64);
@@ -314,19 +338,21 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base,
     return result_u8x16;
 }
 
-/** @brief  64-entry byte LUT addressed by a per-lane index in `[0,64)`: a single `vqtbl4q_u8` over the 64-byte
- *          table (zero for indices >= 64). The bounded twin of @ref sz_utf8_rune_lut256_neon_ for callers whose
- *          table is only one quad wide - e.g. a 128-entry property table read as two 64-byte halves - so the load
- *          never over-reads past the array. @p group_base must point to at least 64 valid bytes. */
+/** 64-entry byte LUT addressed by a per-lane index in `[0,64)`: a single @c vqtbl4q_u8 over the
+ *  64-byte table (zero for indices ≥ 64). The bounded twin of @ref sz_utf8_rune_lut256_neon_ for
+ *  callers whose table is only one quad wide - e.g. a 128-entry property table read as two
+ *  64-byte halves - so the load never over-reads past the array. @p group_base must point to at
+ *  least 64 valid bytes. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8x16_t index_u8x16) {
     return vqtbl4q_u8(vld1q_u8_x4(group_base), index_u8x16);
 }
 
-/** @brief  Class byte per lane from a page-compressed flat table: `page_lut[high]` selects one 256-byte page, then
- *          `flat[page * 256 + low]` is read per lane. Armv8 NEON has no gather and `vqtbl4q` reaches only 64 bytes,
- *          so the page LUT resolves in-register while the leaf read is a bounded scalar L1 walk over fused 16-bit
- *          indices `(page << 8) | low`. Lanes whose page index reaches @p page_count return zero. SVE2 does the same
- *          lookup with a real `LD1B` gather; see @ref sz_utf8_rune_flat_lookup_sve2_. */
+/** Class byte per lane from a page-compressed flat table: `page_lut[high]` selects one 256-byte
+ *  page, then `flat[page * 256 + low]` is read per lane. Armv8 NEON has no gather and @c vqtbl4q
+ *  reaches only 64 bytes, so the page LUT resolves in-register while the leaf read is a bounded
+ *  scalar L1 walk over fused 16-bit indices `(page << 8) | low`. Lanes whose page index reaches
+ *  @p page_count return zero. SVE2 does the same lookup with a real @c LD1B gather; see
+ *  @ref sz_utf8_rune_flat_lookup_sve2_. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, uint8x16_t high_bytes_u8x16,
     uint8x16_t low_bytes_u8x16) {
@@ -349,10 +375,11 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
 
 #pragma region Drains
 
-/** @brief  Left-pack the set lane indices (in [0, 64), ascending) of a 64-bit @p mask into @p out[0..popcount).
- *          NEON has no `vpcompressb`/`pext`: pull the lowest set bit's index via `ctz`, clear it via `mask & (mask-1)`.
- *          This matches the AVX2 `sz_utf8_unpack_indices_haswell_` BMI2 path semantically; on AArch64
- *          `ctz` lowers to `rbit`+`clz`, and the loop trip count is the boundary popcount (sparse for real text). */
+/** Left-pack the set lane indices (in [0, 64), ascending) of a 64-bit @p mask into
+ *  @p out[0..popcount). NEON has no @c vpcompressb or @c pext: pull the lowest set bit's index via
+ *  @c ctz, clear it via `mask & (mask-1)`. This matches the AVX2 @c sz_utf8_unpack_indices_haswell_
+ *  BMI2 path semantically; on AArch64 @c ctz lowers to @c rbit plus @c clz, and the loop trip count
+ *  is the boundary popcount (sparse for real text). */
 SZ_HELPER_INLINE void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
     while (mask) {
         *out++ = (sz_u8_t)sz_u64_ctz_neon_(mask);
@@ -360,18 +387,10 @@ SZ_HELPER_INLINE void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) 
     }
 }
 
-/**
- *  @brief  Left-pack the set-bit positions of a 64-bit lane @p mask into @p out as a dense, ascending array of
- *          byte-offsets in [0, 64), returning the count - the NEON `vpcompressb`-free start-compaction: a 2 KB
- *          shuffle-LUT (`leftpack8`) keyed by each 8-bit sub-mask, with no scalar `ctz` walk: for every 16-lane
- *          quarter the mask splits into a low and a high byte, each `vqtbl1q_u8`-shuffles the LUT row of its set-bit
- *          positions, the high half is offset by +8, and the two halves are stitched at `popcount(low8)` with one
- *          `vqtbl1q_u8` over a gap-shift index (no scalar per-lane index walk). The quarter offset `q*16` is added in
- *          vector and the dense lanes are stored at the running cursor; one loop over the four quarters.
- */
-/** @brief  Expand the low 16 bits of @p submask into a `uint8x16_t` whose lane `i` is 0xFF when bit `i` is set, else 0
- *          - the inverse of @ref sz_utf8_movemask16_neon_. Broadcasts the two mask bytes across the two
- *          8-lane halves, ANDs each lane's bit-position {1,2,..,128}, and `vceqq` against it (gather-free, no scalar).*/
+/** Expand the low 16 bits of @p submask into a @c uint8x16_t whose lane @c i is 0xFF when bit @c i
+ *  is set, else 0, the inverse of @ref sz_utf8_movemask16_neon_. Broadcasts the two mask bytes
+ *  across the two 8-lane halves, ANDs each lane's bit-position {1,2,..,128}, and @c vceqq against
+ *  it, gather-free and with no scalar step. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint8x16_t const bit_position_u8x16 = vld1q_u8(bit_position_lanes);
@@ -381,6 +400,14 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
     return vceqq_u8(vandq_u8(per_half_u8x16, bit_position_u8x16), bit_position_u8x16);
 }
 
+/** Left-pack the set-bit positions of a 64-bit lane @p mask into @p out as a dense, ascending array
+ *  of byte-offsets in [0, 64), returning the count - the NEON @c vpcompressb-free start-compaction:
+ *  a 2 KB shuffle-LUT (named @c leftpack8) keyed by each 8-bit sub-mask, with no scalar @c ctz
+ *  walk: for every 16-lane quarter the mask splits into a low and a high byte, each
+ *  @c vqtbl1q_u8-shuffles the LUT row of its set-bit positions, the high half is offset by +8, and
+ *  the two halves are stitched at `popcount(low8)` with one @c vqtbl1q_u8 over a gap-shift index
+ *  (no scalar per-lane index walk). The quarter offset `q*16` is added in vector and the dense
+ *  lanes are stored at the running cursor; one loop over the four quarters. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
     static sz_u8_t const leftpack8[256 * 8] = {
         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x00
@@ -675,10 +702,10 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t
     return produced;
 }
 
-/** @brief  NEON forward drain — the `vpcompressb`-free twin of @ref sz_utf8_rune_drain_forward_. Emits one
- *          (start, length) per set boundary lane (ascending), honoring @p capacity and the carried previous-boundary
- *          via @p previous_io; bit-exact with the Ice Lake leaf. Indices are unpacked once, then each segment's
- *          (start, length) is computed from the carried previous boundary. */
+/** NEON forward drain — the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_forward_. Emits one
+ *  (start, length) per set boundary lane (ascending), honoring @p capacity and the carried
+ *  previous-boundary via @p previous_io; bit-exact with the Ice Lake leaf. Indices are unpacked
+ *  once, then each segment's (start, length) is computed from the carried previous boundary. */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_neon_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
@@ -705,28 +732,38 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_neon_( //
 }
 
 /**
- *  @brief  Decode the dense set of emitted-start lanes @p emit_starts of a classified window into sequential UTF-32
- *          runes — the NEON twin of @ref sz_utf8_rune_drain_icelake_, bit-for-bit. The start byte-offsets
- *          are left-packed once via the shuffle-LUT compaction (@ref sz_utf8_leftpack_offsets_neon_); three
- *          sibling `vqtbl4q_u8` gathers pull the lead + up to three trailing bytes per codepoint over the 64-byte
- *          @p window_u8x16 (four quarters), and a branchless 1/2/3/4-byte width-blend assembles each value.
+ *  @brief Decode the dense set of emitted-start lanes @p emit_starts of a classified window into
+ *      sequential UTF-32 runes — the NEON twin of @ref sz_utf8_rune_drain_icelake_, bit-for-bit.
  *
- *  TOTAL decode: @p emit_starts also covers promoted orphan continuation bytes, and @p ill_formed marks every start
- *  lane whose maximal ill-formed subpart collapses to one U+FFFD (Unicode 17.0 §3.9 / W3C). The per-lane ill flag is
- *  gathered with the SAME packed indices (a fourth `vqtbl4q_u8`) so ill-formed output lanes are blended to U+FFFD in
- *  register. The resume cursor reads @p consumed_length (per-lane maximal-subpart byte length, in window order) at the
- *  last emitted start, so an ill-formed trailing lane never skips bytes that owe their own next-window U+FFFD.
+ *  The start byte-offsets are left-packed once via the shuffle-LUT compaction (see
+ *  @ref sz_utf8_leftpack_offsets_neon_); three sibling @c vqtbl4q_u8 gathers pull the lead + up to
+ *  three trailing bytes per codepoint over the 64-byte @p window_u8x16 (four quarters), and a
+ *  branchless 1/2/3/4-byte width-blend assembles each value.
  *
- *  @param  window_u8x16     The 64 raw input bytes, as four `uint8x16_t` quarters (lanes [16*q, 16*q+16)).
- *  @param  emit_starts      Bit `i` => lane `i` emits one rune (a codepoint start or a promoted orphan continuation).
- *  @param  ill_byte_u8x16   Per-lane 0xFF where the emitted start is ill-formed (one U+FFFD), 0 otherwise; four
- *                           quarters.
- *  @param  has_three        Non-zero if any 3- or 4-byte lead is present; gates the 3rd-byte gather and 3-byte assembly.
- *  @param  has_four         Non-zero if any 4-byte lead is present; gates the 4th-byte gather and 4-byte assembly.
- *  @param  consumed_length  Per-lane maximal-subpart byte length (1..4) at each start; flat 64-byte window order.
- *  @param  emit_count       Popcount of @p emit_starts (number of runes available to emit).
- *  @param  consumed_bytes   Set to the byte span the emitted runes cover (the resume cursor delta).
- *  @return Number of runes emitted (<= min(emit_count, capacity)).
+ *  Total decode: @p emit_starts also covers promoted orphan continuation bytes, and
+ *  @p ill_formed marks every start lane whose maximal ill-formed subpart collapses to one U+FFFD
+ *  (Unicode 17.0 §3.9 / W3C). The per-lane ill flag is gathered with the same packed indices (a
+ *  fourth @c vqtbl4q_u8) so ill-formed output lanes are blended to U+FFFD in register. The
+ *  resume cursor reads @p consumed_length (per-lane maximal-subpart byte length, in window
+ *  order) at the last emitted start, so an ill-formed trailing lane never skips bytes that owe
+ *  their own next-window U+FFFD.
+ *
+ *  @param[in] window_u8x16 The 64 raw input bytes, as four @c uint8x16_t quarters
+ *      (lanes [16*q, 16*q+16)).
+ *  @param[in] emit_starts Bit @c i is set when lane @c i emits one rune (a codepoint start or a
+ *      promoted orphan continuation).
+ *  @param[in] ill_byte_u8x16 Per-lane 0xFF where the emitted start is ill-formed (one U+FFFD), 0
+ *      otherwise; four quarters.
+ *  @param[in] has_three Non-zero if any 3- or 4-byte lead is present; gates the 3rd-byte gather
+ *      and 3-byte assembly.
+ *  @param[in] has_four Non-zero if any 4-byte lead is present; gates the 4th-byte gather
+ *      and 4-byte assembly.
+ *  @param[in] consumed_length Per-lane maximal-subpart byte length (1..4) at each start; flat
+ *      64-byte window order.
+ *  @param[in] emit_count Popcount of @p emit_starts (number of runes available to emit).
+ *  @param[out] consumed_bytes Set to the byte span the emitted runes cover (the
+ *      resume cursor delta).
+ *  @return Number of runes emitted (at most the smaller of @p emit_count and @p capacity).
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_neon_(                                        //
     uint8x16_t const *window_u8x16, sz_u64_t emit_starts, uint8x16_t const *ill_byte_u8x16, //
@@ -763,7 +800,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_neon_(                            
         // lead, so a CJK (3-byte) window skips the 4th gather and ASCII/2-byte windows skip both.
         uint8x16_t const lead_u8x16 = vqtbl4q_u8(table_u8x16x4, index_u8x16);
         uint8x16_t const byte1_u8x16 = vqtbl4q_u8(table_u8x16x4, vaddq_u8(index_u8x16, v1_u8x16));
-        // Gather the per-emitted-lane ill-formed flag with the SAME packed indices (0xFF => U+FFFD blend).
+        // Gather the per-emitted-lane ill-formed flag with the same packed indices, where 0xFF
+        // selects the U+FFFD blend.
         uint8x16_t const ill_u8x16 = vqtbl4q_u8(ill_table_u8x16x4, index_u8x16);
 
         // Widen the lead, 2nd byte, and ill flag to 32-bit lanes via the two-step u8->u16->u32 ladder (four sub-blocks).
@@ -810,10 +848,11 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_neon_(                            
             uint32x4_t const lead_v_u32x4 = lead32_u32x4[sub], b1_v_u32x4 = b1_32_u32x4[sub];
             uint32x4_t const mask_0x3f_u32x4 = vdupq_n_u32(0x3F);
 
-            // Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the lead byte
-            // alone), so they stay unconditional; the 2-byte form needs only the second byte, also already gathered.
-            // The wider 3-/4-byte forms are assembled and blended CONDITIONALLY via two sibling `if`s so a CJK
-            // (3-byte-only) window never pays for the 4-byte assembly, and ASCII/2-byte windows skip both.
+            // Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from
+            // the lead byte alone), so they stay unconditional; the 2-byte form needs only the
+            // second byte, also already gathered. The wider 3-/4-byte forms are assembled and
+            // blended conditionally via two sibling `if`s so a CJK (3-byte-only) window never pays
+            // for the 4-byte assembly, and ASCII/2-byte windows skip both.
             uint32x4_t const two_byte_u32x4 = vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x1F)), 6),
                                                         vandq_u32(b1_v_u32x4, mask_0x3f_u32x4));
 
@@ -868,18 +907,22 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_neon_(                            
 }
 
 /**
- *  @brief  Pure 3-byte tile: when the cursor sits on an E0..EF lead - the steady state of CJK, Hangul, and Thai
- *          prose - one `vld3q_u8` structure load deinterleaves 16 (lead, cont1, cont2) triples, so ~7 range checks
- *          validate 16 runes at once and the codepoints assemble with zip/widen and store, no compaction and no
- *          per-lane gather. The clean 3-byte prefix is accepted when it covers the whole attempt (a capacity clamp)
- *          or is long enough to out-run the general window engine; a short prefix cut by an irregular byte means
- *          separator-dense text (Hangul, Devanagari), left to the general engine that digests it with its
- *          separators. The NEON twin of the SVE2 `svld3_u8` tile.
+ *  @brief Pure 3-byte tile for a cursor on an E0..EF lead, the steady state of CJK, Hangul,
+ *      and Thai prose.
  *
- *  Requires @p length >= 48 so the unpredicated `vld3q_u8` never over-reads; shorter spans fall to the general
- *  engine (masked load). Emits only well-formed 3-byte runes, so the consumed span is exactly `clean * 3`.
+ *  One @c vld3q_u8 structure load deinterleaves 16 (lead, cont1, cont2) triples, so ~7 range checks
+ *  validate 16 runes at once and the codepoints assemble with zip/widen and store, no compaction
+ *  and no per-lane gather. The clean 3-byte prefix is accepted when it covers the whole attempt (a
+ *  capacity clamp) or is long enough to out-run the general window engine; a short prefix cut by an
+ *  irregular byte means separator-dense text (Hangul, Devanagari), left to the general engine that
+ *  digests it with its separators. The NEON twin of the SVE2 @c svld3_u8 tile.
  *
- *  @return Number of runes emitted (0 => tile declined); sets @p consumed_bytes to `clean * 3` when it emits.
+ *  Requires @p length ≥ 48 so the unpredicated @c vld3q_u8 never over-reads; shorter spans fall to
+ *  the general engine (masked load). Emits only well-formed 3-byte runes, so the consumed span is
+ *  exactly `clean * 3`.
+ *
+ *  @return Number of runes emitted (0 when the tile declines); sets @p consumed_bytes to
+ *      `clean * 3` when it emits.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_rune_tile3_neon_( //
     sz_u8_t const *text, sz_size_t length,           //
@@ -941,13 +984,12 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_tile3_neon_( //
     return clean;
 }
 
-/**
- *  @brief  Decode one <=64-byte window of @p text into dense UTF-32 @p runes by the uniform "classify -> whole-window
- *          soundness gate -> compress starts -> gather -> width-blend" path, the NEON twin of @ref
- *          sz_utf8_decode_once_icelake_. Pure ASCII takes a dedicated widen lane. An ill-formed (overlong /
- *          surrogate / out-of-range / framing) or truncated-only window declines (`*runes_unpacked == 0`, cursor
- *          unchanged) and the public entry hands the remainder to the serial reference (the U+FFFD oracle).
- */
+/** Decode one <=64-byte window of @p text into dense UTF-32 @p runes by the uniform "classify →
+ *  whole-window soundness gate → compress starts → gather → width-blend" path, the NEON twin of
+ *  @ref sz_utf8_decode_once_icelake_. Pure ASCII takes a dedicated widen lane. An ill-formed
+ *  (overlong / surrogate / out-of-range / framing) or truncated-only window declines
+ *  (`*runes_unpacked == 0`, cursor unchanged) and the public entry hands the remainder to the
+ *  serial reference (the U+FFFD oracle). */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
     sz_cptr_t text, sz_size_t length,                 //
     sz_rune_t *runes, sz_size_t runes_capacity,       //
@@ -1084,8 +1126,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
             }
         }
     }
-    // Single-source classification: a high-nibble LUT gives the per-lane byte length (the SAME LUT the serial
-    // reference uses, so 0xF8..0xFF map to length 4 and cannot slip the gate). Derive `len == k` masks per lane.
+    // Single-source classification: a high-nibble LUT gives the per-lane byte length (the same LUT
+    // the serial reference uses, so 0xF8..0xFF map to length 4 and cannot slip the gate). Derive
+    // `len == k` masks per lane.
     static sz_u8_t const length_by_high_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
     uint8x16_t const length_lut_u8x16 = vld1q_u8(length_by_high_nibble);
     sz_u64_t starts_bits = 0, continuation_bits = 0;
@@ -1140,9 +1183,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
     sz_u64_t const len_ge3 = len_eq3 | len_eq4;
     sz_u64_t const len_ge4 = len_eq4;
 
-    // The FIRST start whose declared sequence reaches past the window bounds the decodable prefix (a malformed
-    // lead-in-lead like `E0 C0` can overrun mid-window, not only the trailing truncation). `overrun_position` was
-    // computed branchlessly above (per-lane `index + length > chunk`, `vminvq_u8` first-set), no scalar ctz walk.
+    // The first start whose declared sequence reaches past the window bounds the decodable prefix
+    // (a malformed lead-in-lead like `E0 C0` can overrun mid-window, not only the trailing
+    // truncation). `overrun_position` was computed branchlessly above (per-lane
+    // `index + length > chunk`, `vminvq_u8` first-set), no scalar ctz walk.
     sz_size_t const decodable_end = overrun_position;
     sz_u64_t const decodable_mask = sz_u64_mask_until_serial_(decodable_end);
 
@@ -1194,9 +1238,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
     sz_u64_t const step3 = step2 & len_ge3 & cont2;
     sz_u64_t const step4 = step3 & len_ge4 & cont3;
 
-    // Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span (well-formed OR the bytes an
-    // ill-formed lead's single U+FFFD consumes) becomes its own 1-byte U+FFFD. The subpart spans are exactly the
-    // continuation slots the `step2/3/4` adds reached, so coverage is those slots smeared by their offset.
+    // Orphan promotion: a continuation byte not covered by any lead's maximal-subpart span
+    // (well-formed or the bytes an ill-formed lead's single U+FFFD consumes) becomes its own 1-byte
+    // U+FFFD. The subpart spans are exactly the continuation slots the `step2/3/4` adds reached, so
+    // coverage is those slots smeared by their offset.
     sz_u64_t const covered = ((step2 & decodable_mask) << 1) | ((step3 & decodable_mask) << 2) |
                              ((step4 & decodable_mask) << 3);
     sz_u64_t const orphan = continuation_bits & decodable_mask & ~covered;
@@ -1205,9 +1250,10 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
     if (emit_count == 0) { return *runes_unpacked = 0, text; } // Nothing decodable -> window-edge finalize in driver.
     sz_u64_t const ill_formed = emit_starts & ~well_formed;    // Orphans are continuations -> never well-formed.
 
-    // Materialize the per-lane ill-formed flag (0xFF/0x00) and the per-lane maximal-subpart length (1..4) as 64-byte
-    // window-order vectors so the drain gathers both with the SAME packed start indices. `expand16` inverts the
-    // movemask per quarter (gather-free); the length is `1 + step2 + step3 + step4` per lane via the expanded bits.
+    // Materialize the per-lane ill-formed flag (0xFF/0x00) and the per-lane maximal-subpart length
+    // (1..4) as 64-byte window-order vectors so the drain gathers both with the same packed start
+    // indices. `expand16` inverts the movemask per quarter (gather-free); the length is
+    // `1 + step2 + step3 + step4` per lane via the expanded bits.
     uint8x16_t ill_quarter_u8x16[4];
     sz_u8_t consumed_length[64];
     for (int quarter = 0; quarter < 4; ++quarter) {

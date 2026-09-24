@@ -1,3 +1,10 @@
+"""Build script for the StringZilla Python package, compiling the CPython extension from C sources.
+
+File: setup.py
+Author: Ash Vardanian
+Date: June 18, 2023
+"""
+
 import os
 import sys
 import platform
@@ -9,7 +16,8 @@ import threading
 import time
 
 
-#: Memory budgeted to one compiler pass, so a small many-core box is not driven into the out-of-memory killer.
+#: Memory budgeted to one compiler pass, so a small many-core box is not driven into the
+#: out-of-memory killer.
 MEMORY_PER_WORKER_GB: Final[float] = 2.0
 
 
@@ -116,10 +124,11 @@ def _parallel_compiler_compile(
     )
     cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
 
-    # `-MMD/-MF` emits a makefile depfile listing the headers each TU pulled in, so an incremental rebuild can skip
-    # a translation unit whose object is newer than every source AND header (distutils' own check tracks sources
-    # only, which is why a header-only edit otherwise needs `--force`). MSVC has no `-MMD`, so it keeps the
-    # source-only behavior. `_sz_force` mirrors `build_ext --force`.
+    # `-MMD/-MF` emits a makefile depfile listing the headers each TU pulled in, so an incremental
+    # rebuild can skip a translation unit whose object is newer than every source and header
+    # (distutils' own check tracks sources only, which is why a header-only edit otherwise needs
+    # `--force`). MSVC has no `-MMD`, so it keeps the source-only behavior. `_sz_force` mirrors the
+    # `build_ext --force` option.
     use_depfiles = not is_msvc
     force = getattr(self, "_sz_force", False)
 
@@ -371,7 +380,8 @@ elif sys.platform == "darwin":
 elif sys.platform == "win32":
     compile_args, link_args, macros_args = windows_settings()
 
-# TODO: It would be great to infer available compilation flags on FreeBSD. They are likely similar to Linux
+# TODO: It would be great to infer available compilation flags on FreeBSD. They are likely
+# similar to Linux.
 else:
     compile_args, link_args, macros_args = [], [], []
 

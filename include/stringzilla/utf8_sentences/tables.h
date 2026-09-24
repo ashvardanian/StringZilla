@@ -1,7 +1,26 @@
 /**
- *  @brief UAX-29 Sentence_Break property tables.
  *  @file include/stringzilla/utf8_sentences/tables.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief UAX-29 Sentence_Break property tables.
+ *
+ *  A codepoint maps to one of the 15 @c sz_sentence_break_t values; see
+ *  @c sz_rune_sentence_break_property.
+ *
+ *  The SIMD kernels resolve the BMP through the page-compressed flat table in the "Flat BMP
+ *  classifier tables" region, one indexed lookup per codepoint, @c vpgatherdd on x86. The other
+ *  tables feed the serial oracle and the SIMD astral cascade.
+ *
+ *  Derived from the UCD by:
+ *
+ *  @code{.py}
+ *  # SentenceBreakProperty.txt -> {Other,CR,LF,Extend,Sep,Format,Sp,Lower,Upper,OLetter,Numeric, #
+ *  ATerm,SContinue,STerm,Close} # big_oletter: the huge homogeneous OLetter blocks (CJK, Hangul,
+ *  ...) become (lo, hi) ranges that # resolve to OLetter arithmetically, keeping them out of the
+ *  LUTs. # flat_lut_0800: one property byte per codepoint for cp < 0x800. # trie: the 3-byte BMP
+ *  residue in a B=8 / SB=16 two-level trie of leaf bytes. # astral (cp >= 0x10000): a sorted (lo,
+ *  hi, class) range list.
+ *  @endcode
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_TABLES_H_
 #define STRINGZILLA_UTF8_SENTENCES_TABLES_H_
@@ -15,49 +34,58 @@ extern "C" {
 /**
  *  @brief Unicode UAX-29 Sentence_Break property values (4-bit encoding, 0-14).
  *
- *  These values correspond to the Sentence_Break property from Unicode UAX-29.
- *  Used by `sz_rune_sentence_break_property()` for full UAX-29-compliant sentence boundary detection.
+ *  These values correspond to the Sentence_Break property from Unicode UAX-29. Used by
+ *  `sz_rune_sentence_break_property()` for full UAX-29-compliant sentence boundary detection.
  */
 enum sz_sentence_break_t {
-    sz_sentence_break_other_k = 0,      /**< Default - any non-special codepoint (SB998) */
-    sz_sentence_break_cr_k = 1,         /**< Carriage Return (U+000D) */
-    sz_sentence_break_lf_k = 2,         /**< Line Feed (U+000A) */
-    sz_sentence_break_extend_k = 3,     /**< Combining marks and extenders (Extend) */
-    sz_sentence_break_sep_k = 4,        /**< Paragraph separators (U+0085, U+2028, U+2029) */
-    sz_sentence_break_format_k = 5,     /**< Format characters (Cf) */
-    sz_sentence_break_sp_k = 6,         /**< Whitespace (White_Space, excluding separators) */
-    sz_sentence_break_lower_k = 7,      /**< Lowercase letters (Lowercase) */
-    sz_sentence_break_upper_k = 8,      /**< Uppercase letters (Uppercase, excluding titlecase) */
-    sz_sentence_break_oletter_k = 9,    /**< Other letters (alphabetic, not Upper/Lower) */
-    sz_sentence_break_numeric_k = 10,   /**< Digits (Nd and other numerics) */
-    sz_sentence_break_aterm_k = 11,     /**< Ambiguous terminator (U+002E full stop, etc.) */
-    sz_sentence_break_scontinue_k = 12, /**< Sentence continuation punctuation (comma, colon, etc.) */
-    sz_sentence_break_sterm_k = 13,     /**< Sentence terminator (U+0021, U+003F, etc.) */
-    sz_sentence_break_close_k = 14,     /**< Closing punctuation and quotes (Ps, Pe, Pi, Pf) */
+
+    /** Default - any non-special codepoint (SB998). */
+    sz_sentence_break_other_k = 0,
+
+    /** Carriage Return (U+000D). */
+    sz_sentence_break_cr_k = 1,
+
+    /** Line Feed (U+000A). */
+    sz_sentence_break_lf_k = 2,
+
+    /** Combining marks and extenders (Extend). */
+    sz_sentence_break_extend_k = 3,
+
+    /** Paragraph separators (U+0085, U+2028, U+2029). */
+    sz_sentence_break_sep_k = 4,
+
+    /** Format characters (Cf). */
+    sz_sentence_break_format_k = 5,
+
+    /** Whitespace (White_Space, excluding separators). */
+    sz_sentence_break_sp_k = 6,
+
+    /** Lowercase letters (Lowercase). */
+    sz_sentence_break_lower_k = 7,
+
+    /** Uppercase letters (Uppercase, excluding titlecase). */
+    sz_sentence_break_upper_k = 8,
+
+    /** Other letters (alphabetic, not Upper/Lower). */
+    sz_sentence_break_oletter_k = 9,
+
+    /** Digits (Nd and other numerics). */
+    sz_sentence_break_numeric_k = 10,
+
+    /** Ambiguous terminator (U+002E full stop, etc.). */
+    sz_sentence_break_aterm_k = 11,
+
+    /** Sentence continuation punctuation (comma, colon, etc.). */
+    sz_sentence_break_scontinue_k = 12,
+
+    /** Sentence terminator (U+0021, U+003F, etc.). */
+    sz_sentence_break_sterm_k = 13,
+
+    /** Closing punctuation and quotes (Ps, Pe, Pi, Pf). */
+    sz_sentence_break_close_k = 14,
 };
 
 #pragma region Sentence_Break tables
-
-/**
- *  @brief UAX-29 Sentence_Break property tables. A codepoint maps to one of the 15
- *  `sz_sentence_break_t` values (see `sz_rune_sentence_break_property`).
- *
- *  ! The SIMD kernels resolve the BMP through the page-compressed FLAT table in the `Flat BMP classifier tables`
- *  ! region (one indexed lookup per codepoint, `vpgatherdd` on x86). The tables below feed the serial oracle and
- *  ! the SIMD astral cascade.
- *
- *  Derived from the UCD by:
- *
- *  @code{.py}
- *  # SentenceBreakProperty.txt -> {Other,CR,LF,Extend,Sep,Format,Sp,Lower,Upper,OLetter,Numeric,
- *  #                               ATerm,SContinue,STerm,Close}
- *  # big_oletter: the huge homogeneous OLetter blocks (CJK, Hangul, ...) become (lo, hi) ranges that
- *  #   resolve to OLetter arithmetically, keeping them out of the LUTs.
- *  # flat_lut_0800: one property byte per codepoint for cp < 0x800.
- *  # trie: the 3-byte BMP residue in a B=8 / SB=16 two-level trie of leaf bytes.
- *  # astral (cp >= 0x10000): a sorted (lo, hi, class) range list.
- *  @endcode
- */
 
 enum {
     sz_utf8_sentence_break_big_oletter_count_k = 18,
@@ -484,10 +512,14 @@ static const sz_u8_t sz_utf8_sentence_break_astral_cls_[550] = {
 
 #pragma region Haswell AVX2 Sentence_Break nibble cascade tables
 #if SZ_USE_HASWELL || SZ_USE_NEON
+
 /**
- *  @brief  SIMD Sentence_Break lookup tables, bit-exact with @ref sz_rune_sentence_break_property. `bmp_page_lut_` maps
- *          `cp >> 8` to a page index and doubles as the page LUT of the flat BMP classifier below; the astral
- *          5-nibble `vpshufb` cascade classifies cp-0x10000 in-register, emitting the class byte directly.
+ *  @brief SIMD Sentence_Break lookup tables, bit-exact with @ref sz_rune_sentence_break_property.
+ *
+ *  @c bmp_page_lut_ maps `cp >> 8` to a page index and doubles as the page LUT of the flat BMP
+ *  classifier below; the astral 5-nibble @c vpshufb cascade classifies cp - 0x10000 in-register,
+ *  emitting the class byte directly.
+ *
  *  @code{.py}
  *  # ASTRAL: over offset=cp-0x10000 (nibbles n4..n0): page=astral_stage1[n4*16+n3];
  *  #         leaf2=astral_stage2_lo[page*16+n2]; leaf_lo=astral_stage3_lo[leaf2*16+n1]; leaf_hi=astral_stage3_hi[...];
@@ -774,11 +806,13 @@ static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage4_groups_[3840] 
 // clang-format off
 
 /**
- *  @brief  Flat Sentence_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 57 distinct
- *          256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, one indexed lookup per
- *          codepoint, read by `vpgatherdd` on x86, `svld1_gather` on SVE2, and a bounded scalar leaf walk on NEON,
- *          which has no gather. The page LUT is `bmp_page_lut_` itself, reused rather than duplicated.
- *          Bit-exact with `sz_rune_sentence_break_property` across the BMP by construction. Derived by:
+ *  @brief Flat Sentence_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 57 distinct
+ *      256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor.
+ *
+ *  One indexed lookup per codepoint, read by @c vpgatherdd on x86, @c svld1_gather on SVE2, and a
+ *  bounded scalar leaf walk on NEON, which has no gather. The page LUT is @c bmp_page_lut_ itself,
+ *  reused rather than duplicated. Bit-exact with @c sz_rune_sentence_break_property across the BMP
+ *  by construction. Derived by:
  *
  *  @code{.py}
  *  # desc[cp] = sz_rune_sentence_break_property(cp) for cp in range(0x110000), dumped from the serial oracle.
@@ -792,8 +826,12 @@ static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage4_groups_[3840] 
  *  @endcode
  */
 enum {
-    sz_utf8_sentence_break_flat_pages_k = 57, /**< Distinct 256-byte pages the BMP compresses to. */
-    sz_utf8_sentence_break_flat_count_k = 14592, /**< Logical entries of the flat leaf (the array is padded). */
+
+    /** Distinct 256-byte pages the BMP compresses to. */
+    sz_utf8_sentence_break_flat_pages_k = 57,
+
+    /** Logical entries of the flat leaf (the array is padded). */
+    sz_utf8_sentence_break_flat_count_k = 14592,
 };
 
 sz_align_(64) static const sz_u8_t sz_utf8_sentence_break_flat_bmp_[14656] = {

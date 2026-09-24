@@ -1,8 +1,9 @@
 /**
- *  @brief  UAX-29 word-boundary (Word_Break) tests: known-answer goldens, malformed-input safety, and the
- *          serial-vs-ISA differential over hardened corpora.
- *  @file   test/utf8_wordbreaks.cpp
+ *  @file test/utf8_wordbreaks.cpp
  *  @author Ash Vardanian
+ *  @date June 22, 2026
+ *  @brief UAX-29 word-boundary (Word_Break) tests: known-answer goldens, malformed-input safety,
+ *      and the serial-vs-ISA differential over hardened corpora.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -27,7 +28,7 @@
 
 #pragma region Unit
 
-/** @brief Hand-checked UAX-29 word-break golden vectors: each source text and its expected word segments. */
+/** Hand-checked UAX-29 word-break golden vectors: each source text and its expected words. */
 static utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
     {""_sv, {}},
     {"a"_sv, {"a"_sv}},
@@ -40,7 +41,7 @@ static utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
     {"Hello, world!"_sv, {"Hello"_sv, ","_sv, " "_sv, "world"_sv, "!"_sv}},  // letter/punct/space boundaries
 };
 
-/** @brief Known-answer property table for `sz_rune_is_word_char` (UAX-29 word-character classification). */
+/** Known-answer table for @c sz_rune_is_word_char, the UAX-29 word-character classification. */
 static void check_utf8_wordbreaks_classification_() {
     // ASCII letters, digits, underscore, and the mid-word apostrophe are word characters.
     verify(sz_rune_is_word_char('A') == sz_true_k);
@@ -80,11 +81,9 @@ static void check_utf8_wordbreaks_classification_() {
     verify(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
 }
 
-/**
- *  @brief The UTF-8 word-break segmenters compiled on this target. The always-present `dispatched` entry keeps the
- *         table non-empty on a baseline build, and the unit / rule-coverage / safety / equivalence drivers below
- *         all iterate this one ladder so their ISA coverage can never drift apart.
- */
+/** The UTF-8 word-break segmenters compiled on this target. The always-present @c dispatched entry
+ *  keeps the table non-empty on a baseline build, and the unit / rule-coverage / safety /
+ *  equivalence drivers below all iterate this one ladder so their ISA coverage never drifts. */
 static utf8_segment_backend_t const utf8_wordbreaks_backends[] = {
     {"dispatched", sz_utf8_wordbreaks},
 #if SZ_USE_HASWELL
@@ -113,8 +112,8 @@ static utf8_segment_backend_t const utf8_wordbreaks_backends[] = {
 #endif
 };
 
-/** @brief Segment @p text with @p forward at @p capacity and assert the (start, length) stream tiles the input
- *         into exactly @p expected_lengths. */
+/** Segment @p text with @p forward at @p capacity and assert the (start, length) stream tiles the
+ *  input into exactly @p expected_lengths. */
 static void check_utf8_wordbreaks_lengths_(char const *label, sz_utf8_segmenter_t forward, std::string const &text,
                                            std::vector<sz_size_t> const &expected_lengths, sz_size_t capacity) {
     utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(forward, text.data(), text.size(), capacity);
@@ -128,12 +127,11 @@ static void check_utf8_wordbreaks_lengths_(char const *label, sz_utf8_segmenter_
     verify(!utf8_segment_cursor_next_(cursor, start, length) && label && "deferred-mid golden emitted extra segments");
 }
 
-/**
- *  @brief WB6/WB7/WB11/WB12 deferred-mid goldens: a Mid* (`,` `:` `'` `"`) whose WB4-ignorable lookahead run
- *         crosses every SIMD window width (16/64 bytes) before the bridge completes or fails on the far side.
- *         Regression corpus for the cross-window bridge-shadow carry: a failed bridge must still emit the break
- *         at the mid, keep WB7a's Hebrew x Single_Quote join, and leave the mid as the effective left context.
- */
+/** WB6/WB7/WB11/WB12 deferred-mid goldens: a Mid* (`,` `:` `'` `"`) whose WB4-ignorable lookahead
+ *  run crosses every SIMD window width (16/64 bytes) before the bridge completes or fails on the
+ *  far side. Regression corpus for the cross-window bridge-shadow carry: a failed bridge must still
+ *  emit the break at the mid, keep WB7a's Hebrew x Single_Quote join, and leave the mid as the
+ *  effective left context. */
 static void check_utf8_wordbreaks_deferred_mid_() {
     static sz_size_t const run_lengths[] = {3, 8, 15, 31, 32, 33, 100};
     static char const combining_grave[] = "\xCC\x80";   // U+0300, Word_Break=Extend
@@ -175,7 +173,7 @@ static void check_utf8_wordbreaks_deferred_mid_() {
         }
 }
 
-/** @brief Known-answer word-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
+/** Known-answer word-break vectors via dispatched, serial, each ISA, and the C++ range. */
 void test_utf8_wordbreaks_unit() {
     fmt::println("  - testing UTF-8 word-break known-answer vectors...");
 
@@ -210,11 +208,11 @@ void test_utf8_wordbreaks_unit() {
            "micro_apostrophe wordbreaks");
 }
 
-#pragma endregion // Unit
+#pragma endregion Unit
 
 #pragma region Equivalence
 
-/** @brief UAX-29 word-break corner motifs (sprinkled into the random corpus): Mid-bridges, MidNum, RI parity, etc. */
+/** UAX-29 word-break corner motifs for the random corpus: Mid-bridges, MidNum, RI parity, etc. */
 static sz::string_view_t const utf8_wordbreaks_motifs[] = {
     "don't"_sv,                                // WB6/7: apostrophe bridges two letter runs
     "l'avion"_sv,                              // WB7a/b: leading apostrophe shape
@@ -233,11 +231,9 @@ static sz::string_view_t const utf8_wordbreaks_motifs[] = {
     "word\xC2\xB7word"_sv,                     // U+00B7 MIDDLE DOT as MidLetter between letters
 };
 
-/**
- *  @brief Multi-window seam regressions (each > 64 bytes): WB15/16 Regional_Indicator parity and the WB6/7/11/12
- *         Mid-bridge carry state, each pinned across the 64-byte window boundary. Stored as raw bytes so the
- *         differential driver feeds them to serial-vs-ISA directly (no inline agreement asserts).
- */
+/** Multi-window seam regressions, each over 64 bytes: WB15/16 Regional_Indicator parity and the
+ *  WB6/7/11/12 Mid-bridge carry state, pinned across the 64-byte window boundary. Stored as raw
+ *  bytes for the differential driver to feed to serial-vs-ISA directly, with no inline asserts. */
 static sz::string_view_t const utf8_wordbreaks_seam_regressions[] = {
     // ri_after_newline (65 bytes)
     "\xE3\x82\xAB\x2D\x0A\xF0\x9F\x87\xA6\x62\xC2\xAD\xF0\x9F\x87\xA6\xCC\x80\x0A\x5F\xF0\x9F\x87\xA6" //
@@ -255,13 +251,13 @@ static sz::string_view_t const utf8_wordbreaks_seam_regressions[] = {
     "\xA9\xE3\x80\x80\x35\x27"_sv,
 };
 
-/** @brief Katakana run @p link_count codepoints long (WB13 Katakana x Katakana), into @p out (cleared first). */
+/** @p link_count Katakana codepoints (WB13 Katakana × Katakana), into @p out, cleared first. */
 static void utf8_wordbreaks_dense_katakana_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(0x30AB)); // カ
 }
 
-/** @brief Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend), into @p out. */
+/** Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend), to @p out. */
 static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
@@ -271,7 +267,7 @@ static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_co
     }
 }
 
-/** @brief MidLetter (`'` and U+00B7) between letters, dense across @p link_count groups (WB6/7), into @p out. */
+/** MidLetter (`'` and U+00B7) between letters, @p link_count dense groups (WB6/7), into @p out. */
 static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
@@ -281,7 +277,8 @@ static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_
     }
 }
 
-/** @brief Hebrew letters bridged by single-quote, @p link_count groups (WB7a Hebrew_Letter MidLetter), into @p out. */
+/** Hebrew letters bridged by single-quote, @p link_count groups (WB7a Hebrew_Letter MidLetter),
+ *  into @p out. */
 static void utf8_wordbreaks_dense_hebrew_quote_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
@@ -291,7 +288,8 @@ static void utf8_wordbreaks_dense_hebrew_quote_(std::string &out, std::size_t li
     }
 }
 
-/** @brief Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+/** Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to
+ *  @p sink. */
 static void utf8_wordbreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
@@ -302,7 +300,7 @@ static void utf8_wordbreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t
     utf8_wordbreaks_dense_hebrew_quote_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
+/** Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
 static void utf8_wordbreaks_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     utf8_dense_regional_indicators_(scratch, generator, gap);
@@ -311,7 +309,7 @@ static void utf8_wordbreaks_straddles_(std::mt19937 &generator, std::size_t gap,
     utf8_wordbreaks_dense_midletter_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Word-biased random-corpus snippets: apostrophe/underscore bridges, numeric groups, CJK/Hangul/Hebrew/Katakana. */
+/** Word snippets: apostrophe/underscore bridges, numeric groups, CJK/Hangul/Hebrew/Katakana. */
 static char const *const utf8_wordbreaks_snippets[] = {
     "don't ",
     "can't_stop ",
@@ -331,14 +329,14 @@ static char const *const utf8_wordbreaks_snippets[] = {
     "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7ok ",       // Arabic abutting Latin: WB5 across a bidi transition
 };
 
-/** @brief Word family alphabet: weights bias toward the family snippets and motifs (WB6/7/11/12/13/15/16). */
+/** Word alphabet, biased toward family snippets and motifs (WB6/7/11/12/13/15/16). */
 static utf8_corpus_alphabet_t const utf8_wordbreaks_alphabet = {
     span_over(utf8_wordbreaks_snippets),
     span_over(utf8_default_boundary_codepoints),
     {{40, 15, 10, 30, 5}}, // snippet, boundary, astral, motif, malformed
 };
 
-/** @brief Assemble the word family's differential corpora (motifs + dense + straddle + seam regressions + alphabet). */
+/** Word differential corpora: motifs, dense runs, straddles, seam regressions, and the alphabet. */
 static utf8_segment_corpora_t utf8_wordbreaks_corpora_() {
     utf8_segment_corpora_t corpora = {"word",
                                       span_over(utf8_wordbreaks_motifs),
@@ -349,11 +347,11 @@ static utf8_segment_corpora_t utf8_wordbreaks_corpora_() {
     return corpora;
 }
 
-#pragma endregion // Equivalence
+#pragma endregion Equivalence
 
 #pragma region Rule coverage
 
-/** @brief Rule-coverage gate: every WB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
+/** Rule-coverage gate: every WB rule motif runs and agrees serial-vs-ISA at window phases. */
 void test_utf8_wordbreaks_rules() {
     fmt::println("  - testing UTF-8 word rule-coverage matrix...");
 
@@ -384,11 +382,11 @@ void test_utf8_wordbreaks_rules() {
         {"WB16", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv}, // [^RI] (RI RI)* RI x RI (parity reset)
         {"WB999", utf8_rule_breaks_k, "a b"_sv}, // Any / Any (default break at the space)
         // Opposite-direction motifs (E1): the same rule firing the other way.
-        {"WB6", utf8_rule_breaks_k, "a''b"_sv},           // two MidLetters: the bridge fails -> break
+        {"WB6", utf8_rule_breaks_k, "a''b"_sv},           // two MidLetters: the bridge fails → break
         {"WB6", utf8_rule_breaks_k, "a\"b"_sv},           // Double_Quote is not MidNumLetQ for Latin: break twice
         {"WB11", utf8_rule_breaks_k, "1\"2"_sv},          // Double_Quote never bridges numerics either
-        {"WB11", utf8_rule_breaks_k, "1,,2"_sv},          // two MidNum: numeric bridge fails -> break
-        {"WB13", utf8_rule_breaks_k, "\xE3\x82\xA2z"_sv}, // Katakana then Latin: script change -> break
+        {"WB11", utf8_rule_breaks_k, "1,,2"_sv},          // two MidNum: numeric bridge fails → break
+        {"WB13", utf8_rule_breaks_k, "\xE3\x82\xA2z"_sv}, // Katakana then Latin: script change → break
         {"WB15", utf8_rule_breaks_k,
          "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI: break after the pair
     };
@@ -402,11 +400,11 @@ void test_utf8_wordbreaks_rules() {
                                   span_over(required_rules));
 }
 
-#pragma endregion // Rule coverage
+#pragma endregion Rule coverage
 
 #pragma region Safety
 
-/** @brief Malformed-input safety of the UTF-8 word kernels (serial / dispatched / icelake). */
+/** Malformed-input safety of the UTF-8 word kernels (serial / dispatched / icelake). */
 void test_utf8_wordbreaks_safety() {
     fmt::println("  - testing malformed-input safety of UTF-8 word kernels...");
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_wordbreaks_serial}};
@@ -415,11 +413,11 @@ void test_utf8_wordbreaks_safety() {
     fmt::println("    word safety passed!");
 }
 
-#pragma endregion // Safety
+#pragma endregion Safety
 
 #pragma region Drivers
 
-/** @brief Serial-vs-ISA word differential over the hardened corpora (high-density + long-range + seam regressions). */
+/** Serial-vs-ISA word differential over the hardened high-density, long-range and seam corpora. */
 void test_utf8_wordbreaks_all() {
     // The iteration count is this family's share of the suite budget, sized against its siblings.
     check_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
@@ -431,4 +429,4 @@ void test_utf8_wordbreaks_all() {
                                            motif.data(), motif.size());
 }
 
-#pragma endregion // Drivers
+#pragma endregion Drivers

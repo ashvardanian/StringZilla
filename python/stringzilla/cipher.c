@@ -1,60 +1,61 @@
 /**
- *  @brief AES-256 in counter mode and in Galois/counter mode.
  *  @file python/stringzilla/cipher.c
  *  @author Ash Vardanian
+ *  @date August 4, 2026
+ *  @brief AES-256 in counter mode and in Galois/counter mode.
  */
 #include "stringzilla.h"
 
 /**
- *  @brief The class a refused Galois/counter mode tag raises, derived from `ValueError`.
+ *  @brief The class a refused Galois/counter mode tag raises, derived from @c ValueError.
  *
- *  A forged tag is a value-domain failure, so a caller who only guards against malformed input still
- *  catches a forgery, while a caller who must tell a forgery from a malformed argument names this class.
+ *  A forged tag is a value-domain failure, so a caller who only guards against malformed input
+ *  still catches a forgery, while a caller who must tell a forgery from a malformed argument
+ *  names this class.
  */
 PyObject *AuthenticationErrorType = NULL;
 
-/** @brief An expanded counter-mode schedule, wiped when the object is collected. */
+/** An expanded counter-mode schedule, wiped when the object is collected. */
 typedef struct {
     PyObject ob_base;
     sz_aes256_key_t key;
 } Aes256CtrKey;
 
-/** @brief An expanded schedule plus the Galois hash powers, wiped when the object is collected. */
+/** An expanded schedule plus the Galois hash powers, wiped when the object is collected. */
 typedef struct {
     PyObject ob_base;
     sz_aes256_gcm_key_t key;
 } Aes256GcmKey;
 
-/** @brief A chunked authenticated seal, holding its own copy of the key. */
+/** A chunked authenticated seal, holding its own copy of the key. */
 typedef struct {
     PyObject ob_base;
     sz_aes256_gcm_encryptor_t encryptor;
 } Aes256GcmEncryptor;
 
-/** @brief A chunked authenticated open, holding its own copy of the key. */
+/** A chunked authenticated open, holding its own copy of the key. */
 typedef struct {
     PyObject ob_base;
     sz_aes256_gcm_decryptor_t decryptor;
 } Aes256GcmDecryptor;
 
 /**
- *  @brief  Overwrites @p length bytes at @p start with zeros, in a way a compiler may not elide.
+ *  @brief Overwrites @p length bytes at @p start with zeros, in a way a compiler may not elide.
  *
- *  The C core exposes no wipe entry point, and a plain `memset` over storage that is dead immediately
- *  afterwards is precisely the store an optimizer is licensed to drop. Writing through a `volatile`
- *  pointer makes every byte an observable side effect, so no schedule survives in memory a freed object
- *  once held. This translation unit sits outside the header-only tier, so it may spell the loop out rather
- *  than route through a kernel bound by that tier's no-libc-symbols rule.
+ *  The C core exposes no wipe entry point, and a plain @c memset over storage that is dead
+ *  immediately afterwards is precisely the store an optimizer is licensed to drop. Writing
+ *  through a @c volatile pointer makes every byte an observable side effect, so no schedule
+ *  survives in memory a freed object once held. This translation unit sits outside the
+ *  header-only tier, so it may spell the loop out rather than route through a kernel bound by the
+ *  no-LibC-symbols rule of that tier.
  */
 static void sz_py_wipe_bytes(void *start, sz_size_t length) {
     volatile sz_u8_t *cursor = (volatile sz_u8_t *)start;
     while (length--) *cursor++ = 0;
 }
 
-/**
- *  @brief  Exports a string-like object and confirms it spans exactly @p expected bytes.
- *          On failure sets a Python exception naming @p role and returns 0.
- */
+/** Exports a string-like object and confirms it spans exactly @p expected bytes. On failure sets a
+ *  Python exception naming @p role and returns 0. */
 static int sz_py_export_exact_bytes(PyObject *object, sz_size_t expected, char const *role, sz_cptr_t *start) {
     sz_size_t length;
     if (!sz_py_export_string_like(object, start, &length)) {
@@ -69,10 +70,8 @@ static int sz_py_export_exact_bytes(PyObject *object, sz_size_t expected, char c
     return 1;
 }
 
-/**
- *  @brief  Reads the single `secret` argument every key constructor takes, positionally or by name.
- *          On failure sets a Python exception naming @p type_name and returns NULL.
- */
+/** Reads the single @c secret argument every key constructor takes, positionally or by name. On
+ *  failure sets a Python exception naming @p type_name and returns NULL. */
 static PyObject *sz_py_export_secret_argument(PyObject *args, PyObject *kwargs, char const *type_name) {
     Py_ssize_t const positional_args_count = PyTuple_Size(args);
     if (positional_args_count > 1) {
@@ -435,10 +434,8 @@ static PyObject *Aes256GcmKey_decrypt(PyObject *self_obj, PyObject *const *args,
     return output_obj;
 }
 
-/**
- *  @brief  Reads the `key` and `nonce` arguments both chunked types take, positionally or by name.
- *          On failure sets a Python exception naming @p type_name and returns 0.
- */
+/** Reads the @p key and @p nonce arguments both chunked types take, positionally or by name. On
+ *  failure sets a Python exception naming @p type_name and returns 0. */
 static int sz_py_export_key_and_nonce_arguments(PyObject *args, PyObject *kwargs, char const *type_name,
                                                 Aes256GcmKey const **key, sz_cptr_t *nonce) {
     Py_ssize_t const positional_args_count = PyTuple_Size(args);

@@ -1,7 +1,8 @@
 /**
- *  @brief Hardware-accelerated UAX-29 grapheme cluster segmentation.
  *  @file include/stringzilla/utf8_graphemes.h
  *  @author Ash Vardanian
+ *  @date June 20, 2026
+ *  @brief Hardware-accelerated UAX-29 grapheme cluster segmentation.
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_H_
 #define STRINGZILLA_UTF8_GRAPHEMES_H_
@@ -17,19 +18,20 @@ extern "C" {
 /**
  *  @brief Segment UTF-8 text into UAX-29 grapheme clusters in a single pass (dispatch function).
  *
- *  Walks the whole input left-to-right and writes one entry per grapheme cluster into two parallel output
- *  arrays: `cluster_starts[i]` is the byte offset of the i-th cluster and `cluster_lengths[i]` its byte length.
- *  Clusters are the spans between consecutive UAX-29 grapheme boundaries (GB1-GB999), so a single call segments
- *  the entire input without the caller having to loop and restart a scan for every cluster.
+ *  Walks the whole input left-to-right and writes one entry per grapheme cluster into two parallel
+ *  output arrays: `cluster_starts[i]` is the byte offset of the i-th cluster and
+ *  `cluster_lengths[i]` its byte length. Clusters are the spans between consecutive UAX-29 grapheme
+ *  boundaries (GB1-GB999), so a single call segments the entire input without the caller having to
+ *  loop and restart a scan for every cluster.
  *
- *  @param text UTF-8 encoded text.
- *  @param length Byte length of @p text.
- *  @param cluster_starts Output array of cluster byte offsets (at least @p clusters_capacity entries).
- *  @param cluster_lengths Output array of cluster byte lengths (at least @p clusters_capacity entries).
- *  @param clusters_capacity Capacity of the output arrays, in entries.
- *  @param bytes_consumed Optional output: byte offset up to which the input was segmented. Equals @p length
- *         when everything fit; otherwise it is the start of the first cluster that did not fit (a grapheme
- *         boundary), so the caller may resume from @c text+*bytes_consumed.
+ *  @param[in] text UTF-8 encoded text.
+ *  @param[in] length Byte length of @p text.
+ *  @param[out] cluster_starts Cluster byte offsets, at least @p clusters_capacity entries.
+ *  @param[out] cluster_lengths Cluster byte lengths, at least @p clusters_capacity entries.
+ *  @param[in] clusters_capacity Capacity of the output arrays, in entries.
+ *  @param[out] bytes_consumed Optional byte offset up to which the input was segmented: @p length
+ *      when everything fit, else the start of the first cluster that did not fit (a grapheme
+ *      boundary), so the caller may resume from `text + *bytes_consumed`.
  *  @return Number of clusters written (at most @p clusters_capacity).
  *
  *  @note No zero-length clusters are emitted; @p length == 0 returns 0.

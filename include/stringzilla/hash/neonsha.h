@@ -1,7 +1,9 @@
 /**
- *  @brief NEON + SHA2 backend for string hashing and checksums.
  *  @file include/stringzilla/hash/neonsha.h
  *  @author Ash Vardanian
+ *  @date October 3, 2025
+ *  @brief NEON + SHA2 backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_NEONSHA_H_
@@ -25,8 +27,8 @@ extern "C" {
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256.
- *  @param hash Pointer to 8x 32-bit hash values, modified in place.
- *  @param block Pointer to 64-byte message block.
+ *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param[in] block Pointer to 64-byte message block.
  */
 SZ_HELPER_INLINE void sz_sha256_process_block_neon_(sz_u32_t hash[sz_at_least_(8)],
                                                     sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {

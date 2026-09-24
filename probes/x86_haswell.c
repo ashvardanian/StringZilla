@@ -1,4 +1,11 @@
-/* StringZilla ISA probe: Haswell (x86-64 AVX2 + BMI2), mirroring `include/stringzilla/find/haswell.h` */
+/**
+ *  @file probes/x86_haswell.c
+ *  @author Ash Vardanian
+ *  @date July 9, 2026
+ *  @brief ISA probe for Haswell, the x86-64 AVX2 and BMI2 tier.
+ *
+ *  @sa include/stringzilla/find/haswell.h
+ */
 #include <immintrin.h>
 
 #if defined(__clang__)

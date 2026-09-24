@@ -1,11 +1,12 @@
 /**
  *  @file c/stringzilla/utf8_norm.c
- *  @brief Per-domain dispatch shim for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
  *  @author Ash Vardanian
+ *  @date June 14, 2026
+ *  @brief Per-domain dispatch shim for the single-pass Unicode normalizer: NFD, NFC, NFKD, NFKC.
  *
- *  Fills its slice of the shared dispatch table and defines the `SZ_API_RUNTIME` public wrappers that call
- *  through it. The two entry points - the normalizer and the violation finder - share one streaming
- *  engine parameterized by a force-inlined scan primitive; the NEON backend overrides only that scan.
+ *  Fills its slice of the shared dispatch table and defines the @c SZ_API_RUNTIME public wrappers
+ *  that call through it. The normalizer and the violation finder share one streaming engine,
+ *  parameterized by a force-inlined scan primitive; the NEON backend overrides only that scan.
  */
 #include <stringzilla/utf8_norm.h> // `sz_utf8_norm_*`, `sz_utf8_find_denormalized_*`
 

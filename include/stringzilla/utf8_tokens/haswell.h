@@ -1,7 +1,8 @@
 /**
- *  @brief Haswell (AVX2) backend for UTF-8 newline and whitespace delimiter scanning.
  *  @file include/stringzilla/utf8_tokens/haswell.h
  *  @author Ash Vardanian
+ *  @date November 18, 2025
+ *  @brief Haswell (AVX2) backend for UTF-8 newline and whitespace delimiter scanning.
  */
 #ifndef STRINGZILLA_UTF8_TOKENS_HASWELL_H_
 #define STRINGZILLA_UTF8_TOKENS_HASWELL_H_
@@ -23,23 +24,19 @@ extern "C" {
 #pragma GCC target("avx2,bmi,bmi2,popcnt")
 #endif
 
-/**
- *  @brief Unsigned byte greater-than-or-equal comparison for AVX2 via the `max(a, b) == a` identity.
- */
+/** Unsigned byte greater-than-or-equal comparison for AVX2 via the `max(a, b) == a` identity. */
 SZ_HELPER_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a_u8x32, __m256i b_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(a_u8x32, b_u8x32), a_u8x32);
 }
 
-#pragma region Multistep newline / whitespace iteration
+/*  Multistep newline and whitespace iteration for Haswell AVX2. Each 32-byte window is classified
+ *  into a @c start_bits mask plus per-length start masks, then the peel left-packs matches with @c
+ *  vpermd. Starts in lanes [0,29] are trusted and the cursor steps 30, so any 2-/3-byte delimiter
+ *  is loaded in full. */
+#pragma region Multistep newline and whitespace iteration
 
-/*  Multistep newline / whitespace iteration (Haswell / AVX2). Each 32-byte window is classified into a
- *  `start_bits` mask plus per-length start masks, then the peel left-packs matches with `vpermd`. Starts in
- *  lanes [0,29] are trusted and the cursor steps 30, so any 2-/3-byte delimiter is fully loaded. */
-
-/**
- *  @brief  Left-pack table: row `[m]` holds the 8 dword indices that gather the `m`-selected u64 lanes (of 4,
- *          each a dword pair) to the front for `_mm256_permutevar8x32_epi32`.
- */
+/** Left-pack table: row `[m]` holds the 8 dword indices that gather the @c m -selected u64 lanes
+ *  (of 4, each a dword pair) to the front for @c _mm256_permutevar8x32_epi32. */
 static sz_u32_t const sz_utf8_compact_lut_haswell_[16][8] = {
     {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
     {4, 5, 0, 0, 0, 0, 0, 0}, {0, 1, 4, 5, 0, 0, 0, 0}, {2, 3, 4, 5, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 0, 0},
@@ -47,10 +44,9 @@ static sz_u32_t const sz_utf8_compact_lut_haswell_[16][8] = {
     {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
 };
 
-/**
- *  @brief  Peel the window's first `emit_count` matches with a `vpermd` left-pack, 4 lanes per sub-block.
- *          Each sub-block gathers its set lanes to the front and masked-stores them at the advancing cursor.
- */
+/** Peels the window's first @p emit_count matches with a @c vpermd left-pack, 4 lanes per
+ *  sub-block: each sub-block gathers its set lanes to the front and masked-stores them at the
+ *  advancing output cursor. */
 SZ_HELPER_INLINE void sz_utf8_iterate_peel_haswell_(                           //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
@@ -242,17 +238,19 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
     return count;
 }
 
-#pragma endregion Multistep newline / whitespace iteration
+#pragma endregion Multistep newline and whitespace iteration
 
 #pragma region Membership
 
-/** @brief  Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare): `max_epu8(value,bound)==value`. */
+/** Per-half unsigned `value >= bound` mask, as AVX2 has no unsigned compare:
+ *  `max_epu8(value, bound) == value`. */
 SZ_HELPER_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
-/** @brief  Per-half "third forward neighbour" `next3[i] = window[i+3]`, wrapping modulo 64 to mirror the substrate
- *          neighbour helper (which only emits next1/next2). Needed for the 4-byte astral codepoint reconstruction. */
+/** Per-half "third forward neighbour" `next3[i] = window[i + 3]` for the 4-byte astral codepoint
+ *  reconstruction, wrapping modulo 64 to mirror the substrate neighbour helper that only emits
+ *  next1 and next2. */
 SZ_HELPER_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
     __m256i window_lo_u8x32, __m256i window_hi_u8x32, __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
     __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
@@ -261,8 +259,8 @@ SZ_HELPER_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
     *next3_hi_u8x32 = _mm256_alignr_epi8(high_successor_u8x32, window_hi_u8x32, 3);
 }
 
-/** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one 32-lane half, returned as a 0xFF/0x00
- *          byte mask. The bit mask `1 << (low & 7)` is built by a `vpshufb` over the resident power-of-two table. */
+/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one 32-lane half as a 0xFF/0x00
+ *  byte mask; the bit `1 << (low & 7)` is a @c vpshufb over the resident power-of-two table. */
 SZ_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte_u8x32, __m256i low_u8x32) {
     __m256i const bit_table_u8x32 = _mm256_setr_epi8(              //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0, //
@@ -273,10 +271,11 @@ SZ_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte_u8x3
     return _mm256_cmpeq_epi8(isolated_u8x32, bit_mask_u8x32);
 }
 
-/** @brief  Read the bitmap byte `columns[(low>>3)*64 + block_id]` for one 32-lane half in-register: 32 candidate
- *          column reads (each a 64-entry `cascade_stage` over `block_id`) blended by which column `(low >> 3)` selects.
- *          The transposed `..._columns_` layout (column c holds `bitmaps[id*32+c]`) makes each column lut256-addressable
- *          for `block_id < 64` without a page network. */
+/** Reads the bitmap byte `columns[(low >> 3) * 64 + block_id]` for one 32-lane half in-register: 32
+ *  candidate column reads, each a 64-entry @c cascade_stage over @p block_id_u8x32, blended by
+ *  which column `(low >> 3)` selects. The transposed `..._columns_` layout, where column @c c holds
+ *  `bitmaps[id * 32 + c]`, makes each column lut256-addressable for `block_id < 64` without needing
+ *  a page network. */
 SZ_HELPER_INLINE __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id_u8x32,
                                                            __m256i low_u8x32) {
     __m256i const selector_u8x32 = _mm256_and_si256(_mm256_srli_epi16(block_id_u8x32, 4),
@@ -294,8 +293,9 @@ SZ_HELPER_INLINE __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *column
     return result_u8x32;
 }
 
-/** @brief  BMP (codepoint < 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask. ASCII lanes
- *          (top bit clear) carry their codepoint in the raw byte, so are overridden to (high=0, low=byte). */
+/** BMP (codepoint < 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask.
+ *  ASCII lanes (top bit clear) carry their codepoint in the raw byte, so are overridden to (high =
+ *  0, low = byte). */
 SZ_HELPER_INLINE __m256i sz_delimiter_bmp_membership_haswell_(__m256i window_u8x32, __m256i high_in_u8x32,
                                                               __m256i low_in_u8x32) {
     __m256i const ascii_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(window_u8x32, _mm256_set1_epi8((char)0x80)),
@@ -308,9 +308,10 @@ SZ_HELPER_INLINE __m256i sz_delimiter_bmp_membership_haswell_(__m256i window_u8x
     return sz_delimiter_test_bit_haswell_(bitmap_byte_u8x32, low_u8x32);
 }
 
-/** @brief  Astral (codepoint >= 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask. The full
- *          21-bit codepoint is reconstructed in byte-domain from the raw lead/continuation bytes; the small L1/L2 network
- *          and bitmap are then walked exactly as for the BMP path. Only meaningful on 4-byte lead lanes (caller blends). */
+/** Astral (codepoint ≥ 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte
+ *  mask. The full 21-bit codepoint is reconstructed in byte-domain from the raw lead/continuation
+ *  bytes; the small L1/L2 network and bitmap are then walked exactly as for the BMP path. Only
+ *  meaningful on 4-byte lead lanes, which the caller blends. */
 SZ_HELPER_INLINE __m256i sz_delimiter_astral_membership_haswell_( //
     __m256i window_u8x32, __m256i next1_u8x32, __m256i next2_u8x32, __m256i next3_u8x32) {
     __m256i const b0_u8x32 = _mm256_and_si256(window_u8x32, _mm256_set1_epi8(0x07)); // lead bits  cp[20:18]
@@ -347,9 +348,10 @@ SZ_HELPER_INLINE __m256i sz_delimiter_astral_membership_haswell_( //
     return sz_delimiter_test_bit_haswell_(bitmap_byte_u8x32, low8_u8x32);
 }
 
-/** @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
- *          valid only when its continuation bytes are present (within the loaded span) and well-formed, and it is not
- *          overlong, a surrogate, or beyond U+10FFFF. Returned as a `sz_u64_t` lane mask. */
+/** Per-lane UTF-8 validity for codepoint-start lanes, mirroring @ref sz_rune_decode exactly: a
+ *  2/3/4-byte lead is valid only when its continuation bytes are present (within the loaded span)
+ *  and well-formed, and it is not overlong, a surrogate, or beyond U+10FFFF. Returned as a @c
+ *  sz_u64_t lane mask. */
 SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_haswell_( //
     sz_utf8_rune_window_haswell_t const *decoded, __m256i next1_lo_u8x32, __m256i next1_hi_u8x32,
     __m256i next2_lo_u8x32, __m256i next2_hi_u8x32, __m256i next3_lo_u8x32, __m256i next3_hi_u8x32) {

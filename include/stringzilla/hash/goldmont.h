@@ -1,7 +1,9 @@
 /**
- *  @brief Goldmont (SHA-NI) backend for string hashing and checksums.
  *  @file include/stringzilla/hash/goldmont.h
  *  @author Ash Vardanian
+ *  @date October 6, 2025
+ *  @brief Goldmont (SHA-NI) backend for string hashing and checksums.
+ *
  *  @sa include/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_GOLDMONT_H_
@@ -25,8 +27,8 @@ extern "C" {
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256 with SHA-NI intrinsics.
- *  @param hash Pointer to 8x 32-bit hash values, modified in place.
- *  @param block Pointer to 64-byte message block.
+ *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param[in] block Pointer to 64-byte message block.
  */
 SZ_HELPER_INLINE void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)],
                                                         sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
@@ -308,9 +310,10 @@ SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *st
     }
 }
 
-/*  SHA-NI compresses one message at a time — its state layout is fixed and there is no lane-parallel form —
- *  so this tier has no wide kernel to offer. It exists so a CPU with SHA-NI but no AVX2 still reaches the
- *  hardware compressor for batched work instead of falling back to the serial one. */
+/*  SHA-NI compresses one message at a time — its state layout is fixed and there is no
+ *  lane-parallel form — so this tier has no wide kernel to offer. It exists so a CPU with SHA-NI
+ *  but no AVX2 still reaches the hardware compressor for batched work instead of falling back to
+ *  the serial one. */
 
 SZ_API_COMPTIME void sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states, sz_sequence_t const *texts) {
     sz_size_t const lanes_count = texts->count;

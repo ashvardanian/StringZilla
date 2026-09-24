@@ -3,6 +3,9 @@
 //! Provides fast string search, comparison, hashing, and manipulation functions optimized with SWAR
 //! and SIMD instructions, plus the stateful cross-product engines - Levenshtein distances, window
 //! overlap, and multi-pattern search - that prepare a batch of queries once and reuse it per round.
+//!
+//! File: rust/stringzilla.rs
+//! Author: Ash Vardanian
 
 mod cipher;
 mod compare;
@@ -275,8 +278,8 @@ extern "C" {
         second_positions: *mut SortedIdx,
     ) -> Status;
 
-    // Cross-product engines. Each takes a null allocator, which resolves to the default host one on a
-    // `_cpu` init and to a stream-derived unified one on a `_gpu` init.
+    // Cross-product engines. Each takes a null allocator, which resolves to the default host one on
+    // a `_cpu` init and to a stream-derived unified one on a `_gpu` init.
     pub(crate) fn sz_levenshtein_engine_init_cpu(
         queries: *const _SzSequence,
         symbol: LevenshteinSymbol,
@@ -391,8 +394,8 @@ pub(crate) struct _SzMemoryAllocator {
 
 /// Binds `items` into a `sz_sequence_t` that lives for the span of `call`, allocating nothing.
 ///
-/// The accessors read the caller's slices in place, so a sequence borrows rather than copies and must
-/// never outlive the call the C side makes through it.
+/// The accessors read the caller's slices in place, so a sequence borrows rather than copies and
+/// must never outlive the call the C side makes through it.
 pub(crate) fn with_sequence<Element, Return>(
     items: &[Element],
     call: impl FnOnce(&_SzSequence) -> Return,
@@ -476,7 +479,7 @@ pub trait StringZillableUnary {
     /// Returns a lazy UTF-8 character view with SIMD-accelerated operations.
     ///
     /// The view provides:
-    /// - `.len()` for character count (lazy: computed on first call, cached)
+    /// - `.len()` for character count, computed lazily on first call and cached
     /// - `.offset_of(n)` for random access to Nth character offset
     /// - `.iter()` for efficient batched iteration over characters
     ///
@@ -518,14 +521,14 @@ pub trait StringZillableUnary {
     /// ```
     fn sz_utf8_split_newlines(&self) -> Utf8SplitNewlines<'_>;
 
-    /// Returns an iterator over the newline runs themselves (the separators).
+    /// Returns an iterator over the newline runs themselves, the separators.
     fn sz_utf8_newlines(&self) -> Utf8Newlines<'_>;
 
     /// Returns an iterator over segments split by UTF-8 whitespace characters.
     ///
     /// Handles all 25 Unicode "White_Space" characters; N delimiters yield N+1 segments. By default
-    /// **empty segments are kept** (matching `str::split`), so runs of
-    /// whitespace surface empty slices. Chain `.skip_empty()` on the returned iterator to recover the
+    /// __empty segments are kept__, matching `str::split`, so runs of whitespace surface empty
+    /// slices. Chain `.skip_empty()` on the returned iterator to recover the
     /// `str::split_whitespace` token behavior that drops empties.
     ///
     /// # Examples
@@ -549,27 +552,29 @@ pub trait StringZillableUnary {
     /// ```
     fn sz_utf8_split_whitespaces(&self) -> Utf8SplitWhitespaces<'_>;
 
-    /// Returns an iterator over the whitespace runs themselves (the separators).
+    /// Returns an iterator over the whitespace runs themselves, the separators.
     fn sz_utf8_whitespaces(&self) -> Utf8Whitespaces<'_>;
 
-    /// Returns an iterator splitting on any Unicode delimiter (punctuation/symbol/separator/whitespace).
+    /// Returns an iterator splitting on any Unicode delimiter
+    /// (punctuation/symbol/separator/whitespace).
     fn sz_utf8_split_delimiters(&self) -> Utf8SplitDelimiters<'_>;
 
-    /// Returns an iterator over the delimiter runs themselves (the separators).
+    /// Returns an iterator over the delimiter runs themselves, the separators.
     fn sz_utf8_delimiters(&self) -> Utf8Delimiters<'_>;
 
     /// Returns an iterator over UAX-29 words, in order. Words tile the input contiguously.
     fn sz_utf8_wordbreaks(&self) -> Utf8Wordbreaks<'_>;
 
-    /// Returns an iterator over UAX-29 grapheme clusters, in order. Clusters tile the input contiguously.
+    /// Returns an iterator over UAX-29 grapheme clusters, in order. Clusters tile
+    /// the input contiguously.
     fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_>;
 
     /// Returns an iterator over UAX-29 sentences, in order. Sentences tile the input contiguously.
     fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;
 
-    /// Returns an iterator over UAX-14 line-break opportunities (Unicode TR14), in order. Linewrap segments tile the
-    /// input contiguously, including soft break opportunities. For hard line splits only, use
-    /// [`Self::sz_utf8_split_newlines`].
+    /// Returns an iterator over UAX-14 line-break opportunities per Unicode TR14, in order.
+    /// Linewrap segments tile the input contiguously, including soft break opportunities. For hard
+    /// line splits only, use [`Self::sz_utf8_split_newlines`].
     fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;
 }
 
@@ -632,19 +637,21 @@ where
 
 /// Prose fixtures shared by the tests of more than one UTF-8 domain module.
 ///
-/// Realistic multi-script prose (ASCII-source `\u{}` escapes; rendered prose in comments).
-/// Per-family segment counts are oracle-locked (ICU root / uniseg). Fixtures read by a single
-/// module live beside the test that reads them instead.
+/// Realistic multi-script prose, with ASCII-source `\u{}` escapes and the rendered prose in
+/// comments. Per-family segment counts are oracle-locked (ICU root / uniseg). Fixtures read by a
+/// single module live beside the test that reads them instead.
 #[cfg(test)]
 pub(crate) mod fixtures {
-    // Hotel review (German + Japanese): NFD cafe, NBSP-glued units, a sentence-ending abbreviation, a CJK run.
+    // Hotel review (German + Japanese): NFD cafe, NBSP-glued units, a sentence-ending abbreviation,
+    // a CJK run.
     pub(crate) const PROSE_HOTEL_REVIEW: &str = concat!(
         "Last spring we strolled down M\u{fc}nchner Stra\u{df}e; the cafe\u{301} cortado cost 3,50\u{a0}",
         "\u{20ac} and was unreal. Dr. Vogel, our guide, swore it's the city's finest. Worth the detour?! ",
         "Absolutely \u{2014} and \u{6771}\u{4eac}\u{30bf}\u{30ef}\u{30fc} the next week, all 333\u{a0}m o",
         "f it, was breathtaking at dusk\u{2026}"
     );
-    // Concert post (Korean + Japanese): conjoining L+V+T jamo, a Katakana run, an ideographic stop, a 'p.m.' no-break.
+    // Concert post (Korean + Japanese): conjoining L+V+T jamo, a Katakana run, an ideographic stop,
+    // a 'p.m.' no-break.
     pub(crate) const PROSE_CONCERT_POST: &str = concat!(
         "\u{c624}\u{b298} \u{cf58}\u{c11c}\u{d2b8}, \u{c9c4}\u{c9dc} \u{bbf8}\u{cce4}\u{b2e4}!! \u{1112}",
         "\u{1161}\u{11ab}\u{ad6d} \u{d32c}\u{b4e4}\u{c774} \u{b2e4} \u{baa8}\u{c600}\u{ace0}, the staff b",
@@ -652,13 +659,15 @@ pub(crate) mod fixtures {
         "\u{30fc}\u{30c9}\u{30b3}\u{30a2}; \u{4eca}\u{65e5}\u{306f}\u{6700}\u{9ad8}\u{3060}\u{3063}",
         "\u{305f}\u{3002} We screamed \u{c0ac}\u{b791}\u{d574} till 11 p.m. sharp."
     );
-    // News lede: 'U.S.A.' before a lowercase word (no break), curly quotes, thousands, currency, a date range.
+    // News lede: 'U.S.A.' before a lowercase word without a break, curly quotes, thousands,
+    // currency, a date range.
     pub(crate) const PROSE_NEWS_LEDE: &str = concat!(
         "The U.S.A. wasn't ready, analysts said. \u{201c}We lost 1,000 jobs,\u{201d} the mayor warned. ",
         "\u{201c}Recovery starts now.\u{201d} Filings spiked 2024/06\u{2013}2024/09, topping $1,000 per c",
         "laim. Will it hold?! No one knows for sure."
     );
-    // Language lesson: a Greek final sigma, Cyrillic case pairs, a Croatian titlecase digraph, and a fold-only match.
+    // Language lesson: a Greek final sigma, Cyrillic case pairs, a Croatian titlecase digraph, and
+    // a fold-only match.
     #[allow(dead_code)] // used by the Python uncased prose test, not Rust
     pub(crate) const PROSE_LANGUAGE_LESSON: &str = concat!(
         "Greek lesson: \u{39f}\u{394}\u{39f}\u{3a3} becomes \u{3bf}\u{3b4}\u{3cc}\u{3c2} when lowercased,",
@@ -667,7 +676,8 @@ pub(crate) mod fixtures {
         "\u{1c4}: titlecase \u{1c5}, lowercase \u{1c6}. Quiz \u{2014} does \u{201c}stra\u{df}e\u{201d} ma",
         "tch STRASSE? Yes, once you fold."
     );
-    // RTL scripts: Hebrew gershayim, Arabic, a number-sign Prepend, an NFC niqqud reorder, a Malayalam dot-reph.
+    // RTL scripts: Hebrew gershayim, Arabic, a number-sign Prepend, an NFC niqqud reorder,
+    // a Malayalam dot-reph.
     pub(crate) const PROSE_RTL_SCRIPTS: &str = concat!(
         "Hebrew acronyms take gershayim: \u{5e6}\u{5d4}\u{5f4}\u{5dc} and \u{5d0}\u{5e8}\u{5d4}\u{5f4}",
         "\u{5d1} aren't typos. Arabic flows right-to-left too \u{2014} \u{645}\u{631}\u{62d}\u{628}",

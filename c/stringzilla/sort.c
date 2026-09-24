@@ -1,10 +1,11 @@
 /**
  *  @file c/stringzilla/sort.c
- *  @brief Per-domain dispatch shim for single-threaded sorting (`sz_sequence_argsort` and the
- *         uncased variant). The integer `sz_pgrams_sort_*` core is an internal helper and is
- *         not runtime-dispatched.
  *  @author Ash Vardanian
- *  @date January 16, 2024
+ *  @date February 15, 2025
+ *  @brief Per-domain dispatch shim for single-threaded sorting, cased and uncased.
+ *
+ *  Dispatches @c sz_sequence_argsort and its uncased variant. The integer `sz_pgrams_sort_*` core
+ *  is an internal helper and is not runtime-dispatched.
  */
 #include <stringzilla/sort.h>
 
