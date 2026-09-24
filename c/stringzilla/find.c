@@ -7,8 +7,9 @@
 #if !defined(SZ_OVERRIDE_LIBC)
 #define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
 #endif
-#include "dispatch.h"
 #include <stringzilla/find.h>
+
+#include "dispatch.h"
 
 #if SZ_AVOID_LIBC
 #ifdef _MSC_VER
@@ -19,7 +20,7 @@ typedef __SIZE_TYPE__ size_t; // For GCC/Clang
 #endif
 
 SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->find = sz_find_serial;
@@ -158,29 +159,29 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps) {
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
-    return sz_dispatch_table.find_byte(haystack, haystack_length, needle);
+    return sz_dispatch_cpu_table.find_byte(haystack, haystack_length, needle);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
-    return sz_dispatch_table.rfind_byte(haystack, haystack_length, needle);
+    return sz_dispatch_cpu_table.rfind_byte(haystack, haystack_length, needle);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                  sz_size_t needle_length) {
-    return sz_dispatch_table.find(haystack, haystack_length, needle, needle_length);
+    return sz_dispatch_cpu_table.find(haystack, haystack_length, needle, needle_length);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                   sz_size_t needle_length) {
-    return sz_dispatch_table.rfind(haystack, haystack_length, needle, needle_length);
+    return sz_dispatch_cpu_table.rfind(haystack, haystack_length, needle, needle_length);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-    return sz_dispatch_table.find_byteset(text, length, set);
+    return sz_dispatch_cpu_table.find_byteset(text, length, set);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-    return sz_dispatch_table.rfind_byteset(text, length, set);
+    return sz_dispatch_cpu_table.rfind_byteset(text, length, set);
 }
 
 // Provide overrides for the libc mem* functions

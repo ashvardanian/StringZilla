@@ -137,6 +137,9 @@ int main(int argc, char const **argv) {
     failures += run_test("test_overlap_unit", test_overlap_unit);
     failures += run_test("test_overlap_all", test_overlap_all);
     failures += run_test("test_overlap_safety", test_overlap_safety);
+    failures += run_test("test_substrings_unit", test_substrings_unit);
+    failures += run_test("test_substrings_all", test_substrings_all);
+    failures += run_test("test_substrings_safety", test_substrings_safety);
 
     failures += run_test("test_ascii_unit<sz::string>", test_ascii_unit<sz::string>);
     failures += run_test("test_ascii_unit<sz::string_view>", test_ascii_unit<sz::string_view>);

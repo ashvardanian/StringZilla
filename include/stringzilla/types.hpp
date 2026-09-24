@@ -21,6 +21,9 @@
 #define STRINGZILLA_TYPES_HPP_
 
 #include "stringzilla/types.h"
+#if SZ_USE_CUDA
+#include "stringzilla/types.cuh" // `sz_cuda_device_t`, the three allocators
+#endif
 
 /**
  *  @brief When set to 1, the library will include the C++ STL headers and implement
@@ -1138,6 +1141,389 @@ sz_constexpr_if_cpp14 head_body_tail_t head_body_tail(element_type_ *first_addre
 
     return head_body_tail_t {elements_in_head, elements_in_body, elements_in_tail};
 }
+
+/**
+ *  @brief Safer alternative to `std::vector`, that avoids exceptions, copy constructors,
+ *      and provides alternative `try_push_back` and `try_reserve` for faulty memory allocations.
+ */
+template <typename value_type_, typename allocator_type_>
+class safe_vector {
+  public:
+    using value_type = value_type_;
+    using size_type = std::size_t;
+    using allocator_type = allocator_type_;
+
+    using allocator_traits = std::allocator_traits<allocator_type>;
+    using allocated_type = typename allocator_traits::value_type;
+    static_assert(sizeof(value_type) == sizeof(allocated_type),
+                  "Allocator value type must be the same size as the vector value type");
+    static_assert(allocator_traits::propagate_on_container_move_assignment::value,
+                  "Allocator must propagate on move assignment, otherwise the move assignment won't be `noexcept`.");
+
+  private:
+    value_type *data_;
+    size_type size_;
+    size_type capacity_;
+    allocator_type alloc_;
+
+    /**
+     *  @brief Whether the host may dereference what @ref allocator_type hands out, which growing requires.
+     *
+     *  Growth moves live elements on the host, so an allocator over memory the host cannot touch opts out with
+     *  `static constexpr bool host_accessible_k = false` and gets a build error here instead of a segmentation fault
+     *  (see @ref device_alloc ). Allocators that say nothing - `std::allocator` included -
+     *  are assumed reachable, so nothing else needs changing.
+     */
+    template <typename probed_type_>
+    static constexpr bool allocator_host_accessible_(decltype(probed_type_::host_accessible_k) *) noexcept {
+        return probed_type_::host_accessible_k;
+    }
+    template <typename probed_type_>
+    static constexpr bool allocator_host_accessible_(...) noexcept {
+        return true;
+    }
+    static constexpr bool allocator_reachable_from_host_() noexcept {
+        return allocator_host_accessible_<allocator_type>(nullptr);
+    }
+
+  public:
+    safe_vector() noexcept : data_(nullptr), size_(0), capacity_(0), alloc_() {}
+    safe_vector(allocator_type alloc) noexcept : data_(nullptr), size_(0), capacity_(0), alloc_(alloc) {}
+    ~safe_vector() noexcept { reset(); }
+
+    void clear() noexcept {
+        if (!std::is_trivially_destructible<value_type>::value)
+            for (size_type i = 0; i < size_; ++i) data_[i].~value_type();
+        size_ = 0;
+    }
+
+    void reset() noexcept {
+        clear();
+        if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
+        data_ = nullptr;
+        size_ = 0;
+        capacity_ = 0;
+    }
+
+    /** @warning Use `try_assign` instead to handle out-of-memory failures. */
+    safe_vector(safe_vector const &other) = delete;
+    /** @warning Use `try_assign` instead to handle out-of-memory failures. */
+    safe_vector &operator=(safe_vector const &other) = delete;
+
+    safe_vector(safe_vector &&other) noexcept
+        : data_(other.data_), size_(other.size_), capacity_(other.capacity_), alloc_(std::move(other.alloc_)) {
+        other.data_ = nullptr;
+        other.size_ = 0;
+        other.capacity_ = 0;
+    }
+
+    safe_vector &operator=(safe_vector &&other) noexcept {
+        if (this != &other) {
+            clear();
+            if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
+            data_ = other.data_;
+            size_ = other.size_;
+            capacity_ = other.capacity_;
+            alloc_ = std::move(other.alloc_);
+            other.data_ = nullptr;
+            other.size_ = 0;
+            other.capacity_ = 0;
+        }
+        return *this;
+    }
+
+    status_t try_assign(span<value_type const> const other) noexcept {
+        reset();
+
+        if (other.size() == 0) return status_t::success_k; // Nothing to do :)
+
+        // Allocate exact needed capacity
+        size_type new_cap = other.size();
+        allocated_type *raw = allocator_traits::allocate(alloc_, new_cap);
+        if (!raw) return status_t::bad_alloc_k;
+        data_ = reinterpret_cast<value_type *>(raw);
+        capacity_ = new_cap;
+
+        // Copy‐construct each element
+        if (!std::is_trivially_constructible<value_type>::value)
+            for (size_type i = 0; i < other.size(); ++i) new (data_ + i) value_type(other[i]);
+        else
+            for (size_type i = 0; i < other.size(); ++i) data_[i] = other[i];
+        size_ = other.size();
+        return status_t::success_k;
+    }
+
+    template <typename other_allocator_type_ = allocator_type>
+    status_t try_assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
+        if (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
+        return try_assign(span<value_type>(other.data(), other.size()));
+    }
+
+    status_t try_reserve(size_type new_cap) noexcept {
+        static_assert(allocator_reachable_from_host_(),
+                      "Growing host-moves live elements, so device-only storage must use `try_resize_uninitialized`");
+        if (new_cap <= capacity_) return status_t::success_k;
+        value_type *new_data = (value_type *)alloc_.allocate(new_cap);
+        if (!new_data) return status_t::bad_alloc_k;
+        for (size_type i = 0; i < size_; ++i) {
+            new (new_data + i) value_type(std::move(data_[i]));
+            if (!std::is_trivially_destructible<value_type>::value) data_[i].~value_type();
+        }
+        if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
+        data_ = new_data;
+        capacity_ = new_cap;
+        return status_t::success_k;
+    }
+
+    status_t try_resize(size_type new_size) noexcept {
+        if (new_size > capacity_ && try_reserve(new_size) != status_t::success_k) return status_t::bad_alloc_k;
+
+        if (new_size > size_) {
+            if (!std::is_trivially_constructible<value_type>::value)
+                for (size_type i = size_; i < new_size; ++i) new (data_ + i) value_type();
+        }
+        else if (new_size < size_) {
+            if (!std::is_trivially_destructible<value_type>::value)
+                for (size_type i = new_size; i < size_; ++i) data_[i].~value_type();
+        }
+
+        size_ = new_size;
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Resizes WITHOUT constructing, destroying, or moving any element - the caller guarantees to overwrite
+     *         every live element before reading it. On growth it allocates fresh storage and discards the old
+     *         contents (no element move), so it is safe even when the storage lives in @b device memory the host
+     *         cannot dereference (e.g. a `device_alloc`-backed task array). Requires a trivially-destructible type.
+     */
+    status_t try_resize_uninitialized(size_type new_size) noexcept {
+        static_assert(std::is_trivially_destructible<value_type>::value,
+                      "try_resize_uninitialized requires a trivially-destructible value type");
+        if (new_size > capacity_) {
+            value_type *new_data = (value_type *)alloc_.allocate(new_size);
+            if (!new_data) return status_t::bad_alloc_k;
+            if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
+            data_ = new_data;
+            capacity_ = new_size;
+        }
+        size_ = new_size;
+        return status_t::success_k;
+    }
+
+    status_t try_push_back(value_type const &val) noexcept {
+        if (size_ == capacity_) {
+            size_type new_cap = capacity_ ? capacity_ * 2 : 1;
+            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+        }
+        new (data_ + size_) value_type(val);
+        ++size_;
+        return status_t::success_k;
+    }
+
+    status_t try_push_back(value_type &&val) noexcept {
+        if (size_ == capacity_) {
+            size_type new_cap = capacity_ ? capacity_ * 2 : 1;
+            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+        }
+        new (data_ + size_) value_type(std::move(val));
+        ++size_;
+        return status_t::success_k;
+    }
+
+    status_t try_append(span<value_type const> source) noexcept {
+        size_type needed = size_ + source.size();
+        if (needed > capacity_) {
+            size_type new_cap = capacity_ ? capacity_ : 1;
+            while (new_cap < needed) new_cap *= 2;
+            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+        }
+        for (size_type i = 0; i < source.size(); ++i) new (data_ + size_ + i) value_type(source[i]);
+        size_ = needed;
+        return status_t::success_k;
+    }
+
+    value_type *begin() noexcept { return data_; }
+    value_type const *begin() const noexcept { return data_; }
+    value_type *end() noexcept { return data_ + size_; }
+    value_type const *end() const noexcept { return data_ + size_; }
+    value_type &operator[](size_type i) noexcept {
+        sz_assert_(i < size_);
+        return data_[i];
+    }
+    value_type const &operator[](size_type i) const noexcept {
+        sz_assert_(i < size_);
+        return data_[i];
+    }
+    value_type *data() noexcept { return data_; }
+    value_type const *data() const noexcept { return data_; }
+    value_type &front() noexcept {
+        sz_assert_(size_ != 0);
+        return data_[0];
+    }
+    value_type const &front() const noexcept {
+        sz_assert_(size_ != 0);
+        return data_[0];
+    }
+    value_type &back() noexcept {
+        sz_assert_(size_ != 0);
+        return data_[size_ - 1];
+    }
+    value_type const &back() const noexcept {
+        sz_assert_(size_ != 0);
+        return data_[size_ - 1];
+    }
+    size_type size() const noexcept { return size_; }
+    size_type capacity() const noexcept { return capacity_; }
+    operator span<value_type>() noexcept { return {data_, size_}; }
+    operator span<value_type const>() const noexcept { return {data_, size_}; }
+};
+
+#if SZ_USE_CUDA
+#pragma region CUDA Allocators
+
+/**
+ *  @brief Allocator over CUDA @b unified memory, which both the host and every device address.
+ *
+ *  Standard-allocator shaped, so `std::vector`, @ref arrow_strings_tape and @ref safe_vector all take it. The
+ *  @c device it binds is the caller's, never a hidden one; a default-constructed allocator uses whatever
+ *  context the calling thread already has current.
+ */
+template <typename value_type_>
+struct unified_alloc {
+    using value_type = value_type_;
+    using pointer = value_type *;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_copy_assignment = std::false_type;
+
+    /** The device every allocation binds before touching the driver, or `nullptr` for the current context. */
+    sz_cuda_device_t *device = nullptr;
+
+    template <typename other_value_type_>
+    struct rebind {
+        using other = unified_alloc<other_value_type_>;
+    };
+
+    constexpr unified_alloc() noexcept = default;
+    constexpr explicit unified_alloc(sz_cuda_device_t *bound) noexcept : device(bound) {}
+    constexpr unified_alloc(unified_alloc const &) noexcept = default;
+    template <typename other_value_type_>
+    constexpr unified_alloc(unified_alloc<other_value_type_> const &other) noexcept : device(other.device) {}
+
+    value_type *allocate(size_type count) const noexcept {
+        return (value_type *)sz_memory_allocate_unified_(count * sizeof(value_type), device);
+    }
+    void deallocate(pointer start, size_type count) const noexcept {
+        sz_memory_free_driver_(start, count * sizeof(value_type), device);
+    }
+    template <typename other_type_>
+    bool operator==(unified_alloc<other_type_> const &other) const noexcept {
+        return device == other.device;
+    }
+    template <typename other_type_>
+    bool operator!=(unified_alloc<other_type_> const &other) const noexcept {
+        return device != other.device;
+    }
+};
+
+/**
+ *  @brief Allocator over plain CUDA @b device memory, which no host code may dereference.
+ *
+ *  For scratch that only a kernel ever reads or writes, where unified memory would pay page migration on every
+ *  access from the wrong side. @ref safe_vector is the only container that grows it, through
+ *  @c try_resize_uninitialized, because moving elements on the host is exactly what @c host_accessible_k forbids.
+ */
+template <typename value_type_>
+struct device_alloc {
+    using value_type = value_type_;
+    using pointer = value_type *;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_copy_assignment = std::false_type;
+
+    /** Plain device memory: a container must not move elements through it on the host while growing. */
+    static constexpr bool host_accessible_k = false;
+
+    /** The device every allocation binds before touching the driver, or `nullptr` for the current context. */
+    sz_cuda_device_t *device = nullptr;
+
+    template <typename other_value_type_>
+    struct rebind {
+        using other = device_alloc<other_value_type_>;
+    };
+
+    constexpr device_alloc() noexcept = default;
+    constexpr explicit device_alloc(sz_cuda_device_t *bound) noexcept : device(bound) {}
+    constexpr device_alloc(device_alloc const &) noexcept = default;
+    template <typename other_value_type_>
+    constexpr device_alloc(device_alloc<other_value_type_> const &other) noexcept : device(other.device) {}
+
+    value_type *allocate(size_type count) const noexcept {
+        return (value_type *)sz_memory_allocate_device_(count * sizeof(value_type), device);
+    }
+    void deallocate(pointer start, size_type count) const noexcept {
+        sz_memory_free_driver_(start, count * sizeof(value_type), device);
+    }
+    template <typename other_type_>
+    bool operator==(device_alloc<other_type_> const &other) const noexcept {
+        return device == other.device;
+    }
+    template <typename other_type_>
+    bool operator!=(device_alloc<other_type_> const &other) const noexcept {
+        return device != other.device;
+    }
+};
+
+/**
+ *  @brief Allocator over CUDA @b pinned page-locked host memory, which the driver copies at the bus rate.
+ *
+ *  A kernel cannot address what this hands back - @ref sz_memory_reaches_device answers false for it - so it is
+ *  the staging side of a transfer rather than anything a launch reads.
+ */
+template <typename value_type_>
+struct pinned_alloc {
+    using value_type = value_type_;
+    using pointer = value_type *;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_copy_assignment = std::false_type;
+
+    /** The device every allocation binds before touching the driver, or `nullptr` for the current context. */
+    sz_cuda_device_t *device = nullptr;
+
+    template <typename other_value_type_>
+    struct rebind {
+        using other = pinned_alloc<other_value_type_>;
+    };
+
+    constexpr pinned_alloc() noexcept = default;
+    constexpr explicit pinned_alloc(sz_cuda_device_t *bound) noexcept : device(bound) {}
+    constexpr pinned_alloc(pinned_alloc const &) noexcept = default;
+    template <typename other_value_type_>
+    constexpr pinned_alloc(pinned_alloc<other_value_type_> const &other) noexcept : device(other.device) {}
+
+    value_type *allocate(size_type count) const noexcept {
+        return (value_type *)sz_memory_allocate_pinned_(count * sizeof(value_type), device);
+    }
+    void deallocate(pointer start, size_type count) const noexcept {
+        sz_memory_free_pinned_(start, count * sizeof(value_type), device);
+    }
+    template <typename other_type_>
+    bool operator==(pinned_alloc<other_type_> const &other) const noexcept {
+        return device == other.device;
+    }
+    template <typename other_type_>
+    bool operator!=(pinned_alloc<other_type_> const &other) const noexcept {
+        return device != other.device;
+    }
+};
+
+#pragma endregion CUDA Allocators
+#endif // SZ_USE_CUDA
 
 } // namespace stringzilla
 } // namespace ashvardanian

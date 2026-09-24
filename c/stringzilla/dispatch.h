@@ -6,21 +6,20 @@
  *
  *  The compiled StringZilla library is split into one translation unit per domain
  *  (`compare.c`, `memory.c`, `hash.c`, `cipher.c`, `find.c`, `sort.c`, `intersect.c`, `levenshtein.c`,
- *  `overlap.c`, `utf8_runes.c`, `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`,
+ *  `overlap.c`, `substrings.c`, `utf8_runes.c`, `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`,
  *  `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching a
  *  domain only recompiles that domain. Each TU includes only its own domain header, fills its slice of
- *  the shared `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_API_RUNTIME` public
+ *  the shared `sz_dispatch_cpu_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_API_RUNTIME` public
  *  wrappers that call through the table. The thin `runtime.c` owns the table definition and the
  *  one-time initialization.
  */
 #ifndef SZ_DISPATCH_H_
 #define SZ_DISPATCH_H_
 
-// Overwrite `SZ_DYNAMIC_DISPATCH` before including StringZilla.
-#ifdef SZ_DYNAMIC_DISPATCH
-#undef SZ_DYNAMIC_DISPATCH
+#if !SZ_DYNAMIC_DISPATCH
+#error "The dispatch shims are compiled with `SZ_DYNAMIC_DISPATCH=1`, which the build passes."
 #endif
-#define SZ_DYNAMIC_DISPATCH 1
+
 #include <stringzilla/types.h> // Function-pointer typedefs, `sz_capability_t`, `SZ_USE_*`
 
 // The dispatch table and per-domain updaters are shared across translation units,
@@ -97,21 +96,45 @@ typedef struct sz_implementations_t {
     sz_sequence_argsort_t sequence_argsort_uncased;
     sz_sequence_intersect_t sequence_intersect;
 
-    sz_levenshtein_distance_t levenshtein_distance;
     sz_levenshtein_distances_t levenshtein_distances;
-    sz_levenshtein_distance_t levenshtein_distance_utf8;
     sz_levenshtein_distances_t levenshtein_distances_utf8;
 
-    sz_overlap_score_t overlap_score;
     sz_overlap_scores_t overlap_scores;
+
+    sz_substrings_counts_t substrings_counts;
+    sz_substrings_find_t substrings_find;
+    sz_substrings_replace_t substrings_replace;
+    sz_substrings_bm25_scores_t substrings_bm25_scores;
 
 } sz_implementations_t;
 
 /**
- *  @brief The global "virtual table" of supported backends, defined in `stringzilla.c`
+ *  @brief The global "virtual table" of supported @b CPU backends, defined in `stringzilla.c`
  *         and populated by the per-domain updaters below.
+ *
+ *  Holds CPU tiers only. A device backend is reached through @ref sz_dispatch_gpu_table instead, picked by the
+ *  engine's own capability rather than by the machine's - so an engine built for the host scores on the host
+ *  even where a device is present.
  */
-extern SZ_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_table;
+extern SZ_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_cpu_table;
+
+/**
+ *  @brief The cross-product engines a device can run, defined in `stringzilla.c`.
+ *
+ *  Only the families with a device backend appear, and every slot is null until a GPU runtime is compiled in
+ *  and a device answers. Populated by @ref sz_dispatch_gpu_table_init.
+ */
+typedef struct sz_implementations_gpu_t {
+    sz_levenshtein_distances_t levenshtein_distances;
+    sz_levenshtein_distances_t levenshtein_distances_utf8;
+    sz_overlap_scores_t overlap_scores;
+    sz_substrings_counts_t substrings_counts;
+    sz_substrings_find_t substrings_find;
+    sz_substrings_replace_t substrings_replace;
+    sz_substrings_bm25_scores_t substrings_bm25_scores;
+} sz_implementations_gpu_t;
+
+extern SZ_DISPATCH_INTERNAL sz_implementations_gpu_t sz_dispatch_gpu_table;
 
 /*  Each updater fills only its own fields, defaulting to the serial backend and then
  *  overriding for the most capable enabled SIMD generation matching @p caps.
@@ -125,6 +148,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_substrings_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_wordbreaks_update_(sz_capability_t caps);
@@ -134,6 +158,11 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_linebreaks_update_(sz_capability_t ca
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps);
+
+SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_gpu_update_(void);
+SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_gpu_update_(void);
+SZ_DISPATCH_INTERNAL void sz_dispatch_substrings_gpu_update_(void);
+SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void);
 
 #if SZ_IS_64BIT_ARM_ && (SZ_USE_SVE || SZ_USE_SVE2) && !defined(_MSC_VER)
 #if defined(__clang__)

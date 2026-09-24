@@ -1,6 +1,6 @@
 /**
  *  @brief CUDA backend for window overlap: one thread per candidate, its chain walked through a ring of prefix
- *      hashes so every width is scored in one pass, and the prepared-query B-tree probed per thread.
+ *      hashes so every width is scored in one pass, and one prepared query's B-tree probed per block row.
  *  @file include/stringzilla/overlap/cuda.cuh
  *  @author Ash Vardanian
  *  @sa include/stringzilla/overlap.h
@@ -15,9 +15,13 @@
  *  hashes rather than the whole chain, so its footprint is constant in the candidate's length and every width is
  *  scored in the same pass over the text.
  *
- *  Nothing here crosses the bus. The candidates, the scores and the allocator's scratch are already where the
- *  device reaches them and the texts are read in place, so a round costs one launch rather than a round trip -
- *  the difference between the bus rate and the device's own.
+ *  The query axis rides @c blockIdx.y, one tree per block, strided when a batch outruns a grid dimension. The chain
+ *  is therefore walked once per query rather than once per candidate - the probe is a @c levels deep descent with a
+ *  sixteen-key branch step at every node against two operations of chain, so sharing it would buy about a percent
+ *  and cost a per-thread match counter per query, which no register file holds.
+ *
+ *  Nothing here crosses the bus during a round. The forest, the candidates and the scores are already where the
+ *  device reaches them and the texts are read in place, so a round costs one launch rather than a round trip.
  */
 #ifndef STRINGZILLA_OVERLAP_CUDA_CUH_
 #define STRINGZILLA_OVERLAP_CUDA_CUH_
@@ -40,12 +44,15 @@ enum { sz_overlap_cuda_ring_span_k = 32 };
 /** Widest window this backend scores, one short of the ring so a window's start and end never alias. */
 enum { sz_overlap_cuda_widest_window_k = sz_overlap_cuda_ring_span_k - 1 };
 
-/** Widths one call may ask for; the per-thread match counters are held in registers, so the bound is small. */
+/** Widths one engine may hold; the per-thread match counters are held in registers, so the bound is small. */
 enum { sz_overlap_cuda_widths_max_k = 8 };
 
 /** Candidates one block scores when the device cannot be asked; measured flat from 32 to 512 and off a cliff
  *  at 1024, so this is the ceiling of the flat range rather than a tuned figure. */
 enum { sz_overlap_cuda_candidates_per_block_k = 512 };
+
+/** Queries one grid carries on @c blockIdx.y; a batch past it strides, since a grid dimension is bounded. */
+enum { sz_overlap_cuda_queries_per_grid_k = 65535 };
 
 /** The share of a block's shared memory a staged tree may take. Staging is worth about half again while the tree
  *  is small, and stops paying past that: the descent is data-dependent, and shared memory's banks handle a scatter
@@ -53,15 +60,17 @@ enum { sz_overlap_cuda_candidates_per_block_k = 512 };
  *  - a hundred kilobytes per multiprocessor on consumer Ada against more than twice that on the datacenter parts. */
 enum { sz_overlap_cuda_shared_tree_share_k = 3 };
 
-/** The prepared query as a kernel argument: the tree with its nodes device-reachable, beside the widths. */
-typedef struct sz_overlap_cuda_query_t {
-    sz_overlap_btree_t btree; /**< @c nodes must be device-reachable; the level bases travel by value. */
-    sz_u32_t const *widths;   /**< The @b [window_widths] window widths, in bytes. */
-    sz_u32_t const *powers;   /**< The @b [window_widths] @ref sz_overlap_window_power values, one per width. */
-    sz_size_t widths_count;   /**< Entries in @c widths and @c powers, at most @ref sz_overlap_cuda_widths_max_k. */
-    sz_size_t query_length;   /**< Bytes of the query the tree was built from. */
-    sz_size_t nodes_count;    /**< Entries to stage in shared memory, or zero to descend through @c btree.nodes. */
-} sz_overlap_cuda_query_t;
+/**
+ *  @brief What @ref sz_overlap_engine_init_cuda resolved once, kept at the head of the engine's own block.
+ *
+ *  Every member costs a driver round trip to answer, and none of them moves between rounds, so a scoring verb
+ *  reads them rather than asking again.
+ */
+typedef struct sz_overlap_cuda_geometry_t {
+    void *stream;                   /**< The @c cudaStream_t every round is enqueued on, or zero for the default. */
+    sz_size_t candidates_per_block; /**< Threads one block runs, whichever count lands the most resident warps. */
+    sz_size_t staged_nodes_count;   /**< @c u32 entries a block stages, sized by the widest tree, or zero for none. */
+} sz_overlap_cuda_geometry_t;
 
 /** Whether the prepared query holds one raw @p window_hash, walking the tree a level at a time. */
 SZ_DEVICE_INLINE sz_size_t sz_overlap_cuda_btree_probe_(sz_overlap_btree_t const *btree, sz_u32_t window_hash) {
@@ -78,35 +87,26 @@ SZ_DEVICE_INLINE sz_size_t sz_overlap_cuda_btree_probe_(sz_overlap_btree_t const
 }
 
 /**
- *  @brief Scores one candidate per thread against the prepared query, one score per width.
+ *  @brief Scores one candidate against one prepared query, one score per width, on one thread.
  *
  *  The ring holds @c P(k) back to @c P(k - widest), so a window of any width up to that reads its start straight
  *  out of it and the text is walked once however many widths are asked for.
  *
- *  @p candidates travels whole and its accessors run here, on the device: one call per candidate, uniform across
- *  the warp, against multi-kilobyte texts. Nothing is flattened for the launch, and a caller whose sequence is
- *  some other layout entirely - a tape, a column, an index into someone else's arena - needs no conversion.
+ *  @p candidates ' accessors run here, on the device: one call per candidate, uniform across the warp, against
+ *  multi-kilobyte texts. Nothing is flattened for the launch, so a caller whose sequence is some other layout
+ *  entirely - a tape, a column, an index into someone else's arena - needs no conversion.
  */
-static __global__ void sz_overlap_cuda_scores_kernel_(sz_overlap_cuda_query_t query, sz_sequence_t candidates,
-                                                      sz_f32_t *scores) {
-    // The whole tree, when the launch asked for it: every probe in the block then descends out of shared memory.
-    extern __shared__ sz_u32_t staged_nodes_[];
-    if (query.nodes_count) {
-        for (sz_size_t entry = threadIdx.x; entry < query.nodes_count; entry += blockDim.x)
-            staged_nodes_[entry] = query.btree.nodes[entry];
-        __syncthreads();
-        query.btree.nodes = staged_nodes_;
-    }
-
-    sz_size_t const candidate = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (candidate >= candidates.count) return;
-
-    sz_cptr_t const text = candidates.get_start(candidates.handle, candidate);
-    sz_size_t const length = candidates.get_length(candidates.handle, candidate);
-    sz_f32_t *const candidate_scores = scores + candidate * query.widths_count;
+SZ_DEVICE_INLINE void sz_overlap_cuda_sweep_(sz_overlap_engine_t const *engine, sz_overlap_btree_t const *btree,
+                                             sz_size_t query, sz_sequence_t const *candidates, sz_size_t candidate,
+                                             sz_f32_t *scores, sz_size_t scores_query_stride,
+                                             sz_size_t scores_candidate_stride) {
+    sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
+    sz_size_t const length = candidates->get_length(candidates->handle, candidate);
+    sz_size_t const query_length = engine->lengths[query];
+    sz_f32_t *const candidate_scores = scores + query * scores_query_stride + candidate * scores_candidate_stride;
 
     sz_u32_t matches[sz_overlap_cuda_widths_max_k];
-    for (sz_size_t index = 0; index != query.widths_count; ++index) matches[index] = 0;
+    for (sz_size_t index = 0; index != engine->widths_count; ++index) matches[index] = 0;
 
     // `ring[k & mask]` is `P(k)`, so a window ending at `k` reads its start at `(k - width) & mask`. The base is
     // `256 mod p`, which is 256 itself, the modulus being the wider of the two.
@@ -118,98 +118,148 @@ static __global__ void sz_overlap_cuda_scores_kernel_(sz_overlap_cuda_query_t qu
         prior = (prior * 256 + (sz_u64_t)(sz_u8_t)text[position]) % (sz_u64_t)sz_overlap_modulus_k;
         sz_size_t const ending = position + 1;
         ring[ending & mask] = (sz_u32_t)prior;
-        for (sz_size_t index = 0; index != query.widths_count; ++index) {
-            sz_size_t const width = query.widths[index];
+        for (sz_size_t index = 0; index != engine->widths_count; ++index) {
+            sz_size_t const width = engine->widths[index];
             if (!width || width > ending) continue;
             sz_u64_t const start = (sz_u64_t)ring[(ending - width) & mask];
-            sz_u64_t const shifted = start * query.powers[index] % (sz_u64_t)sz_overlap_modulus_k;
+            sz_u64_t const shifted = start * engine->powers[index] % (sz_u64_t)sz_overlap_modulus_k;
             sz_u64_t const residue = prior + (sz_u64_t)sz_overlap_modulus_k - shifted;
             matches[index] += (sz_u32_t)sz_overlap_cuda_btree_probe_(
-                &query.btree, (sz_u32_t)(residue % (sz_u64_t)sz_overlap_modulus_k));
+                btree, (sz_u32_t)(residue % (sz_u64_t)sz_overlap_modulus_k));
         }
     }
 
-    for (sz_size_t index = 0; index != query.widths_count; ++index) {
-        sz_size_t const width = query.widths[index];
-        sz_bool_t const scored = width && width <= query.query_length && width <= length ? sz_true_k : sz_false_k;
+    for (sz_size_t index = 0; index != engine->widths_count; ++index) {
+        sz_size_t const width = engine->widths[index];
+        sz_bool_t const scored = width && width <= query_length && width <= length ? sz_true_k : sz_false_k;
         candidate_scores[index] =
-            scored ? sz_overlap_share_(matches[index], length - width + 1, query.query_length - width + 1) : 0.0f;
+            scored ? sz_overlap_share_(matches[index], length - width + 1, query_length - width + 1) : 0.0f;
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_overlap_scores_scheduled_cuda(
-    sz_cptr_t query, sz_size_t query_length, sz_sequence_t const *candidates, sz_size_t const *window_widths,
-    sz_size_t window_widths_count, sz_memory_allocator_t *alloc, sz_f32_t *scores, void *stream) {
+/**
+ *  @brief One block row per prepared query, one thread per candidate, the tree staged when the launch asked for it.
+ *
+ *  No thread leaves the query loop early, because the staging barriers are collective: a candidate past the batch
+ *  skips its sweep rather than returning, so every thread of the block reaches every @c __syncthreads.
+ */
+static __global__ void sz_overlap_cuda_scores_kernel_(sz_overlap_engine_t engine, sz_sequence_t candidates,
+                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                      sz_size_t scores_candidate_stride,
+                                                      sz_size_t staged_nodes_count) {
+    extern __shared__ sz_u32_t staged_nodes_[];
+    sz_size_t const candidate = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+
+    for (sz_size_t query = blockIdx.y; query < engine.count; query += gridDim.y) {
+        sz_overlap_btree_t btree = sz_overlap_engine_row_(&engine, query);
+        if (staged_nodes_count) {
+            sz_size_t const entries = engine.nodes_offsets[query + 1] - engine.nodes_offsets[query];
+            for (sz_size_t entry = threadIdx.x; entry < entries; entry += blockDim.x)
+                staged_nodes_[entry] = btree.nodes[entry];
+            __syncthreads();
+            btree.nodes = staged_nodes_;
+        }
+        if (candidate < candidates.count)
+            sz_overlap_cuda_sweep_(&engine, &btree, query, &candidates, candidate, scores, scores_query_stride,
+                                   scores_candidate_stride);
+        if (staged_nodes_count) __syncthreads();
+    }
+}
+
+/**
+ *  @brief Prepares every query of @p queries into one device-reachable block and resolves the launch geometry.
+ *
+ *  The trees are laid out by the host, because a sort is neither a scan nor a map and a hand-written device radix
+ *  sort would replace a host sort of a few tens of thousands of keys. The chain that feeds them is host working
+ *  space no kernel ever reads, so it comes from the host allocator rather than from @p alloc.
+ *
+ *  @param[in] queries Read on the @b host, so its accessors must be host-callable, unlike a round's candidates.
+ *  @param[in] alloc Unified and device-reachable, or @c SZ_NULL to have a unified one derived from the context.
+ *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the current device's default one.
+ *  @retval sz_unexpected_dimensions_k for no widths, more than @ref sz_overlap_cuda_widths_max_k of them, or one
+ *      past @ref sz_overlap_cuda_widest_window_k, which is the per-thread ring's compile-time bound.
+ *  @retval sz_device_memory_mismatch_k when @p alloc hands back memory the device cannot reach.
+ *  @sa sz_overlap_engine_init_gpu
+ */
+SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_cuda(sz_sequence_t const *queries, sz_size_t const *window_widths,
+                                                        sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
+                                                        void *stream, sz_overlap_engine_t *engine) {
     if (!window_widths_count || window_widths_count > sz_overlap_cuda_widths_max_k) return sz_unexpected_dimensions_k;
     for (sz_size_t index = 0; index != window_widths_count; ++index)
         if (window_widths[index] > sz_overlap_cuda_widest_window_k) return sz_unexpected_dimensions_k;
-    if (!candidates->count) return sz_success_k;
-    // The handle is checked, never the accessors: those are the device's to call, so the host must not, and a
-    // pointer is all this side can inspect. That the texts they answer are device-reachable is the caller's word.
-    if (!sz_memory_reaches_device(scores)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_device(candidates->handle)) return sz_device_memory_mismatch_k;
 
-    sz_size_t query_windows_total = 0;
-    for (sz_size_t index = 0; index != window_widths_count; ++index)
-        if (window_widths[index] && window_widths[index] <= query_length)
-            query_windows_total += query_length - window_widths[index] + 1;
-
-    // One allocation, widest alignment first so every view lands on its own boundary without padding. It has to
-    // reach the device too: the kernel reads the tree, the widths and the powers straight out of it, and only
-    // the chain is host-side working space.
-    sz_size_t const nodes_count = sz_overlap_btree_entries(query_windows_total);
-    sz_size_t const scratch_bytes = (query_length + 1) * sizeof(sz_f64_t) +
-                                    (nodes_count + 2 * window_widths_count) * sizeof(sz_u32_t);
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    if (!sz_memory_reaches_device(scratch)) {
-        alloc->free(scratch, scratch_bytes, alloc->handle);
+    sz_memory_allocator_t unified;
+    if (alloc) unified = *alloc;
+    else sz_memory_allocator_init_unified(&unified, SZ_NULL);
+    sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count,
+                                                       sizeof(sz_overlap_cuda_geometry_t), &unified, engine);
+    if (opened != sz_success_k) return opened;
+    if (!sz_memory_reaches_device(engine->memory)) {
+        sz_overlap_engine_close_(engine);
         return sz_device_memory_mismatch_k;
     }
 
-    sz_f64_t *const chain = (sz_f64_t *)scratch;
-    sz_u32_t *const nodes = (sz_u32_t *)(chain + query_length + 1);
-    sz_u32_t *const widths = nodes + nodes_count;
-    sz_u32_t *const powers = widths + window_widths_count;
-
-    chain[0] = 0.0;
-    sz_f64_t prior = 0.0;
-    for (sz_size_t position = 0; position != query_length; ++position)
-        prior = sz_overlap_f64x1_prefix_hash_step_serial(prior, query + position, chain + position + 1);
-
-    // Every width's query window hashes share one tree, laid out in place by the serial tier.
-    sz_size_t written = 0;
-    for (sz_size_t index = 0; index != window_widths_count; ++index) {
-        sz_size_t const width = window_widths[index];
-        sz_f64_t const power = sz_overlap_window_power(width);
-        widths[index] = (sz_u32_t)width, powers[index] = (sz_u32_t)power;
-        if (!width || width > query_length) continue;
-        for (sz_size_t window = 0; window + width <= query_length; ++window)
-            sz_overlap_f64x1_window_hash_step_serial(chain + window, chain + window + width, power,
-                                                     nodes + written + window);
-        written += query_length - width + 1;
+    sz_size_t longest_query = 0;
+    for (sz_size_t index = 0; index != engine->count; ++index)
+        if (engine->lengths[index] > longest_query) longest_query = engine->lengths[index];
+    sz_memory_allocator_t host;
+    sz_memory_allocator_init_default(&host);
+    sz_size_t const chain_bytes = (longest_query + 1) * sizeof(sz_f64_t);
+    sz_f64_t *const chain = (sz_f64_t *)host.allocate(chain_bytes, host.handle);
+    if (!chain) {
+        sz_overlap_engine_close_(engine);
+        return sz_bad_alloc_k;
     }
-    sz_overlap_cuda_query_t device_query;
-    sz_overlap_btree_prepare(nodes, sz_overlap_u32x1_btree_sort_serial(nodes, written), &device_query.btree);
-    device_query.widths = widths;
-    device_query.powers = powers;
-    device_query.widths_count = window_widths_count;
-    device_query.query_length = query_length;
-    // What this device will hand one block, not what the part it was tuned on would have.
-    int shared_limit = 0;
-    sz_size_t const tree_bytes = nodes_count * sizeof(sz_u32_t);
-    device_query.nodes_count = 0;
-    if (cudaDeviceGetAttribute(&shared_limit, cudaDevAttrMaxSharedMemoryPerBlock, 0) == cudaSuccess &&
-        tree_bytes * sz_overlap_cuda_shared_tree_share_k <= (sz_size_t)shared_limit)
-        device_query.nodes_count = nodes_count;
 
-    // The sequence goes to the kernel whole - its accessors are the device's to call, once per candidate.
+    // The arena and the key counts stay writable until the engine is handed back; its readers see them const.
+    sz_u32_t *const nodes = (sz_u32_t *)engine->nodes;
+    sz_u32_t *const keys_counts = (sz_u32_t *)engine->keys_counts;
+    sz_size_t widest_nodes = 0;
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_cptr_t const text = queries->get_start(queries->handle, index);
+        sz_size_t const length = engine->lengths[index];
+        sz_u32_t *const arena = nodes + engine->nodes_offsets[index];
+        sz_size_t const entries = engine->nodes_offsets[index + 1] - engine->nodes_offsets[index];
+        if (entries > widest_nodes) widest_nodes = entries;
+        chain[0] = 0.0;
+        sz_f64_t prior = 0.0;
+        for (sz_size_t position = 0; position != length; ++position)
+            prior = sz_overlap_f64x1_prefix_hash_step_serial(prior, text + position, chain + position + 1);
+
+        sz_size_t written = 0;
+        for (sz_size_t width_index = 0; width_index != engine->widths_count; ++width_index) {
+            sz_size_t const width = engine->widths[width_index];
+            if (!width || width > length) continue;
+            sz_f64_t const power = (sz_f64_t)engine->powers[width_index];
+            sz_size_t const query_windows = length - width + 1;
+            for (sz_size_t window = 0; window != query_windows; ++window)
+                sz_overlap_f64x1_window_hash_step_serial(chain + window, chain + window + width, power,
+                                                         arena + written + window);
+            written += query_windows;
+        }
+        sz_overlap_btree_t btree;
+        sz_size_t const distinct = sz_overlap_u32x1_btree_sort_serial(arena, written);
+        sz_overlap_btree_prepare(arena, distinct, &btree);
+        keys_counts[index] = (sz_u32_t)distinct;
+    }
+    host.free(chain, chain_bytes, host.handle);
+
+    // What the bound device will hand one block, not what the part this was tuned on would have. Every block
+    // stages one tree, so the widest of them is what the launch has to fit and what the occupancy walk is told.
+    sz_overlap_cuda_geometry_t *const geometry = (sz_overlap_cuda_geometry_t *)sz_overlap_engine_head_(engine);
+    int ordinal = 0, shared_limit = 0;
+    geometry->stream = stream;
+    geometry->staged_nodes_count = 0;
+    if (cudaGetDevice(&ordinal) == cudaSuccess &&
+        cudaDeviceGetAttribute(&shared_limit, cudaDevAttrMaxSharedMemoryPerBlock, ordinal) == cudaSuccess &&
+        widest_nodes * sizeof(sz_u32_t) * sz_overlap_cuda_shared_tree_share_k <= (sz_size_t)shared_limit)
+        geometry->staged_nodes_count = widest_nodes;
+
     // The block size comes from this device and this kernel, not from the part it was tuned on: register pressure
     // and the staged tree both move the residency ceiling, and a launcher that hard-codes one number is answering
     // for a GPU it has never seen. The walk keeps whichever size lands the most warps per multiprocessor, which
     // is what the C++ occupancy helper computes and the only shape of it that has a C spelling.
-    cudaStream_t const on = (cudaStream_t)stream;
-    sz_size_t const staged_bytes = device_query.nodes_count * sizeof(sz_u32_t);
+    sz_size_t const staged_bytes = geometry->staged_nodes_count * sizeof(sz_u32_t);
     sz_size_t per_block = sz_overlap_cuda_candidates_per_block_k;
     cudaFuncAttributes attributes;
     if (cudaFuncGetAttributes(&attributes, (void const *)sz_overlap_cuda_scores_kernel_) == cudaSuccess) {
@@ -225,98 +275,63 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_scheduled_cuda(
             if (warps > most_warps) most_warps = warps, per_block = candidate;
         }
     }
+    geometry->candidates_per_block = per_block;
+
+    engine->capability = sz_cap_cuda_k;
+    return sz_success_k;
+}
+
+/**
+ *  The device arm of @ref sz_overlap_scores.
+ *  @pre @p candidates carries @b device accessors, as @ref sz_sequence_from_string_views_cuda binds them, because
+ *      the kernel is what calls them - one call per candidate, uniform across the warp. Only the handle can be
+ *      checked from this side, so host accessors reach the device as an invalid address rather than a status.
+ *  @retval sz_device_memory_mismatch_k when the scores or the first candidate is host memory.
+ *  @retval sz_device_code_mismatch_k when the launch itself is refused.
+ *  @note Enqueues and returns; the caller joins the stream it handed @ref sz_overlap_engine_init_gpu before
+ *      reading @p scores.
+ */
+SZ_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                   sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                   sz_size_t scores_candidate_stride) {
+    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
+                                                              scores_candidate_stride);
+    if (dimensions != sz_success_k) return dimensions;
+    if (!candidates->count || !engine->count) return sz_success_k;
+    // The handle is checked, never the accessors: those are the device's to call, so the host must not, and a
+    // pointer is all this side can inspect. That the texts they answer are device-reachable is the caller's word.
+    if (!sz_memory_reaches_device(scores)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_reaches_device(candidates->handle)) return sz_device_memory_mismatch_k;
+
+    sz_overlap_cuda_geometry_t const *const geometry =
+        (sz_overlap_cuda_geometry_t const *)sz_overlap_engine_head_(engine);
+    sz_size_t const per_block = geometry->candidates_per_block;
     sz_size_t const blocks = (candidates->count + per_block - 1) / per_block;
+    sz_size_t const rows = engine->count < sz_overlap_cuda_queries_per_grid_k ? engine->count
+                                                                              : sz_overlap_cuda_queries_per_grid_k;
+    sz_size_t staged_nodes_count = geometry->staged_nodes_count;
+    sz_size_t const staged_bytes = staged_nodes_count * sizeof(sz_u32_t);
+
+    // The engine travels by value with its host-only members cleared: an allocator's function pointers would ride
+    // into constant memory on every launch and no kernel can call them.
+    sz_overlap_engine_t launched_engine = *engine;
+    launched_engine.alloc.allocate = SZ_NULL;
+    launched_engine.alloc.free = SZ_NULL;
+    launched_engine.alloc.handle = SZ_NULL;
+    launched_engine.memory = SZ_NULL, launched_engine.memory_bytes = 0;
+    launched_engine.scratch = SZ_NULL, launched_engine.scratch_bytes = 0;
+    sz_sequence_t launched_candidates = *candidates;
 
     dim3 grid, block;
-    grid.x = (unsigned)blocks, grid.y = 1, grid.z = 1;
+    grid.x = (unsigned)blocks, grid.y = (unsigned)rows, grid.z = 1;
     block.x = (unsigned)per_block, block.y = 1, block.z = 1;
-    void *arguments[3];
-    sz_sequence_t launched_candidates = *candidates;
-    arguments[0] = &device_query, arguments[1] = &launched_candidates, arguments[2] = &scores;
-    if (cudaLaunchKernel((void const *)sz_overlap_cuda_scores_kernel_, grid, block, arguments, staged_bytes, on) !=
-        cudaSuccess) {
-        alloc->free(scratch, scratch_bytes, alloc->handle);
+    void *arguments[6];
+    arguments[0] = &launched_engine, arguments[1] = &launched_candidates, arguments[2] = &scores;
+    arguments[3] = &scores_query_stride, arguments[4] = &scores_candidate_stride, arguments[5] = &staged_nodes_count;
+    if (cudaLaunchKernel((void const *)sz_overlap_cuda_scores_kernel_, grid, block, arguments, staged_bytes,
+                         (cudaStream_t)geometry->stream) != cudaSuccess)
         return sz_device_code_mismatch_k;
-    }
-
-    // Only this stream is waited on, so the caller's other work on the device keeps running.
-    cudaError_t const finished = cudaStreamSynchronize(on);
-    alloc->free(scratch, scratch_bytes, alloc->handle);
-    return finished == cudaSuccess ? sz_success_k : sz_device_code_mismatch_k;
-}
-
-SZ_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_cptr_t query, sz_size_t query_length,
-                                                   sz_sequence_t const *candidates, sz_size_t const *window_widths,
-                                                   sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
-                                                   sz_f32_t *scores) {
-    // The one probe is the strict verb's own: it refuses whatever the device cannot reach, and only then is there
-    // anything to stage. A caller already holding its data on the device pays nothing for the attempt.
-    sz_status_t const resident = sz_overlap_scores_scheduled_cuda(query, query_length, candidates, window_widths,
-                                                                  window_widths_count, alloc, scores, SZ_NULL);
-    if (resident != sz_device_memory_mismatch_k) return resident;
-
-    sz_size_t texts_bytes = 0;
-    for (sz_size_t index = 0; index != candidates->count; ++index)
-        texts_bytes += candidates->get_length(candidates->handle, index);
-    sz_size_t const scores_count = candidates->count * window_widths_count;
-
-    // The texts are only ever read by the device, so they go to plain device memory and cross once; only the
-    // views and the scores, which the host writes or reads, need memory both sides address.
-    sz_memory_allocator_t staging;
-    sz_memory_allocator_init_unified(&staging);
-    sz_size_t const shared_bytes = candidates->count * sizeof(sz_string_view_t) + scores_count * sizeof(sz_f32_t);
-    sz_ptr_t const shared = (sz_ptr_t)staging.allocate(shared_bytes, staging.handle);
-    sz_ptr_t const flat = (sz_ptr_t)alloc->allocate(texts_bytes, alloc->handle);
-    sz_ptr_t texts = SZ_NULL;
-    if (!shared || !flat || cudaMalloc((void **)&texts, texts_bytes) != cudaSuccess) {
-        if (shared) staging.free(shared, shared_bytes, staging.handle);
-        if (flat) alloc->free(flat, texts_bytes, alloc->handle);
-        return sz_bad_alloc_k;
-    }
-
-    sz_string_view_t *const views = (sz_string_view_t *)shared;
-    sz_f32_t *const staged_scores = (sz_f32_t *)(views + candidates->count);
-    sz_size_t written = 0;
-    for (sz_size_t index = 0; index != candidates->count; ++index) {
-        sz_size_t const length = candidates->get_length(candidates->handle, index);
-        sz_cptr_t const start = candidates->get_start(candidates->handle, index);
-        for (sz_size_t byte = 0; byte != length; ++byte) flat[written + byte] = start[byte];
-        views[index].start = texts + written, views[index].length = length;
-        written += length;
-    }
-    cudaMemcpy(texts, flat, texts_bytes, cudaMemcpyHostToDevice);
-    alloc->free(flat, texts_bytes, alloc->handle);
-
-    // Bound to the device's own accessors, so the staged round reaches the kernel exactly as a caller's own
-    // device-resident sequence would - one code path from here on.
-    sz_sequence_t staged_candidates;
-    sz_status_t const bound = sz_sequence_from_string_views_cuda(views, candidates->count, &staged_candidates);
-    if (bound != sz_success_k) {
-        cudaFree(texts);
-        staging.free(shared, shared_bytes, staging.handle);
-        return bound;
-    }
-
-    // The strict verb joins the default stream before returning, so the staged scores are settled by the time
-    // they are read back and the staging is released.
-    sz_status_t const status = sz_overlap_scores_scheduled_cuda(query, query_length, &staged_candidates, window_widths,
-                                                                window_widths_count, &staging, staged_scores, SZ_NULL);
-    if (status == sz_success_k)
-        for (sz_size_t index = 0; index != scores_count; ++index) scores[index] = staged_scores[index];
-    cudaFree(texts);
-    staging.free(shared, shared_bytes, staging.handle);
-    return status;
-}
-
-SZ_API_COMPTIME sz_status_t sz_overlap_score_cuda(sz_cptr_t query, sz_size_t query_length, sz_cptr_t candidate,
-                                                  sz_size_t candidate_length, sz_size_t const *window_widths,
-                                                  sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
-                                                  sz_f32_t *scores) {
-    sz_string_view_t view;
-    view.start = candidate, view.length = candidate_length;
-    sz_sequence_t candidates;
-    sz_sequence_from_string_views(&view, 1, &candidates);
-    return sz_overlap_scores_cuda(query, query_length, &candidates, window_widths, window_widths_count, alloc, scores);
+    return sz_success_k;
 }
 
 #pragma endregion CUDA

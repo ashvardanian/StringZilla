@@ -10,6 +10,9 @@
  *  Scoring a handful of candidates per call would time the launch instead, and answer a question nobody is
  *  asking of a GPU.
  *
+ *  The engine is built before the timing on both sides, because that is how it is meant to be used: one forest
+ *  per batch of queries, many rounds of candidates against it. What is timed is the round alone.
+ *
  *  There is no per-stage breakdown as in `overlap.cpp`: the device runs the prepared query, the chain and the
  *  probes inside one launch, so there is no boundary between them to time.
  *
@@ -49,6 +52,9 @@
 
 using namespace ashvardanian::stringzilla::bench;
 
+using overlap_engine_init_t = sz_status_t (*)(sz_sequence_t const *, sz_size_t const *, sz_size_t,
+                                              sz_memory_allocator_t *, sz_overlap_engine_t *);
+
 /** @brief The width the corpus's collision entropy picks for a query of @p query_bytes against a mean candidate. */
 static std::size_t overlap_width_(environment_t const &env, std::size_t query_bytes) {
     double counts[256] = {};
@@ -63,20 +69,6 @@ static std::size_t overlap_width_(environment_t const &env, std::size_t query_by
     double const width =
         std::ceil(std::log2(static_cast<double>(query_bytes) * mean_candidate_bytes) / collision_entropy);
     return width > 1.0 ? static_cast<std::size_t>(width) : 1;
-}
-
-/**
- *  @brief Candidates one call scores: the `STRINGWARS_BATCH` entry if set, else one residency wave.
- *
- *  Both kernels map one candidate per thread, so a wave is every multiprocessor filled to its thread ceiling -
- *  a count that moves with the part rather than a literal tuned on one of them.
- */
-static std::size_t candidates_per_call(environment_t const &env, int device) {
-    if (!env.batch_sizes_override.empty()) return env.batch_sizes_override.front();
-    cudaDeviceProp properties;
-    if (cudaGetDeviceProperties(&properties, device) != cudaSuccess)
-        throw std::runtime_error("The device would not report its geometry.");
-    return (std::size_t)properties.multiProcessorCount * (std::size_t)properties.maxThreadsPerMultiProcessor;
 }
 
 /**
@@ -100,7 +92,7 @@ struct overlap_cuda_corpus_t {
     }
 
     overlap_cuda_corpus_t(environment_t const &env) {
-        std::size_t const count = std::min<std::size_t>(env.tokens.size(), candidates_per_call(env, 0));
+        std::size_t const count = std::min<std::size_t>(env.tokens.size(), resident_candidates_per_call(env));
         views.resize(count), scores.resize(count);
         for (std::size_t index = 0; index != count; ++index) {
             token_view_t const token = env.tokens[index];
@@ -113,28 +105,40 @@ struct overlap_cuda_corpus_t {
     }
 };
 
-/** Scores the resident corpus against one token as the query, entirely on the device. */
+/** @brief The leading token cut to @p query_bytes, which is the one query every arm's engine is built over. */
+static std::string overlap_query_text_(environment_t const &env, std::size_t query_bytes) {
+    token_view_t const whole = env.tokens[0];
+    return std::string(whole.data(), std::min(whole.size(), query_bytes));
+}
+
+/** Scores the resident corpus against the fixed query, entirely on the device. */
 struct overlap_scores_from_cuda {
-    environment_t const &env;
     overlap_cuda_corpus_t &corpus;
-    std::size_t query_bytes;
-    std::size_t width;
     std::size_t windows;
+    std::string query;
     sz_memory_allocator_t alloc;
+    sz_overlap_engine_t engine {};
 
     overlap_scores_from_cuda(environment_t const &env, overlap_cuda_corpus_t &corpus, std::size_t query_bytes,
                              std::size_t width)
-        : env(env), corpus(corpus), query_bytes(query_bytes), width(width), windows(corpus.windows_at(width)) {
-        sz_memory_allocator_init_unified(&alloc);
-    }
-
-    call_result_t operator()(std::size_t token_index) {
-        token_view_t const whole = env.tokens[token_index % env.tokens.size()];
-        token_view_t const query {whole.data(), std::min(whole.size(), query_bytes)};
+        : corpus(corpus), windows(corpus.windows_at(width)), query(overlap_query_text_(env, query_bytes)) {
+        sz_memory_allocator_init_unified(&alloc, SZ_NULL);
+        sz_string_view_t const view {query.data(), query.size()};
+        sz_sequence_t queries {};
+        sz_sequence_from_string_views(&view, 1, &queries);
         sz_size_t const scored_width = width;
-        if (sz_overlap_scores_cuda(query.data(), query.size(), &corpus.device_candidates, &scored_width, 1, &alloc,
-                                   corpus.scores.data()) != sz_success_k)
+        if (sz_overlap_engine_init_gpu(&queries, &scored_width, 1, &alloc, SZ_NULL, &engine) != sz_success_k)
+            throw std::runtime_error("The device forest could not be prepared.");
+    }
+    ~overlap_scores_from_cuda() { sz_overlap_engine_free(&engine); }
+    overlap_scores_from_cuda(overlap_scores_from_cuda const &) = delete;
+    overlap_scores_from_cuda &operator=(overlap_scores_from_cuda const &) = delete;
+
+    call_result_t operator()(std::size_t) {
+        if (sz_overlap_scores_cuda(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.scores.size(), 1) !=
+            sz_success_k)
             throw std::runtime_error("The GPU round failed.");
+        if (cudaStreamSynchronize(SZ_NULL) != cudaSuccess) throw std::runtime_error("The GPU round did not finish.");
         check_value_t mixed = 0;
         for (sz_f32_t const score : corpus.scores) mixed = mixed * 31u + (check_value_t)(score * 1048576.0f);
         call_result_t result(corpus.bytes, mixed, windows);
@@ -144,30 +148,33 @@ struct overlap_scores_from_cuda {
 };
 
 /** The same round on the CPU, so the two check values line up under `STRINGWARS_STRESS`. */
-template <sz_status_t (*scores_)(sz_cptr_t, sz_size_t, sz_sequence_t const *, sz_size_t const *, sz_size_t,
-                                 sz_memory_allocator_t *, sz_f32_t *)>
+template <overlap_engine_init_t init_, sz_overlap_scores_t scores_>
 struct overlap_scores_from_sz {
-    environment_t const &env;
     overlap_cuda_corpus_t &corpus;
-    std::size_t query_bytes;
-    std::size_t width;
     std::size_t windows;
+    std::string query;
     sz_memory_allocator_t alloc;
     std::vector<sz_f32_t> scores;
+    sz_overlap_engine_t engine {};
 
     overlap_scores_from_sz(environment_t const &env, overlap_cuda_corpus_t &corpus, std::size_t query_bytes,
                            std::size_t width)
-        : env(env), corpus(corpus), query_bytes(query_bytes), width(width), windows(corpus.windows_at(width)),
+        : corpus(corpus), windows(corpus.windows_at(width)), query(overlap_query_text_(env, query_bytes)),
           scores(corpus.scores.size()) {
         sz_memory_allocator_init_default(&alloc);
-    }
-
-    call_result_t operator()(std::size_t token_index) {
-        token_view_t const whole = env.tokens[token_index % env.tokens.size()];
-        token_view_t const query {whole.data(), std::min(whole.size(), query_bytes)};
+        sz_string_view_t const view {query.data(), query.size()};
+        sz_sequence_t queries {};
+        sz_sequence_from_string_views(&view, 1, &queries);
         sz_size_t const scored_width = width;
-        if (scores_(query.data(), query.size(), &corpus.host_candidates, &scored_width, 1, &alloc, scores.data()) !=
-            sz_success_k)
+        if (init_(&queries, &scored_width, 1, &alloc, &engine) != sz_success_k)
+            throw std::runtime_error("The host forest could not be prepared.");
+    }
+    ~overlap_scores_from_sz() { sz_overlap_engine_free(&engine); }
+    overlap_scores_from_sz(overlap_scores_from_sz const &) = delete;
+    overlap_scores_from_sz &operator=(overlap_scores_from_sz const &) = delete;
+
+    call_result_t operator()(std::size_t) {
+        if (scores_(&engine, &corpus.host_candidates, scores.data(), scores.size(), 1) != sz_success_k)
             throw std::runtime_error("The CPU round failed.");
         check_value_t mixed = 0;
         for (sz_f32_t const score : scores) mixed = mixed * 31u + (check_value_t)(score * 1048576.0f);
@@ -181,16 +188,19 @@ struct overlap_scores_from_sz {
 static void bench_overlap_scores(environment_t const &env, overlap_cuda_corpus_t &corpus, std::size_t query_bytes) {
     std::size_t const width = overlap_width_(env, query_bytes);
     std::string const suffix = ":w" + std::to_string(width);
-    auto validator = overlap_scores_from_sz<sz_overlap_scores_serial> {env, corpus, query_bytes, width};
+    auto validator = overlap_scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {
+        env, corpus, query_bytes, width};
     bench_result_t base = bench_unary(env, std::string("sz_overlap_scores_serial") + suffix, validator).log();
 #if SZ_USE_HASWELL
     base = bench_unary(env, std::string("sz_overlap_scores_haswell") + suffix, validator,
-                       overlap_scores_from_sz<sz_overlap_scores_haswell> {env, corpus, query_bytes, width})
+                       overlap_scores_from_sz<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell> {
+                           env, corpus, query_bytes, width})
                .log(base);
 #endif
 #if SZ_USE_SKYLAKE
     base = bench_unary(env, std::string("sz_overlap_scores_skylake") + suffix, validator,
-                       overlap_scores_from_sz<sz_overlap_scores_skylake> {env, corpus, query_bytes, width})
+                       overlap_scores_from_sz<sz_overlap_engine_init_skylake, sz_overlap_scores_skylake> {
+                           env, corpus, query_bytes, width})
                .log(base);
 #endif
     bench_unary(env, std::string("sz_overlap_scores_cuda") + suffix, validator,

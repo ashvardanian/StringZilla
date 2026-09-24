@@ -251,25 +251,35 @@ SZ_HELPER_AUTO sz_levenshtein_lanes_icelake_t sz_levenshtein_lanes_icelake(sz_si
 
 #pragma endregion Narrow Lanes
 
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_icelake(sz_cptr_t query_text, sz_size_t query_length,
-                                                             sz_sequence_t const *candidates,
-                                                             sz_memory_allocator_t *alloc, sz_size_t *distances) {
-    // Only a query short enough for a byte lane is this tier's own; every wider one, and an empty one, is Skylake's.
-    if (query_length == 0 || sz_levenshtein_lanes_icelake(query_length) != sz_levenshtein_lanes_u8x64_k)
-        return sz_levenshtein_distances_skylake(query_text, query_length, candidates, alloc, distances);
-    // The byte lanes keep their vertical in a register, so the scratch is an alignment head, the masks, and the map.
-    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(query_length);
-    sz_size_t const scratch_bytes = 64 + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t)) +
-                                    sz_levenshtein_byte_classes_k;
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
+SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engine_t *engine,
+                                                             sz_sequence_t const *candidates, sz_size_t *distances,
+                                                             sz_size_t distances_stride) {
+    enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
+    // The byte lanes read one word of one class row, so a rune batch is Skylake's whole and not one query at a time.
+    if (engine->symbol != sz_levenshtein_bytes_k)
+        return sz_levenshtein_distances_skylake(engine, candidates, distances, distances_stride);
+    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    // Only a query short enough for a byte lane is this tier's own; every wider one keeps the Skylake verticals.
+    sz_status_t const grown = sz_levenshtein_engine_scratch_(
+        engine, sz_levenshtein_engine_verticals_bytes_(registers_k, sz_levenshtein_engine_words_max_(engine),
+                                                       sizeof(sz_levenshtein_u64x8_vertical_skylake_t)));
+    if (grown != sz_success_k) return grown;
+    sz_levenshtein_u64x8_vertical_skylake_t *const verticals =
+        (sz_levenshtein_u64x8_vertical_skylake_t *)sz_levenshtein_engine_verticals_(engine);
 
-    sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
-    sz_levenshtein_icelake_u8x64_distances_(&query, candidates, distances);
-    alloc->free(scratch, scratch_bytes, alloc->handle);
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t *const row = distances + index * distances_stride;
+        if (engine->lengths[index] == 0) {
+            sz_levenshtein_engine_empty_row_(engine, candidates, row);
+            continue;
+        }
+        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
+        if (sz_levenshtein_lanes_icelake(query.length) == sz_levenshtein_lanes_u8x64_k)
+            sz_levenshtein_icelake_u8x64_distances_(&query, candidates, row);
+        else
+            sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_transpose_skylake,
+                                                    sz_levenshtein_classes_u8_k, verticals, row);
+    }
     return sz_success_k;
 }
 

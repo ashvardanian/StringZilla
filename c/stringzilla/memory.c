@@ -7,8 +7,9 @@
 #if !defined(SZ_OVERRIDE_LIBC)
 #define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
 #endif
-#include "dispatch.h"
 #include <stringzilla/memory.h>
+
+#include "dispatch.h"
 
 #if SZ_AVOID_LIBC
 #ifdef _MSC_VER
@@ -19,7 +20,7 @@ typedef __SIZE_TYPE__ size_t; // For GCC/Clang
 #endif
 
 SZ_DISPATCH_INTERNAL void sz_dispatch_memory_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->copy = sz_copy_serial;
@@ -117,19 +118,19 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_memory_update_(sz_capability_t caps) {
 }
 
 SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    sz_dispatch_table.copy(target, source, length);
+    sz_dispatch_cpu_table.copy(target, source, length);
 }
 
 SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    sz_dispatch_table.move(target, source, length);
+    sz_dispatch_cpu_table.move(target, source, length);
 }
 
 SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    sz_dispatch_table.fill(target, length, value);
+    sz_dispatch_cpu_table.fill(target, length, value);
 }
 
 SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
-    sz_dispatch_table.lookup(target, length, source, lut);
+    sz_dispatch_cpu_table.lookup(target, length, source, lut);
 }
 
 // Provide overrides for the libc mem* functions

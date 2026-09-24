@@ -1,15 +1,14 @@
 # Clang cross-compilation toolchain for WebAssembly (wasm32-wasip1-threads) with SIMD128 and relaxed-SIMD.
 #
 # Usage: cmake -B build_wasm_threads -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32-threads.cmake ... ; ctest --test-dir build_wasm_threads
-# # builds the wasm32 test binaries, the parallel `stringzillas` ones included, and runs each .wasm under Wasmtime.
+# # builds the wasm32 test binaries and runs each .wasm under Wasmtime.
 #
 # Threads are a whole-module choice: `-pthread` puts every worker on its own wasi-thread over one imported shared
-# memory, which is what ForkUnion's pools and the `stringzillas` kernels behind them need. The single-threaded core
-# lives under cmake/toolchain-wasm32.cmake, whose SIMD tier and exception handling this file repeats.
+# memory. Nothing in the library needs it today, so the single-threaded cmake/toolchain-wasm32.cmake is the usual
+# one; this file repeats its SIMD tier and exception handling for a caller that shards work across threads itself.
 #
 # Only Wasmtime runs wasi-threads modules today, with `-W threads=y -S threads=y`; there is no runtime choice here.
-# Shared libraries stay off: WASI has no dynamic loader, so the tests link `forkunion::static` and compile the
-# `stringzillas` kernels in.
+# Shared libraries stay off: WASI has no dynamic loader, so the tests link statically.
 #
 # Requires the wasi-sdk (self-contained clang + wasi-sysroot + libc). Point at it with -DWASI_SDK_PREFIX=... or the
 # WASI_SDK_PREFIX / WASI_SDK_PATH environment variables; the default falls back to ~/wasi-sdk then /opt/wasi-sdk*.

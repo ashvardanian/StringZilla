@@ -89,8 +89,9 @@
 
 #include "stringzilla/sort.h"        // `sz_sequence_argsort`, `sz_pgrams_sort`
 #include "stringzilla/intersect.h"   // `sz_sequence_intersect`
-#include "stringzilla/levenshtein.h" // `sz_levenshtein_distance`, `sz_levenshtein_distances`
-#include "stringzilla/overlap.h"     // `sz_overlap_score`, `sz_overlap_scores`
+#include "stringzilla/levenshtein.h" // `sz_levenshtein_engine_init_cpu`, `sz_levenshtein_distances`
+#include "stringzilla/overlap.h"     // `sz_overlap_engine_init_cpu`, `sz_overlap_scores`
+#include "stringzilla/substrings.h"  // `sz_substrings_engine_init_cpu`, `sz_substrings_find`
 
 #include "stringzilla/utf8_runes.h"        // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
 #include "stringzilla/utf8_tokens.h"       // `sz_utf8_newlines`, `sz_utf8_whitespaces`, `sz_utf8_delimiters`
@@ -776,8 +777,8 @@ SZ_API_RUNTIME sz_capability_t sz_capabilities_comptime(void);
 SZ_API_RUNTIME sz_capability_t sz_capabilities_runtime(void);
 SZ_API_RUNTIME sz_capability_t sz_capabilities(void);
 SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
-SZ_API_RUNTIME void sz_dispatch_table_init(void);
-SZ_API_RUNTIME void sz_dispatch_table_update(sz_capability_t caps);
+SZ_API_RUNTIME void sz_dispatch_cpu_table_init(void);
+SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps);
 
 #else
 
@@ -799,8 +800,9 @@ SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     sz_capabilities_to_string_implementation_(caps, names, sizeof(names));
     return names;
 }
-SZ_API_RUNTIME void sz_dispatch_table_init(void) {}
-SZ_API_RUNTIME void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
+SZ_API_RUNTIME void sz_dispatch_cpu_table_init(void) {}
+/** No-op in a non-dynamic build, where every verb resolved at compile time. */
+SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) { sz_unused_(caps); }
 
 #endif
 

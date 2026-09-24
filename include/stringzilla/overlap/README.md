@@ -1,37 +1,38 @@
 # Overlap: Window Hashing and Prepared-Query Match Counting
 
-This directory holds the kernels behind `sz_overlap_score` and `sz_overlap_scores`, plus the prefix-hash, window-hash, key-sort and B-tree probe primitives every backend shares.
-Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86.
-The dispatcher picks the fastest one available on the running CPU.
+This directory holds the kernels behind `sz_overlap_engine_init_cpu`, `sz_overlap_engine_init_gpu` and `sz_overlap_scores`, plus the prefix-hash, window-hash, key-sort and B-tree probe primitives every backend shares.
+Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86, and a CUDA backend on the device.
+The engine resolves its tier once, when the batch of queries is prepared, and every later round scores on that tier alone.
 
 ## Methodology
 
 Numbers are throughput in windows per second, rendered as Mwin/s, one window per byte offset at the scored width, measured with `bench/overlap.cpp` over the `xlsum.csv` corpus on one pinned core, reporting the median of repeated runs.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one stage.
 Token length decides whether the query's B-tree fits L1, so results are split into a Short Words table (tokens averaging 9 bytes) and a Long Lines table (tokens averaging 3 KB).
-Preparation is the query's key sort and tree layout, paid once per query, and Window lookups is a candidate's whole read side — its chain, its window hashes, then the walk over each one — so the probe alone is that column against Window hashes.
-The GPU rows come from `bench/overlap.cu` and score one residency wave of one candidate per thread.
+Preparation is the query's key sort and tree layout, paid once per batch, and Window lookups is a candidate's whole read side — its chain, its window hashes, then the walk over each one — so the probe alone is that column against Window hashes.
+The `sz_overlap_scores` column times the round alone: the engine is built before the timing starts, because that is how it is meant to be used — one forest per batch of queries, many rounds of candidates against it.
+The GPU rows come from `bench/overlap.cu` and score one residency wave of one candidate per thread, one query per block row.
 A `…` cell is genuinely-missing data, on a backend not yet measured on hardware that runs it.
 
 ## Short Words
 
-| Backend         | `sz_overlap_score` | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
-| :-------------- | -----------------: | ------------------: | ------------: | ------------: | ----------: | -------------: |
-| Serial @ Xeon6  |              10.24 |               68.38 |        262.17 |        146.69 |       25.11 |          68.58 |
-| Haswell @ Xeon6 |              33.13 |              121.37 |        279.79 |        156.88 |      214.44 |          98.72 |
-| Skylake @ Xeon6 |              36.52 |              130.03 |        278.57 |        142.03 |      226.19 |          73.95 |
-| CUDA @ SM90     |                  … |                   … |             … |             … |           … |              … |
-| CUDA @ SM120    |                  … |              386.92 |             … |             … |           … |              … |
+| Backend         | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
+| :-------------- | ------------------: | ------------: | ------------: | ----------: | -------------: |
+| Serial @ Xeon6  |                   … |        262.17 |        146.69 |       25.11 |          68.58 |
+| Haswell @ Xeon6 |                   … |        279.79 |        156.88 |      214.44 |          98.72 |
+| Skylake @ Xeon6 |                   … |        278.57 |        142.03 |      226.19 |          73.95 |
+| CUDA @ SM90     |                   … |             … |             … |           … |              … |
+| CUDA @ SM120    |                   … |             … |             … |           … |              … |
 
 ## Long Lines
 
-| Backend         | `sz_overlap_score` | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
-| :-------------- | -----------------: | ------------------: | ------------: | ------------: | ----------: | -------------: |
-| Serial @ Xeon6  |              19.58 |               41.65 |        273.26 |        168.11 |       32.33 |          45.26 |
-| Haswell @ Xeon6 |              70.40 |              135.51 |        280.10 |        192.73 |      163.66 |         138.84 |
-| Skylake @ Xeon6 |             103.94 |              219.77 |        522.27 |        321.89 |      178.71 |         242.86 |
-| CUDA @ SM90     |                  … |                   … |             … |             … |           … |              … |
-| CUDA @ SM120    |                  … |              878.99 |             … |             … |           … |              … |
+| Backend         | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
+| :-------------- | ------------------: | ------------: | ------------: | ----------: | -------------: |
+| Serial @ Xeon6  |                   … |        273.26 |        168.11 |       32.33 |          45.26 |
+| Haswell @ Xeon6 |                   … |        280.10 |        192.73 |      163.66 |         138.84 |
+| Skylake @ Xeon6 |                   … |        522.27 |        321.89 |      178.71 |         242.86 |
+| CUDA @ SM90     |                   … |             … |             … |           … |              … |
+| CUDA @ SM120    |                   … |             … |             … |           … |              … |
 
 ## Window Hashes
 
@@ -53,7 +54,7 @@ This prime's weight is twenty-four, which `test/overlap.cpp` certifies by the sa
 
 ## Window Widths
 
-Every width's query window hashes share one B-tree: the step primitives are told a width and know nothing about why, while `sz_overlap_score` and `sz_overlap_scores` take the whole `window_widths` list and answer one score per width.
+Every width's query window hashes share one B-tree: the step primitives are told a width and know nothing about why, while the engine takes the whole `window_widths` list at construction and `sz_overlap_scores` answers one score per query per candidate per width.
 A candidate window hash is produced at a known width, so a hit is attributed to that width, and a coincidence with another width's window hash runs at $2^{-32}$.
 What to do with those scores — weight them, or pick one per pair from the two texts' lengths — stays with the caller.
 

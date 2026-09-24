@@ -1,4 +1,0 @@
-[submodule "forkunion"]
-	path = forkunion
-	url = https://github.com/ashvardanian/ForkUnion.git
-	branch = main-v4

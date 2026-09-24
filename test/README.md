@@ -6,11 +6,10 @@ Each C++ translation unit exercises one kernel family, and the Python suite mirr
 ## C++ and CUDA
 
 - `stringzilla.cpp` / `stringzilla.cu` — C++ API against STL baselines, and the CUDA backends of the core families.
-- `stringzillas.cpp` / `stringzillas.cu` — parallel CPU and CUDA backend tests.
 - `hash.cpp`, `find.cpp`, `sort.cpp`, `string.cpp`, `uncased.cpp`, `cipher.cpp` — per-family kernel tests.
-- `levenshtein.cpp` / `levenshtein.cu` and `overlap.cpp` / `overlap.cu` — edit distance and window overlap, each family's CPU backends beside its CUDA one.
+- `levenshtein.cpp` / `levenshtein.cu`, `overlap.cpp` / `overlap.cu`, and `substrings.cpp` / `substrings.cu` — edit distances, window overlap, and multi-pattern search, each family's CPU backends beside its CUDA one.
 - `utf8_runes.cpp`, `utf8_wordbreaks.cpp`, `utf8_graphemes.cpp`, `utf8_sentences.cpp`, `utf8_linebreaks.cpp`, `utf8_norm.cpp`, `utf8_tokens.cpp` — UTF-8 decode and segmentation tests.
-- `stringzilla.hpp` and `utf8.hpp` are the shared harnesses; `fingerprints.cuh`, `similarities.cuh` and `substrings.cuh` are the CUDA harnesses.
+- `stringzilla.hpp` and `utf8.hpp` are the shared harnesses.
 
 ## Python
 

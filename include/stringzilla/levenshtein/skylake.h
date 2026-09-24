@@ -271,54 +271,32 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_skylake(sz_cptr_t query_text, sz_size_t query_length,
-                                                             sz_sequence_t const *candidates,
-                                                             sz_memory_allocator_t *alloc, sz_size_t *distances) {
+SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engine_t *engine,
+                                                             sz_sequence_t const *candidates, sz_size_t *distances,
+                                                             sz_size_t distances_stride) {
     enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
-    if (query_length == 0) return sz_levenshtein_byte_counts_as_distances_(candidates, distances), sz_success_k;
-    sz_size_t const words = sz_levenshtein_query_words(query_length);
-    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(query_length);
-    sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        mask_entries, sz_levenshtein_byte_classes_k, 0, registers_k, words,
-        sizeof(sz_levenshtein_u64x8_vertical_skylake_t));
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
+    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_bool_t const over_bytes = engine->symbol == sz_levenshtein_bytes_k ? sz_true_k : sz_false_k;
+    sz_levenshtein_transpose_t const transpose = over_bytes ? sz_levenshtein_u8x8_transpose_skylake
+                                                            : sz_levenshtein_transpose_utf8;
+    sz_levenshtein_classes_width_t const width = over_bytes ? sz_levenshtein_classes_u8_k
+                                                            : sz_levenshtein_classes_u32_k;
+    sz_status_t const grown = sz_levenshtein_engine_scratch_(
+        engine, sz_levenshtein_engine_verticals_bytes_(registers_k, sz_levenshtein_engine_words_max_(engine),
+                                                       sizeof(sz_levenshtein_u64x8_vertical_skylake_t)));
+    if (grown != sz_success_k) return grown;
     sz_levenshtein_u64x8_vertical_skylake_t *const verticals =
-        (sz_levenshtein_u64x8_vertical_skylake_t *)(byte_to_class + sz_levenshtein_byte_classes_k);
+        (sz_levenshtein_u64x8_vertical_skylake_t *)sz_levenshtein_engine_verticals_(engine);
 
-    sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
-    sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_transpose_skylake,
-                                            sz_levenshtein_classes_u8_k, verticals, distances);
-    alloc->free(scratch, scratch_bytes, alloc->handle);
-    return sz_success_k;
-}
-
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_skylake(sz_cptr_t query_text, sz_size_t query_length,
-                                                                  sz_sequence_t const *candidates,
-                                                                  sz_memory_allocator_t *alloc, sz_size_t *distances) {
-    enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
-    sz_size_t const runes = sz_levenshtein_utf8_runes(query_text, query_length);
-    if (runes == 0) return sz_levenshtein_rune_counts_as_distances_(candidates, distances), sz_success_k;
-    sz_size_t const words = sz_levenshtein_query_words(runes);
-    sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(runes);
-    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries_utf8(runes);
-    sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        mask_entries, 0, pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x8_vertical_skylake_t));
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
-    sz_levenshtein_u64x8_vertical_skylake_t *const verticals =
-        (sz_levenshtein_u64x8_vertical_skylake_t *)(pages + sz_levenshtein_align64_(pages_bytes));
-
-    sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare_utf8(query_text, query_length, masks, pages, &query);
-    sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_transpose_utf8,
-                                            sz_levenshtein_classes_u32_k, verticals, distances);
-    alloc->free(scratch, scratch_bytes, alloc->handle);
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t *const row = distances + index * distances_stride;
+        if (engine->lengths[index] == 0) {
+            sz_levenshtein_engine_empty_row_(engine, candidates, row);
+            continue;
+        }
+        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
+        sz_levenshtein_skylake_u64x8_distances_(&query, candidates, transpose, width, verticals, row);
+    }
     return sz_success_k;
 }
 

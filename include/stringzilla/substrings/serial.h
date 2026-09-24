@@ -1,6 +1,6 @@
 /**
  *  @brief Serial backend for multi-pattern search: the automaton's construction, its transition, and the
- *      three walks every other tier reuses.
+ *      walks and verb drivers every other CPU tier reuses.
  *  @file include/stringzilla/substrings/serial.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/substrings.h
@@ -12,9 +12,10 @@
  *  count follow the state count instead of being bounded separately.
  *
  *  The walk is one data-dependent load per byte, so a single chain leaves the load ports idle for that
- *  whole latency. A counting walk therefore steps @ref sz_substrings_chains_k disjoint slices at once,
- *  each primed by the bytes before it, which is what overlaps the loads. A walk that has to report in
- *  haystack order keeps one chain, since nothing orders several chains against each other.
+ *  whole latency. Byte-exact walks therefore step @ref SZ_SUBSTRINGS_CHAINS disjoint slices at once, each
+ *  primed by the bytes before it; a walk reporting in haystack order does so in rounds of windows whose
+ *  matches it buffers and flushes in window order. A SIMD tier replaces the stages in
+ *  @ref sz_substrings_walks_t and inherits the verb drivers.
  */
 #ifndef STRINGZILLA_SUBSTRINGS_SERIAL_H_
 #define STRINGZILLA_SUBSTRINGS_SERIAL_H_
@@ -40,9 +41,9 @@ extern "C" {
 /** Interior vacancies one double-array row may reject before it settles on the arena frontier instead. */
 #define SZ_SUBSTRINGS_MAX_INTERIOR_PROBES (256)
 
-/** Hot rows an automaton keeps when the caller names no count. One row is a kibibyte, so this is also the
- *  last-level cache it assumes; a caller that can measure its own host passes @c hot_states instead. */
-#define SZ_SUBSTRINGS_HOT_STATES_DEFAULT (4096)
+/** Bytes of hot rows an automaton keeps when the caller names no count, which is the last-level cache it
+ *  assumes; a caller that can measure its own host passes @c hot_states instead. */
+#define SZ_SUBSTRINGS_HOT_BYTES_DEFAULT (4u << 20)
 
 /**
  *  @brief Whether a walk's reports arrive in the order the haystack spells them, or in any order at all.
@@ -111,9 +112,9 @@ SZ_HELPER_AUTO sz_size_t sz_substrings_pending_starts_width(sz_size_t max_source
 
 #pragma region Transition
 
-/** One goto-completed row of the hot tier, whose width is the alphabet and so known at compile time. */
-SZ_HELPER_AUTO sz_u32_t const *sz_substrings_hot_row(sz_substrings_automaton_t const *automaton, sz_u32_t state) {
-    return automaton->hot_rows + (sz_size_t)state * (SZ_U8_MAX + 1);
+/** One goto-completed row of the hot tier, one target per byte class. */
+SZ_HELPER_AUTO sz_u32_t const *sz_substrings_hot_row(sz_substrings_engine_t const *engine, sz_u32_t state) {
+    return engine->hot_rows + (sz_size_t)state * engine->classes_count;
 }
 
 /**
@@ -123,25 +124,26 @@ SZ_HELPER_AUTO sz_u32_t const *sz_substrings_hot_row(sz_substrings_automaton_t c
  *  somebody else, hop to the failure link and retry the same byte. The root is total - every one of its
  *  slots resolves, self-looping where the trie has no edge - which is what terminates the retry loop.
  */
-SZ_HELPER_AUTO sz_u32_t sz_substrings_step(sz_substrings_automaton_t const *automaton, sz_u32_t state, sz_u8_t byte) {
+SZ_HELPER_AUTO sz_u32_t sz_substrings_step(sz_substrings_engine_t const *engine, sz_u32_t state, sz_u8_t byte) {
     for (;;) {
-        if (state < automaton->hot_count) {
-            sz_u32_t const *const row = sz_substrings_hot_row(automaton, state);
-            return row[byte];
+        if (state < engine->hot_count) {
+            // The class depends on the byte alone, so its load sits off the chain of transitions.
+            sz_u32_t const *const row = sz_substrings_hot_row(engine, state);
+            return row[engine->byte_to_class[byte]];
         }
         // The probe index stays wide: `base + byte` can exceed the id ceiling on a slot this state does not
         // own, and narrowing first would wrap onto a slot `check` might accept. The arrays carry
         // `SZ_U8_MAX` slots of headroom past the last state for exactly this reach.
-        sz_size_t const candidate = (sz_size_t)automaton->base[state] + byte;
-        if (automaton->check[candidate] == state) return (sz_u32_t)candidate;
-        if (state == automaton->root) return automaton->root;
-        state = automaton->fail[state];
+        sz_size_t const candidate = (sz_size_t)engine->base[state] + byte;
+        if (engine->check[candidate] == state) return (sz_u32_t)candidate;
+        if (state == engine->root) return engine->root;
+        state = engine->fail[state];
     }
 }
 
 /** Whether any needle ends on @p state, answered from one bit rather than from the counts array. */
-SZ_HELPER_AUTO sz_bool_t sz_substrings_accepts(sz_substrings_automaton_t const *automaton, sz_u32_t state) {
-    return (sz_bool_t)((automaton->accepts_words[state >> 5] >> (state & 31u)) & 1u);
+SZ_HELPER_AUTO sz_bool_t sz_substrings_accepts(sz_substrings_engine_t const *engine, sz_u32_t state) {
+    return (sz_bool_t)((engine->accepts_words[state >> 5] >> (state & 31u)) & 1u);
 }
 
 /**
@@ -150,10 +152,10 @@ SZ_HELPER_AUTO sz_bool_t sz_substrings_accepts(sz_substrings_automaton_t const *
  *  The pair every walk repeats: the transition, then the output count that decides whether the walk stops
  *  to enumerate matches.
  */
-SZ_HELPER_AUTO sz_u32_t sz_substrings_step_counting(sz_substrings_automaton_t const *automaton, sz_u32_t *state,
+SZ_HELPER_AUTO sz_u32_t sz_substrings_step_counting(sz_substrings_engine_t const *engine, sz_u32_t *state,
                                                     sz_u8_t byte) {
-    *state = sz_substrings_step(automaton, *state, byte);
-    return automaton->outputs_counts[*state];
+    *state = sz_substrings_step(engine, *state, byte);
+    return engine->outputs_counts[*state];
 }
 
 #pragma endregion Transition
@@ -279,13 +281,13 @@ SZ_HELPER_AUTO sz_bool_t sz_substrings_folded_cursor_next(sz_substrings_folded_c
                     if (cursor->runes.pending_idx >= cursor->runes.pending_count) break;
                     sz_utf8_folded_iter_next_(&cursor->runes, &rune);
                 }
-                cursor->breaks_boundary =
-                    (sz_bool_t)(rune_count != 1 || (sz_size_t)cursor->image_length != cursor->runes.codepoint_length);
+                cursor->breaks_boundary = (sz_bool_t)(rune_count != 1 || (sz_size_t)cursor->image_length !=
+                                                                             cursor->runes.codepoint_length);
             }
         }
 
-        cursor->codepoint_end =
-            (sz_size_t)(cursor->runes.codepoint_begin - cursor->origin) + cursor->runes.codepoint_length;
+        cursor->codepoint_end = (sz_size_t)(cursor->runes.codepoint_begin - cursor->origin) +
+                                cursor->runes.codepoint_length;
         cursor->image_index = 0;
         cursor->previous_rune_end = 0;
     }
@@ -370,8 +372,7 @@ SZ_HELPER_AUTO sz_substrings_resolved_match_t sz_substrings_resolve_match(sz_cpt
 
         taken = stepped - trailing + 1;
         if (shift != 0) {
-            if (taken > shift && ring[(taken - shift) % SZ_SUBSTRINGS_FOLDED_IMAGE_MAX] != byte)
-                periodic = sz_false_k;
+            if (taken > shift && ring[(taken - shift) % SZ_SUBSTRINGS_FOLDED_IMAGE_MAX] != byte) periodic = sz_false_k;
             ring[taken % SZ_SUBSTRINGS_FOLDED_IMAGE_MAX] = byte;
         }
         if (taken == folded_match_bytes) start_here = codepoint_begin;
@@ -488,6 +489,10 @@ typedef struct sz_substrings_builder_t {
     sz_u32_t max_outputs_per_state;
     /** Whether this vocabulary matches byte-exact or case-folded. */
     sz_substrings_case_sensitivity_t case_sensitivity;
+    /** Each byte's hot-row column, derived from the edge labels once the trie is complete. */
+    sz_u8_t byte_to_class[SZ_U8_MAX + 1];
+    /** Columns of a hot row. */
+    sz_size_t classes_count;
     /** States kept in the dense hot rows. */
     sz_size_t hot_count;
     /** The allocator every buffer above came from, and the one they go back to. */
@@ -499,19 +504,19 @@ SZ_API_COMPTIME void sz_substrings_builder_free_(sz_substrings_builder_t *builde
     sz_memory_allocator_t *const alloc = builder->alloc;
     if (builder->nodes)
         alloc->free(builder->nodes, builder->nodes_capacity * sizeof(sz_substrings_trie_node_t), alloc->handle);
-    if (builder->needle_next) alloc->free(builder->needle_next, builder->needles_count * sizeof(sz_u32_t),
-                                          alloc->handle);
+    if (builder->needle_next)
+        alloc->free(builder->needle_next, builder->needles_count * sizeof(sz_u32_t), alloc->handle);
     if (builder->needle_folded_bytes)
         alloc->free(builder->needle_folded_bytes, builder->needles_count * sizeof(sz_u32_t), alloc->handle);
     if (builder->fold_scratch) alloc->free(builder->fold_scratch, builder->fold_scratch_bytes, alloc->handle);
     if (builder->order) alloc->free(builder->order, builder->nodes_count * sizeof(sz_u32_t), alloc->handle);
-    if (builder->order_scratch) alloc->free(builder->order_scratch, builder->nodes_count * sizeof(sz_u32_t),
-                                            alloc->handle);
+    if (builder->order_scratch)
+        alloc->free(builder->order_scratch, builder->nodes_count * sizeof(sz_u32_t), alloc->handle);
     if (builder->root_row) alloc->free(builder->root_row, (SZ_U8_MAX + 1) * sizeof(sz_u32_t), alloc->handle);
     if (builder->base) alloc->free(builder->base, builder->slots_capacity * sizeof(sz_u32_t), alloc->handle);
     if (builder->check) alloc->free(builder->check, builder->slots_capacity * sizeof(sz_u32_t), alloc->handle);
-    if (builder->state_of_slot) alloc->free(builder->state_of_slot, builder->slots_capacity * sizeof(sz_u32_t),
-                                            alloc->handle);
+    if (builder->state_of_slot)
+        alloc->free(builder->state_of_slot, builder->slots_capacity * sizeof(sz_u32_t), alloc->handle);
     if (builder->occupied)
         alloc->free(builder->occupied, ((builder->slots_capacity >> 6) + 8) * sizeof(sz_u64_t), alloc->handle);
     builder->nodes = SZ_NULL, builder->needle_next = SZ_NULL, builder->needle_folded_bytes = SZ_NULL;
@@ -600,10 +605,12 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_follow_(sz_substrings_builder_
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_builder_add_output_(sz_substrings_builder_t *builder, sz_u32_t state,
                                                               sz_u32_t needle_index, sz_size_t folded_match_bytes) {
-    sz_size_t const contraction =
-        builder->case_sensitivity == sz_substrings_uncased_k ? (sz_size_t)sz_utf8_fold_max_contraction_k : 1;
-    sz_size_t const expansion =
-        builder->case_sensitivity == sz_substrings_uncased_k ? (sz_size_t)sz_utf8_fold_max_expansion_k : 1;
+    sz_size_t const contraction = builder->case_sensitivity == sz_substrings_uncased_k
+                                      ? (sz_size_t)sz_utf8_fold_max_contraction_k
+                                      : 1;
+    sz_size_t const expansion = builder->case_sensitivity == sz_substrings_uncased_k
+                                    ? (sz_size_t)sz_utf8_fold_max_expansion_k
+                                    : 1;
     sz_size_t const source_ceiling = folded_match_bytes * contraction;
     sz_size_t const source_floor = (folded_match_bytes + expansion - 1) / expansion;
     if (folded_match_bytes > (sz_size_t)SZ_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
@@ -747,10 +754,10 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_link_failures_(sz_substrings_b
             for (child = builder->nodes[parent].first_child; child != SZ_SUBSTRINGS_NO_STATE;
                  child = builder->nodes[child].next_sibling) {
                 // A depth-one state fails to the root; anything deeper chases its parent's failure link.
-                builder->nodes[child].failure =
-                    parent == 0 ? 0
-                                : sz_substrings_builder_chase_(builder, parent_failure,
-                                                               builder->nodes[child].parent_byte);
+                builder->nodes[child].failure = parent == 0
+                                                    ? 0
+                                                    : sz_substrings_builder_chase_(builder, parent_failure,
+                                                                                   builder->nodes[child].parent_byte);
                 builder->order[discovered++] = child;
             }
         }
@@ -764,8 +771,7 @@ SZ_API_COMPTIME sz_status_t sz_substrings_builder_link_failures_(sz_substrings_b
 }
 
 /** Grows every slot-indexed array to hold @p minimum slots, clearing whatever the growth exposed. */
-SZ_API_COMPTIME sz_status_t sz_substrings_builder_reserve_slots_(sz_substrings_builder_t *builder,
-                                                                 sz_size_t minimum) {
+SZ_API_COMPTIME sz_status_t sz_substrings_builder_reserve_slots_(sz_substrings_builder_t *builder, sz_size_t minimum) {
     sz_memory_allocator_t *const alloc = builder->alloc;
     sz_size_t const old_capacity = builder->slots_capacity;
     sz_size_t const new_capacity = sz_size_bit_ceil(minimum);
@@ -1031,6 +1037,8 @@ typedef struct sz_substrings_layout_t {
     sz_size_t outputs;
     /** The dense goto-completed rows. */
     sz_size_t hot_rows;
+    /** The byte-to-column map, the narrowest member and so the last. */
+    sz_size_t byte_to_class;
     /** Double-array bases. */
     sz_size_t base;
     /** Double-array ownership. */
@@ -1046,19 +1054,20 @@ typedef struct sz_substrings_layout_t {
 } sz_substrings_layout_t;
 
 /** Carves one block into every published array, widest alignment first so nothing needs padding. */
-SZ_API_COMPTIME sz_substrings_layout_t sz_substrings_publish_layout_(sz_size_t hot_count, sz_size_t slots_count,
-                                                                     sz_size_t outputs_total) {
+SZ_API_COMPTIME sz_substrings_layout_t sz_substrings_publish_layout_(sz_size_t hot_count, sz_size_t classes_count,
+                                                                     sz_size_t slots_count, sz_size_t outputs_total) {
     sz_size_t const accepts_words = sz_size_divide_round_up(slots_count, 32);
     sz_substrings_layout_t layout;
     sz_size_t amount = 0;
     layout.outputs_offsets = amount, amount += slots_count * sizeof(sz_size_t);
     layout.outputs = amount, amount += outputs_total * sizeof(sz_substrings_output_t);
-    layout.hot_rows = amount, amount += hot_count * (SZ_U8_MAX + 1) * sizeof(sz_u32_t);
+    layout.hot_rows = amount, amount += hot_count * classes_count * sizeof(sz_u32_t);
     layout.base = amount, amount += slots_count * sizeof(sz_u32_t);
     layout.check = amount, amount += slots_count * sizeof(sz_u32_t);
     layout.fail = amount, amount += slots_count * sizeof(sz_u32_t);
     layout.outputs_counts = amount, amount += slots_count * sizeof(sz_u32_t);
     layout.accepts_words = amount, amount += accepts_words * sizeof(sz_u32_t);
+    layout.byte_to_class = amount, amount += (SZ_U8_MAX + 1) * sizeof(sz_u8_t);
     layout.total = amount;
     return layout;
 }
@@ -1094,6 +1103,29 @@ SZ_API_COMPTIME void sz_substrings_publish_outputs_(sz_substrings_builder_t cons
 }
 
 /**
+ *  @brief Gives every byte some needle spells its own class, and every other byte one shared class.
+ *
+ *  Bytes no edge carries behave identically from every state, falling through the failure links to the
+ *  root, so one column answers for all of them, and a row is only as wide as the vocabulary's alphabet.
+ */
+SZ_API_COMPTIME void sz_substrings_builder_classify_(sz_substrings_builder_t *builder) {
+    sz_bool_t labelled[SZ_U8_MAX + 1];
+    sz_size_t byte, state, shared_class = SZ_U8_MAX + 1;
+    for (byte = 0; byte != SZ_U8_MAX + 1; ++byte) labelled[byte] = sz_false_k;
+    for (state = 1; state < builder->nodes_count; ++state) labelled[builder->nodes[state].parent_byte] = sz_true_k;
+    builder->classes_count = 0;
+    for (byte = 0; byte != SZ_U8_MAX + 1; ++byte) {
+        if (!labelled[byte]) continue;
+        builder->byte_to_class[byte] = (sz_u8_t)builder->classes_count++;
+    }
+    for (byte = 0; byte != SZ_U8_MAX + 1; ++byte) {
+        if (labelled[byte]) continue;
+        if (shared_class == SZ_U8_MAX + 1) shared_class = builder->classes_count++;
+        builder->byte_to_class[byte] = (sz_u8_t)shared_class;
+    }
+}
+
+/**
  *  @brief Materializes the hot tier's goto-completed rows by inheritance.
  *
  *  Goto completion means @c goto(state, @c byte) @c == @c goto(fail(state), @c byte) wherever @c state has
@@ -1103,14 +1135,14 @@ SZ_API_COMPTIME void sz_substrings_publish_outputs_(sz_substrings_builder_t cons
  */
 SZ_API_COMPTIME sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_builder_t const *builder,
                                                             sz_u32_t *hot_rows) {
-    sz_size_t hot_index, byte;
+    sz_size_t hot_index, column;
     sz_u32_t child;
     if (builder->hot_count == 0) return sz_success_k;
 
-    for (byte = 0; byte != SZ_U8_MAX + 1; ++byte) hot_rows[byte] = builder->nodes[0].published;
+    for (column = 0; column != builder->classes_count; ++column) hot_rows[column] = builder->nodes[0].published;
     for (child = builder->nodes[0].first_child; child != SZ_SUBSTRINGS_NO_STATE;
          child = builder->nodes[child].next_sibling)
-        hot_rows[builder->nodes[child].parent_byte] = builder->nodes[child].published;
+        hot_rows[builder->byte_to_class[builder->nodes[child].parent_byte]] = builder->nodes[child].published;
 
     for (hot_index = 1; hot_index < builder->hot_count; ++hot_index) {
         sz_u32_t const state = builder->order[hot_index];
@@ -1121,12 +1153,12 @@ SZ_API_COMPTIME sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_builde
         // already final. A real return rather than an assert: violated in a release build this would read an
         // unwritten row and bake wrong transitions into the published automaton, silently.
         if (inherited_index >= hot_index) return sz_unexpected_dimensions_k;
-        inherited = hot_rows + inherited_index * (SZ_U8_MAX + 1);
-        row = hot_rows + hot_index * (SZ_U8_MAX + 1);
-        for (byte = 0; byte != SZ_U8_MAX + 1; ++byte) row[byte] = inherited[byte];
+        inherited = hot_rows + inherited_index * builder->classes_count;
+        row = hot_rows + hot_index * builder->classes_count;
+        for (column = 0; column != builder->classes_count; ++column) row[column] = inherited[column];
         for (child = builder->nodes[state].first_child; child != SZ_SUBSTRINGS_NO_STATE;
              child = builder->nodes[child].next_sibling)
-            row[builder->nodes[child].parent_byte] = builder->nodes[child].published;
+            row[builder->byte_to_class[builder->nodes[child].parent_byte]] = builder->nodes[child].published;
     }
     return sz_success_k;
 }
@@ -1135,30 +1167,48 @@ SZ_API_COMPTIME sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_builde
 
 #pragma region Building
 
-SZ_API_COMPTIME void sz_substrings_automaton_free(sz_substrings_automaton_t *automaton,
-                                                  sz_memory_allocator_t *alloc) {
-    if (automaton->memory) alloc->free(automaton->memory, automaton->memory_bytes, alloc->handle);
-    automaton->memory = SZ_NULL, automaton->memory_bytes = 0;
-    automaton->hot_rows = SZ_NULL, automaton->base = SZ_NULL, automaton->check = SZ_NULL, automaton->fail = SZ_NULL;
-    automaton->accepts_words = SZ_NULL, automaton->outputs = SZ_NULL;
-    automaton->outputs_counts = SZ_NULL, automaton->outputs_offsets = SZ_NULL;
-    automaton->outputs_total = 0, automaton->slots_count = 0;
-    automaton->hot_count = 0, automaton->state_count = 0, automaton->root = 0, automaton->needles_count = 0;
-    automaton->max_source_match_bytes = 0, automaton->min_source_match_bytes = 0, automaton->max_outputs_per_state = 0;
+SZ_API_COMPTIME void sz_substrings_engine_free_(sz_substrings_engine_t *engine) {
+    sz_memory_allocator_t *const alloc = &engine->alloc;
+    if (engine->memory) alloc->free(engine->memory, engine->memory_bytes, alloc->handle);
+    if (engine->scratch) alloc->free(engine->scratch, engine->scratch_bytes, alloc->handle);
+    engine->memory = SZ_NULL, engine->memory_bytes = 0;
+    engine->scratch = SZ_NULL, engine->scratch_bytes = 0;
+    engine->hot_rows = SZ_NULL, engine->base = SZ_NULL, engine->check = SZ_NULL, engine->fail = SZ_NULL;
+    engine->byte_to_class = SZ_NULL, engine->classes_count = 0;
+    engine->accepts_words = SZ_NULL, engine->outputs = SZ_NULL;
+    engine->outputs_counts = SZ_NULL, engine->outputs_offsets = SZ_NULL;
+    engine->outputs_total = 0, engine->slots_count = 0;
+    engine->hot_count = 0, engine->state_count = 0, engine->root = 0, engine->needles_count = 0;
+    engine->max_source_match_bytes = 0, engine->min_source_match_bytes = 0, engine->max_outputs_per_state = 0;
+    engine->matches_budget = 0, engine->chunk_budget = 0;
+    engine->report = SZ_NULL, engine->capability = sz_cap_serial_k;
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_build(sz_sequence_t const *needles,
-                                                sz_substrings_case_sensitivity_t case_sensitivity,
-                                                sz_size_t hot_states, sz_memory_allocator_t *alloc,
-                                                sz_substrings_automaton_t *automaton) {
+/**
+ *  @brief Compiles @p needles into @p engine 's first block, leaving the round's arena for a tier to size.
+ *
+ *  The one place the vocabulary is read: every tier's arena is a function of the bounds this settles, so a
+ *  tier sizes its own scratch afterwards rather than passing the vocabulary around twice.
+ */
+SZ_API_COMPTIME sz_status_t sz_substrings_engine_compile_(sz_sequence_t const *needles,
+                                                          sz_substrings_case_sensitivity_t case_sensitivity,
+                                                          sz_substrings_overlap_policy_t overlap_policy,
+                                                          sz_size_t hot_states, sz_size_t matches_budget,
+                                                          sz_capability_t capability,
+                                                          sz_memory_allocator_t const *allocator,
+                                                          sz_substrings_engine_t *engine) {
     sz_substrings_builder_t builder;
     sz_substrings_layout_t layout;
+    sz_memory_allocator_t resolved;
+    sz_memory_allocator_t *const alloc = &resolved;
     sz_size_t needle_index, state_index, longest_needle = 0, state_count_published, slots_count;
     sz_size_t outputs_total = 0, slot;
     sz_status_t status;
     sz_u32_t minted_root;
     sz_ptr_t block;
 
+    if (allocator) resolved = *allocator;
+    else sz_memory_allocator_init_default(&resolved);
     builder.nodes = SZ_NULL, builder.nodes_capacity = 0, builder.nodes_count = 0;
     builder.needle_next = SZ_NULL, builder.needle_folded_bytes = SZ_NULL;
     builder.fold_scratch = SZ_NULL, builder.fold_scratch_bytes = 0;
@@ -1212,7 +1262,10 @@ SZ_API_COMPTIME sz_status_t sz_substrings_build(sz_sequence_t const *needles,
         return status;
     }
 
-    builder.hot_count = hot_states == SZ_SUBSTRINGS_HOT_STATES_AUTO ? SZ_SUBSTRINGS_HOT_STATES_DEFAULT : hot_states;
+    sz_substrings_builder_classify_(&builder);
+    builder.hot_count = hot_states == SZ_SUBSTRINGS_HOT_STATES_AUTO
+                            ? SZ_SUBSTRINGS_HOT_BYTES_DEFAULT / (builder.classes_count * sizeof(sz_u32_t))
+                            : hot_states;
     builder.hot_count = sz_min_of_two(builder.hot_count, builder.nodes_count);
 
     status = sz_substrings_builder_pack_(&builder);
@@ -1226,11 +1279,11 @@ SZ_API_COMPTIME sz_status_t sz_substrings_build(sz_sequence_t const *needles,
     // is address arithmetic and can skip past slots no state ever ended up owning.
     state_count_published = builder.hot_count;
     for (state_index = 0; state_index != builder.nodes_count; ++state_index)
-        state_count_published =
-            sz_max_of_two(state_count_published, (sz_size_t)builder.nodes[state_index].published + 1);
+        state_count_published = sz_max_of_two(state_count_published,
+                                              (sz_size_t)builder.nodes[state_index].published + 1);
     slots_count = state_count_published + SZ_U8_MAX;
 
-    layout = sz_substrings_publish_layout_(builder.hot_count, slots_count, outputs_total);
+    layout = sz_substrings_publish_layout_(builder.hot_count, builder.classes_count, slots_count, outputs_total);
     block = (sz_ptr_t)alloc->allocate(layout.total, alloc->handle);
     if (!block) {
         sz_substrings_builder_free_(&builder);
@@ -1246,14 +1299,16 @@ SZ_API_COMPTIME sz_status_t sz_substrings_build(sz_sequence_t const *needles,
         sz_u32_t *const fail = (sz_u32_t *)(block + layout.fail);
         sz_u32_t *const outputs_counts = (sz_u32_t *)(block + layout.outputs_counts);
         sz_u32_t *const accepts_words = (sz_u32_t *)(block + layout.accepts_words);
+        sz_u8_t *const byte_to_class = (sz_u8_t *)(block + layout.byte_to_class);
         sz_size_t const accepts_count = sz_size_divide_round_up(slots_count, 32);
+
+        for (slot = 0; slot != SZ_U8_MAX + 1; ++slot) byte_to_class[slot] = builder.byte_to_class[slot];
 
         for (slot = 0; slot != accepts_count; ++slot) accepts_words[slot] = 0;
         for (slot = 0; slot != slots_count; ++slot) {
             // The packing arena can be narrower than the published bound, and every slot past it is free by
             // construction - no base, no owner, and a failure link back to the root.
-            sz_u32_t const state = slot < builder.slots_capacity ? builder.state_of_slot[slot]
-                                                                 : SZ_SUBSTRINGS_NO_STATE;
+            sz_u32_t const state = slot < builder.slots_capacity ? builder.state_of_slot[slot] : SZ_SUBSTRINGS_NO_STATE;
             base[slot] = slot < builder.slots_capacity ? builder.base[slot] : 0;
             check[slot] = slot < builder.slots_capacity ? builder.check[slot] : SZ_SUBSTRINGS_NO_STATE;
             if (state == SZ_SUBSTRINGS_NO_STATE) {
@@ -1277,29 +1332,46 @@ SZ_API_COMPTIME sz_status_t sz_substrings_build(sz_sequence_t const *needles,
             return status;
         }
 
-        automaton->hot_rows = hot_rows;
-        automaton->base = base;
-        automaton->check = check;
-        automaton->fail = fail;
-        automaton->accepts_words = accepts_words;
-        automaton->outputs = outputs;
-        automaton->outputs_counts = outputs_counts;
-        automaton->outputs_offsets = outputs_offsets;
+        engine->hot_rows = hot_rows;
+        engine->byte_to_class = byte_to_class;
+        engine->base = base;
+        engine->check = check;
+        engine->fail = fail;
+        engine->accepts_words = accepts_words;
+        engine->outputs = outputs;
+        engine->outputs_counts = outputs_counts;
+        engine->outputs_offsets = outputs_offsets;
     }
 
-    automaton->outputs_total = outputs_total;
-    automaton->slots_count = slots_count;
-    automaton->hot_count = (sz_u32_t)builder.hot_count;
-    automaton->state_count = (sz_u32_t)state_count_published;
-    automaton->root = builder.nodes[0].published;
-    automaton->needles_count = (sz_u32_t)needles->count;
-    automaton->max_source_match_bytes = builder.max_source_match_bytes;
-    automaton->min_source_match_bytes = builder.min_source_match_bytes;
-    automaton->max_outputs_per_state = builder.max_outputs_per_state;
-    automaton->case_sensitivity = case_sensitivity;
-    automaton->memory = block;
-    automaton->memory_bytes = layout.total;
-    sz_assert_(automaton->root == 0 && "The root is the unique shallowest state, so it always sorts first");
+    engine->outputs_total = outputs_total;
+    engine->slots_count = slots_count;
+    engine->hot_count = (sz_u32_t)builder.hot_count;
+    engine->classes_count = (sz_u32_t)builder.classes_count;
+    engine->state_count = (sz_u32_t)state_count_published;
+    engine->root = builder.nodes[0].published;
+    engine->needles_count = (sz_u32_t)needles->count;
+    engine->max_source_match_bytes = builder.max_source_match_bytes;
+    engine->min_source_match_bytes = builder.min_source_match_bytes;
+    engine->max_outputs_per_state = builder.max_outputs_per_state;
+    engine->case_sensitivity = case_sensitivity;
+    engine->overlap_policy = overlap_policy;
+    engine->matches_budget = matches_budget;
+    engine->chunk_budget = 0;
+    engine->report = SZ_NULL;
+    engine->capability = capability;
+    engine->alloc = resolved;
+    engine->memory = block;
+    engine->memory_bytes = layout.total;
+    engine->scratch = SZ_NULL;
+    engine->scratch_bytes = 0;
+    sz_assert_(engine->root == 0 && "The root is the unique shallowest state, so it always sorts first");
+    {
+        sz_size_t byte;
+        sz_byteset_init(&engine->root_live);
+        for (byte = 0; byte != SZ_U8_MAX + 1; ++byte)
+            if (sz_substrings_step(engine, engine->root, (sz_u8_t)byte) != engine->root)
+                sz_byteset_add_u8(&engine->root_live, (sz_u8_t)byte);
+    }
     sz_substrings_builder_free_(&builder);
     return sz_success_k;
 }
@@ -1308,8 +1380,16 @@ SZ_API_COMPTIME sz_status_t sz_substrings_build(sz_sequence_t const *needles,
 
 #pragma region Matching
 
+/** Bytes one chain of an ordered walk covers per round, so its buffered ends fit on the stack. */
+#define SZ_SUBSTRINGS_ORDERED_WINDOW (256)
+
+/** Bytes a byte-exact walk primes a slice with, which is one short of the longest match. */
+SZ_HELPER_AUTO sz_size_t sz_substrings_bytes_warm_up_(sz_substrings_engine_t const *engine) {
+    return engine->max_source_match_bytes > 0 ? (sz_size_t)engine->max_source_match_bytes - 1 : 0;
+}
+
 /**
- *  @brief Counts every match in @p haystack without enumerating a single output run.
+ *  @brief Counts every match in @p haystack, byte for byte, without enumerating a single output run.
  *
  *  The counts ride the transitions, so no output is ever read. @ref SZ_SUBSTRINGS_CHAINS disjoint slices
  *  step at once, each primed by the bytes before it: a state is the longest suffix read so far that spells
@@ -1317,11 +1397,9 @@ SZ_API_COMPTIME sz_status_t sz_substrings_build(sz_sequence_t const *needles,
  *  the byte it first reports on is one of them. A haystack whose slices would be shorter than that priming
  *  walks on one chain instead.
  */
-SZ_API_COMPTIME sz_size_t sz_substrings_count_cased_(sz_substrings_automaton_t const *automaton, sz_cptr_t haystack,
-                                                     sz_size_t length) {
-    sz_size_t const warm_up = automaton->max_source_match_bytes > 0
-                                  ? (sz_size_t)automaton->max_source_match_bytes - 1
-                                  : 0;
+SZ_API_COMPTIME sz_size_t sz_substrings_count_bytes_serial(sz_substrings_engine_t const *engine,
+                                                           sz_cptr_t haystack, sz_size_t length) {
+    sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
     sz_size_t const share = length / SZ_SUBSTRINGS_CHAINS, remainder = length % SZ_SUBSTRINGS_CHAINS;
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_u8_t const *slices[SZ_SUBSTRINGS_CHAINS];
@@ -1329,83 +1407,150 @@ SZ_API_COMPTIME sz_size_t sz_substrings_count_cased_(sz_substrings_automaton_t c
     sz_size_t total = 0, chain, delta, primed;
 
     if (share <= warm_up) {
-        sz_u32_t state = automaton->root;
-        for (delta = 0; delta != length; ++delta) total += sz_substrings_step_counting(automaton, &state, bytes[delta]);
+        sz_u32_t state = engine->root;
+        for (delta = 0; delta != length; ++delta) total += sz_substrings_step_counting(engine, &state, bytes[delta]);
         return total;
     }
 
     // The fair split hands the first slices one byte more than the last ones, and never two.
     for (chain = 0; chain != SZ_SUBSTRINGS_CHAINS; ++chain) {
         sz_size_t const first = chain * share + sz_min_of_two(chain, remainder);
-        slices[chain] = bytes + first, states[chain] = automaton->root;
+        slices[chain] = bytes + first, states[chain] = engine->root;
     }
     // Priming reports nothing, so once it ends the report test is gone from the round rather than being
     // re-asked per byte. The first slice starts where a whole-haystack walk starts and primes nothing.
     for (primed = 0; primed != warm_up; ++primed)
         for (chain = 1; chain != SZ_SUBSTRINGS_CHAINS; ++chain)
-            states[chain] = sz_substrings_step(automaton, states[chain], *(slices[chain] - warm_up + primed));
+            states[chain] = sz_substrings_step(engine, states[chain], *(slices[chain] - warm_up + primed));
 
     for (delta = 0; delta != share; ++delta)
         for (chain = 0; chain != SZ_SUBSTRINGS_CHAINS; ++chain)
-            total += sz_substrings_step_counting(automaton, states + chain, slices[chain][delta]);
+            total += sz_substrings_step_counting(engine, states + chain, slices[chain][delta]);
     for (chain = 0; chain != remainder; ++chain)
-        total += sz_substrings_step_counting(automaton, states + chain, slices[chain][share]);
+        total += sz_substrings_step_counting(engine, states + chain, slices[chain][share]);
     return total;
 }
 
 /** Reports every needle ending on @p state at @p end_offset, or stops the walk. */
-SZ_HELPER_AUTO sz_substrings_walk_t sz_substrings_report_outputs_(sz_substrings_automaton_t const *automaton,
+SZ_HELPER_AUTO sz_substrings_walk_t sz_substrings_report_outputs_(sz_substrings_engine_t const *engine,
                                                                   sz_u32_t state, sz_u32_t output_count,
                                                                   sz_size_t end_offset,
-                                                                  sz_substrings_reporter_t reporter,
-                                                                  void *context) {
-    sz_size_t const output_offset = automaton->outputs_offsets[state];
+                                                                  sz_substrings_reporter_t reporter, void *context) {
+    sz_size_t const output_offset = engine->outputs_offsets[state];
     sz_size_t index;
     for (index = 0; index != output_count; ++index) {
-        sz_substrings_output_t const output = automaton->outputs[output_offset + index];
+        sz_substrings_output_t const output = engine->outputs[output_offset + index];
         sz_size_t const match_length = output.folded_match_bytes;
         // Tested by addition rather than by subtracting the length: a chain primed from the bytes before
         // its slice can spell a match reaching behind that slice, and a subtraction would wrap.
         if (end_offset + 1 < match_length) continue;
-        if (reporter(context, output.needle_index, end_offset + 1 - match_length, match_length) ==
-            sz_substrings_stop_k)
+        if (reporter(context, output.needle_index, end_offset + 1 - match_length, match_length) == sz_substrings_stop_k)
             return sz_substrings_stop_k;
     }
     return sz_substrings_continue_k;
+}
+
+/** One accepting position an ordered round found, held until the chains before it have reported. */
+typedef struct sz_substrings_pending_end_t {
+    /** The state the chain stood on, whose outputs the flush enumerates. */
+    sz_u32_t state;
+    /** Where it stood, relative to the chain's window. */
+    sz_u32_t delta;
+} sz_substrings_pending_end_t;
+
+/**
+ *  @brief Reports every match in @p haystack in ascending end order, stepping several chains at once.
+ *
+ *  Each round cuts @ref SZ_SUBSTRINGS_CHAINS consecutive windows, primes every chain from the bytes before
+ *  its window, and buffers the positions where it accepts. Windows are disjoint and each match belongs to
+ *  the window its end falls in, so flushing the buffers in window order reproduces one chain's stream. The
+ *  last chain ends exactly where the next round begins, so the tail continues from its state unprimed.
+ */
+SZ_API_COMPTIME void sz_substrings_find_ascending_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                   sz_size_t length, sz_substrings_reporter_t reporter, void *context) {
+    sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
+    sz_size_t const round_bytes = SZ_SUBSTRINGS_CHAINS * SZ_SUBSTRINGS_ORDERED_WINDOW;
+    sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
+    sz_substrings_pending_end_t pending[SZ_SUBSTRINGS_CHAINS][SZ_SUBSTRINGS_ORDERED_WINDOW];
+    sz_size_t pending_counts[SZ_SUBSTRINGS_CHAINS];
+    sz_u32_t states[SZ_SUBSTRINGS_CHAINS];
+    sz_u32_t state = engine->root;
+    sz_size_t round = 0, chain, delta, primed, index;
+
+    for (; round + round_bytes <= length; round += round_bytes) {
+        sz_u8_t const *const first = bytes + round;
+        // Chain zero continues from the state the previous round's last chain ended on, so it primes nothing.
+        states[0] = state;
+        for (chain = 1; chain != SZ_SUBSTRINGS_CHAINS; ++chain) states[chain] = engine->root;
+        for (primed = 0; primed != warm_up; ++primed)
+            for (chain = 1; chain != SZ_SUBSTRINGS_CHAINS; ++chain)
+                states[chain] = sz_substrings_step(engine, states[chain],
+                                                   first[chain * SZ_SUBSTRINGS_ORDERED_WINDOW - warm_up + primed]);
+
+        for (chain = 0; chain != SZ_SUBSTRINGS_CHAINS; ++chain) pending_counts[chain] = 0;
+        for (delta = 0; delta != SZ_SUBSTRINGS_ORDERED_WINDOW; ++delta)
+            for (chain = 0; chain != SZ_SUBSTRINGS_CHAINS; ++chain) {
+                sz_u32_t const output_count = sz_substrings_step_counting(
+                    engine, states + chain, first[chain * SZ_SUBSTRINGS_ORDERED_WINDOW + delta]);
+                if (output_count == 0) continue;
+                pending[chain][pending_counts[chain]].state = states[chain];
+                pending[chain][pending_counts[chain]].delta = (sz_u32_t)delta;
+                ++pending_counts[chain];
+            }
+
+        for (chain = 0; chain != SZ_SUBSTRINGS_CHAINS; ++chain)
+            for (index = 0; index != pending_counts[chain]; ++index) {
+                sz_substrings_pending_end_t const end = pending[chain][index];
+                sz_size_t const end_offset = round + chain * SZ_SUBSTRINGS_ORDERED_WINDOW + end.delta;
+                if (sz_substrings_report_outputs_(engine, end.state, engine->outputs_counts[end.state],
+                                                  end_offset, reporter, context) == sz_substrings_stop_k)
+                    return;
+            }
+        state = states[SZ_SUBSTRINGS_CHAINS - 1];
+    }
+
+    for (delta = round; delta != length; ++delta) {
+        sz_u32_t const output_count = sz_substrings_step_counting(engine, &state, bytes[delta]);
+        if (output_count == 0) continue;
+        if (sz_substrings_report_outputs_(engine, state, output_count, delta, reporter, context) ==
+            sz_substrings_stop_k)
+            return;
+    }
 }
 
 /**
  *  @brief Reports every match in @p haystack, byte for byte, in whichever order @p order asks for.
  *
  *  A transition is one data-dependent load, so a single chain leaves the load ports idle for that whole
- *  latency. An unordered consumer therefore gets @ref SZ_SUBSTRINGS_CHAINS disjoint slices stepped at once,
- *  each primed by the bytes before it: a state is the longest suffix read so far that spells a needle
- *  prefix, so once the longest match is behind it a chain cannot remember anything earlier. A haystack
- *  whose slices would be shorter than that priming walks on one chain instead.
+ *  latency. An unordered consumer gets @ref SZ_SUBSTRINGS_CHAINS disjoint slices stepped at once, each
+ *  primed by the bytes before it; an ordered one gets them in rounds of windows it can buffer. Either way
+ *  a haystack too short to amortize the priming walks on one chain.
  *
  *  Acceptance rides the output count rather than the automaton's bit, because a state that accepts is
  *  about to have its count read anyway and both arrays are cache-resident on a host.
  */
-SZ_API_COMPTIME void sz_substrings_find_cased_(sz_substrings_automaton_t const *automaton, sz_cptr_t haystack,
-                                               sz_size_t length, sz_substrings_report_order_t order,
-                                               sz_substrings_reporter_t reporter, void *context) {
-    sz_size_t const warm_up = automaton->max_source_match_bytes > 0
-                                  ? (sz_size_t)automaton->max_source_match_bytes - 1
-                                  : 0;
-    sz_size_t const wanted = order == sz_substrings_unordered_k ? SZ_SUBSTRINGS_CHAINS : 1;
+SZ_API_COMPTIME void sz_substrings_find_bytes_serial(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                     sz_size_t length, sz_substrings_report_order_t order,
+                                                     sz_substrings_reporter_t reporter, void *context) {
+    sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_u8_t const *slices[SZ_SUBSTRINGS_CHAINS];
     sz_u32_t states[SZ_SUBSTRINGS_CHAINS];
     sz_size_t share, remainder, chain, delta, primed;
 
+    // Rounds re-prime every window, which pays only while the priming is a small share of it.
+    if (order == sz_substrings_ascending_ends_k && warm_up * 4 <= SZ_SUBSTRINGS_ORDERED_WINDOW) {
+        sz_substrings_find_ascending_(engine, haystack, length, reporter, context);
+        return;
+    }
+
     // One chain keeps its state in a register, which an array indexed by a runtime chain count cannot.
-    // It is the whole of the ordered walk, so it is written out rather than folded into the round below.
-    if (wanted == 1 || length / wanted <= warm_up) {
-        sz_u32_t state = automaton->root;
+    if (order == sz_substrings_ascending_ends_k || length / SZ_SUBSTRINGS_CHAINS <= warm_up) {
+        sz_u32_t state = engine->root;
         for (delta = 0; delta != length; ++delta) {
-            sz_u32_t const output_count = sz_substrings_step_counting(automaton, &state, bytes[delta]);
+            sz_u32_t const output_count = sz_substrings_step_counting(engine, &state, bytes[delta]);
             if (output_count == 0) continue;
-            if (sz_substrings_report_outputs_(automaton, state, output_count, delta, reporter, context) ==
+            if (sz_substrings_report_outputs_(engine, state, output_count, delta, reporter, context) ==
                 sz_substrings_stop_k)
                 return;
         }
@@ -1413,35 +1558,122 @@ SZ_API_COMPTIME void sz_substrings_find_cased_(sz_substrings_automaton_t const *
     }
 
     // The fair split hands the first slices one byte more than the last ones, and never two.
-    share = length / wanted, remainder = length % wanted;
-    for (chain = 0; chain != wanted; ++chain) {
+    share = length / SZ_SUBSTRINGS_CHAINS, remainder = length % SZ_SUBSTRINGS_CHAINS;
+    for (chain = 0; chain != SZ_SUBSTRINGS_CHAINS; ++chain) {
         sz_size_t const first = chain * share + sz_min_of_two(chain, remainder);
-        slices[chain] = bytes + first, states[chain] = automaton->root;
+        slices[chain] = bytes + first, states[chain] = engine->root;
     }
     // Priming reports nothing, so once it ends the report test is gone from the round rather than being
     // re-asked per byte. The first slice starts where a whole-haystack walk starts and primes nothing.
     for (primed = 0; primed != warm_up; ++primed)
-        for (chain = 1; chain != wanted; ++chain)
-            states[chain] = sz_substrings_step(automaton, states[chain], *(slices[chain] - warm_up + primed));
+        for (chain = 1; chain != SZ_SUBSTRINGS_CHAINS; ++chain)
+            states[chain] = sz_substrings_step(engine, states[chain], *(slices[chain] - warm_up + primed));
 
     for (delta = 0; delta != share; ++delta)
         for (chain = 0; chain != SZ_SUBSTRINGS_CHAINS; ++chain) {
-            sz_u32_t const output_count = sz_substrings_step_counting(automaton, states + chain,
-                                                                       slices[chain][delta]);
+            sz_u32_t const output_count = sz_substrings_step_counting(engine, states + chain, slices[chain][delta]);
             if (output_count == 0) continue;
-            if (sz_substrings_report_outputs_(automaton, states[chain], output_count,
+            if (sz_substrings_report_outputs_(engine, states[chain], output_count,
                                               (sz_size_t)(slices[chain] - bytes) + delta, reporter,
                                               context) == sz_substrings_stop_k)
                 return;
         }
     for (chain = 0; chain != remainder; ++chain) {
-        sz_u32_t const output_count = sz_substrings_step_counting(automaton, states + chain, slices[chain][share]);
+        sz_u32_t const output_count = sz_substrings_step_counting(engine, states + chain, slices[chain][share]);
         if (output_count == 0) continue;
-        if (sz_substrings_report_outputs_(automaton, states[chain], output_count,
-                                          (sz_size_t)(slices[chain] - bytes) + share, reporter, context) ==
-            sz_substrings_stop_k)
+        if (sz_substrings_report_outputs_(engine, states[chain], output_count,
+                                          (sz_size_t)(slices[chain] - bytes) + share, reporter,
+                                          context) == sz_substrings_stop_k)
             return;
     }
+}
+
+/**
+ *  @brief Whether skipping from the root to the next live byte pays over @p haystack.
+ *
+ *  A byte search call costs about as much as eight transitions, so the skip pays once fewer than one byte
+ *  in eight leaves the root. The density is a property of the text as much as of the vocabulary, so it is
+ *  sampled here, at 64 evenly spaced bytes, rather than decided once per automaton.
+ */
+SZ_API_COMPTIME sz_bool_t sz_substrings_skipping_pays_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                       sz_size_t length) {
+    sz_size_t const samples = 64;
+    sz_size_t const stride = length > samples ? length / samples : 1;
+    sz_size_t position, taken = 0, live = 0;
+    for (position = 0; position < length && taken != samples; position += stride, ++taken)
+        live += sz_byteset_contains_u8(&engine->root_live, (sz_u8_t)haystack[position]);
+    return (sz_bool_t)(live * 8 < taken);
+}
+
+/**
+ *  @brief Counts every match in @p haystack on one chain that jumps from the root to the next live byte.
+ *  @param[in] find_live The tier's byte search, handed @c root_live.
+ *
+ *  The root carries no outputs and leaves itself on every dead byte, so a run of them is skipped whole.
+ */
+SZ_API_COMPTIME sz_size_t sz_substrings_count_skipping_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                        sz_size_t length, sz_find_byteset_t find_live) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
+    sz_u32_t state = engine->root;
+    sz_size_t position = 0, total = 0;
+    while (position != length) {
+        if (state == engine->root) {
+            sz_cptr_t const live = find_live(haystack + position, length - position, &engine->root_live);
+            if (!live) break;
+            position = (sz_size_t)(live - haystack);
+        }
+        total += sz_substrings_step_counting(engine, &state, bytes[position]);
+        ++position;
+    }
+    return total;
+}
+
+/** Reports every match in @p haystack in ascending end order, skipping from the root to the next live byte. */
+SZ_API_COMPTIME void sz_substrings_find_skipping_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                  sz_size_t length, sz_substrings_reporter_t reporter, void *context,
+                                                  sz_find_byteset_t find_live) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
+    sz_u32_t state = engine->root;
+    sz_size_t position = 0;
+    while (position != length) {
+        sz_u32_t output_count;
+        if (state == engine->root) {
+            sz_cptr_t const live = find_live(haystack + position, length - position, &engine->root_live);
+            if (!live) return;
+            position = (sz_size_t)(live - haystack);
+        }
+        output_count = sz_substrings_step_counting(engine, &state, bytes[position]);
+        if (output_count != 0 && sz_substrings_report_outputs_(engine, state, output_count, position, reporter,
+                                                               context) == sz_substrings_stop_k)
+            return;
+        ++position;
+    }
+}
+
+/**
+ *  @brief The stages a tier may replace, handed to every verb so one tier's walk reaches all of them.
+ *
+ *  Byte-exact walks answer for a cased vocabulary; a folded one takes the cursor, which folds as it walks.
+ */
+typedef struct sz_substrings_walks_t {
+    /** Overlapping count of one haystack walked byte for byte. */
+    sz_size_t (*count_bytes)(sz_substrings_engine_t const *, sz_cptr_t, sz_size_t);
+    /** Overlapping reports of one haystack walked byte for byte, in the order asked. */
+    void (*find_bytes)(sz_substrings_engine_t const *, sz_cptr_t, sz_size_t, sz_substrings_report_order_t,
+                       sz_substrings_reporter_t, void *);
+} sz_substrings_walks_t;
+
+/** The serial stages, which every tier starts from. */
+SZ_API_COMPTIME sz_substrings_walks_t sz_substrings_walks_serial_(void) {
+    sz_substrings_walks_t walks;
+    walks.count_bytes = &sz_substrings_count_bytes_serial;
+    walks.find_bytes = &sz_substrings_find_bytes_serial;
+    return walks;
+}
+
+/** Whether this vocabulary's haystacks are walked byte for byte, rather than folded as they are walked. */
+SZ_API_COMPTIME sz_bool_t sz_substrings_walks_bytes_(sz_substrings_engine_t const *engine) {
+    return (sz_bool_t)(engine->case_sensitivity == sz_substrings_cased_k);
 }
 
 /**
@@ -1449,11 +1681,11 @@ SZ_API_COMPTIME void sz_substrings_find_cased_(sz_substrings_automaton_t const *
  *
  *  Only a byte ending a folded rune can end a match, so a reported end is always a whole codepoint's.
  */
-SZ_API_COMPTIME void sz_substrings_find_uncased_(sz_substrings_automaton_t const *automaton, sz_cptr_t haystack,
+SZ_API_COMPTIME void sz_substrings_find_uncased_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                  sz_size_t length, sz_substrings_reporter_t reporter, void *context) {
     sz_substrings_folded_cursor_t cursor;
     sz_substrings_folded_byte_t step;
-    sz_u32_t state = automaton->root;
+    sz_u32_t state = engine->root;
     sz_size_t folded = 0, last_break_folded_end = 0;
 
     sz_substrings_folded_cursor_init(&cursor, haystack, length);
@@ -1463,21 +1695,21 @@ SZ_API_COMPTIME void sz_substrings_find_uncased_(sz_substrings_automaton_t const
         if (step.malformed) {
             // A malformed byte can never sit inside a match, so the walk drops back to the root and
             // resynchronizes one byte at a time, exactly as the folded iterators do.
-            state = automaton->root;
+            state = engine->root;
             continue;
         }
 
-        state = sz_substrings_step(automaton, state, step.byte);
+        state = sz_substrings_step(engine, state, step.byte);
         if (!step.rune_end) continue;
         // Claimed before this rune end reports: a match ending inside a boundary-breaking codepoint starts
         // inside it too, and subtracting its folded length would land mid-codepoint.
         if (step.breaks_boundary) last_break_folded_end = folded + step.trailing;
 
-        output_count = automaton->outputs_counts[state];
+        output_count = engine->outputs_counts[state];
         if (output_count == 0) continue;
-        output_offset = automaton->outputs_offsets[state];
+        output_offset = engine->outputs_offsets[state];
         for (index = 0; index != output_count; ++index) {
-            sz_substrings_output_t const output = automaton->outputs[output_offset + index];
+            sz_substrings_output_t const output = engine->outputs[output_offset + index];
             sz_size_t const folded_length = output.folded_match_bytes;
             sz_substrings_resolved_match_t resolved;
             if (folded < folded_length) continue;
@@ -1491,24 +1723,57 @@ SZ_API_COMPTIME void sz_substrings_find_uncased_(sz_substrings_automaton_t const
 }
 
 /**
- *  @brief Reports every match of @p haystack, folding it when the vocabulary asks.
+ *  @brief Reports every match of @p haystack, folding it when the vocabulary and the haystack ask.
  *  @note A folded walk keeps one chain whatever @p order names, since a fold consumes a variable number of
  *        source bytes per step and so cannot be indexed in lockstep.
  */
-SZ_API_COMPTIME void sz_substrings_find_all_(sz_substrings_automaton_t const *automaton, sz_cptr_t haystack,
-                                             sz_size_t length, sz_substrings_report_order_t order,
-                                             sz_substrings_reporter_t reporter, void *context) {
-    if (automaton->case_sensitivity == sz_substrings_uncased_k)
-        sz_substrings_find_uncased_(automaton, haystack, length, reporter, context);
-    else sz_substrings_find_cased_(automaton, haystack, length, order, reporter, context);
+SZ_API_COMPTIME void sz_substrings_find_all_(sz_substrings_engine_t const *engine,
+                                             sz_substrings_walks_t const *walks, sz_cptr_t haystack, sz_size_t length,
+                                             sz_substrings_report_order_t order, sz_substrings_reporter_t reporter,
+                                             void *context) {
+    if (sz_substrings_walks_bytes_(engine)) walks->find_bytes(engine, haystack, length, order, reporter, context);
+    else sz_substrings_find_uncased_(engine, haystack, length, reporter, context);
+}
+
+/**
+ *  @brief The undecided starts of a leftmost walk, and which of them any match has claimed.
+ *
+ *  Every claimed start lies within @c width of the drain position, so the ring holds them keyed by start
+ *  modulo @c width, and the bitmap lets draining jump between claims rather than visit every byte.
+ */
+typedef struct sz_substrings_ring_t {
+    /** The @b [width] best match per start, zero where no match has claimed it. */
+    sz_substrings_pending_start_t *starts;
+    /** One bit per entry of @c starts, set exactly where that entry is claimed. */
+    sz_u64_t *claimed;
+    /** Entries the ring holds, a power of two so the slot lookup is a mask. */
+    sz_size_t width;
+} sz_substrings_ring_t;
+
+/** Words the claimed bitmap of a ring @p width entries wide takes. */
+SZ_HELPER_AUTO sz_size_t sz_substrings_ring_words_(sz_size_t width) { return sz_size_divide_round_up(width, 64); }
+
+/** The first claimed start in @c [from, @c limit), or @p limit when there is none. */
+SZ_API_COMPTIME sz_size_t sz_substrings_ring_next_claimed_(sz_substrings_ring_t const *ring, sz_size_t from,
+                                                           sz_size_t limit) {
+    // Every claim lies within one width of `from`, so nothing past that can be claimed.
+    sz_size_t const end = sz_min_of_two(limit, from + ring->width);
+    sz_size_t position = from;
+    while (position < end) {
+        sz_size_t const slot = position & (ring->width - 1), bit = slot & 63;
+        sz_size_t const span = sz_min_of_two(sz_min_of_two((sz_size_t)64 - bit, ring->width - slot), end - position);
+        sz_u64_t const window = span == 64 ? ~(sz_u64_t)0 : (((sz_u64_t)1 << span) - 1);
+        sz_u64_t const bits = (ring->claimed[slot >> 6] >> bit) & window;
+        if (bits) return position + (sz_size_t)sz_u64_ctz(bits);
+        position += span;
+    }
+    return limit;
 }
 
 /** What a leftmost walk carries between the overlapping walk beneath it and the cover it is deciding. */
 typedef struct sz_substrings_leftmost_context_t {
-    /** The ring of undecided starts, @c width entries wide and zero on entry. */
-    sz_substrings_pending_start_t *ring;
-    /** Entries the ring holds, a power of two so the slot lookup is a mask. */
-    sz_size_t width;
+    /** The undecided starts, empty on entry. */
+    sz_substrings_ring_t *ring;
     /** Which cover the ties resolve under. */
     sz_substrings_overlap_policy_t policy;
     /** Where the consumer's own reports go. */
@@ -1525,85 +1790,100 @@ typedef struct sz_substrings_leftmost_context_t {
     sz_substrings_walk_t walk;
 } sz_substrings_leftmost_context_t;
 
-/** Drains one start, reporting its incumbent when nothing accepted has already covered it. */
+/** Drains one claimed start, reporting its incumbent when nothing accepted has already covered it. */
 SZ_API_COMPTIME void sz_substrings_leftmost_accept_(sz_substrings_leftmost_context_t *leftmost, sz_size_t start) {
-    sz_substrings_pending_start_t *const slot = leftmost->ring + (start & (leftmost->width - 1));
-    if (slot->source_match_bytes != 0 && start >= leftmost->cursor) {
+    sz_substrings_ring_t *const ring = leftmost->ring;
+    sz_size_t const slot_index = start & (ring->width - 1);
+    sz_substrings_pending_start_t *const slot = ring->starts + slot_index;
+    if (start >= leftmost->cursor) {
         leftmost->walk = leftmost->reporter(leftmost->context, slot->needle_index, start, slot->source_match_bytes);
         leftmost->cursor = start + slot->source_match_bytes;
     }
     slot->needle_index = 0, slot->source_match_bytes = 0;
+    ring->claimed[slot_index >> 6] &= ~((sz_u64_t)1 << (slot_index & 63));
+}
+
+/** Drains every claimed start before @p limit, jumping between claims. */
+SZ_API_COMPTIME void sz_substrings_leftmost_drain_(sz_substrings_leftmost_context_t *leftmost, sz_size_t limit) {
+    while (leftmost->settled < limit && leftmost->walk == sz_substrings_continue_k) {
+        sz_size_t const next = sz_substrings_ring_next_claimed_(leftmost->ring, leftmost->settled, limit);
+        if (next == limit) {
+            leftmost->settled = limit;
+            break;
+        }
+        sz_substrings_leftmost_accept_(leftmost, next);
+        leftmost->settled = next + 1;
+    }
 }
 
 /** Takes one overlapping match into the ring, draining whatever it settles on the way. */
 SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_leftmost_report_(void *context, sz_size_t needle_index,
                                                                     sz_size_t byte_offset, sz_size_t byte_length) {
     sz_substrings_leftmost_context_t *const leftmost = (sz_substrings_leftmost_context_t *)context;
-    sz_size_t const settles_before = byte_offset + byte_length > leftmost->width
-                                         ? byte_offset + byte_length - leftmost->width
-                                         : 0;
-    sz_substrings_pending_start_t challenger, *slot;
+    sz_substrings_ring_t *const ring = leftmost->ring;
+    sz_size_t const settles_before = byte_offset + byte_length > ring->width ? byte_offset + byte_length - ring->width
+                                                                             : 0;
+    sz_size_t const slot_index = byte_offset & (ring->width - 1);
+    sz_substrings_pending_start_t challenger;
     // The walk beneath reports in non-decreasing end order, so the starts drain from the end each match
     // reaches - no second walk, and the cursor test waits until a start can no longer be outbid.
-    for (; leftmost->settled < settles_before && leftmost->walk == sz_substrings_continue_k; ++leftmost->settled)
-        sz_substrings_leftmost_accept_(leftmost, leftmost->settled);
+    sz_substrings_leftmost_drain_(leftmost, settles_before);
     if (leftmost->walk == sz_substrings_stop_k) return sz_substrings_stop_k;
 
     challenger.needle_index = (sz_u32_t)needle_index, challenger.source_match_bytes = (sz_u32_t)byte_length;
-    slot = leftmost->ring + (byte_offset & (leftmost->width - 1));
-    if (sz_substrings_leftmost_wins(challenger, *slot, leftmost->policy)) *slot = challenger;
+    if (sz_substrings_leftmost_wins(challenger, ring->starts[slot_index], leftmost->policy)) {
+        ring->starts[slot_index] = challenger;
+        ring->claimed[slot_index >> 6] |= (sz_u64_t)1 << (slot_index & 63);
+    }
     leftmost->undrained_end = sz_max_of_two(leftmost->undrained_end, byte_offset + 1);
     return sz_substrings_continue_k;
 }
 
 /**
  *  @brief Reports the matches of @p haystack that share no bytes, one per accepted start position.
- *  @param[in] ring Scratch of @ref sz_substrings_pending_starts_width entries, every one zero on entry; on
- *             return every one of them is zero again.
+ *  @param[in] ring Empty on entry, and empty again on return.
  *
  *  Matches surface at their end, so the earliest start is not the first seen: over "abcd" against
  *  {"bc", "abcd"}, "bc" completes first and "abcd" starts before it. A start settles only once the walk is
  *  @c max_source_match_bytes past it, which is what the ring holds.
- *
- *  The zero-in, zero-out contract holds for every haystack and from the first, so a run of them clears the
- *  ring once rather than once each.
  */
-SZ_API_COMPTIME void sz_substrings_find_leftmost_(sz_substrings_automaton_t const *automaton, sz_cptr_t haystack,
-                                                  sz_size_t length, sz_substrings_pending_start_t *ring,
-                                                  sz_size_t width, sz_substrings_overlap_policy_t policy,
+SZ_API_COMPTIME void sz_substrings_find_leftmost_(sz_substrings_engine_t const *engine,
+                                                  sz_substrings_walks_t const *walks, sz_cptr_t haystack,
+                                                  sz_size_t length, sz_substrings_ring_t *ring,
+                                                  sz_substrings_overlap_policy_t policy,
                                                   sz_substrings_reporter_t reporter, void *context) {
     sz_substrings_leftmost_context_t leftmost;
-    leftmost.ring = ring, leftmost.width = width, leftmost.policy = policy;
+    leftmost.ring = ring, leftmost.policy = policy;
     leftmost.reporter = reporter, leftmost.context = context;
     leftmost.cursor = 0, leftmost.settled = 0, leftmost.undrained_end = 0;
     leftmost.walk = sz_substrings_continue_k;
     sz_assert_(policy != sz_substrings_overlapping_k && "Overlapping matches are reported through `find_all`");
-    sz_assert_((width & (width - 1)) == 0 && "A power-of-two width is what turns the lookup into a mask");
+    sz_assert_((ring->width & (ring->width - 1)) == 0 && "A power-of-two width turns the lookup into a mask");
 
-    sz_substrings_find_all_(automaton, haystack, length, sz_substrings_ascending_ends_k,
+    sz_substrings_find_all_(engine, walks, haystack, length, sz_substrings_ascending_ends_k,
                             &sz_substrings_leftmost_report_, &leftmost);
-
-    // Draining stops at the last start any match claimed rather than at the haystack's end: a slot is only
-    // ever occupied by a start a match reported, and visiting positions past the final one would both waste
-    // a pass over the whole haystack and re-report a stale slot at a position it never matched.
-    for (; leftmost.settled < leftmost.undrained_end && leftmost.walk == sz_substrings_continue_k; ++leftmost.settled)
-        sz_substrings_leftmost_accept_(&leftmost, leftmost.settled);
+    // Draining stops at the last start any match claimed rather than at the haystack's end.
+    sz_substrings_leftmost_drain_(&leftmost, leftmost.undrained_end);
     // A consumer that stopped the walk left its undecided starts behind, so they are cleared here.
     if (leftmost.walk == sz_substrings_stop_k) {
         sz_size_t slot;
-        for (slot = 0; slot != width; ++slot) ring[slot].needle_index = 0, ring[slot].source_match_bytes = 0;
+        for (slot = 0; slot != ring->width; ++slot) {
+            ring->starts[slot].needle_index = 0;
+            ring->starts[slot].source_match_bytes = 0;
+        }
+        for (slot = 0; slot != sz_substrings_ring_words_(ring->width); ++slot) ring->claimed[slot] = 0;
     }
 }
 
 /** Reports every match of @p haystack in the order @p policy names. */
-SZ_API_COMPTIME void sz_substrings_visit_(sz_substrings_automaton_t const *automaton, sz_cptr_t haystack,
-                                          sz_size_t length, sz_substrings_pending_start_t *ring, sz_size_t width,
-                                          sz_substrings_overlap_policy_t policy,
+SZ_API_COMPTIME void sz_substrings_visit_(sz_substrings_engine_t const *engine,
+                                          sz_substrings_walks_t const *walks, sz_cptr_t haystack, sz_size_t length,
+                                          sz_substrings_ring_t *ring, sz_substrings_overlap_policy_t policy,
                                           sz_substrings_report_order_t order, sz_substrings_reporter_t reporter,
                                           void *context) {
     if (policy == sz_substrings_overlapping_k)
-        sz_substrings_find_all_(automaton, haystack, length, order, reporter, context);
-    else sz_substrings_find_leftmost_(automaton, haystack, length, ring, width, policy, reporter, context);
+        sz_substrings_find_all_(engine, walks, haystack, length, order, reporter, context);
+    else sz_substrings_find_leftmost_(engine, walks, haystack, length, ring, policy, reporter, context);
 }
 
 #pragma endregion Matching
@@ -1699,117 +1979,211 @@ SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_rewrite_report_(void *context
  *  Sizing and splicing are one walk: the copies run while there is room and the tally runs to the end
  *  whatever happens, so the size never depends on what the output could hold.
  */
-SZ_API_COMPTIME sz_size_t sz_substrings_rewrite_(sz_substrings_automaton_t const *automaton, sz_cptr_t haystack,
+SZ_API_COMPTIME sz_size_t sz_substrings_rewrite_(sz_substrings_engine_t const *engine,
+                                                 sz_substrings_walks_t const *walks, sz_cptr_t haystack,
                                                  sz_size_t length, sz_sequence_t const *replacements,
-                                                 sz_substrings_pending_start_t *ring, sz_size_t width,
-                                                 sz_substrings_overlap_policy_t policy, sz_ptr_t output,
-                                                 sz_size_t output_capacity) {
+                                                 sz_substrings_ring_t *ring, sz_substrings_overlap_policy_t policy,
+                                                 sz_ptr_t output, sz_size_t output_capacity) {
     sz_substrings_rewriter_t rewriter;
     rewriter.haystack = haystack, rewriter.haystack_length = length, rewriter.replacements = replacements;
     rewriter.output = output, rewriter.output_capacity = output_capacity;
     rewriter.cursor = 0, rewriter.written = 0, rewriter.removed = 0, rewriter.added = 0;
-    sz_substrings_find_leftmost_(automaton, haystack, length, ring, width, policy, &sz_substrings_rewrite_report_,
+    sz_substrings_find_leftmost_(engine, walks, haystack, length, ring, policy, &sz_substrings_rewrite_report_,
                                  &rewriter);
     sz_substrings_rewriter_emit_(&rewriter, haystack + rewriter.cursor, length - rewriter.cursor);
     // Accumulated apart rather than netted per match, so a shrinking rewrite never wraps the unsigned sum.
     return length - rewriter.removed + rewriter.added;
 }
 
-/** Allocates the leftmost ring, zeroed, or reports that the policy needs none. */
-SZ_API_COMPTIME sz_status_t sz_substrings_ring_allocate_(sz_substrings_automaton_t const *automaton,
-                                                         sz_substrings_overlap_policy_t policy,
-                                                         sz_memory_allocator_t *alloc,
-                                                         sz_substrings_pending_start_t **ring, sz_size_t *width) {
-    sz_size_t slot;
-    *ring = SZ_NULL, *width = 0;
-    if (policy == sz_substrings_overlapping_k) return sz_success_k;
-    *width = sz_substrings_pending_starts_width(automaton->max_source_match_bytes);
-    *ring = (sz_substrings_pending_start_t *)alloc->allocate(*width * sizeof(sz_substrings_pending_start_t),
-                                                             alloc->handle);
-    if (!*ring) return sz_bad_alloc_k;
-    {
-        sz_substrings_pending_start_t *const slots = *ring;
-        for (slot = 0; slot != *width; ++slot) slots[slot].needle_index = 0, slots[slot].source_match_bytes = 0;
-    }
+/** Bytes one block holding a ring @p width entries wide takes: its starts, then its bitmap. */
+SZ_HELPER_AUTO sz_size_t sz_substrings_ring_bytes_(sz_size_t width) {
+    return width * sizeof(sz_substrings_pending_start_t) + sz_substrings_ring_words_(width) * sizeof(sz_u64_t);
+}
+
+/**
+ *  @brief Byte offsets of the one arena every host tier's round runs out of.
+ *
+ *  Everything a round needs is a function of the vocabulary and the policy, both settled at construction, so
+ *  the arena is sized once and no compute verb ever reaches for an allocator.
+ */
+typedef struct sz_substrings_host_arena_t {
+    /** Offset of the round's report, which is the first thing every verb writes. */
+    sz_size_t report;
+    /** Offset of the leftmost ring's starts, equal to @c bm25_counts when the policy claims no ring. */
+    sz_size_t ring;
+    /** Offset of the @b [2 * needles] BM25 counters: the per-needle tallies, then the touched list. */
+    sz_size_t bm25_counts;
+    /** Bytes the whole arena takes. */
+    sz_size_t total;
+} sz_substrings_host_arena_t;
+
+/** Lays the host arena out for one vocabulary under one policy. */
+SZ_API_COMPTIME sz_substrings_host_arena_t sz_substrings_host_arena_(sz_size_t needles_count,
+                                                                     sz_size_t max_source_match_bytes,
+                                                                     sz_substrings_overlap_policy_t overlap_policy) {
+    sz_size_t const ring_width = sz_substrings_pending_starts_width(max_source_match_bytes);
+    sz_size_t const ring_bytes =
+        overlap_policy == sz_substrings_overlapping_k ? 0 : sz_substrings_ring_bytes_(ring_width);
+    sz_substrings_host_arena_t arena;
+    arena.report = 0;
+    arena.ring = sizeof(sz_substrings_report_t);
+    arena.bm25_counts = arena.ring + ring_bytes;
+    arena.total = arena.bm25_counts + 2 * needles_count * sizeof(sz_u32_t);
+    return arena;
+}
+
+/** Binds the leftmost ring onto the engine's arena, empty, or leaves it unbound under an overlapping policy. */
+SZ_API_COMPTIME void sz_substrings_ring_bind_(sz_substrings_engine_t const *engine, sz_substrings_ring_t *ring) {
+    sz_substrings_host_arena_t const arena =
+        sz_substrings_host_arena_(engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
+    ring->starts = SZ_NULL, ring->claimed = SZ_NULL, ring->width = 0;
+    if (engine->overlap_policy == sz_substrings_overlapping_k) return;
+    ring->width = sz_substrings_pending_starts_width(engine->max_source_match_bytes);
+    ring->starts = (sz_substrings_pending_start_t *)((sz_u8_t *)engine->scratch + arena.ring);
+    ring->claimed = (sz_u64_t *)((sz_u8_t *)ring->starts + ring->width * sizeof(sz_substrings_pending_start_t));
+}
+
+/** The round's report, which each tier's own arena places and @c _init_* binds. */
+SZ_HELPER_AUTO sz_substrings_report_t *sz_substrings_report_(sz_substrings_engine_t const *engine) {
+    return engine->report;
+}
+
+/** Leaves the report empty, which is what every verb starts its round from. */
+SZ_API_COMPTIME void sz_substrings_report_clear_(sz_substrings_report_t *report) {
+    report->matches_emitted = 0, report->matches_stored = 0, report->tape_bytes = 0, report->shortfall = 0;
+}
+
+/** Allocates and zeroes the host arena, which is the second and last block an engine owns. */
+SZ_API_COMPTIME sz_status_t sz_substrings_engine_arena_host_(sz_substrings_engine_t *engine) {
+    sz_substrings_host_arena_t const arena =
+        sz_substrings_host_arena_(engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
+    sz_memory_allocator_t *const alloc = &engine->alloc;
+    sz_u8_t *block = (sz_u8_t *)alloc->allocate(arena.total, alloc->handle);
+    sz_size_t index;
+    if (!block) return sz_bad_alloc_k;
+    for (index = 0; index != arena.total; ++index) block[index] = 0;
+    engine->scratch = block, engine->scratch_bytes = arena.total;
+    engine->report = (sz_substrings_report_t *)block;
     return sz_success_k;
 }
 
-/** Returns the leftmost ring to its allocator. */
-SZ_API_COMPTIME void sz_substrings_ring_free_(sz_substrings_pending_start_t *ring, sz_size_t width,
-                                              sz_memory_allocator_t *alloc) {
-    if (ring) alloc->free(ring, width * sizeof(sz_substrings_pending_start_t), alloc->handle);
+/**
+ *  @brief Compiles @p needles and sizes the host arena beside it, which is @ref sz_substrings_engine_init_cpu.
+ *
+ *  Split from the public verb only so a device tier can reuse the compilation without the host arena.
+ */
+SZ_API_COMPTIME sz_status_t sz_substrings_engine_build_(sz_sequence_t const *needles,
+                                                        sz_substrings_case_sensitivity_t case_sensitivity,
+                                                        sz_substrings_overlap_policy_t overlap_policy,
+                                                        sz_size_t hot_states, sz_size_t matches_budget,
+                                                        sz_capability_t capability,
+                                                        sz_memory_allocator_t *alloc, sz_substrings_engine_t *engine) {
+    sz_status_t status = sz_substrings_engine_compile_(needles, case_sensitivity, overlap_policy, hot_states,
+                                                       matches_budget, capability, alloc, engine);
+    if (status != sz_success_k) return status;
+    status = sz_substrings_engine_arena_host_(engine);
+    if (status != sz_success_k) sz_substrings_engine_free_(engine);
+    return status;
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_counts_serial(sz_substrings_automaton_t const *automaton,
-                                                        sz_sequence_t const *haystacks,
-                                                        sz_substrings_overlap_policy_t overlap_policy,
-                                                        sz_memory_allocator_t *alloc, sz_size_t *counts) {
-    sz_substrings_pending_start_t *ring;
-    sz_size_t width, haystack_index;
-    sz_status_t const allocated = sz_substrings_ring_allocate_(automaton, overlap_policy, alloc, &ring, &width);
-    if (allocated != sz_success_k) return allocated;
+/** Refuses an output stride that cannot address one entry per haystack. */
+SZ_HELPER_AUTO sz_status_t sz_substrings_stride_check_(sz_size_t stride) {
+    return stride == 0 ? sz_unexpected_dimensions_k : sz_success_k;
+}
+
+/** Per-haystack counts through @p walks, which is every CPU tier's counting verb. */
+SZ_API_COMPTIME sz_status_t sz_substrings_counts_with_(sz_substrings_engine_t *engine,
+                                                       sz_substrings_walks_t const *walks,
+                                                       sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                       sz_size_t counts_stride) {
+    sz_substrings_overlap_policy_t const overlap_policy = engine->overlap_policy;
+    sz_substrings_report_t *const report = sz_substrings_report_(engine);
+    sz_substrings_ring_t ring;
+    sz_size_t haystack_index, total = 0;
+    sz_status_t const checked = sz_substrings_stride_check_(counts_stride);
+    if (checked != sz_success_k) return checked;
+    sz_substrings_ring_bind_(engine, &ring);
+    sz_substrings_report_clear_(report);
 
     for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
         sz_cptr_t const haystack = haystacks->get_start(haystacks->handle, haystack_index);
         sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
-        // Only the overlapping cased count can ride the transitions alone; every other shape has to see the
-        // matches themselves, either to fold spans together or to decide a cover between them.
-        if (overlap_policy == sz_substrings_overlapping_k &&
-            automaton->case_sensitivity == sz_substrings_cased_k) {
-            counts[haystack_index] = sz_substrings_count_cased_(automaton, haystack, length);
-            continue;
-        }
-        {
+        sz_size_t counted;
+        // Only an overlapping count over a byte-exact walk can ride the transitions alone; every other shape
+        // has to see the matches themselves, either to fold spans together or to decide a cover between them.
+        if (overlap_policy == sz_substrings_overlapping_k && sz_substrings_walks_bytes_(engine))
+            counted = walks->count_bytes(engine, haystack, length);
+        else {
             sz_substrings_tally_t tally;
             tally.count = 0;
-            sz_substrings_visit_(automaton, haystack, length, ring, width, overlap_policy,
-                                 sz_substrings_unordered_k, &sz_substrings_tally_report_, &tally);
-            counts[haystack_index] = tally.count;
+            sz_substrings_visit_(engine, walks, haystack, length, &ring, overlap_policy, sz_substrings_unordered_k,
+                                 &sz_substrings_tally_report_, &tally);
+            counted = tally.count;
         }
+        counts[haystack_index * counts_stride] = counted;
+        total += counted;
     }
-    sz_substrings_ring_free_(ring, width, alloc);
+    report->matches_emitted = total, report->matches_stored = total;
     return sz_success_k;
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_find_serial(sz_substrings_automaton_t const *automaton,
-                                                      sz_sequence_t const *haystacks,
-                                                      sz_substrings_overlap_policy_t overlap_policy,
-                                                      sz_memory_allocator_t *alloc, sz_substrings_match_t *matches,
-                                                      sz_size_t matches_capacity, sz_size_t *matches_found) {
+SZ_API_COMPTIME sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine,
+                                                        sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                        sz_size_t counts_stride) {
+    sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
+    return sz_substrings_counts_with_(engine, &walks, haystacks, counts, counts_stride);
+}
+
+/** Every match through @p walks, which is every CPU tier's locating verb. */
+SZ_API_COMPTIME sz_status_t sz_substrings_find_with_(sz_substrings_engine_t *engine,
+                                                     sz_substrings_walks_t const *walks, sz_sequence_t const *haystacks,
+                                                     sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                     sz_size_t *matches_offsets) {
+    sz_substrings_report_t *const report = sz_substrings_report_(engine);
     sz_substrings_collector_t collector;
-    sz_substrings_pending_start_t *ring;
-    sz_size_t width, haystack_index;
-    sz_status_t const allocated = sz_substrings_ring_allocate_(automaton, overlap_policy, alloc, &ring, &width);
-    if (allocated != sz_success_k) return allocated;
+    sz_substrings_ring_t ring;
+    sz_size_t haystack_index;
+    sz_substrings_ring_bind_(engine, &ring);
+    sz_substrings_report_clear_(report);
 
     collector.matches = matches, collector.capacity = matches_capacity;
     collector.count = 0, collector.haystack_index = 0;
     for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
         sz_cptr_t const haystack = haystacks->get_start(haystacks->handle, haystack_index);
         sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
+        matches_offsets[haystack_index] = collector.count;
         collector.haystack_index = haystack_index;
-        sz_substrings_visit_(automaton, haystack, length, ring, width, overlap_policy,
+        sz_substrings_visit_(engine, walks, haystack, length, &ring, engine->overlap_policy,
                              sz_substrings_unordered_k, &sz_substrings_collect_report_, &collector);
     }
-    sz_substrings_ring_free_(ring, width, alloc);
-    *matches_found = collector.count;
-    return collector.count > matches_capacity ? sz_unexpected_dimensions_k : sz_success_k;
+    matches_offsets[haystacks->count] = collector.count;
+    report->matches_emitted = collector.count;
+    report->matches_stored = sz_min_of_two(collector.count, matches_capacity);
+    report->shortfall = collector.count - report->matches_stored;
+    return sz_success_k;
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_replace_serial(sz_substrings_automaton_t const *automaton,
-                                                         sz_sequence_t const *haystacks,
-                                                         sz_sequence_t const *replacements,
-                                                         sz_substrings_overlap_policy_t overlap_policy,
-                                                         sz_memory_allocator_t *alloc, sz_ptr_t tape,
-                                                         sz_size_t tape_capacity, sz_size_t *offsets) {
-    sz_substrings_pending_start_t *ring;
-    sz_size_t width, haystack_index, running = 0;
-    sz_status_t allocated;
+SZ_API_COMPTIME sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                      sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                      sz_size_t *matches_offsets) {
+    sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
+    return sz_substrings_find_with_(engine, &walks, haystacks, matches, matches_capacity, matches_offsets);
+}
+
+/** The rewrite through @p walks, which is every CPU tier's rewriting verb. */
+SZ_API_COMPTIME sz_status_t sz_substrings_replace_with_(sz_substrings_engine_t *engine,
+                                                        sz_substrings_walks_t const *walks,
+                                                        sz_sequence_t const *haystacks,
+                                                        sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                        sz_size_t tape_capacity, sz_size_t *offsets) {
+    sz_substrings_report_t *const report = sz_substrings_report_(engine);
+    sz_substrings_ring_t ring;
+    sz_size_t haystack_index, running = 0;
     // A substitution over matches that share bytes is not a function, so there is no cover to apply.
-    if (overlap_policy == sz_substrings_overlapping_k) return sz_status_unknown_k;
-    if (replacements->count != automaton->needles_count) return sz_unexpected_dimensions_k;
-    allocated = sz_substrings_ring_allocate_(automaton, overlap_policy, alloc, &ring, &width);
-    if (allocated != sz_success_k) return allocated;
+    if (engine->overlap_policy == sz_substrings_overlapping_k) return sz_status_unknown_k;
+    if (replacements->count != engine->needles_count) return sz_unexpected_dimensions_k;
+    sz_substrings_ring_bind_(engine, &ring);
+    sz_substrings_report_clear_(report);
 
     // One walk per haystack, splicing straight into the tape at the offset the walk before it settled.
     // The rewrite reports the bytes it produces whether or not they fit, so a second sizing pass would
@@ -1819,12 +2193,21 @@ SZ_API_COMPTIME sz_status_t sz_substrings_replace_serial(sz_substrings_automaton
         sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
         sz_size_t const room = tape && running < tape_capacity ? tape_capacity - running : 0;
         offsets[haystack_index] = running;
-        running += sz_substrings_rewrite_(automaton, haystack, length, replacements, ring, width, overlap_policy,
-                                          room ? tape + running : SZ_NULL, room);
+        running += sz_substrings_rewrite_(engine, walks, haystack, length, replacements, &ring,
+                                          engine->overlap_policy, room ? tape + running : SZ_NULL, room);
     }
     offsets[haystacks->count] = running;
-    sz_substrings_ring_free_(ring, width, alloc);
-    return running > tape_capacity ? sz_unexpected_dimensions_k : sz_success_k;
+    report->tape_bytes = running;
+    report->shortfall = running > tape_capacity ? running - tape_capacity : 0;
+    return sz_success_k;
+}
+
+SZ_API_COMPTIME sz_status_t sz_substrings_replace_serial(sz_substrings_engine_t *engine,
+                                                         sz_sequence_t const *haystacks,
+                                                         sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                         sz_size_t tape_capacity, sz_size_t *offsets) {
+    sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
+    return sz_substrings_replace_with_(engine, &walks, haystacks, replacements, tape, tape_capacity, offsets);
 }
 
 /** Refuses the BM25 arguments no backend can score, before any walk or allocation. */
@@ -1844,8 +2227,8 @@ SZ_HELPER_AUTO sz_f64_t sz_substrings_bm25_norm(sz_substrings_bm25_t const *para
 }
 
 /** One needle's contribution: its weight times the saturated frequency `tf·(k1 + 1) / (tf + k1·norm)`. */
-SZ_HELPER_AUTO sz_f64_t sz_substrings_bm25_term(sz_substrings_bm25_t const *parameters, sz_f64_t norm,
-                                                sz_f32_t weight, sz_size_t term_frequency) {
+SZ_HELPER_AUTO sz_f64_t sz_substrings_bm25_term(sz_substrings_bm25_t const *parameters, sz_f64_t norm, sz_f32_t weight,
+                                                sz_size_t term_frequency) {
     sz_f64_t const saturation = parameters->term_frequency_saturation;
     sz_f64_t const frequency = (sz_f64_t)term_frequency;
     return weight * frequency * (saturation + 1) / (frequency + saturation * norm);
@@ -1853,17 +2236,18 @@ SZ_HELPER_AUTO sz_f64_t sz_substrings_bm25_term(sz_substrings_bm25_t const *para
 
 /** Per-needle counters for one document, plus the needles it touched in first-occurrence order. */
 typedef struct sz_substrings_frequencies_t {
-    /** Occurrences of each needle so far, zero for every needle not in @c touched. */
+    /** The @b [needles] occurrences of each needle so far, zero for every needle not in @c touched. */
     sz_u32_t *counts;
-    /** Needles with a nonzero count. */
+    /** The @b [needles] list whose head holds the needles with a nonzero count, its tail spare room. */
     sz_u32_t *touched;
-    /** Entries @c touched holds. */
+    /** Entries at the head of @c touched. */
     sz_size_t touched_count;
+    /** Needles in the vocabulary, the length of both arrays. */
+    sz_size_t needles_count;
 } sz_substrings_frequencies_t;
 
 SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_frequencies_report_(void *context, sz_size_t needle_index,
-                                                                       sz_size_t byte_offset,
-                                                                       sz_size_t byte_length) {
+                                                                       sz_size_t byte_offset, sz_size_t byte_length) {
     sz_substrings_frequencies_t *const frequencies = (sz_substrings_frequencies_t *)context;
     sz_unused_(byte_offset), sz_unused_(byte_length);
     if (frequencies->counts[needle_index]++ == 0)
@@ -1872,12 +2256,26 @@ SZ_API_COMPTIME sz_substrings_walk_t sz_substrings_frequencies_report_(void *con
 }
 
 /**
- *  @brief Sorts needle indices ascending with a byte-wise LSD radix sort, only as many passes as the
- *         vocabulary has index bytes.
- *  @return Whichever of @p keys and @p spare holds the sorted order.
+ *  @brief Adds every overlapping occurrence in @p haystack to @p frequencies.
+ *
+ *  Split from @ref sz_substrings_bm25_total_ so slices of one long document can be counted into separate
+ *  rows and merged by addition, since integer frequencies do not depend on who counted them.
  */
-SZ_API_COMPTIME sz_u32_t *sz_substrings_sort_needles_(sz_u32_t *keys, sz_u32_t *spare, sz_size_t count,
-                                                      sz_size_t needles_count) {
+SZ_API_COMPTIME void sz_substrings_bm25_count_(sz_substrings_engine_t const *engine,
+                                               sz_substrings_walks_t const *walks, sz_cptr_t haystack, sz_size_t length,
+                                               sz_substrings_frequencies_t *frequencies) {
+    // Raw overlapping frequencies: a leftmost cover would hide a needle nested inside another.
+    sz_substrings_find_all_(engine, walks, haystack, length, sz_substrings_unordered_k,
+                            &sz_substrings_frequencies_report_, frequencies);
+}
+
+/**
+ *  @brief Sorts the touched needles ascending with a byte-wise LSD radix sort into the list's own tail.
+ *  @return Whichever half holds the sorted order.
+ *  @pre `touched_count * 2 <= needles_count`, so the tail is at least as long as the head.
+ */
+SZ_API_COMPTIME sz_u32_t *sz_substrings_sort_needles_(sz_u32_t *keys, sz_size_t count, sz_size_t needles_count) {
+    sz_u32_t *spare = keys + count;
     sz_size_t buckets[SZ_U8_MAX + 1];
     sz_size_t shift, index, bucket, running;
     for (shift = 0; shift < 32 && (needles_count - 1) >> shift; shift += 8) {
@@ -1896,52 +2294,84 @@ SZ_API_COMPTIME sz_u32_t *sz_substrings_sort_needles_(sz_u32_t *keys, sz_u32_t *
     return keys;
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_serial(sz_substrings_automaton_t const *automaton,
-                                                             sz_sequence_t const *haystacks,
-                                                             sz_f32_t const *document_lengths,
-                                                             sz_substrings_bm25_t const *parameters,
-                                                             sz_f32_t const *needle_weights,
-                                                             sz_memory_allocator_t *alloc, sz_f32_t *scores) {
+/**
+ *  @brief Scores one counted document in ascending needle order, leaving @p frequencies empty again.
+ *
+ *  Float addition is not associative, so the order is part of the answer: fixing it makes the score
+ *  independent of the order any walk reported in.
+ */
+SZ_API_COMPTIME sz_f64_t sz_substrings_bm25_total_(sz_substrings_bm25_t const *parameters, sz_f64_t norm,
+                                                   sz_f32_t const *needle_weights,
+                                                   sz_substrings_frequencies_t *frequencies) {
+    sz_size_t const touched_count = frequencies->touched_count, needles_count = frequencies->needles_count;
+    sz_u32_t *ordered = frequencies->touched;
+    sz_f64_t score = 0;
+    sz_size_t index;
+    // Past half the vocabulary the row itself is the cheaper index, and arrives already sorted.
+    if (touched_count * 2 <= needles_count)
+        ordered = sz_substrings_sort_needles_(frequencies->touched, touched_count, needles_count);
+    else {
+        sz_size_t written = 0, needle;
+        for (needle = 0; needle != needles_count; ++needle)
+            if (frequencies->counts[needle]) ordered[written++] = (sz_u32_t)needle;
+    }
+    for (index = 0; index != touched_count; ++index) {
+        sz_u32_t const needle = ordered[index];
+        score += sz_substrings_bm25_term(parameters, norm, needle_weights[needle], frequencies->counts[needle]);
+        frequencies->counts[needle] = 0;
+    }
+    frequencies->touched_count = 0;
+    return score;
+}
+
+/** BM25 scores through @p walks, which is every CPU tier's scoring verb. */
+SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_with_(sz_substrings_engine_t *engine,
+                                                            sz_substrings_walks_t const *walks,
+                                                            sz_sequence_t const *haystacks,
+                                                            sz_f32_t const *document_lengths,
+                                                            sz_substrings_bm25_t const *parameters,
+                                                            sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                            sz_size_t scores_stride) {
+    sz_substrings_host_arena_t const arena =
+        sz_substrings_host_arena_(engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
+    sz_size_t const needles_count = engine->needles_count;
+    sz_u32_t *const counters = (sz_u32_t *)((sz_u8_t *)engine->scratch + arena.bm25_counts);
     sz_substrings_frequencies_t frequencies;
-    sz_size_t const needles_count = automaton->needles_count;
-    sz_size_t const scratch_bytes = 3 * needles_count * sizeof(sz_u32_t);
-    sz_u32_t *scratch;
     sz_size_t haystack_index, needle_index;
-    sz_status_t const checked = sz_substrings_bm25_check(parameters, needle_weights);
+    sz_status_t checked = sz_substrings_bm25_check(parameters, needle_weights);
+    if (checked == sz_success_k) checked = sz_substrings_stride_check_(scores_stride);
     if (checked != sz_success_k) return checked;
+    sz_substrings_report_clear_(sz_substrings_report_(engine));
     if (needles_count == 0) {
-        for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) scores[haystack_index] = 0;
+        for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index)
+            scores[haystack_index * scores_stride] = 0;
         return sz_success_k;
     }
-    scratch = (sz_u32_t *)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    for (needle_index = 0; needle_index != needles_count; ++needle_index) scratch[needle_index] = 0;
-    frequencies.counts = scratch, frequencies.touched = scratch + needles_count;
+    for (needle_index = 0; needle_index != needles_count; ++needle_index) counters[needle_index] = 0;
+    frequencies.counts = counters, frequencies.touched = counters + needles_count;
+    frequencies.touched_count = 0, frequencies.needles_count = needles_count;
 
     for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
         sz_cptr_t const haystack = haystacks->get_start(haystacks->handle, haystack_index);
         sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
         sz_f64_t const norm = sz_substrings_bm25_norm(
             parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
-        sz_f64_t score = 0;
-        sz_u32_t const *touched;
-        sz_size_t touched_index;
-        // Raw overlapping frequencies: a leftmost cover would hide a needle nested inside another.
-        frequencies.touched_count = 0;
-        sz_substrings_find_all_(automaton, haystack, length, sz_substrings_unordered_k,
-                                &sz_substrings_frequencies_report_, &frequencies);
-        // Ascending needle order makes the sum independent of the order the walk reported in.
-        touched = sz_substrings_sort_needles_(frequencies.touched, scratch + 2 * needles_count,
-                                              frequencies.touched_count, needles_count);
-        for (touched_index = 0; touched_index != frequencies.touched_count; ++touched_index) {
-            sz_u32_t const needle = touched[touched_index];
-            score += sz_substrings_bm25_term(parameters, norm, needle_weights[needle], frequencies.counts[needle]);
-            frequencies.counts[needle] = 0;
-        }
-        scores[haystack_index] = (sz_f32_t)score;
+        sz_substrings_bm25_count_(engine, walks, haystack, length, &frequencies);
+        scores[haystack_index * scores_stride] =
+            (sz_f32_t)sz_substrings_bm25_total_(parameters, norm, needle_weights, &frequencies);
     }
-    alloc->free(scratch, scratch_bytes, alloc->handle);
     return sz_success_k;
+}
+
+SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_serial(sz_substrings_engine_t *engine,
+                                                             sz_sequence_t const *haystacks,
+                                                             sz_f32_t const *document_lengths,
+                                                             sz_substrings_bm25_t const *parameters,
+                                                             sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                             sz_size_t scores_stride) {
+    sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
+    return sz_substrings_bm25_scores_with_(engine, &walks, haystacks, document_lengths, parameters, needle_weights,
+                                           scores, scores_stride);
 }
 
 #pragma endregion Serial Backends

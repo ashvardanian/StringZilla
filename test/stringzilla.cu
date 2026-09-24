@@ -32,6 +32,9 @@ int main(int argc, char const **argv) {
     failures += run_test("test_levenshtein_safety", test_levenshtein_safety);
     failures += run_test("test_overlap_all", test_overlap_all);
     failures += run_test("test_overlap_safety", test_overlap_safety);
+    failures += run_test("test_substrings_unit", test_substrings_unit);
+    failures += run_test("test_substrings_all", test_substrings_all);
+    failures += run_test("test_substrings_safety", test_substrings_safety);
 
     if (failures) {
         std::printf("Fail! %zu tests failed.\n", failures);

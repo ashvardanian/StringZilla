@@ -3,11 +3,12 @@
  *  @brief Per-domain dispatch shim for UTF-8 newline, whitespace, and general delimiter scanning.
  *  @author Ash Vardanian
  */
-#include "dispatch.h"
 #include <stringzilla/utf8_tokens.h>
 
+#include "dispatch.h"
+
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->utf8_newlines = sz_utf8_newlines_serial;
@@ -83,20 +84,20 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
 SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                           sz_size_t *match_lengths, sz_size_t matches_capacity,
                                           sz_size_t *bytes_consumed) {
-    return sz_dispatch_table.utf8_newlines(text, length, match_offsets, match_lengths, matches_capacity,
+    return sz_dispatch_cpu_table.utf8_newlines(text, length, match_offsets, match_lengths, matches_capacity,
                                            bytes_consumed);
 }
 
 SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                              sz_size_t *match_lengths, sz_size_t matches_capacity,
                                              sz_size_t *bytes_consumed) {
-    return sz_dispatch_table.utf8_whitespaces(text, length, match_offsets, match_lengths, matches_capacity,
+    return sz_dispatch_cpu_table.utf8_whitespaces(text, length, match_offsets, match_lengths, matches_capacity,
                                               bytes_consumed);
 }
 
 SZ_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                             sz_size_t *match_lengths, sz_size_t matches_capacity,
                                             sz_size_t *bytes_consumed) {
-    return sz_dispatch_table.utf8_delimiters(text, length, match_offsets, match_lengths, matches_capacity,
+    return sz_dispatch_cpu_table.utf8_delimiters(text, length, match_offsets, match_lengths, matches_capacity,
                                              bytes_consumed);
 }

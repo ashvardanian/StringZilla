@@ -7,8 +7,9 @@
 # types.h, and `-mrelaxed-simd` likewise enables `SZ_USE_V128RELAXED`. Pass -DSZ_USE_V128RELAXED=0 for the strict
 # module: the same override that zeroes the macro also drops the flag here, so no relaxed opcode reaches the binary.
 #
-# Single-threaded: the parallel `stringzillas` backend needs wasi-threads, which cmake/toolchain-wasm32-threads.cmake
-# provides. Pick the runtime with -DSZ_WASM_RUNTIME=wasmtime (default) or =wasmer; both execute a `.wasm` WASI command
+# Single-threaded; a threaded variant lives in cmake/toolchain-wasm32-threads.cmake.
+#
+# Pick the runtime with -DSZ_WASM_RUNTIME=wasmtime (default) or =wasmer; both execute a `.wasm` WASI command
 # directly, so CTest can use them as a CMAKE_CROSSCOMPILING_EMULATOR with no wrapper script. (node cannot run a
 # bare `.wasm` from the CLI, so it is intentionally not wired here.)
 #

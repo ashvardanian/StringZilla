@@ -11,8 +11,7 @@
     "**/dist/",
     "**/node_modules/",
     "**/package-lock.json",
-    "**/target/",
-    "forkunion/"
+    "**/target/"
   ],
   "plugins": [
     "https://plugins.dprint.dev/json-0.23.0.wasm",

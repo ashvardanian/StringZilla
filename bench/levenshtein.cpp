@@ -1,18 +1,19 @@
 /**
  *  @file bench/levenshtein.cpp
  *  @brief Benchmarks for Levenshtein edit distances under unit costs.
- *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the one-to-one and
- *         one-to-many entries of every backend, validating the SIMD-accelerated backends against the serial one.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the cross-product engine of
+ *         every backend, validating the SIMD-accelerated backends against the serial one.
  *
  *  Compute-bound: Myers' algorithm costs one word-step per query word per candidate byte, so a 64 MiB slice
  *  exercises every path while each call samples only what it needs.
  *
  *  Three shapes are measured, byte-level and rune-level alike, every candidate at its own length:
- *  - `sz_levenshtein_distance_*` between a median-length query and its successor, on the serial entries alone,
- *    since the one-to-one entries have no other backend;
- *  - `sz_levenshtein_distances_*` from one query against the next `STRINGWARS_BATCH` tokens - by default as many
- *    median tokens as fill a 32 KiB L1 - at two query lengths, the slice's median and the 1024 bytes whose match
- *    masks fill that L1, on every compiled backend;
+ *  - `sz_levenshtein_engine_init_cpu` plus one round over a single pair, which is what a caller scoring one pair
+ *    pays: a batch of one, prepared and released around the round;
+ *  - `sz_levenshtein_distances` from a prepared batch of queries against the next `STRINGWARS_BATCH` tokens - by
+ *    default as many median tokens as fill a 32 KiB L1 - at two query lengths, the slice's median and the 1024
+ *    bytes whose match masks fill that L1, on every compiled backend. The batch is prepared once per arm, so what
+ *    the arm times is the sweep and not the preparation the engine exists to hoist;
  *  - the exported building blocks one at a time, so the query's preparation, the staging of candidate bytes into
  *    class ids, and the word-steps over those ids each carry a number of their own.
  *
@@ -83,115 +84,144 @@ static std::vector<sz_u8_t> levenshtein_staged_classes(environment_t const &env,
     return classes;
 }
 
-#pragma region One to One
+#pragma region One Pair
 
-/** @brief One pair per call: a query clamped to @c query_bytes against its successor at its own length. */
-template <sz_levenshtein_distance_t function_>
-struct levenshtein_distance_from_sz {
-    environment_t const &env;
-    std::size_t query_bytes;
-    sz_memory_allocator_t alloc;
+/** @brief Queries one prepared batch carries, so the sweeps cross a query axis wider than one. */
+static constexpr std::size_t levenshtein_queries_per_batch_k = 8;
 
-    levenshtein_distance_from_sz(environment_t const &env, std::size_t query_bytes)
-        : env(env), query_bytes(query_bytes) {
-        sz_memory_allocator_init_default(&alloc);
-    }
+/** @brief One pair per call through a batch of one: the preparation and the round a caller now pays together. */
+struct levenshtein_pair_from_sz {
+    environment_t const &env;       /**< The tokens the pair is drawn from. */
+    std::size_t query_bytes;        /**< Bytes the query is clamped to. */
+    sz_levenshtein_symbol_t symbol; /**< Whether the distance counts bytes or runes. */
+
+    levenshtein_pair_from_sz(environment_t const &env, std::size_t query_bytes, sz_levenshtein_symbol_t symbol)
+        : env(env), query_bytes(query_bytes), symbol(symbol) {}
 
     call_result_t operator()(std::size_t token_index) {
         std::string_view const query = std::string_view(env.tokens[token_index]).substr(0, query_bytes);
         std::string_view const candidate = env.tokens[(token_index + 1) % env.tokens.size()];
+        sz_string_view_t const query_view {query.data(), query.size()};
+        sz_string_view_t const candidate_view {candidate.data(), candidate.size()};
+        sz_sequence_t queries, candidates;
+        sz_sequence_from_string_views(&query_view, 1, &queries);
+        sz_sequence_from_string_views(&candidate_view, 1, &candidates);
+
+        sz_levenshtein_engine_t engine {};
+        if (sz_levenshtein_engine_init_cpu(&queries, symbol, nullptr, &engine) != sz_success_k)
+            throw std::runtime_error("The engine could not be prepared.");
         sz_size_t distance = 0;
-        if (function_(query.data(), query.size(), candidate.data(), candidate.size(), &alloc, &distance) !=
-            sz_success_k)
-            throw std::runtime_error("The one-to-one entry failed.");
+        sz_status_t const status = sz_levenshtein_distances(&engine, &candidates, &distance, 1);
+        sz_levenshtein_engine_free(&engine);
+        if (status != sz_success_k) throw std::runtime_error("The one-pair round failed.");
         return call_result_t(query.size() + candidate.size(), distance, query.size() * candidate.size());
     }
 };
 
-/** @brief The one-to-one entries on the serial walk alone, since one pair fills one candidate on every backend. */
-void bench_levenshtein_one_to_one(environment_t const &env, std::size_t query_bytes) {
+/** @brief The one-pair shape on the dispatched entry alone, since one pair fills one candidate on every backend. */
+void bench_levenshtein_one_pair(environment_t const &env, std::size_t query_bytes) {
     std::string const suffix = ":q" + std::to_string(query_bytes);
-    bench_unary(env, "sz_levenshtein_distance_serial" + suffix,
-                levenshtein_distance_from_sz<sz_levenshtein_distance_serial> {env, query_bytes})
+    bench_unary(env, "sz_levenshtein_distances:pair" + suffix,
+                levenshtein_pair_from_sz {env, query_bytes, sz_levenshtein_bytes_k})
         .log();
-    bench_unary(env, "sz_levenshtein_distance_utf8_serial" + suffix,
-                levenshtein_distance_from_sz<sz_levenshtein_distance_utf8_serial> {env, query_bytes})
+    bench_unary(env, "sz_levenshtein_distances:pair:utf8" + suffix,
+                levenshtein_pair_from_sz {env, query_bytes, sz_levenshtein_runes_k})
         .log();
 }
 
 #pragma endregion
 
-#pragma region One to Many
+#pragma region Cross Product
 
-/** @brief One query per call, clamped to @c query_bytes, against the next @c candidates tokens at their own length. */
+/** @brief One batch prepared per arm, scored against the next @c candidates tokens at their own length. */
 template <sz_levenshtein_distances_t function_>
 struct levenshtein_distances_from_sz {
-    environment_t const &env;
-    std::size_t query_bytes;
-    std::size_t candidates;
-    sz_memory_allocator_t alloc;
-    std::vector<sz_string_view_t> views;
-    std::vector<sz_size_t> distances;
+    environment_t const &env;                  /**< The tokens the queries and candidates are drawn from. */
+    std::size_t query_bytes;                   /**< Bytes every query is clamped to. */
+    std::size_t candidates;                    /**< Candidates one round scores, which is also the row stride. */
+    std::vector<sz_string_view_t> query_views; /**< @b [queries] the batch was prepared from. */
+    std::vector<sz_string_view_t> views;       /**< @b [candidates] one round's texts. */
+    std::vector<sz_size_t> distances;          /**< @b [queries, candidates] one round's answers. */
+    sz_levenshtein_engine_t engine {};         /**< The batch, prepared once and reused by every round. */
 
-    levenshtein_distances_from_sz(environment_t const &env, std::size_t query_bytes, std::size_t candidates)
-        : env(env), query_bytes(query_bytes), candidates(candidates), views(candidates), distances(candidates) {
-        sz_memory_allocator_init_default(&alloc);
+    levenshtein_distances_from_sz(environment_t const &env, std::size_t query_bytes, std::size_t candidates,
+                                  sz_levenshtein_symbol_t symbol)
+        : env(env), query_bytes(query_bytes), candidates(candidates), query_views(levenshtein_queries_per_batch_k),
+          views(candidates), distances(levenshtein_queries_per_batch_k * candidates) {
+        for (std::size_t query = 0; query != query_views.size(); ++query) {
+            std::string_view const token = std::string_view(env.tokens[query % env.tokens.size()]);
+            std::string_view const text = token.substr(0, query_bytes);
+            query_views[query] = {text.data(), text.size()};
+        }
+        sz_sequence_t queries;
+        sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
+        if (sz_levenshtein_engine_init_cpu(&queries, symbol, nullptr, &engine) != sz_success_k)
+            throw std::runtime_error("The engine could not be prepared.");
     }
+    ~levenshtein_distances_from_sz() { sz_levenshtein_engine_free(&engine); }
+    levenshtein_distances_from_sz(levenshtein_distances_from_sz const &) = delete;
+    levenshtein_distances_from_sz &operator=(levenshtein_distances_from_sz const &) = delete;
 
     call_result_t operator()(std::size_t token_index) {
-        std::string_view const query = std::string_view(env.tokens[token_index]).substr(0, query_bytes);
-        std::size_t bytes = 0, cells = 0;
+        std::size_t bytes = 0, query_symbols = 0;
+        for (std::size_t query = 0; query != query_views.size(); ++query) query_symbols += query_views[query].length;
         for (std::size_t candidate = 0; candidate != candidates; ++candidate) {
             std::string_view const token = env.tokens[(token_index + 1 + candidate) % env.tokens.size()];
             views[candidate] = {token.data(), token.size()};
-            bytes += token.size(), cells += query.size() * token.size();
+            bytes += token.size();
         }
         sz_sequence_t sequence;
         sz_sequence_from_string_views(views.data(), candidates, &sequence);
-        if (function_(query.data(), query.size(), &sequence, &alloc, distances.data()) != sz_success_k)
-            throw std::runtime_error("The one-to-many entry failed.");
+        if (function_(&engine, &sequence, distances.data(), candidates) != sz_success_k)
+            throw std::runtime_error("The cross-product entry failed.");
         // Multiplied rather than summed, so two candidates swapping distances cannot cancel out.
         check_value_t mixed = 0;
         for (sz_size_t const distance : distances) mixed = mixed * 31u + distance;
-        call_result_t result(bytes, mixed, cells);
-        result.inputs_processed = candidates;
+        call_result_t result(bytes, mixed, query_symbols * bytes);
+        result.inputs_processed = candidates * query_views.size();
         return result;
     }
 };
 
-/** @brief The one-to-many entries at one query length, byte and rune level, every backend against its serial base. */
-void bench_levenshtein_one_to_many(environment_t const &env, std::size_t query_bytes, std::size_t candidates) {
+/** @brief The cross-product entries at one query length, byte and rune level, every backend against serial. */
+void bench_levenshtein_cross_product(environment_t const &env, std::size_t query_bytes, std::size_t candidates) {
     std::string const suffix = ":q" + std::to_string(query_bytes);
-    auto validator = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {env, query_bytes, candidates};
+    auto validator = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {env, query_bytes, candidates,
+                                                                                     sz_levenshtein_bytes_k};
     bench_result_t base = bench_unary(env, "sz_levenshtein_distances_serial" + suffix, validator).log();
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_levenshtein_distances_haswell" + suffix, validator,
-                levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {env, query_bytes, candidates})
+                levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {env, query_bytes, candidates,
+                                                                                 sz_levenshtein_bytes_k})
         .log(base);
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_levenshtein_distances_skylake" + suffix, validator,
-                levenshtein_distances_from_sz<sz_levenshtein_distances_skylake> {env, query_bytes, candidates})
+                levenshtein_distances_from_sz<sz_levenshtein_distances_skylake> {env, query_bytes, candidates,
+                                                                                 sz_levenshtein_bytes_k})
         .log(base);
 #endif
 #if SZ_USE_ICELAKE
     bench_unary(env, "sz_levenshtein_distances_icelake" + suffix, validator,
-                levenshtein_distances_from_sz<sz_levenshtein_distances_icelake> {env, query_bytes, candidates})
+                levenshtein_distances_from_sz<sz_levenshtein_distances_icelake> {env, query_bytes, candidates,
+                                                                                 sz_levenshtein_bytes_k})
         .log(base);
 #endif
     // The rune-level entries decode every candidate byte, so their cost over the byte entries is the decoder's.
-    auto validator_utf8 = levenshtein_distances_from_sz<sz_levenshtein_distances_utf8_serial> {env, query_bytes,
-                                                                                               candidates};
+    auto validator_utf8 = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {
+        env, query_bytes, candidates, sz_levenshtein_runes_k};
     bench_result_t base_utf8 =
-        bench_unary(env, "sz_levenshtein_distances_utf8_serial" + suffix, validator_utf8).log(base);
+        bench_unary(env, "sz_levenshtein_distances_serial:utf8" + suffix, validator_utf8).log(base);
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_levenshtein_distances_utf8_haswell" + suffix, validator_utf8,
-                levenshtein_distances_from_sz<sz_levenshtein_distances_utf8_haswell> {env, query_bytes, candidates})
+    bench_unary(env, "sz_levenshtein_distances_haswell:utf8" + suffix, validator_utf8,
+                levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {env, query_bytes, candidates,
+                                                                                 sz_levenshtein_runes_k})
         .log(base_utf8);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_levenshtein_distances_utf8_skylake" + suffix, validator_utf8,
-                levenshtein_distances_from_sz<sz_levenshtein_distances_utf8_skylake> {env, query_bytes, candidates})
+    bench_unary(env, "sz_levenshtein_distances_skylake:utf8" + suffix, validator_utf8,
+                levenshtein_distances_from_sz<sz_levenshtein_distances_skylake> {env, query_bytes, candidates,
+                                                                                 sz_levenshtein_runes_k})
         .log(base_utf8);
 #endif
 }
@@ -467,9 +497,9 @@ int main(int argc, char const **argv) {
         // The long arm is the 1024 bytes whose match masks fill a 32 KiB L1, where the multi-word regime starts.
         std::size_t const query_lengths[] = {median_token_bytes(env), 1024};
         std::printf("Starting Levenshtein benchmarks...\n");
-        bench_levenshtein_one_to_one(env, median_token_bytes(env));
+        bench_levenshtein_one_pair(env, median_token_bytes(env));
         for (std::size_t const query_bytes : query_lengths) {
-            bench_levenshtein_one_to_many(env, query_bytes, candidates);
+            bench_levenshtein_cross_product(env, query_bytes, candidates);
             bench_levenshtein_query_prepare(env, query_bytes);
             bench_levenshtein_steps(env, query_bytes);
         }

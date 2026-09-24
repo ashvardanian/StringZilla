@@ -74,10 +74,13 @@ struct overlap_step_backend_t {
     overlap_btree_probe_t btree_probe;
 };
 
-/** @brief One backend's whole verbs, the one-to-one and the one-to-many. */
+using overlap_engine_init_t = sz_status_t (*)(sz_sequence_t const *, sz_size_t const *, sz_size_t,
+                                              sz_memory_allocator_t *, sz_overlap_engine_t *);
+
+/** @brief One backend's engine constructor and the round it then scores. */
 struct overlap_backend_t {
     char const *name;
-    sz_overlap_score_t score;
+    overlap_engine_init_t init;
     sz_overlap_scores_t scores;
 };
 
@@ -103,13 +106,13 @@ static overlap_step_backend_t const overlap_step_backends[] = {
 
 /** @brief Every whole-verb backend compiled into this translation unit, dispatched first. */
 static overlap_backend_t const overlap_backends[] = {
-    {"dispatched", sz_overlap_score, sz_overlap_scores},
-    {"serial", sz_overlap_score_serial, sz_overlap_scores_serial},
+    {"dispatched", sz_overlap_engine_init_cpu, sz_overlap_scores},
+    {"serial", sz_overlap_engine_init_serial, sz_overlap_scores_serial},
 #if SZ_USE_HASWELL
-    {"haswell", sz_overlap_score_haswell, sz_overlap_scores_haswell},
+    {"haswell", sz_overlap_engine_init_haswell, sz_overlap_scores_haswell},
 #endif
 #if SZ_USE_SKYLAKE
-    {"skylake", sz_overlap_score_skylake, sz_overlap_scores_skylake},
+    {"skylake", sz_overlap_engine_init_skylake, sz_overlap_scores_skylake},
 #endif
 };
 
@@ -184,33 +187,56 @@ static std::vector<sz_u32_t> overlap_repeating_keys_(std::size_t count) {
     return keys;
 }
 
-/** @brief Runs @p query against @p candidates through the one-to-many verb of @p backend at @p widths, asserting each
- *         share matches the oracle to within one rounding. */
-static void check_overlap_scores_(overlap_backend_t const &backend, std::string const &query,
-                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths) {
+/** @brief One backend's engine over @p queries, scored against @p candidates into a packed @b [Q,C,W] tensor. */
+static std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
+                                             std::vector<std::string> const &candidates,
+                                             std::vector<std::size_t> const &widths) {
     sz_memory_allocator_t alloc;
     sz_memory_allocator_init_default(&alloc);
-    sz_sequence_t const sequence = sequence_from_(candidates);
-    std::vector<sz_f32_t> computed(candidates.size() * widths.size(), -1.0f);
-    if (backend.scores(query.data(), query.size(), &sequence, widths.data(), widths.size(), &alloc, computed.data()) !=
-        sz_success_k)
-        fail_backend_(backend.name, "one-to-many scores refused a well-formed batch");
-    for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate)
-        for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
-            sz_f32_t const expected = overlap_reference_score_(query, candidates[candidate], widths[width_index]);
-            if (std::fabs(computed[candidate * widths.size() + width_index] - expected) > 1e-6f)
-                fail_backend_(backend.name, "a share differs from the std::set oracle by more than one rounding");
-        }
+    sz_sequence_t const query_sequence = sequence_from_(queries);
+    sz_sequence_t const candidate_sequence = sequence_from_(candidates);
+    sz_overlap_engine_t engine {};
+    if (backend.init(&query_sequence, widths.data(), widths.size(), &alloc, &engine) != sz_success_k)
+        fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
+    std::vector<sz_f32_t> scores(queries.size() * candidates.size() * widths.size(), -1.0f);
+    if (backend.scores(&engine, &candidate_sequence, scores.data(), candidates.size() * widths.size(),
+                       widths.size()) != sz_success_k)
+        fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
+    sz_overlap_engine_free(&engine);
+    return scores;
 }
 
-/** @brief One pair through the dispatched one-to-one entry at one width, asserting the literal @p expected share. */
+/** @brief Runs @p queries against @p candidates through @p backend at @p widths, asserting each share matches the
+ *         oracle to within one rounding. */
+static void check_overlap_scores_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
+                                  std::vector<std::string> const &candidates,
+                                  std::vector<std::size_t> const &widths) {
+    std::vector<sz_f32_t> const computed = overlap_tensor_(backend, queries, candidates, widths);
+    std::size_t const candidate_stride = widths.size(), query_stride = candidates.size() * widths.size();
+    for (std::size_t query = 0; query != queries.size(); ++query)
+        for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate)
+            for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
+                sz_f32_t const expected = overlap_reference_score_(queries[query], candidates[candidate],
+                                                                   widths[width_index]);
+                sz_f32_t const produced = computed[query * query_stride + candidate * candidate_stride + width_index];
+                if (std::fabs(produced - expected) > 1e-6f)
+                    fail_backend_(backend.name, "a share differs from the std::set oracle by more than one rounding");
+            }
+}
+
+/** @brief One pair through the dispatched engine at one width, asserting the literal @p expected share. */
 static void check_overlap_pair_(std::string const &query, std::string const &candidate, std::size_t width,
                                 sz_f32_t expected) {
     sz_memory_allocator_t alloc;
     sz_memory_allocator_init_default(&alloc);
+    std::vector<std::string> const queries = {query}, candidates = {candidate};
+    sz_sequence_t const query_sequence = sequence_from_(queries);
+    sz_sequence_t const candidate_sequence = sequence_from_(candidates);
+    sz_overlap_engine_t engine {};
+    verify(sz_overlap_engine_init_cpu(&query_sequence, &width, 1, &alloc, &engine) == sz_success_k);
     sz_f32_t share = -1.0f;
-    verify(sz_overlap_score(query.data(), query.size(), candidate.data(), candidate.size(), &width, 1, &alloc,
-                            &share) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &candidate_sequence, &share, 1, 1) == sz_success_k);
+    sz_overlap_engine_free(&engine);
     verify(share == expected);
 }
 
@@ -298,7 +324,7 @@ static void check_overlap_btree_(overlap_step_backend_t const &backend, std::siz
 
 #pragma region Unit
 
-/** @brief Known answers: the constants, the capacities, and shares readable off the texts by inspection. */
+/** @brief Known answers: the constants, the capacities, the strides, and shares readable off the texts. */
 void test_overlap_unit() {
     std::printf("  - testing window-overlap known-answer vectors...\n");
 
@@ -317,14 +343,17 @@ void test_overlap_unit() {
     // Identical texts share every window, disjoint alphabets share none, and a candidate narrower than the width
     // has no windows to share; "the" holds three, two and one windows below that, over the query's 43 bytes.
     std::string const fox = "the quick brown fox jumps over the lazy dog";
+    std::vector<std::string> const queries = {fox};
     std::vector<std::string> const candidates = {fox, "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", "the", ""};
     std::vector<std::size_t> const widths = {1, 2, 3, 4, 6, 8, 43};
     sz_memory_allocator_t alloc;
     sz_memory_allocator_init_default(&alloc);
+    sz_sequence_t const query_sequence = sequence_from_(queries);
     sz_sequence_t const sequence = sequence_from_(candidates);
+    sz_overlap_engine_t engine {};
+    verify(sz_overlap_engine_init_cpu(&query_sequence, widths.data(), widths.size(), &alloc, &engine) == sz_success_k);
     sz_f32_t shares[4 * 7];
-    verify(sz_overlap_scores(fox.data(), fox.size(), &sequence, widths.data(), widths.size(), &alloc, shares) ==
-           sz_success_k);
+    verify(sz_overlap_scores(&engine, &sequence, shares, 4 * 7, 7) == sz_success_k);
     for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
         verify(shares[0 * 7 + width_index] == 1.0f);
         verify(shares[1 * 7 + width_index] == 0.0f);
@@ -336,6 +365,26 @@ void test_overlap_unit() {
     for (std::size_t width_index = 3; width_index != widths.size(); ++width_index)
         verify(shares[2 * 7 + width_index] == 0.0f);
 
+    // A candidate stride wider than the widths leaves the gap it names alone, and every share lands where it says.
+    sz_f32_t padded[4 * 9];
+    for (sz_f32_t &slot : padded) slot = -1.0f;
+    verify(sz_overlap_scores(&engine, &sequence, padded, 4 * 9, 9) == sz_success_k);
+    for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
+        for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
+            verify(padded[candidate * 9 + width_index] == shares[candidate * 7 + width_index]);
+        verify(padded[candidate * 9 + 7] == -1.0f && padded[candidate * 9 + 8] == -1.0f);
+    }
+
+    // A stride under the axis it spans would write one row into its neighbour's, so it is refused.
+    verify(sz_overlap_scores(&engine, &sequence, shares, 4 * 7, 6) == sz_unexpected_dimensions_k);
+    verify(sz_overlap_scores(&engine, &sequence, shares, 4 * 7 - 1, 7) == sz_unexpected_dimensions_k);
+    sz_overlap_engine_free(&engine);
+
+    // Zero widths answer nothing, and are refused before anything is prepared.
+    sz_overlap_engine_t refused {};
+    verify(sz_overlap_engine_init_cpu(&query_sequence, widths.data(), 0, &alloc, &refused) ==
+           sz_unexpected_dimensions_k);
+
     // "aaaa" holds one distinct window at width one, so "ab" finds one in four; the other way finds all four.
     check_overlap_pair_("aaaa", "ab", 1, 0.25f);
     check_overlap_pair_("ab", "aaaa", 1, 1.0f);
@@ -344,68 +393,53 @@ void test_overlap_unit() {
     check_overlap_pair_("", "abc", 1, 0.0f);
     check_overlap_pair_("abc", "", 1, 0.0f);
     check_overlap_pair_("", "", 1, 0.0f);
-
-    // Zero widths answer nothing, and are refused as such.
-    sz_f32_t share = -1.0f;
-    verify(sz_overlap_scores(fox.data(), fox.size(), &sequence, widths.data(), 0, &alloc, &share) ==
-           sz_unexpected_dimensions_k);
-    verify(sz_overlap_score(fox.data(), fox.size(), "the", 3, widths.data(), 0, &alloc, &share) ==
-           sz_unexpected_dimensions_k);
-    verify(share == -1.0f);
 }
 
 #pragma endregion // Unit
 
 #pragma region Safety
 
-/** @brief The whole verbs of @p backend on degenerate inputs: empties on either side, both, and none survive, as does
- *         a candidate narrower than the width; zero widths and a refused allocation are reported without touching
- *         the outputs. */
+/** @brief One backend's engine on degenerate inputs: empties on either side, both, and none survive, as does a
+ *         candidate narrower than the width; zero widths, a refused allocation and a stride under its own axis are
+ *         reported without touching the outputs. */
 static void check_overlap_safety_(overlap_backend_t const &backend) {
     sz_memory_allocator_t alloc;
     sz_memory_allocator_init_default(&alloc);
     sz_memory_allocator_t refusing = refusing_allocator_();
     std::vector<std::string> const words = {"sitting", "kitten"};
+    std::vector<std::string> const kitten = {"kitten"};
     std::vector<std::string> const empty = {""};
     std::vector<std::string> const narrow = {"ab"};
     std::vector<std::string> const none;
-    sz_sequence_t const words_sequence = sequence_from_(words);
-    sz_sequence_t const empty_sequence = sequence_from_(empty);
-    sz_sequence_t const narrow_sequence = sequence_from_(narrow);
-    sz_sequence_t const none_sequence = sequence_from_(none);
-    std::size_t const widths[] = {3, 8};
-    sz_f32_t answers[4];
+    std::vector<std::size_t> const widths = {3, 8};
 
-    if (backend.scores("", 0, &words_sequence, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-many scores refused an empty query");
-    if (backend.scores("kitten", 6, &empty_sequence, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-many scores refused an empty candidate");
-    if (backend.scores("", 0, &empty_sequence, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-many scores refused an empty pair");
-    if (backend.scores("kitten", 6, &none_sequence, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-many scores refused an empty batch");
-    if (backend.scores("kitten", 6, &narrow_sequence, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-many scores refused a candidate narrower than the width");
-    if (backend.score("", 0, "sitting", 7, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-one score refused an empty query");
-    if (backend.score("kitten", 6, "", 0, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-one score refused an empty candidate");
-    if (backend.score("", 0, "", 0, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-one score refused an empty pair");
-    if (backend.score("kitten", 6, "ab", 2, widths, 2, &alloc, answers) != sz_success_k)
-        fail_backend_(backend.name, "one-to-one score refused a candidate narrower than the width");
+    check_overlap_scores_(backend, empty, words, widths);
+    check_overlap_scores_(backend, kitten, empty, widths);
+    check_overlap_scores_(backend, empty, empty, widths);
+    check_overlap_scores_(backend, kitten, none, widths);
+    check_overlap_scores_(backend, none, words, widths);
+    check_overlap_scores_(backend, kitten, narrow, widths);
+
+    sz_sequence_t const kitten_sequence = sequence_from_(kitten);
+    sz_sequence_t const words_sequence = sequence_from_(words);
+    sz_overlap_engine_t engine {};
+    if (backend.init(&kitten_sequence, widths.data(), 0, &alloc, &engine) != sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "the engine accepted zero widths");
+    if (backend.init(&kitten_sequence, widths.data(), widths.size(), &refusing, &engine) != sz_bad_alloc_k)
+        fail_backend_(backend.name, "the engine did not report the refused allocation");
+    if (backend.init(&kitten_sequence, widths.data(), widths.size(), &alloc, &engine) != sz_success_k)
+        fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
 
     sz_f32_t refused[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
-    if (backend.scores("kitten", 6, &words_sequence, widths, 0, &alloc, refused) != sz_unexpected_dimensions_k)
-        fail_backend_(backend.name, "one-to-many scores accepted zero widths");
-    if (backend.score("kitten", 6, "sitting", 7, widths, 0, &alloc, refused) != sz_unexpected_dimensions_k)
-        fail_backend_(backend.name, "one-to-one score accepted zero widths");
-    if (backend.scores("kitten", 6, &words_sequence, widths, 2, &refusing, refused) != sz_bad_alloc_k)
-        fail_backend_(backend.name, "one-to-many scores did not report the refused allocation");
-    if (backend.score("kitten", 6, "sitting", 7, widths, 2, &refusing, refused) != sz_bad_alloc_k)
-        fail_backend_(backend.name, "one-to-one score did not report the refused allocation");
+    if (backend.scores(&engine, &words_sequence, refused, words.size() * widths.size(), widths.size() - 1) !=
+        sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "the engine accepted a candidate stride under its widths");
+    if (backend.scores(&engine, &words_sequence, refused, words.size() * widths.size() - 1, widths.size()) !=
+        sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "the engine accepted a query stride under its candidates");
     for (sz_f32_t const untouched : refused)
         if (untouched != -1.0f) fail_backend_(backend.name, "a refused call still wrote a score");
+    sz_overlap_engine_free(&engine);
 }
 
 /**
@@ -443,12 +477,10 @@ static void check_overlap_step_oracles_(overlap_step_backend_t const &backend) {
     }
 }
 
-/** @brief One backend's whole verbs against the @c std::set oracle over generated corpora, and its one-to-one entry
- *         against its own one-to-many answer, since the two walk different paths. */
+/** @brief One backend's engine against the @c std::set oracle over generated corpora, and one engine over every
+ *         query against one engine per query, since a batched row and a lone row walk different forests. */
 static void check_overlap_score_oracles_(overlap_backend_t const &backend) {
     std::mt19937 &generator = global_random_generator();
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
     for (std::size_t round = 0; round != scale_iterations(8); ++round) {
         std::size_t const query_length = std::uniform_int_distribution<std::size_t>(0, 700)(generator);
@@ -462,71 +494,46 @@ static void check_overlap_score_oracles_(overlap_backend_t const &backend) {
         candidates.push_back(query);
         candidates.push_back(query.substr(query_length / 3));
         candidates.push_back(query + query);
-        check_overlap_scores_(backend, query, candidates, widths);
-        check_overlap_scores_(backend, random_string(query_length, "ab", 2), candidates, widths);
+        std::vector<std::string> const queries = {query, random_string(query_length, "ab", 2), std::string()};
+        check_overlap_scores_(backend, queries, candidates, widths);
 
-        sz_sequence_t const sequence = sequence_from_(candidates);
-        std::vector<sz_f32_t> expected(candidates.size() * widths.size(), -1.0f), pair(widths.size(), -1.0f);
-        if (backend.scores(query.data(), query.size(), &sequence, widths.data(), widths.size(), &alloc,
-                           expected.data()) != sz_success_k)
-            fail_backend_(backend.name, "one-to-many scores refused a well-formed batch");
-        for (std::size_t index = 0; index != candidates.size(); ++index) {
-            if (backend.score(query.data(), query.size(), candidates[index].data(), candidates[index].size(),
-                              widths.data(), widths.size(), &alloc, pair.data()) != sz_success_k)
-                fail_backend_(backend.name, "one-to-one score refused a well-formed pair");
-            for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
-                if (pair[width_index] != expected[index * widths.size() + width_index])
-                    fail_backend_(backend.name, "one-to-one score differs from the one-to-many answer");
+        std::vector<sz_f32_t> const batched = overlap_tensor_(backend, queries, candidates, widths);
+        std::size_t const query_stride = candidates.size() * widths.size();
+        for (std::size_t index = 0; index != queries.size(); ++index) {
+            std::vector<std::string> const alone = {queries[index]};
+            std::vector<sz_f32_t> const lone = overlap_tensor_(backend, alone, candidates, widths);
+            if (std::memcmp(batched.data() + index * query_stride, lone.data(), query_stride * sizeof(sz_f32_t)) != 0)
+                fail_backend_(backend.name, "a query's row differs between a batched engine and its own");
         }
     }
 }
 
-/** @brief One backend's whole verbs against the serial backend's, bit for bit, over random queries and two-letter
- *         batches at every width. */
+/** @brief One backend's engine against the serial backend's, bit for bit, over random query batches and two-letter
+ *         candidate batches at every width. */
 static void check_overlap_equivalence_(overlap_backend_t const &reference, overlap_backend_t const &candidate,
                                        std::size_t rounds) {
     std::mt19937 &generator = global_random_generator();
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
     std::vector<std::string> candidates;
-    std::vector<sz_f32_t> from_reference, from_candidate;
     for (std::size_t round = 0; round != rounds; ++round) {
         std::string query(std::uniform_int_distribution<std::size_t>(0, 700)(generator), '\0');
         randomize_string(&query[0], query.size());
         randomize_strings(fuzzy_config_t("ab", 12, 0, 900), candidates);
         candidates.push_back(query);
         candidates.push_back(query.substr(query.size() / 3));
-        sz_sequence_t const sequence = sequence_from_(candidates);
+        std::vector<std::string> const queries = {query, query.substr(query.size() / 2), std::string()};
 
-        from_reference.assign(candidates.size() * widths.size(), -1.0f);
-        from_candidate.assign(candidates.size() * widths.size(), -1.0f);
-        verify(reference.scores(query.data(), query.size(), &sequence, widths.data(), widths.size(), &alloc,
-                                from_reference.data()) == sz_success_k);
-        if (candidate.scores(query.data(), query.size(), &sequence, widths.data(), widths.size(), &alloc,
-                             from_candidate.data()) != sz_success_k)
-            fail_backend_(candidate.name, "one-to-many scores refused a batch serial accepted");
+        std::vector<sz_f32_t> const from_reference = overlap_tensor_(reference, queries, candidates, widths);
+        std::vector<sz_f32_t> const from_candidate = overlap_tensor_(candidate, queries, candidates, widths);
         if (std::memcmp(from_reference.data(), from_candidate.data(), from_reference.size() * sizeof(sz_f32_t)) != 0)
-            fail_backend_(candidate.name, "one-to-many scores disagreed with serial");
-
-        for (std::size_t index = 0; index != candidates.size(); ++index) {
-            from_reference.assign(widths.size(), -1.0f);
-            from_candidate.assign(widths.size(), -1.0f);
-            verify(reference.score(query.data(), query.size(), candidates[index].data(), candidates[index].size(),
-                                   widths.data(), widths.size(), &alloc, from_reference.data()) == sz_success_k);
-            if (candidate.score(query.data(), query.size(), candidates[index].data(), candidates[index].size(),
-                                widths.data(), widths.size(), &alloc, from_candidate.data()) != sz_success_k)
-                fail_backend_(candidate.name, "one-to-one score refused a pair serial accepted");
-            if (std::memcmp(from_reference.data(), from_candidate.data(), widths.size() * sizeof(sz_f32_t)) != 0)
-                fail_backend_(candidate.name, "one-to-one score disagreed with serial");
-        }
+            fail_backend_(candidate.name, "the engine's scores disagreed with serial");
     }
 }
 
 /**
  *  @brief Drives the oracles and the serial-versus-SIMD differential across every backend compiled here: the step
- *         verbs against their integer and @c std:: oracles, the whole verbs against @c std::set, and every whole
- *         verb against serial's answers bit for bit.
+ *         verbs against their integer and @c std:: oracles, the engines against @c std::set, and every engine
+ *         against serial's answers bit for bit.
  */
 void test_overlap_all() {
     for (overlap_step_backend_t const &backend : overlap_step_backends) check_overlap_step_oracles_(backend);

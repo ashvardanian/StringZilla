@@ -121,9 +121,6 @@ endfunction ()
 function (set_compiler_flags target cpp_standard target_arch compiler_id)
     get_target_property(target_type ${target} TYPE)
 
-    # No `forkunion::header` here. This function also runs for `stringzilla_shared` and `stringzilla_bare`, whose C
-    # shims never include a ForkUnion header, and the launchers that do need it link it themselves. Linking it for
-    # everything meant the pure-C libraries could not be built from a tree without the submodule.
     target_include_directories(${target} PRIVATE test bench)
 
     # Set output directory for single-configuration generators (like Make)

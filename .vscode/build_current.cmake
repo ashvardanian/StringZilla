@@ -22,7 +22,7 @@ if (BASENAME MATCHES "^bench_(.+)$")
     # Benchmark files: bench_find.cpp -> stringzilla_bench_find_cpp20
     set(TARGET "stringzilla_${BASENAME}_cpp20")
 else ()
-    message(FATAL_ERROR "Unknown file pattern: ${BASENAME}\nSupported patterns:\n  - bench_*.cpp\n  - test_stringzilla.cpp\n  - test_stringzillas.cpp")
+    message(FATAL_ERROR "Unknown file pattern: ${BASENAME}\nSupported patterns:\n  - bench_*.cpp\n  - test_stringzilla.cpp")
 endif ()
 
 # Determine build directory

@@ -1,7 +1,7 @@
 {
   "name": "stringzilla",
   "version": "5.1.2",
-  "description": "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
+  "description": "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
   "author": "Ash Vardanian",
   "license": "Apache-2.0",
   "main": "javascript/stringzilla.js",

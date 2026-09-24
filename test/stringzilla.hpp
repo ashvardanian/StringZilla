@@ -79,9 +79,6 @@
 #endif
 
 #include "stringzilla/types.hpp"
-#if SZ_USE_CUDA
-#include "stringzillas/types.cuh"
-#endif
 
 #pragma region Assertion Helpers
 
@@ -169,9 +166,9 @@ using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, std::allocator<
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 #else
-using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, stringzillas::unified_alloc<char>>;
+using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, unified_alloc<char>>;
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, stringzillas::unified_alloc<value_type_>>;
+using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 #endif
 
 #if SZ_USE_CUDA
@@ -181,7 +178,7 @@ using unified_vector = std::vector<value_type_, stringzillas::unified_alloc<valu
  *  A third memory kind beside unified and device, and the one a caller is most likely to expect to work.
  */
 template <typename value_type_>
-using pinned_vector = std::vector<value_type_, stringzillas::pinned_alloc<value_type_>>;
+using pinned_vector = std::vector<value_type_, pinned_alloc<value_type_>>;
 
 /**
  *  @brief Plain device memory a kernel can write and the host cannot touch.
@@ -190,7 +187,7 @@ using pinned_vector = std::vector<value_type_, stringzillas::pinned_alloc<value_
  *  `try_resize_uninitialized` is the only growth a non-host-accessible allocator admits.
  */
 template <typename value_type_>
-using device_vector = stringzillas::safe_vector<value_type_, stringzillas::device_alloc<value_type_>>;
+using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
 
 /**
  *  @brief Drains a device-resident buffer into @p destination, forwarding whatever the driver reported.
@@ -865,5 +862,8 @@ void test_levenshtein_safety();
 void test_overlap_unit();
 void test_overlap_all();
 void test_overlap_safety();
+void test_substrings_unit();
+void test_substrings_all();
+void test_substrings_safety();
 
 #pragma endregion // Sequence Algorithms

@@ -1,6 +1,6 @@
 /**
- *  @brief  Window overlap on the GPU: the device backend against serial's answers, the memory contract the two
- *          verbs keep, and the width bound the per-thread ring imposes.
+ *  @brief  Window overlap on the GPU: the device engine against serial's answers, the memory contract the scoring
+ *          verb keeps, the width bounds the per-thread ring imposes, and the asynchrony the verb promises.
  *  @file   test/overlap.cu
  *  @author Ash Vardanian
  *  @date   September 15, 2026
@@ -36,19 +36,26 @@ using namespace sz::test;
  *  @brief A corpus both sides address: one arena, the views into it, and the room for one round's scores.
  *
  *  Unified storage is readable from the host, so the serial reference runs against these very bytes rather than
- *  a second copy of them, and the two sequences differ only in whose accessors they carry.
+ *  a second copy of them, and the two candidate sequences differ only in whose accessors they carry. The queries
+ *  stay plain host strings, because an engine's builder reads them on the host and no kernel ever sees them.
  */
 struct overlap_cuda_corpus_t {
-    unified_vector<char> query;             /**< The text whose windows are sorted into the tree. */
+    std::vector<std::string> queries;       /**< The texts whose windows are sorted into the forest. */
     unified_vector<char> arena;             /**< Every candidate's bytes, back to back. */
     unified_vector<sz_string_view_t> views; /**< One view per candidate; its size is the candidate count. */
-    unified_vector<sz_f32_t> scores;        /**< @b [candidates,window_widths], written by whichever verb ran. */
-    sz_sequence_t device_candidates {};     /**< Accessors a kernel calls, as the strict verb requires. */
+    unified_vector<sz_f32_t> scores;        /**< @b [queries,candidates,widths], written by whichever verb ran. */
+    sz_sequence_t query_sequence {};        /**< Host accessors, which is what an engine's builder calls. */
+    sz_sequence_t device_candidates {};     /**< Accessors a kernel calls, as the scoring verb requires. */
     sz_sequence_t host_candidates {};       /**< Accessors the serial reference calls, over the same views. */
 
-    overlap_cuda_corpus_t(std::size_t count, std::size_t query_length, std::size_t widths_count)
-        : query(query_length), views(count), scores(count * widths_count) {
-        randomize_string(query.data(), query.size());
+    overlap_cuda_corpus_t(std::size_t queries_count, std::size_t count, std::size_t query_length,
+                          std::size_t widths_count)
+        : views(count), scores(queries_count * count * widths_count) {
+        for (std::size_t index = 0; index != queries_count; ++index) {
+            std::string text(query_length ? query_length - index % query_length : 0, '\0');
+            if (!text.empty()) randomize_string(&text[0], text.size());
+            queries.push_back(text);
+        }
         for (std::size_t index = 0; index != count; ++index) arena.resize(arena.size() + 1 + (index * 37) % 900);
         randomize_string(arena.data(), arena.size());
 
@@ -58,11 +65,13 @@ struct overlap_cuda_corpus_t {
             views[index].start = arena.data() + written, views[index].length = length;
             written += length;
         }
+        query_sequence = sequence_from_(queries);
         verify(sz_sequence_from_string_views_cuda(views.data(), views.size(), &device_candidates) == sz_success_k);
         sz_sequence_from_string_views(views.data(), views.size(), &host_candidates);
     }
 
-    std::size_t widths_count() const noexcept { return scores.size() / views.size(); }
+    std::size_t candidate_stride() const noexcept { return scores.size() / (queries.size() * views.size()); }
+    std::size_t query_stride() const noexcept { return views.size() * candidate_stride(); }
 };
 
 /** The serial backend's answers for the same corpus, read off the very bytes the device reads. */
@@ -70,9 +79,13 @@ static std::vector<sz_f32_t> overlap_serial_reference_(overlap_cuda_corpus_t con
                                                        sz::span<sz_size_t const> widths) {
     sz_memory_allocator_t host;
     sz_memory_allocator_init_default(&host);
-    std::vector<sz_f32_t> expected(corpus.scores.size());
-    verify(sz_overlap_scores_serial(corpus.query.data(), corpus.query.size(), &corpus.host_candidates, widths.data(),
-                                    widths.size(), &host, expected.data()) == sz_success_k);
+    sz_overlap_engine_t engine {};
+    verify(sz_overlap_engine_init_serial(&corpus.query_sequence, widths.data(), widths.size(), &host, &engine) ==
+           sz_success_k);
+    std::vector<sz_f32_t> expected(corpus.scores.size(), -1.0f);
+    verify(sz_overlap_scores_serial(&engine, &corpus.host_candidates, expected.data(), corpus.query_stride(),
+                                    corpus.candidate_stride()) == sz_success_k);
+    sz_overlap_engine_free(&engine);
     return expected;
 }
 
@@ -80,11 +93,11 @@ static std::vector<sz_f32_t> overlap_serial_reference_(overlap_cuda_corpus_t con
 
 #pragma region Backends
 
-/** @brief One CUDA backend's one-to-many verb, and the device it needs. */
+/** @brief One CUDA backend's scoring verb, and the device it needs. */
 struct overlap_cuda_backend_t {
-    char const *name;         /**< The row's spelling, for @ref fail_backend_ and the log. */
-    sz_capability_t required; /**< The tier bits @ref sz_capabilities must carry for this row to run. */
-    sz_overlap_scores_t scores; /**< The verb itself, which stages whatever the device cannot reach. */
+    char const *name;           /**< The row's spelling, for @ref fail_backend_ and the log. */
+    sz_capability_t required;   /**< The tier bits @ref sz_capabilities must carry for this row to run. */
+    sz_overlap_scores_t scores; /**< The verb itself, which every row reaches through a device-built engine. */
 };
 
 /**
@@ -105,81 +118,102 @@ static overlap_cuda_backend_t const overlap_cuda_backends[] = {
 /** One backend's scores against serial's, on a corpus that never leaves the device. */
 static void check_overlap_cuda_equivalence_(overlap_cuda_backend_t const &backend) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
-    sz_memory_allocator_t unified;
-    sz_memory_allocator_init_unified(&unified);
 
-    for (std::size_t count : {1u, 129u, 4096u})
-        for (std::size_t query_length : {12u, 777u}) {
-            overlap_cuda_corpus_t corpus(count, query_length, widths.size());
-            std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
-
-            if (backend.scores(corpus.query.data(), corpus.query.size(), &corpus.device_candidates, widths.data(),
-                               widths.size(), &unified, corpus.scores.data()) != sz_success_k)
-                fail_backend_(backend.name, "a device-resident batch was refused");
-            for (std::size_t slot = 0; slot != expected.size(); ++slot)
-                if (corpus.scores[slot] != expected[slot]) fail_backend_(backend.name, "a share differs from serial");
-        }
+    for (std::size_t queries_count : {1u, 3u})
+        for (std::size_t count : {1u, 129u, 4096u})
+            for (std::size_t query_length : {12u, 777u}) {
+                overlap_cuda_corpus_t corpus(queries_count, count, query_length, widths.size());
+                std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus,
+                                                                                 {widths.data(), widths.size()});
+                sz_overlap_engine_t engine {};
+                if (sz_overlap_engine_init_gpu(&corpus.query_sequence, widths.data(), widths.size(), SZ_NULL, SZ_NULL,
+                                               &engine) != sz_success_k)
+                    fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
+                if (backend.scores(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.query_stride(),
+                                   corpus.candidate_stride()) != sz_success_k)
+                    fail_backend_(backend.name, "a device-resident batch was refused");
+                verify(cudaStreamSynchronize(SZ_NULL) == cudaSuccess);
+                sz_overlap_engine_free(&engine);
+                for (std::size_t slot = 0; slot != expected.size(); ++slot)
+                    if (corpus.scores[slot] != expected[slot])
+                        fail_backend_(backend.name, "a share differs from serial");
+            }
 }
 
-/** One backend staging host memory it cannot reach, and answering what serial answers. */
+/** One backend refusing the host memory no kernel can address, rather than reaching it as an invalid pointer. */
 static void check_overlap_cuda_memory_safety_(overlap_cuda_backend_t const &backend) {
     std::array<sz_size_t, 2> const widths {4, 6};
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
+    overlap_cuda_corpus_t corpus(1, 8, 333, widths.size());
+    sz_overlap_engine_t engine {};
+    if (sz_overlap_engine_init_gpu(&corpus.query_sequence, widths.data(), widths.size(), SZ_NULL, SZ_NULL, &engine) !=
+        sz_success_k)
+        fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
 
-    std::string query(333, '\0');
-    randomize_string(&query[0], query.size());
-    std::string arena(541, '\0');
-    randomize_string(&arena[0], arena.size());
-    std::array<sz_string_view_t, 3> const views {
-        sz_string_view_t {arena.data(), 1}, {arena.data() + 1, 40}, {arena.data() + 41, 500}};
-    sz_sequence_t candidates {};
-    sz_sequence_from_string_views(views.data(), views.size(), &candidates);
+    // The corpus's own views are unified, so a genuinely host-resident sequence needs its own plain storage.
+    std::string text(64, '\0');
+    randomize_string(&text[0], text.size());
+    std::array<sz_string_view_t, 1> const host_views {sz_string_view_t {text.data(), text.size()}};
+    sz_sequence_t host_candidates {};
+    sz_sequence_from_string_views(host_views.data(), host_views.size(), &host_candidates);
 
-    std::vector<sz_f32_t> expected(views.size() * widths.size()), produced(views.size() * widths.size());
-    verify(sz_overlap_scores_serial(query.data(), query.size(), &candidates, widths.data(), widths.size(), &host,
-                                    expected.data()) == sz_success_k);
-    if (backend.scores(query.data(), query.size(), &candidates, widths.data(), widths.size(), &host,
-                       produced.data()) != sz_success_k)
-        fail_backend_(backend.name, "host memory was refused by the verb that must stage it");
-    if (produced != expected) fail_backend_(backend.name, "a staged round differs from serial");
+    std::vector<sz_f32_t> host_scores(corpus.scores.size(), -1.0f);
+    if (backend.scores(&engine, &corpus.device_candidates, host_scores.data(), corpus.query_stride(),
+                       corpus.candidate_stride()) != sz_device_memory_mismatch_k)
+        fail_backend_(backend.name, "host scores were not refused");
+    if (backend.scores(&engine, &host_candidates, corpus.scores.data(), corpus.query_stride(),
+                       corpus.candidate_stride()) != sz_device_memory_mismatch_k)
+        fail_backend_(backend.name, "a host-resident sequence handle was not refused");
+    for (sz_f32_t const untouched : host_scores)
+        if (untouched != -1.0f) fail_backend_(backend.name, "a refused call still wrote a score");
+    sz_overlap_engine_free(&engine);
 }
 
-/** One backend's widest window, and the refusal one past it. */
+/** The widest window the per-thread ring holds, and the two refusals one step past each of its bounds. */
 static void check_overlap_cuda_width_safety_(overlap_cuda_backend_t const &backend) {
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
-    std::string query(256, '\0');
-    randomize_string(&query[0], query.size());
-    sz_string_view_t const view {query.data(), query.size()};
-    sz_sequence_t candidates {};
-    sz_sequence_from_string_views(&view, 1, &candidates);
-
     std::array<sz_size_t, 1> const widest {sz_overlap_cuda_widest_window_k};
     std::array<sz_size_t, 1> const past {sz_overlap_cuda_widest_window_k + 1};
-    sz_f32_t score = 0.0f;
-    if (backend.scores(query.data(), query.size(), &candidates, widest.data(), widest.size(), &host, &score) !=
-        sz_success_k)
-        fail_backend_(backend.name, "the widest window the ring holds was refused");
-    if (score != 1.0f) fail_backend_(backend.name, "a text does not fully overlap itself");
-    if (backend.scores(query.data(), query.size(), &candidates, past.data(), past.size(), &host, &score) !=
+    std::array<sz_size_t, sz_overlap_cuda_widths_max_k + 1> too_many {};
+    for (std::size_t index = 0; index != too_many.size(); ++index) too_many[index] = index + 1;
+
+    // The one candidate is the query's own bytes in unified storage, so the text scores against itself.
+    overlap_cuda_corpus_t corpus(1, 1, 256, widest.size());
+    corpus.arena.assign(corpus.queries.front().begin(), corpus.queries.front().end());
+    corpus.views[0].start = corpus.arena.data(), corpus.views[0].length = corpus.arena.size();
+
+    sz_overlap_engine_t engine {};
+    if (sz_overlap_engine_init_gpu(&corpus.query_sequence, past.data(), past.size(), SZ_NULL, SZ_NULL, &engine) !=
         sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "a width past the ring was not refused");
+    if (sz_overlap_engine_init_gpu(&corpus.query_sequence, too_many.data(), too_many.size(), SZ_NULL, SZ_NULL,
+                                   &engine) != sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "more widths than the registers hold were not refused");
+    if (sz_overlap_engine_init_gpu(&corpus.query_sequence, widest.data(), widest.size(), SZ_NULL, SZ_NULL, &engine) !=
+        sz_success_k)
+        fail_backend_(backend.name, "the widest window the ring holds was refused");
+    if (backend.scores(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.query_stride(),
+                       corpus.candidate_stride()) != sz_success_k)
+        fail_backend_(backend.name, "a device-resident batch was refused");
+    verify(cudaStreamSynchronize(SZ_NULL) == cudaSuccess);
+    sz_overlap_engine_free(&engine);
+    if (corpus.scores[0] != 1.0f) fail_backend_(backend.name, "a text does not fully overlap itself");
 }
 
-/** The verb a caller schedules on its own stream refuses host memory rather than staging it. */
-static void check_overlap_cuda_scheduled_refusal_() {
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
-    std::array<sz_size_t, 2> const widths {4, 6};
-    std::string query(333, '\0');
-    randomize_string(&query[0], query.size());
-    sz_string_view_t const view {query.data(), query.size()};
-    sz_sequence_t candidates {};
-    sz_sequence_from_string_views(&view, 1, &candidates);
-    std::array<sz_f32_t, 2> produced {};
-    verify(sz_overlap_scores_scheduled_cuda(query.data(), query.size(), &candidates, widths.data(), widths.size(),
-                                            &host, produced.data(), SZ_NULL) == sz_device_memory_mismatch_k);
+/** The scoring verb enqueues and returns, so a round big enough to outlive the call is still running after it. */
+static void check_overlap_cuda_asynchrony_() {
+    std::array<sz_size_t, 3> const widths {4, 6, 8};
+    overlap_cuda_corpus_t corpus(8, 4096, 777, widths.size());
+    cudaStream_t stream = SZ_NULL;
+    verify(cudaStreamCreate(&stream) == cudaSuccess);
+
+    sz_overlap_engine_t engine {};
+    verify(sz_overlap_engine_init_gpu(&corpus.query_sequence, widths.data(), widths.size(), SZ_NULL, stream,
+                                      &engine) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.query_stride(),
+                             corpus.candidate_stride()) == sz_success_k);
+    verify(cudaStreamQuery(stream) == cudaErrorNotReady && "the scoring verb joined the stream it enqueued on");
+    verify(cudaStreamSynchronize(stream) == cudaSuccess);
+    sz_overlap_engine_free(&engine);
+    verify(cudaStreamDestroy(stream) == cudaSuccess);
 }
 
 #pragma endregion Checks
@@ -195,7 +229,7 @@ void test_overlap_all() {
     }
 }
 
-/** @brief Degenerate inputs, stated refusals, and the bound the per-thread ring imposes. */
+/** @brief Degenerate inputs, stated refusals, the bounds the per-thread ring imposes, and the asynchrony promised. */
 void test_overlap_safety() {
     std::printf("  - testing degenerate inputs and refused batches of the CUDA window-overlap kernels...\n");
     for (overlap_cuda_backend_t const &backend : overlap_cuda_backends) {
@@ -203,7 +237,7 @@ void test_overlap_safety() {
         check_overlap_cuda_memory_safety_(backend);
         check_overlap_cuda_width_safety_(backend);
     }
-    check_overlap_cuda_scheduled_refusal_();
+    if ((sz_capabilities() & sz_cap_cuda_k) == sz_cap_cuda_k) check_overlap_cuda_asynchrony_();
 }
 
 #pragma endregion Drivers

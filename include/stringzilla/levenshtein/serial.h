@@ -1,7 +1,7 @@
 /**
- *  @brief Serial backend for Levenshtein edit distances: Myers' bit-parallel algorithm, one query against one
- *      or many candidates, over bytes or over UTF-8 runes, plus the shared query state and the step primitives
- *      every SIMD backend mirrors.
+ *  @brief Serial backend for Levenshtein edit distances: Myers' bit-parallel algorithm, a batch of prepared
+ *      queries against a batch of candidates, over bytes or over UTF-8 runes, plus the cross-product engine
+ *      every backend scores through and the step primitives every SIMD backend mirrors.
  *  @file include/stringzilla/levenshtein/serial.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/levenshtein.h
@@ -269,16 +269,6 @@ SZ_HELPER_INLINE sz_levenshtein_deadline_t sz_levenshtein_deadline_(sz_u64_t unr
 /** Rounds @p bytes up to a cache line, so every scratch area below starts aligned. */
 SZ_HELPER_AUTO sz_size_t sz_levenshtein_align64_(sz_size_t bytes) { return (bytes + 63) & ~(sz_size_t)63; }
 
-/** Scratch one call takes from the allocator: the mask table, the byte-class map or the UTF-8 page table,
- *  then the verticals, each starting on a cache line. */
-SZ_HELPER_AUTO sz_size_t sz_levenshtein_distances_scratch_bytes_(sz_size_t mask_entries, sz_size_t map_bytes,
-                                                                 sz_size_t pages_bytes,
-                                                                 sz_size_t registers_per_position, sz_size_t words,
-                                                                 sz_size_t vertical_bytes) {
-    return 64 + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t)) + map_bytes +
-           sz_levenshtein_align64_(pages_bytes) + registers_per_position * words * vertical_bytes;
-}
-
 /** Eight bytes as their eight classes, packed the same way, so a transpose's byte transposes stay byte transposes. */
 SZ_HELPER_INLINE sz_u64_t sz_levenshtein_octet_classes_(sz_u8_t const *byte_to_class, sz_u64_t octet) {
     sz_u64_t classes = 0;
@@ -301,6 +291,341 @@ SZ_HELPER_AUTO void sz_levenshtein_rune_counts_as_distances_(sz_sequence_t const
 }
 
 #pragma endregion Generic Internal Helpers
+
+#pragma region Cross Product Engine
+
+/**
+ *  @brief A batch of prepared queries, the block it lives in, and the round's scratch beside it.
+ *
+ *  The first four members are @ref sz_levenshtein_query_t in tensor form: every query's mask plane back to back,
+ *  which a kernel indexes by arithmetic where an array of structs would need a pointer chase. The launch geometry
+ *  lives in @c memory 's head, which only the tier named by @c capability reads.
+ */
+typedef struct sz_levenshtein_engine_t {
+    sz_u64_t const *masks;          /**< Every query's mask plane, back to back, @c masks_offsets addressing them. */
+    sz_size_t const *masks_offsets; /**< The @b [count+1] word offsets into @c masks, the last being its length. */
+    void const *symbol_to_class;    /**< The mask row each symbol reads, laid out as @c symbol spells it. */
+    sz_u32_t const *lengths;        /**< The @b [count] symbols each query spans, which seeds its score bit. */
+    sz_size_t count;                /**< Queries prepared, which is the first axis of every output. */
+    sz_levenshtein_symbol_t symbol; /**< The alphabet the batch was prepared over, and how to read the class map. */
+    sz_capability_t capability;     /**< The tier @c _init_* resolved, and the only one that may score with it. */
+    sz_memory_allocator_t alloc;    /**< What built both blocks below and what grows the second. */
+    void *memory;                   /**< The batch's block, fixed for the engine's life, its head tier-private. */
+    sz_size_t memory_bytes;         /**< Bytes of that block. */
+    void *scratch;                  /**< The round's block, grown by a compute verb and never shrunk. */
+    sz_size_t scratch_bytes;        /**< Bytes of that block, zero until the first round sizes it. */
+} sz_levenshtein_engine_t;
+
+/** One query's shape, measured before the block that holds it exists. */
+typedef struct sz_levenshtein_engine_shape_t {
+    sz_u32_t length;  /**< Symbols the query spans: bytes, or runes under @c sz_levenshtein_runes_k. */
+    sz_u32_t classes; /**< Mask rows its plane takes, the row an absent symbol reads included, zero if empty. */
+    sz_u32_t rows;    /**< Class rows its page table takes, which is zero under @c sz_levenshtein_bytes_k. */
+} sz_levenshtein_engine_shape_t;
+
+/** Where a batch's tensors sit inside one block, so the sizing pass and the filling pass agree by construction. */
+typedef struct sz_levenshtein_engine_layout_t {
+    sz_size_t head_bytes;     /**< Bytes the block opens with, which only the tier that asked for them reads. */
+    sz_size_t masks_offset;   /**< Byte offset of the mask planes, which is the head rounded to a cache line. */
+    sz_size_t masks_words;    /**< Words every plane spans together. */
+    sz_size_t offsets_offset; /**< Byte offset of the @b [count+1] plane offsets. */
+    sz_size_t lengths_offset; /**< Byte offset of the @b [count] symbol counts. */
+    sz_size_t classes_offset; /**< Byte offset of the class map, laid out as the alphabet spells it. */
+    sz_size_t classes_bytes;  /**< Bytes that map spans. */
+    sz_size_t total_bytes;    /**< Bytes the whole block takes. */
+} sz_levenshtein_engine_layout_t;
+
+/**
+ *  @brief The tier a batch of @p symbol scores on, given @p caps, resolved once so no round asks again.
+ *
+ *  Ice Lake's byte lanes have no rune arm, so a rune batch stops at Skylake however capable the machine is.
+ */
+SZ_HELPER_AUTO sz_capability_t sz_levenshtein_tier_for(sz_capability_t caps, sz_levenshtein_symbol_t symbol) {
+#if SZ_USE_ICELAKE
+    if ((caps & sz_cap_icelake_k) != 0 && symbol == sz_levenshtein_bytes_k) return sz_cap_icelake_k;
+#endif
+#if SZ_USE_SKYLAKE
+    if ((caps & sz_cap_skylake_k) != 0) return sz_cap_skylake_k;
+#endif
+#if SZ_USE_HASWELL
+    if ((caps & sz_cap_haswell_k) != 0) return sz_cap_haswell_k;
+#endif
+    return sz_unused_(caps), sz_unused_(symbol), sz_cap_serial_k;
+}
+
+/** The page table and the class rows of query @p index, which the rune alphabet keeps one block per query. */
+SZ_HELPER_AUTO void sz_levenshtein_engine_pages_(sz_levenshtein_engine_t const *engine, sz_size_t index,
+                                                 sz_u16_t const **page_rows, sz_u32_t const **class_rows) {
+    sz_size_t const *const pages_offsets = (sz_size_t const *)engine->symbol_to_class;
+    sz_u16_t const *const pages = (sz_u16_t const *)((sz_cptr_t)engine->symbol_to_class + pages_offsets[index]);
+    *page_rows = pages;
+    *class_rows = (sz_u32_t const *)(pages + sz_levenshtein_utf8_pages_k);
+}
+
+/** Materializes one row of the batch as the kit's own query type: base pointers and arithmetic, no storage. */
+SZ_HELPER_AUTO sz_levenshtein_query_t sz_levenshtein_engine_row_(sz_levenshtein_engine_t const *engine,
+                                                                 sz_size_t index) {
+    sz_levenshtein_query_t row = {SZ_NULL, SZ_NULL, SZ_NULL, SZ_NULL, 0, 0, 0};
+    row.masks = engine->masks + engine->masks_offsets[index];
+    row.length = engine->lengths[index];
+    row.stride = sz_levenshtein_query_stride(row.length);
+    row.classes =
+        row.stride ? (engine->masks_offsets[index + 1] - engine->masks_offsets[index]) / row.stride : 0;
+    if (engine->symbol == sz_levenshtein_bytes_k) {
+        row.byte_to_class = (sz_u8_t const *)engine->symbol_to_class + index * sz_levenshtein_byte_classes_k;
+        row.page_rows = SZ_NULL, row.class_rows = SZ_NULL;
+    }
+    else {
+        row.byte_to_class = SZ_NULL;
+        sz_levenshtein_engine_pages_(engine, index, &row.page_rows, &row.class_rows);
+    }
+    return row;
+}
+
+/** The widest word count the batch holds, which is what one round's verticals are sized for. */
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_engine_words_max_(sz_levenshtein_engine_t const *engine) {
+    sz_size_t words = 0;
+    for (sz_size_t index = 0; index != engine->count; ++index)
+        words = sz_max_of_two(words, sz_levenshtein_query_words(engine->lengths[index]));
+    return words;
+}
+
+/** Every candidate's distance to an empty query, which is its own symbol count in the batch's alphabet. */
+SZ_HELPER_AUTO void sz_levenshtein_engine_empty_row_(sz_levenshtein_engine_t const *engine,
+                                                     sz_sequence_t const *candidates, sz_size_t *row) {
+    if (engine->symbol == sz_levenshtein_bytes_k) sz_levenshtein_byte_counts_as_distances_(candidates, row);
+    else sz_levenshtein_rune_counts_as_distances_(candidates, row);
+}
+
+/** Bytes one round's verticals take: a cache line to align on, then one set per register of candidates. */
+SZ_HELPER_AUTO sz_size_t sz_levenshtein_engine_verticals_bytes_(sz_size_t registers_per_position, sz_size_t words,
+                                                                sz_size_t vertical_bytes) {
+    return 64 + registers_per_position * words * vertical_bytes;
+}
+
+/** The round's verticals, cache-line aligned inside the block the round grew for them. */
+SZ_API_COMPTIME void *sz_levenshtein_engine_verticals_(sz_levenshtein_engine_t const *engine) {
+    return (void *)sz_levenshtein_align64_((sz_size_t)engine->scratch);
+}
+
+/** Grows @p engine 's round block to @p bytes, which a round does once and never undoes. */
+SZ_API_COMPTIME sz_status_t sz_levenshtein_engine_scratch_(sz_levenshtein_engine_t *engine, sz_size_t bytes) {
+    if (engine->scratch_bytes >= bytes) return sz_success_k;
+    void *const grown = engine->alloc.allocate(bytes, engine->alloc.handle);
+    if (!grown) return sz_bad_alloc_k;
+    if (engine->scratch) engine->alloc.free(engine->scratch, engine->scratch_bytes, engine->alloc.handle);
+    engine->scratch = grown, engine->scratch_bytes = bytes;
+    return sz_success_k;
+}
+
+/** Flags the distinct byte values of @p text into @p seen and answers the mask rows they take, the absent one too. */
+SZ_API_COMPTIME sz_size_t sz_levenshtein_engine_byte_classes_(sz_cptr_t text, sz_size_t length, sz_u8_t *seen) {
+    sz_size_t distinct = 0;
+    for (sz_size_t byte = 0; byte != sz_levenshtein_byte_classes_k; ++byte) seen[byte] = 0;
+    for (sz_size_t position = 0; position != length; ++position) seen[(sz_u8_t)text[position]] = 1;
+    for (sz_size_t byte = 0; byte != sz_levenshtein_byte_classes_k; ++byte) distinct += seen[byte];
+    return sz_min_of_two(distinct + 1, (sz_size_t)sz_levenshtein_byte_classes_k);
+}
+
+/**
+ *  @brief Counts the runes, the classes and the page rows of @p text without building a mask plane for it.
+ *  @param[out] page_rows Caller-owned, @c sz_levenshtein_utf8_pages_k entries, rewritten on every call.
+ *  @param[out] class_rows Caller-owned, one row of 256 per page the text can touch plus the all-zero row.
+ *  @param[out] shape The counts a batch is sized from, all three zero for an empty text.
+ */
+SZ_API_COMPTIME void sz_levenshtein_engine_rune_classes_(sz_cptr_t text, sz_size_t length, sz_u16_t *page_rows,
+                                                         sz_u32_t *class_rows,
+                                                         sz_levenshtein_engine_shape_t *shape) {
+    for (sz_size_t page = 0; page != sz_levenshtein_utf8_pages_k; ++page) page_rows[page] = 0;
+    for (sz_size_t entry = 0; entry != 256; ++entry) class_rows[entry] = 0;
+    sz_size_t runes = 0, rows = 1, classes = 1;
+    for (sz_size_t position = 0; position < length; ++runes) {
+        sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+        if (page_rows[rune >> 8] == 0) {
+            page_rows[rune >> 8] = (sz_u16_t)rows++;
+            for (sz_size_t entry = 0; entry != 256; ++entry) class_rows[page_rows[rune >> 8] * 256 + entry] = 0;
+        }
+        sz_u32_t *const class_slot = class_rows + (sz_size_t)page_rows[rune >> 8] * 256 + (rune & 255);
+        if (*class_slot == 0) *class_slot = (sz_u32_t)classes++;
+    }
+    shape->length = (sz_u32_t)runes;
+    shape->classes = runes != 0 ? (sz_u32_t)classes : 0;
+    shape->rows = runes != 0 ? (sz_u32_t)rows : 0;
+}
+
+/** Measures every query of @p queries, which is what sizes the block they are then prepared into. */
+SZ_API_COMPTIME sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t const *queries,
+                                                           sz_levenshtein_symbol_t symbol,
+                                                           sz_memory_allocator_t const *alloc,
+                                                           sz_levenshtein_engine_shape_t *shapes) {
+    if (queries->count == 0) return sz_success_k;
+    if (symbol == sz_levenshtein_bytes_k) {
+        sz_u8_t seen[sz_levenshtein_byte_classes_k];
+        for (sz_size_t index = 0; index != queries->count; ++index) {
+            sz_size_t const length = queries->get_length(queries->handle, index);
+            sz_cptr_t const text = queries->get_start(queries->handle, index);
+            shapes[index].length = (sz_u32_t)length;
+            shapes[index].classes = length != 0
+                                        ? (sz_u32_t)sz_levenshtein_engine_byte_classes_(text, length, seen)
+                                        : 0;
+            shapes[index].rows = 0;
+        }
+        return sz_success_k;
+    }
+    // Runes never outnumber bytes, so the longest text bounds the page table every measurement reuses.
+    sz_size_t longest = 0;
+    for (sz_size_t index = 0; index != queries->count; ++index)
+        longest = sz_max_of_two(longest, queries->get_length(queries->handle, index));
+    sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(longest);
+    sz_u16_t *const page_rows = (sz_u16_t *)alloc->allocate(pages_bytes, alloc->handle);
+    if (!page_rows) return sz_bad_alloc_k;
+    sz_u32_t *const class_rows = (sz_u32_t *)(page_rows + sz_levenshtein_utf8_pages_k);
+    for (sz_size_t index = 0; index != queries->count; ++index)
+        sz_levenshtein_engine_rune_classes_(queries->get_start(queries->handle, index),
+                                            queries->get_length(queries->handle, index), page_rows, class_rows,
+                                            shapes + index);
+    alloc->free(page_rows, pages_bytes, alloc->handle);
+    return sz_success_k;
+}
+
+/** Lays @p count queries of the given @p shapes out inside one block, after a tier's own @p head_bytes. */
+SZ_HELPER_AUTO void sz_levenshtein_engine_layout_(sz_size_t count, sz_levenshtein_symbol_t symbol,
+                                                  sz_levenshtein_engine_shape_t const *shapes, sz_size_t head_bytes,
+                                                  sz_levenshtein_engine_layout_t *layout) {
+    sz_size_t words = 0, rows = 0;
+    for (sz_size_t index = 0; index != count; ++index) {
+        words += (sz_size_t)shapes[index].classes * sz_levenshtein_query_stride(shapes[index].length);
+        rows += shapes[index].rows;
+    }
+    layout->head_bytes = sz_levenshtein_align64_(head_bytes);
+    layout->masks_offset = layout->head_bytes;
+    layout->masks_words = words;
+    layout->offsets_offset = layout->masks_offset + sz_levenshtein_align64_(words * sizeof(sz_u64_t));
+    layout->lengths_offset = layout->offsets_offset + sz_levenshtein_align64_((count + 1) * sizeof(sz_size_t));
+    layout->classes_offset = layout->lengths_offset + sz_levenshtein_align64_(count * sizeof(sz_u32_t));
+    layout->classes_bytes = symbol == sz_levenshtein_bytes_k
+                                ? count * sz_levenshtein_byte_classes_k
+                                : (count + 1) * sizeof(sz_size_t) +
+                                      count * sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) +
+                                      rows * 256 * sizeof(sz_u32_t);
+    layout->total_bytes = layout->classes_offset + sz_levenshtein_align64_(layout->classes_bytes);
+}
+
+/** Points @p engine 's tensors into its block and writes the offsets and lengths the @p shapes imply. */
+SZ_API_COMPTIME void sz_levenshtein_engine_bind_(sz_levenshtein_engine_t *engine,
+                                                 sz_levenshtein_engine_layout_t const *layout,
+                                                 sz_levenshtein_engine_shape_t const *shapes) {
+    sz_ptr_t const block = (sz_ptr_t)engine->memory;
+    sz_size_t *const offsets = (sz_size_t *)(block + layout->offsets_offset);
+    sz_u32_t *const lengths = (sz_u32_t *)(block + layout->lengths_offset);
+    sz_size_t words = 0;
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        offsets[index] = words;
+        lengths[index] = shapes[index].length;
+        words += (sz_size_t)shapes[index].classes * sz_levenshtein_query_stride(shapes[index].length);
+    }
+    offsets[engine->count] = words;
+    engine->masks = (sz_u64_t const *)(block + layout->masks_offset);
+    engine->masks_offsets = offsets;
+    engine->lengths = lengths;
+    engine->symbol_to_class = block + layout->classes_offset;
+    if (engine->symbol == sz_levenshtein_bytes_k) return;
+    // A rune query's page table and its class rows sit together, which is the block `_prepare_utf8` fills.
+    sz_size_t *const pages_offsets = (sz_size_t *)(block + layout->classes_offset);
+    sz_size_t taken = (engine->count + 1) * sizeof(sz_size_t);
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        pages_offsets[index] = taken;
+        taken += sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) +
+                 (sz_size_t)shapes[index].rows * 256 * sizeof(sz_u32_t);
+    }
+    pages_offsets[engine->count] = taken;
+}
+
+/** Builds every query's plane on the host, into the block @ref sz_levenshtein_engine_bind_ addressed. */
+SZ_API_COMPTIME void sz_levenshtein_engine_fill_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries) {
+    sz_u64_t *const masks = (sz_u64_t *)engine->masks;
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        if (engine->lengths[index] == 0) continue;
+        sz_cptr_t const text = queries->get_start(queries->handle, index);
+        sz_size_t const bytes = queries->get_length(queries->handle, index);
+        sz_u64_t *const plane = masks + engine->masks_offsets[index];
+        sz_levenshtein_query_t prepared = {SZ_NULL, SZ_NULL, SZ_NULL, SZ_NULL, 0, 0, 0};
+        if (engine->symbol == sz_levenshtein_bytes_k) {
+            sz_u8_t *const byte_to_class = (sz_u8_t *)engine->symbol_to_class +
+                                           index * sz_levenshtein_byte_classes_k;
+            sz_levenshtein_query_prepare(text, bytes, plane, byte_to_class, &prepared);
+            continue;
+        }
+        sz_u16_t const *page_rows = SZ_NULL;
+        sz_u32_t const *class_rows = SZ_NULL;
+        sz_levenshtein_engine_pages_(engine, index, &page_rows, &class_rows);
+        sz_levenshtein_query_prepare_utf8(text, bytes, plane, (void *)page_rows, &prepared);
+    }
+}
+
+/** Sizes @p engine 's batch block through @p alloc and binds its tensors, leaving the planes unwritten. */
+SZ_API_COMPTIME sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const *queries, sz_levenshtein_symbol_t symbol,
+                                                         sz_size_t head_bytes, sz_memory_allocator_t const *alloc,
+                                                         sz_levenshtein_engine_t *engine) {
+    sz_size_t const count = queries->count;
+    sz_size_t const shapes_bytes = (count != 0 ? count : 1) * sizeof(sz_levenshtein_engine_shape_t);
+    sz_levenshtein_engine_shape_t *const shapes =
+        (sz_levenshtein_engine_shape_t *)alloc->allocate(shapes_bytes, alloc->handle);
+    if (!shapes) return sz_bad_alloc_k;
+    sz_status_t const measured = sz_levenshtein_engine_measure_(queries, symbol, alloc, shapes);
+    if (measured != sz_success_k) {
+        alloc->free(shapes, shapes_bytes, alloc->handle);
+        return measured;
+    }
+
+    sz_levenshtein_engine_layout_t layout;
+    sz_levenshtein_engine_layout_(count, symbol, shapes, head_bytes, &layout);
+    void *const block = alloc->allocate(layout.total_bytes, alloc->handle);
+    if (!block) {
+        alloc->free(shapes, shapes_bytes, alloc->handle);
+        return sz_bad_alloc_k;
+    }
+
+    engine->count = count;
+    engine->symbol = symbol;
+    engine->capability = sz_cap_serial_k;
+    engine->alloc = *alloc;
+    engine->memory = block;
+    engine->memory_bytes = layout.total_bytes;
+    engine->scratch = SZ_NULL;
+    engine->scratch_bytes = 0;
+    sz_levenshtein_engine_bind_(engine, &layout, shapes);
+    alloc->free(shapes, shapes_bytes, alloc->handle);
+    return sz_success_k;
+}
+
+/** Prepares @p queries on the host and records the tier @p caps and @p symbol resolve between them. */
+SZ_API_COMPTIME sz_status_t sz_levenshtein_engine_init_cpu_(sz_sequence_t const *queries,
+                                                            sz_levenshtein_symbol_t symbol, sz_capability_t caps,
+                                                            sz_memory_allocator_t *alloc,
+                                                            sz_levenshtein_engine_t *engine) {
+    sz_memory_allocator_t host;
+    if (alloc) host = *alloc;
+    else sz_memory_allocator_init_default(&host);
+    sz_status_t const built = sz_levenshtein_engine_build_(queries, symbol, 0, &host, engine);
+    if (built != sz_success_k) return built;
+    sz_levenshtein_engine_fill_(engine, queries);
+    engine->capability = sz_levenshtein_tier_for(caps, symbol);
+    return sz_success_k;
+}
+
+/** Returns both of @p engine 's blocks to the allocator they were built with, and leaves it empty. */
+SZ_API_COMPTIME void sz_levenshtein_engine_free_(sz_levenshtein_engine_t *engine) {
+    if (engine->memory) engine->alloc.free(engine->memory, engine->memory_bytes, engine->alloc.handle);
+    if (engine->scratch) engine->alloc.free(engine->scratch, engine->scratch_bytes, engine->alloc.handle);
+    engine->masks = SZ_NULL, engine->masks_offsets = SZ_NULL;
+    engine->symbol_to_class = SZ_NULL, engine->lengths = SZ_NULL;
+    engine->count = 0;
+    engine->memory = SZ_NULL, engine->memory_bytes = 0;
+    engine->scratch = SZ_NULL, engine->scratch_bytes = 0;
+}
+
+#pragma endregion Cross Product Engine
 
 #pragma region Serial Implementation
 
@@ -467,119 +792,30 @@ SZ_HELPER_INLINE void sz_levenshtein_serial_u64x1_distances_(sz_levenshtein_quer
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                           sz_size_t b_length, sz_memory_allocator_t *alloc,
-                                                           sz_size_t *distance) {
-    // The shorter side is the pattern: fewer words per vertical, and unit-cost edit distance is symmetric.
-    if (a_length > b_length) {
-        sz_cptr_t const swapped_text = a;
-        sz_size_t const swapped_length = a_length;
-        a = b, a_length = b_length, b = swapped_text, b_length = swapped_length;
-    }
-    if (a_length == 0) return *distance = b_length, sz_success_k;
-    sz_size_t const words = sz_levenshtein_query_words(a_length);
-    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(a_length);
-    sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        mask_entries, sz_levenshtein_byte_classes_k, 0, 1, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
-    sz_levenshtein_u64x1_vertical_serial_t *const verticals =
-        (sz_levenshtein_u64x1_vertical_serial_t *)(byte_to_class + sz_levenshtein_byte_classes_k);
-
-    sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(a, a_length, masks, byte_to_class, &query);
-    sz_levenshtein_u64x1_state_serial_t state;
-    sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
-    for (sz_size_t position = 0; position != b_length; ++position)
-        sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, byte_to_class[(sz_u8_t)b[position]]);
-    *distance = state.score;
-    alloc->free(scratch, scratch_bytes, alloc->handle);
-    return sz_success_k;
-}
-
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_utf8_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                sz_size_t b_length, sz_memory_allocator_t *alloc,
-                                                                sz_size_t *distance) {
-    // Either side is a valid pattern, so fewer bytes stands in for fewer runes: a heuristic, never the answer.
-    if (a_length > b_length) {
-        sz_cptr_t const swapped_text = a;
-        sz_size_t const swapped_length = a_length;
-        a = b, a_length = b_length, b = swapped_text, b_length = swapped_length;
-    }
-    if (a_length == 0) return *distance = sz_levenshtein_utf8_runes(b, b_length), sz_success_k;
-    sz_size_t const a_runes = sz_levenshtein_utf8_runes(a, a_length);
-    sz_size_t const words = sz_levenshtein_query_words(a_runes);
-    sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(a_runes);
-    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries_utf8(a_runes);
-    sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        mask_entries, 0, pages_bytes, 1, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
-    sz_levenshtein_u64x1_vertical_serial_t *const verticals =
-        (sz_levenshtein_u64x1_vertical_serial_t *)(pages + sz_levenshtein_align64_(pages_bytes));
-
-    sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare_utf8(a, a_length, masks, pages, &query);
-    sz_levenshtein_u64x1_state_serial_t state;
-    sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
-    for (sz_size_t cursor = 0; cursor < b_length;)
-        sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query,
-                                         sz_levenshtein_utf8_class(&query, sz_utf8_next_rune_(b, b_length, &cursor)));
-    *distance = state.score;
-    alloc->free(scratch, scratch_bytes, alloc->handle);
-    return sz_success_k;
-}
-
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_serial(sz_cptr_t query_text, sz_size_t query_length,
-                                                            sz_sequence_t const *candidates,
-                                                            sz_memory_allocator_t *alloc, sz_size_t *distances) {
+SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engine_t *engine,
+                                                            sz_sequence_t const *candidates, sz_size_t *distances,
+                                                            sz_size_t distances_stride) {
     enum { registers_k = sz_levenshtein_serial_u64x1_registers_per_position_k };
-    if (query_length == 0) return sz_levenshtein_byte_counts_as_distances_(candidates, distances), sz_success_k;
-    sz_size_t const words = sz_levenshtein_query_words(query_length);
-    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries(query_length);
-    sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        mask_entries, sz_levenshtein_byte_classes_k, 0, registers_k, words,
-        sizeof(sz_levenshtein_u64x1_vertical_serial_t));
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_u8_t *const byte_to_class = (sz_u8_t *)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
+    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_levenshtein_transpose_t const transpose = engine->symbol == sz_levenshtein_bytes_k
+                                                     ? sz_levenshtein_transpose
+                                                     : sz_levenshtein_transpose_utf8;
+    sz_status_t const grown = sz_levenshtein_engine_scratch_(
+        engine, sz_levenshtein_engine_verticals_bytes_(registers_k, sz_levenshtein_engine_words_max_(engine),
+                                                       sizeof(sz_levenshtein_u64x1_vertical_serial_t)));
+    if (grown != sz_success_k) return grown;
     sz_levenshtein_u64x1_vertical_serial_t *const verticals =
-        (sz_levenshtein_u64x1_vertical_serial_t *)(byte_to_class + sz_levenshtein_byte_classes_k);
+        (sz_levenshtein_u64x1_vertical_serial_t *)sz_levenshtein_engine_verticals_(engine);
 
-    sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare(query_text, query_length, masks, byte_to_class, &query);
-    sz_levenshtein_serial_u64x1_distances_(&query, candidates, sz_levenshtein_transpose, verticals, distances);
-    alloc->free(scratch, scratch_bytes, alloc->handle);
-    return sz_success_k;
-}
-
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_utf8_serial(sz_cptr_t query_text, sz_size_t query_length,
-                                                                 sz_sequence_t const *candidates,
-                                                                 sz_memory_allocator_t *alloc, sz_size_t *distances) {
-    enum { registers_k = sz_levenshtein_serial_u64x1_registers_per_position_k };
-    sz_size_t const runes = sz_levenshtein_utf8_runes(query_text, query_length);
-    if (runes == 0) return sz_levenshtein_rune_counts_as_distances_(candidates, distances), sz_success_k;
-    sz_size_t const words = sz_levenshtein_query_words(runes);
-    sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes(runes);
-    sz_size_t const mask_entries = sz_levenshtein_query_mask_entries_utf8(runes);
-    sz_size_t const scratch_bytes = sz_levenshtein_distances_scratch_bytes_(
-        mask_entries, 0, pages_bytes, registers_k, words, sizeof(sz_levenshtein_u64x1_vertical_serial_t));
-    sz_ptr_t const scratch = (sz_ptr_t)alloc->allocate(scratch_bytes, alloc->handle);
-    if (!scratch) return sz_bad_alloc_k;
-    sz_u64_t *const masks = (sz_u64_t *)sz_levenshtein_align64_((sz_size_t)scratch);
-    sz_ptr_t const pages = (sz_ptr_t)masks + sz_levenshtein_align64_(mask_entries * sizeof(sz_u64_t));
-    sz_levenshtein_u64x1_vertical_serial_t *const verticals =
-        (sz_levenshtein_u64x1_vertical_serial_t *)(pages + sz_levenshtein_align64_(pages_bytes));
-
-    sz_levenshtein_query_t query;
-    sz_levenshtein_query_prepare_utf8(query_text, query_length, masks, pages, &query);
-    sz_levenshtein_serial_u64x1_distances_(&query, candidates, sz_levenshtein_transpose_utf8, verticals, distances);
-    alloc->free(scratch, scratch_bytes, alloc->handle);
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t *const row = distances + index * distances_stride;
+        if (engine->lengths[index] == 0) {
+            sz_levenshtein_engine_empty_row_(engine, candidates, row);
+            continue;
+        }
+        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
+        sz_levenshtein_serial_u64x1_distances_(&query, candidates, transpose, verticals, row);
+    }
     return sz_success_k;
 }
 

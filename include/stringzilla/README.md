@@ -7,14 +7,15 @@ It bundles:
 - a header-only C++ library importable from `<stringzilla/stringzilla.hpp>`,
 - a precompiled __shared__ library enabling dynamic dispatch for maximum portability.
 
-The plain C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, and `memcpy`/`memmove`/`memset`/lookup-table memory transforms.
+The plain C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, `sz_copy`/`sz_move`/`sz_fill`/`sz_lookup` memory transforms, and the stateful cross-product engines for edit distances, window overlap, and multi-pattern search.
 The thin C++ binding rebuilds the STL `<string>` and `<string_view>` surface on top of those kernels, adding an owning Small-String-Optimized container, allocation-free splitting and partitioning views, and free functions for hashing, sorting, and translation.
 
 The fastest SIMD backend is picked per CPU — at compile time in header-only mode, or at runtime when the library is built with dynamic dispatch.
-There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_memory_allocator_t *`, and parallel or GPU engines live in a separate distribution, not in these headers.
+There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_memory_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
+An engine is prepared for one residency and one tier — `sz_levenshtein_engine_init_cpu` or `sz_levenshtein_engine_init_gpu`, and the same pairing for overlap and substrings — so choosing a device is choosing a constructor rather than setting a global.
 
-The headers compile as freestanding C 99 — set `SZ_AVOID_LIBC=1` to drop the libc dependency — and as C++11 or newer for the `sz::` layer.
-Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, and `small_string.h` forward to the per-ISA kernels under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, and so on — each guarded by an `SZ_USE_*` macro.
+The headers compile as freestanding C 99 — set `SZ_AVOID_LIBC=1` to drop the libc dependency — and as C++20 or newer for the `sz::` layer.
+Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` forward to the per-ISA kernels under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, `levenshtein/cuda.cuh`, and so on — each guarded by an `SZ_USE_*` macro.
 
 ## Installation
 
@@ -40,7 +41,13 @@ Each family can also be included on its own when you only need a slice of the AP
 #include <stringzilla/intersect.h> // `sz_sequence_intersect`
 #include <stringzilla/memory.h> // `sz_copy`, `sz_move`, `sz_fill`, `sz_lookup`
 #include <stringzilla/small_string.h> // `sz_string_t` SSO container
+#include <stringzilla/levenshtein.h> // `sz_levenshtein_engine_init_cpu`, `sz_levenshtein_distances`
+#include <stringzilla/overlap.h> // `sz_overlap_engine_init_cpu`, `sz_overlap_scores`
+#include <stringzilla/substrings.h> // `sz_substrings_engine_init_cpu`, `sz_substrings_counts`
 ```
+
+The three engine families prepare a batch of queries once and score it against many batches of candidates, writing into a strided block the caller supplies rather than allocating one per round.
+Their per-tier building blocks and their design notes live beside the kernels, in [`levenshtein/README.md`](levenshtein/README.md), [`overlap/README.md`](overlap/README.md), and [`substrings/README.md`](substrings/README.md).
 
 ### CMake, Header Only
 
@@ -86,7 +93,6 @@ target_link_libraries(your_app PRIVATE stringzilla::header)
 ```
 
 `stringzilla::shared` and `stringzilla::bare` join the package whenever `STRINGZILLA_BUILD_SHARED` was on for the install.
-The parallel engines are a separate package - see [`include/stringzillas/README.md`](../stringzillas/README.md).
 
 A shared-library install also writes `lib/pkgconfig/stringzilla.pc`, for build systems that read pkg-config rather than CMake:
 
@@ -132,7 +138,7 @@ The per-ISA SIMD kernels and the project's own tests are CI-validated with these
 
 GCC 10 and older miss a conforming STL `insert` and fail to build the tests.
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
-NVCC with CUDA 12 builds the GPU engines, which live in the separate `stringzillas` distribution.
+NVCC with CUDA 12 builds the device backends of the engine families, reached through the `_init_gpu` constructors.
 
 StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1` with `-msimd128 -mrelaxed-simd`, which enables the `SZ_USE_V128` and `SZ_USE_V128RELAXED` kernels listed above.
 

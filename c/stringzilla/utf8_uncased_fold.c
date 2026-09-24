@@ -7,11 +7,12 @@
  *  Split from the uncased @b find/order shim (`utf8_uncased.c`) so the cheap
  *  folding kernels compile as their own translation unit, in parallel with the heavy AVX-512 find.
  */
-#include "dispatch.h"
 #include <stringzilla/utf8_uncased_fold.h> // `sz_utf8_uncased_fold_*`
 
+#include "dispatch.h"
+
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->utf8_uncased_fold = sz_utf8_uncased_fold_serial;
@@ -51,5 +52,5 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t 
 }
 
 SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
-    return sz_dispatch_table.utf8_uncased_fold(source, source_length, destination);
+    return sz_dispatch_cpu_table.utf8_uncased_fold(source, source_length, destination);
 }

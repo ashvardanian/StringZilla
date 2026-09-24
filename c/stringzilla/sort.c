@@ -6,11 +6,12 @@
  *  @author Ash Vardanian
  *  @date January 16, 2024
  */
-#include "dispatch.h"
 #include <stringzilla/sort.h>
 
+#include "dispatch.h"
+
 SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
@@ -54,10 +55,10 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps) {
 
 SZ_API_RUNTIME sz_status_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory_allocator_t *alloc,
                                                sz_size_t *order, sz_size_t top_count, sz_bool_t reverse) {
-    return sz_dispatch_table.sequence_argsort(array, alloc, order, top_count, reverse);
+    return sz_dispatch_cpu_table.sequence_argsort(array, alloc, order, top_count, reverse);
 }
 
 SZ_API_RUNTIME sz_status_t sz_sequence_argsort_uncased(sz_sequence_t const *array, sz_memory_allocator_t *alloc,
                                                        sz_size_t *order, sz_size_t top_count, sz_bool_t reverse) {
-    return sz_dispatch_table.sequence_argsort_uncased(array, alloc, order, top_count, reverse);
+    return sz_dispatch_cpu_table.sequence_argsort_uncased(array, alloc, order, top_count, reverse);
 }

@@ -20,7 +20,7 @@ env:
   SWIFT_VERSION: 6.2
   PYTHONUTF8: 1
   WASI_SDK_VERSION: "34"
-  # wasi-threads runs on Wasmtime 46 and older, so the threaded rows take the 36 LTS line.
+  # Pinned to the 36 LTS line so the wasm rows run a reproducible engine.
   WASMTIME_VERSION: v36.0.15
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -84,8 +84,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Log hardware capabilities
         run: |
@@ -152,16 +150,6 @@ jobs:
         # The results in such an unstable environment will be meaningless anyway.
         if: 0
 
-      - name: Test Parallel Algorithms on Real World Data
-        run: |
-          build_artifacts/stringzillas_bench_similarities_cpp20 ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzillas_bench_fingerprints_cpp20 ${DATASET_PATH} # for multi-needle search in many strings
-        env:
-          DATASET_PATH: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
-
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v7
@@ -219,8 +207,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Log hardware capabilities
         run: |
@@ -341,8 +327,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Log hardware capabilities
         run: |
@@ -424,8 +408,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
         # Install CUDA Toolkit
       - name: Install CUDA Toolkit
@@ -517,8 +499,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Log hardware capabilities
         run: |
@@ -536,8 +516,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Install build tools
         run: |
@@ -575,8 +553,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Install build tools
         run: |
@@ -670,8 +646,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Log hardware capabilities
         run: |
@@ -829,8 +803,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Install WASI SDK
         run: |
@@ -846,7 +818,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1, wasm32-wasip1-threads
+          targets: wasm32-wasip1
 
       # The C kernels need the WASI SDK clang and sysroot, and compile the SIMD tier that `RUSTFLAGS` declares.
       # Tests run single-threaded under Wasmtime, which refuses relaxed SIMD in the strict row.
@@ -873,7 +845,6 @@ jobs:
             -DSTRINGZILLA_BUILD_TEST=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=0 \
             -DSTRINGZILLA_BUILD_SHARED=0 \
-            -DSTRINGZILLAS_BUILD_SHARED=0 \
             -DSTRINGZILLA_BUILD_CUDA=0
           cmake --build build_wasi --target stringzilla_test_cpp20
       - name: Test C++ UTF-8 suites under Wasmtime
@@ -1013,8 +984,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
       - name: Set up MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -1099,8 +1068,6 @@ jobs:
           git --version || echo "git not installed"
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Log hardware capabilities
         run: |
@@ -1140,8 +1107,7 @@ jobs:
         run: cargo test --release --no-default-features --features std
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
-  # Packaging surface - what a downstream distributor sees, not what our own build tree sees. vcpkg and Conan
-  # unpack a tarball with no submodules, so the first half runs without `submodules: recursive`. The consumers
+  # Packaging surface - what a downstream distributor sees, not what our own build tree sees. The consumers
   # check spellings by linking them: an undefined name fails at generate time.
   test_packaging:
     name: CMake Packaging
@@ -1172,26 +1138,13 @@ jobs:
           }
           EOF
 
-        # A header-only consumer needs no ForkUnion, so a submodule-less tree must configure - the one
-        # property every registry recipe depends on.
-      - name: Install header-only without submodules
+        # Every registry recipe depends on the header-only prefix configuring and installing cleanly.
+      - name: Install the header-only package
         run: |
           cmake -B build_header -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_TEST=OFF \
             -DSTRINGZILLA_BUILD_BENCHMARK=OFF -DSTRINGZILLA_BUILD_SHARED=OFF \
-            -DSTRINGZILLAS_BUILD_SHARED=OFF -DSTRINGZILLA_BUILD_CUDA=OFF \
-            -DCMAKE_INSTALL_PREFIX="$HEADER_PREFIX"
+            -DSTRINGZILLA_BUILD_CUDA=OFF -DCMAKE_INSTALL_PREFIX="$HEADER_PREFIX"
           cmake --install build_header
-
-        # ForkUnion is ours to vendor, not to scatter into a prefix, and a header-only prefix must not
-        # advertise an empty StringZillas package.
-      - name: Check the header-only prefix carries nothing extra
-        run: |
-          if find "$HEADER_PREFIX" -iname '*forkunion*' | grep -q .; then
-            echo "ForkUnion leaked into the StringZilla prefix"; exit 1
-          fi
-          if [ -d "$HEADER_PREFIX/lib/cmake/stringzillas" ]; then
-            echo "StringZillas package installed without its libraries"; exit 1
-          fi
 
       - name: Consume the header-only package
         run: |
@@ -1206,37 +1159,25 @@ jobs:
           cmake --build consumer/build
           ./consumer/build/consumer
 
-        # Only StringZillas needs ForkUnion, so the C dispatch libraries must build submodule-less too. This is
-        # what a distribution packaging libstringzilla alone does.
-      - name: Build the dispatch libraries without submodules
-        run: |
-          cmake -B build_shared -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_TEST=OFF \
-            -DSTRINGZILLA_BUILD_BENCHMARK=OFF -DSTRINGZILLA_BUILD_SHARED=ON \
-            -DSTRINGZILLAS_BUILD_SHARED=OFF -DSTRINGZILLA_BUILD_CUDA=OFF
-          cmake --build build_shared --parallel
-
       - name: Install the compiled libraries
         run: |
-          git submodule update --init --recursive
           cmake -B build_full -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON \
             -DSTRINGZILLA_BUILD_TEST=OFF -DSTRINGZILLA_BUILD_BENCHMARK=OFF \
-            -DSTRINGZILLA_BUILD_SHARED=ON -DSTRINGZILLAS_BUILD_SHARED=ON \
-            -DSTRINGZILLA_BUILD_CUDA=OFF -DCMAKE_INSTALL_PREFIX="$FULL_PREFIX"
+            -DSTRINGZILLA_BUILD_SHARED=ON -DSTRINGZILLA_BUILD_CUDA=OFF \
+            -DCMAKE_INSTALL_PREFIX="$FULL_PREFIX"
           cmake --build build_full --parallel
           cmake --install build_full
 
-        # `find_package(stringzillas)` only resolves if ForkUnion rode along into the same prefix.
-      - name: Consume both packages
+        # The installed prefix must resolve the shared library's own exported targets.
+      - name: Consume the compiled package
         run: |
           cat > consumer/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.21)
           project(consumer C)
           find_package(stringzilla REQUIRED)
-          find_package(stringzillas REQUIRED)
           add_executable(consumer main.c)
           target_link_libraries(consumer PRIVATE
-              stringzilla::header stringzilla::shared stringzilla::stringzilla_shared stringzilla_shared
-              stringzillas::cpus_shared stringzilla::stringzillas_cpus_shared)
+              stringzilla::header stringzilla::shared stringzilla::stringzilla_shared stringzilla_shared)
           EOF
           rm -rf consumer/build
           cmake -S consumer -B consumer/build -DCMAKE_PREFIX_PATH="$FULL_PREFIX"
@@ -1251,23 +1192,20 @@ jobs:
           cc consumer/main.c $(pkg-config --cflags --libs stringzilla) -o consumer/pc_consumer
           LD_LIBRARY_PATH="$FULL_PREFIX/lib" ./consumer/pc_consumer
 
-        # The in-tree aliases are a separate code path, and the only one offering the static archives.
+        # The in-tree aliases are a separate code path from the installed package's exported targets.
       - name: Consume via add_subdirectory
         run: |
           cat > consumer/CMakeLists.txt <<EOF
           cmake_minimum_required(VERSION 3.21)
           project(consumer C CXX)
           set(STRINGZILLA_BUILD_SHARED ON CACHE BOOL "" FORCE)
-          set(STRINGZILLAS_BUILD_SHARED ON CACHE BOOL "" FORCE)
           add_subdirectory($GITHUB_WORKSPACE stringzilla_build)
           # `bare` is libc-free and overrides libc symbols, so it is checked rather than linked in.
           if (NOT TARGET stringzilla::bare)
               message(FATAL_ERROR "stringzilla::bare alias is missing")
           endif ()
           add_executable(consumer main.c)
-          target_link_libraries(consumer PRIVATE
-              stringzilla::header stringzilla::shared
-              stringzillas::cpus_static stringzilla::stringzillas_cpus_shared)
+          target_link_libraries(consumer PRIVATE stringzilla::header stringzilla::shared)
           EOF
           rm -rf consumer/build
           cmake -S consumer -B consumer/build
@@ -1298,8 +1236,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -1331,8 +1267,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
       - name: Set up Python
         uses: actions/setup-python@v7
         with:

@@ -60,14 +60,10 @@
 #endif
 #endif
 
-#include <forkunion/topology.hpp> // `machine_topology_t` - the machine's cache geometry
 
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/stringzilla.hpp"
 
-#if SZ_USE_CUDA
-#include "stringzillas/types.cuh" // `unified_alloc`
-#endif
 
 #include "stringzilla.hpp" // `read_file`
 
@@ -296,9 +292,9 @@ using dataset_t = std::string;
 using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
 #else
-using dataset_t = std::basic_string<char, std::char_traits<char>, stringzillas::unified_alloc<char>>;
+using dataset_t = std::basic_string<char, std::char_traits<char>, unified_alloc<char>>;
 using token_view_t = stringzilla::span<char const>;
-using tokens_t = std::vector<token_view_t, stringzillas::unified_alloc<token_view_t>>;
+using tokens_t = std::vector<token_view_t, unified_alloc<token_view_t>>;
 #endif
 
 /**
@@ -581,24 +577,9 @@ inline environment_t build_environment(                                        /
     // Group integer decimal separators by 3
     // https://www.ibm.com/docs/en/i/7.4?topic=categories-lc-numeric-category
     std::setlocale(LC_NUMERIC, "en_US.UTF-8");
-    // The machine's own cache geometry, harvested once: ForkUnion names the deepest cache confined to a compute
-    // domain, the shared L3 on uniform parts, and has no per-core level query, so the narrower levels keep the
-    // conservative defaults a shape sized from them is nominal against.
-    {
-        namespace fu = ashvardanian::forkunion;
-        fu::machine_topology_t topology;
-        if (fu::succeeded(topology.harvest())) {
-            std::size_t confined_bytes = 0;
-            for (std::size_t domain = 0; domain != topology.compute_domains_count(); ++domain) {
-                std::size_t const domain_bytes =
-                    topology.compute_domain_at(static_cast<fu::compute_domain_index_t>(domain)).cache_bytes;
-                if (domain_bytes && (confined_bytes == 0 || domain_bytes < confined_bytes))
-                    confined_bytes = domain_bytes;
-            }
-            if (confined_bytes) env.specs.l3_bytes = confined_bytes;
-            if (std::size_t const cores = topology.logical_cores_count()) env.specs.cores_per_socket = cores;
-        }
-    }
+    // Only the core count is portable to query, so every cache level keeps the conservative default a shape sized
+    // from it is nominal against.
+    if (unsigned const cores = std::thread::hardware_concurrency()) env.specs.cores_per_socket = cores;
 
     std::printf("Environment built with the following settings:\n");
     std::printf(" - Dataset path: %s\n", env.path.c_str());
@@ -641,6 +622,19 @@ inline std::size_t candidates_per_call(environment_t const &env) {
     if (!env.batch_sizes_override.empty()) return env.batch_sizes_override.front();
     return std::max<std::size_t>(1, env.specs.l1_bytes / median_token_bytes(env));
 }
+
+#if SZ_USE_CUDA
+/** @brief Candidates one device call scores: the first `STRINGWARS_BATCH` entry if set, else one per resident thread
+ *         of the bound device. */
+inline std::size_t resident_candidates_per_call(environment_t const &env) {
+    if (!env.batch_sizes_override.empty()) return env.batch_sizes_override.front();
+    int device = 0;
+    cudaDeviceProp properties;
+    if (cudaGetDevice(&device) != cudaSuccess || cudaGetDeviceProperties(&properties, device) != cudaSuccess)
+        throw std::runtime_error("The device would not report its geometry.");
+    return (std::size_t)properties.multiProcessorCount * (std::size_t)properties.maxThreadsPerMultiProcessor;
+}
+#endif
 
 /**
  *  @brief Uses C-style file IO to save information about the most recent stress test failure.

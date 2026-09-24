@@ -7,11 +7,12 @@
  *  through it. The two entry points - the normalizer and the violation finder - share one streaming
  *  engine parameterized by a force-inlined scan primitive; the NEON backend overrides only that scan.
  */
-#include "dispatch.h"
 #include <stringzilla/utf8_norm.h> // `sz_utf8_norm_*`, `sz_utf8_find_denormalized_*`
 
+#include "dispatch.h"
+
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->utf8_norm = sz_utf8_norm_serial;
@@ -87,9 +88,9 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps) {
 
 SZ_API_RUNTIME sz_size_t sz_utf8_norm(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                       sz_ptr_t destination) {
-    return sz_dispatch_table.utf8_norm(source, source_length, form, destination);
+    return sz_dispatch_cpu_table.utf8_norm(source, source_length, form, destination);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form) {
-    return sz_dispatch_table.utf8_find_denormalized(source, source_length, form);
+    return sz_dispatch_cpu_table.utf8_find_denormalized(source, source_length, form);
 }

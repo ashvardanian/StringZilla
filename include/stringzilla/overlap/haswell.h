@@ -393,11 +393,84 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x8_btree_probe_haswell(sz_overlap_btree_
     return matches;
 }
 
-SZ_API_COMPTIME sz_status_t sz_overlap_scores_haswell(sz_cptr_t query, sz_size_t query_length,
-                                                      sz_sequence_t const *candidates, sz_size_t const *window_widths,
-                                                      sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
-                                                      sz_f32_t *scores) {
-    if (!window_widths_count) return sz_unexpected_dimensions_k;
+/**
+ *  @brief Prepares every query of @p queries into one block, hashing and sorting on the Haswell tier.
+ *  @param[in] alloc Where the forest's block comes from, or @c SZ_NULL for the default host allocator.
+ *  @sa sz_overlap_engine_init_cpu
+ */
+SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_haswell(sz_sequence_t const *queries,
+                                                           sz_size_t const *window_widths,
+                                                           sz_size_t window_widths_count,
+                                                           sz_memory_allocator_t *alloc,
+                                                           sz_overlap_engine_t *engine) {
+    sz_size_t const step = sz_overlap_haswell_f64x4_positions_per_step_k;
+    sz_memory_allocator_t host;
+    if (alloc) host = *alloc;
+    else sz_memory_allocator_init_default(&host);
+    sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, engine);
+    if (opened != sz_success_k) return opened;
+
+    // The chain is the engine's own round block, so the first round reuses what the longest query already asked for.
+    sz_size_t longest_query = 0;
+    for (sz_size_t index = 0; index != engine->count; ++index)
+        if (engine->lengths[index] > longest_query) longest_query = engine->lengths[index];
+    sz_status_t const grown = sz_overlap_engine_grow_(engine, (longest_query + 1) * sizeof(sz_f64_t));
+    if (grown != sz_success_k) {
+        sz_overlap_engine_close_(engine);
+        return grown;
+    }
+
+    // The arena and the key counts stay writable until the engine is handed back; its readers see them const.
+    sz_u32_t *const nodes = (sz_u32_t *)engine->nodes;
+    sz_u32_t *const keys_counts = (sz_u32_t *)engine->keys_counts;
+    sz_f64_t *const chain = (sz_f64_t *)engine->scratch;
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_cptr_t const text = queries->get_start(queries->handle, index);
+        sz_size_t const length = engine->lengths[index];
+        sz_u32_t *const arena = nodes + engine->nodes_offsets[index];
+        chain[0] = 0.0;
+        sz_f64_t prior = 0.0;
+        sz_size_t position = 0;
+        for (; position + step <= length; position += step)
+            prior = sz_overlap_f64x4_prefix_hash_step_haswell(prior, text + position, chain + position + 1);
+        if (position != length)
+            sz_overlap_f64x4_prefix_hash_step_tail_haswell(prior, text + position, length - position,
+                                                           chain + position + 1);
+
+        // Every width's window hashes land in one tree; a candidate window hash carries its own width, so a hit is
+        // attributed to that width and a cross-width coincidence costs `2^-32`.
+        sz_size_t written = 0;
+        for (sz_size_t width_index = 0; width_index != engine->widths_count; ++width_index) {
+            sz_size_t const width = engine->widths[width_index];
+            if (!width || width > length) continue;
+            sz_f64_t const power = (sz_f64_t)engine->powers[width_index];
+            sz_size_t const query_windows = length - width + 1;
+            sz_size_t window = 0;
+            for (; window + step <= query_windows; window += step)
+                sz_overlap_f64x4_window_hash_step_haswell(chain + window, chain + window + width, power,
+                                                          arena + written + window);
+            if (window != query_windows)
+                sz_overlap_f64x4_window_hash_step_tail_haswell(chain + window, chain + window + width, power,
+                                                               query_windows - window, arena + written + window);
+            written += query_windows;
+        }
+        sz_overlap_btree_t btree;
+        sz_size_t const distinct = sz_overlap_u32x8_btree_sort_haswell(arena, written);
+        sz_overlap_btree_prepare(arena, distinct, &btree);
+        keys_counts[index] = (sz_u32_t)distinct;
+    }
+
+    engine->capability = sz_cap_haswell_k;
+    return sz_success_k;
+}
+
+SZ_API_COMPTIME sz_status_t sz_overlap_scores_haswell(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                      sz_size_t scores_candidate_stride) {
+    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
+                                                              scores_candidate_stride);
+    if (dimensions != sz_success_k) return dimensions;
+    if (!candidates->count || !engine->count) return sz_success_k;
     sz_size_t const step = sz_overlap_haswell_f64x4_positions_per_step_k;
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
 
@@ -406,46 +479,13 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_haswell(sz_cptr_t query, sz_size_t
         sz_size_t const length = candidates->get_length(candidates->handle, index);
         if (length > longest_candidate) longest_candidate = length;
     }
-    sz_overlap_scratch_t const scratch = sz_overlap_scratch(query_length, longest_candidate, window_widths,
-                                                            window_widths_count, chains);
-    sz_ptr_t const allocation = (sz_ptr_t)alloc->allocate(scratch.total_bytes, alloc->handle);
-    if (!allocation) return sz_bad_alloc_k;
+    sz_status_t const grown = sz_overlap_engine_grow_(
+        engine, sz_overlap_engine_round_bytes_(longest_candidate, chains));
+    if (grown != sz_success_k) return grown;
 
     sz_size_t const chain_stride = longest_candidate + 1;
-    sz_u32_t *const nodes = (sz_u32_t *)(((sz_size_t)allocation + 63) & ~(sz_size_t)63);
-    sz_f64_t *const window_powers = (sz_f64_t *)(nodes + scratch.nodes_count);
-    sz_f64_t *const query_prefix_hashes = window_powers + window_widths_count;
-    sz_f64_t *const prefix_hashes = query_prefix_hashes + query_length + 1;
+    sz_f64_t *const prefix_hashes = (sz_f64_t *)engine->scratch;
     sz_u32_t *const window_hashes = (sz_u32_t *)(prefix_hashes + chain_stride * chains);
-
-    query_prefix_hashes[0] = 0.0;
-    sz_f64_t prior = 0.0;
-    sz_size_t position = 0;
-    for (; position + step <= query_length; position += step)
-        prior = sz_overlap_f64x4_prefix_hash_step_haswell(prior, query + position, query_prefix_hashes + position + 1);
-    if (position != query_length)
-        sz_overlap_f64x4_prefix_hash_step_tail_haswell(prior, query + position, query_length - position,
-                                                       query_prefix_hashes + position + 1);
-
-    sz_size_t written = 0;
-    for (sz_size_t width_index = 0; width_index != window_widths_count; ++width_index) {
-        sz_size_t const width = window_widths[width_index];
-        window_powers[width_index] = sz_overlap_window_power(width);
-        if (!width || width > query_length) continue;
-        sz_size_t const query_windows = query_length - width + 1;
-        sz_f64_t const power = window_powers[width_index];
-        sz_size_t window = 0;
-        for (; window + step <= query_windows; window += step)
-            sz_overlap_f64x4_window_hash_step_haswell(
-                query_prefix_hashes + window, query_prefix_hashes + window + width, power, nodes + written + window);
-        if (window != query_windows)
-            sz_overlap_f64x4_window_hash_step_tail_haswell(query_prefix_hashes + window,
-                                                           query_prefix_hashes + window + width, power,
-                                                           query_windows - window, nodes + written + window);
-        written += query_windows;
-    }
-    sz_overlap_btree_t btree;
-    sz_overlap_btree_prepare(nodes, sz_overlap_u32x8_btree_sort_haswell(nodes, written), &btree);
 
     // Four candidates' chains advance together, each carrying its own prior, so their latency-bound steps overlap.
     for (sz_size_t first = 0; first < candidates->count; first += chains) {
@@ -478,18 +518,16 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_haswell(sz_cptr_t query, sz_size_t
                                                                chain_prefix_hashes + own + 1);
         }
 
+        // One candidate's window hashes at one width serve every query's tree, so the hashing runs once here and
+        // the probe runs `count` times over what it wrote.
         for (sz_size_t chain = 0; chain != interleaved; ++chain) {
             sz_f64_t const *const chain_prefix_hashes = prefix_hashes + chain * chain_stride;
             sz_size_t const length = lengths[chain];
-            sz_f32_t *const candidate_scores = scores + (first + chain) * window_widths_count;
-            for (sz_size_t width_index = 0; width_index != window_widths_count; ++width_index) {
-                sz_size_t const width = window_widths[width_index];
-                if (!width || width > query_length || width > length) {
-                    candidate_scores[width_index] = 0.0f;
-                    continue;
-                }
-                sz_f64_t const power = window_powers[width_index];
-                sz_size_t const query_windows = query_length - width + 1, windows = length - width + 1;
+            sz_f32_t *const candidate_scores = scores + (first + chain) * scores_candidate_stride;
+            for (sz_size_t width_index = 0; width_index != engine->widths_count; ++width_index) {
+                sz_size_t const width = engine->widths[width_index];
+                sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
+                sz_f64_t const power = (sz_f64_t)engine->powers[width_index];
                 sz_size_t window = 0;
                 for (; window + step <= windows; window += step)
                     sz_overlap_f64x4_window_hash_step_haswell(chain_prefix_hashes + window,
@@ -499,102 +537,20 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_haswell(sz_cptr_t query, sz_size_t
                     sz_overlap_f64x4_window_hash_step_tail_haswell(chain_prefix_hashes + window,
                                                                    chain_prefix_hashes + window + width, power,
                                                                    windows - window, window_hashes + window);
-                sz_size_t const matches = sz_overlap_u32x8_btree_probe_haswell(&btree, window_hashes, windows);
-                candidate_scores[width_index] = sz_overlap_share_(matches, windows, query_windows);
+                for (sz_size_t query = 0; query != engine->count; ++query) {
+                    sz_size_t const query_length = engine->lengths[query];
+                    sz_f32_t *const slot = candidate_scores + query * scores_query_stride + width_index;
+                    if (!windows || width > query_length) {
+                        *slot = 0.0f;
+                        continue;
+                    }
+                    sz_overlap_btree_t const btree = sz_overlap_engine_row_(engine, query);
+                    sz_size_t const matches = sz_overlap_u32x8_btree_probe_haswell(&btree, window_hashes, windows);
+                    *slot = sz_overlap_share_(matches, windows, query_length - width + 1);
+                }
             }
         }
     }
-
-    alloc->free(allocation, scratch.total_bytes, alloc->handle);
-    return sz_success_k;
-}
-
-/** The query's and the candidate's chains advance together, so their latency-bound steps overlap. */
-SZ_API_COMPTIME sz_status_t sz_overlap_score_haswell(sz_cptr_t query, sz_size_t query_length, sz_cptr_t candidate,
-                                                     sz_size_t candidate_length, sz_size_t const *window_widths,
-                                                     sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
-                                                     sz_f32_t *scores) {
-    if (!window_widths_count) return sz_unexpected_dimensions_k;
-    sz_size_t const step = sz_overlap_haswell_f64x4_positions_per_step_k;
-    sz_overlap_scratch_t const scratch = sz_overlap_scratch(query_length, candidate_length, window_widths,
-                                                            window_widths_count, 1);
-    sz_ptr_t const allocation = (sz_ptr_t)alloc->allocate(scratch.total_bytes, alloc->handle);
-    if (!allocation) return sz_bad_alloc_k;
-
-    sz_u32_t *const nodes = (sz_u32_t *)(((sz_size_t)allocation + 63) & ~(sz_size_t)63);
-    sz_f64_t *const window_powers = (sz_f64_t *)(nodes + scratch.nodes_count);
-    sz_f64_t *const query_prefix_hashes = window_powers + window_widths_count;
-    sz_f64_t *const candidate_prefix_hashes = query_prefix_hashes + query_length + 1;
-    sz_u32_t *const window_hashes = (sz_u32_t *)(candidate_prefix_hashes + candidate_length + 1);
-
-    // Both chains advance together up to the shorter length, then the longer runs on alone.
-    sz_size_t const shorter = query_length < candidate_length ? query_length : candidate_length;
-    query_prefix_hashes[0] = candidate_prefix_hashes[0] = 0.0;
-    sz_f64_t query_prior = 0.0, candidate_prior = 0.0;
-    sz_size_t walked = 0;
-    for (; walked + step <= shorter; walked += step) {
-        query_prior = sz_overlap_f64x4_prefix_hash_step_haswell(query_prior, query + walked,
-                                                                query_prefix_hashes + walked + 1);
-        candidate_prior = sz_overlap_f64x4_prefix_hash_step_haswell(candidate_prior, candidate + walked,
-                                                                    candidate_prefix_hashes + walked + 1);
-    }
-    sz_size_t position = walked;
-    for (; position + step <= query_length; position += step)
-        query_prior = sz_overlap_f64x4_prefix_hash_step_haswell(query_prior, query + position,
-                                                                query_prefix_hashes + position + 1);
-    if (position != query_length)
-        sz_overlap_f64x4_prefix_hash_step_tail_haswell(query_prior, query + position, query_length - position,
-                                                       query_prefix_hashes + position + 1);
-    position = walked;
-    for (; position + step <= candidate_length; position += step)
-        candidate_prior = sz_overlap_f64x4_prefix_hash_step_haswell(candidate_prior, candidate + position,
-                                                                    candidate_prefix_hashes + position + 1);
-    if (position != candidate_length)
-        sz_overlap_f64x4_prefix_hash_step_tail_haswell(
-            candidate_prior, candidate + position, candidate_length - position, candidate_prefix_hashes + position + 1);
-
-    sz_size_t written = 0;
-    for (sz_size_t width_index = 0; width_index != window_widths_count; ++width_index) {
-        sz_size_t const width = window_widths[width_index];
-        window_powers[width_index] = sz_overlap_window_power(width);
-        if (!width || width > query_length) continue;
-        sz_size_t const query_windows = query_length - width + 1;
-        sz_f64_t const power = window_powers[width_index];
-        sz_size_t window = 0;
-        for (; window + step <= query_windows; window += step)
-            sz_overlap_f64x4_window_hash_step_haswell(
-                query_prefix_hashes + window, query_prefix_hashes + window + width, power, nodes + written + window);
-        if (window != query_windows)
-            sz_overlap_f64x4_window_hash_step_tail_haswell(query_prefix_hashes + window,
-                                                           query_prefix_hashes + window + width, power,
-                                                           query_windows - window, nodes + written + window);
-        written += query_windows;
-    }
-    sz_overlap_btree_t btree;
-    sz_overlap_btree_prepare(nodes, sz_overlap_u32x8_btree_sort_haswell(nodes, written), &btree);
-
-    for (sz_size_t width_index = 0; width_index != window_widths_count; ++width_index) {
-        sz_size_t const width = window_widths[width_index];
-        if (!width || width > query_length || width > candidate_length) {
-            scores[width_index] = 0.0f;
-            continue;
-        }
-        sz_f64_t const power = window_powers[width_index];
-        sz_size_t const query_windows = query_length - width + 1, windows = candidate_length - width + 1;
-        sz_size_t window = 0;
-        for (; window + step <= windows; window += step)
-            sz_overlap_f64x4_window_hash_step_haswell(candidate_prefix_hashes + window,
-                                                      candidate_prefix_hashes + window + width, power,
-                                                      window_hashes + window);
-        if (window != windows)
-            sz_overlap_f64x4_window_hash_step_tail_haswell(candidate_prefix_hashes + window,
-                                                           candidate_prefix_hashes + window + width, power,
-                                                           windows - window, window_hashes + window);
-        sz_size_t const matches = sz_overlap_u32x8_btree_probe_haswell(&btree, window_hashes, windows);
-        scores[width_index] = sz_overlap_share_(matches, windows, query_windows);
-    }
-
-    alloc->free(allocation, scratch.total_bytes, alloc->handle);
     return sz_success_k;
 }
 

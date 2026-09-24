@@ -22,14 +22,14 @@ StringZilla is the GodZilla of string libraries, accelerating exact and fuzzy ma
 
 - It can be __3x faster than LibC__ doing substring search on Arm servers, and __9x on Apple Silicon__, where the system `strstr` is weaker.
 - It can be __10-70x faster than ICU__, both ICU4C and its Rust successor ICU4X, in UTF-8 handling, case folding, segmentation, and tokenization.
-- It can be __over 10x faster than NVIDIA's own libraries__ for on-GPU Levenshtein, NW, and SW edit distances.
+- It can be __over 10x faster than NVIDIA's own libraries__ for on-GPU Levenshtein edit distances.
 - It comes with built-in custom __WebAssembly__ backend for sandboxed WASI, DBMS, & LLM environments, custom __RVV__ backend for RISC-V CPUs, __PowerPC__ backend for IBM Power servers, __LoongArch__ for Chinese domestic chips, and more!
 
 Reach for it from your language of choice:
 
 - 🐂 __[C](#c-and-c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
 - 🐉 __[C++](#c-and-c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
-- 🧮 __[CUDA](include/stringzillas/README.md):__ Process in-bulk with `<stringzillas/stringzillas.h>` in CUDA C++ 20
+- 🧮 __[CUDA](include/stringzilla/README.md):__ Score batches on a device with the `_init_gpu` engines in CUDA C++ 20
 - 🐍 __[Python](#python):__ Upgrade your `str` to faster `Str`
 - 🦀 __[Rust](#rust):__ Use the `StringZilla` traits crate
 - 🦫 __[Go](#go):__ Use the `StringZilla` cGo module
@@ -54,12 +54,12 @@ __Who is this for?__
 
 ## Performance
 
-Throughput and timings on two CPUs and one GPU, grouped by operation.
+Throughput and timings on two CPUs, grouped by operation.
 Only the languages that ship a counterpart appear under each heading.
 `StringZilla.C` is the C kernel called directly; `StringZilla.Py` is the same kernel through the CPython binding, so the gap between them is the cost of crossing the interpreter boundary.
 
 ```
-                                                      Xeon4    M5 Pro        H100
+                                                      Xeon4    M5 Pro
 ─────────────────────────────────────────────────────────────────────────────────
 Unicode case-insensitive substring search  (GB/s)
   Python          icu.StringSearch                     0.06      0.15
@@ -79,23 +79,15 @@ Split lines separated by \n or \r  (GB/s)
   Python          re.finditer                          0.32      0.64
   StringZilla.C   sz_find_byteset                      13.8      23.7
   StringZilla.Py  sz.split_byteset_iter                11.2      21.7
-
-Levenshtein distances, ≅ 100 byte DNA, one core  (MCUPS)
-  Python          rapidfuzz.process.cdist             4,970    18,370
-  StringZilla.C   szs_levenshtein_distances          15,680    22,844   5,980,110
-  StringZilla.Py  szs.LevenshteinDistances           14,130    21,930   4,074,700
-
-Needleman-Wunsch scores, ≅ 1 KB DNA, one core  (MCUPS)
-  Python          Bio.Align.PairwiseAligner.score       430       870
-  StringZilla.C   szs_needleman_wunsch_scores        12,000     1,267     701,760
-  StringZilla.Py  szs.NeedlemanWunschScores          10,730     1,060     700,900
 ```
 
 > Treat these as a first impression, not a benchmark suite.
-> The Unicode numbers were obtained on a 128 MB slice of multilingual XLSum; the similarity rows on synthetic DNA strings.
-> `Xeon4` is an Intel Sapphire Rapids with GCC and `glibc`, `M5 Pro` an 18-core Apple Silicon with Apple clang and `libc++`, `H100` an Nvidia Hopper GPU.
+> The Unicode numbers were obtained on a 128 MB slice of multilingual XLSum.
+> `Xeon4` is an Intel Sapphire Rapids with GCC and `glibc`, and `M5 Pro` an 18-core Apple Silicon with Apple clang and `libc++`.
 > The two CPUs therefore differ in standard library as much as in ISA, which is most of the gap in the `strstr`, `strcspn`, and `std::string::find_first_of` rows; the StringZilla rows build from the same source on both.
 > These will not reproduce exactly; the links below carry the methodology and the per-library breakdowns.
+
+The batch engines are timed per family and per backend, CPU beside GPU, in [`levenshtein/README.md`](include/stringzilla/levenshtein/README.md), [`overlap/README.md`](include/stringzilla/overlap/README.md), and [`substrings/README.md`](include/stringzilla/substrings/README.md).
 
 Most StringZilla modules ship ready-to-run benchmarks for C, C++, Python, and more.
 Grab them from `./bench`, and see [`CONTRIBUTING.md`](CONTRIBUTING.md), [`test/README.md`](test/README.md), and [`bench/README.md`](bench/README.md) for instructions.
@@ -135,13 +127,13 @@ C++
 ## Functionality
 
 StringZilla is compatible with most modern CPUs, and provides a broad range of functionality.
-It's split into 2 layers:
+Its C surface comes in 2 shapes:
 
-1. StringZilla: single-header C library and C++ wrapper for high-performance string operations.
-2. StringZillas: parallel CPU/GPU backends used for large-batch operations and accelerators.
+1. Single-string kernels, taking a pointer and a length, and answering with an offset, a digest, or an order.
+2. Stateful engines, preparing a batch of queries once and scoring it against many batches of candidates.
 
-Having a second C++/CUDA layer greatly simplifies the implementation of similarity scoring and fingerprinting functions, which would otherwise require too much error-prone boilerplate code in pure C.
-Both layers are designed to be extremely portable:
+An engine is prepared for one residency and one tier — `_init_cpu` or `_init_gpu` — and every later round runs there, so choosing a device is choosing a constructor rather than flipping a global.
+Both shapes are designed to be extremely portable:
 
 - [x] across both little-endian and big-endian architectures.
 - [x] across 32-bit and 64-bit hardware architectures.
@@ -172,9 +164,9 @@ Consider contributing if you need a feature that's not yet implemented.
 | Unicode Normalization          |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
 | Codepoint Counting & Indexing  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
 |                                |          |       |       |        |       |       |       |       |       |       |
-| Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| Parallel Multi-Pattern Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Batch Edit Distances           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Batch Window Overlap           |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Batch Multi-Pattern Search     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 
 > 🌳 parts are used in production.
 > 🧐 parts are in beta.
@@ -205,7 +197,7 @@ The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing
 
 ### C and C++
 
-Header-only, or pull it in with CMake `FetchContent`, or `find_package(stringzilla)` an installed build &centerdot; guides: [`include/stringzilla/README.md`](include/stringzilla/README.md) and [`include/stringzillas/README.md`](include/stringzillas/README.md)
+Header-only, or pull it in with CMake `FetchContent`, or `find_package(stringzilla)` an installed build &centerdot; guide: [`include/stringzilla/README.md`](include/stringzilla/README.md)
 
 ```c
 #include <stringzilla/stringzilla.h>
@@ -218,7 +210,7 @@ namespace sz = ashvardanian::stringzilla;
 sz::string_view("the quick brown fox").find("brown"); // 10
 ```
 
-The header-only library covers search, hashing, sorting, comparison, set intersection, memory operations, and lazy UTF-8 segmentation; the bulk and GPU engines for edit distances, alignment scores, and fingerprints live in the companion `stringzillas` distribution.
+The header-only library covers search, hashing, sorting, comparison, set intersection, memory operations, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm and a CUDA one.
 
 ### Rust
 
@@ -307,13 +299,8 @@ StringZilla aims to optimize some of the slowest string operations.
 Some popular operations, however, like equality comparisons and relative order checking, almost always complete on some of the very first bytes in either string.
 In such operations vectorization is almost useless, unless huge and very similar strings are considered.
 StringZilla implements those operations as well, but won't result in substantial speedups.
-Where vectorization stops being effective, parallelism takes over, across two layers:
-
-- StringZilla C library w/out dependencies
-- StringZillas parallel extensions:
-  - Parallel C++ algorithms built with [ForkUnion](https://github.com/ashvardanian/ForkUnion)
-  - Parallel CUDA algorithms for Nvidia GPUs
-  - Parallel ROCm algorithms for AMD GPUs 🔜
+Where vectorization stops being effective, batching takes over: an engine prepares a batch of queries once and scores every candidate against all of them, on the host or on a CUDA device.
+The library owns no thread pool and starts no thread of its own, so a caller wanting more than one core builds one engine per worker and shards the candidate range itself.
 
 ### Exact Substring Search
 
@@ -391,10 +378,10 @@ The naive implementation, however:
 There are several ways to improve the original algorithm.
 One is to use sparse DFA representation, which is more cache-friendly, but would require extra processing to navigate state transitions.
 
-StringZilla takes that route in [`stringzillas`](include/stringzillas/substrings/README.md), compiling a needle dictionary once into a goto-completed Aho-Corasick automaton and reusing it across every later call.
-The automaton is split into two tiers - a dense 256-wide row per frequently-visited state and a double array for the rest - so a step is one load with no failure-following at runtime.
-It matches raw bytes or applies full Unicode case folding to both sides, runs across a slice of CPU cores or a CUDA GPU, and is reachable as `szs::Substrings` in Rust and `szs.Substrings` in Python.
-Where only near-duplicate detection or candidate filtering is needed, the rolling-fingerprint machinery described below is the cheaper tool.
+StringZilla takes that route in [`substrings`](include/stringzilla/substrings/README.md), compiling a needle vocabulary once into a goto-completed Aho-Corasick automaton and reusing it across every later round of haystacks.
+The automaton is split into two tiers — a dense goto-completed row per frequently-visited state, one target per byte class, and a double array for the rest — so a step is one load with no failure-following at runtime.
+It matches raw bytes or applies full Unicode case folding to both sides, runs on the host or on a CUDA device, and answers counts, located matches, rewritten haystacks, or BM25 scores out of the one walk.
+Where only near-duplicate detection or candidate filtering is needed, the window-overlap machinery described below is the cheaper tool.
 
 ### Levenshtein Edit Distance
 
@@ -411,12 +398,13 @@ Several optimizations are known:
 3. __Automata__: Levenshtein automata can be effective, if one of the strings doesn't change, and is a subject to many comparisons.
 4. __Shift-Or__: Bit-parallel algorithms transpose the matrix into a bit-matrix, and perform bitwise operations on it.
 
-The last approach is quite powerful and performant, and is used by the great [RapidFuzz][rapidfuzz] library.
+The last approach is the one StringZilla takes, and the one the great [RapidFuzz][rapidfuzz] library takes as well.
 It's less known, than the others, derived from the Baeza-Yates-Gonnet algorithm, extended to bounded edit-distance search by Manber and Wu in 1990s, and further extended by Gene Myers in 1999 and Heikki Hyyro between 2002 and 2004.
+Every query is packed into match masks 64 symbols to a machine word once per batch, and every candidate then streams one symbol per step against all of them, so the preparation a one-shot distance repeats per pair is paid exactly once and the register width buys candidates per step rather than cells per step.
 
-StringZilla focuses on a different approach, extensively used in Unum's internal combinatorial optimization libraries.
+The anti-diagonal traversal covers the one case the bit-parallel recurrence cannot: a single pair too long for it, scored on a device by `sz_levenshtein_distance_tiled_cuda`.
 It doesn't change the number of trivial operations, but performs them in a different order, removing the data dependency, that occurs when computing the insertion costs.
-StringZilla __evaluates diagonals instead of rows__, exploiting the fact that all cells within a diagonal are independent, and can be computed in parallel.
+It __evaluates diagonals instead of rows__, exploiting the fact that all cells within a diagonal are independent, and can be computed in parallel.
 We'll store 3 diagonals instead of the 2 rows, and each consecutive diagonal will be computed from the previous two.
 Substitution costs will come from the sooner diagonal, while insertion and deletion costs will come from the later diagonal.
 
@@ -464,36 +452,12 @@ Computing diagonal 5:
 </tr>
 </table>
 
-This results in much better vectorization for intra-core parallelism and potentially multi-core evaluation of a single request.
-Moreover, it's easy to generalize to weighted edit-distances, where the cost of a substitution between two characters may not be the same for all pairs, often used in bioinformatics.
+This results in much better vectorization for intra-core parallelism, and parallelizes over the long text's tile-columns, which is the axis the bit-parallel recurrence cannot touch.
 
 > § Reading materials.
 > [Faster Levenshtein Distances with a SIMD-friendly Traversal Order](https://ashvardanian.com/posts/levenshtein-diagonal).
 
 [rapidfuzz]: https://github.com/rapidfuzz/RapidFuzz
-
-### Needleman-Wunsch and Smith-Waterman Scores for Bioinformatics
-
-The field of bioinformatics studies various representations of biological structures.
-The "primary" representations are generally strings over sparse alphabets:
-
-- [DNA][faq-dna] sequences, where the alphabet is {A, C, G, T}, ranging from ~100 characters for short reads to 3 billion for the human genome.
-- [RNA][faq-rna] sequences, where the alphabet is {A, C, G, U}, ranging from ~50 characters for tRNA to thousands for mRNA.
-- [Proteins][faq-protein], where the alphabet is made of 22 amino acids, ranging from 2 characters for [dipeptide][faq-dipeptide] to 35,000 for [Titin][faq-titin], the longest protein.
-
-The shorter the representation, the more often researchers may want to use custom substitution matrices.
-Meaning that the cost of a substitution between two characters may not be the same for all pairs.
-In the general case the serial algorithm works for arbitrary substitution costs for each of 256×256 possible character pairs.
-That lookup table, however, is too large to fit into CPU registers, so StringZilla ships a 32×32 substitution-matrix design, the `error_costs_32x32_t` type in `include/stringzillas/similarities.hpp`, which fits into 1 KB with single-byte "error costs" and stays resident across the diagonal sweep.
-That said, most [BLOSUM][faq-blosum] and [PAM][faq-pam] substitution matrices only contain 4-bit values, so they can be packed even further.
-
-[faq-dna]: https://en.wikipedia.org/wiki/DNA
-[faq-rna]: https://en.wikipedia.org/wiki/RNA
-[faq-protein]: https://en.wikipedia.org/wiki/Protein
-[faq-blosum]: https://en.wikipedia.org/wiki/BLOSUM
-[faq-pam]: https://en.wikipedia.org/wiki/Point_accepted_mutation
-[faq-dipeptide]: https://en.wikipedia.org/wiki/Dipeptide
-[faq-titin]: https://en.wikipedia.org/wiki/Titin
 
 ### Memory Copying, Fills, and Moves
 
@@ -641,8 +605,8 @@ Very small inputs fall back to insertion sort.
 Most StringZilla operations are byte-level, so they work well with ASCII and UTF-8 content out of the box.
 In some cases, like edit-distance computation, the result of byte-level evaluation and character-level evaluation may differ.
 
-- `szs_levenshtein_distances_utf8("αβγδ", "αγδ") == 1` — one unicode symbol.
-- `szs_levenshtein_distances("αβγδ", "αγδ") == 2` — one unicode symbol is two bytes long.
+- An engine built with `sz_levenshtein_runes_k` scores `"αβγδ"` against `"αγδ"` as 1 — one unicode symbol.
+- An engine built with `sz_levenshtein_bytes_k` scores the same pair as 2 — one unicode symbol is two bytes long.
 
 Java, JavaScript, Python 2, C#, and Objective-C, however, expose strings as UTF-16 — a variable-length encoding whose code units are two bytes, so anything outside the Basic Multilingual Plane takes two of them.
 Because those languages index by code unit rather than by codepoint, this leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
@@ -696,18 +660,21 @@ StringZilla intersects two deduplicated string collections through a power-of-tw
 The hash is seeded for adversarial resistance and the probe sequence runs under a bounded collision budget, so the intersection completes in linear time and space rather than degrading on crafted inputs.
 The implementation lives in `include/stringzilla/intersect.h`.
 
-### Rolling Fingerprints and MinHash
+### Window Overlap
 
-For near-duplicate detection and multi-pattern search at scale, StringZilla slides multiple Rabin-Karp rolling-hash windows of different widths over each document at once.
-Each window tracks its running minimum to build MinHash sketches, and the same passes feed Count-Min-Sketch counters, so a single traversal yields both the similarity signatures and the frequency estimates.
-The implementation lives in the `include/stringzillas/fingerprints*` files.
+For near-duplicate detection and candidate filtering, StringZilla slides Rabin-Karp rolling-hash windows of several widths over each query at once, and sorts every width's window hashes of one query into that query's own B-tree.
+A candidate then streams through the forest, hashing its own windows and probing, so nothing is stored per candidate and the candidates may change round to round while the queries and the widths stay.
+A window hash is a prefix difference, one modular multiply-add at any width and any offset, against a 32-bit prime chosen for collision weight rather than for size.
+The measure is asymmetric: a candidate's window occurrences count against a query's distinct windows, so swapping the sides changes the score when either repeats a window.
+The implementation lives in `include/stringzilla/overlap.h` and the backends beside it.
 
 ### GPU Edit Distances
 
-On the GPU, short pairs are scored entirely in registers, one thread per pair, holding the anti-diagonal wavefront of the dynamic-programming matrix in registers instead of shared memory.
-For short sequences this is several times faster than the classic shared-memory anti-diagonal kernel, which is dominated by shared-memory traffic at small sizes.
-Hopper DPX instructions accelerate the min-plus recurrence, and a warp-per-pair path covers older GPUs that lack them.
-The kernels live in `include/stringzillas/similarities/hopper.cuh` and `include/stringzillas/similarities/kepler.cuh`.
+On the GPU a candidate's recurrence is a dependency chain, so it stays on one thread, and the parallelism comes from the candidates on `blockIdx.x` and from the queries on `blockIdx.y`.
+The verticals live in the thread's own registers while the match masks are read-only and shared, every thread indexing the same plane by the class of the byte it is stepping, so the rows stay hot in cache instead of being rebuilt per candidate.
+Myers is add-with-carry and bitwise operations over 64-bit words, all of which the device runs at its integer rate, so this family has one GPU tier rather than a ladder of them.
+A pair too long for the recurrence falls to `sz_levenshtein_distance_tiled_cuda`, whose wavefront parallelizes over the long text's tile-columns instead.
+The kernels live in `include/stringzilla/levenshtein/cuda.cuh`.
 
 ## Dynamic Dispatch
 

@@ -3,11 +3,12 @@
  *  @brief Per-domain dispatch shim for UTF-8 codepoint mechanics: count, find-nth, and rune unpacking.
  *  @author Ash Vardanian
  */
-#include "dispatch.h"
 #include <stringzilla/utf8_runes.h>
 
+#include "dispatch.h"
+
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->utf8_count = sz_utf8_count_serial;
@@ -87,14 +88,14 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps) {
 }
 
 SZ_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
-    return sz_dispatch_table.utf8_count(text, length);
+    return sz_dispatch_cpu_table.utf8_count(text, length);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    return sz_dispatch_table.utf8_seek(text, length, n);
+    return sz_dispatch_cpu_table.utf8_seek(text, length, n);
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_utf8_decode(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
                                         sz_size_t *runes_unpacked) {
-    return sz_dispatch_table.utf8_decode(text, length, runes, runes_capacity, runes_unpacked);
+    return sz_dispatch_cpu_table.utf8_decode(text, length, runes, runes_capacity, runes_unpacked);
 }

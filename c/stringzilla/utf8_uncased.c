@@ -8,11 +8,12 @@
  *  `utf8_uncased/icelake.h` are by far the heaviest single compilation in the core; keeping
  *  them in their own translation unit lets the rest of the UTF-8 case domain build in parallel.
  */
-#include "dispatch.h"
 #include <stringzilla/utf8_uncased.h> // `sz_utf8_uncased_{find,order}_*`
 
+#include "dispatch.h"
+
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->utf8_uncased_search = sz_utf8_uncased_search_serial;
@@ -81,11 +82,11 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_uncased_search(   //
     sz_cptr_t haystack, sz_size_t haystack_length, //
     sz_cptr_t needle, sz_size_t needle_length,     //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
-    return sz_dispatch_table.utf8_uncased_search(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_dispatch_cpu_table.utf8_uncased_search(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                  matched_length);
 }
 
 SZ_API_RUNTIME sz_ordering_t sz_utf8_uncased_order( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-    return sz_dispatch_table.utf8_uncased_order(a, a_length, b, b_length);
+    return sz_dispatch_cpu_table.utf8_uncased_order(a, a_length, b, b_length);
 }

@@ -7,11 +7,12 @@
 #if !defined(SZ_OVERRIDE_LIBC)
 #define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
 #endif
-#include "dispatch.h"
 #include <stringzilla/cipher.h>
 
+#include "dispatch.h"
+
 SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
-    sz_implementations_t *impl = &sz_dispatch_table;
+    sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->aes256_key_init = sz_aes256_key_init_serial;
@@ -176,67 +177,67 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
 }
 
 SZ_API_RUNTIME void sz_aes256_key_init(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
-    sz_dispatch_table.aes256_key_init(key, secret);
+    sz_dispatch_cpu_table.aes256_key_init(key, secret);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_key_init(sz_aes256_gcm_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
-    sz_dispatch_table.aes256_gcm_key_init(key, secret);
+    sz_dispatch_cpu_table.aes256_gcm_key_init(key, secret);
 }
 
 SZ_API_RUNTIME void sz_aes256_ctr_xor(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
                                       sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
-    sz_dispatch_table.aes256_ctr_xor(key, nonce, byte_offset, text, length, output);
+    sz_dispatch_cpu_table.aes256_ctr_xor(key, nonce, byte_offset, text, length, output);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_encrypt(sz_aes256_gcm_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
                                           sz_cptr_t associated, sz_size_t associated_length, sz_cptr_t text,
                                           sz_size_t length, sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
-    sz_dispatch_table.aes256_gcm_encrypt(key, nonce, associated, associated_length, text, length, output, tag);
+    sz_dispatch_cpu_table.aes256_gcm_encrypt(key, nonce, associated, associated_length, text, length, output, tag);
 }
 
 SZ_API_RUNTIME sz_status_t sz_aes256_gcm_decrypt(sz_aes256_gcm_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
                                                  sz_cptr_t associated, sz_size_t associated_length, sz_cptr_t text,
                                                  sz_size_t length, sz_ptr_t output,
                                                  sz_u8_t const tag[sz_at_least_(16)]) {
-    return sz_dispatch_table.aes256_gcm_decrypt(key, nonce, associated, associated_length, text, length, output, tag);
+    return sz_dispatch_cpu_table.aes256_gcm_decrypt(key, nonce, associated, associated_length, text, length, output, tag);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_encryptor_init(sz_aes256_gcm_encryptor_t *encryptor, sz_aes256_gcm_key_t const *key,
                                                  sz_u8_t const nonce[sz_at_least_(12)]) {
-    sz_dispatch_table.aes256_gcm_encryptor_init(encryptor, key, nonce);
+    sz_dispatch_cpu_table.aes256_gcm_encryptor_init(encryptor, key, nonce);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_encryptor_associate(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
                                                       sz_size_t length) {
-    sz_dispatch_table.aes256_gcm_encryptor_associate(encryptor, text, length);
+    sz_dispatch_cpu_table.aes256_gcm_encryptor_associate(encryptor, text, length);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_encryptor_update(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
                                                    sz_size_t length, sz_ptr_t output) {
-    sz_dispatch_table.aes256_gcm_encryptor_update(encryptor, text, length, output);
+    sz_dispatch_cpu_table.aes256_gcm_encryptor_update(encryptor, text, length, output);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_encryptor_digest(sz_aes256_gcm_encryptor_t const *encryptor,
                                                    sz_u8_t tag[sz_at_least_(16)]) {
-    sz_dispatch_table.aes256_gcm_encryptor_digest(encryptor, tag);
+    sz_dispatch_cpu_table.aes256_gcm_encryptor_digest(encryptor, tag);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_decryptor_init(sz_aes256_gcm_decryptor_t *decryptor, sz_aes256_gcm_key_t const *key,
                                                  sz_u8_t const nonce[sz_at_least_(12)]) {
-    sz_dispatch_table.aes256_gcm_decryptor_init(decryptor, key, nonce);
+    sz_dispatch_cpu_table.aes256_gcm_decryptor_init(decryptor, key, nonce);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_decryptor_associate(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
                                                       sz_size_t length) {
-    sz_dispatch_table.aes256_gcm_decryptor_associate(decryptor, text, length);
+    sz_dispatch_cpu_table.aes256_gcm_decryptor_associate(decryptor, text, length);
 }
 
 SZ_API_RUNTIME void sz_aes256_gcm_decryptor_update_unverified(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
                                                               sz_size_t length, sz_ptr_t output) {
-    sz_dispatch_table.aes256_gcm_decryptor_update_unverified(decryptor, text, length, output);
+    sz_dispatch_cpu_table.aes256_gcm_decryptor_update_unverified(decryptor, text, length, output);
 }
 
 SZ_API_RUNTIME sz_status_t sz_aes256_gcm_decryptor_verify(sz_aes256_gcm_decryptor_t const *decryptor,
                                                           sz_u8_t const tag[sz_at_least_(16)]) {
-    return sz_dispatch_table.aes256_gcm_decryptor_verify(decryptor, tag);
+    return sz_dispatch_cpu_table.aes256_gcm_decryptor_verify(decryptor, tag);
 }

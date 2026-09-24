@@ -790,6 +790,11 @@ struct sz_aes256_gcm_state_t;      // Forward declaration of the payload both st
 struct sz_aes256_gcm_encryptor_t;  // Forward declaration of an AES-256-GCM sealing state
 struct sz_aes256_gcm_decryptor_t;  // Forward declaration of an AES-256-GCM opening state
 struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
+struct sz_substrings_match_t;      // Forward declaration of one located multi-pattern match
+struct sz_substrings_bm25_t;       // Forward declaration of BM25's continuous parameters
+struct sz_levenshtein_engine_t;    // Forward declaration of a batch of prepared Levenshtein queries
+struct sz_overlap_engine_t;        // Forward declaration of a forest of prepared overlap query trees
+struct sz_substrings_engine_t;     // Forward declaration of a compiled multi-pattern vocabulary
 typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
 typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
 
@@ -1260,21 +1265,21 @@ typedef sz_status_t (*sz_sequence_intersect_t)(struct sz_sequence_t const *, str
                                                sz_memory_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
                                                sz_sorted_idx_t *);
 
-/** @brief Signature of `sz_levenshtein_distance` and `sz_levenshtein_distance_utf8`. */
-typedef sz_status_t (*sz_levenshtein_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_memory_allocator_t *,
-                                                 sz_size_t *);
+/** Which symbols a batch counts, since the alphabet picks the transpose and the mask layout alike. */
+typedef enum sz_levenshtein_symbol_t {
+    /** Every byte is its own symbol, and a distance counts bytes. */
+    sz_levenshtein_bytes_k = 0,
+    /** Every UTF-8 rune is one symbol, an ill-formed byte decoding to U+FFFD. */
+    sz_levenshtein_runes_k = 1,
+} sz_levenshtein_symbol_t;
 
-/** @brief Signature of `sz_levenshtein_distances` and `sz_levenshtein_distances_utf8`. */
-typedef sz_status_t (*sz_levenshtein_distances_t)(sz_cptr_t, sz_size_t, struct sz_sequence_t const *,
-                                                  sz_memory_allocator_t *, sz_size_t *);
-
-/** @brief Signature of `sz_overlap_score`. */
-typedef sz_status_t (*sz_overlap_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t const *, sz_size_t,
-                                          sz_memory_allocator_t *, sz_f32_t *);
+/** @brief Signature of `sz_levenshtein_distances`, at either alphabet. */
+typedef sz_status_t (*sz_levenshtein_distances_t)(struct sz_levenshtein_engine_t *, struct sz_sequence_t const *,
+                                                  sz_size_t *, sz_size_t);
 
 /** @brief Signature of `sz_overlap_scores`. */
-typedef sz_status_t (*sz_overlap_scores_t)(sz_cptr_t, sz_size_t, struct sz_sequence_t const *, sz_size_t const *,
-                                           sz_size_t, sz_memory_allocator_t *, sz_f32_t *);
+typedef sz_status_t (*sz_overlap_scores_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *, sz_f32_t *,
+                                           sz_size_t, sz_size_t);
 
 /** How matches that share bytes resolve: reported in full, or thinned to a leftmost run. */
 typedef enum sz_substrings_overlap_policy_t {
@@ -1285,6 +1290,23 @@ typedef enum sz_substrings_overlap_policy_t {
     /** Matches sharing no bytes: earliest start, then lower needle index, however long the rival. */
     sz_substrings_leftmost_first_k = 2,
 } sz_substrings_overlap_policy_t;
+
+/** @brief Signature of `sz_substrings_counts`. */
+typedef sz_status_t (*sz_substrings_counts_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+                                              sz_size_t *, sz_size_t);
+
+/** @brief Signature of `sz_substrings_find`. */
+typedef sz_status_t (*sz_substrings_find_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+                                            struct sz_substrings_match_t *, sz_size_t, sz_size_t *);
+
+/** @brief Signature of `sz_substrings_replace`. */
+typedef sz_status_t (*sz_substrings_replace_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+                                               struct sz_sequence_t const *, sz_ptr_t, sz_size_t, sz_size_t *);
+
+/** @brief Signature of `sz_substrings_bm25_scores`. */
+typedef sz_status_t (*sz_substrings_bm25_scores_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+                                                   sz_f32_t const *, struct sz_substrings_bm25_t const *,
+                                                   sz_f32_t const *, sz_f32_t *, sz_size_t);
 
 #pragma endregion
 
@@ -2063,15 +2085,25 @@ SZ_HELPER_INLINE void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
 #endif
 }
 
-/** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
+/** Bytes a fixed buffer rounds every block up to, so one odd length cannot misalign the next block. */
+enum { sz_memory_alignment_k = 64 };
+
+/**
+ *  @brief Helper function, using the supplied fixed-capacity buffer to allocate memory.
+ *
+ *  Offsets are rounded to @ref sz_memory_alignment_k, so a block is aligned as far as the caller's own buffer
+ *  is: pass one aligned to 64 and every block is, and a malloc'd buffer still carries its own guarantee.
+ */
 SZ_HELPER_AUTO sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
 
     sz_size_t const capacity = *(sz_size_t *)handle;
     sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
-    if (consumed_capacity + length > capacity) return SZ_NULL_CHAR;
+    sz_size_t const aligned_capacity =
+        (consumed_capacity + sz_memory_alignment_k - 1) & ~(sz_size_t)(sz_memory_alignment_k - 1);
+    if (aligned_capacity + length > capacity) return SZ_NULL_CHAR;
     // Increase the consumed capacity.
-    *((sz_size_t *)handle + 1) += length;
-    return (sz_ptr_t)handle + consumed_capacity;
+    *((sz_size_t *)handle + 1) = aligned_capacity + length;
+    return (sz_ptr_t)handle + aligned_capacity;
 }
 
 /** @brief Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */

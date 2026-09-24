@@ -7,7 +7,7 @@
  *  Compute-bound: the prefix hashes are one pass over a candidate and the window hashes one more, so a 64 MiB
  *  slice exercises every path.
  *
- *  Six arms are measured per backend, each reporting the windows it touched as `operations`, so the
+ *  Five arms are measured per backend, each reporting the windows it touched as `operations`, so the
  *  ops-per-second column reads as windows per second. The first three nest, so a stage's own cost is the
  *  difference between neighbouring arms:
  *  - `prefix_hashes` - the prefix hashes alone, one per byte, whatever the width;
@@ -15,9 +15,8 @@
  *  - `window_lookups` - the prefix hashes, the window hashes, then the B-tree walk over every window hash;
  *  - `query_preparation` - the query's key sort and tree layout, once per call, the token ignored - at an 8 KiB query
  *    this is most of a round, so it stands on its own;
- *  - `score` - the one-to-one verb against one token: both chains interleaved, the query's sort and layout, one probe;
- *  - `scores` - the one-to-many verb against the next `STRINGWARS_BATCH` tokens, by default as many median tokens as
- *    fill a 32 KiB L1: the query prepared once, four chains interleaved.
+ *  - `scores` - the engine's round against the next `STRINGWARS_BATCH` tokens, by default as many median tokens as
+ *    fill a 32 KiB L1: the forest built once before the timing, four chains interleaved inside it.
  *
  *  Two query lengths run: the slice's median token length, and the byte count whose window hashes fill a 32 KiB L1.
  *  The window width is derived from the slice rather than fixed - `ceil(log2(query bytes · mean candidate bytes)
@@ -63,6 +62,8 @@ using overlap_window_hash_step_t = void (*)(sz_f64_t const *, sz_f64_t const *, 
 using overlap_window_hash_step_tail_t = void (*)(sz_f64_t const *, sz_f64_t const *, sz_f64_t, sz_size_t, sz_u32_t *);
 using overlap_btree_sort_t = sz_size_t (*)(sz_u32_t *, sz_size_t);
 using overlap_btree_probe_t = sz_size_t (*)(sz_overlap_btree_t const *, sz_u32_t const *, sz_size_t);
+using overlap_engine_init_t = sz_status_t (*)(sz_sequence_t const *, sz_size_t const *, sz_size_t,
+                                              sz_memory_allocator_t *, sz_overlap_engine_t *);
 
 /** @brief The chain over @p text, one prefix hash per byte after the empty one at @p prefix_hashes[0]. */
 template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
@@ -356,55 +357,10 @@ static void bench_overlap_query_preparation(environment_t const &env, overlap_qu
 
 #pragma endregion
 
-#pragma region One to One
-
-/** @brief The one-to-one verb at the query's width, one token per call. */
-template <sz_overlap_score_t score_>
-struct score_from_sz {
-    environment_t const &env;
-    overlap_query_t const &query;
-    sz_memory_allocator_t alloc;
-
-    score_from_sz(environment_t const &env, overlap_query_t const &query) : env(env), query(query) {
-        sz_memory_allocator_init_default(&alloc);
-    }
-
-    call_result_t operator()(std::size_t token_index) {
-        std::string_view const text = env.tokens[token_index];
-        sz_size_t const width = query.width;
-        sz_f32_t score = 0.0f;
-        if (score_(query.text.data(), query.text.size(), text.data(), text.size(), &width, 1, &alloc, &score) !=
-            sz_success_k)
-            throw std::runtime_error("The one-to-one verb failed.");
-        sz_u32_t bits = 0;
-        std::memcpy(&bits, &score, sizeof(bits));
-        std::size_t const windows = width <= text.size() ? text.size() - width + 1 : 0;
-        return call_result_t(text.size(), bits, windows);
-    }
-};
-
-/** @brief The one-to-one verb on every backend, the accelerated arms logged against the serial one. */
-static void bench_overlap_score(environment_t const &env, overlap_query_t const &query, std::string const &suffix) {
-    auto validator = score_from_sz<sz_overlap_score_serial> {env, query};
-    bench_result_t base = bench_unary(env, "sz_overlap_score_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
-    bench_unary(env, "sz_overlap_score_haswell" + suffix, validator,
-                score_from_sz<sz_overlap_score_haswell> {env, query})
-        .log(base);
-#endif
-#if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_overlap_score_skylake" + suffix, validator,
-                score_from_sz<sz_overlap_score_skylake> {env, query})
-        .log(base);
-#endif
-}
-
-#pragma endregion
-
 #pragma region One to Many
 
-/** @brief The one-to-many verb over the next @c candidates tokens, one call per iteration. */
-template <sz_overlap_scores_t scores_>
+/** @brief The engine's round over the next @c candidates tokens, its forest prepared once in the constructor. */
+template <overlap_engine_init_t init_, sz_overlap_scores_t scores_>
 struct scores_from_sz {
     environment_t const &env;
     overlap_query_t const &query;
@@ -412,11 +368,21 @@ struct scores_from_sz {
     sz_memory_allocator_t alloc;
     std::vector<sz_string_view_t> views;
     std::vector<sz_f32_t> scores;
+    sz_overlap_engine_t engine {};
 
     scores_from_sz(environment_t const &env, overlap_query_t const &query, std::size_t candidates)
         : env(env), query(query), candidates(candidates), views(candidates), scores(candidates) {
         sz_memory_allocator_init_default(&alloc);
+        sz_string_view_t const view {query.text.data(), query.text.size()};
+        sz_sequence_t queries {};
+        sz_sequence_from_string_views(&view, 1, &queries);
+        sz_size_t const width = query.width;
+        if (init_(&queries, &width, 1, &alloc, &engine) != sz_success_k)
+            throw std::runtime_error("The query forest could not be prepared.");
     }
+    ~scores_from_sz() { sz_overlap_engine_free(&engine); }
+    scores_from_sz(scores_from_sz const &) = delete;
+    scores_from_sz &operator=(scores_from_sz const &) = delete;
 
     call_result_t operator()(std::size_t token_index) {
         std::size_t bytes = 0, windows = 0;
@@ -428,9 +394,8 @@ struct scores_from_sz {
         }
         sz_sequence_t sequence {};
         sz_sequence_from_string_views(views.data(), candidates, &sequence);
-        sz_size_t const width = query.width;
-        if (scores_(query.text.data(), query.text.size(), &sequence, &width, 1, &alloc, scores.data()) != sz_success_k)
-            throw std::runtime_error("The one-to-many verb failed.");
+        if (scores_(&engine, &sequence, scores.data(), candidates, 1) != sz_success_k)
+            throw std::runtime_error("The engine's round failed.");
         // Multiplied rather than summed, so two candidates swapping scores cannot cancel out.
         check_value_t mixed = 0;
         for (sz_f32_t const score : scores) {
@@ -444,19 +409,19 @@ struct scores_from_sz {
     }
 };
 
-/** @brief The one-to-many verb on every backend, the accelerated arms logged against the serial one. */
+/** @brief The engine's round on every backend, the accelerated arms logged against the serial one. */
 static void bench_overlap_scores(environment_t const &env, overlap_query_t const &query, std::size_t candidates,
                                  std::string const &suffix) {
-    auto validator = scores_from_sz<sz_overlap_scores_serial> {env, query, candidates};
+    auto validator = scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {env, query, candidates};
     bench_result_t base = bench_unary(env, "sz_overlap_scores_serial" + suffix, validator).log();
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_overlap_scores_haswell" + suffix, validator,
-                scores_from_sz<sz_overlap_scores_haswell> {env, query, candidates})
+                scores_from_sz<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell> {env, query, candidates})
         .log(base);
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_overlap_scores_skylake" + suffix, validator,
-                scores_from_sz<sz_overlap_scores_skylake> {env, query, candidates})
+                scores_from_sz<sz_overlap_engine_init_skylake, sz_overlap_scores_skylake> {env, query, candidates})
         .log(base);
 #endif
 }
@@ -471,7 +436,6 @@ static void bench_overlap_query(environment_t const &env, std::size_t query_byte
     bench_overlap_window_hashes(env, query, suffix);
     bench_overlap_window_lookups(env, query, suffix);
     bench_overlap_query_preparation(env, query, suffix);
-    bench_overlap_score(env, query, suffix);
     bench_overlap_scores(env, query, candidates, suffix);
 }
 

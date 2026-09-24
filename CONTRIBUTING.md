@@ -6,22 +6,14 @@ Depending on the type of contribution, you may need to follow different steps.
 
 ---
 
-Before building the first time, please pull `git` submodules.
-That's how we bring in `forkunion` and other optional dependencies to test all of the available functionality.
-
-
-```sh
-git submodule update --init --recursive
-```
-
 ## Project Structure
 
 The project is split into the following parts:
 
-- `include/stringzilla/stringzilla.h` - single-header C implementation.
+- `include/stringzilla/stringzilla.h` - umbrella C header over the per-family hubs beside it.
 - `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
-- `include/stringzillas/*` - parallel CPU/GPU header-only backends.
-- `c/*` - [C, C++, and CUDA](#c-and-c) sources for dynamic dispatch and parallel backends.
+- `include/stringzilla/<family>/*` - per-ISA kernels behind each hub, including the `cuda.cuh` device backends.
+- `c/*` - [C and CUDA](#c-and-c) sources for dynamic dispatch, one translation unit per kernel family.
 - `rust/*` - [Rust](#rust) crate sources; `rust/stringzilla/*` and `rust/stringzillas/*` hold one module per kernel domain, re-exported through `rust/stringzilla.rs` and `rust/stringzillas.rs`.
 - `python/*` - [Python](#python) bindings; one translation unit per kernel domain, with `python/stringzilla/stringzilla.h` and `python/stringzillas/stringzillas.h` as the two extensions' private headers.
 - `swift/*` - [Swift](#swift) package sources and tests.
@@ -46,8 +38,9 @@ They have the broadest coverage of the library, and are the most important to ke
 - `bench/find.cpp` - bidirectional substring search, both exact and fuzzy.
 - `bench/sequence.cpp` - sorting, partitioning, merging.
 - `bench/container.cpp` - STL containers with different string keys.
-- `bench/similarities.cpp` - benchmark all edit distance backends.
-- `bench/fingerprints.cpp` - benchmark all Min-Hash fingerprinting backends.
+- `bench/levenshtein.cpp` and `bench/levenshtein.cu` - benchmark every edit-distance backend, CPU beside GPU.
+- `bench/overlap.cpp` and `bench/overlap.cu` - benchmark every window-overlap backend.
+- `bench/substrings.cpp` and `bench/substrings.cu` - benchmark every multi-pattern-search backend.
 
 
 ## Benchmarking Datasets
@@ -310,31 +303,31 @@ build_release/stringzilla_bench_utf8_norm_cpp20     # - for UTF-8 normalization
 build_release/stringzilla_bench_container_cpp20     # - for STL containers with string keys
 build_release/stringzilla_bench_memory_cpp20        # - for string copies and fills
 build_release/stringzilla_bench_cipher_cpp20        # - for AES encryption and decryption
+build_release/stringzilla_bench_levenshtein_cpp20   # - for batch edit distances
+build_release/stringzilla_bench_overlap_cpp20       # - for window overlap between prepared queries and candidates
+build_release/stringzilla_bench_substrings_cpp20    # - for multi-pattern search over one compiled vocabulary
 ```
 
-There are also parallel algorithms that need a very different benchmarking setup:
+Each engine family also has a CUDA launcher, built only when `STRINGZILLA_BUILD_CUDA` is on:
 
 ```sh
-build_release/stringzillas_bench_similarities_cpp20     # - for parallel edit distances and alignment scores on CPU
-build_release/stringzillas_bench_similarities_cu20      # - for parallel edit distances and alignment scores on GPU
-build_release/stringzillas_bench_fingerprints_cpp20     # - for parallel Min-Hash sketching on CPU
-build_release/stringzillas_bench_fingerprints_cu20      # - for parallel Min-Hash sketching on GPU
-build_release/stringzillas_bench_substrings_cpp20       # - for parallel multi-pattern search on CPU
-build_release/stringzillas_bench_substrings_cu20        # - for parallel multi-pattern search on GPU
+build_release/stringzilla_bench_levenshtein_cu20    # - for batch edit distances on GPU
+build_release/stringzilla_bench_overlap_cu20        # - for window overlap on GPU
+build_release/stringzilla_bench_substrings_cu20     # - for multi-pattern search on GPU
 ```
 
 All of them support customization via environment variables.
-Let's say you want to benchmark large-batch DNA similarity scoring kernels:
+Let's say you want to benchmark large-batch DNA edit distances:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release --target stringzillas_bench_fingerprints_cpp20 --parallel # CPU
-cmake --build build_release --config Release --target stringzillas_bench_similarities_cu20 --parallel  # GPU
-STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarities_cpp20
-STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarities_cu20
+cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cpp20 --parallel # CPU
+cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cu20 --parallel  # GPU
+STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench_levenshtein_cpp20
+STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench_levenshtein_cu20
 
-STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarities_cu20
-STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarities_cu20
+STRINGWARS_FILTER="cuda.*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench_levenshtein_cu20
+STRINGWARS_STRESS=0 STRINGWARS_FILTER="cuda.*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench_levenshtein_cu20
 ```
 
 The benchmark harness reads these environment variables:
@@ -348,9 +341,8 @@ The benchmark harness reads these environment variables:
 | `STRINGWARS_FILTER`          | Regex over benchmark names; only matching backends run                                       |                  (all) |
 | `STRINGWARS_DURATION`        | Seconds per benchmark (longer = steadier numbers)                                            |   1 debug / 10 release |
 | `STRINGWARS_SEED`            | Non-zero shuffles tokens; `0` keeps deterministic order                                      |                      0 |
-| `STRINGWARS_BATCH`           | Comma-separated batch-size override (skips the largest sweep)                                |        backend default |
-| `STRINGWARS_BATCH_PER_CORE`  | Pairs scored per core for the parallel similarity benchmarks; scales with device parallelism | 16 debug / 256 release |
-| `STRINGWARS_STRESS`          | Run the correctness stress phase (`0` to skip while timing)                                  |                     on |
+| `STRINGWARS_BATCH`           | Comma-separated batch-size override, which skips the largest sweep                           |        backend default |
+| `STRINGWARS_STRESS`          | Run the correctness stress phase, `0` to skip while timing                                   |                     on |
 | `STRINGWARS_STRESS_DURATION` | Seconds per stress-test                                                                      |   1 debug / 10 release |
 | `STRINGWARS_STRESS_DIR`      | Directory for stress-test failure logs                                                       |                   .tmp |
 | `STRINGWARS_STRESS_LIMIT`    | Number of stress-test failures tolerated before aborting                                     |                      1 |
@@ -557,13 +549,13 @@ cmake --build build_artifacts --config Release --parallel
 
 Two toolchain files under `cmake/` cover WebAssembly, and both need the [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) and [Wasmtime](https://wasmtime.dev).
 `toolchain-wasm32.cmake` builds `wasm32-wasip1` modules, single-threaded, for the single-string core.
-`toolchain-wasm32-threads.cmake` builds `wasm32-wasip1-threads` modules over one shared memory, which the parallel `stringzillas` kernels and ForkUnion's pools need.
+`toolchain-wasm32-threads.cmake` builds `wasm32-wasip1-threads` modules over one shared memory, for a caller that shards work across threads itself; nothing in the library needs them, and the CI wasm jobs use the single-threaded file above.
 Point either file at the SDK with `-DWASI_SDK_PREFIX=...` or the `WASI_SDK_PATH` environment variable.
 
 ```sh
 export WASI_SDK_PATH=~/wasi-sdk
 cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32.cmake \
-    -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_SHARED=0 -DSTRINGZILLAS_BUILD_SHARED=0 -DCMAKE_BUILD_TYPE=Release
+    -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_SHARED=0 -DCMAKE_BUILD_TYPE=Release
 cmake --build build_wasm --target stringzilla_test_cpp20
 ctest --test-dir build_wasm # runs each .wasm under Wasmtime
 ```
@@ -572,23 +564,23 @@ A module carries one SIMD tier, so the relaxed-SIMD `v128relaxed` build above is
 Pass `-DSZ_USE_V128RELAXED=0` for the strict module; the override zeroes the macro and drops `-mrelaxed-simd` at once, so no relaxed opcode reaches the binary.
 Shared libraries stay off in both configurations, since WASI has no dynamic loader.
 
-## Parallel C++ and CUDA
+## CUDA
+
+The device backends of the engine families build into one launcher, `stringzilla_test_cu20`, which needs `STRINGZILLA_BUILD_CUDA` on and checks each kernel against the serial answers:
 
 ```sh
-cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build build_debug --config Debug --target stringzillas_test_cpp20 --parallel
-cmake --build build_debug --config Debug --target stringzillas_test_cu20 --parallel
+cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_CUDA=1 -B build_debug
+cmake --build build_debug --config Debug --target stringzilla_test_cu20 --parallel
 ```
 
 ```sh
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
-cmake --build build_release --config Release --target stringzillas_test_cpp20 --parallel
-cmake --build build_release --config Release --target stringzillas_test_cu20 --parallel
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_CUDA=1 -B build_release
+cmake --build build_release --config Release --target stringzilla_test_cu20 --parallel
 ```
 
 ```sh
-cuda-gdb ./build_debug/stringzillas_test_cu20
-cuda-memcheck ./build_debug/stringzillas_test_cu20
+cuda-gdb ./build_debug/stringzilla_test_cu20
+cuda-memcheck ./build_debug/stringzilla_test_cu20
 ```
 
 ## Python
