@@ -1,15 +1,14 @@
-// swift-tools-version:6.0
+// swift-tools-version:6.4
 import PackageDescription
 
 let package = Package(
     name: "StringZilla",
     platforms: [
-        // Linux doesn't have to be explicitly listed
-        .iOS(.v13),  // For iOS, version 13 and later
-        .tvOS(.v13),  // For tvOS, version 13 and later
-        .macOS(.v10_15),  // For macOS, version 10.15 (Catalina) and later
-        .watchOS(.v6),  // For watchOS, version 6 and later
-        .visionOS(.v1),  // For visionOS, version 1.0 and later
+        .macOS(.v12),
+        .iOS(.v15),
+        .tvOS(.v15),
+        .watchOS(.v9),
+        .visionOS(.v1),
     ],
     products: [
         .library(
@@ -32,6 +31,9 @@ let package = Package(
                 "c/stringzilla/find.c",
                 "c/stringzilla/sort.c",
                 "c/stringzilla/intersect.c",
+                "c/stringzilla/levenshtein.c",
+                "c/stringzilla/overlap.c",
+                "c/stringzilla/substrings.c",
                 "c/stringzilla/utf8_norm.c",
                 "c/stringzilla/utf8_runes.c",
                 "c/stringzilla/utf8_tokens.c",
@@ -43,7 +45,8 @@ let package = Package(
                 "c/stringzilla/utf8_uncased.c",
             ],
             // `include/` is the module header root, so the `module.modulemap` umbrella and the
-            // `#include "stringzilla/<...>.h"` chain resolve exactly as in the CMake/Rust/Python builds (`-I include`).
+            // `#include "stringzilla/<...>.h"` chain resolve exactly as `-I include` does in the
+            // CMake, Rust, and Python builds.
             publicHeadersPath: "include",
             cSettings: [
                 .define("SZ_DYNAMIC_DISPATCH", to: "1"),
@@ -56,14 +59,14 @@ let package = Package(
             name: "StringZilla",
             dependencies: ["StringZillaC"],
             path: "swift",
-            exclude: ["Test.swift"],
+            exclude: ["Test.swift", "README.md"],
             sources: ["StringProtocol+StringZilla.swift"]
         ),
         .testTarget(
             name: "StringZillaTests",
             dependencies: ["StringZilla"],
             path: "swift",
-            exclude: ["StringProtocol+StringZilla.swift"],
+            exclude: ["StringProtocol+StringZilla.swift", "README.md"],
             sources: ["Test.swift"]
         ),
     ],

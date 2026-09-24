@@ -1,7 +1,5 @@
 //
-//  StringProtocol+StringZilla.swift
-//
-//  Created by Ash Vardanian on 18/1/24.
+//  swift/StringProtocol+StringZilla.swift
 //  Extension of StringProtocol to interface with StringZilla functionalities.
 //
 //  Docs:
@@ -13,25 +11,18 @@
 //    https://forums.swift.org/t/string-s-abi-and-utf-8/17676
 //  - Stable pointer into a C string without copying it? Aug 2021
 //    https://forums.swift.org/t/stable-pointer-into-a-c-string-without-copying-it/51244/1
+//
+//  - Author: Ash Vardanian
+//  - Date: January 21, 2024
+//
 
 import StringZillaC
 
-// We need to link the C standard library; the module differs per platform, and `os(...)` misses
-// Windows and musl, so probe by availability instead.
-#if canImport(Darwin)
-    import Darwin.C
-#elseif canImport(Glibc)
-    import Glibc
-#elseif canImport(Musl)
-    import Musl
-#elseif canImport(ucrt)
-    import ucrt
-#endif
-
 /// Result of a three-way string comparison.
 ///
-/// Mirrors `Foundation.ComparisonResult` but is defined here so the package stays Foundation-free and usable
-/// on Linux and embedded targets. The cases match the verdicts of the exact and case-insensitive orderings.
+/// Mirrors `Foundation.ComparisonResult` but is defined here so the package stays
+/// Foundation-free and usable on Linux and embedded targets. The cases match the verdicts of the
+/// exact and case-insensitive orderings.
 public enum StringZillaOrdering: Sendable {
     case ascending  // The receiver sorts before the argument.
     case equal  // The two compare as equal.
@@ -111,7 +102,7 @@ public protocol StringZillaViewable: Collection {
     ///
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
-    ///   - startPointer: The starting pointer for the calculation, previously obtained from `withStringZillaScope`.
+    ///   - startPointer: The starting pointer, as obtained from `withStringZillaScope`.
     /// - Returns: The calculated index offset.
     func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index
 }
@@ -138,7 +129,8 @@ extension String: StringZillaViewable {
 extension Substring.UTF8View: StringZillaViewable {
     public typealias Index = Substring.UTF8View.Index
 
-    /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte elements (UTF-8 code units).
+    /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte
+    /// elements, the UTF-8 code units.
     /// - Parameters:
     ///   - body: A closure that takes a pointer to the contiguous storage and its size.
     /// - Throws: An error if the storage is not contiguous.
@@ -157,7 +149,7 @@ extension Substring.UTF8View: StringZillaViewable {
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
-    ///   - startPointer: The starting pointer for the calculation, previously obtained from `withStringZillaScope`.
+    ///   - startPointer: The starting pointer, as obtained from `withStringZillaScope`.
     /// - Returns: The calculated index offset.
     @_transparent
     public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
@@ -170,7 +162,8 @@ extension Substring.UTF8View: StringZillaViewable {
 extension String.UTF8View: StringZillaViewable {
     public typealias Index = String.UTF8View.Index
 
-    /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte elements (UTF-8 code units).
+    /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte
+    /// elements, the UTF-8 code units.
     /// - Parameters:
     ///   - body: A closure that takes a pointer to the contiguous storage and its size.
     /// - Throws: An error if the storage is not contiguous.
@@ -188,7 +181,7 @@ extension String.UTF8View: StringZillaViewable {
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
-    ///   - startPointer: The starting pointer for the calculation, previously obtained from `withStringZillaScope`.
+    ///   - startPointer: The starting pointer, as obtained from `withStringZillaScope`.
     /// - Returns: The calculated index offset.
     public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
         -> Index
@@ -199,7 +192,7 @@ extension String.UTF8View: StringZillaViewable {
 
 extension StringZillaViewable {
     /// Computes a 64-bit hash of the string content using StringZilla's fast hash algorithm.
-    /// - Parameter seed: Optional seed value for the hash function (default: 0).
+    /// - Parameter seed: Optional seed value for the hash function, defaulting to 0.
     /// - Returns: A 64-bit unsigned integer hash value.
     public func hash(seed: UInt64 = 0) -> UInt64 {
         return withStringZillaScope { pointer, length in
@@ -301,7 +294,8 @@ extension StringZillaViewable {
         return result
     }
 
-    /// Finds the first occurrence of a character outside of the the given character-set within the receiver.
+    /// Finds the first occurrence of a character outside of the the given character-set
+    /// within the receiver.
     /// - Parameter characters: A string-like collection of characters to exclude.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
@@ -318,7 +312,8 @@ extension StringZillaViewable {
         return result
     }
 
-    /// Finds the last occurrence of a character outside of the the given character-set within the receiver.
+    /// Finds the last occurrence of a character outside of the the given character-set
+    /// within the receiver.
     /// - Parameter characters: A string-like collection of characters to exclude.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
@@ -336,7 +331,7 @@ extension StringZillaViewable {
     }
 
     /// Applies full Unicode case folding to the content's UTF-8 bytes.
-    /// The returned bytes are UTF-8 and may be longer than the input (e.g., "ß" -> "ss").
+    /// The returned bytes are UTF-8 and may be longer than the input, as "ß" → "ss" is.
     public func utf8UncasedFoldedBytes() -> [UInt8] {
         var folded: [UInt8] = []
         withStringZillaScope { pointer, length in
@@ -357,8 +352,9 @@ extension StringZillaViewable {
     }
 
     /// Produces the UTF-8 bytes of the receiver after applying a Unicode normalization form.
-    /// The output may be longer than the input; the worst-case expansion is 18× per source byte (NFKD).
-    /// - Parameter form: The normalization form to apply (default: `.nfc`).
+    /// The output may be longer than the input; the worst-case expansion is 18× per source
+    /// byte, under NFKD.
+    /// - Parameter form: The normalization form to apply, defaulting to `.nfc`.
     /// - Returns: The normalized UTF-8 bytes.
     public func utf8Normalized(_ form: StringZillaNormalizationForm = .nfc) -> [UInt8] {
         var normalized: [UInt8] = []
@@ -379,9 +375,11 @@ extension StringZillaViewable {
         return normalized
     }
 
-    /// Returns the index of the first byte violating the given normalization form, or `nil` if already normalized.
+    /// Returns the index of the first byte violating the given normalization form, or `nil`
+    /// if already normalized.
     /// - Parameter form: The normalization form to test.
-    /// - Returns: The `Index` of the first non-conforming byte, or `nil` if the content is already in @p form.
+    /// - Returns: The `Index` of the first non-conforming byte, or `nil` if the content is already
+    ///   in `form`.
     public func utf8NormalizationViolation(_ form: StringZillaNormalizationForm) -> Index? {
         var result: Index?
         withStringZillaScope { pointer, length in
@@ -427,8 +425,8 @@ extension StringZillaViewable {
         return result
     }
 
-    /// Splits the content into UAX-29 words (Unicode TR29), in order.
-    /// Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word.
+    /// Splits the content into UAX-29 words per Unicode TR29, in order. Unlike whitespace
+    /// splitting, the words tile the input: every byte belongs to exactly one word.
     /// - Returns: Byte-accurate ranges into the receiver, one per word.
     public func utf8Words() -> [Range<Index>] {
         var ranges: [Range<Index>] = []
@@ -450,30 +448,33 @@ extension StringZillaViewable {
         return ranges
     }
 
-    /// Splits the content on UTF-8 newline delimiters (the 7 line-break characters plus a CRLF pair).
+    /// Splits the content on UTF-8 newline delimiters: the 7 line-break characters plus
+    /// a CRLF pair.
     ///
-    /// The delimiters partition the text into the N+1 *gaps* between them, so a string with N newlines
-    /// yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), so
-    /// `"a\n\nb\n".utf8Lines()` -> `["a", "", "b", ""]`.
+    /// The delimiters partition the text into the N+1 _gaps_ between them, so a string with N
+    /// newlines yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), so
+    /// `"a\n\nb\n".utf8Lines()` → `["a", "", "b", ""]`.
     ///
-    /// - Note: This differs from the Swift standard library's `split(omittingEmptySubsequences: true)`,
-    ///   which drops empty subsequences by default. Pass `skipEmpty: true` for that behavior.
-    /// - Parameter skipEmpty: When `true`, zero-length segments are omitted (default: `false`).
+    /// - Note: This differs from the Swift standard library's
+    ///   `split(omittingEmptySubsequences: true)`, which drops empty subsequences by default.
+    ///   Pass `skipEmpty: true` for that behavior.
+    /// - Parameter skipEmpty: When `true`, zero-length segments are omitted, defaulting to `false`.
     /// - Returns: Byte-accurate ranges into the receiver, one per segment.
     public func utf8Lines(skipEmpty: Bool = false) -> [Range<Index>] {
         return utf8Split(skipEmpty: skipEmpty, onNewlines: true)
     }
 
-    /// Splits the content on UTF-8 whitespace delimiters (all 25 Unicode `White_Space` characters).
+    /// Splits the content on UTF-8 whitespace delimiters: all 25 Unicode `White_Space` characters.
     ///
-    /// The delimiters partition the text into the N+1 *gaps* between them, so a string with N whitespace
-    /// characters yields N+1 segments. By default empty segments are kept (`skipEmpty: false`).
-    /// Pass `skipEmpty: true` to drop runs of whitespace as separators, e.g.
-    /// `"  hi  ".utf8Tokens(skipEmpty: true)` -> `["hi"]`.
+    /// The delimiters partition the text into the N+1 _gaps_ between them, so a string with N
+    /// whitespace characters yields N+1 segments. By default, with `skipEmpty: false`, empty
+    /// segments are kept. Pass `skipEmpty: true` to drop runs of whitespace as separators, as in
+    /// `"  hi  ".utf8Tokens(skipEmpty: true)` → `["hi"]`.
     ///
-    /// - Note: This differs from the Swift standard library's `split(omittingEmptySubsequences: true)`,
-    ///   which drops empty subsequences by default. Pass `skipEmpty: true` for that behavior.
-    /// - Parameter skipEmpty: When `true`, zero-length segments are omitted (default: `false`).
+    /// - Note: This differs from the Swift standard library's
+    ///   `split(omittingEmptySubsequences: true)`, which drops empty subsequences by default.
+    ///   Pass `skipEmpty: true` for that behavior.
+    /// - Parameter skipEmpty: When `true`, zero-length segments are omitted, defaulting to `false`.
     /// - Returns: Byte-accurate ranges into the receiver, one per segment.
     public func utf8Tokens(skipEmpty: Bool = false) -> [Range<Index>] {
         return utf8Split(skipEmpty: skipEmpty, onNewlines: false)
@@ -481,12 +482,12 @@ extension StringZillaViewable {
 
     /// Shared driver for delimiter-based UTF-8 splitting (`utf8Lines` / `utf8Tokens`).
     ///
-    /// Buffers delimiter boundaries through the multistep FFI kernel (just like `utf8Words()`), but whereas
-    /// words *tile* the input, the delimiters here are discarded and the *gaps* between them become the
-    /// segments: delimiter `d` spans `[start, start + length)`, and the segment preceding it runs from the
-    /// previous delimiter's end up to this delimiter's start. When the kernel reports it consumed the whole
-    /// remaining region, the trailing segment after the last delimiter (possibly empty) is appended too, so
-    /// N delimiters always produce N+1 segments.
+    /// Buffers delimiter boundaries through the multistep FFI kernel, just like `utf8Words()`, but
+    /// whereas words _tile_ the input, the delimiters here are discarded and the _gaps_ between
+    /// them become the segments: delimiter `d` spans `[start, start + length)`, and the segment
+    /// preceding it runs from the previous delimiter's end up to this delimiter's start. When the
+    /// kernel reports it consumed the whole remaining region, the trailing segment after the last
+    /// delimiter, possibly empty, is appended too, so N delimiters always produce N+1 segments.
     ///
     /// - Parameters:
     ///   - skipEmpty: When `true`, zero-length segments are omitted.
@@ -501,7 +502,8 @@ extension StringZillaViewable {
             var lengths = [sz_size_t](repeating: 0, count: steps)
             var suffix: sz_size_t = 0 // Byte offset of the not-yet-segmented suffix within `pointer`.
 
-            // Emits one segment `[begin, end)` (offsets relative to `pointer`), honoring `skipEmpty`.
+            // Emits one segment `[begin, end)`, with offsets relative to
+            // `pointer`, honoring `skipEmpty`.
             func appendSegment(_ begin: sz_size_t, _ end: sz_size_t) {
                 if skipEmpty && end == begin { return }
                 let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(begin)), after: pointer)
@@ -523,8 +525,9 @@ extension StringZillaViewable {
                                 lengthsBuffer.baseAddress, sz_size_t(steps), &consumed)
                     }
                 }
-                // Each delimiter's gap (the segment before it) becomes one output range; offsets are
-                // relative to `pointer.advanced(by: suffix)`, so re-base them onto `pointer` via `suffix`.
+                // Each delimiter's gap, the segment before it, becomes one output range;
+                // offsets are relative to `pointer.advanced(by: suffix)`, so re-base them onto
+                // `pointer` via `suffix`.
                 var previousEnd: sz_size_t = 0
                 for delimiter in 0..<Int(delimiters) {
                     let delimiterStart = offsets[delimiter]
@@ -533,7 +536,8 @@ extension StringZillaViewable {
                     previousEnd = delimiterStart + delimiterLength
                 }
                 if consumed == region {
-                    // Reached end-of-text: append the trailing segment after the last delimiter, then stop.
+                    // Reached end-of-text: append the trailing segment after the last
+                    // delimiter, then stop.
                     appendSegment(suffix + previousEnd, suffix + region)
                     break
                 }
@@ -544,7 +548,7 @@ extension StringZillaViewable {
         return ranges
     }
 
-    /// Lexicographic (byte-order) comparison, SIMD-accelerated via `sz_order`.
+    /// Lexicographic byte-order comparison, SIMD-accelerated via `sz_order`.
     /// - Parameter other: The string to compare against.
     /// - Returns: `.ascending`, `.equal`, or `.descending`.
     @_specialize(where Self == String, S == String)
@@ -578,7 +582,7 @@ extension StringZillaViewable {
         return .equal
     }
 
-    /// Byte-level equality, SIMD-accelerated via `sz_equal` (differing lengths are never equal).
+    /// Byte-level equality, SIMD-accelerated via `sz_equal`; differing lengths are never equal.
     /// - Parameter other: The string to compare against.
     /// - Returns: `true` if the byte contents are identical.
     @_specialize(where Self == String, S == String)
@@ -614,7 +618,8 @@ public final class Utf8UncasedNeedle {
         metadata = sz_utf8_uncased_needle_metadata_t()
     }
 
-    /// Note: not safe for concurrent use. The internal metadata is computed lazily and mutated during searches.
+    /// Note: not safe for concurrent use. The internal metadata is computed lazily and
+    /// mutated during searches.
     public func findFirst<S: StringZillaViewable>(in haystack: S) -> Range<S.Index>? {
         if needleBytes.isEmpty { return haystack.startIndex..<haystack.startIndex }
 
@@ -645,13 +650,13 @@ public final class Utf8UncasedNeedle {
     }
 }
 
-/// A progressive hasher for computing StringZilla hashes incrementally.
-/// Use this class when you need to hash data that arrives in chunks or when building up a hash over time.
+/// A progressive hasher for computing StringZilla hashes incrementally. Use this class when you
+/// need to hash data that arrives in chunks or when building up a hash over time.
 public class StringZillaHasher {
     private var state: sz_hash_state_t
 
     /// Creates a new hasher with the specified seed.
-    /// - Parameter seed: The seed value for the hash function (default: 0).
+    /// - Parameter seed: The seed value for the hash function, defaulting to 0.
     public init(seed: UInt64 = 0) {
         state = sz_hash_state_t()
         sz_hash_state_init(&state, seed)
@@ -683,15 +688,16 @@ public class StringZillaHasher {
     public func digest() -> UInt64 { return finalize() }
 
     /// Resets the hasher to its initial state.
-    /// - Parameter seed: New seed value; the original seed is not retained, so omitting this re-seeds with 0.
+    /// - Parameter seed: New seed value; the original seed is not retained, so omitting this
+    ///   re-seeds with 0.
     public func reset(seed: UInt64? = nil) {
         let newSeed = seed ?? 0  // Default to 0 if no seed provided
         sz_hash_state_init(&state, newSeed)
     }
 }
 
-/// A progressive SHA-256 hasher for computing cryptographic checksums incrementally.
-/// Use this class when you need to hash data that arrives in chunks or when building up a hash over time.
+/// A progressive SHA-256 hasher for computing cryptographic checksums incrementally. Use this class
+/// when you need to hash data that arrives in chunks or when building up a hash over time.
 public class StringZillaSha256 {
     private var state: sz_sha256_state_t
 

@@ -17,7 +17,6 @@ env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
   PYTHON_VERSION: 3.13
-  SWIFT_VERSION: 6.2
   PYTHONUTF8: 1
   WASI_SDK_VERSION: "34"
   # Pinned to the 36 LTS line so the wasm rows run a reproducible engine.
@@ -306,17 +305,6 @@ jobs:
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
 
-        # Swift
-        # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
-      # - name: Set up Swift ${{ env.SWIFT_VERSION }}
-      #   uses: swift-actions/setup-swift@v2.4.0
-      #   with:
-      #     swift-version: ${{ env.SWIFT_VERSION }}
-      # - name: Build Swift
-      #   run: swift build -c release --static-swift-stdlib
-      # - name: Test Swift
-      #   run: swift test -c release
-
   test_ubuntu_cuda:
     name: Ubuntu CUDA
     runs-on: ubuntu-22.04
@@ -380,12 +368,14 @@ jobs:
       - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
-  # Temporary workaround to run Swift tests on Linux
-  # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
   test_ubuntu_swift:
-    name: Swift on Linux
-    runs-on: ubuntu-22.04
-    container: swift:latest
+    name: Swift on Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    container: swift:6.4
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -803,16 +793,6 @@ jobs:
       - name: Test Python
         run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
 
-        # Swift
-      - name: Set up Swift ${{ env.SWIFT_VERSION }}
-        uses: swift-actions/setup-swift@v2.4.0
-        with:
-          swift-version: ${{ env.SWIFT_VERSION }}
-      - name: Build Swift
-        run: swift build
-      - name: Test Swift
-        run: swift test
-
         # Rust
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -822,6 +802,82 @@ jobs:
         run: cargo test --release --no-default-features --features std
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
+
+  test_swift_macos:
+    name: Swift on macOS ${{ matrix.arch }}
+    runs-on: xcode-27
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # The `x86_64` destination runs the Intel build under Rosetta, as no Intel image ships Xcode 27
+      - name: Test Swift
+        run: xcodebuild test -scheme StringZilla -destination 'platform=macOS,arch=${{ matrix.arch }}'
+
+  test_swift_simulators:
+    name: Swift on ${{ matrix.platform }} Simulator
+    runs-on: xcode-27
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [iOS, tvOS, watchOS, visionOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Build for Simulator
+        run: xcodebuild build -scheme StringZilla -destination 'generic/platform=${{ matrix.platform }} Simulator' CODE_SIGNING_ALLOWED=NO
+      - name: Test on iPhone Simulator
+        if: matrix.platform == 'iOS'
+        run: xcodebuild test -scheme StringZilla -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17' CODE_SIGNING_ALLOWED=NO
+
+  test_swift_windows:
+    name: Swift on Windows ${{ matrix.arch }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set Up Swift
+        uses: compnerd/gha-setup-swift@v0.5.0
+        with:
+          swift-version: swift-6.4.0-release
+          swift-build: 6.4.0-RELEASE
+          build_arch: ${{ matrix.arch }}
+      - name: Test Swift
+        run: swift test
+
+  test_swift_android:
+    name: Swift on Android
+    uses: swiftlang/github-workflows/.github/workflows/swift_package_test.yml@fa1e46cf0f07ffde2de131e9ed5bd66a488c289c # main
+    with:
+      enable_linux_checks: false
+      enable_windows_checks: false
+      enable_android_sdk_build: true
+      enable_android_sdk_checks: true
+      android_sdk_versions: '["6.4"]'
+
+  test_swift_wasm:
+    name: Swift on WebAssembly WASI
+    runs-on: ubuntu-24.04
+    container: swift:6.4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Install Swift SDK for WebAssembly and Wasmtime
+        run: |
+          swift sdk install https://download.swift.org/swift-6.4.0-release/wasm-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_wasm.artifactbundle.tar.gz --checksum f07b7be3c586d92d7a07051fc6d303b87ebea67eadc40640ba59d5a8b79aa86d
+          apt-get update && apt-get install -y curl xz-utils
+          curl -fsSL https://wasmtime.dev/install.sh | bash
+      - name: Build Library and Tests
+        run: swift build --build-tests --swift-sdk swift-6.4.0-RELEASE_wasm
+      - name: Test under Wasmtime
+        run: ~/.wasmtime/bin/wasmtime run --dir / .build/debug/StringZillaTests-test-runner.wasm --testing-library swift-testing
 
   test_windows:
     name: Windows - ${{ matrix.os }}
