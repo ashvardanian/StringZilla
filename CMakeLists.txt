@@ -10,12 +10,9 @@
 #
 # * stringzilla::header, stringzilla::shared, stringzilla::bare - from `find_package(stringzilla)`.
 #
-# Tests for different C++ standards:
+# Tests:
 #
-# * stringzilla_test_cpp11: C++11 baseline support.
-# * stringzilla_test_cpp14: C++14 support with `std::less<std::string>`-like function objects.
-# * stringzilla_test_cpp17: C++17 support with `std::string_view` compatibility.
-# * stringzilla_test_cpp20: C++20 support with `<=>` operator and more `constexpr` features.
+# * stringzilla_test_cpp20: The C++ interface, at its C++20 floor.
 # * stringzilla_test_cu20: The CUDA backends of the core families, against the serial answers.
 #
 # Serial Benchmarks:
@@ -51,7 +48,8 @@ project(
 )
 
 set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -197,8 +195,8 @@ option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehavior
 
 # Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only): cmake -B
 # build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
-# build_cov --target stringzilla_test_cpp17 -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test_cpp17
-# llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata llvm-cov report ./build_cov/stringzilla_test_cpp17
+# build_cov --target stringzilla_test_cpp20 -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test_cpp20
+# llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata llvm-cov report ./build_cov/stringzilla_test_cpp20
 # -instr-profile=/tmp/sz.profdata include/stringzilla/ `-march=native` compiles out the non-native backends, so a
 # faithful picture needs `llvm-profdata merge` across per-ISA builds (native x86 + qemu-aarch64 for NEON/SVE + the RVV
 # qemu toolchain).
@@ -554,10 +552,6 @@ if (STRINGZILLA_BUILD_TEST)
         test/sort.cpp
     )
 
-    # Make sure compilation passes for different C++ standards; MSVC only supports C++11 and newer.
-    define_launcher(stringzilla_test_cpp11 11 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
-    define_launcher(stringzilla_test_cpp14 14 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
-    define_launcher(stringzilla_test_cpp17 17 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
     define_launcher(stringzilla_test_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
 
     if (STRINGZILLA_BUILD_CUDA)

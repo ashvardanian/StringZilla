@@ -46,12 +46,10 @@
 #include <random>      // `std::random_device`, `std::mt19937`
 #include <regex>       // `std::regex`, `std::regex_search`
 #include <string>      // `std::hash`
+#include <string_view> // `std::string_view`
 #include <thread>      // `std::this_thread::sleep_for`, `std::thread::hardware_concurrency`
 #include <type_traits> // `std::invoke_result_t`
 #include <vector>      // `std::vector`
-
-#include <string_view> // Requires C++17
-#include <span>        // Requires C++20, used to pass info to batch-capable parallel backends
 
 #if defined(_MSC_VER)
 #include <intrin.h> // `__rdtsc`, `_ReadStatusReg`

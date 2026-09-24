@@ -476,8 +476,8 @@ yum install -y make cmake3 gcc g++
 cmake3 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug \
     -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc -D STRINGZILLA_TARGET_ARCH="ivybridge" \
     -B build_debug
-cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
-build_debug/stringzilla_test_cpp11
+cmake3 --build build_debug --config Debug --target stringzilla_test_cpp20
+build_debug/stringzilla_test_cpp20
 ```
 
 The CentOS-based __Amazon Linux 2__ is still used in older AWS Lambda functions.
@@ -490,8 +490,8 @@ yum install -y make cmake3 gcc10 gcc10-c++
 cmake3 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug \
     -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc -D STRINGZILLA_TARGET_ARCH="ivybridge" \
     -B build_debug
-cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
-build_debug/stringzilla_test_cpp11
+cmake3 --build build_debug --config Debug --target stringzilla_test_cpp20
+build_debug/stringzilla_test_cpp20
 ```
 
 > [!CAUTION]

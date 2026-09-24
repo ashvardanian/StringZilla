@@ -55,9 +55,6 @@
 #include <string_view> // Baseline
 #include <vector>      // `std::vector`
 
-#if !SZ_IS_CPP11_
-#error "This test requires C++11 or later."
-#endif
 
 #include "utf8.hpp" // `print_utf8_test_bytes_`, `encoded_rune_`
 
@@ -66,9 +63,7 @@ using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
 
-#if SZ_IS_CPP17_
 using namespace std::literals; // for ""sv
-#endif
 
 #pragma region Helpers
 

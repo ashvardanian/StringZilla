@@ -1,9 +1,8 @@
 /**
  *  @brief StringZilla C++ wrapper improving over the performance of `std::string_view` and `std::string`,
  *         mostly for substring search, adding approximate matching functionality, and C++23 functionality
- *         to a C++11 compatible implementation.
+ *         to a C++20 implementation.
  *
- *  This implementation is aiming to be compatible with C++11, while implementing the C++23 functionality.
  *  By default, it includes C++ STL headers, but that can be avoided to minimize compilation overhead.
  *  https://artificial-mind.net/projects/compile-health/
  *
@@ -46,9 +45,7 @@
 #include <stdexcept> // `std::out_of_range`
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 #include <string_view> // `std::string_view`
-#endif
 #endif
 
 #include <stringzilla/stringzilla.h>
@@ -264,16 +261,16 @@ class basic_byteset {
   public:
     using char_type = char_type_;
 
-    sz_constexpr_if_cpp14 basic_byteset() noexcept {
+    constexpr basic_byteset() noexcept {
         // ! Instead of relying on the `sz_byteset_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
-    explicit sz_constexpr_if_cpp14 basic_byteset(std::initializer_list<char_type> chars) noexcept : basic_byteset() {
+    explicit constexpr basic_byteset(std::initializer_list<char_type> chars) noexcept : basic_byteset() {
         // ! Instead of relying on the `sz_byteset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
         for (auto c : chars) bitset_._u64s[sz_bitcast_(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast_(sz_u8_t, c) & 63u));
     }
 
-    explicit sz_constexpr_if_cpp14 basic_byteset(char_type const *chars, std::size_t count_characters) noexcept
+    explicit constexpr basic_byteset(char_type const *chars, std::size_t count_characters) noexcept
         : basic_byteset() {
         for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
@@ -282,7 +279,7 @@ class basic_byteset {
     }
 
     template <std::size_t count_characters>
-    explicit sz_constexpr_if_cpp14 basic_byteset(std::array<char_type, count_characters> const &chars) noexcept
+    explicit constexpr basic_byteset(std::array<char_type, count_characters> const &chars) noexcept
         : basic_byteset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
         for (std::size_t i = 0; i < count_characters; ++i) {
@@ -291,14 +288,14 @@ class basic_byteset {
         }
     }
 
-    sz_constexpr_if_cpp14 basic_byteset(basic_byteset const &other) noexcept : bitset_(other.bitset_) {}
-    sz_constexpr_if_cpp14 basic_byteset &operator=(basic_byteset const &other) noexcept {
+    constexpr basic_byteset(basic_byteset const &other) noexcept : bitset_(other.bitset_) {}
+    constexpr basic_byteset &operator=(basic_byteset const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
 
-    sz_constexpr_if_cpp14 basic_byteset operator|(basic_byteset other) const noexcept {
-        basic_byteset result = *this; //? Variable declaration in a `constexpr` function is a C++14 extension
+    constexpr basic_byteset operator|(basic_byteset other) const noexcept {
+        basic_byteset result = *this;
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
         return result;
@@ -394,11 +391,9 @@ struct end_sentinel_type {};
 struct include_overlaps_type {};
 struct exclude_overlaps_type {};
 
-#if SZ_IS_CPP17_
 inline static constexpr end_sentinel_type end_sentinel;
 inline static constexpr include_overlaps_type include_overlaps;
 inline static constexpr exclude_overlaps_type exclude_overlaps;
-#endif
 
 /**
  *  @brief Zero-cost wrapper around the `.find` member function of string-like classes.
@@ -494,28 +489,16 @@ struct matcher_find_last_not_of {
     size_type operator()(haystack_type_ haystack) const noexcept { return haystack.find_last_not_of(needles_); }
 };
 
-/**
- *  @brief Helper to detect if a type has a nested `::string_view` typedef.
- *         Uses SFINAE with no STL dependencies for `std::enabled_if` or `std::void_t`.
- */
+/** @brief Whether a type carries a nested `::string_view` typedef. */
 template <typename type_>
-struct has_string_view_member_ {
-  private:
-    template <typename candidate_>
-    static char test_(typename candidate_::string_view *);
-    template <typename candidate_>
-    static int test_(...);
-
-  public:
-    static constexpr bool value = sizeof(test_<type_>(0)) == sizeof(char);
-};
+concept has_string_view_member_ = requires { typename type_::string_view; };
 
 /**
  *  @brief Helper to extract the appropriate view type for a string-like type.
  *         For StringZilla types, uses the nested ::string_view typedef.
  *         For STL types (like std::string_view), uses the type itself.
  */
-template <typename string_type_, bool has_nested_view_ = has_string_view_member_<string_type_>::value>
+template <typename string_type_, bool has_nested_view_ = has_string_view_member_<string_type_>>
 struct string_view_for {
     // Default: use the type itself (for STL types)
     using type = string_type_;
@@ -648,7 +631,7 @@ using range_needle_type = typename range_needle_for<range_view_type<haystack_typ
  *        high-performance applications where cache efficiency and register allocation matter.
  *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
  *        efficient termination without constructing full end iterators.
- *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ *  @note Compatible with C++20 ranges, `std::string_view`, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::find_iterator`.
  */
 template <typename string_type_, typename matcher_type_>
@@ -740,7 +723,7 @@ class find_matches_view {
  *        high-performance applications where cache efficiency and register allocation matter.
  *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
  *        efficient termination without constructing full end iterators.
- *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ *  @note Compatible with C++20 ranges, `std::string_view`, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::find_iterator`.
  */
 template <typename string_type_, typename matcher_type_>
@@ -845,7 +828,7 @@ class rfind_matches_view {
  *        high-performance applications where cache efficiency and register allocation matter.
  *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
  *        efficient termination without constructing full end iterators.
- *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ *  @note Compatible with C++20 ranges, `std::string_view`, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::split_iterator`.
  *
  *  In some sense, represents the inverse operation to `find_matches_view`, as it reports not the search matches
@@ -981,7 +964,7 @@ class find_splits_view {
  *        high-performance applications where cache efficiency and register allocation matter.
  *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
  *        efficient termination without constructing full end iterators.
- *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ *  @note Compatible with C++20 ranges, `std::string_view`, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::split_iterator`.
  *
  *  In some sense, represents the inverse operation to `find_matches_view`, as it reports not the search matches
@@ -2248,21 +2231,17 @@ class basic_string_slice {
 
 #if !SZ_AVOID_STL
 
-    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 basic_string_slice(std::string const &other) noexcept
+    constexpr basic_string_slice(std::string const &other) noexcept requires std::is_const_v<char_type>
         : basic_string_slice(other.data(), other.size()) {}
 
-    template <typename sfinae_ = char_type, typename std::enable_if<!std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 basic_string_slice(std::string &other) noexcept
-        : basic_string_slice(&other[0], other.size()) {} // The `.data()` has mutable variant only since C++17
+    constexpr basic_string_slice(std::string &other) noexcept requires(!std::is_const_v<char_type>)
+        : basic_string_slice(other.data(), other.size()) {}
 
-    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 string_slice &operator=(std::string const &other) noexcept {
+    constexpr string_slice &operator=(std::string const &other) noexcept requires std::is_const_v<char_type> {
         return assign({other.data(), other.size()});
     }
 
-    template <typename sfinae_ = char_type, typename std::enable_if<!std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 string_slice &operator=(std::string &other) noexcept {
+    constexpr string_slice &operator=(std::string &other) noexcept requires(!std::is_const_v<char_type>) {
         return assign({other.data(), other.size()});
     }
 
@@ -2278,19 +2257,15 @@ class basic_string_slice {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
-    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 basic_string_slice(std::string_view const &other) noexcept
+    constexpr basic_string_slice(std::string_view const &other) noexcept requires std::is_const_v<char_type>
         : basic_string_slice(other.data(), other.size()) {}
 
-    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 string_slice &operator=(std::string_view const &other) noexcept {
+    constexpr string_slice &operator=(std::string_view const &other) noexcept requires std::is_const_v<char_type> {
         return assign({other.data(), other.size()});
     }
     operator std::string_view() const noexcept { return {data(), size()}; }
 
-#endif
 
 #endif
 
@@ -2520,7 +2495,6 @@ class basic_string_slice {
                sz_equal(data() + other.first.size(), other.second.data(), other.second.size()) == sz_true_k;
     }
 
-#if SZ_IS_CPP20_
 
     /**  @brief Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(string_view other) const noexcept {
@@ -2529,24 +2503,6 @@ class basic_string_slice {
         return orders[compare(other) + 1];
     }
 
-#else
-
-    /**  @brief Checks if the string is not equal to the other string. */
-    bool operator!=(string_view other) const noexcept { return !operator==(other); }
-
-    /**  @brief Checks if the string is lexicographically smaller than the other string. */
-    bool operator<(string_view other) const noexcept { return compare(other) == sz_less_k; }
-
-    /**  @brief Checks if the string is lexicographically equal or smaller than the other string. */
-    bool operator<=(string_view other) const noexcept { return compare(other) != sz_greater_k; }
-
-    /**  @brief Checks if the string is lexicographically greater than the other string. */
-    bool operator>(string_view other) const noexcept { return compare(other) == sz_greater_k; }
-
-    /**  @brief Checks if the string is lexicographically equal or greater than the other string. */
-    bool operator>=(string_view other) const noexcept { return compare(other) != sz_less_k; }
-
-#endif
 
 #pragma endregion
 #pragma region Prefix and Suffix Comparisons
@@ -3180,13 +3136,13 @@ class basic_string_slice {
     }
 
   private:
-    sz_constexpr_if_cpp14 string_slice &assign(string_view const &other) noexcept {
+    constexpr string_slice &assign(string_view const &other) noexcept {
         start_ = (pointer)other.data();
         length_ = other.size();
         return *this;
     }
 
-    sz_constexpr_if_cpp14 static size_type null_terminated_length(const_pointer s) noexcept {
+    constexpr static size_type null_terminated_length(const_pointer s) noexcept {
         const_pointer p = s;
         while (*p) ++p;
         return p - s;
@@ -3336,7 +3292,7 @@ class basic_string {
 
 #pragma region Constructors and STL Utilities
 
-    sz_constexpr_if_cpp14 basic_string() noexcept {
+    constexpr basic_string() noexcept {
         // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.internal.start = &string_.internal.chars[0];
         string_.words[1] = 0;
@@ -3438,13 +3394,11 @@ class basic_string {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
     basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
     operator std::string_view() const noexcept { return view(); }
 
-#endif
 
     /**
      *  @brief Materializes a lazy concatenation expression into an owning string in one allocation.
@@ -3700,31 +3654,12 @@ class basic_string {
     bool operator==(string_view other) const noexcept { return view() == other; }
     bool operator==(const_pointer other) const noexcept { return view() == string_view(other); }
 
-#if SZ_IS_CPP20_
 
     /**  @brief Computes the lexicographic ordering between this and the @p other string. */
     std::strong_ordering operator<=>(basic_string const &other) const noexcept { return view() <=> other.view(); }
     std::strong_ordering operator<=>(string_view other) const noexcept { return view() <=> other; }
     std::strong_ordering operator<=>(const_pointer other) const noexcept { return view() <=> string_view(other); }
 
-#else
-
-    /**  @brief Checks if the string is not equal to the other string. */
-    bool operator!=(string_view other) const noexcept { return !operator==(other); }
-
-    /**  @brief Checks if the string is lexicographically smaller than the other string. */
-    bool operator<(string_view other) const noexcept { return compare(other) == sz_less_k; }
-
-    /**  @brief Checks if the string is lexicographically equal or smaller than the other string. */
-    bool operator<=(string_view other) const noexcept { return compare(other) != sz_greater_k; }
-
-    /**  @brief Checks if the string is lexicographically greater than the other string. */
-    bool operator>(string_view other) const noexcept { return compare(other) == sz_greater_k; }
-
-    /**  @brief Checks if the string is lexicographically equal or greater than the other string. */
-    bool operator>=(string_view other) const noexcept { return compare(other) != sz_less_k; }
-
-#endif
 
 #pragma endregion
 #pragma region Prefix and Suffix Comparisons
@@ -4925,7 +4860,7 @@ static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 point
 
 namespace literals {
 constexpr string_view operator""_sv(char const *str, std::size_t length) noexcept { return {str, length}; }
-inline sz_constexpr_if_cpp14 byteset operator""_bs(char const *str, std::size_t length) noexcept {
+inline constexpr byteset operator""_bs(char const *str, std::size_t length) noexcept {
     return byteset {str, length};
 }
 } // namespace literals
@@ -5182,7 +5117,7 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
  *  @brief Helper function-like object to order string-view convertible objects with StringZilla.
  *  @see Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
  *
- *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Unlike the STL analog, doesn't require including the heavy `<functional>` header.
  *  Can be used to combine STL classes with StringZilla logic, like: `std::map<std::string, int, sz::less>`.
  */
 struct less {
@@ -5193,7 +5128,7 @@ struct less {
  *  @brief Helper function-like object to check equality between string-view convertible objects with StringZilla.
  *  @see Similar to `std::equal_to<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/equal_to
  *
- *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Unlike the STL analog, doesn't require including the heavy `<functional>` header.
  *  Can be used to combine STL classes with StringZilla logic, like:
  *      `std::unordered_map<std::string, int, sz::hash, sz::equal_to>`.
  */
@@ -5205,7 +5140,7 @@ struct equal_to {
  *  @brief Helper function-like object to hash string-view convertible objects with StringZilla.
  *  @see Similar to `std::hash<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/hash
  *
- *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Unlike the STL analog, doesn't require including the heavy `<functional>` header.
  *  Can be used to combine STL classes with StringZilla logic, like:
  *      `std::unordered_map<std::string, int, sz::hash, sz::equal_to>`.
  */
@@ -5248,7 +5183,6 @@ typename concatenation_result<first_type_, second_type_, following_types_...>::t
     first_type_ &&first, second_type_ &&second, following_types_ &&...following) noexcept(false) {
     // Fold expression like the one below would result in faster compile times,
     // but would incur the penalty of additional `if`-statements in every `append` call.
-    // Moreover, those are only supported in C++17 and later.
     //      std::size_t total_size = (strings.size() + ... + 0);
     //      std::string result;
     //      result.reserve(total_size);
@@ -5474,8 +5408,8 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str
  *  @return The array of indices, that will be populated with the permutation.
  *  @throw `std::bad_alloc` if the allocation fails.
  */
-template <typename container_type_, typename string_extractor_,
-          typename std::enable_if<!std::is_arithmetic<string_extractor_>::value, int>::type = 0>
+template <typename container_type_, typename string_extractor_>
+    requires(!std::is_arithmetic_v<string_extractor_>)
 std::vector<sorted_idx_t> argsort( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
     bool reverse = false) noexcept(false) {
@@ -5503,8 +5437,8 @@ std::vector<sorted_idx_t> argsort(container_type_ const &container, std::size_t 
  *  @brief Uncased (Unicode case-folded) permutation that would lead to sorted order.
  *  @throw `std::bad_alloc` if the allocation fails.
  */
-template <typename container_type_, typename string_extractor_,
-          typename std::enable_if<!std::is_arithmetic<string_extractor_>::value, int>::type = 0>
+template <typename container_type_, typename string_extractor_>
+    requires(!std::is_arithmetic_v<string_extractor_>)
 std::vector<sorted_idx_t> argsort_utf8_uncased( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
     bool reverse = false) noexcept(false) {

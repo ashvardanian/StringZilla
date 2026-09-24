@@ -65,9 +65,6 @@
 #include <string>      // Baseline
 #include <string_view> // Baseline
 
-#if !SZ_IS_CPP11_
-#error "This test requires C++11 or later."
-#endif
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -76,9 +73,7 @@ using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
 
-#if SZ_IS_CPP17_
 using namespace std::literals; // for ""sv
-#endif
 
 #pragma region Helpers
 
@@ -974,13 +969,11 @@ void test_stl_reads_unit() {
     verify(str("b") >= str("a"));
     verify(str("a") < str("aa"));
 
-#if SZ_IS_CPP20_ && defined(__cpp_lib_three_way_comparison)
     // Spaceship operator instead of conventional comparions.
     verify((str("a") <=> str("b")) == std::strong_ordering::less);
     verify((str("b") <=> str("a")) == std::strong_ordering::greater);
     verify((str("b") <=> str("b")) == std::strong_ordering::equal);
     verify((str("a") <=> str("aa")) == std::strong_ordering::less);
-#endif
 
     // Compare with another `str`.
     verify(str("test").compare(str("test")) == 0);
@@ -1017,7 +1010,6 @@ void test_stl_reads_unit() {
     verify(str("hello world").compare(6, 5, "worlds", 5) == 0);
     verify(str("hello world").compare(6, 5, "worlds", 6) < 0);
 
-#if SZ_IS_CPP20_ && defined(__cpp_lib_starts_ends_with)
     // Prefix and suffix checks against strings.
     verify(str("https://cppreference.com").starts_with(str("http")) == true);
     verify(str("https://cppreference.com").starts_with(str("ftp")) == false);
@@ -1035,9 +1027,8 @@ void test_stl_reads_unit() {
     verify(str("string_view").starts_with("String") == false);
     verify(str("string_view").ends_with("view") == true);
     verify(str("string_view").ends_with("View") == false);
-#endif
 
-#if SZ_IS_CPP23_ && defined(__cpp_lib_string_contains)
+#if defined(__cpp_lib_string_contains)
     // Checking basic substring presence.
     verify(str("hello").contains(str("ell")) == true);
     verify(str("hello").contains(str("oll")) == false);
@@ -1069,11 +1060,8 @@ void test_stl_reads_unit() {
     verify(std::hash<str> {}("hello") != 0);
     scope_verify(std::ostringstream os, os << str("hello"), os.str() == "hello");
 
-#if SZ_IS_CPP14_
-    // Comparison function objects are a C++14 feature.
     verify(std::equal_to<str> {}("hello", "world") == false);
     verify(std::less<str> {}("hello", "world") == true);
-#endif
 }
 
 #pragma endregion // STL Reads
@@ -1134,7 +1122,7 @@ void test_stl_updates_unit() {
     verify(str().get_allocator() == std::allocator<char>());
     verify(std::strcmp(str("c_str").c_str(), "c_str") == 0);
 
-#if SZ_IS_CPP23_ && defined(__cpp_lib_string_resize_and_overwrite)
+#if defined(__cpp_lib_string_resize_and_overwrite)
     // Test C++23 resize and overwrite functionality
     scope_verify(str s("hello"),
                  s.resize_and_overwrite(10,
@@ -1269,7 +1257,6 @@ void test_stl_conversions_unit() {
         verify(szv == "hello");
         verify(szv.data() == stl.data()); // A view borrows, a string owns
     }
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     // From STL `string_view` to StringZilla and vice-versa.
     {
         std::string_view stl {"hello"};
@@ -1282,7 +1269,6 @@ void test_stl_conversions_unit() {
         stl = szv;
         verify(stl == "hello");
     }
-#endif
 }
 
 /** @brief Tests STL containers keyed by StringZilla strings, and STL containers ordered & hashed by `sz` functors. */
@@ -2266,9 +2252,7 @@ void test_memory_all() {
 // Explicit template instantiations for the entry points invoked from `main()` (see `stringzilla.cpp`).
 template void test_ascii_unit<sz::string>();
 template void test_ascii_unit<sz::string_view>();
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 template void test_stl_reads_unit<std::string_view>();
-#endif
 template void test_stl_reads_unit<std::string>();
 template void test_stl_reads_unit<sz::string_view>();
 template void test_stl_reads_unit<sz::string>();

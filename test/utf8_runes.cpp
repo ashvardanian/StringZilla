@@ -56,9 +56,6 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
-#if !SZ_IS_CPP11_
-#error "This test requires C++11 or later."
-#endif
 
 #include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 
@@ -376,8 +373,7 @@ void test_utf8_runes_unit() {
 void test_utf8_runes_scripts_unit() {
     std::printf("  - testing UTF-8 codepoints across Unicode scripts...\n");
 
-    // C++ API: codepoint (rune) iteration materialized as a vector - never a range-for over the view range,
-    // whose sentinel comparison is a C++17 extension that errors at C++11.
+    // C++ API: codepoint iteration materialized as a vector, since every check below indexes by position.
     {
         auto runes_of = [](char const *t) {
             return sz::string_view(t).utf8_runes().template to<std::vector<sz_rune_t>>();

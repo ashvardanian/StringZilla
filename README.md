@@ -28,7 +28,7 @@ StringZilla is the GodZilla of string libraries, accelerating exact and fuzzy ma
 Reach for it from your language of choice:
 
 - 🐂 __[C](#c-and-c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
-- 🐉 __[C++](#c-and-c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
+- 🐉 __[C++](#c-and-c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 20
 - 🧮 __[CUDA](include/stringzilla/README.md):__ Score batches on a device with the `_init_gpu` engines in CUDA C++ 20
 - 🐍 __[Python](#python):__ Upgrade your `str` to faster `Str`
 - 🦀 __[Rust](#rust):__ Use the `StringZilla` traits crate

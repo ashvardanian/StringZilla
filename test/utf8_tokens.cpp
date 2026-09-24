@@ -56,9 +56,6 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
-#if !SZ_IS_CPP11_
-#error "This test requires C++11 or later."
-#endif
 
 #include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 

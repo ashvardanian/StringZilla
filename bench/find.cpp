@@ -385,7 +385,7 @@ struct matcher_memchr_t {
 };
 
 /**
- *  @brief Wraps the C++11 @b `std::find` algorithms for finding the next occurrence of a string
+ *  @brief Wraps the @b `std::find` algorithms for finding the next occurrence of a string
  *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
  */
 struct matcher_from_std_find {
@@ -579,7 +579,7 @@ struct matcher_strcspn_t {
 };
 
 /**
- *  @brief Wraps the C++11 @b `std::string_view::find_first_of` algorithms for finding the next occurrence of a string
+ *  @brief Wraps the @b `std::string_view::find_first_of` algorithms for finding the next occurrence of a string
  *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::find_matches_view`.
  */
 struct matcher_std_string_first_of_t {
@@ -593,7 +593,7 @@ struct matcher_std_string_first_of_t {
 };
 
 /**
- *  @brief Wraps the C++11 @b `std::string_view::find_last_of` algorithms for finding the next occurrence of a string
+ *  @brief Wraps the @b `std::string_view::find_last_of` algorithms for finding the next occurrence of a string
  *         into something similar to @b `sz::matcher_rfind` and compatible with @b `sz::rfind_matches_view`.
  */
 struct matcher_std_string_last_of_t {

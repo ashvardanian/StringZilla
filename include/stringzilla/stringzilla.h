@@ -23,18 +23,12 @@
  *  - `find.h` - searching for substrings and byte sets.
  *  - `sort.h` - single-threaded sorting algorithms.
  *  - `intersect.h` - intersections of unordered string sets.
+ *  - `levenshtein.h` - edit distances between batches of queries and candidates, on a CPU or a CUDA device.
+ *  - `overlap.h` - window overlap between batches of queries and candidates, on a CPU or a CUDA device.
+ *  - `substrings.h` - multi-pattern search over a compiled vocabulary, on a CPU or a CUDA device.
  *  - `small_string.h` - "Small String Optimization" in C 99.
  *  - `stringzilla.h` - umbrella header for the core C API.
  *  - `stringzilla.hpp` - umbrella header for the core C++ API.
- *
- *  It also provides many higher-level parallel algorithms, implemented in C++ with Fork Union and CUDA, also exposed
- *  via the stable C 99 ABI, but requiring C++17 and CUDA 17 compilers to build the shared @b StringZillas libraries:
- *
- *  - `similarities.{hpp,cuh}` - similarity measures, like Levenshtein, Needleman-Wunsch, & Smith-Waterman scores.
- *  - `fingerprints.{hpp,cuh}` - feature extraction for TF-IDF and other Machine Learning algorithms.
- *
- *  The core implementations of those algorithms are mostly structured as callable structure templates, as opposed to
- *  template functions to simplify specialized overloads and reusing the state between invocations.
  *
  *  @section sz_compilation_settings Compilation Settings
  *

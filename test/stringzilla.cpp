@@ -63,9 +63,6 @@
 #include <unordered_set> // `std::unordered_set`
 #include <vector>        // `std::vector`
 
-#if !SZ_IS_CPP11_
-#error "This test requires C++11 or later."
-#endif
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -74,17 +71,13 @@ using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
 
-#if SZ_IS_CPP17_
 using namespace std::literals; // for ""sv
-#endif
 
 /**
  *  Instantiate all the templates to make the symbols visible and also check
  *  for weird compilation errors on uncommon paths.
  */
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 template class std::basic_string_view<char>;
-#endif
 template class sz::basic_string_slice<char>;
 template class std::basic_string<char>;
 template class sz::basic_string<char>;
@@ -148,9 +141,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_memory_all", test_memory_all);
     failures += run_test("test_memory_safety", test_memory_safety);
 
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     failures += run_test("test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
-#endif
     failures += run_test("test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
     failures += run_test("test_stl_reads_unit<sz::string_view>", test_stl_reads_unit<sz::string_view>);
     failures += run_test("test_stl_reads_unit<sz::string>", test_stl_reads_unit<sz::string>);
@@ -175,9 +166,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_find_all", test_find_all);
     failures += run_test("test_find_safety", test_find_safety);
     failures += run_test("test_lookup_equivalence", [] { test_lookup_equivalence(); }); // ! Defaulted args
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     failures += run_test("test_find_misaligned_equivalence", test_find_misaligned_equivalence);
-#endif
 
     failures += run_test("test_utf8_runes_unit", test_utf8_runes_unit);
     failures += run_test("test_utf8_runes_scripts_unit", test_utf8_runes_scripts_unit);

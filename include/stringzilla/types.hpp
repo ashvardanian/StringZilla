@@ -33,66 +33,9 @@
 #define SZ_AVOID_STL (0) // true or false
 #endif
 
-/*  We need to detect the version of the C++ language we are compiled with.
- *  This will affect recent features like `operator<=>` and tests against STL.
- *  MSVC pins `__cplusplus` at 199711L unless `/Zc:__cplusplus` is passed, so prefer
- *  `_MSVC_LANG` there - it always reports the real standard.
- */
-#if defined(_MSVC_LANG)
-#define SZ_CPP_LANG_ _MSVC_LANG
-#else
-#define SZ_CPP_LANG_ __cplusplus
-#endif
-#if SZ_CPP_LANG_ >= 202101L
-#define SZ_IS_CPP23_ 1
-#else
-#define SZ_IS_CPP23_ 0
-#endif
-#if SZ_CPP_LANG_ >= 202002L
-#define SZ_IS_CPP20_ 1
-#else
-#define SZ_IS_CPP20_ 0
-#endif
-#if SZ_CPP_LANG_ >= 201703L
-#define SZ_IS_CPP17_ 1
-#else
-#define SZ_IS_CPP17_ 0
-#endif
-#if SZ_CPP_LANG_ >= 201402L
-#define SZ_IS_CPP14_ 1
-#else
-#define SZ_IS_CPP14_ 0
-#endif
-#if SZ_CPP_LANG_ >= 201103L
-#define SZ_IS_CPP11_ 1
-#else
-#define SZ_IS_CPP11_ 0
-#endif
-#if SZ_CPP_LANG_ >= 199711L
-#define SZ_IS_CPP98_ 1
-#else
-#define SZ_IS_CPP98_ 0
-#endif
-
-/**
- *  @brief Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
- *      Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
- *
- *  The `constexpr` keyword has different applicability scope in different C++ versions.
- *  - C++11: Introduced `constexpr`, but no loops or multiple `return` statements were allowed.
- *  - C++14: Allowed loops, multiple statements, and local variables in `constexpr` functions.
- *  - C++17: Added the `if constexpr` construct for compile-time branching.
- *  - C++20: Added some dynamic memory allocations, `virtual` functions, and `try`/`catch` blocks.
- */
-#if SZ_IS_CPP14_
-#define sz_constexpr_if_cpp14 constexpr
-#else
-#define sz_constexpr_if_cpp14
-#endif
-#if SZ_IS_CPP20_
-#define sz_constexpr_if_cpp20 constexpr
-#else
-#define sz_constexpr_if_cpp20
+/*  MSVC pins `__cplusplus` at 199711L unless `/Zc:__cplusplus` is passed, so read `_MSVC_LANG` there. */
+#if (defined(_MSVC_LANG) ? _MSVC_LANG : __cplusplus) < 202002L
+#error "StringZilla's C++ interface requires C++20; the C interface in `stringzilla.h` has no such floor."
 #endif
 
 #if defined(_MSC_VER)
@@ -124,23 +67,12 @@
 #define SZ_NOIPA SZ_NOINLINE
 #endif
 
-/**
- *  C++20 concepts: enabled when both the language standard and the compiler
- *  feature-test macro confirm support.  NVCC defers to the host compiler,
- *  so the __cpp_concepts check covers MSVC, GCC, and Clang under nvcc alike.
- */
-#if __cplusplus > 201703L && defined(__cpp_concepts) && __cpp_concepts >= 201907L
-#define SZ_HAS_CONCEPTS_ 1
-#else
-#define SZ_HAS_CONCEPTS_ 0
-#endif
-
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
 #include <limits>           // `std::numeric_limits`
 #include <memory>           // `std::allocator_traits` for allocator rebinding
-#include <type_traits>      // `is_same_type`, `std::enable_if`, etc.
+#include <type_traits>      // `std::is_const_v`, `std::is_arithmetic_v`, `std::is_trivially_destructible`
 #endif
 
 namespace ashvardanian {
@@ -250,12 +182,12 @@ struct span {
 
     constexpr span() noexcept = default;
     constexpr span(value_type *data) noexcept : data_(data) {}
-    sz_constexpr_if_cpp14 span(value_type *data, size_type size) noexcept : data_(data) {
+    constexpr span(value_type *data, size_type size) noexcept : data_(data) {
         sz_assert_(extent == size && "The second argument is only intended for compatibility");
         sz_unused_(size);
     }
 
-    sz_constexpr_if_cpp14 explicit operator bool() const noexcept { return data_ != nullptr; }
+    constexpr explicit operator bool() const noexcept { return data_ != nullptr; }
 
     constexpr value_type *begin() const noexcept { return data_; }
     constexpr value_type *end() const noexcept { return data_ + extent; }
@@ -268,9 +200,9 @@ struct span {
     constexpr value_type &back() const noexcept { return data_[extent - 1]; }
     constexpr bool empty() const noexcept { return extent == 0; }
 
-    template <typename same_value_type_ = value_type,
-              typename = typename std::enable_if<!std::is_const<same_value_type_>::value>::type>
-    constexpr operator span<typename std::add_const<same_value_type_>::type>() const noexcept {
+    constexpr operator span<value_type const>() const noexcept
+        requires(!std::is_const_v<value_type>)
+    {
         return {data_};
     }
 
@@ -280,7 +212,7 @@ struct span {
             reinterpret_cast<other_value_type_ *>(data_));
     }
 
-    sz_constexpr_if_cpp14 span<value_type, SZ_SIZE_MAX> subspan(size_type offset, size_type count) const noexcept {
+    constexpr span<value_type, SZ_SIZE_MAX> subspan(size_type offset, size_type count) const noexcept {
         sz_assert_(offset + count <= extent && "Subspan out of bounds");
         return span<value_type, SZ_SIZE_MAX>(data_ + offset, count);
     }
@@ -301,7 +233,7 @@ struct span<value_type_, SZ_SIZE_MAX> {
     constexpr span(value_type *data, value_type *end) noexcept
         : data_(data), size_(static_cast<size_type>(end - data)) {}
 
-    sz_constexpr_if_cpp14 explicit operator bool() const noexcept { return data_ != nullptr; }
+    constexpr explicit operator bool() const noexcept { return data_ != nullptr; }
 
     constexpr value_type *begin() const noexcept { return data_; }
     constexpr value_type *end() const noexcept { return data_ + size_; }
@@ -314,9 +246,9 @@ struct span<value_type_, SZ_SIZE_MAX> {
     constexpr value_type &back() const noexcept { return data_[size_ - 1]; }
     constexpr bool empty() const noexcept { return size_ == 0; }
 
-    template <typename same_value_type_ = value_type,
-              typename = typename std::enable_if<!std::is_const<same_value_type_>::value>::type>
-    constexpr operator span<typename std::add_const<same_value_type_>::type>() const noexcept {
+    constexpr operator span<value_type const>() const noexcept
+        requires(!std::is_const_v<value_type>)
+    {
         return {data_, size_};
     }
 
@@ -326,13 +258,13 @@ struct span<value_type_, SZ_SIZE_MAX> {
                                        size_ * sizeof(value_type) / sizeof(other_value_type_));
     }
 
-    sz_constexpr_if_cpp14 span subspan(size_type offset, size_type count) const noexcept {
+    constexpr span subspan(size_type offset, size_type count) const noexcept {
         sz_assert_(offset + count <= size_ && "Subspan out of bounds");
         return span(data_ + offset, count);
     }
 
     /** @brief Returns the i-th equal slice when this span is divided into n parts. Last part absorbs remainder. */
-    sz_constexpr_if_cpp14 span part_i_of_n(size_type i, size_type n) const noexcept {
+    constexpr span part_i_of_n(size_type i, size_type n) const noexcept {
         size_type const slice = size_ / n;
         size_type const offset = i * slice;
         size_type const count = (i + 1 == n) ? size_ - offset : slice;
@@ -340,7 +272,7 @@ struct span<value_type_, SZ_SIZE_MAX> {
     }
 
     /** @brief Lexicographic equality comparison for STL compatibility. */
-    sz_constexpr_if_cpp14 bool operator==(span const &other) const noexcept {
+    constexpr bool operator==(span const &other) const noexcept {
         if (size_ != other.size_) return false;
         for (size_type i = 0; i < size_; ++i)
             if (data_[i] != other.data_[i]) return false;
@@ -348,10 +280,10 @@ struct span<value_type_, SZ_SIZE_MAX> {
     }
 
     /** @brief Lexicographic inequality comparison for STL compatibility. */
-    sz_constexpr_if_cpp14 bool operator!=(span const &other) const noexcept { return !(*this == other); }
+    constexpr bool operator!=(span const &other) const noexcept { return !(*this == other); }
 
     /** @brief Lexicographic less-than comparison for STL compatibility. */
-    sz_constexpr_if_cpp14 bool operator<(span const &other) const noexcept {
+    constexpr bool operator<(span const &other) const noexcept {
         size_type const min_size = size_ < other.size_ ? size_ : other.size_;
         for (size_type i = 0; i < min_size; ++i) {
             if (data_[i] < other.data_[i]) return true;
@@ -399,8 +331,8 @@ struct dummy_alloc {
     template <typename other_value_type_>
     constexpr dummy_alloc(dummy_alloc<other_value_type_> const &) noexcept {}
 
-    sz_constexpr_if_cpp14 value_type *allocate(size_type) const noexcept { return nullptr; }
-    sz_constexpr_if_cpp14 void deallocate(pointer, size_type) const noexcept {}
+    constexpr value_type *allocate(size_type) const noexcept { return nullptr; }
+    constexpr void deallocate(pointer, size_type) const noexcept {}
 
     template <typename other_type_>
     constexpr bool operator==(dummy_alloc<other_type_> const &) const noexcept {
@@ -450,44 +382,44 @@ struct indexed_container_iterator {
     };
 
     constexpr proxy operator->() const noexcept { return proxy(operator*()); }
-    sz_constexpr_if_cpp14 indexed_container_iterator &operator++() noexcept {
+    constexpr indexed_container_iterator &operator++() noexcept {
         ++index_;
         return *this;
     }
 
-    sz_constexpr_if_cpp14 indexed_container_iterator operator++(int) noexcept {
+    constexpr indexed_container_iterator operator++(int) noexcept {
         indexed_container_iterator temp = *this;
         ++index_;
         return temp;
     }
 
-    sz_constexpr_if_cpp14 indexed_container_iterator &operator--() noexcept {
+    constexpr indexed_container_iterator &operator--() noexcept {
         --index_;
         return *this;
     }
 
-    sz_constexpr_if_cpp14 indexed_container_iterator operator--(int) noexcept {
+    constexpr indexed_container_iterator operator--(int) noexcept {
         indexed_container_iterator temp = *this;
         --index_;
         return temp;
     }
 
-    sz_constexpr_if_cpp14 indexed_container_iterator &operator+=(difference_type n) noexcept {
+    constexpr indexed_container_iterator &operator+=(difference_type n) noexcept {
         index_ += n;
         return *this;
     }
 
-    sz_constexpr_if_cpp14 indexed_container_iterator &operator-=(difference_type n) noexcept {
+    constexpr indexed_container_iterator &operator-=(difference_type n) noexcept {
         index_ -= n;
         return *this;
     }
 
-    sz_constexpr_if_cpp14 indexed_container_iterator operator+(difference_type n) const noexcept {
+    constexpr indexed_container_iterator operator+(difference_type n) const noexcept {
         indexed_container_iterator temp = *this;
         return temp += n;
     }
 
-    sz_constexpr_if_cpp14 indexed_container_iterator operator-(difference_type n) const noexcept {
+    constexpr indexed_container_iterator operator-(difference_type n) const noexcept {
         indexed_container_iterator temp = *this;
         return temp -= n;
     }
@@ -650,13 +582,13 @@ struct arrow_strings_tape {
     arrow_strings_tape(arrow_strings_tape const &) = delete;
     arrow_strings_tape &operator=(arrow_strings_tape const &) = delete;
 
-    sz_constexpr_if_cpp20 arrow_strings_tape(arrow_strings_tape &&other) noexcept
+    constexpr arrow_strings_tape(arrow_strings_tape &&other) noexcept
         : buffer_(other.buffer_), offsets_(other.offsets_), char_alloc_(std::move(other.char_alloc_)),
           offset_alloc_(std::move(other.offset_alloc_)), count_(other.count_) {
         other.buffer_ = {}, other.offsets_ = {}, other.count_ = 0;
     }
 
-    sz_constexpr_if_cpp20 arrow_strings_tape &operator=(arrow_strings_tape &&other) noexcept {
+    constexpr arrow_strings_tape &operator=(arrow_strings_tape &&other) noexcept {
         reset();
         buffer_ = other.buffer_, offsets_ = other.offsets_;
         char_alloc_ = std::move(other.char_alloc_), offset_alloc_ = std::move(other.offset_alloc_);
@@ -668,8 +600,8 @@ struct arrow_strings_tape {
     constexpr arrow_strings_tape(span<char_t> buffer, span<offset_t> offsets, allocator_t alloc)
         : buffer_(buffer), offsets_(offsets), char_alloc_(alloc), offset_alloc_(alloc) {}
 
-    sz_constexpr_if_cpp20 ~arrow_strings_tape() noexcept { reset(); }
-    sz_constexpr_if_cpp20 void reset() noexcept {
+    constexpr ~arrow_strings_tape() noexcept { reset(); }
+    constexpr void reset() noexcept {
         if (buffer_.data_) char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_), buffer_ = {};
         if (offsets_.data_)
             offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_), offsets_ = {};
@@ -778,7 +710,7 @@ struct arrow_strings_tape {
         return status_t::success_k;
     }
 
-    sz_constexpr_if_cpp14 value_type operator[](size_t i) const noexcept {
+    constexpr value_type operator[](size_t i) const noexcept {
         sz_assert_(i < count_ && "Index out of bounds");
         return {buffer_.data_ + offsets_.data_[i], offsets_.data_[i + 1] - offsets_.data_[i] - 1};
     }
@@ -807,29 +739,29 @@ struct constant_iterator {
     constexpr reference operator*() const { return value_; }
     constexpr pointer operator->() const { return &value_; }
 
-    sz_constexpr_if_cpp14 constant_iterator &operator++() {
+    constexpr constant_iterator &operator++() {
         ++pos_;
         return *this;
     }
-    sz_constexpr_if_cpp14 constant_iterator operator++(int) {
+    constexpr constant_iterator operator++(int) {
         constant_iterator temp(*this);
         ++pos_;
         return temp;
     }
-    sz_constexpr_if_cpp14 constant_iterator &operator--() {
+    constexpr constant_iterator &operator--() {
         --pos_;
         return *this;
     }
-    sz_constexpr_if_cpp14 constant_iterator operator--(int) {
+    constexpr constant_iterator operator--(int) {
         constant_iterator temp(*this);
         --pos_;
         return temp;
     }
-    sz_constexpr_if_cpp14 constant_iterator &operator+=(difference_type n) {
+    constexpr constant_iterator &operator+=(difference_type n) {
         pos_ += n;
         return *this;
     }
-    sz_constexpr_if_cpp14 constant_iterator &operator-=(difference_type n) {
+    constexpr constant_iterator &operator-=(difference_type n) {
         pos_ -= n;
         return *this;
     }
@@ -871,10 +803,8 @@ struct random_access_range {
     }
 };
 
-#if SZ_IS_CPP17_ // ? Template deduction guides are available in C++17 and later
 template <typename begin_type_, typename end_type_>
 random_access_range(begin_type_, end_type_) -> random_access_range<begin_type_, end_type_>;
-#endif
 
 template <typename value_type_, size_t count_>
 struct safe_array {
@@ -886,14 +816,14 @@ struct safe_array {
 
     value_type data_[count_k] = {};
 
-    sz_constexpr_if_cpp14 value_type &operator[](size_type i) noexcept { return data_[i]; }
+    constexpr value_type &operator[](size_type i) noexcept { return data_[i]; }
     constexpr value_type const &operator[](size_type i) const noexcept { return data_[i]; }
     constexpr size_type size() const noexcept { return count_k; }
-    sz_constexpr_if_cpp14 value_type *data() noexcept { return data_; }
+    constexpr value_type *data() noexcept { return data_; }
     constexpr value_type const *data() const noexcept { return data_; }
-    sz_constexpr_if_cpp14 iterator begin() noexcept { return data_; }
+    constexpr iterator begin() noexcept { return data_; }
     constexpr const_iterator begin() const noexcept { return data_; }
-    sz_constexpr_if_cpp14 iterator end() noexcept { return data_ + count_k; }
+    constexpr iterator end() noexcept { return data_ + count_k; }
     constexpr const_iterator end() const noexcept { return data_ + count_k; }
 
     operator span<value_type, count_k>() noexcept { return span<value_type, count_k>(data_); }
@@ -1024,7 +954,7 @@ struct gpu_specs_t {
  *  @note This is equivalent to `ceil(x / divisor)`, but avoids floating-point arithmetic.
  */
 template <typename scalar_type_>
-sz_constexpr_if_cpp14 scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
+constexpr scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
     sz_assert_(divisor > 0 && "Divisor must be positive");
     return (x + divisor - 1) / divisor;
 }
@@ -1033,7 +963,7 @@ sz_constexpr_if_cpp14 scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ 
  *  @brief Rounds @p x up to the nearest multiple of @p divisor.
  */
 template <typename scalar_type_>
-sz_constexpr_if_cpp14 scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
+constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
     sz_assert_(divisor > 0 && "Divisor must be positive");
     return divide_round_up(x, divisor) * divisor;
 }
@@ -1046,7 +976,7 @@ sz_constexpr_if_cpp14 scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_t
  *  @note Unrolled rather than delegating to `sz_u64_clz`, which is an intrinsic wrapper and not `constexpr`.
  */
 template <typename scalar_type_>
-sz_constexpr_if_cpp14 int bit_width(scalar_type_ x) noexcept {
+constexpr int bit_width(scalar_type_ x) noexcept {
     static_assert(std::is_unsigned<scalar_type_>::value, "Value type must be unsigned integer");
     u64_t wide = (u64_t)x;
     int width = 0;
@@ -1068,7 +998,7 @@ sz_constexpr_if_cpp14 int bit_width(scalar_type_ x) noexcept {
  *  `std::sqrt`.
  */
 template <typename scalar_type_>
-sz_constexpr_if_cpp14 scalar_type_ integer_square_root(scalar_type_ x) noexcept {
+constexpr scalar_type_ integer_square_root(scalar_type_ x) noexcept {
     static_assert(std::is_unsigned<scalar_type_>::value, "Value type must be unsigned integer");
     static_assert(sizeof(scalar_type_) <= sizeof(u64_t), "Newton ladder is sized for at most 64-bit inputs");
     if (x <= 1) return x;
@@ -1086,7 +1016,7 @@ sz_constexpr_if_cpp14 scalar_type_ integer_square_root(scalar_type_ x) noexcept 
  *  @brief Equivalent to `(condition ? value : 0)`, but avoids branching.
  */
 template <typename value_type_>
-sz_constexpr_if_cpp14 value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
+constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
     static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
     sz_assert_((condition == 0 || condition == 1) && "Condition must be either 0 or 1 unsigned integer");
     return value * condition;
@@ -1096,7 +1026,7 @@ sz_constexpr_if_cpp14 value_type_ non_zero_if(value_type_ value, value_type_ con
  *  @brief Analog to `std::swap` from `<utility>`, but generates also device code, unlike STL.
  */
 template <typename value_type_>
-sz_constexpr_if_cpp14 void trivial_swap(value_type_ &x, value_type_ &y) noexcept {
+constexpr void trivial_swap(value_type_ &x, value_type_ &y) noexcept {
     static_assert(std::is_trivially_copyable<value_type_>::value, "Value type must be trivially copyable");
     value_type_ temp = x;
     x = y;
@@ -1117,7 +1047,7 @@ struct head_body_tail_t {
 };
 
 template <size_t elements_per_page_, typename element_type_>
-sz_constexpr_if_cpp14 head_body_tail_t head_body_tail(element_type_ *first_address, size_t total_length) noexcept {
+constexpr head_body_tail_t head_body_tail(element_type_ *first_address, size_t total_length) noexcept {
     constexpr size_t bytes_per_element = sizeof(element_type_);
     constexpr size_t bytes_per_page = elements_per_page_ * bytes_per_element;
     static_assert(bytes_per_page > 0, "Slice size must be positive");
@@ -1174,16 +1104,9 @@ class safe_vector {
      *  (see @ref device_alloc ). Allocators that say nothing - `std::allocator` included -
      *  are assumed reachable, so nothing else needs changing.
      */
-    template <typename probed_type_>
-    static constexpr bool allocator_host_accessible_(decltype(probed_type_::host_accessible_k) *) noexcept {
-        return probed_type_::host_accessible_k;
-    }
-    template <typename probed_type_>
-    static constexpr bool allocator_host_accessible_(...) noexcept {
-        return true;
-    }
     static constexpr bool allocator_reachable_from_host_() noexcept {
-        return allocator_host_accessible_<allocator_type>(nullptr);
+        if constexpr (requires { allocator_type::host_accessible_k; }) return allocator_type::host_accessible_k;
+        else return true;
     }
 
   public:
@@ -1192,7 +1115,7 @@ class safe_vector {
     ~safe_vector() noexcept { reset(); }
 
     void clear() noexcept {
-        if (!std::is_trivially_destructible<value_type>::value)
+        if constexpr (!std::is_trivially_destructible<value_type>::value)
             for (size_type i = 0; i < size_; ++i) data_[i].~value_type();
         size_ = 0;
     }
@@ -1245,7 +1168,7 @@ class safe_vector {
         capacity_ = new_cap;
 
         // Copy‐construct each element
-        if (!std::is_trivially_constructible<value_type>::value)
+        if constexpr (!std::is_trivially_constructible<value_type>::value)
             for (size_type i = 0; i < other.size(); ++i) new (data_ + i) value_type(other[i]);
         else
             for (size_type i = 0; i < other.size(); ++i) data_[i] = other[i];
@@ -1255,7 +1178,7 @@ class safe_vector {
 
     template <typename other_allocator_type_ = allocator_type>
     status_t try_assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
-        if (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
+        if constexpr (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
         return try_assign(span<value_type>(other.data(), other.size()));
     }
 
@@ -1267,7 +1190,7 @@ class safe_vector {
         if (!new_data) return status_t::bad_alloc_k;
         for (size_type i = 0; i < size_; ++i) {
             new (new_data + i) value_type(std::move(data_[i]));
-            if (!std::is_trivially_destructible<value_type>::value) data_[i].~value_type();
+            if constexpr (!std::is_trivially_destructible<value_type>::value) data_[i].~value_type();
         }
         if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
         data_ = new_data;
@@ -1279,11 +1202,11 @@ class safe_vector {
         if (new_size > capacity_ && try_reserve(new_size) != status_t::success_k) return status_t::bad_alloc_k;
 
         if (new_size > size_) {
-            if (!std::is_trivially_constructible<value_type>::value)
+            if constexpr (!std::is_trivially_constructible<value_type>::value)
                 for (size_type i = size_; i < new_size; ++i) new (data_ + i) value_type();
         }
         else if (new_size < size_) {
-            if (!std::is_trivially_destructible<value_type>::value)
+            if constexpr (!std::is_trivially_destructible<value_type>::value)
                 for (size_type i = new_size; i < size_; ++i) data_[i].~value_type();
         }
 
@@ -1378,6 +1301,7 @@ class safe_vector {
     operator span<value_type>() noexcept { return {data_, size_}; }
     operator span<value_type const>() const noexcept { return {data_, size_}; }
 };
+
 
 #if SZ_USE_CUDA
 #pragma region CUDA Allocators

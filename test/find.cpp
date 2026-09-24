@@ -56,9 +56,6 @@
 #include <string_view> // Baseline
 #include <vector>      // `std::vector`
 
-#if !SZ_IS_CPP11_
-#error "This test requires C++11 or later."
-#endif
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -67,9 +64,7 @@ using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
 
-#if SZ_IS_CPP17_
 using namespace std::literals; // for ""sv
-#endif
 
 #pragma region Helpers
 
@@ -559,7 +554,6 @@ void check_byteset_equivalence_(reference_ reference, candidate_ candidate, sz_s
 
 #pragma region Safety
 
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
 /**
  *  @brief Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl
@@ -754,7 +748,6 @@ void test_find_misaligned_equivalence() {
     check_find_misaligned_("axabbcxcaaabbccc", "aaabbccc");
 }
 
-#endif
 
 /** @brief Evaluates the correctness of look-up table transforms using random lookup tables. */
 void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {

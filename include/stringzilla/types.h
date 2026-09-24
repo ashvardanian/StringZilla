@@ -187,9 +187,8 @@
 // few portable ones wrapping a builtin or a type-punned load - carries `SZ_HELPER_INLINE` instead, which
 // is why no translation unit needs a `-Wno-` flag to compile this header.
 //
-// C++20 is the floor rather than C++11 because these helpers declare their locals before filling them, and
-// only C++20 permits an uninitialized local in a `constexpr` function. An older dialect - the Python
-// extensions build at C++17 - gets the same plain inline function it had before the qualifier existed.
+// The qualifier waits for C++20 because these helpers declare their locals before filling them, which only
+// C++20 permits in a `constexpr` function. C, and an older C++ dialect reaching the C API, get the plain helper.
 //
 // MSVC is the one front end that gets the plain helper: its bit-scan and byte-swap intrinsics are not
 // constant-evaluable, so `sz_u64_ctz` and every helper that reaches one - `sz_size_bit_ceil`, the folded
@@ -1550,10 +1549,7 @@ SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views
  *         The default often comes from locale.h, stddef.h,
  *         stdio.h, stdlib.h, string.h, time.h, or wchar.h.
  */
-#ifdef __GNUG__
-#define SZ_NULL __null
-#define SZ_NULL_CHAR __null
-#elif defined(__cplusplus)
+#if defined(__cplusplus)
 #define SZ_NULL nullptr
 #define SZ_NULL_CHAR nullptr
 #else

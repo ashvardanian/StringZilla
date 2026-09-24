@@ -126,7 +126,7 @@ The umbrella header also exposes the version triple as `STRINGZILLA_H_VERSION_MA
 
 ### Compilers and Platforms
 
-The headers require only C 99 and C++ 11, so any reasonably modern compiler builds the serial and SWAR baseline.
+The headers require only C 99 and C++ 20, so any reasonably modern compiler builds the serial and SWAR baseline.
 The per-ISA SIMD kernels and the project's own tests are CI-validated with these toolchains:
 
 | Toolchain | Recommended Versions |

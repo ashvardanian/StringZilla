@@ -20,8 +20,7 @@
  *  high-density / long-range generators emit runs through a @ref utf8_run_sink_t callback rather than returning
  *  containers.
  *
- *  Everything here is `inline` (the header is included into four TUs) and C++11-clean (uses `sz::string_view`,
- *  never `std::string_view`/`std::span`).
+ *  Everything here is `inline`, since the header is included into four translation units.
  */
 #ifndef STRINGZILLA_TEST_UTF8_HPP_
 #define STRINGZILLA_TEST_UTF8_HPP_
