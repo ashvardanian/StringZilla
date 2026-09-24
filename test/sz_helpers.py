@@ -1307,7 +1307,7 @@ def representatives_by_class(
 # `SystemRandom` gives true randomness independent of the seeded RNG state.
 _random_seed_for_run = int.from_bytes(os.urandom(4), "little")
 
-# Reproducible test seeds for consistent CI runs (kept in sync with test/stringzillas.py).
+# Reproducible test seeds for consistent CI runs.
 SEED_VALUES = [
     42,  # Classic test seed
     0,  # Edge case: zero seed

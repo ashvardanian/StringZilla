@@ -178,7 +178,7 @@ Consider contributing if you need a feature that's not yet implemented.
 ## Quick Start
 
 Each binding has its own install command, import line, and dedicated guide, all collected in the per-language sections below.
-The batch and GPU engines ship separately, as `stringzillas-cpus` and `stringzillas-cuda` on PyPI and the `cpus` and `cuda` crate features; each binding's guide covers the details.
+The batch engines ship inside the same package and the same crate as the single-string kernels, so there is nothing extra to install for them.
 
 ### Python
 
@@ -193,7 +193,7 @@ text.split()                # Strs(['the', 'quick', 'brown', 'fox'])
 sz.hash("hello")            # fast 64-bit hash
 ```
 
-The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing, UTF-8 segmentation, and Unicode case-folding, plus the batch-parallel `stringzillas` engines for edit distances and rolling fingerprints.
+The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing, UTF-8 segmentation, and Unicode case-folding, plus the batch engines that score one prepared set of queries against many collections of candidates.
 
 ### C and C++
 
@@ -223,7 +223,7 @@ assert_eq!(sz::find("the quick brown fox", "brown"), Some(10));
 let digest = sz::hash("hello"); // fast 64-bit hash
 ```
 
-The crate adds SIMD search, sorting, hashing, and UTF-8 segmentation to any `AsRef<[u8]>`, with the optional `stringzillas` engines for batch edit distances and rolling fingerprints.
+The crate adds SIMD search, sorting, hashing, and UTF-8 segmentation to any `AsRef<[u8]>`, plus the `LevenshteinEngine`, `OverlapEngine` and `SubstringsEngine` batch engines, whose device arms come with the `cuda` feature.
 
 ### JavaScript
 

@@ -1,13 +1,13 @@
 # StringZilla for Rust
 
 `stringzilla` is a Rust crate for fast string processing with SWAR, SIMD, and GPGPU acceleration.
-It exposes two modules, each re-exported under a short alias for convenience:
+It exposes one module, `stringzilla`, re-exported under the short alias `sz`, covering two kinds of work:
 
-- `stringzilla`, aliased `sz` — single-string operations: search, counting, splitting, hashing, sorting, UTF-8 segmentation, normalization, and case folding.
-- `stringzillas`, aliased `szs` — batch/parallel engines: byte and UTF-8 Levenshtein distances, Needleman-Wunsch and Smith-Waterman alignment scores, and Min-Hash fingerprints, with CPU multi-threading and optional CUDA/ROCm offload.
+- __single-string operations__ — search, counting, splitting, hashing, sorting, UTF-8 segmentation, normalization, and case folding.
+- __batch engines__ — Levenshtein distances, window overlap, and multi-pattern substring search, each a stateful cross-product engine prepared once from a batch of queries and reused across every later round.
 
-The single-string module is `no_std`-friendly and SIMD-accelerated; most of its surface is exposed both as free functions in `sz` and as ergonomic extension-trait methods on any `AsRef<[u8]>` — `&str`, `String`, `&[u8]`, `Vec<u8>`, `Cow<str>`, and more.
-The batch module is gated behind the parallel-backend features and operates over slices of strings, returning dense result matrices in unified memory.
+The crate is `no_std`-friendly and SIMD-accelerated; most of the single-string surface is exposed both as free functions in `sz` and as ergonomic extension-trait methods on any `AsRef<[u8]>` — `&str`, `String`, `&[u8]`, `Vec<u8>`, `Cow<str>`, and more.
+The engines take slices of anything `AsRef<[u8]>` and write into caller-owned buffers at a caller-chosen stride, so a pipeline allocates once and reuses those buffers across every batch.
 
 ## Installation
 
@@ -32,27 +32,22 @@ The crate ships the C/C++ sources and compiles them through a `build.rs` via `cc
 | :----------------- | :-----: | :------------------------------------------------- |
 | `std`              |   yes   | `std` support, else `no_std`                       |
 | `dynamic-dispatch` |   yes   | Runtime SIMD dispatch; disable to bake in one tier |
-| `cpus`             |   no    | Multi-threaded CPU backend                         |
-| `cuda`             |   no    | CUDA GPU backend; implies `cpus`                   |
-| `rocm`             |   no    | ROCm GPU backend; implies `cpus`                   |
+| `cuda`             |   no    | CUDA GPU backend, behind every `new_on_gpu`        |
 
 Without `std` the crate is `no_std`; `std` is also required for the `BuildSzHasher` integration with `HashMap`/`HashSet`.
-The `cpus` backend compiles the `stringzillas` module and pulls in `allocator-api2` and `stringtape`.
-The entire `stringzillas` module is compiled only when at least one of `cpus`, `cuda`, or `rocm` is enabled:
+The `cuda` feature compiles the CUDA backend and unlocks each engine's `new_on_gpu` constructor; without it the engines are host-only and every other verb is unchanged:
 
 ```toml
 [dependencies]
-stringzilla = { version = "5", features = ["cpus"] }   # CPU batch engines
-# stringzilla = { version = "5", features = ["cuda"] } # CUDA-accelerated batch engines
+stringzilla = { version = "5", features = ["cuda"] } # CUDA-accelerated engines
 ```
 
-Import either by full module name or by alias:
+Import by full module name or by alias:
 
 ```rust
-use stringzilla::sz;                       // single-string free functions
+use stringzilla::sz;                       // free functions and batch engines
 use stringzilla::sz::StringZillableBinary; // search/split extension methods
 use stringzilla::sz::StringZillableUnary;  // hash/segmentation extension methods
-use stringzilla::szs;                      // batch engines (needs cpus/cuda/rocm)
 ```
 
 ### Dynamic vs Compile-Time Dispatch
@@ -88,7 +83,7 @@ stringzilla = { version = "5", default-features = false, features = ["std"] }
 Every tier can be forced on or off with its `SZ_USE_*` environment variable (`SZ_USE_SVE2=0 cargo build`), overriding the run gate but never the compile gate; the CMake build honors the same names as cache options (`-D SZ_USE_SVE2=0`).
 For a portable compile-time build, cross-describe the floor instead of probing the machine: pin `-C target-feature=…` (or `-C target-cpu=…`) to the oldest deployment CPU.
 `sz::dynamic_dispatch()` reports which mode the crate was built with.
-This setting applies to the single-string `sz` library; the batch `stringzillas` engines (`cpus`/`cuda`/`rocm`) always use runtime dispatch.
+An engine resolves its ISA tier once, when it is constructed, under either mode — so the table costs it one branch per round rather than one per call.
 
 ## Types
 
@@ -626,242 +621,188 @@ sz::fill_random(&mut b, 42);
 assert_eq!(a, b); // identical nonce → identical bytes
 ```
 
-## Edit Distances and Alignment Scores
+## Edit Distances
 
-The `szs` module, gated behind feature `cpus`, `cuda`, or `rocm`, provides batch engines that compute dense cross-product matrices over slices of strings.
-Every engine is created against a `DeviceScope` and exposes `compute`, `compute_symmetric`, and `compute_into`.
-
-`compute<T, S>` and `compute_symmetric<T, S>` are generic over `T: AsRef<[S]>` and `S: AsRef<[u8]>`, so they accept `Vec<&str>`, `&[String]`, `Vec<Vec<u8>>`, and similar.
-Results are returned as `UnifiedMat<usize>` for distances or `UnifiedMat<isize>` for scores, a row-major `queries × candidates` matrix indexable with `matrix[(query, candidate)]`, with `dimensions()`, `queries_count()`, `candidates_count()`, `row(i)`, `row_stride()`, and `as_slice()` accessors.
-
-### Levenshtein Distances, Byte and UTF-8
-
-Each engine is constructed with match, mismatch, and gap open/extend costs, then exposes `compute` for a cross-product matrix and `compute_symmetric` for self-similarity.
+`LevenshteinEngine` prepares a batch of queries once — Myers' bit-parallel masks, the ISA tier, and on a device the launch geometry — then scores as many batches of candidates against it as a caller has.
+Preparation is the expensive half, so a long-lived engine amortizes it across every later round, and the round's scratch grows to fit the widest batch it has seen and is never shrunk.
 
 ```rust
-LevenshteinDistances::new(device, match_cost: i8, mismatch_cost: i8, open_cost: i8, extend_cost: i8)
-    -> Result<Self, Error>;
-LevenshteinDistancesUtf8::new(device, match_cost: i8, mismatch_cost: i8, open_cost: i8, extend_cost: i8)
-    -> Result<Self, Error>;
+fn new<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol) -> Result<LevenshteinEngine, Status>;
+unsafe fn new_on_gpu<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol, stream: *mut c_void)
+    -> Result<LevenshteinEngine, Status>;                                      // needs `cuda`
 
-fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<usize>, Error>;
-fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<usize>, Error>;
+fn distances<C: AsRef<[u8]>>(&mut self, candidates: &[C], distances: &mut [usize],
+    distances_stride: usize) -> Result<(), Status>;
 ```
 
-`LevenshteinDistances` works at the byte level; `LevenshteinDistancesUtf8` operates on Unicode codepoints and is correct for international text.
-Costs are: `match_cost`, typically `0`, then `mismatch_cost`, gap `open_cost`, and gap `extend_cost`.
+`LevenshteinSymbol::Bytes` counts bytes and `LevenshteinSymbol::Runes` counts UTF-8 runes, an ill-formed byte decoding to `U+FFFD`; the two alphabets are one engine and one verb rather than two spellings.
+Costs are unit — one per substitution, insertion and deletion — and there are no gap costs and no substitution matrix.
+
+The output is a `[queries, candidates]` block the caller owns: query `q` against candidate `c` lands at `distances[q * distances_stride + c]`, the stride counting entries rather than bytes and being at least the candidate count.
+A stride wider than the candidate count is what lets one round fill a sub-block of a larger matrix.
 
 ```rust
-use stringzilla::szs::{DeviceScope, LevenshteinDistances, LevenshteinDistancesUtf8};
+use stringzilla::sz::{LevenshteinEngine, LevenshteinSymbol};
 
-let device = DeviceScope::default().unwrap();
-let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
+let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes).unwrap();
 
-let queries = vec!["cat", "dog"];
-let candidates = vec!["bat", "fog", "word"];
-let matrix = engine.compute(&device, &queries, &candidates).unwrap();
-assert_eq!(matrix.dimensions(), (2, 3));
-assert_eq!(matrix[(0, 0)], 1); // cat vs bat
+let mut distances = [0usize; 4];
+engine.distances(&["sitting", "sunday"], &mut distances, 2).unwrap();
+assert_eq!(distances[0], 3); // kitten vs sitting
+assert_eq!(distances[3], 3); // saturday vs sunday
 
-// Symmetric self-similarity (square matrix, symmetric, zero diagonal).
-let words = vec!["cat", "bat", "rat"];
-let sym = engine.compute_symmetric(&device, &words).unwrap();
-assert_eq!(sym[(0, 1)], sym[(1, 0)]);
+// The same engine, a second round, no preparation repeated.
+let mut again = [0usize; 2];
+engine.distances(&["mitten"], &mut again, 1).unwrap();
 
-// Unicode-aware variant.
-let utf8 = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
-let a = vec!["Hello", "こんにちは"];
-let b = vec!["Hallo", "こんばんは"];
-let _ = utf8.compute(&device, &a, &b).unwrap();
+// Runes rather than bytes, for text where a codepoint is the unit.
+let mut unicode = LevenshteinEngine::new(&["café"], LevenshteinSymbol::Runes).unwrap();
+let mut one = [0usize; 1];
+unicode.distances(&["cafe"], &mut one, 1).unwrap();
+assert_eq!(one[0], 1);
 ```
 
-### Needleman-Wunsch and Smith-Waterman Scores
+## Window Overlap
 
-Each engine is built from a substitution scheme and gap costs, then exposes `compute` and `compute_symmetric` returning signed-score matrices.
+`OverlapEngine` hashes and sorts a batch of queries into one B-tree forest over every window width, then streams candidates through it.
+A window is a fixed-width byte n-gram, and the overlap of two texts at that width is the count of one's windows that occur in the other, over whichever of the two holds more.
+Nothing is stored per candidate, so the candidates may change round to round while the queries and the widths stay.
 
 ```rust
-NeedlemanWunschScores::new(device, byte_to_class: &[u8; 256], class_substitution_costs: &[[i8; 32]; 32],
-    open_cost: i8, extend_cost: i8) -> Result<Self, Error>;
-SmithWatermanScores::new(device, byte_to_class: &[u8; 256], class_substitution_costs: &[[i8; 32]; 32],
-    open_cost: i8, extend_cost: i8) -> Result<Self, Error>;
+fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize]) -> Result<OverlapEngine, Status>;
+unsafe fn new_on_gpu<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], stream: *mut c_void)
+    -> Result<OverlapEngine, Status>;                                          // needs `cuda`
 
-fn compute<T, S>(&self, device, queries: T, candidates: T) -> Result<UnifiedMat<isize>, Error>;
-fn compute_symmetric<T, S>(&self, device, sequences: T) -> Result<UnifiedMat<isize>, Error>;
+fn scores<C: AsRef<[u8]>>(&mut self, candidates: &[C], scores: &mut [f32],
+    scores_query_stride: usize, scores_candidate_stride: usize) -> Result<(), Status>;
 ```
 
-Both take a substitution scheme: a 256-entry `byte_to_class` map sending each byte to one of 32 classes, plus a `32 × 32` `class_substitution_costs` matrix, then gap `open_cost` and `extend_cost`, typically negative.
-Needleman-Wunsch is global alignment; Smith-Waterman is local alignment.
-Scores are returned as `UnifiedMat<isize>`, where higher is more similar.
-
-Two helpers build a compact diagonal scheme:
+Widths are in bytes and need not form a doubling chain, since a window hash comes from a prefix difference that costs one modular multiply-add at any width; a width past a text scores zero for every pair it spans.
+The output is a `[queries, candidates, widths]` block with the width axis unit-strided: share `[q, c, w]` lands at `scores[q * query_stride + c * candidate_stride + w]`, each in `[0, 1]`.
+The score is asymmetric — a candidate's window occurrences count against a query's distinct windows — so swapping the two sides changes the answer whenever either repeats a window.
 
 ```rust
-pub fn error_costs_classes_diagonal(match_score: i8, mismatch_score: i8) -> ([u8; 256], [[i8; 32]; 32]);
-pub fn error_costs_classes_unary() -> ([u8; 256], [[i8; 32]; 32]); // == diagonal(0, -1)
+use stringzilla::sz::OverlapEngine;
+
+let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8]).unwrap();
+
+let mut scores = [0.0f32; 2];
+engine.scores(&["the quick brown cat"], &mut scores, 2, 2).unwrap();
+assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
 ```
-
-```rust
-use stringzilla::szs::{DeviceScope, NeedlemanWunschScores, SmithWatermanScores, error_costs_classes_diagonal};
-
-let device = DeviceScope::default().unwrap();
-let (byte_to_class, class_costs) = error_costs_classes_diagonal(2, -1);
-
-let nw = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
-let queries = vec!["ATCGATCG", "GGCCTTAA"];
-let candidates = vec!["ATCGATCC", "GGCCTTAA"];
-let scores = nw.compute(&device, &queries, &candidates).unwrap();
-assert_eq!(scores.dimensions(), (2, 2));
-
-let sw = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -3, -1).unwrap();
-let _local = sw.compute(&device, &queries, &candidates).unwrap();
-```
-
-### Computing into Preallocated Tapes
-
-For GPU work or to avoid reallocation, every engine also offers `compute_into`, which accepts an `AnyBytesTape<'a>` — an owned `BytesTape` or a zero-copy view, with 32- or 64-bit offsets — an optional candidates tape that is `None` for symmetric runs, and a `&mut UnifiedMat<...>`.
-The `compute` / `compute_symmetric` wrappers handle tape construction automatically, so most callers never touch `compute_into` directly.
-
-## Rolling Fingerprints
-
-`Fingerprints` is created through a builder and its `compute` returns the Min-Hash signatures and Count-Min-Sketch counts for a batch of strings.
-
-```rust
-Fingerprints::builder() -> FingerprintsBuilder;
-fn compute<T, S>(&self, device: &DeviceScope, strings: T, dimensions: usize)
-    -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>;
-```
-
-`Fingerprints` computes Min-Hash signatures and Count-Min-Sketch frequencies for locality-sensitive similarity, deduplication, and clustering.
-It is configured through `FingerprintsBuilder`:
-
-- `new()` — defaults: `dimensions = 1024`, `seed = 0`, hardware-optimized window widths.
-- `binary()` — 256-symbol alphabet of arbitrary bytes.
-- `ascii()` — 128-symbol alphabet.
-- `dna()` — 4-symbol alphabet of nucleotides.
-- `protein()` — amino-acid alphabet.
-- `alphabet_size(size: usize)` — explicit alphabet size.
-- `window_widths(widths: &[usize])` — n-gram window widths to hash.
-- `dimensions(dimensions: usize)` — number of hash functions per fingerprint.
-- `seed(seed: u64)` — reproducibility seed.
-- `build(device: &DeviceScope) -> Result<Fingerprints, Error>`.
-
-`compute` returns `(min_hashes, min_counts)`, each a `UnifiedVec<u32>` laid out as `num_strings × dimensions`, where entry `i * dimensions + j` is the j-th hash/count of string `i`:
-
-```rust
-use stringzilla::szs::{Fingerprints, DeviceScope};
-
-let device = DeviceScope::default().unwrap();
-let dimensions = 256;
-let engine = Fingerprints::builder()
-    .ascii()
-    .dimensions(dimensions)
-    .build(&device)
-    .unwrap();
-
-let documents = vec![
-    "The quick brown fox jumps over the lazy dog",
-    "A quick brown fox leaps over a lazy dog",
-];
-let (hashes, _counts) = engine.compute(&device, &documents, dimensions).unwrap();
-
-// Estimate Jaccard similarity between the two documents.
-let matches = (0..dimensions).filter(|&i| hashes[i] == hashes[dimensions + i]).count();
-let similarity = matches as f64 / dimensions as f64;
-println!("Estimated Jaccard similarity: {similarity:.3}");
-```
-
-`Fingerprints` also exposes `compute_into` for writing into caller-provided buffers via an `AnyBytesTape`.
 
 ## Multi-Pattern Search
 
-`Substrings` compiles a whole needle set into one Aho-Corasick automaton and walks every haystack against all of them at once, so a dictionary of thousands of terms costs one pass rather than thousands.
-Building it is the expensive half, and the engine is reusable, so a long-lived `Substrings` amortizes that across every later batch.
+`SubstringsEngine` compiles a whole needle set into one Aho-Corasick automaton and walks every haystack against all of them at once, so a dictionary of thousands of terms costs one pass rather than thousands.
+Building it is the expensive half and the engine is reusable, so a long-lived one amortizes that across every later batch.
 
 ```rust
-fn new<S>(device: &DeviceScope, needles: &[S], case_sensitivity: CaseSensitivity) -> Result<Substrings, Error>;
+fn new<N: AsRef<[u8]>>(needles: &[N], case_sensitivity: CaseSensitivity,
+    overlap_policy: SubstringsOverlapPolicy, hot_states: usize, matches_budget: usize)
+    -> Result<SubstringsEngine, Status>;
+unsafe fn new_on_gpu<N: AsRef<[u8]>>(/* the same, plus */ stream: *mut c_void)
+    -> Result<SubstringsEngine, Status>;                                       // needs `cuda`
 
-fn count_into(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, policy: OverlapPolicy,
-    counts: &mut [usize]) -> Result<usize, Error>;
-fn find_into(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, policy: OverlapPolicy,
-    matches: &mut [SubstringsMatch]) -> Result<usize, Error>;
-fn score_bm25_into(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, needle_weights: &[f32],
-    document_lengths: Option<&[f32]>, parameters: Bm25Params, scores: &mut [f32]) -> Result<(), Error>;
-fn replace_bound<R>(&self, replacements: &[R], input_bytes: usize) -> Result<usize, Error>;
-fn replace_into<R>(&self, device: &DeviceScope, haystacks: &AnyBytesTape<'_>, policy: OverlapPolicy,
-    replacements: &[R], output_data: &mut [u8], output_offsets: &mut [u64]) -> Result<usize, Error>;
+fn counts<H: AsRef<[u8]>>(&mut self, haystacks: &[H], counts: &mut [usize],
+    counts_stride: usize) -> Result<(), Status>;
+fn find<H: AsRef<[u8]>>(&mut self, haystacks: &[H], matches: &mut [SubstringsMatch],
+    matches_offsets: &mut [usize]) -> Result<(), Status>;
+fn replace<H: AsRef<[u8]>, R: AsRef<[u8]>>(&mut self, haystacks: &[H], replacements: &[R],
+    tape: &mut [u8], offsets: &mut [usize]) -> Result<(), Status>;
+fn bm25_scores<H: AsRef<[u8]>>(&mut self, haystacks: &[H], document_lengths: Option<&[f32]>,
+    parameters: &Bm25Params, needle_weights: &[f32], scores: &mut [f32],
+    scores_stride: usize) -> Result<(), Status>;
+
+fn report(&self) -> SubstringsReport;
 ```
 
-Every verb writes into caller-owned buffers, so a pipeline allocates once and reuses those buffers across every batch.
-On a GPU scope those buffers must be device-accessible, which [Unified Memory](#unified-memory) spells out.
-Haystacks arrive as an `AnyBytesTape`, which spells all three shapes the C API accepts — a 32- or 64-bit tape built by `AnyBytesTape::from_sequences`, or borrowed slices addressed by callback through `AnyBytesTape::from_slices`, which copies nothing.
-Only `replace_into` narrows that to the tapes, since a rewrite's product is itself a tape and there is nowhere to put one otherwise.
+`hot_states` sizes the automaton's dense tier, or takes `SUBSTRINGS_HOT_STATES_AUTO` to fill a fixed byte budget instead, which holds more states the fewer byte classes the vocabulary spells.
+`matches_budget` bounds what one round may emit and is read by a device tier alone, so a host engine takes `SUBSTRINGS_MATCHES_BUDGET_AUTO` and walks straight into the caller's output.
 
 `CaseSensitivity::Cased` matches bytes exactly and accepts arbitrary needles, while `CaseSensitivity::Uncased` folds both sides under full Unicode case folding and requires valid UTF-8.
 Folding is not a byte-length-preserving operation, so a 1-byte needle can match a 3-byte span — the Kelvin sign `U+212A` folds to `k` — which is why every `SubstringsMatch` carries its own `byte_length` rather than borrowing the needle's.
 
-`OverlapPolicy` decides what a walk reports, and travels per call rather than per engine, since one automaton serves all three:
+`SubstringsOverlapPolicy` decides what a walk reports, and it sizes the engine's arena, so it is fixed at construction and one engine runs exactly one of the three:
 
 - `Overlapping` — every match of every needle, nested and overlapping ones included.
-- `LeftmostLongest` — a non-overlapping cover taking the widest match at the earliest start.
-- `LeftmostFirst` — a non-overlapping cover taking the lowest needle index at the earliest start.
+- `LeftmostLongest` — a cover taking the widest match at the earliest start.
+- `LeftmostFirst` — a cover taking the lowest needle index at the earliest start.
+
+A capacity shortfall is not an error.
+The sizing walk always runs, so `report()` names `matches_emitted`, the true total; `matches_stored`, what was written; `tape_bytes`, what a rewrite needs; and `shortfall`, what did not fit.
+That is what lets one call with an empty output size the next one, with no walk in between.
 
 ```rust
-use stringzilla::szs::{AnyBytesTape, CaseSensitivity, DeviceScope, OverlapPolicy, Substrings, SubstringsMatch};
+use stringzilla::sz::{
+    CaseSensitivity, SubstringsEngine, SubstringsMatch, SubstringsOverlapPolicy,
+    SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
+};
 
-let device = DeviceScope::default().unwrap();
-let engine = Substrings::new(&device, &["cat", "catalog"], CaseSensitivity::Cased).unwrap();
-let documents = vec!["a catalog of cats", "nothing here"];
-let haystacks = AnyBytesTape::from_slices(&documents);
+let mut engine = SubstringsEngine::new(
+    &["cat", "catalog"],
+    CaseSensitivity::Cased,
+    SubstringsOverlapPolicy::Overlapping,
+    SUBSTRINGS_HOT_STATES_AUTO,
+    SUBSTRINGS_MATCHES_BUDGET_AUTO,
+)
+.unwrap();
 
-let mut counts = vec![0usize; documents.len()];
-let total = engine.count_into(&device, &haystacks, OverlapPolicy::Overlapping, &mut counts).unwrap();
-assert_eq!(counts, vec![3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
-assert_eq!(total, 3);
+let documents = ["a catalog of cats", "nothing here"];
+let mut counts = [0usize; 2];
+engine.counts(&documents, &mut counts, 1).unwrap();
+assert_eq!(counts, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
 
-// A cover keeps no two matches sharing a byte, so the longer needle shadows the shorter one.
-let mut cover = vec![SubstringsMatch::default(); total];
-let found = engine.find_into(&device, &haystacks, OverlapPolicy::LeftmostLongest, &mut cover).unwrap();
-assert_eq!(found, 2);
+// `find` fills one boundary per haystack plus a final total, whether or not the matches fit.
+let mut matches = [SubstringsMatch::default(); 3];
+let mut offsets = [0usize; 3];
+engine.find(&documents, &mut matches, &mut offsets).unwrap();
+assert_eq!(offsets, [0, 3, 3]);
+assert_eq!(engine.report().matches_emitted, 3);
+assert_eq!(engine.report().shortfall, 0);
 ```
 
 ### Scoring and Rewriting
 
-The same automaton scores documents with BM25 and rewrites them, both in a single walk.
-`score_bm25_into` treats the dictionary itself as the query — `needle_weights[i]` is needle `i`'s IDF or boost — and writes one score per haystack, so a many-term query over a large corpus never materializes per-term frequency rows.
-Term frequencies are raw overlapping counts, which is classic BM25, and `document_lengths` defaults to byte lengths when `None`.
+The same automaton scores documents with BM25 and rewrites them, each in a single walk.
+`bm25_scores` treats the dictionary itself as the query — `needle_weights[i]` is needle `i`'s IDF or boost — and writes one score per haystack, so a many-term query over a large corpus never materializes per-term frequency rows.
+Term frequencies are raw overlapping counts, which is classic BM25, so the engine's own policy does not apply here, and `document_lengths` falls back to each haystack's byte length when `None`.
 
 `Bm25Params` has no `Default`, because a corpus mean has no correct default value.
 Its two constructors name the two configurations that exist: `Bm25Params::normalized(mean)` is the literature's `k1 = 1.2` and `b = 0.75` against a corpus whose mean document length you know, and `Bm25Params::unnormalized()` switches length normalization off and leaves `document_lengths` unread.
-A positive `b` beside a non-positive mean is refused rather than quietly discarding both it and the lengths you computed.
+
+`replace` takes one replacement per needle, inserted verbatim, an empty one deleting its match, and writes one output tape beside its boundaries.
+Rewriting is defined only under a cover, so an engine built with `SubstringsOverlapPolicy::Overlapping` is refused there — an overlapping rewrite is not a function.
+A tape too small is not an error either: `report().tape_bytes` names the bytes the rewrite needed and the tape's contents are then unspecified, so an empty tape is how the next call is sized.
 
 ```rust
-use stringzilla::szs::{AnyBytesTape, Bm25Params, CaseSensitivity, DeviceScope, OverlapPolicy, Substrings};
+use stringzilla::sz::{Bm25Params, CaseSensitivity, SubstringsEngine, SubstringsOverlapPolicy,
+                      SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
 
-let device = DeviceScope::default().unwrap();
-let engine = Substrings::new(&device, &["cat", "dog"], CaseSensitivity::Cased).unwrap();
-let documents = vec!["cat and dog", "nothing here"];
-let haystacks = AnyBytesTape::from_slices(&documents);
+let mut engine = SubstringsEngine::new(
+    &["cat", "dog"],
+    CaseSensitivity::Cased,
+    SubstringsOverlapPolicy::LeftmostLongest,
+    SUBSTRINGS_HOT_STATES_AUTO,
+    SUBSTRINGS_MATCHES_BUDGET_AUTO,
+)
+.unwrap();
 
-let mut scores = vec![0.0f32; documents.len()];
+let documents = ["cat and dog", "nothing here"];
+let mut scores = [0.0f32; 2];
 let parameters = Bm25Params::normalized(10.0);
-engine.score_bm25_into(&device, &haystacks, &[1.0, 1.0], None, parameters, &mut scores).unwrap();
+engine
+    .bm25_scores(&documents, None, &parameters, &[1.0, 1.0], &mut scores, 1)
+    .unwrap();
 assert_eq!(scores[1], 0.0);
 
-// One replacement per needle, inserted verbatim; an empty replacement deletes its match. Tape in,
-// tape out, so this arm takes a materialized tape rather than borrowed slices.
-let tape = AnyBytesTape::from_sequences(&documents).unwrap();
+// One replacement per needle: an empty tape sizes the rewrite, a second call performs it.
 let replacements = ["feline", "canine"];
-let input_bytes = documents.iter().map(|document| document.len()).sum();
-let mut data = vec![0u8; engine.replace_bound(&replacements, input_bytes).unwrap()];
-let mut offsets = vec![0u64; documents.len() + 1];
-engine
-    .replace_into(&device, &tape, OverlapPolicy::LeftmostLongest, &replacements, &mut data, &mut offsets)
-    .unwrap();
-assert_eq!(&data[offsets[0] as usize..offsets[1] as usize], b"feline and canine");
+let mut offsets = [0usize; 3];
+engine.replace(&documents, &replacements, &mut [], &mut offsets).unwrap();
+let mut tape = vec![0u8; engine.report().tape_bytes];
+engine.replace(&documents, &replacements, &mut tape, &mut offsets).unwrap();
+assert_eq!(&tape[offsets[0]..offsets[1]], b"feline and canine");
 ```
-
-Rewriting is defined only under a cover, so `OverlapPolicy::Overlapping` is rejected there — an overlapping rewrite is not a function.
-`replace_bound` sizes an output tape from the needle set alone, without a walk, making the rewrite one call that cannot be refused for capacity.
 
 ## UTF-8 Segmentation
 
@@ -975,53 +916,29 @@ println!("dynamic dispatch: {}", sz::dynamic_dispatch());
 println!("capabilities: {}", sz::capabilities().as_str());
 ```
 
-The `szs` module reports the same metadata for the batch engines, plus a one-line backend summary and per-`DeviceScope` introspection:
+### Engines on a GPU
+
+With the `cuda` feature every engine gains a `new_on_gpu` constructor taking a `cudaStream_t` — or null for the current device's default stream — beside the arguments its host constructor takes.
+That constructor is the only place a stream is ever named: it prepares the batch where a kernel reaches it and resolves the launch geometry once, and every compute verb of that engine then enqueues on the same stream and returns without joining.
+
+It is `unsafe` for three reasons no type system checks.
+The stream has to be live and belong to the current context.
+Every output buffer has to be device-reachable memory — unified or plain device memory, never page-locked host memory, and a host buffer is refused with `Status::DeviceMemoryMismatch` rather than copied behind your back — and it has to outlive the launch.
+And because a verb returns before the device has written anything, nothing it produced, `SubstringsEngine::report` included, may be read until the caller has joined the stream itself.
 
 ```rust
-pub fn version() -> SemVer;
-pub fn capabilities() -> SmallCString;
-pub fn backend_info() -> &'static str; // e.g. "Multi-threaded CPU backend enabled"
+use stringzilla::sz::{LevenshteinEngine, LevenshteinSymbol};
+
+// SAFETY: `stream` is live, `distances` is unified memory, and the caller joins before reading it.
+let mut engine = unsafe {
+    LevenshteinEngine::new_on_gpu(&["kitten", "saturday"], LevenshteinSymbol::Bytes, stream)?
+};
+engine.distances(&["sitting", "sunday"], distances, 2)?;
+// cudaStreamSynchronize(stream) belongs here, before `distances` is read.
 ```
 
-A `DeviceScope` selects the execution backend.
-`DeviceScope::default()` auto-detects the best available hardware, `cpu_cores(n)` forces `n` CPU threads where `0` means all cores, and `gpu_device(i)` targets GPU `i` and requires the `cuda` or `rocm` feature:
+__One gap worth naming.__
+A device engine's compute verbs also need a candidate sequence whose accessors run on the device, over device-resident texts, and the C tier builds one only inside a CUDA translation unit rather than exporting a symbol for it — so this crate can construct a device engine but cannot yet drive it, and a verb handed the host-side sequence the safe methods build answers `Status::DeviceMemoryMismatch` rather than letting a kernel read host memory.
+The device allocators are unexported for the same reason, so nothing here hands back the unified memory those output buffers would have to live in.
 
-```rust
-use stringzilla::szs::{self, DeviceScope};
-
-let device = DeviceScope::default().unwrap();
-let cpu = DeviceScope::cpu_cores(4).unwrap();
-assert_eq!(cpu.get_cpu_cores().unwrap(), 4);
-assert!(!cpu.is_gpu());
-
-println!("backend: {}", szs::backend_info());
-println!("capabilities: {}", szs::capabilities().as_str());
-
-match DeviceScope::gpu_device(0) {
-    Ok(gpu) => println!("using GPU {}", gpu.get_gpu_device().unwrap()),
-    Err(e)  => println!("GPU unavailable: {e:?}"),
-}
-```
-
-`DeviceScope` API: `default()`, `cpu_cores(usize)`, `gpu_device(usize)`, `get_capabilities() -> Result<Capability, Error>`, `get_cpu_cores() -> Result<usize, Error>`, `get_gpu_device() -> Result<usize, Error>`, `is_gpu() -> bool`.
-Batch-engine failures surface as `szs::Error`, a `status` plus an optional message, which converts from the shared `Status` enum.
-
-### Unified Memory
-
-On a GPU scope every buffer an engine reads or writes must live on the device — unified or plain CUDA memory, never page-locked host memory.
-A host buffer is refused with `Status::DeviceMemoryMismatch` rather than copied behind your back, so the cost of a stray `Vec` is a visible error instead of a hidden transfer.
-A CPU scope imposes no requirement at all.
-
-The allocating verbs already satisfy this, since `Fingerprints::compute` returns `UnifiedVec<u32>` and the similarity engines return a `UnifiedMat`.
-The `*_into` verbs take `&mut [T]`, which is what lets a caller write into a subrange of a larger buffer, so meeting the contract there means backing that slice with unified memory:
-
-```rust
-use stringzilla::szs::{DeviceScope, UnifiedVec, UnifiedAlloc};
-
-let gpu = DeviceScope::gpu_device(0).unwrap();
-let mut counts = UnifiedVec::with_capacity_in(haystacks_count, UnifiedAlloc);
-counts.resize(haystacks_count, 0usize);
-engine.count_into(&gpu, &haystacks, OverlapPolicy::Overlapping, &mut counts[..])?;
-```
-
-`&mut counts[..]` is the way in, and the same pattern covers `find_into`, `score_bm25_into` — whose `needle_weights` and `document_lengths` are read on the device too — and `replace_into`'s output data and offsets.
+A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and every one of them has returned by the time it answers.

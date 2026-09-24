@@ -1,13 +1,9 @@
 include README.md
 include VERSION
 include LICENSE
-include build_backend.py
 include setup.py
-include SZ_TARGET.env
 
 graft include
-graft forkunion/include
 graft c
 graft python
 
-include test/stringzillas.py

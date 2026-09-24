@@ -223,11 +223,11 @@ EOF
   exit 1
 fi
 
-# Shared test scaffolding lives only in test/sz_helpers.py, test/szs_helpers.py, test/utf8_helpers.py,
+# Shared test scaffolding lives only in test/sz_helpers.py, test/utf8_helpers.py,
 # and test/conftest.py. Every other test file imports it, so corpora, the seed system, the iterations
 # multiplier, and the backend sweep can't drift apart.
 scaffolding=$(git diff --cached --no-color -U0 \
-  -- 'test/*.py' ':(exclude)test/sz_helpers.py' ':(exclude)test/szs_helpers.py' ':(exclude)test/utf8_helpers.py' ':(exclude)test/conftest.py' \
+  -- 'test/*.py' ':(exclude)test/sz_helpers.py' ':(exclude)test/utf8_helpers.py' ':(exclude)test/conftest.py' \
   | grep -E '^\+' | grep -vE '^\+\+\+' \
   | grep -E '^\+(def (vector_width_bracketing_strings|malformed_utf8_corpus|boundary_strings|differential_bodies|get_random_string|is_equal_strings|seed_random_generators|scale_iterations|unaligned_views|run_across_backends|assert_backends_agree|run_across_engines|assert_engines_agree|device_scope_and_capabilities|generate_string_batches|capability_sweep|forced_capabilities)\(|(SEED_VALUES|ITERATIONS_MULTIPLIER)[[:space:]]*=)' || true)
 if [ -n "$scaffolding" ]; then
@@ -419,7 +419,6 @@ fi
 # needs beyond it has a C entry point: launch through `cudaLaunchKernel` with an explicit `dim3` and argument
 # array rather than `<<< >>>`, size a block through `cudaFuncGetAttributes` rather than the occupancy template,
 # and read a device symbol through the five-argument `cudaMemcpyFromSymbol` rather than its `T const &` overload.
-# `include/stringzillas/` is excluded: that library is C++ templates by design, and its `.cuh` files with it.
 cpp_in_cuh=$(git diff --cached --no-color -U0 -- 'include/stringzilla/*.cuh' 'include/stringzilla/*/*.cuh' \
   | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
   | grep -E '(^|[^A-Za-z0-9_])(template[[:space:]]*<|class[[:space:]]+[A-Za-z_]|namespace[[:space:]]|auto[[:space:]]+[A-Za-z_*&]|nullptr|new[[:space:]]+[A-Za-z_]|delete[[:space:]]|std::|constexpr[[:space:]]|noexcept|public:|private:|protected:|operator[[:space:]]*[^(])|<<<' \

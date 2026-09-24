@@ -1,24 +1,7 @@
-use std::collections::HashMap;
 use std::env;
 
+/// Builds the StringZilla C library, engines included, with the SIMD tiers this toolchain and target allow.
 fn main() {
-    // Build stringzilla (always included, single-string operations)
-    let serial_flags = build_stringzilla();
-
-    // Build stringzillas (multi-string operations) if any feature is enabled
-    if env::var("CARGO_FEATURE_CPUS").is_ok()
-        || env::var("CARGO_FEATURE_CUDA").is_ok()
-        || env::var("CARGO_FEATURE_ROCM").is_ok()
-    {
-        build_stringzillas(&serial_flags);
-    }
-}
-
-/// Build the StringZilla C library with dynamic SIMD dispatching
-/// and returns a dictionary of enabled compilation flags to be reused for
-/// parallel backends (e.g., StringZillas).
-fn build_stringzilla() -> HashMap<String, bool> {
-    let mut flags = HashMap::<String, bool>::new();
     let mut build = cc::Build::new();
     build
         .include("include")
@@ -51,6 +34,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
             "c/stringzilla/intersect.c",
             "c/stringzilla/levenshtein.c",
             "c/stringzilla/overlap.c",
+            "c/stringzilla/substrings.c",
             "c/stringzilla/utf8_runes.c",
             "c/stringzilla/utf8_tokens.c",
             "c/stringzilla/utf8_wordbreaks.c",
@@ -82,31 +66,11 @@ fn build_stringzilla() -> HashMap<String, bool> {
     let avoid_libc = target_os == "unknown" || target_os.is_empty();
     build.define("SZ_AVOID_LIBC", if avoid_libc { "1" } else { "0" });
 
-    // Set endian-specific macro
-    if target_endian == "big" {
-        build.define("SZ_IS_BIG_ENDIAN_", "1");
-        flags.insert("SZ_IS_BIG_ENDIAN_".to_string(), true);
-    } else {
-        build.define("SZ_IS_BIG_ENDIAN_", "0");
-        flags.insert("SZ_IS_BIG_ENDIAN_".to_string(), false);
-    }
-
-    if target_arch == "x86_64" && target_bits == "64" {
-        build.define("SZ_IS_64BIT_X86_", "1");
-        build.define("SZ_IS_64BIT_ARM_", "0");
-        flags.insert("SZ_IS_64BIT_X86_".to_string(), true);
-        flags.insert("SZ_IS_64BIT_ARM_".to_string(), false);
-    } else if target_arch == "aarch64" && target_bits == "64" {
-        build.define("SZ_IS_64BIT_X86_", "0");
-        build.define("SZ_IS_64BIT_ARM_", "1");
-        flags.insert("SZ_IS_64BIT_X86_".to_string(), false);
-        flags.insert("SZ_IS_64BIT_ARM_".to_string(), true);
-    } else {
-        build.define("SZ_IS_64BIT_X86_", "0");
-        build.define("SZ_IS_64BIT_ARM_", "0");
-        flags.insert("SZ_IS_64BIT_X86_".to_string(), false);
-        flags.insert("SZ_IS_64BIT_ARM_".to_string(), false);
-    }
+    let is_64bit_x86 = target_arch == "x86_64" && target_bits == "64";
+    let is_64bit_arm = target_arch == "aarch64" && target_bits == "64";
+    build.define("SZ_IS_BIG_ENDIAN_", if target_endian == "big" { "1" } else { "0" });
+    build.define("SZ_IS_64BIT_X86_", if is_64bit_x86 { "1" } else { "0" });
+    build.define("SZ_IS_64BIT_ARM_", if is_64bit_arm { "1" } else { "0" });
 
     // SIMD tier selection - two probed facts per tier, shared with the CMake build through the same
     // checked-in `probes/` sources:
@@ -119,6 +83,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
     // dispatch bakes the best tier into every symbol with no guard, so it enables COMPILE ∩ RUN.
     // WebAssembly engines validate a module whole, so there both models enable COMPILE ∩ the target description.
     let is_wasm = target_arch == "wasm32" || target_arch == "wasm64";
+    let is_msvc = build.get_compiler().is_like_msvc();
     let dynamic_dispatch = env::var("CARGO_FEATURE_DYNAMIC_DISPATCH").is_ok();
     let target_features: std::collections::HashSet<String> = env::var("CARGO_CFG_TARGET_FEATURE")
         .unwrap_or_default()
@@ -195,7 +160,12 @@ fn build_stringzilla() -> HashMap<String, bool> {
         };
 
         build.define(probe.define, if enabled { "1" } else { "0" });
-        flags.insert(probe.define.to_string(), enabled);
+        if enabled {
+            // Only the WebAssembly tiers carry any: their SIMD is a whole-module flag, not a per-function pragma.
+            for flag in if is_msvc { probe.msvc_flags } else { probe.gcc_flags } {
+                build.flag(flag);
+            }
+        }
     }
     if tuned_beyond_description {
         println!(
@@ -210,10 +180,6 @@ fn build_stringzilla() -> HashMap<String, bool> {
              does not advertise them. Build with `RUSTFLAGS=\"-C target-cpu=native\"` (or `-C \
              target-feature=+…`) to bake in the best tier for the deployment machine."
         );
-    }
-
-    for flag in wasm_simd_flags(&flags) {
-        build.flag(flag);
     }
 
     // The compile probes already rejected anything this toolchain cannot build, so failures here are real
@@ -233,8 +199,6 @@ fn build_stringzilla() -> HashMap<String, bool> {
         println!("cargo:rerun-if-env-changed={}", probe.define);
     }
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
-
-    flags
 }
 
 /// One SIMD tier's probe row. The `probe_file` sources under `probes/` are shared with the CMake build
@@ -476,7 +440,7 @@ fn probe_isa(probe: &IsaProbe) -> bool {
         }
     } else {
         command
-            .arg("-std=c99") // the real build enforces C99 (see `build_stringzilla`), so probes must too
+            .arg("-std=c99") // the real build enforces C99 (see `main`), so probes must too
             .arg("-c")
             .arg(probe.probe_file)
             .arg("-o")
@@ -601,24 +565,10 @@ fn machine_capabilities() -> Option<std::collections::HashSet<String>> {
     }
 }
 
-/// MSVC host-compiler flags the StringZilla(s) C++ sources need on Windows: report `__cplusplus` accurately (so the
-/// `sz_constexpr_if_cpp14` helpers are seen as constexpr, else C3615), use the standard-conforming preprocessor
-/// (required by CCCL 3.x), and read the UTF-8 sources as UTF-8. Empty off the MSVC target env — a GCC/Clang host
-/// needs none — so callers can loop unconditionally. The `cl`-direct backends apply these verbatim; the CUDA backend
-/// forwards each through `-Xcompiler`. (`CARGO_CFG_TARGET_ENV`, not `cfg!`, is the target signal in a build script.)
-fn msvc_cxx_flags() -> &'static [&'static str] {
-    if matches!(env::var("CARGO_CFG_TARGET_ENV").as_deref(), Ok("msvc")) {
-        &["/Zc:__cplusplus", "/Zc:preprocessor", "/utf-8"]
-    } else {
-        &[]
-    }
-}
-
 /// Flags that stop the compiler from substituting its own builtins for the bytewise primitives StringZilla provides
 /// — and, under `SZ_OVERRIDE_LIBC`, from lowering those implementations back into a self-recursive libc call. Mirrors
 /// the "avoid builtin functions" block in CMakeLists.txt: MSVC disables intrinsic generation with `/Oi-`, GCC/Clang
-/// disable the specific `mem*` builtins. Applied to every StringZilla(s) build; the CUDA backend forwards each
-/// through `-Xcompiler`, exactly as it does the MSVC conformance flags.
+/// disable the specific `mem*` builtins.
 fn no_builtin_flags() -> &'static [&'static str] {
     if matches!(env::var("CARGO_CFG_TARGET_ENV").as_deref(), Ok("msvc")) {
         &["/Oi-"]
@@ -630,232 +580,4 @@ fn no_builtin_flags() -> &'static [&'static str] {
             "-fno-builtin-memset",
         ]
     }
-}
-
-/// WebAssembly selects SIMD through whole-module flags rather than per-function `target` attributes, so both builds
-/// mirror the enabled tier onto the compiler; the flags define `__wasm_simd128__` / `__wasm_relaxed_simd__`, which
-/// `types.h` maps back to `SZ_USE_V128` / `SZ_USE_V128RELAXED`. Empty off WebAssembly.
-fn wasm_simd_flags(flags: &HashMap<String, bool>) -> &'static [&'static str] {
-    if !matches!(env::var("CARGO_CFG_TARGET_ARCH").as_deref(), Ok("wasm32" | "wasm64")) {
-        &[]
-    } else if *flags.get("SZ_USE_V128RELAXED").unwrap_or(&false) {
-        &["-msimd128", "-mrelaxed-simd"]
-    } else if *flags.get("SZ_USE_V128").unwrap_or(&false) {
-        &["-msimd128"]
-    } else {
-        &[]
-    }
-}
-
-/// A fresh StringZillas build with the configuration shared by every backend: include paths, the dispatch/NUMA
-/// defines, the C++20 standard, common flags, and the architecture flags inherited from the StringZilla build.
-/// Each backend adds only its own sources (and, for CUDA, its nvcc flags) on top.
-fn stringzillas_base_build(serial_flags: &HashMap<String, bool>) -> cc::Build {
-    let mut build = cc::Build::new();
-    build
-        .include("include")
-        .warnings(false)
-        .define("SZ_DYNAMIC_DISPATCH", "1")
-        .define("SZ_AVOID_LIBC", "0")
-        .define("SZ_DEBUG", "0")
-        .std("c++20")
-        .flag_if_supported("-fdiagnostics-color=always")
-        .flag_if_supported("-fPIC");
-    build.include(std::env::var("DEP_FORKUNION_INCLUDE").expect("exported by the `forkunion` crate"));
-    // Apply the same architecture-specific flags as determined for stringzilla.
-    for (flag, enabled) in serial_flags.iter() {
-        build.define(flag, if *enabled { "1" } else { "0" });
-    }
-    for flag in wasm_simd_flags(serial_flags) {
-        build.flag(flag);
-    }
-    build
-}
-
-/// StringZillas C-API entry units, compiled once per backend - as C++ into the CPU one, as CUDA into the GPU one.
-const STRINGZILLAS_API_CPP_SOURCES: [&str; 6] = [
-    "c/stringzillas/runtime.cpp",
-    "c/stringzillas/levenshtein.cpp",
-    "c/stringzillas/needleman_wunsch.cpp",
-    "c/stringzillas/smith_waterman.cpp",
-    "c/stringzillas/fingerprints.cpp",
-    "c/stringzillas/substrings.cpp",
-];
-const STRINGZILLAS_API_CU_SOURCES: [&str; 6] = [
-    "c/stringzillas/runtime.cu",
-    "c/stringzillas/levenshtein.cu",
-    "c/stringzillas/needleman_wunsch.cu",
-    "c/stringzillas/smith_waterman.cu",
-    "c/stringzillas/fingerprints.cu",
-    "c/stringzillas/substrings.cu",
-];
-
-/// Per-ISA CPU instantiation units, host C++ in every backend - NVCC forwards `.cpp` straight to the host
-/// compiler, keeping CPU SIMD out of its frontend; off-platform files compile to empty objects.
-const STRINGZILLAS_CPUS_SOURCES: [&str; 16] = [
-    "c/stringzillas/levenshtein_serial.cpp",
-    "c/stringzillas/levenshtein_icelake.cpp",
-    "c/stringzillas/levenshtein_haswell.cpp",
-    "c/stringzillas/levenshtein_neon.cpp",
-    "c/stringzillas/levenshtein_rvv.cpp",
-    "c/stringzillas/needleman_wunsch_serial.cpp",
-    "c/stringzillas/needleman_wunsch_icelake.cpp",
-    "c/stringzillas/needleman_wunsch_haswell.cpp",
-    "c/stringzillas/needleman_wunsch_neon.cpp",
-    "c/stringzillas/needleman_wunsch_rvv.cpp",
-    "c/stringzillas/smith_waterman_serial.cpp",
-    "c/stringzillas/smith_waterman_icelake.cpp",
-    "c/stringzillas/smith_waterman_haswell.cpp",
-    "c/stringzillas/smith_waterman_neon.cpp",
-    "c/stringzillas/smith_waterman_rvv.cpp",
-    "c/stringzillas/substrings_serial.cpp",
-];
-
-/// CUDA architecture set, the base tier's from `STRINGZILLA_CUDA_ARCHS` in CMakeLists.txt and `_CUDA_ARCHES` in
-/// setup.py: `-real` emits SASS, `-virtual` forward PTX. Those two give each tier its own narrower set, but the
-/// `cc` crate emits one archive (per-tier splitting would need non-portable linker grouping), so every unit here
-/// shares this one - the extra cubins that gives the Kepler and Hopper units are weight `--compress-all` erases.
-const STRINGZILLAS_CUDA_ARCHES: [&str; 3] = ["80-real", "90-real", "90-virtual"];
-
-/// The GPU generation an arch entry names, as nvcc spells it: `"90-real"` → 90.
-fn cuda_arch_number(arch: &str) -> u32 {
-    let (number, _) = arch.split_once('-').unwrap_or((arch, "real"));
-    number.parse().unwrap_or(0)
-}
-
-/// `-gencode` flags for an architecture list: `"90-real"` → `arch=compute_90,code=sm_90`.
-fn cuda_gencode_flags(arches: &[&str]) -> Vec<String> {
-    let mut flags = Vec::with_capacity(arches.len());
-    for arch in arches {
-        let (number, kind) = arch.split_once('-').unwrap_or((arch, "real"));
-        let code = if kind == "real" { "sm" } else { "compute" };
-        flags.push(format!("-gencode=arch=compute_{number},code={code}_{number}"));
-    }
-    flags
-}
-
-/// Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
-/// from the base set.
-const STRINGZILLAS_CUDA_SOURCES: [&str; 4] = [
-    "c/stringzillas/levenshtein_cuda.cu",
-    "c/stringzillas/needleman_wunsch_cuda.cu",
-    "c/stringzillas/smith_waterman_cuda.cu",
-    "c/stringzillas/substrings_cuda.cu",
-];
-const STRINGZILLAS_KEPLER_SOURCES: [&str; 1] = ["c/stringzillas/levenshtein_kepler.cu"];
-const STRINGZILLAS_HOPPER_SOURCES: [&str; 3] = [
-    "c/stringzillas/levenshtein_hopper.cu",
-    "c/stringzillas/needleman_wunsch_hopper.cu",
-    "c/stringzillas/smith_waterman_hopper.cu",
-];
-
-/// Build the NVIDIA CUDA backend (the `.cu` sources via nvcc). Returns `Err` if the toolkit is missing or the
-/// sources fail to compile; the driver-API link directive is emitted only on success.
-fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(), cc::Error> {
-    let mut build = stringzillas_base_build(serial_flags);
-    // `SZ_USE_HOPPER` follows the architectures actually compiled, not the toolkit version: a newer nvcc asked
-    // for sm_80 alone emits no DPX, and the host pass cannot scan `__CUDA_ARCH_LIST__` in the preprocessor.
-    let carries_hopper = STRINGZILLAS_CUDA_ARCHES.iter().any(|arch| cuda_arch_number(arch) >= 90);
-    build
-        .cuda(true)
-        .define("SZ_USE_CUDA", "1")
-        .define("SZ_USE_HOPPER", if carries_hopper { "1" } else { "0" })
-        .define("SZ_USE_ROCM", "0");
-    // nvcc rejects host compilers newer than it supports (CUDA 12.x caps at GCC 14); honor CUDAHOSTCXX so the caller
-    // can point nvcc at a compatible host compiler, mirroring CMAKE_CUDA_HOST_COMPILER.
-    if let Ok(host_cxx) = env::var("CUDAHOSTCXX") {
-        build.flag("-ccbin").flag(&host_cxx);
-    }
-    // `.std()` only reaches the host compiler (`-Xcompiler -std:c++20`); nvcc's device frontend would otherwise
-    // default to an older standard and `cudafe++` chokes on the C++20 device code (templated lambdas, designated
-    // initializers), so set nvcc's own device standard too — as the CMake build does.
-    build.flag("-std=c++20").flag("--expt-relaxed-constexpr");
-    for gencode in cuda_gencode_flags(&STRINGZILLAS_CUDA_ARCHES) {
-        build.flag(gencode);
-    }
-    build.flag("-Xfatbin=--compress-all");
-    // Forward the MSVC conformance flags and the no-builtin flags to the host compiler through nvcc.
-    for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
-        build.flag(format!("-Xcompiler={flag}"));
-    }
-    build.files(STRINGZILLAS_API_CU_SOURCES);
-    build.files(STRINGZILLAS_CPUS_SOURCES);
-    build.files(STRINGZILLAS_CUDA_SOURCES);
-    build.files(STRINGZILLAS_KEPLER_SOURCES);
-    build.files(STRINGZILLAS_HOPPER_SOURCES);
-    build.try_compile("stringzillas")?;
-    // Only demand libcuda once the build actually linked: the kernels use the driver API (cuLaunchKernel,
-    // cuEventElapsedTime, cuFuncSetAttribute) on top of the cudart that `build.cuda(true)` already links. On a
-    // driver-less host its only `libcuda.so` is the toolkit stub under `lib64/stubs`, off the default search path,
-    // so add that directory; the real driver's `libcuda.so.1` still wins at load time.
-    if !matches!(env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("windows")) {
-        let cuda_home = env::var("CUDA_HOME")
-            .or_else(|_| env::var("CUDA_PATH"))
-            .unwrap_or_else(|_| "/usr/local/cuda".to_string());
-        println!("cargo:rustc-link-search=native={cuda_home}/lib64/stubs");
-    }
-    println!("cargo:rustc-link-lib=dylib=cuda");
-    Ok(())
-}
-
-/// Build the AMD ROCm backend. TODO: wire up a real HIP/ROCm compiler — today this is a stub that fails to compile
-/// the `.cu` sources with a plain C++ compiler, so callers fall back to the CPU-only backend.
-fn try_build_stringzillas_rocm(serial_flags: &HashMap<String, bool>) -> Result<(), cc::Error> {
-    let mut build = stringzillas_base_build(serial_flags);
-    build
-        .cpp(true)
-        .define("SZ_USE_CUDA", "0")
-        .define("SZ_USE_HOPPER", "0")
-        .define("SZ_USE_ROCM", "1");
-    for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
-        build.flag(flag);
-    }
-    build.files(STRINGZILLAS_API_CU_SOURCES);
-    build.try_compile("stringzillas")
-}
-
-/// Build the CPU-only backend: the `.cpp` per-ISA single-pair cores (off-platform files compile to empty objects via
-/// their internal `SZ_USE_*` guards). Used by the `cpus` feature AND as the fallback when a GPU toolkit is missing,
-/// so it carries no `.cu` sources — only a host C++ compiler is needed.
-fn try_build_stringzillas_cpus(serial_flags: &HashMap<String, bool>) -> Result<(), cc::Error> {
-    let mut build = stringzillas_base_build(serial_flags);
-    build
-        .cpp(true)
-        .define("SZ_USE_CUDA", "0")
-        .define("SZ_USE_HOPPER", "0")
-        .define("SZ_USE_ROCM", "0");
-    for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
-        build.flag(flag);
-    }
-    build.files(STRINGZILLAS_API_CPP_SOURCES);
-    build.files(STRINGZILLAS_CPUS_SOURCES);
-    build.try_compile("stringzillas")
-}
-
-fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
-    // No ForkUnion trigger: those headers arrive via `DEP_FORKUNION_INCLUDE`, and the submodule path is absent from the
-    // published crate - `rerun-if-changed` on a missing path re-runs this script every build.
-    println!("cargo:rerun-if-changed=c/stringzillas");
-    println!("cargo:rerun-if-changed=include/stringzillas");
-
-    // `cuda` and `rocm` both imply `cpus`. Try the requested GPU backend first; if it can't build (commonly: no GPU
-    // toolkit on this machine), fall through to the CPU-only backend so the crate still works.
-    let is_cuda = env::var("CARGO_FEATURE_CUDA").is_ok();
-    let is_rocm = env::var("CARGO_FEATURE_ROCM").is_ok();
-    let gpu_error = if is_cuda {
-        try_build_stringzillas_cuda(serial_flags).err()
-    } else if is_rocm {
-        try_build_stringzillas_rocm(serial_flags).err()
-    } else {
-        None
-    };
-    if (is_cuda || is_rocm) && gpu_error.is_none() {
-        return;
-    }
-    if let Some(error) = gpu_error {
-        // The reason matters: a missing toolkit, an unusable compiler, and a genuine compile error in our own
-        // sources all land here, and only the message tells them apart.
-        println!("cargo:warning=GPU backend unavailable, building CPU-only StringZillas instead: {error}");
-    }
-    try_build_stringzillas_cpus(serial_flags).expect("failed to compile CPU-only StringZillas");
 }

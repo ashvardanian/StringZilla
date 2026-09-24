@@ -12,7 +12,7 @@
  *  PyCapsule protocol in conjunction with @b `__arrow_c_array__` dunder methods can be used to extract strings.
  *  @see https://arrow.apache.org/docs/python/generated/pyarrow.array.html
  *
- *  This module exports C functions via `PyCapsule` of `PyAPI` for use by other extensions (like `stringzillas-cpus`):
+ *  This module exports C functions via `PyCapsule` of `PyAPI`, for another extension to import:
  *  - `sz_py_export_string_like`.
  *  - `sz_py_export_strings_as_sequence`.
  *  - `sz_py_export_strings_as_u32tape`.
@@ -23,20 +23,21 @@
  *  - `Str_like_*`: Functions that can be called both as module-level functions AND as member methods.
  *  - `Str_*`: Functions that are member-only methods or have simpler calling conventions.
  *
- *  This translation unit owns only the module-init glue: `PyModuleDef`, the type-registration table, and
- *  `PyInit_stringzilla`. The `File`/`Str`/`Strs` struct layouts and the `PyTypeObject` forward declarations
- *  every domain file needs live in `stringzilla.h`; the domains themselves are split across `shared.c`, `file.c`,
- *  `str.c`, `strs.c`, `memory.c`, `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`,
+ *  This translation unit owns the module-init glue - `PyModuleDef`, the type-registration table, and
+ *  `PyInit_stringzilla` - plus the argument plumbing the three engine files share. The `File`/`Str`/`Strs`
+ *  struct layouts and the `PyTypeObject` forward declarations every domain file needs live in `stringzilla.h`;
+ *  the domains themselves are split across `shared.c`, `file.c`, `str.c`, `strs.c`, `memory.c`, `hash.c`,
+ *  `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`, `overlap.c`, `substrings.c`,
  *  and the `utf8_*.c` files.
  */
 #include "stringzilla.h"
 
 /**
- *  @brief  The function table `stringzillas` reads out of this module's `_sz_py_api` capsule.
+ *  @brief  The function table an importing extension reads out of this module's `_sz_py_api` capsule.
  *
- *  `python/stringzillas.c` carries its own copy of this layout and casts the capsule pointer to it. The two
- *  must stay identical: a field added, removed, or reordered on one side alone makes the other misread memory
- *  with no diagnostic, since the capsule carries no version tag.
+ *  An importer carries its own copy of this layout and casts the capsule pointer to it, so the two must stay
+ *  identical: a field added, removed, or reordered on one side alone makes the other misread memory with no
+ *  diagnostic, since the capsule carries no version tag.
  */
 typedef struct PyAPI {
     sz_bool_t (*sz_py_export_string_like)(PyObject *, sz_cptr_t *, sz_size_t *);
@@ -131,7 +132,7 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     if (parse_and_intersect_capabilities(caps_obj, &caps) != 0) return NULL;
 
     // Update the dispatch table
-    sz_dispatch_table_update(caps);
+    sz_dispatch_cpu_table_update(caps);
 
     // Recompute and set module-level capability exports
     PyObject *caps_tuple = capabilities_to_tuple(caps);
@@ -167,6 +168,94 @@ static void stringzilla_cleanup(PyObject *m) {
     state->strs_freelist_head = NULL;
     state->strs_freelist_count = 0;
 }
+
+#pragma region Engine Arguments
+
+void sz_py_raise_status(sz_status_t status, char const *context) {
+    switch (status) {
+    case sz_bad_alloc_k: PyErr_Format(PyExc_MemoryError, "%s: could not allocate", context); break;
+    case sz_invalid_utf8_k: PyErr_Format(PyExc_ValueError, "%s: input is not well-formed UTF-8", context); break;
+    case sz_contains_duplicates_k: PyErr_Format(PyExc_ValueError, "%s: input repeats an entry", context); break;
+    case sz_overflow_risk_k: PyErr_Format(PyExc_OverflowError, "%s: input outgrows the index width", context); break;
+    case sz_unexpected_dimensions_k: PyErr_Format(PyExc_ValueError, "%s: arguments disagree on shape", context); break;
+    case sz_missing_gpu_k:
+    case sz_device_code_mismatch_k: PyErr_Format(PyExc_RuntimeError, "%s: no GPU runtime answers here", context); break;
+    case sz_device_memory_mismatch_k:
+        PyErr_Format(PyExc_BufferError, "%s: memory the device cannot reach", context);
+        break;
+    default: PyErr_Format(PyExc_RuntimeError, "%s: failed with status %d", context, (int)status); break;
+    }
+}
+
+int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_t *sequence) {
+    if (sz_py_export_strings_as_sequence(object, sequence)) return 0;
+    PyErr_Format(PyExc_TypeError, "%s must be a stringzilla.Strs, got %s", name, Py_TYPE(object)->tp_name);
+    return -1;
+}
+
+int sz_py_export_stream(PyObject *stream_obj, void **stream) {
+    if (!stream_obj || stream_obj == Py_None) {
+        *stream = NULL;
+        return 0;
+    }
+    if (!PyLong_Check(stream_obj)) {
+        PyErr_SetString(PyExc_TypeError, "stream must be an int holding a device stream handle");
+        return -1;
+    }
+    *stream = PyLong_AsVoidPtr(stream_obj);
+    if (PyErr_Occurred()) return -1;
+    return 0;
+}
+
+int sz_py_export_output_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, int rank,
+                               sz_size_t const *extents, Py_buffer *view, sz_size_t *strides) {
+    if (PyObject_GetBuffer(object, view, PyBUF_STRIDES | PyBUF_WRITABLE) != 0) return -1;
+    if (view->ndim != rank) {
+        PyErr_Format(PyExc_ValueError, "%s must be a %d-dimensional buffer, got %d", name, rank, view->ndim);
+        PyBuffer_Release(view);
+        return -1;
+    }
+    if (view->itemsize != itemsize) {
+        PyErr_Format(PyExc_TypeError, "%s must hold %zd-byte items, got %zd-byte ones", name, itemsize, view->itemsize);
+        PyBuffer_Release(view);
+        return -1;
+    }
+    for (int axis = 0; axis != rank; ++axis) {
+        if ((sz_size_t)view->shape[axis] < extents[axis]) {
+            PyErr_Format(PyExc_ValueError, "%s axis %d holds %zd entries, need %zu", name, axis, view->shape[axis],
+                         extents[axis]);
+            PyBuffer_Release(view);
+            return -1;
+        }
+        // A stride the verb cannot express: it counts whole items forward, never bytes and never backwards.
+        if (view->strides[axis] < itemsize || view->strides[axis] % itemsize != 0) {
+            PyErr_Format(PyExc_ValueError, "%s axis %d must step whole items forward", name, axis);
+            PyBuffer_Release(view);
+            return -1;
+        }
+        strides[axis] = (sz_size_t)(view->strides[axis] / itemsize);
+    }
+    return 0;
+}
+
+int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, sz_size_t count,
+                              Py_buffer *view) {
+    if (PyObject_GetBuffer(object, view, PyBUF_CONTIG_RO) != 0) return -1;
+    if (view->itemsize != itemsize) {
+        PyErr_Format(PyExc_TypeError, "%s must hold %zd-byte items, got %zd-byte ones", name, itemsize, view->itemsize);
+        PyBuffer_Release(view);
+        return -1;
+    }
+    if ((sz_size_t)(view->len / view->itemsize) < count) {
+        PyErr_Format(PyExc_ValueError, "%s holds %zd entries, need %zu", name, (Py_ssize_t)(view->len / itemsize),
+                     count);
+        PyBuffer_Release(view);
+        return -1;
+    }
+    return 0;
+}
+
+#pragma endregion Engine Arguments
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
@@ -252,7 +341,7 @@ static PyMethodDef stringzilla_methods[] = {
 PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
     "stringzilla",
-    "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
+    "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
     sizeof(stringzilla_state_t), // Per-interpreter free-list state; also enables `PyState_FindModule`.
     stringzilla_methods,
     NULL,
@@ -294,6 +383,9 @@ static struct {
     {"Aes256GcmKey", &Aes256GcmKeyType},
     {"Aes256GcmEncryptor", &Aes256GcmEncryptorType},
     {"Aes256GcmDecryptor", &Aes256GcmDecryptorType},
+    {"LevenshteinEngine", &LevenshteinEngineType},
+    {"OverlapEngine", &OverlapEngineType},
+    {"SubstringsEngine", &SubstringsEngineType},
 };
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {

@@ -170,7 +170,7 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
 
         # JavaScript
       - name: Set up Node.js
@@ -294,13 +294,13 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
 
         # Rust
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Test Rust with parallel engines
-        run: cargo test --release --features cpus
+      - name: Test Rust with dynamic dispatch
+        run: cargo test --release
       - name: Test Rust with compile-time dispatch
         run: cargo test --release --no-default-features --features std
       - name: Test Rust no_std
@@ -317,89 +317,8 @@ jobs:
       # - name: Test Swift
       #   run: swift test -c release
 
-  test_ubuntu_cpus:
-    name: Ubuntu StringZillas-CPUs
-    runs-on: ubuntu-22.04
-    env:
-      CC: gcc-12
-      CXX: g++-12
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Log hardware capabilities
-        run: |
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-
-        # C/C++
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential gcc-12 g++-12
-
-      - name: Build C/C++
-        run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
-            echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
-            echo "GCC Version:"
-            gcc-12 --version
-            echo "G++ Version:"
-            g++-12 --version
-            exit 1
-          }
-      - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
-      - name: Test C++11 language floor
-        run: build_artifacts/stringzilla_test_cpp11
-      - name: Test C++ parallel engines
-        run: build_artifacts/stringzillas_test_cpp20
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
-
-        # Python StringZillas-CPUs
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-        # Ensure modern build backend is available for editable installs
-      - name: Build Python StringZillas-CPUs
-        run: |
-          python -m pip install --upgrade pip
-          pip install "setuptools>=64" wheel
-          pip install pytest pytest-repeat numpy pyarrow affine-gaps
-          # The third-party oracles, from the one place they are declared rather than a second list here.
-          pip install --group tests-oracles
-          SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
-          SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation --no-deps
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          import stringzillas as szs
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
-          print("stringzillas.__capabilities__:", szs.__capabilities__)
-          PY
-      - name: Test Python StringZillas-CPUs
-        run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/substrings.py test/doctests.py -s -vv --maxfail=1 --full-trace
-
   test_ubuntu_cuda:
-    name: Ubuntu StringZillas-CUDA
+    name: Ubuntu CUDA
     runs-on: ubuntu-22.04
     env:
       CC: gcc-12
@@ -460,35 +379,6 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp20
       - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
-
-        # Python StringZillas-CUDA
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-        # Ensure modern build backend is available for editable installs
-      - name: Build Python StringZillas-CUDA
-        run: |
-          python -m pip install --upgrade pip
-          pip install "setuptools>=64" wheel
-          pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
-          # The third-party oracles, from the one place they are declared rather than a second list here.
-          pip install --group tests-oracles
-          SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
-          SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation --no-deps
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          import stringzillas as szs
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
-          print("stringzillas.__capabilities__:", szs.__capabilities__)
-          PY
-      - name: Test Python StringZillas-CUDA
-        run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/substrings.py test/doctests.py -s -vv --maxfail=1 --full-trace
 
   # Temporary workaround to run Swift tests on Linux
   # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
@@ -856,41 +746,6 @@ jobs:
             --dir . --env SZ_TESTS_FILTER --env SZ_TESTS_MULTIPLIER \
             build_wasi/stringzilla_test_cpp20
 
-      # The parallel kernels and the ForkUnion pool behind `cpus` need wasi-threads; no test drives them yet.
-      - name: Build Rust with threads and the `cpus` feature
-        if: matrix.tier == 'v128relaxed'
-        env:
-          CC_wasm32_wasip1_threads: ${{ env.WASI_SDK_PATH }}/bin/clang
-          CXX_wasm32_wasip1_threads: ${{ env.WASI_SDK_PATH }}/bin/clang++
-          AR_wasm32_wasip1_threads: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
-          CFLAGS_wasm32_wasip1_threads: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
-          CXXFLAGS_wasm32_wasip1_threads: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
-          WASI_SYSROOT: ${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
-          RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
-        run: cargo build --target wasm32-wasip1-threads --features cpus
-
-      # The parallel suite needs wasi-threads: one imported shared memory and Wasmtime's threads switches on.
-      - name: Build parallel C++ tests for wasm32-wasip1-threads
-        if: matrix.tier == 'v128relaxed'
-        run: |
-          cmake -B build_wasi_threads \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32-threads.cmake \
-            -DWASI_SDK_PREFIX=${WASI_SDK_PATH} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSTRINGZILLA_BUILD_TEST=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=0 \
-            -DSTRINGZILLA_BUILD_SHARED=0 \
-            -DSTRINGZILLAS_BUILD_SHARED=0 \
-            -DSTRINGZILLA_BUILD_CUDA=0
-          cmake --build build_wasi_threads --target stringzillas_test_cpp20
-      - name: Test parallel C++ suites under Wasmtime
-        if: matrix.tier == 'v128relaxed'
-        env:
-          SZ_TESTS_MULTIPLIER: "0.05"
-        run: |
-          wasmtime -W relaxed-simd=y -W threads=y -W exceptions=y -S threads=y --dir . --env SZ_TESTS_MULTIPLIER \
-            build_wasi_threads/stringzillas_test_cpp20
-
   test_macos:
     name: MacOS
     runs-on: macos-15
@@ -898,8 +753,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Log hardware capabilities
         run: |
@@ -948,7 +801,7 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
@@ -1038,7 +891,7 @@ jobs:
           pip install pytest pytest-repeat numpy
           python -m pip install .
       - name: Test Python
-        run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
 
         # Rust
       - name: Set up Rust
@@ -1098,7 +951,7 @@ jobs:
           pip install --break-system-packages pytest pytest-repeat
           pip install --break-system-packages .
       - name: Test Python
-        run: pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/substrings.py --ignore=test/szs_helpers.py -s -x
+        run: pytest test/ -s -x
 
         # Rust
       - name: Set up Rust

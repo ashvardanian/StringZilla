@@ -1,24 +1,12 @@
 # This file configures wheels compilation for `cibuildwheel` for the StringZilla CPython bindings.
-# One `SZ_TARGET` env var selects which of the three packages a build produces, and the release
-# workflow drives a different platform set for each - the widest for the header-only core, narrower
-# for the parallel engines, narrowest for CUDA:
 #
 #   stringzilla        CPython 3.10-3.14 and 3.14t (free-threaded)
 #                      Linux `manylinux` + `musllinux` on x86_64, aarch64, i686, ppc64le, s390x,
 #                      armv7l, riscv64; macOS x86_64 + arm64; Windows AMD64, x86, ARM64.
-#   stringzillas-cpus  same Python versions; Linux x86_64 + aarch64 only (the C++ engines are too
-#                      slow to build and test under QEMU); macOS x86_64 + arm64; Windows AMD64 and
-#                      ARM64. 32-bit Windows is skipped deliberately - a parallel batch engine has
-#                      little use there and no CI compiles the C++ stack for 32-bit anywhere.
-#   stringzillas-cuda  same Python versions; Linux x86_64 + aarch64, and Windows AMD64. NVIDIA
-#                      ships no CUDA Toolkit for Windows-on-Arm, and no musl toolchain at all, so
-#                      that job selects `manylinux` explicitly.
 #
-# Every wheel runs the full suite on the interpreter it was built for, except the Windows CUDA
-# wheels, which cannot be imported on a driver-less runner - see the note in `release.yml`.
+# Every wheel runs the full suite on the interpreter it was built for.
 [build-system]
-backend-path = ["."]
-build-backend = "build_backend"
+build-backend = "setuptools.build_meta"
 requires = ["setuptools>=61", "wheel"]
 
 [tool.pytest.ini_options]
@@ -48,10 +36,9 @@ tests-cuda = ["cupy-cuda12x"]
 line-length = 120
 
 [tool.cibuildwheel]
-before-test = ["python {project}/build_backend.py pull-deps {project}"]
 build-verbosity = 0
-test-command = "python {project}/build_backend.py run-tests {project}"
-test-requires = ["pytest", "pytest-repeat", "pytest-run-parallel"]
+test-command = "python -m pytest -s -x {project}/test"
+test-requires = ["numpy", "pytest", "pytest-repeat", "pytest-run-parallel"]
 
 # We need to build for all platforms:
 # - on Linux: x86_64, aarch64, i686, ppc64le, s390x
@@ -168,6 +155,12 @@ environment.SZ_IS_64BIT_ARM_ = "1"
 environment.SZ_IS_64BIT_X86_ = "0"
 inherit.environment = "append"
 select = "*-macos*_arm64"
+
+# A free-threaded interpreter is the only place a data race can surface, so its suite runs concurrently.
+# Doctests sit out, asserting against a process-wide stdout capture that threads interleave.
+[[tool.cibuildwheel.overrides]]
+select = "cp3*t-*"
+test-command = "python -m pytest -s -x --parallel-threads=4 --ignore={project}/test/doctests.py {project}/test"
 
 [tool.ruff]
 extend-select = [

@@ -2,24 +2,22 @@
 #![doc = r"
 # StringZilla
 
-Fast string processing library with SIMD and GPU acceleration.
+Fast string processing with SIMD and GPU acceleration.
 
-This crate provides two main modules:
-- `stringzilla` (alias `sz`): Single-string operations  
-- `stringzillas` (alias `szs`): Multi-string parallel operations (requires features)
+The crate is one module, `stringzilla`, aliased `sz`: single-string search, comparison, hashing,
+sorting and UTF-8 segmentation, beside the stateful cross-product engines - `LevenshteinEngine`,
+`OverlapEngine` and `SubstringsEngine` - which prepare a batch of queries once and score any number
+of candidate batches against it.
 
 ## Features
-- `cpus`: Enable multi-threaded CPU backend
-- `cuda`: Enable CUDA GPU backend  
-- `rocm`: Enable ROCm GPU backend
+- `std`: standard-library integration, such as `BuildSzHasher` for `HashMap`; without it the crate is
+  `no_std`.
+- `dynamic-dispatch`: compile every ISA tier and pick one at load through a dispatch table; without it
+  the tier is resolved at compile time and baked in.
+- `cuda`: compile the CUDA backend, which is what the engines' `new_on_gpu` constructors need.
 "]
 
 pub mod stringzilla;
 
-#[cfg(any(feature = "cpus", feature = "cuda", feature = "rocm"))]
-pub mod stringzillas;
-
-// Convenience aliases for shorter names
+// Convenience alias for the shorter name.
 pub use stringzilla as sz;
-#[cfg(any(feature = "cpus", feature = "cuda", feature = "rocm"))]
-pub use stringzillas as szs;

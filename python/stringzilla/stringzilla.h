@@ -4,16 +4,12 @@
  *  @author Ash Vardanian
  *
  *  The `stringzilla` extension is split into one translation unit per domain - `memory.c`, `hash.c`,
- *  `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, the `utf8_` files - alongside the CPython
- *  object-model files `file.c`, `str.c`, `strs.c` and the `shared.c` plumbing. This header carries
- *  everything more than one of those files touches: the `File`/`Str`/`Strs` struct layouts, the full
- *  `PyTypeObject` forward-declaration set the module-init file needs to build its type-registration table,
- *  and the per-interpreter free-list state. Structs read by a single translation unit live in that file
- *  instead.
- *
- *  The sibling `stringzillas` extension has its own private header, `stringzillas.h`. The two must not be
- *  mixed: both define `SZ_METHOD_FLAGS`, to different values, and `stringzillas` shadows this extension's
- *  capsule-exported function names as file-local pointers.
+ *  `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`, `overlap.c`, `substrings.c`,
+ *  the `utf8_` files - alongside the CPython object-model files `file.c`, `str.c`, `strs.c` and the
+ *  `shared.c` plumbing. This header carries everything more than one of those files touches: the
+ *  `File`/`Str`/`Strs` struct layouts, the full `PyTypeObject` forward-declaration set the module-init file
+ *  needs to build its type-registration table, and the per-interpreter free-list state. Structs read by a
+ *  single translation unit live in that file instead.
  *
  *  Not installed; private to this extension's build.
  */
@@ -117,6 +113,9 @@ extern PyTypeObject Aes256CtrKeyType;
 extern PyTypeObject Aes256GcmKeyType;
 extern PyTypeObject Aes256GcmEncryptorType;
 extern PyTypeObject Aes256GcmDecryptorType;
+extern PyTypeObject LevenshteinEngineType;
+extern PyTypeObject OverlapEngineType;
+extern PyTypeObject SubstringsEngineType;
 
 extern struct PyModuleDef stringzilla_module;
 
@@ -323,6 +322,23 @@ extern Py_ssize_t Strs_len(Strs *self);
     } while (0)
 #endif
 
+// Each engine keeps a grow-only round scratch that every compute verb writes through, so two threads
+// calling into one engine would race on it. The GIL is what serializes them today; a free-threaded
+// build says so out loud with a per-object mutex, zero-initialized by `tp_alloc` and never torn down.
+#if defined(Py_GIL_DISABLED)
+#define sz_engine_lock_field_ PyMutex engine_lock;
+#define sz_engine_lock_(engine) PyMutex_Lock(&(engine)->engine_lock)
+#define sz_engine_unlock_(engine) PyMutex_Unlock(&(engine)->engine_lock)
+#else
+#define sz_engine_lock_field_
+#define sz_engine_lock_(engine) \
+    do {                        \
+    } while (0)
+#define sz_engine_unlock_(engine) \
+    do {                          \
+    } while (0)
+#endif
+
 /**
  *  @brief  Cross-domain function/docstring declarations.
  *
@@ -513,6 +529,29 @@ extern PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ss
                                     PyObject *args_names_tuple);
 extern PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
                                                  Py_ssize_t positional_args_count, PyObject *args_names_tuple);
+
+// stringzilla.c
+/** @brief  Raises the Python exception @p status names, blaming @p context; never called on success. */
+extern void sz_py_raise_status(sz_status_t status, char const *context);
+
+/** @brief  Exports @p object as a sequence of strings, or raises a `TypeError` naming @p name. */
+extern int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_t *sequence);
+
+/** @brief  Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
+extern int sz_py_export_stream(PyObject *stream_obj, void **stream);
+
+/**
+ *  @brief  Binds @p object as a writable output of @p rank axes, each at least as wide as @p extents.
+ *  @param[out] strides Entries from one index of each axis to the next, in items rather than bytes.
+ *  @return 0 with @p view bound, or -1 with an exception set and nothing left to release.
+ *  @note Says nothing about contiguity: a verb taking no stride for an axis checks that axis itself.
+ */
+extern int sz_py_export_output_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, int rank,
+                                      sz_size_t const *extents, Py_buffer *view, sz_size_t *strides);
+
+/** @brief  Binds @p object as a read-only, contiguous input of at least @p count items. */
+extern int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, sz_size_t count,
+                                     Py_buffer *view);
 
 // str.c
 extern char const doc_offset_within[], doc_write_to[], doc_decode[];

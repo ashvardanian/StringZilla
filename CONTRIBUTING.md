@@ -14,8 +14,8 @@ The project is split into the following parts:
 - `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
 - `include/stringzilla/<family>/*` - per-ISA kernels behind each hub, including the `cuda.cuh` device backends.
 - `c/*` - [C and CUDA](#c-and-c) sources for dynamic dispatch, one translation unit per kernel family.
-- `rust/*` - [Rust](#rust) crate sources; `rust/stringzilla/*` and `rust/stringzillas/*` hold one module per kernel domain, re-exported through `rust/stringzilla.rs` and `rust/stringzillas.rs`.
-- `python/*` - [Python](#python) bindings; one translation unit per kernel domain, with `python/stringzilla/stringzilla.h` and `python/stringzillas/stringzillas.h` as the two extensions' private headers.
+- `rust/*` - [Rust](#rust) crate sources; `rust/stringzilla/*` holds one module per kernel domain, re-exported through `rust/stringzilla.rs`.
+- `python/*` - [Python](#python) bindings; one translation unit per kernel domain, with `python/stringzilla/stringzilla.h` as the extension's private header.
 - `swift/*` - [Swift](#swift) package sources and tests.
 - `javascript/*` - [JavaScript](#javascript) bindings.
 - `golang/*` - [Go](#golang) bindings.
@@ -28,7 +28,7 @@ The project is split into the following parts:
 For minimal test coverage, check the following scripts:
 
 - `test/stringzilla.cpp` - drives every per-ISA C kernel directly, spot-checking the C++ wrappers in the `_unit` tier.
-- `test/*.py` - tests the Python API against native strings, split per kernel family (`string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `similarities.py`, `fingerprints.py`, `substrings.py`, `utf8_*.py`), with shared helpers in `sz_helpers.py`, `szs_helpers.py`, and `utf8_helpers.py`.
+- `test/*.py` - tests the Python API against native strings, split per kernel family - `string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `utf8_*.py` - with shared helpers in `sz_helpers.py` and `utf8_helpers.py`.
 - `test/stringzilla.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
@@ -230,7 +230,7 @@ SZ_TESTS_MULTIPLIER=10 build_debug/stringzilla_test_cpp20
 SZ_TESTS_SEED=12345 SZ_TESTS_MULTIPLIER=5 build_debug/stringzilla_test_cpp20
 
 # Python tests also respect SZ_TESTS_SEED
-SZ_TESTS_SEED=42 pytest test/ --ignore=test/stringzillas.py -v
+SZ_TESTS_SEED=42 pytest test/ -v
 ```
 
 When a test fails, note the seed from the output and re-run with that exact seed to reproduce the issue.
@@ -601,14 +601,6 @@ To check the installed version and capabilities, try:
 uv run --no-project python -c "import stringzilla as sz; print(sz.__capabilities__)"
 ```
 
-To build parallel StringZillas CPUs & CUDA backends, try:
-
-```bash
-uv pip install setuptools wheel numpy
-SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
-SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
-```
-
 To clean up code before pushing:
 
 ```bash
@@ -624,10 +616,10 @@ uv run --no-project flake8 test/*.py --max-line-length=120
 For testing we use PyTest, which may not be installed on your system.
 
 ```bash
-uv pip install pytest pytest-repeat numpy pyarrow                                       # for repeated fuzzy tests
-uv run --no-project python -m pytest test/ --ignore=test/stringzillas.py                      # default settings
-uv run --no-project python -m pytest test/ --ignore=test/stringzillas.py -s -x -p no:warnings # custom settings
-uv run --no-project python -m pytest test/doctests.py                           # to run the docstring examples
+uv pip install pytest pytest-repeat numpy pyarrow                # for repeated fuzzy tests
+uv run --no-project python -m pytest test/                       # default settings
+uv run --no-project python -m pytest test/ -s -x -p no:warnings  # custom settings
+uv run --no-project python -m pytest test/doctests.py            # to run the docstring examples
 uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz_hash("abc", 100))'
 ```
 
@@ -643,15 +635,10 @@ uv pip install pycryptodome uniseg grapheme pysbd pyicu # oracles for the cipher
 ### Packaging
 
 For source distributions, make sure `MANIFEST.in` is up-to-date.
-When building `sdist`-s for the variant packages, you must set `SZ_TARGET` so the `sdist` metadata `Name` matches the package on PyPI.
-Use the backend helper to build all three correctly named `sdist`-s into `dist/`:
 
 ```bash
 uv pip install build
-uv build --sdist --out-dir dist # defaults to `stringzilla`
-SZ_TARGET=stringzilla uv run --no-project python build_backend.py build-sdists
-SZ_TARGET=stringzillas-cpus uv run --no-project python build_backend.py build-sdists
-SZ_TARGET=stringzillas-cuda uv run --no-project python build_backend.py build-sdists
+uv build --sdist --out-dir dist
 ```
 
 Before you ship, please make sure the `cibuilwheel` packaging works and tests pass on other platforms.
@@ -689,9 +676,9 @@ python -m cibuildwheel --platform windows
 All together, for one version of Python, OS, hardware platform:
 
 ```bash
-CIBW_BUILD=cp312-* CIBW_ARCHS_LINUX=x86_64 SZ_TARGET=stringzillas-cuda cibuildwheel --platform linux
-CIBW_BUILD=cp312-* CIBW_ARCHS_MACOS=arm64 SZ_TARGET=stringzillas-cpus python3 -m cibuildwheel --platform macos
-$env:CIBW_BUILD = "cp312-*"; $env:CIBW_ARCHS_WINDOWS = "AMD64"; $env:SZ_TARGET = "stringzillas-cpus"; python -m cibuildwheel --platform windows
+CIBW_BUILD=cp312-* CIBW_ARCHS_LINUX=x86_64 cibuildwheel --platform linux
+CIBW_BUILD=cp312-* CIBW_ARCHS_MACOS=arm64 python3 -m cibuildwheel --platform macos
+$env:CIBW_BUILD = "cp312-*"; $env:CIBW_ARCHS_WINDOWS = "AMD64"; python -m cibuildwheel --platform windows
 ```
 
 [cibuildwheel-cli]: https://cibuildwheel.readthedocs.io/en/stable/options/#command-line
@@ -742,17 +729,16 @@ sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -c "
 StringZilla's Rust crate supports both `std` and `no_std` builds.
 Other options include:
 
-- `std` (default): enables standard library support.
-- `cpus`: multi-threaded CPU backend (implies `std`).
-- `cuda`: CUDA backend (implies `cpus` and `std`).
-- `rocm`: ROCm backend (implies `cpus` and `std`).
+- `std`, on by default: enables standard library support.
+- `dynamic-dispatch`, on by default: compiles every ISA tier and picks one at load.
+- `cuda`: unlocks each engine's `new_on_gpu` constructor, which implies `std`.
+- `rocm`: the AMD counterpart, which implies `std`.
 
 ```bash
 cargo test --no-default-features                # verify `no_std` build
 cargo test --no-default-features --features std # only test with `std`
 cargo test                                      # default tests with `std`
-cargo test --features cpus                      # for parallel multi-CPU backends
-cargo test --features cuda                      # for parallel Nvidia GPU backend
+cargo test --features cuda                      # for the Nvidia GPU engines
 ```
 
 If you need to isolate a failing test:

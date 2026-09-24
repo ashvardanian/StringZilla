@@ -1,15 +1,19 @@
-//! Core single-string operations with SIMD acceleration.
+//! Single-string operations and batch engines, both with SIMD acceleration.
 //!
-//! Provides fast string search, comparison, hashing, and manipulation
-//! functions optimized with SWAR and SIMD instructions.
+//! Provides fast string search, comparison, hashing, and manipulation functions optimized with SWAR
+//! and SIMD instructions, plus the stateful cross-product engines - Levenshtein distances, window
+//! overlap, and multi-pattern search - that prepare a batch of queries once and reuse it per round.
 
 mod cipher;
 mod compare;
 mod find;
 mod hash;
 mod intersect;
+mod levenshtein;
 mod memory;
+mod overlap;
 mod sort;
+mod substrings;
 mod types;
 mod utf8_graphemes;
 mod utf8_linebreaks;
@@ -26,8 +30,11 @@ pub use compare::*;
 pub use find::*;
 pub use hash::*;
 pub use intersect::*;
+pub use levenshtein::*;
 pub use memory::*;
+pub use overlap::*;
 pub use sort::*;
+pub use substrings::*;
 pub use types::*;
 pub use utf8_graphemes::*;
 pub use utf8_linebreaks::*;
@@ -268,6 +275,158 @@ extern "C" {
         second_positions: *mut SortedIdx,
     ) -> Status;
 
+    // Cross-product engines. Each takes a null allocator, which resolves to the default host one on a
+    // `_cpu` init and to a stream-derived unified one on a `_gpu` init.
+    pub(crate) fn sz_levenshtein_engine_init_cpu(
+        queries: *const _SzSequence,
+        symbol: LevenshteinSymbol,
+        alloc: *const c_void,
+        engine: *mut LevenshteinEngine,
+    ) -> Status;
+    #[cfg(feature = "cuda")]
+    pub(crate) fn sz_levenshtein_engine_init_gpu(
+        queries: *const _SzSequence,
+        symbol: LevenshteinSymbol,
+        alloc: *const c_void,
+        stream: *mut c_void,
+        engine: *mut LevenshteinEngine,
+    ) -> Status;
+    pub(crate) fn sz_levenshtein_engine_free(engine: *mut LevenshteinEngine);
+    pub(crate) fn sz_levenshtein_distances(
+        engine: *mut LevenshteinEngine,
+        candidates: *const _SzSequence,
+        distances: *mut usize,
+        distances_stride: usize,
+    ) -> Status;
+
+    pub(crate) fn sz_overlap_engine_init_cpu(
+        queries: *const _SzSequence,
+        window_widths: *const usize,
+        window_widths_count: usize,
+        alloc: *const c_void,
+        engine: *mut OverlapEngine,
+    ) -> Status;
+    #[cfg(feature = "cuda")]
+    pub(crate) fn sz_overlap_engine_init_gpu(
+        queries: *const _SzSequence,
+        window_widths: *const usize,
+        window_widths_count: usize,
+        alloc: *const c_void,
+        stream: *mut c_void,
+        engine: *mut OverlapEngine,
+    ) -> Status;
+    pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine);
+    pub(crate) fn sz_overlap_scores(
+        engine: *mut OverlapEngine,
+        candidates: *const _SzSequence,
+        scores: *mut f32,
+        scores_query_stride: usize,
+        scores_candidate_stride: usize,
+    ) -> Status;
+
+    pub(crate) fn sz_substrings_engine_init_cpu(
+        needles: *const _SzSequence,
+        case_sensitivity: CaseSensitivity,
+        overlap_policy: SubstringsOverlapPolicy,
+        hot_states: usize,
+        matches_budget: usize,
+        alloc: *const c_void,
+        engine: *mut SubstringsEngine,
+    ) -> Status;
+    #[cfg(feature = "cuda")]
+    pub(crate) fn sz_substrings_engine_init_gpu(
+        needles: *const _SzSequence,
+        case_sensitivity: CaseSensitivity,
+        overlap_policy: SubstringsOverlapPolicy,
+        hot_states: usize,
+        matches_budget: usize,
+        alloc: *const c_void,
+        stream: *mut c_void,
+        engine: *mut SubstringsEngine,
+    ) -> Status;
+    pub(crate) fn sz_substrings_engine_free(engine: *mut SubstringsEngine);
+    pub(crate) fn sz_substrings_counts(
+        engine: *mut SubstringsEngine,
+        haystacks: *const _SzSequence,
+        counts: *mut usize,
+        counts_stride: usize,
+    ) -> Status;
+    pub(crate) fn sz_substrings_find(
+        engine: *mut SubstringsEngine,
+        haystacks: *const _SzSequence,
+        matches: *mut SubstringsMatch,
+        matches_capacity: usize,
+        matches_offsets: *mut usize,
+    ) -> Status;
+    pub(crate) fn sz_substrings_replace(
+        engine: *mut SubstringsEngine,
+        haystacks: *const _SzSequence,
+        replacements: *const _SzSequence,
+        tape: *mut u8,
+        tape_capacity: usize,
+        offsets: *mut usize,
+    ) -> Status;
+    pub(crate) fn sz_substrings_bm25_scores(
+        engine: *mut SubstringsEngine,
+        haystacks: *const _SzSequence,
+        document_lengths: *const f32,
+        parameters: *const Bm25Params,
+        needle_weights: *const f32,
+        scores: *mut f32,
+        scores_stride: usize,
+    ) -> Status;
+
+}
+
+/// Mirror of `sz_memory_allocator_t`, carried by value inside every engine so a release cannot be
+/// handed the wrong allocator. Nothing on the Rust side reads it; the engines pass a null allocator
+/// and take whichever default their residency resolves to.
+#[repr(C)]
+#[allow(dead_code)] // Every member is the C side's to write; the layout is what Rust keeps.
+pub(crate) struct _SzMemoryAllocator {
+    pub(crate) allocate: Option<unsafe extern "C" fn(bytes: usize, handle: *mut c_void) -> *mut c_void>,
+    pub(crate) free: Option<unsafe extern "C" fn(pointer: *mut c_void, bytes: usize, handle: *mut c_void)>,
+    pub(crate) handle: *mut c_void,
+}
+
+/// Binds `items` into a `sz_sequence_t` that lives for the span of `call`, allocating nothing.
+///
+/// The accessors read the caller's slices in place, so a sequence borrows rather than copies and must
+/// never outlive the call the C side makes through it.
+pub(crate) fn with_sequence<Element, Return>(
+    items: &[Element],
+    call: impl FnOnce(&_SzSequence) -> Return,
+) -> Return
+where
+    Element: AsRef<[u8]>,
+{
+    // SAFETY: the slices outlive `call`, which is the only thing that reaches them.
+    let adapter = move |index: usize| -> &'static [u8] {
+        unsafe { core::mem::transmute::<&[u8], &'static [u8]>(items[index].as_ref()) }
+    };
+    _with_sequence_impl(adapter, items.len(), call)
+}
+
+/// Helper that takes an adapter with a concrete type, which is what `_get_slice_fn` needs to name.
+fn _with_sequence_impl<Adapter, Return>(
+    adapter: Adapter,
+    count: usize,
+    call: impl FnOnce(&_SzSequence) -> Return,
+) -> Return
+where
+    Adapter: Fn(usize) -> &'static [u8],
+{
+    let wrapper = _PunnedSliceLookupView {
+        get_slice: unsafe { _get_slice_fn::<Adapter>() },
+        data: &adapter as *const Adapter as *const c_void,
+    };
+    let sequence = _SzSequence {
+        handle: &wrapper as *const _PunnedSliceLookupView as *const c_void,
+        count,
+        get_start: Some(_slice_get_start_punned),
+        get_length: Some(_slice_get_length_punned),
+    };
+    call(&sequence)
 }
 
 /// Trait for unary string operations that only operate on `self` without needle parameters.

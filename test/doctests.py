@@ -11,8 +11,6 @@ Run with::
 import doctest
 import hashlib
 
-import pytest
-
 import stringzilla as sz
 
 # Names referenced by the docstring examples (e.g. ``>>> sz.Str(...)``). Doctests run in a
@@ -29,14 +27,3 @@ def _run(module, extraglobs):
 def test_stringzilla_doctests():
     attempted = _run(sz, extraglobs={"sz": sz, "hashlib": hashlib})
     assert attempted > 0, "no doctests were discovered in stringzilla"
-
-
-def test_stringzillas_doctests():
-    # `stringzillas` is a separate, optional extension (parallel/GPU engines). Skip cleanly when it
-    # is not importable here, including a partial or link-failed build, so the suite still runs the
-    # core `stringzilla` doctests. CI builds it fully, where these examples execute for real.
-    try:
-        import stringzillas as szs
-    except ImportError as error:
-        pytest.skip(f"stringzillas not importable: {error}")
-    _run(szs, extraglobs={"sz": sz, "szs": szs})
