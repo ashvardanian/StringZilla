@@ -37,6 +37,8 @@
  */
 #include <vector>
 
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
@@ -183,22 +185,22 @@ void bench_utf8_linebreaks(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla UTF-8 Segmentation Benchmarks!\n");
+    fmt::println("Welcome to StringZilla UTF-8 Segmentation Benchmarks!");
     if (auto code = log_environment(); code != 0) return code;
 
-    std::printf("Building up the environment...\n");
+    fmt::println("Building up the environment...");
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual coverage
         environment_t::tokenization_t::lines_k, compute_bound_slice_bytes_k);
 
-    std::printf("Starting UTF-8 segmentation benchmarks...\n");
+    fmt::println("Starting UTF-8 segmentation benchmarks...");
 
     bench_utf8_wordbreaks(env);
     bench_utf8_graphemes(env);
     bench_utf8_sentences(env);
     bench_utf8_linebreaks(env);
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

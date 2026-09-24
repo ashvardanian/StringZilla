@@ -51,6 +51,8 @@
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
 
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
@@ -340,7 +342,7 @@ struct query_preparation_from_sz {
 
 /** @brief The query indexing on every backend, the accelerated arms logged against the serial one. */
 static void bench_overlap_query_preparation(environment_t const &env, overlap_query_t const &query,
-                                         std::string const &suffix) {
+                                            std::string const &suffix) {
     auto validator = query_preparation_from_sz<sz_overlap_u32x1_btree_sort_serial> {query};
     bench_result_t base = bench_unary(env, "sz_overlap_query_preparation_serial" + suffix, validator).log();
 #if SZ_USE_HASWELL
@@ -441,22 +443,22 @@ static void bench_overlap_query(environment_t const &env, std::size_t query_byte
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {
-        std::printf("Building up the environment...\n");
+        fmt::println("Building up the environment...");
         environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         std::size_t const candidates = candidates_per_call(env);
-        std::printf("Starting window overlap benchmarks...\n");
+        fmt::println("Starting window overlap benchmarks...");
         bench_overlap_query(env, median_token_bytes(env), candidates);
     }
     catch (std::exception const &e) {
-        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

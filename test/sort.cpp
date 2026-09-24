@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -47,7 +46,7 @@
 #endif
 
 #include <cstdint> // `std::uintptr_t`
-#include <cstdio>  // `std::printf`
+#include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
@@ -64,6 +63,7 @@
 #include <unordered_set> // `std::unordered_set`
 #include <vector>        // `std::vector`
 
+#include <fmt/format.h>
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -134,7 +134,7 @@ void test_sort_unit() {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
 
-    std::printf("  - testing sequence sort & intersect known-answer vectors...\n");
+    fmt::println("  - testing sequence sort & intersect known-answer vectors...");
 
     // Byte arg-sort: {"banana","apple","cherry"} sorts lexicographically to {"apple","banana","cherry"},
     // so the permutation is {1, 0, 2}. Check the dispatched API and every natively-compiled kernel.
@@ -353,7 +353,7 @@ void test_intersect_unit() {
  *  has to cost the same at every multiplier, and these sweeps are exactly what does not.
  */
 void test_intersect_equivalence() {
-    std::printf("  - testing intersection sizes against random string sets...\n");
+    fmt::println("  - testing intersection sizes against random string sets...");
 
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
@@ -395,7 +395,7 @@ void test_intersect_equivalence() {
  *  has to cost the same at every multiplier, and these sweeps are exactly what does not.
  */
 void test_sort_reference_equivalence() {
-    std::printf("  - testing sorting against a std::stable_sort reference...\n");
+    fmt::println("  - testing sorting against a std::stable_sort reference...");
 
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
@@ -641,7 +641,7 @@ void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size
  *  looks sorted and only the permutation property fails.
  */
 void test_sort_safety() {
-    std::printf("  - testing degenerate sequences of the sorting kernels...\n");
+    fmt::println("  - testing degenerate sequences of the sorting kernels...");
 
     using strs_t = std::vector<std::string>;
 
@@ -654,7 +654,7 @@ void test_sort_safety() {
         std::vector<bool> seen(input.size(), false);
         for (sz_sorted_idx_t const index : order) {
             if ((std::size_t)index >= input.size() || seen[(std::size_t)index]) {
-                std::fprintf(stderr, "%s: argsort produced %s for a %zu-element input\n", name,
+                fmt::println(stderr, "{}: argsort produced {} for a {}-element input", name,
                              (std::size_t)index >= input.size() ? "an out-of-range index" : "a repeated index",
                              input.size());
                 verify(false && "A sort's output must be a permutation of the input indices");
@@ -700,7 +700,7 @@ void test_sort_safety() {
     sweep("rvv", sz_sequence_argsort_rvv);
 #endif
 
-    std::printf("    degenerate-sequence safety passed!\n");
+    fmt::println("    degenerate-sequence safety passed!");
 }
 
 #pragma endregion // Safety

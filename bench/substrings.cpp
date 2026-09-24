@@ -40,6 +40,8 @@
 #include <stdexcept> // `std::runtime_error`
 #include <string>    // `std::string`
 
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 #include "substrings.cuh"  // `substrings_dictionary_t`, `substrings_counts_from_sz`
@@ -57,8 +59,8 @@ struct substrings_build_from_sz {
         sz_substrings_engine_t engine;
         sz_memory_allocator_init_default(&allocator);
         if (sz_substrings_engine_init_cpu(&dictionary.needle_sequence, dictionary.sensitivity,
-                                          sz_substrings_overlapping_k, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0,
-                                          &allocator, &engine) != sz_success_k)
+                                          sz_substrings_overlapping_k, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &allocator,
+                                          &engine) != sz_success_k)
             throw std::runtime_error("The vocabulary would not compile.");
         check_value_t const mixed = (check_value_t)engine.state_count * 31u + engine.max_outputs_per_state;
         sz_substrings_engine_free(&engine);
@@ -174,13 +176,13 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
     substrings_dictionary_t const dictionary(env, slice, sensitivity, allocator);
     std::string const suffix = substrings_label(slice, sensitivity);
     if (dictionary.needles.empty()) {
-        std::printf("Vocabulary %s is empty on this corpus, skipping it.\n", suffix.c_str());
+        fmt::println("Vocabulary {} is empty on this corpus, skipping it.", suffix.c_str());
         return;
     }
     {
         substrings_engine_t probe(dictionary, sz_substrings_overlapping_k, substrings_residency_t::host_k);
-        std::printf("Vocabulary %s holds %zu needles over %u states, %u of them hot.\n", suffix.c_str(),
-                    dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
+        fmt::println("Vocabulary {} holds {} needles over {} states, {} of them hot.", suffix.c_str(),
+                     dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
     }
 
     bench_unary(env, "sz_substrings_engine_init_cpu" + suffix, substrings_build_from_sz {dictionary}).log();
@@ -204,25 +206,25 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {
-        std::printf("Building up the environment...\n");
+        fmt::println("Building up the environment...");
         environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         substrings_corpus_t const corpus(env);
-        std::printf("Starting multi-pattern search benchmarks...\n");
+        fmt::println("Starting multi-pattern search benchmarks...");
         bench_substrings_slice(env, corpus, substrings_slice_t::frequent_k, sz_substrings_cased_k);
         bench_substrings_slice(env, corpus, substrings_slice_t::rare_k, sz_substrings_cased_k);
         bench_substrings_slice(env, corpus, substrings_slice_t::frequent_k, sz_substrings_uncased_k);
         bench_substrings_slice(env, corpus, substrings_slice_t::sampled_k, sz_substrings_cased_k);
     }
     catch (std::exception const &e) {
-        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

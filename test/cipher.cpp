@@ -10,7 +10,6 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif

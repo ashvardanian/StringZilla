@@ -23,7 +23,6 @@
  #define SZ_USE_HASWELL 0
  #define SZ_USE_ICELAKE 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -36,13 +35,14 @@
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
-#include <cstdio>  // `std::printf`, `std::fprintf`
 #include <cstring> // `std::strcmp`
 
 #include <algorithm> // `std::min`
 #include <random>    // `std::uniform_int_distribution`
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
+
+#include <fmt/format.h>
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`, `refusing_allocator_`
 
@@ -91,8 +91,7 @@ struct levenshtein_backend_t {
 
 /** @brief Every cross-product backend compiled into this translation unit, dispatched first. */
 static levenshtein_backend_t const levenshtein_backends[] = {
-    {"dispatched", sz_levenshtein_distances},
-    {"serial", sz_levenshtein_distances_serial},
+    {"dispatched", sz_levenshtein_distances},      {"serial", sz_levenshtein_distances_serial},
 #if SZ_USE_HASWELL
     {"haswell", sz_levenshtein_distances_haswell},
 #endif
@@ -217,7 +216,7 @@ static void check_levenshtein_unit_(std::string const &query, std::vector<levens
 /** @brief Known answers: the classic pairs, empties on either side, identity, the 64-symbol word boundary, and
  *         multi-byte runes, through every backend row. */
 void test_levenshtein_unit() {
-    std::printf("  - testing edit-distance known-answer vectors...\n");
+    fmt::println("  - testing edit-distance known-answer vectors...");
     check_levenshtein_unit_(
         "kitten", {{"sitting", 3, 3}, {"kitten", 0, 0}, {"", 6, 6}, {"k", 5, 5}, {"kittens", 1, 1}, {"mitten", 1, 1}});
     check_levenshtein_unit_("flaw", {{"lawn", 2, 2}, {"flaw", 0, 0}, {"flaws", 1, 1}, {"law", 1, 1}});
@@ -293,7 +292,7 @@ static void check_levenshtein_build_safety_() {
  *         writes an output.
  */
 void test_levenshtein_safety() {
-    std::printf("  - testing degenerate inputs and refused allocations of the edit-distance kernels...\n");
+    fmt::println("  - testing degenerate inputs and refused allocations of the edit-distance kernels...");
     for (levenshtein_backend_t const &backend : levenshtein_backends) check_levenshtein_safety_(backend);
     check_levenshtein_build_safety_();
 }
@@ -336,8 +335,7 @@ void test_levenshtein_all() {
         wide_query += static_cast<char>(0x80 | ((rune >> 6) & 0x3F));
         wide_query += static_cast<char>(0x80 | (rune & 0x3F));
     }
-    check_levenshtein_case_({wide_query},
-                            {wide_query, wide_query.substr(0, 150), wide_query.substr(300), "abc", ""});
+    check_levenshtein_case_({wide_query}, {wide_query, wide_query.substr(0, 150), wide_query.substr(300), "abc", ""});
     check_levenshtein_case_({"abc"}, {});
     for (std::size_t round = 0; round != scale_iterations(8); ++round) {
         std::vector<std::string> queries;

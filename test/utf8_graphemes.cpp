@@ -10,18 +10,18 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 #include <cstddef> // `std::size_t`
-#include <cstdio>  // `std::printf`
 
 #include <random> // `std::mt19937`, `std::uniform_int_distribution`
 #include <string> // `std::string`
 #include <vector> // `std::vector`
+
+#include <fmt/format.h>
 
 #include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
@@ -70,7 +70,7 @@ static utf8_segment_backend_t const utf8_graphemes_backends[] = {
 
 /** @brief Known-answer grapheme-cluster vectors through dispatched, serial, and each ISA backend + the C++ range. */
 void test_utf8_graphemes_unit() {
-    std::printf("  - testing UTF-8 grapheme-cluster known-answer vectors...\n");
+    fmt::println("  - testing UTF-8 grapheme-cluster known-answer vectors...");
 
     check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, span_over(utf8_graphemes_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
@@ -269,7 +269,7 @@ static utf8_segment_corpora_t utf8_graphemes_corpora_() {
 
 /** @brief Rule-coverage gate: every GB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
 void test_utf8_graphemes_rules() {
-    std::printf("  - testing UTF-8 grapheme rule-coverage matrix...\n");
+    fmt::println("  - testing UTF-8 grapheme rule-coverage matrix...");
 
     // One motif per UAX-29 Grapheme_Cluster_Break rule (break or no-break direction).
     utf8_rule_case_t const rule_cases[] = {
@@ -308,11 +308,11 @@ void test_utf8_graphemes_rules() {
 
 /** @brief Malformed-input safety of the UTF-8 grapheme kernels: the serial reference and every compiled ISA. */
 void test_utf8_graphemes_safety() {
-    std::printf("  - testing malformed-input safety of UTF-8 grapheme kernels...\n");
+    fmt::println("  - testing malformed-input safety of UTF-8 grapheme kernels...");
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_graphemes_serial}};
     check_utf8_segment_safety_("grapheme", span_over(serial_only));
     check_utf8_segment_safety_("grapheme", span_over(utf8_graphemes_backends));
-    std::printf("    grapheme safety passed!\n");
+    fmt::println("    grapheme safety passed!");
 }
 
 #pragma endregion // Safety

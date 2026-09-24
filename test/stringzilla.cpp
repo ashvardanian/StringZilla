@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,7 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
+#include <cstdio>  // `stderr`, `stdout`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
@@ -63,6 +62,7 @@
 #include <unordered_set> // `std::unordered_set`
 #include <vector>        // `std::vector`
 
+#include <fmt/format.h>
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -96,7 +96,7 @@ int main(int argc, char const **argv) {
     // Let's greet the user nicely
     sz_unused_(argc && argv);
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Hi, dear tester! You look nice today!\n");
+    fmt::println("Hi, dear tester! You look nice today!");
     log_environment();
     print_test_environment();
 
@@ -150,7 +150,8 @@ int main(int argc, char const **argv) {
     failures += run_test("test_stl_conversions_unit", test_stl_conversions_unit);
     failures += run_test("test_stl_containers_unit", test_stl_containers_unit);
 
-    failures += run_test("test_extensions_reads_unit<sz::string_view_t>", test_extensions_reads_unit<sz::string_view_t>);
+    failures += run_test("test_extensions_reads_unit<sz::string_view_t>",
+                         test_extensions_reads_unit<sz::string_view_t>);
     failures += run_test("test_extensions_reads_unit<sz::string_t>", test_extensions_reads_unit<sz::string_t>);
     failures += run_test("test_extensions_updates_unit", test_extensions_updates_unit);
     failures += run_test("test_extensions_ranges_unit", test_extensions_ranges_unit);
@@ -206,9 +207,9 @@ int main(int argc, char const **argv) {
     failures += run_test("test_uncased_safety", test_uncased_safety);
 
     if (failures != 0) {
-        std::fprintf(stderr, "\n%zu test(s) failed.\n", failures);
+        fmt::println(stderr, "\n{} test(s) failed.", failures);
         return 1;
     }
-    std::printf("\nAll tests passed!\n");
+    fmt::println("\nAll tests passed!");
     return 0;
 }

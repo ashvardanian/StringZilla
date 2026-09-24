@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,7 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
+#include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>   // `std::transform`
@@ -56,6 +55,7 @@
 #include <string_view> // Baseline
 #include <vector>      // `std::vector`
 
+#include <fmt/format.h>
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -148,7 +148,7 @@ static void check_compare_unit_(char const *name, sz_equal_t equal, sz_order_t o
 
         right = left;
         if (equal(left.data(), right.data(), length) != sz_true_k) {
-            std::fprintf(stderr, "%s: equal() denied identical %zu-byte inputs\n", name, (std::size_t)length);
+            fmt::println(stderr, "{}: equal() denied identical {}-byte inputs", name, (std::size_t)length);
             verify(false && "Comparison backend must accept identical inputs at every ladder length");
         }
         verify(order(left.data(), length, right.data(), length) == sz_equal_k &&
@@ -158,8 +158,8 @@ static void check_compare_unit_(char const *name, sz_equal_t equal, sz_order_t o
         for (sz_size_t const position : span_over(positions)) {
             right = left, right[(std::size_t)position] = 'b'; // ? 'b' sorts after 'a', so `left` is the lesser
             if (equal(left.data(), right.data(), length) != sz_false_k) {
-                std::fprintf(stderr, "%s: equal() missed a difference at byte %zu of %zu\n", name,
-                             (std::size_t)position, (std::size_t)length);
+                fmt::println(stderr, "{}: equal() missed a difference at byte {} of {}", name, (std::size_t)position,
+                             (std::size_t)length);
                 verify(false && "Comparison backend must see a single differing byte at every ladder length");
             }
             verify(order(left.data(), length, right.data(), length) == sz_less_k &&
@@ -191,12 +191,12 @@ static void check_find_byte_unit_(char const *name, sz_find_byte_t find_byte, sz
             haystack[(std::size_t)position] = 'z';
             sz_cptr_t const expected = haystack.data() + position;
             if (find_byte(haystack.data(), length, "z") != expected) {
-                std::fprintf(stderr, "%s: find_byte missed the byte at %zu of %zu\n", name, (std::size_t)position,
+                fmt::println(stderr, "{}: find_byte missed the byte at {} of {}", name, (std::size_t)position,
                              (std::size_t)length);
                 verify(false && "Forward byte scan must find a lone match at every ladder length");
             }
             if (rfind_byte(haystack.data(), length, "z") != expected) {
-                std::fprintf(stderr, "%s: rfind_byte missed the byte at %zu of %zu\n", name, (std::size_t)position,
+                fmt::println(stderr, "{}: rfind_byte missed the byte at {} of {}", name, (std::size_t)position,
                              (std::size_t)length);
                 verify(false && "Reverse byte scan must find a lone match at every ladder length");
             }
@@ -232,7 +232,7 @@ static void check_find_byte_unit_(char const *name, sz_find_byte_t find_byte, sz
  *  icelake backends. The comparison family `sz_order`/`sz_equal` ships serial, haswell, and skylake.
  */
 void test_find_unit() {
-    std::printf("  - testing search & comparison known-answer vectors...\n");
+    fmt::println("  - testing search & comparison known-answer vectors...");
 
     char const *hello = "hello world";
     sz_size_t const hello_length = (sz_size_t)std::strlen(hello); // 11 bytes
@@ -444,21 +444,20 @@ void check_find_search_equivalence_(reference_ reference, candidate_ candidate, 
 
     // Replays one haystack/needle pair at every intra-cacheline alignment and compares the backends.
     auto compare_on = [&](std::string const &haystack_pattern, std::string const &needle) {
-        for_each_cacheline_offset_(
-            haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
-                std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
-                sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
-                sz_size_t const needle_length = (sz_size_t)needle.size();
+        for_each_cacheline_offset_(haystack_pattern.size(), [&](sz_ptr_t haystack,
+                                                                [[maybe_unused]] std::size_t offset) {
+            std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
+            sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
+            sz_size_t const needle_length = (sz_size_t)needle.size();
 
-                sz_cptr_t const result_reference = reference(haystack, haystack_length, needle.data(), needle_length);
-                sz_cptr_t const result_candidate = candidate(haystack, haystack_length, needle.data(), needle_length);
-                if (result_reference != result_candidate) {
-                    std::fprintf(
-                        stderr, "%s vs %s: substring search disagreed on a %zu-byte needle in a %zu-byte haystack\n",
-                        reference.name, candidate.name, (std::size_t)needle_length, (std::size_t)haystack_length);
-                    verify(false && "Candidate backend must resolve every needle to the same offset as the reference");
-                }
-            });
+            sz_cptr_t const result_reference = reference(haystack, haystack_length, needle.data(), needle_length);
+            sz_cptr_t const result_candidate = candidate(haystack, haystack_length, needle.data(), needle_length);
+            if (result_reference != result_candidate) {
+                fmt::println(stderr, "{} vs {}: substring search disagreed on a {}-byte needle in a {}-byte haystack",
+                             reference.name, candidate.name, (std::size_t)needle_length, (std::size_t)haystack_length);
+                verify(false && "Candidate backend must resolve every needle to the same offset as the reference");
+            }
+        });
     };
 
     // Hand-picked edge cases: empty needle, not-found, needle at start, needle at end, needle == haystack,
@@ -508,19 +507,19 @@ void check_byteset_equivalence_(reference_ reference, candidate_ candidate, sz_s
 
     // Replays one haystack at every intra-cacheline alignment and compares the backends.
     auto compare_on = [&](std::string const &haystack_pattern, sz_byteset_t const &byteset_t) {
-        for_each_cacheline_offset_(
-            haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
-                std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
-                sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
+        for_each_cacheline_offset_(haystack_pattern.size(), [&](sz_ptr_t haystack,
+                                                                [[maybe_unused]] std::size_t offset) {
+            std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
+            sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
 
-                sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset_t);
-                sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset_t);
-                if (result_reference != result_candidate) {
-                    std::fprintf(stderr, "%s vs %s: byteset search disagreed on a %zu-byte haystack\n", reference.name,
-                                 candidate.name, (std::size_t)haystack_length);
-                    verify(false && "Candidate backend must resolve every byteset_t to the same offset as the reference");
-                }
-            });
+            sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset_t);
+            sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset_t);
+            if (result_reference != result_candidate) {
+                fmt::println(stderr, "{} vs {}: byteset search disagreed on a {}-byte haystack", reference.name,
+                             candidate.name, (std::size_t)haystack_length);
+                verify(false && "Candidate backend must resolve every byteset_t to the same offset as the reference");
+            }
+        });
     };
 
     // Hand-picked edge cases: empty haystack, no member present, member at start, member at end,
@@ -553,7 +552,6 @@ void check_byteset_equivalence_(reference_ reference, candidate_ candidate, sz_s
 #pragma endregion // Equivalence
 
 #pragma region Safety
-
 
 /**
  *  @brief Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl
@@ -608,13 +606,8 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
         std::transform(begin_sz, end_sz, std::back_inserter(offsets_sz),
                        [&](auto const &match) { return match.data() - haystack_sz.data(); });
         auto print_all_matches = [&]() {
-            std::printf("Breakdown of found matches:\n");
-            std::printf("- STL (%zu): ", offsets_stl.size());
-            for (auto offset : offsets_stl) std::printf("%zu ", offset);
-            std::printf("\n");
-            std::printf("- StringZilla (%zu): ", offsets_sz.size());
-            for (auto offset : offsets_sz) std::printf("%zu ", offset);
-            std::printf("\n");
+            fmt::println("Breakdown of found matches:\n- STL ({}): {}\n- StringZilla ({}): {}", offsets_stl.size(),
+                         fmt::join(offsets_stl, " "), offsets_sz.size(), fmt::join(offsets_sz, " "));
         };
 
         for (std::size_t match_idx = 0; begin_stl != end_stl && begin_sz != end_sz;
@@ -622,8 +615,8 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
             auto match_stl = *begin_stl;
             auto match_sz = *begin_sz;
             if (match_stl.data() != match_sz.data()) {
-                std::printf("Mismatch at index #%zu: %zu != %zu\n", match_idx, match_stl.data() - haystack_stl.data(),
-                            match_sz.data() - haystack_sz.data());
+                fmt::println("Mismatch at index #{}: {} != {}", match_idx, match_stl.data() - haystack_stl.data(),
+                             match_sz.data() - haystack_sz.data());
                 print_all_matches();
                 verify(false && "StringZilla must land on the same match offset as the STL reference matcher");
             }
@@ -653,34 +646,34 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
  */
 void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
 
-    check_find_misaligned_<                                                          //
-        sz::find_matches_view<std::string_view, sz::matcher_find<std::string_view>>, //
-        sz::find_matches_view<sz::string_view_t, sz::matcher_find<sz::string_view_t>>>(  //
+    check_find_misaligned_<                                                             //
+        sz::find_matches_view<std::string_view, sz::matcher_find<std::string_view>>,    //
+        sz::find_matches_view<sz::string_view_t, sz::matcher_find<sz::string_view_t>>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    check_find_misaligned_<                                                            //
-        sz::rfind_matches_view<std::string_view, sz::matcher_rfind<std::string_view>>, //
-        sz::rfind_matches_view<sz::string_view_t, sz::matcher_rfind<sz::string_view_t>>>(  //
+    check_find_misaligned_<                                                               //
+        sz::rfind_matches_view<std::string_view, sz::matcher_rfind<std::string_view>>,    //
+        sz::rfind_matches_view<sz::string_view_t, sz::matcher_rfind<sz::string_view_t>>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    check_find_misaligned_<                                                                   //
-        sz::find_matches_view<std::string_view, sz::matcher_find_first_of<std::string_view>>, //
-        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_of<sz::string_view_t>>>(  //
+    check_find_misaligned_<                                                                      //
+        sz::find_matches_view<std::string_view, sz::matcher_find_first_of<std::string_view>>,    //
+        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_of<sz::string_view_t>>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    check_find_misaligned_<                                                                   //
-        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_of<std::string_view>>, //
-        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_of<sz::string_view_t>>>(  //
+    check_find_misaligned_<                                                                      //
+        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_of<std::string_view>>,    //
+        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_of<sz::string_view_t>>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    check_find_misaligned_<                                                                       //
-        sz::find_matches_view<std::string_view, sz::matcher_find_first_not_of<std::string_view>>, //
-        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_not_of<sz::string_view_t>>>(  //
+    check_find_misaligned_<                                                                          //
+        sz::find_matches_view<std::string_view, sz::matcher_find_first_not_of<std::string_view>>,    //
+        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_not_of<sz::string_view_t>>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    check_find_misaligned_<                                                                       //
-        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_not_of<std::string_view>>, //
-        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_not_of<sz::string_view_t>>>(  //
+    check_find_misaligned_<                                                                          //
+        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_not_of<std::string_view>>,    //
+        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_not_of<sz::string_view_t>>>( //
         haystack_pattern, needle_stl, misalignment);
 }
 
@@ -748,7 +741,6 @@ void test_find_misaligned_equivalence() {
     check_find_misaligned_("axabbcxcaaabbccc", "aaabbccc");
 }
 
-
 /** @brief Evaluates the correctness of look-up table transforms using random lookup tables. */
 void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
 
@@ -770,8 +762,7 @@ void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slice
         std::uniform_int_distribution<std::size_t> length_distribution(0, body_length - slice_offset - 1);
         std::size_t const slice_length = length_distribution(global_random_generator());
 
-        sz::lookup(sz::string_view_t(body.data() + slice_offset, slice_length), lut,
-                         &transformed[0] + slice_offset);
+        sz::lookup(sz::string_view_t(body.data() + slice_offset, slice_length), lut, &transformed[0] + slice_offset);
         for (std::size_t index = 0; index != slice_length; ++index)
             verify(transformed[slice_offset + index] == lut[body[slice_offset + index]]);
     }
@@ -786,7 +777,7 @@ void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slice
  *  overlapping load reaches past the end.
  */
 void test_find_safety() {
-    std::printf("  - testing degenerate and boundary inputs of the search kernels...\n");
+    fmt::println("  - testing degenerate and boundary inputs of the search kernels...");
 
     char const *body = "the quick brown fox";
     sz_size_t const body_length = (sz_size_t)std::strlen(body);
@@ -795,11 +786,11 @@ void test_find_safety() {
     // read - and every compiled backend has to say so, not merely whichever one the dispatcher picks here.
     auto check_degenerate_ = [&](char const *name, sz_find_byte_t find_byte, sz_find_byte_t rfind_byte) {
         if (find_byte(body, 0, "a") != SZ_NULL_CHAR) {
-            std::fprintf(stderr, "%s: find_byte reported a match in a zero-length haystack\n", name);
+            fmt::println(stderr, "{}: find_byte reported a match in a zero-length haystack", name);
             verify(false && "A zero-length haystack holds no byte to find");
         }
         if (rfind_byte(body, 0, "a") != SZ_NULL_CHAR) {
-            std::fprintf(stderr, "%s: rfind_byte reported a match in a zero-length haystack\n", name);
+            fmt::println(stderr, "{}: rfind_byte reported a match in a zero-length haystack", name);
             verify(false && "A zero-length haystack holds no byte to find");
         }
     };
@@ -865,7 +856,7 @@ void test_find_safety() {
         });
     }
 
-    std::printf("    boundary-input safety passed!\n");
+    fmt::println("    boundary-input safety passed!");
 }
 
 #pragma endregion // Safety

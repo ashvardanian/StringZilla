@@ -61,37 +61,140 @@
 #pragma once
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstdint> // `std::uintptr_t` for cache-line alignment
-#include <cstdio>  // `std::printf`, `std::fflush`
+#include <cstdio>  // `std::FILE`, `std::fopen`, `stderr`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::strcmp`
 
-#include <algorithm> // `std::copy`, `std::generate`
-#include <chrono>    // `std::chrono::steady_clock` for per-test timing
-#include <exception> // `std::exception`
-#include <random>    // `std::random_device`
-#include <regex>     // `std::regex_search` for `SZ_TESTS_FILTER`
-#include <string>    // `std::string`
-#include <vector>    // `std::vector`
+#include <algorithm>   // `std::copy`, `std::generate`
+#include <chrono>      // `std::chrono::steady_clock` for per-test timing
+#include <exception>   // `std::exception`
+#include <random>      // `std::random_device`
+#include <regex>       // `std::regex_search` for `SZ_TESTS_FILTER`
+#include <span>        // `std::span`, `std::as_bytes`
+#include <string>      // `std::string`
+#include <string_view> // `std::string_view`
+#include <type_traits> // `std::is_enum_v`
+#include <vector>      // `std::vector`
 
 #if defined(__linux__) && defined(__GLIBC__)
 #include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
 #include <unistd.h>   // `STDERR_FILENO`
 #endif
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+#include <fmt/std.h>
+
 #include "stringzilla/types.hpp"
 
 #pragma region Assertion Helpers
 
+namespace ashvardanian {
+namespace stringzilla {
+namespace test {
+
+/** One operand of a failed comparison, cut at a few hundred bytes so a megabyte string cannot drown the report. */
+template <typename value_type_>
+std::string render_operand(value_type_ const &value) {
+    std::string rendered;
+    if constexpr (std::is_null_pointer_v<value_type_>) rendered = "nullptr";
+    else if constexpr (std::is_pointer_v<value_type_>) rendered = fmt::format("{}", fmt::ptr(value));
+    else if constexpr (std::is_array_v<value_type_> &&
+                       std::is_same_v<std::remove_cv_t<std::remove_extent_t<value_type_>>, char>)
+        rendered = fmt::format("{:?}", std::string_view(value, std::find(value, std::end(value), '\0')));
+    else if constexpr (std::is_same_v<value_type_, char>) rendered = fmt::format("{:?}", value);
+    else if constexpr (std::is_convertible_v<value_type_ const &, std::string_view>)
+        rendered = fmt::format("{:?}", std::string_view(value));
+    else if constexpr (std::is_enum_v<value_type_>) rendered = fmt::format("{}", fmt::underlying(value));
+    else if constexpr (fmt::is_formattable<value_type_>::value) rendered = fmt::format("{}", value);
+    else rendered = "{?}";
+    std::size_t constexpr limit_bytes = 256;
+    if (rendered.size() > limit_bytes)
+        rendered = fmt::format("{}... {} more bytes", rendered.substr(0, limit_bytes), rendered.size() - limit_bytes);
+    return rendered;
+}
+
+/** The bytes of @p text, space-separated, printing a hex dump under `{:02X}`. */
+inline auto hex_bytes(std::string_view text) noexcept { return fmt::join(std::as_bytes(std::span(text)), " "); }
+
+/** The state of one `verify`: the operands of its leftmost comparison, rendered only if that comparison fails. */
+struct assertion_t {
+    std::string expansion;
+
+    [[noreturn]] void fail(char const *expression, char const *file, int line) const noexcept {
+        fmt::println(stderr, "Test verification failed: {}, {}:{}", expression, file, line);
+        if (!expansion.empty()) fmt::println(stderr, "  with expansion: {}", expansion);
+        std::abort();
+    }
+};
+
+/** The left operand of a `verify` condition, awaiting the comparison that decides whether it is worth rendering. */
+template <typename left_type_>
+struct left_operand {
+    assertion_t &assertion;
+    left_type_ const &value;
+
+    explicit operator bool() const { return static_cast<bool>(value); }
+
+    template <typename right_type_>
+    bool record(bool holds, char const *operator_name, right_type_ const &right) const {
+        if (!holds)
+            assertion.expansion = fmt::format("{} {} {}", render_operand(value), operator_name, render_operand(right));
+        return holds;
+    }
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#endif
+    template <typename right_type_>
+    friend bool operator==(left_operand &&left, right_type_ const &right) {
+        return left.record(left.value == right, "==", right);
+    }
+    template <typename right_type_>
+    friend bool operator!=(left_operand &&left, right_type_ const &right) {
+        return left.record(left.value != right, "!=", right);
+    }
+    template <typename right_type_>
+    friend bool operator<(left_operand &&left, right_type_ const &right) {
+        return left.record(left.value < right, "<", right);
+    }
+    template <typename right_type_>
+    friend bool operator<=(left_operand &&left, right_type_ const &right) {
+        return left.record(left.value <= right, "<=", right);
+    }
+    template <typename right_type_>
+    friend bool operator>(left_operand &&left, right_type_ const &right) {
+        return left.record(left.value > right, ">", right);
+    }
+    template <typename right_type_>
+    friend bool operator>=(left_operand &&left, right_type_ const &right) {
+        return left.record(left.value >= right, ">=", right);
+    }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+};
+
+/** Binds tighter than every comparison, so `assertion <= a == b` captures `a` before `==` sees it. */
+template <typename left_type_>
+left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &value) noexcept {
+    return {assertion, value};
+}
+
+} // namespace test
+} // namespace stringzilla
+} // namespace ashvardanian
+
 /**
  *  @brief Test-suite verification - always active, regardless of `NDEBUG` or `SZ_DEBUG`. Unlike `sz_assert_`,
  *         which is a debug-only invariant check for the library, a test's oracle must never be a no-op.
+ *         A failing comparison prints both of its operands.
  */
-#define verify(condition)                                                                                  \
-    do {                                                                                                   \
-        if (!(condition)) {                                                                                \
-            std::fprintf(stderr, "Test verification failed: %s, %s:%d\n", #condition, __FILE__, __LINE__); \
-            std::abort();                                                                                  \
-        }                                                                                                  \
+#define verify(condition)                                                                      \
+    do {                                                                                       \
+        ::ashvardanian::stringzilla::test::assertion_t sz_assertion_;                          \
+        if (!(sz_assertion_ <= condition)) sz_assertion_.fail(#condition, __FILE__, __LINE__); \
     } while (0)
 
 /**
@@ -139,7 +242,7 @@
  *  @param[in] what What the row disagreed with - its oracle, its known answer, or the reference backend.
  */
 inline void fail_backend_(char const *name, char const *what) noexcept {
-    std::fprintf(stderr, "Backend %s failed: %s\n", name, what);
+    fmt::println(stderr, "Backend {} failed: {}", name, what);
     verify(false && "A backend disagreed with its oracle, its known answer, or the reference");
 }
 
@@ -153,7 +256,6 @@ backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], cha
 }
 
 #pragma endregion // Backend Tables
-
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -556,33 +658,33 @@ inline char const *status_name(status_t s) noexcept {
 
 inline int log_environment() {
     // The library already answers both questions; a wall of `SZ_USE_*` echoes only repeats the first one.
-    std::printf("- Compiled for: %s\n", sz_capabilities_to_string(sz_capabilities_comptime()));
-    std::printf("- This machine: %s\n", sz_capabilities_to_string(sz_capabilities()));
+    fmt::println("- Compiled for: {}", sz_capabilities_to_string(sz_capabilities_comptime()));
+    fmt::println("- This machine: {}", sz_capabilities_to_string(sz_capabilities()));
 
 #if SZ_USE_CUDA
     // The device is asked directly rather than through `sz_capabilities`: that verb answers for the library this
     // binary links, and `define_stringzilla_library` compiles the core without CUDA, so it reports none.
     cudaError_t cuda_error = cudaFree(0); // Force context initialization
     if (cuda_error != cudaSuccess) {
-        std::printf("CUDA initialization error: %s\n", cudaGetErrorString(cuda_error));
+        fmt::println("CUDA initialization error: {}", cudaGetErrorString(cuda_error));
         return 1;
     }
     int device_count = 0;
     cuda_error = cudaGetDeviceCount(&device_count);
     if (cuda_error != cudaSuccess) {
-        std::printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
+        fmt::println("CUDA error: {}", cudaGetErrorString(cuda_error));
         return 1;
     }
     if (device_count == 0) {
-        std::printf("- No CUDA device is visible - the GPU backends have nothing to run on.\n");
+        fmt::println("- No CUDA device is visible - the GPU backends have nothing to run on.");
         return 1;
     }
-    std::printf("- CUDA devices:\n");
+    fmt::println("- CUDA devices:");
     for (int i = 0; i < device_count; ++i) {
         cudaDeviceProp prop;
         cuda_error = cudaGetDeviceProperties(&prop, i);
         if (cuda_error != cudaSuccess) {
-            std::printf("Error retrieving properties for device %d: %s\n", i, cudaGetErrorString(cuda_error));
+            fmt::println("Error retrieving properties for device {}: {}", i, cudaGetErrorString(cuda_error));
             continue;
         }
         std::size_t count = 1;
@@ -594,14 +696,21 @@ inline int log_environment() {
         int warps_per_sm = prop.maxThreadsPerMultiProcessor / prop.warpSize;
         std::size_t shared_memory_per_warp =
             (warps_per_sm > 0) ? (prop.sharedMemPerMultiprocessor / static_cast<std::size_t>(warps_per_sm)) : 0;
-        std::printf("  - %zu x %s\n", count, prop.name);
-        std::printf("    Shared Memory per SM: %zu bytes\n", prop.sharedMemPerMultiprocessor);
-        std::printf("    Maximum Threads per SM: %d\n", prop.maxThreadsPerMultiProcessor);
-        std::printf("    Warp Size: %d threads\n", prop.warpSize);
-        std::printf("    Max Warps per SM: %d warps\n", warps_per_sm);
-        std::printf("    Shared Memory per Warp: %zu bytes\n", shared_memory_per_warp);
-        std::printf("    Managed memory: %s\n", prop.managedMemory ? "yes" : "no");
-        std::printf("    Unified addressing: %s\n", prop.unifiedAddressing ? "yes" : "no");
+        fmt::print(R"(  - {count} x {name}
+    Shared Memory per SM: {shared_per_sm} bytes
+    Maximum Threads per SM: {threads_per_sm}
+    Warp Size: {warp_size} threads
+    Max Warps per SM: {warps_per_sm} warps
+    Shared Memory per Warp: {shared_per_warp} bytes
+    Managed memory: {managed}
+    Unified addressing: {unified}
+)",
+                   fmt::arg("count", count), fmt::arg("name", prop.name),
+                   fmt::arg("shared_per_sm", prop.sharedMemPerMultiprocessor),
+                   fmt::arg("threads_per_sm", prop.maxThreadsPerMultiProcessor), fmt::arg("warp_size", prop.warpSize),
+                   fmt::arg("warps_per_sm", warps_per_sm), fmt::arg("shared_per_warp", shared_memory_per_warp),
+                   fmt::arg("managed", prop.managedMemory ? "yes" : "no"),
+                   fmt::arg("unified", prop.unifiedAddressing ? "yes" : "no"));
         i += static_cast<int>(count) - 1;
     }
 #endif
@@ -617,9 +726,9 @@ inline int log_environment() {
 inline void print_test_environment() noexcept {
     auto seed = global_random_seed();
     bool from_env = global_random_seed_from_env();
-    std::printf("- Test seed: %u%s\n", static_cast<unsigned>(seed), from_env ? " (from SZ_TESTS_SEED)" : "");
+    fmt::println("- Test seed: {}{}", static_cast<unsigned>(seed), from_env ? " (from SZ_TESTS_SEED)" : "");
     double multiplier = get_iterations_multiplier();
-    if (multiplier != 1.0) std::printf("- Iterations multiplier: %.2fx\n", multiplier);
+    if (multiplier != 1.0) fmt::println("- Iterations multiplier: {:.2f}x", multiplier);
     std::fflush(stdout); // Ensure output is visible even on crash
 }
 
@@ -630,7 +739,7 @@ inline void print_test_environment() noexcept {
  *         instead of dying silently - especially under output redirection in CI.
  */
 inline void test_fatal_signal_handler(int signal_number) noexcept {
-    std::fprintf(stderr, "\n*** Fatal signal %d - backtrace follows ***\n", signal_number);
+    fmt::println(stderr, "\n*** Fatal signal {} - backtrace follows ***", signal_number);
 #if defined(__linux__) && defined(__GLIBC__)
     void *frames[64];
     int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
@@ -700,11 +809,11 @@ inline void seed_generator_for_test(char const *name) noexcept {
 template <typename function_type_>
 inline std::size_t run_test(char const *name, function_type_ &&test_function) noexcept {
     if (!test_should_run(name)) {
-        std::printf("- %s ... skipped (SZ_TESTS_FILTER)\n", name);
+        fmt::println("- {} ... skipped (SZ_TESTS_FILTER)", name);
         std::fflush(stdout);
         return 0;
     }
-    std::printf("- %s ...\n", name);
+    fmt::println("- {} ...", name);
     std::fflush(stdout);
     // Reseed per test so inputs don't depend on which tests ran first, and `SZ_TESTS_FILTER` reproduces faithfully.
     seed_generator_for_test(name);
@@ -713,12 +822,12 @@ inline std::size_t run_test(char const *name, function_type_ &&test_function) no
         test_function();
     }
     catch (std::exception const &error) {
-        std::fprintf(stderr, "- %s ... FAILED: %s\n", name, error.what());
+        fmt::println(stderr, "- {} ... FAILED: {}", name, error.what());
         std::fflush(stderr);
         return 1;
     }
     double const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    std::printf("- %s ... ok (%.2f s)\n", name, seconds);
+    fmt::println("- {} ... ok ({:.2f} s)", name, seconds);
     std::fflush(stdout);
     return 0;
 }

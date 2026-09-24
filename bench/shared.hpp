@@ -33,7 +33,7 @@
 #include <cctype>  // `std::isalnum`
 #include <clocale> // `std::setlocale`
 #include <cmath>   // `std::ceil`, `std::log`, `std::pow`
-#include <cstdio>  // `std::fopen`, `std::fscanf`
+#include <cstdio>  // `std::fopen`, `std::fclose`, `std::FILE`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>
@@ -58,10 +58,12 @@
 #endif
 #endif
 
+#include <fmt/color.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/stringzilla.hpp"
-
 
 #include "stringzilla.hpp" // `read_file`
 
@@ -364,6 +366,16 @@ struct environment_t {
         words_k = 253,
     };
 
+    /** How `fmt` spells a tokenization mode: `file`, `line`, `word`, or `N-grams`. */
+    friend std::string format_as(tokenization_t mode) {
+        switch (mode) {
+        case file_k: return "file";
+        case lines_k: return "line";
+        case words_k: return "word";
+        default: return fmt::format("{}-grams", static_cast<std::size_t>(mode));
+        }
+    }
+
     /** @brief Absolute path of the textual input file on disk. */
     std::string path;
     /** @brief Stress-testing results directory. */
@@ -575,28 +587,30 @@ inline environment_t build_environment(                                        /
     // from it is nominal against.
     if (unsigned const cores = std::thread::hardware_concurrency()) env.specs.cores_per_socket = cores;
 
-    std::printf("Environment built with the following settings:\n");
-    std::printf(" - Dataset path: %s\n", env.path.c_str());
-    std::printf(" - Time limit: %zu seconds per benchmark (%zu per stress-test)\n", env.benchmark_seconds,
-                env.stress_seconds);
-    if (!env.filter.empty()) std::printf(" - Algorithm filter: %s\n", env.filter.c_str());
-    std::printf(" - Tokenization mode: ");
-    switch (env.tokenization) {
-    case environment_t::file_k: std::printf("file\n"); break;
-    case environment_t::lines_k: std::printf("line\n"); break;
-    case environment_t::words_k: std::printf("word\n"); break;
-    default: std::printf("%zu-grams\n", static_cast<std::size_t>(env.tokenization)); break;
-    }
-    std::printf(" - Seed: %zu%s\n", static_cast<std::size_t>(env.seed), seed_message);
-    std::printf(" - Stress-testing: %s\n", env.stress ? "yes" : "no");
-    std::printf(" - Unique tokens: %s\n", env.unique ? "yes" : "no");
-    std::printf(" - Loaded dataset size: %zu bytes\n", env.dataset.size());
-    if (env.dataset_limit_bytes == 0) std::printf(" - Dataset limit: whole file\n");
-    else std::printf(" - Dataset limit: %zu bytes\n", env.dataset_limit_bytes);
-    std::printf(" - Number of tokens: %zu\n", env.tokens.size());
-    std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
-    std::printf(" - Caches: %zu B first-level (assumed), %zu B confined to a compute domain\n", env.specs.l1_bytes,
-                env.specs.l3_bytes);
+    fmt::print(R"(Environment built with the following settings:
+ - Dataset path: {path}
+ - Time limit: {benchmark_seconds} seconds per benchmark ({stress_seconds} per stress-test)
+ - Algorithm filter: {filter}
+ - Tokenization mode: {tokenization}
+ - Seed: {seed}{seed_message}
+ - Stress-testing: {stress}
+ - Unique tokens: {unique}
+ - Loaded dataset size: {dataset_bytes} bytes
+ - Dataset limit: {dataset_limit}
+ - Number of tokens: {tokens}
+ - Mean token length: {mean_token_length:.2f} bytes
+ - Caches: {l1_bytes} B first-level (assumed), {l3_bytes} B confined to a compute domain
+)",
+               fmt::arg("path", env.path), fmt::arg("benchmark_seconds", env.benchmark_seconds),
+               fmt::arg("stress_seconds", env.stress_seconds),
+               fmt::arg("filter", env.filter.empty() ? std::string("none") : env.filter),
+               fmt::arg("tokenization", env.tokenization), fmt::arg("seed", static_cast<std::size_t>(env.seed)),
+               fmt::arg("seed_message", seed_message), fmt::arg("stress", env.stress ? "yes" : "no"),
+               fmt::arg("unique", env.unique ? "yes" : "no"), fmt::arg("dataset_bytes", env.dataset.size()),
+               fmt::arg("dataset_limit", env.dataset_limit_bytes ? fmt::format("{} bytes", env.dataset_limit_bytes)
+                                                                 : std::string("whole file")),
+               fmt::arg("tokens", env.tokens.size()), fmt::arg("mean_token_length", mean_token_length),
+               fmt::arg("l1_bytes", env.specs.l1_bytes), fmt::arg("l3_bytes", env.specs.l3_bytes));
 
     return env;
 }
@@ -650,17 +664,14 @@ inline void log_failure(                                              //
     std::FILE *file = std::fopen(file_path.c_str(), "w");
     if (!file) throw std::runtime_error("Failed to open file for writing: " + file_name);
 
-    std::fprintf(file, "Dataset path: %s\n", env.path.c_str());
-    std::fprintf(file, "Tokenization mode: %d\n", env.tokenization);
-    std::fprintf(file, "Seed: %zu\n", static_cast<std::size_t>(env.seed));
+    fmt::println(file, "Dataset path: {}\nTokenization mode: {}\nSeed: {}", env.path, env.tokenization,
+                 static_cast<std::size_t>(env.seed));
     if (token_index) {
-        std::fprintf(file, "Token index: %zu\n", *token_index);
-        std::fprintf(file, "Token Hex: ");
-        for (char c : env[*token_index]) std::fprintf(file, "%02X ", (unsigned char)c);
-        std::fprintf(file, "\n");
+        token_view_t const token = env[*token_index];
+        fmt::println(file, "Token index: {}\nToken Hex: {:02X}", *token_index,
+                     test::hex_bytes({token.data(), token.size()}));
     }
-    std::fprintf(file, "Expected: %zu\n", expected_check_value);
-    std::fprintf(file, "Actual: %zu\n", actual_check_value);
+    fmt::println(file, "Expected: {}\nActual: {}", expected_check_value, actual_check_value);
     std::fclose(file);
 }
 
@@ -777,11 +788,10 @@ struct bench_result_t {
     template <typename... baselines_types_>
     bench_result_t const &log(baselines_types_ const &...bases) const {
         if (skipped) return *this;
-        std::printf("\n"); // Let's add some spacing between separate benchmarks
-        std::printf("Benchmarking \033[1m`%s`\033[0m:\n", name.c_str());
+        fmt::println("\nBenchmarking {}:", fmt::styled(fmt::format("`{}`", name), fmt::emphasis::bold));
 
         // Print the number of errors, if any
-        if (errors) std::printf("> Errors: %zu in %zu calls\n", errors, stress_calls);
+        if (errors) fmt::println("> Errors: {} in {} calls", errors, stress_calls);
 
         // Compute average call latency.
         auto seconds_printable = profiled_seconds * 1e9 / profiled_calls;
@@ -797,9 +807,9 @@ struct bench_result_t {
         if (bytes_printable > 1024) bytes_printable /= 1024, bytes_printable_unit = "KiB/s";
         if (bytes_printable > 1024) bytes_printable /= 1024, bytes_printable_unit = "MiB/s";
         if (bytes_printable > 1024) bytes_printable /= 1024, bytes_printable_unit = "GiB/s";
-        std::printf("> Throughput: %.2f %s @ %.2f %s/call\n", //
-                    bytes_printable, bytes_printable_unit,    //
-                    seconds_printable, seconds_printable_unit);
+        fmt::println("> Throughput: {:.2f} {} @ {:.2f} {}/call", //
+                     bytes_printable, bytes_printable_unit,      //
+                     seconds_printable, seconds_printable_unit);
 
         // Scheduler interference only slows a call down, so the minimum is a less noisy estimator than the
         // mean above, and the 99th percentile shows whether outliers drag that mean up. Both come from the
@@ -819,9 +829,9 @@ struct bench_result_t {
             if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "ms";
             if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "s";
 
-            std::printf("> Latency: min %.2f %s/call, p99 %.2f %s/call\n", //
-                        minimum_printable, minimum_printable_unit,         //
-                        p99_printable, p99_printable_unit);
+            fmt::println("> Latency: min {:.2f} {}/call, p99 {:.2f} {}/call", //
+                         minimum_printable, minimum_printable_unit,           //
+                         p99_printable, p99_printable_unit);
         }
 
         // Print the number of operations, if there was a separate tracking mechanism for those.
@@ -832,7 +842,8 @@ struct bench_result_t {
             if (ops_printable > 1e3) ops_printable /= 1e3, ops_printable_unit = "KOps/s";
             if (ops_printable > 1e3) ops_printable /= 1e3, ops_printable_unit = "MOps/s";
             if (ops_printable > 1e3) ops_printable /= 1e3, ops_printable_unit = "GOps/s";
-            std::printf("> Efficiency: %.2f %s @ %.2f ops/cycle\n", ops_printable, ops_printable_unit, ops_per_cycle);
+            fmt::println("> Efficiency: {:.2f} {} @ {:.2f} ops/cycle", ops_printable, ops_printable_unit,
+                         ops_per_cycle);
         }
 
         // Define a helper lambda to log relative performance with folding expressions.
@@ -843,16 +854,15 @@ struct bench_result_t {
                 relative_throughput = (operations / profiled_seconds) / (base.operations / base.profiled_seconds);
 
             // Format relative improvements: green and a plus for improvements, red and a minus for regressions.
-            char const *relative_color = (relative_throughput > 1) ? "\033[32m" : "\033[31m";
+            auto const relative_color = fmt::fg(relative_throughput > 1 ? fmt::terminal_color::green
+                                                                        : fmt::terminal_color::red);
             char const *relative_sign = (relative_throughput > 1) ? "+" : "-";
             char const *relative_unit = (relative_throughput > 2) ? "x" : "%";
             if (relative_throughput < 0.5) relative_throughput = 1 / relative_throughput, relative_unit = "x";
             if (std::strcmp(relative_unit, "%") == 0) relative_throughput = (relative_throughput - 1) * 100;
-            std::printf("> %s%s %.1f %s\033[0m against `%s`\n",       //
-                        relative_color,                               //
-                        relative_sign, std::abs(relative_throughput), //
-                        relative_unit,                                //
-                        base.name.c_str());
+            std::string const relative = fmt::format("{} {:.1f} {}", relative_sign, std::abs(relative_throughput),
+                                                     relative_unit);
+            fmt::println("> {} against `{}`", fmt::styled(relative, relative_color), base.name);
         };
 
         // Expand over all provided baselines.
@@ -910,8 +920,8 @@ bench_result_t bench_nullary(  //
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;
             if (result.errors > env.stress_limit) {
-                std::printf("Too many errors in %s after %.3f seconds. Stopping the test.\n", name.c_str(),
-                            stress.seconds());
+                fmt::println("Too many errors in {} after {:.3f} seconds. Stopping the test.", name.c_str(),
+                             stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, {});
@@ -990,8 +1000,8 @@ bench_result_t bench_unary(    //
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;
             if (result.errors > env.stress_limit) {
-                std::printf("Too many errors in %s after %.3f seconds. Stopping the test.\n", name.c_str(),
-                            stress.seconds());
+                fmt::println("Too many errors in {} after {:.3f} seconds. Stopping the test.", name.c_str(),
+                             stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, token_index);
@@ -1094,7 +1104,7 @@ struct arrays_equality {
         if (a_.size() != b_.size()) return false;
         for (std::size_t i = 0; i < a_.size(); ++i)
             if (a_[i] != b_[i]) {
-                std::printf("Mismatch at index %zu\n", i);
+                fmt::println("Mismatch at index {}", i);
                 return false;
             }
         return true;

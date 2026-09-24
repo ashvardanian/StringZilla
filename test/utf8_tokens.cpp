@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,7 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
+#include <cstdio>  // `stderr`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::memcpy`
 
@@ -56,6 +55,7 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
+#include <fmt/format.h>
 
 #include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 
@@ -204,7 +204,7 @@ static std::string exact_byte_length_(char const *pattern, std::size_t pattern_l
  *  against literal expected segment lists, never against another backend.
  */
 void test_utf8_tokens_unit() {
-    std::printf("  - testing UTF-8 newline/whitespace known-answer vectors...\n");
+    fmt::println("  - testing UTF-8 newline/whitespace known-answer vectors...");
 
     // The mixed-script anchor: "aß中" is `a` (1 byte) + `ß` U+00DF (2 bytes) + `中` U+4E2D (3 bytes),
     // so 6 bytes encode exactly 3 codepoints {0x61, 0xDF, 0x4E2D}.
@@ -279,7 +279,9 @@ void test_utf8_tokens_unit() {
 
     // Split by Unicode newlines
     {
-        auto lines = [](sz::string_view_t t) { return t.utf8_split_newlines().template to<std::vector<std::string>>(); };
+        auto lines = [](sz::string_view_t t) {
+            return t.utf8_split_newlines().template to<std::vector<std::string>>();
+        };
 
         // Basic newline types
         let_verify(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
@@ -342,8 +344,9 @@ void test_utf8_tokens_unit() {
 
     // `.with_separators()` interleaves segments and delimiters losslessly: concatenation reconstructs the input.
     {
-        for (sz::string_view_t input : {sz::string_view_t("Hi, world"), sz::string_view_t("a\nb\nc"),
-                                      sz::string_view_t("  x  "), sz::string_view_t(""), sz::string_view_t("plain")}) {
+        for (sz::string_view_t input :
+             {sz::string_view_t("Hi, world"), sz::string_view_t("a\nb\nc"), sz::string_view_t("  x  "),
+              sz::string_view_t(""), sz::string_view_t("plain")}) {
             std::string rejoined;
             for (auto piece : input.utf8_split_whitespaces().with_separators())
                 rejoined.append(piece.data(), piece.size());
@@ -369,7 +372,7 @@ void test_utf8_tokens_unit() {
  *  backend that widens the E2 80 [80-8A] block would shatter ZWJ emoji and Arabic/Indic words is caught here.
  */
 void test_utf8_tokens_scripts_unit() {
-    std::printf("  - testing UTF-8 whitespace codepoints across Unicode scripts...\n");
+    fmt::println("  - testing UTF-8 whitespace codepoints across Unicode scripts...");
 
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
@@ -468,9 +471,10 @@ void test_utf8_tokens_scripts_unit() {
         let_verify(auto w = words("a \xC2\xA0" " \xE3\x80\x80" "b"), w.size() == 5); // 1+2+3+3 byte: 4 delims -> 5 segs
 
         // Long sequences to test chunk boundaries - N delimiters yield N+1 segments
-        scope_verify(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
-                     sz::string_view_t(long_ws).utf8_split_whitespaces().template to<std::vector<std::string>>().size() ==
-                         101); // 100 spaces = 101 empty segments
+        scope_verify(
+            std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
+            sz::string_view_t(long_ws).utf8_split_whitespaces().template to<std::vector<std::string>>().size() ==
+                101); // 100 spaces = 101 empty segments
 
         scope_verify(
             std::string long_mixed,
@@ -700,7 +704,7 @@ void check_utf8_tokens_equivalence_(reference_ reference, candidate_ candidate, 
  *         `bytes_consumed` past the input.
  */
 void test_utf8_tokens_safety() {
-    std::printf("  - testing malformed-input safety of UTF-8 newline/whitespace kernels...\n");
+    fmt::println("  - testing malformed-input safety of UTF-8 newline/whitespace kernels...");
 
     static constexpr std::size_t max_input_length = utf8_unit_capacity_k;
 
@@ -714,7 +718,7 @@ void test_utf8_tokens_safety() {
             verify(bytes_consumed <= input_length && "Boundary finder consumed past the input");
             for (sz_size_t index = 0; index != found; ++index) {
                 if (boundary_offsets[index] + boundary_lengths[index] <= input_length) continue;
-                std::fprintf(stderr, "%s emitted out-of-bounds boundary (offset=%zu len=%zu, input=%zu)\n", finder_name,
+                fmt::println(stderr, "{} emitted out-of-bounds boundary (offset={} len={}, input={})", finder_name,
                              (std::size_t)boundary_offsets[index], (std::size_t)boundary_lengths[index], input_length);
                 print_utf8_test_bytes_("input", input, input_length);
                 verify(false && "Boundary finder emitted a span outside the input");
@@ -762,7 +766,7 @@ void test_utf8_tokens_safety() {
 
     for_each_adversarial_utf8_input_(global_random_generator(), scale_iterations(10000), check);
 
-    std::printf("    malformed-input safety passed!\n");
+    fmt::println("    malformed-input safety passed!");
 }
 
 #pragma endregion // Safety
@@ -847,7 +851,7 @@ static utf8_segment_backend_t const utf8_delimiters_backends[] = {
 
 /** @brief Known-answer unit tests for the UTF-8 delimiter segmenter on simple, hand-verifiable inputs. */
 void test_utf8_delimiters_unit() {
-    std::printf("  - testing UTF-8 delimiter known-answer vectors...\n");
+    fmt::println("  - testing UTF-8 delimiter known-answer vectors...");
 
     struct {
         char const *text;
@@ -1049,11 +1053,11 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
 
 /** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
 void test_utf8_delimiters_safety() {
-    std::printf("  - testing malformed-input safety of UTF-8 delimiter kernels...\n");
+    fmt::println("  - testing malformed-input safety of UTF-8 delimiter kernels...");
     check_utf8_delimiters_safety_(sz_utf8_delimiters_serial);
     for (utf8_segment_backend_t const &backend : utf8_delimiters_backends)
         check_utf8_delimiters_safety_(backend.finder);
-    std::printf("    malformed-input safety passed!\n");
+    fmt::println("    malformed-input safety passed!");
 }
 
 /** @brief Drive the serial-vs-SIMD UTF-8 delimiter differential across every backend compiled on this target. */

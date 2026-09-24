@@ -36,6 +36,8 @@
 #include <stdexcept> // `std::runtime_error`
 #include <string>    // `std::string`
 
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 #include "substrings.cuh"  // `substrings_dictionary_t`, `substrings_counts_from_sz`
@@ -77,12 +79,12 @@ static bool substrings_fills_a_wave(sz_substrings_engine_t const &engine, substr
         chunks += view.length == 0 ? 1 : (view.length + chunk - 1) / chunk;
 
     double const waves = (double)chunks / (double)budget;
-    std::printf("> Corpus: %.1f MB in %zu haystacks, cut into %zu chunks of %zu B " //
-                "against %zu resident threads - %.2f waves\n",                      //
-                (double)corpus.bytes / 1e6, corpus.views.size(), chunks, chunk, budget, waves);
+    fmt::println("> Corpus: {:.1f} MB in {} haystacks, cut into {} chunks of {} B " //
+                 "against {} resident threads - {:.2f} waves",                      //
+                 (double)corpus.bytes / 1e6, corpus.views.size(), chunks, chunk, budget, waves);
     if (waves >= 1.0) return true;
-    std::printf("> Refusing the round: below one wave it times the launch, not the walk. " //
-                "Raise STRINGWARS_DATASET_LIMIT.\n");
+    fmt::println("> Refusing the round: below one wave it times the launch, not the walk. " //
+                 "Raise STRINGWARS_DATASET_LIMIT.");
     return false;
 }
 
@@ -93,16 +95,15 @@ static bool substrings_fits_the_budget(sz_substrings_engine_t &engine, substring
     unified_vector<sz_size_t> offsets(corpus.views.size() + 1, 0);
     if (cudaMemGetInfo(&free_bytes, &total_bytes) != cudaSuccess)
         throw std::runtime_error("The device would not report its memory.");
-    if (sz_substrings_find_cuda(&engine, &device_haystacks, nullptr, 0, offsets.data()) ==
-        sz_device_memory_mismatch_k)
+    if (sz_substrings_find_cuda(&engine, &device_haystacks, nullptr, 0, offsets.data()) == sz_device_memory_mismatch_k)
         throw std::runtime_error("The corpus is not device-resident.");
     if (cudaStreamSynchronize(nullptr) != cudaSuccess) throw std::runtime_error("The sizing round failed.");
 
     std::size_t const emitted = engine.report->matches_emitted;
-    std::printf("> Matches: %zu against a budget of %zu, in a %.1f GB arena and %.1f GB free\n", emitted,
-                (std::size_t)engine.matches_budget, (double)engine.scratch_bytes / 1e9, (double)free_bytes / 1e9);
+    fmt::println("> Matches: {} against a budget of {}, in a {:.1f} GB arena and {:.1f} GB free", emitted,
+                 (std::size_t)engine.matches_budget, (double)engine.scratch_bytes / 1e9, (double)free_bytes / 1e9);
     if (emitted <= engine.matches_budget && engine.scratch_bytes <= free_bytes / 2) return true;
-    std::printf("> Refusing the round: the round outruns its match budget. Lower STRINGWARS_DATASET_LIMIT.\n");
+    fmt::println("> Refusing the round: the round outruns its match budget. Lower STRINGWARS_DATASET_LIMIT.");
     return false;
 }
 
@@ -140,9 +141,9 @@ static void bench_substrings_replace(environment_t const &env, substrings_engine
     auto validator = substrings_replace_from_sz<sz_substrings_replace_serial> {host, corpus, corpus.haystacks,
                                                                                dictionary.replacements};
     bench_result_t base = bench_unary(env, "sz_substrings_replace_serial" + suffix, validator).log();
-    bench_unary(env, "sz_substrings_replace_cuda" + suffix, validator,
-                substrings_replace_from_sz<sz_substrings_replace_cuda> {device, corpus, device_haystacks,
-                                                                        device_replacements})
+    bench_unary(
+        env, "sz_substrings_replace_cuda" + suffix, validator,
+        substrings_replace_from_sz<sz_substrings_replace_cuda> {device, corpus, device_haystacks, device_replacements})
         .log(base);
 }
 
@@ -166,13 +167,13 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
     substrings_dictionary_t const dictionary(env, slice, sensitivity, allocator);
     std::string const suffix = substrings_label(slice, sensitivity);
     if (dictionary.needles.empty()) {
-        std::printf("Vocabulary %s is empty on this corpus, skipping it.\n", suffix.c_str());
+        fmt::println("Vocabulary {} is empty on this corpus, skipping it.", suffix.c_str());
         return;
     }
     {
         substrings_engine_t probe(dictionary, sz_substrings_overlapping_k, substrings_residency_t::device_k);
-        std::printf("Vocabulary %s holds %zu needles over %u states, %u of them hot.\n", suffix.c_str(),
-                    dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
+        fmt::println("Vocabulary {} holds {} needles over {} states, {} of them hot.", suffix.c_str(),
+                     dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
         if (!substrings_fills_a_wave(probe.engine, corpus) ||
             !substrings_fits_the_budget(probe.engine, corpus, device_haystacks))
             return;
@@ -203,27 +204,27 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {
-        std::printf("Building up the environment...\n");
+        fmt::println("Building up the environment...");
         environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         substrings_corpus_t const corpus(env);
         sz_sequence_t const device_haystacks = substrings_device_sequence(corpus.views);
         substrings_prefetch(corpus);
-        std::printf("Starting multi-pattern search benchmarks...\n");
+        fmt::println("Starting multi-pattern search benchmarks...");
         bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::frequent_k, sz_substrings_cased_k);
         bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::rare_k, sz_substrings_cased_k);
         bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::frequent_k, sz_substrings_uncased_k);
         bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::sampled_k, sz_substrings_cased_k);
     }
     catch (std::exception const &e) {
-        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

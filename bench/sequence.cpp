@@ -58,7 +58,8 @@
 #include <stdlib.h> // `qsort_r`
 #endif
 
-#define SZ_USE_MISALIGNED_LOADS (1)
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 #include "stringzilla.hpp" // `global_random_generator`
@@ -570,21 +571,21 @@ void bench_intersections(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
-    std::printf("Building up the environment...\n");
+    fmt::println("Building up the environment...");
     environment_t env = build_environment( //
         argc, argv,                        //
         "leipzig1M.txt",                   //
         environment_t::tokenization_t::words_k);
 
-    std::printf("Starting search benchmarks...\n");
+    fmt::println("Starting search benchmarks...");
     bench_sequencing_pgrams(env);
     bench_sequencing_strings(env);
     bench_sequencing_strings_uncased(env);
     bench_intersections(env);
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

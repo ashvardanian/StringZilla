@@ -17,7 +17,6 @@
 
 #include <cmath>   // `std::fabs`
 #include <cstddef> // `std::size_t`
-#include <cstdio>  // `std::printf`
 #include <cstring> // `std::strlen`
 
 #include <algorithm> // `std::sort`
@@ -90,15 +89,14 @@ struct substrings_cuda_engines_t {
     sz_substrings_engine_t host {};   /**< The serial oracle's engine, in plain host memory. */
     sz_substrings_engine_t device {}; /**< The device's engine, arena and report included. */
 
-    substrings_cuda_engines_t(substrings_cuda_vocabulary_t &vocabulary,
-                              sz_substrings_case_sensitivity_t sensitivity,
+    substrings_cuda_engines_t(substrings_cuda_vocabulary_t &vocabulary, sz_substrings_case_sensitivity_t sensitivity,
                               sz_substrings_overlap_policy_t policy) {
         sz_memory_allocator_t allocator;
         sz_memory_allocator_init_default(&allocator);
-        verify(sz_substrings_engine_init_cpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO,
-                                             0, &allocator, &host) == sz_success_k);
-        verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO,
-                                             0, &vocabulary.unified, nullptr, &device) == sz_success_k);
+        verify(sz_substrings_engine_init_cpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0,
+                                             &allocator, &host) == sz_success_k);
+        verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0,
+                                             &vocabulary.unified, nullptr, &device) == sz_success_k);
         verify(sz_memory_reaches_device(device.memory) && "A device engine's block is one a kernel addresses");
         verify(!sz_memory_reaches_device(host.memory) && "A host engine's block is not");
     }
@@ -166,8 +164,7 @@ static std::vector<substrings_cuda_case_t> device_matches_(sz_substrings_engine_
     verify(engine->report->matches_stored + engine->report->shortfall == total);
 
     unified_vector<sz_substrings_match_t> matches(total);
-    verify(sz_substrings_find_cuda(engine, haystacks, matches.data(), matches.size(), offsets.data()) ==
-           sz_success_k);
+    verify(sz_substrings_find_cuda(engine, haystacks, matches.data(), matches.size(), offsets.data()) == sz_success_k);
     join_();
     verify(engine->report->matches_stored == total && engine->report->shortfall == 0);
     return sorted_(matches.data(), total);
@@ -200,8 +197,7 @@ static void verify_is_a_cover_(std::vector<substrings_cuda_case_t> const &report
  */
 static void check_against_serial_(substrings_cuda_corpus_t &corpus, substrings_cuda_vocabulary_t &vocabulary,
                                   std::vector<std::string> const &haystacks,
-                                  sz_substrings_case_sensitivity_t sensitivity,
-                                  sz_substrings_overlap_policy_t policy,
+                                  sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
                                   sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k) {
     substrings_cuda_engines_t engines(vocabulary, sensitivity, policy);
     std::vector<substrings_cuda_case_t> const expected = serial_matches_(&engines.host, &corpus.host_haystacks);
@@ -220,8 +216,7 @@ static void check_against_serial_(substrings_cuda_corpus_t &corpus, substrings_c
     // The counts come from the boundaries rather than from the match list, so they can disagree with it.
     unified_vector<sz_size_t> device_counts(haystacks.size(), 0);
     std::vector<sz_size_t> serial_counts(haystacks.size(), 0);
-    verify(sz_substrings_counts_serial(&engines.host, &corpus.host_haystacks, serial_counts.data(), 1) ==
-           sz_success_k);
+    verify(sz_substrings_counts_serial(&engines.host, &corpus.host_haystacks, serial_counts.data(), 1) == sz_success_k);
     verify(sz_substrings_counts_cuda(&engines.device, &corpus.device_haystacks, device_counts.data(), 1) ==
            sz_success_k);
     join_();
@@ -244,9 +239,8 @@ static void check_against_serial_(substrings_cuda_corpus_t &corpus, substrings_c
 
     unified_vector<sz_size_t> device_offsets(haystacks.size() + 1, 0);
     std::vector<sz_size_t> serial_offsets(haystacks.size() + 1, 0);
-    verify(sz_substrings_replace_cuda(&engines.device, &corpus.device_haystacks,
-                                      &replacement_corpus.device_haystacks, nullptr, 0,
-                                      device_offsets.data()) == sz_success_k);
+    verify(sz_substrings_replace_cuda(&engines.device, &corpus.device_haystacks, &replacement_corpus.device_haystacks,
+                                      nullptr, 0, device_offsets.data()) == sz_success_k);
     join_();
     verify(sz_substrings_replace_serial(&engines.host, &corpus.host_haystacks, &replacement_corpus.host_haystacks,
                                         nullptr, 0, serial_offsets.data()) == sz_success_k);
@@ -256,8 +250,7 @@ static void check_against_serial_(substrings_cuda_corpus_t &corpus, substrings_c
     sz_size_t const rewritten = serial_offsets[haystacks.size()];
     unified_vector<char> device_tape(rewritten);
     std::vector<char> serial_tape(rewritten);
-    verify(sz_substrings_replace_cuda(&engines.device, &corpus.device_haystacks,
-                                      &replacement_corpus.device_haystacks,
+    verify(sz_substrings_replace_cuda(&engines.device, &corpus.device_haystacks, &replacement_corpus.device_haystacks,
                                       device_tape.empty() ? nullptr : device_tape.data(), rewritten,
                                       device_offsets.data()) == sz_success_k);
     join_();
@@ -415,8 +408,7 @@ void test_substrings_safety() {
     // The counts a device walk answers with, which the same corpus answers on the host.
     {
         unified_vector<sz_size_t> counts(haystacks.size(), 0);
-        verify(sz_substrings_counts_cuda(&engines.device, &corpus.device_haystacks, counts.data(), 1) ==
-               sz_success_k);
+        verify(sz_substrings_counts_cuda(&engines.device, &corpus.device_haystacks, counts.data(), 1) == sz_success_k);
         join_();
         verify(counts[0] == 4);
     }
@@ -448,9 +440,9 @@ void test_substrings_safety() {
     {
         sz_substrings_engine_t tiny {};
         unified_vector<sz_size_t> offsets(haystacks.size() + 1, SZ_SIZE_MAX);
-        verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sz_substrings_cased_k,
-                                             sz_substrings_leftmost_first_k, SZ_SUBSTRINGS_HOT_STATES_AUTO, 1,
-                                             &vocabulary.unified, nullptr, &tiny) == sz_success_k);
+        verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sz_substrings_cased_k, sz_substrings_leftmost_first_k,
+                                             SZ_SUBSTRINGS_HOT_STATES_AUTO, 1, &vocabulary.unified, nullptr,
+                                             &tiny) == sz_success_k);
         verify(sz_substrings_find_cuda(&tiny, &corpus.device_haystacks, nullptr, 0, offsets.data()) == sz_success_k);
         join_();
         verify(tiny.report->matches_emitted == 4 && tiny.report->shortfall == 3);

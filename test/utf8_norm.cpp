@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,7 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
+#include <cstdio>  // `stderr`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::memcpy`
 
@@ -56,6 +55,7 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
+#include <fmt/format.h>
 
 #include "utf8.hpp" // `print_utf8_test_bytes_`, `encoded_rune_`
 
@@ -75,7 +75,7 @@ using sz::literals::operator""_sv; // for `sz::string_view_t`
  *  is still caught against an external ground truth.
  */
 void test_utf8_norm_unit() {
-    std::printf("  - testing UTF-8 normalization known-answer vectors...\n");
+    fmt::println("  - testing UTF-8 normalization known-answer vectors...");
 
     // `sz_utf8_norm` / `sz_utf8_find_denormalized`: "café" with a precomposed é (U+00E9) is already NFC, but
     // breaks NFD (é decomposes into e + U+0301). NFC normalization is a no-op; NFD expands it to 5 bytes.
@@ -134,7 +134,7 @@ void test_utf8_norm_unit() {
     verify(fi_str.contains('f'));
     verify(fi_str.contains('i'));
 
-    std::printf("    normalization known-answer vectors passed!\n");
+    fmt::println("    normalization known-answer vectors passed!");
 }
 
 #pragma endregion // Unit
@@ -169,8 +169,8 @@ void check_utf8_norm_equivalence_(reference_ reference, candidate_ candidate, st
         if (codepoint >= 0xD800 && codepoint <= 0xDFFF) continue; // skip surrogates
         all_runes.push_back(codepoint);
     }
-    std::printf("  - testing normalization fuzz (%zu iterations x 4 forms x %zu codepoints)...\n", iterations,
-                all_runes.size());
+    fmt::println("  - testing normalization fuzz ({} iterations x 4 forms x {} codepoints)...", iterations,
+                 all_runes.size());
 
     std::vector<char> input_buffer(all_runes.size() * 4);
     std::vector<char> output_reference(input_buffer.size() * 4 + 64); // decomposition can expand
@@ -192,19 +192,19 @@ void check_utf8_norm_equivalence_(reference_ reference, candidate_ candidate, st
                                                      output_candidate.data());
             if (len_reference != len_candidate ||
                 std::memcmp(output_reference.data(), output_candidate.data(), len_reference) != 0) {
-                std::fprintf(stderr, "norm mismatch (form=%d, iter=%zu): reference_len=%zu candidate_len=%zu\n",
+                fmt::println(stderr, "norm mismatch (form={}, iter={}): reference_len={} candidate_len={}",
                              (int)normal_form, iteration, (size_t)len_reference, (size_t)len_candidate);
                 verify(false);
             }
             sz_cptr_t viol_reference = reference.violation(input_buffer.data(), input_length, normal_form);
             sz_cptr_t viol_candidate = candidate.violation(input_buffer.data(), input_length, normal_form);
             if (viol_reference != viol_candidate) {
-                std::fprintf(stderr, "norm violation mismatch (form=%d, iter=%zu)\n", (int)normal_form, iteration);
+                fmt::println(stderr, "norm violation mismatch (form={}, iter={})", (int)normal_form, iteration);
                 verify(false);
             }
         }
     }
-    std::printf("    normalization fuzzing passed!\n");
+    fmt::println("    normalization fuzzing passed!");
 }
 
 #pragma endregion // Equivalence
@@ -241,8 +241,8 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
             sz_cptr_t const found = violation(input, (sz_size_t)input_length, normal_form);
             if (found == SZ_NULL_CHAR) continue;
             if (found >= input && found <= input + input_length) continue;
-            std::fprintf(stderr, "norm violation returned out-of-bounds pointer (form=%d, input=%zu)\n",
-                         (int)normal_form, input_length);
+            fmt::println(stderr, "norm violation returned out-of-bounds pointer (form={}, input={})", (int)normal_form,
+                         input_length);
             print_utf8_test_bytes_("input", input, input_length);
             verify(false && "Normalization-violation finder returned a pointer outside the input");
         }
@@ -255,7 +255,7 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
             with_guarded_buffer_(norm_bound, [&](sz_ptr_t output, std::size_t) {
                 sz_size_t const normalized = norm(input, (sz_size_t)input_length, sz_normal_form_nfkd_k, output);
                 if (normalized > norm_bound) {
-                    std::fprintf(stderr, "Norm of invalid input returned %zu bytes for %zu input bytes (bound %zu)\n",
+                    fmt::println(stderr, "Norm of invalid input returned {} bytes for {} input bytes (bound {})",
                                  (std::size_t)normalized, input_length, norm_bound);
                     print_utf8_test_bytes_("input", input, input_length);
                     verify(false && "Normalizer output must stay within the documented bound");
@@ -269,7 +269,7 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
 
 /** @brief Drive the malformed-input normalization safety probe through serial, dispatched, and every backend. */
 void test_utf8_norm_safety() {
-    std::printf("  - testing malformed-input safety of UTF-8 normalization kernels...\n");
+    fmt::println("  - testing malformed-input safety of UTF-8 normalization kernels...");
 
     // Serial baseline and the dispatched (automatic kernel resolution) entry points face the same contract.
     check_utf8_norm_safety_(sz_utf8_norm_serial, sz_utf8_find_denormalized_serial);
@@ -309,7 +309,7 @@ void test_utf8_norm_safety() {
     check_utf8_norm_safety_(sz_utf8_norm_powervsx, sz_utf8_find_denormalized_powervsx);
 #endif
 
-    std::printf("    normalization safety passed!\n");
+    fmt::println("    normalization safety passed!");
 }
 
 #pragma endregion // Safety

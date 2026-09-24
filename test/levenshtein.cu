@@ -20,11 +20,12 @@
 #undef NDEBUG // ! Enable all assertions for testing
 
 #include <cstddef> // `std::size_t`
-#include <cstdio>  // `std::printf`
 
 #include <array>  // `std::array`
 #include <string> // `std::string`
 #include <vector> // `std::vector`
+
+#include <fmt/format.h>
 
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_*`
 #include <stringzilla/stringzilla.h> // Primary C API
@@ -51,7 +52,7 @@ static std::vector<std::string> levenshtein_cuda_symbols_(levenshtein_cuda_alpha
         for (unsigned value = 0; value != 256; ++value) symbols.push_back(std::string(1, (char)value));
         return symbols;
     }
-    char const *const runes[] = {"a",      "z",      "é", "ß", "α",     "ω",     "ж",
+    char const *const runes[] = {"a", "z",  "é",  "ß",  "α",          "ω",          "ж",
                                  "я", "中", "漢", "字", "\U0001f600", "\U0001f30d", "\U0001d11e"};
     for (char const *const rune : runes) symbols.push_back(std::string(rune));
     return symbols;
@@ -273,8 +274,7 @@ static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtei
         sz_levenshtein_engine_t host_engine {};
         verify(sz_levenshtein_engine_init_cpu(&queries, sz_levenshtein_bytes_k, &host, &host_engine) == sz_success_k);
         std::vector<sz_size_t> expected(count);
-        verify(sz_levenshtein_distances_serial(&host_engine, &host_candidates, expected.data(), count) ==
-               sz_success_k);
+        verify(sz_levenshtein_distances_serial(&host_engine, &host_candidates, expected.data(), count) == sz_success_k);
         sz_levenshtein_engine_free(&host_engine);
         for (std::size_t index = 0; index != count; ++index)
             if (distances[index] != expected[index])
@@ -297,8 +297,7 @@ static void check_levenshtein_cuda_tiled_() {
             fail_backend_("cuda", "the wavefront refused a device-resident pair");
 
         sz_levenshtein_engine_t engine {};
-        verify(sz_levenshtein_engine_init_cpu(&corpus.queries, sz_levenshtein_bytes_k, &host, &engine) ==
-               sz_success_k);
+        verify(sz_levenshtein_engine_init_cpu(&corpus.queries, sz_levenshtein_bytes_k, &host, &engine) == sz_success_k);
         sz_size_t expected = 0;
         verify(sz_levenshtein_distances_serial(&engine, &corpus.host_candidates, &expected, 1) == sz_success_k);
         sz_levenshtein_engine_free(&engine);
@@ -330,8 +329,8 @@ static void check_levenshtein_cuda_memory_safety_(levenshtein_cuda_backend_t con
 /** The builder's refusal of a query past what the widest rung holds, in bytes and again in runes. */
 static void check_levenshtein_cuda_query_safety_() {
     enum { symbols_k = sz_levenshtein_cuda_words_max_k * 64 + 1 };
-    for (levenshtein_cuda_alphabet_t const alphabet : {levenshtein_cuda_alphabet_t::bytes_k,
-                                                       levenshtein_cuda_alphabet_t::runes_k}) {
+    for (levenshtein_cuda_alphabet_t const alphabet :
+         {levenshtein_cuda_alphabet_t::bytes_k, levenshtein_cuda_alphabet_t::runes_k}) {
         levenshtein_cuda_corpus_t corpus(1, symbols_k, 1, alphabet);
         sz_levenshtein_engine_t engine {};
         if (sz_levenshtein_engine_init_gpu(&corpus.queries, levenshtein_cuda_symbol_(alphabet), SZ_NULL, SZ_NULL,
@@ -404,8 +403,8 @@ static void check_levenshtein_cuda_scheduled_asynchrony_() {
 
 /** @brief Every CUDA backend this device carries, against serial, over generated corpora at every rung boundary. */
 void test_levenshtein_all() {
-    std::printf("  - testing %zu CUDA query lengths against serial over bytes and runes, refused past %d words\n",
-                sizeof(levenshtein_cuda_query_symbols_k) / sizeof(std::size_t), (int)sz_levenshtein_cuda_words_max_k);
+    fmt::println("  - testing {} CUDA query lengths against serial over bytes and runes, refused past {} words",
+                 sizeof(levenshtein_cuda_query_symbols_k) / sizeof(std::size_t), (int)sz_levenshtein_cuda_words_max_k);
     for (levenshtein_cuda_backend_t const &backend : levenshtein_cuda_backends) {
         if ((sz_capabilities() & backend.required) != backend.required) continue;
         check_levenshtein_cuda_equivalence_(backend.name, levenshtein_cuda_alphabet_t::bytes_k, backend.distances);
@@ -420,7 +419,7 @@ void test_levenshtein_all() {
 
 /** @brief Degenerate inputs, stated refusals, and the bound each alphabet's widest rung imposes. */
 void test_levenshtein_safety() {
-    std::printf("  - testing degenerate inputs and refused batches of the CUDA edit-distance kernels...\n");
+    fmt::println("  - testing degenerate inputs and refused batches of the CUDA edit-distance kernels...");
     for (levenshtein_cuda_backend_t const &backend : levenshtein_cuda_backends) {
         if ((sz_capabilities() & backend.required) != backend.required) continue;
         check_levenshtein_cuda_memory_safety_(backend);

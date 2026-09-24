@@ -26,7 +26,7 @@
 #define STRINGZILLA_TEST_UTF8_HPP_
 
 #include <cstddef> // `std::size_t`
-#include <cstdio>  // `std::fprintf`
+#include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`, `std::strcmp`, `std::strlen`
 
 #include <array>            // `std::array`
@@ -34,6 +34,9 @@
 #include <random>           // `std::mt19937`, `std::uniform_int_distribution`, `std::discrete_distribution`
 #include <string>           // `std::string`
 #include <vector>           // `std::vector`
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // `sz::string_view_t`
@@ -339,14 +342,14 @@ typedef void (*utf8_run_sink_t)(void *context, sz_cptr_t data, sz_size_t length)
  *         corner-case motifs, its high-density / long-range run generators (visitor style), and its alphabet.
  */
 struct utf8_segment_corpora_t {
-    char const *family_name;                /**< human label printed by the driver (e.g. "word") */
+    char const *family_name;                  /**< human label printed by the driver (e.g. "word") */
     sz::span<sz::string_view_t const> motifs; /**< the family's own corner-case motifs */
     /** Streams the family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
     void (*dense_runs)(std::mt19937 &generator, utf8_run_sink_t sink, void *context);
     /** Streams the family's long-range straddling constructions for a given @p gap to @p sink. */
     void (*straddles)(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context);
     sz::span<sz::string_view_t const> regressions; /**< optional fixed hand-found regression inputs */
-    utf8_corpus_alphabet_t const *alphabet;      /**< per-family random-corpus alphabet (null -> the shared default) */
+    utf8_corpus_alphabet_t const *alphabet; /**< per-family random-corpus alphabet (null -> the shared default) */
 };
 
 /** @brief Identifies a fuzz case for replay: which family, which stressor, the iteration, capacity and flavor. */
@@ -368,9 +371,7 @@ typedef sz_bool_t (*utf8_boundary_oracle_t)(sz_cptr_t, sz_size_t, sz_size_t);
 
 /** @brief Prints one labeled hex dump line to `stderr`; used by the safety sweep and the divergence repro. */
 inline void print_utf8_test_bytes_(char const *label, char const *bytes, std::size_t length) {
-    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
-    for (std::size_t index = 0; index < length; ++index) std::fprintf(stderr, "%02X ", (unsigned char)bytes[index]);
-    std::fprintf(stderr, "\n");
+    fmt::println(stderr, "  {} ({} bytes): {:02X}", label, length, sz::test::hex_bytes({bytes, length}));
 }
 
 /**
@@ -666,19 +667,19 @@ inline void utf8_report_divergence_(utf8_repro_t const &repro, sz_cptr_t data, s
                                     sz_size_t reference_length, sz_bool_t candidate_more, sz_size_t candidate_start,
                                     sz_size_t candidate_length) {
     unsigned const seed = (unsigned)global_random_seed();
-    std::fprintf(stderr, "\nUTF-8 %s divergence in stressor '%s': seed=%u iteration=%zu capacity=%zu flavor=%s\n",
+    fmt::println(stderr, "\nUTF-8 {} divergence in stressor '{}': seed={} iteration={} capacity={} flavor={}",
                  repro.family, repro.stressor, seed, repro.iteration, (std::size_t)repro.capacity,
                  repro.flavor == utf8_corpus_flavor_t::valid_k ? "valid" : "malformed");
-    std::fprintf(stderr, "  rerun: SZ_TESTS_SEED=%u <test binary>\n", seed);
-    std::fprintf(stderr, "  first divergence at segment %zu:\n", segment_index);
+    fmt::println(stderr, "  rerun: SZ_TESTS_SEED={} <test binary>", seed);
+    fmt::println(stderr, "  first divergence at segment {}:", segment_index);
     if (reference_more)
-        std::fprintf(stderr, "    reference: start=%zu length=%zu\n", (std::size_t)reference_start,
+        fmt::println(stderr, "    reference: start={} length={}", (std::size_t)reference_start,
                      (std::size_t)reference_length);
-    else std::fprintf(stderr, "    reference: <end of stream>\n");
+    else fmt::println(stderr, "    reference: <end of stream>");
     if (candidate_more)
-        std::fprintf(stderr, "    candidate: start=%zu length=%zu\n", (std::size_t)candidate_start,
+        fmt::println(stderr, "    candidate: start={} length={}", (std::size_t)candidate_start,
                      (std::size_t)candidate_length);
-    else std::fprintf(stderr, "    candidate: <end of stream>\n");
+    else fmt::println(stderr, "    candidate: <end of stream>");
     print_utf8_test_bytes_("input", data, length);
     verify(false && "UTF-8 segmentation backends diverged (see stderr for the reproduction record)");
 }
@@ -759,7 +760,7 @@ enum utf8_rule_direction_t { utf8_rule_breaks_k, utf8_rule_joins_k };
 struct utf8_rule_case_t {
     char const *rule_id;             /**< UAX rule id this motif exercises, e.g. "WB6", "GB9c", "SB8", "LB21a". */
     utf8_rule_direction_t direction; /**< whether the motif demonstrates the rule breaking or joining. */
-    sz::string_view_t text;            /**< short input that fires the rule. */
+    sz::string_view_t text;          /**< short input that fires the rule. */
 };
 
 /**
@@ -857,7 +858,7 @@ inline void check_utf8_segment_safety_(char const *family, sz::span<utf8_segment
             verify(bytes_consumed <= input_length && "segment finder consumed past the input");
             for (sz_size_t index = 0; index != found; ++index) {
                 if (offsets[index] + lengths[index] <= input_length) continue;
-                std::fprintf(stderr, "%s %s emitted out-of-bounds segment (offset=%zu len=%zu, input=%zu)\n", family,
+                fmt::println(stderr, "{} {} emitted out-of-bounds segment (offset={} len={}, input={})", family,
                              backend.name, (std::size_t)offsets[index], (std::size_t)lengths[index], input_length);
                 print_utf8_test_bytes_("input", input, input_length);
                 verify(false && "segment finder emitted a span outside the input");
@@ -891,7 +892,7 @@ inline void check_utf8_segment_against_oracle_(char const *family, sz_utf8_segme
     for (sz_size_t position = 0; position <= (sz_size_t)length; ++position) {
         bool const oracle_says = oracle(text, (sz_size_t)length, position) == sz_true_k;
         if (oracle_says == starts_a_segment[position]) continue;
-        std::fprintf(stderr, "%s: segmenter and rule oracle disagree at position %zu of %zu (%s vs %s)\n", family,
+        fmt::println(stderr, "{}: segmenter and rule oracle disagree at position {} of {} ({} vs {})", family,
                      (std::size_t)position, length, starts_a_segment[position] ? "boundary" : "interior",
                      oracle_says ? "boundary" : "interior");
         print_utf8_test_bytes_("input", text, length);
@@ -1030,7 +1031,7 @@ inline void utf8_differential_regressions_(utf8_differential_context_t &context)
 /** @brief Randomized fuzz: per iteration a 400-byte valid corpus, an occasional ~4096-byte wide tier, a mutated copy,
  *         and a malformed corpus — each compared serial-vs-ISA across the capacity sweep. */
 inline void utf8_differential_fuzz_corpus_(utf8_differential_context_t &context, std::size_t iterations) {
-    std::printf("  - fuzzing %s random corpus (serial-vs-ISA)...\n", context.corpora->family_name);
+    fmt::println("  - fuzzing {} random corpus (serial-vs-ISA)...", context.corpora->family_name);
     utf8_corpus_alphabet_t const &alphabet = utf8_context_alphabet_(context);
     sz::span<sz::string_view_t const> const motifs = context.corpora->motifs;
     std::string mutated;
@@ -1064,7 +1065,7 @@ inline void utf8_differential_fuzz_corpus_(utf8_differential_context_t &context,
 /** @brief Randomized fuzz: the family's high-density homogeneous runs (one long single-rule blob per run). */
 inline void utf8_differential_fuzz_dense_runs_(utf8_differential_context_t &context, std::size_t iterations) {
     if (!context.corpora->dense_runs) return;
-    std::printf("  - fuzzing %s dense runs...\n", context.corpora->family_name);
+    fmt::println("  - fuzzing {} dense runs...", context.corpora->family_name);
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
         utf8_sink_context_t sink;
         sink.context = &context, sink.stressor = "dense-run", sink.iteration = iteration, sink.filler = 0;
@@ -1075,7 +1076,7 @@ inline void utf8_differential_fuzz_dense_runs_(utf8_differential_context_t &cont
 /** @brief Randomized fuzz: the family's long-range straddles, gap-swept and phase-shifted by a random ASCII filler. */
 inline void utf8_differential_fuzz_straddles_(utf8_differential_context_t &context, std::size_t iterations) {
     if (!context.corpora->straddles) return;
-    std::printf("  - fuzzing %s long-range straddles...\n", context.corpora->family_name);
+    fmt::println("  - fuzzing {} long-range straddles...", context.corpora->family_name);
     std::uniform_int_distribution<std::size_t> filler_length(0, utf8_window_k - 1);
     for (std::size_t iteration = 0; iteration != iterations; ++iteration)
         for (std::size_t gap : utf8_straddle_gaps) {
@@ -1089,7 +1090,7 @@ inline void utf8_differential_fuzz_straddles_(utf8_differential_context_t &conte
 /** @brief Deterministic: a corpus driven at every sub-cache-line offset so the load alignment is swept. A fresh
  *         corpus per round restores the (offset, capacity) cross product when the multiplier samples one capacity. */
 inline void utf8_differential_alignment_sweep_(utf8_differential_context_t &context) {
-    std::printf("  - testing %s alignment sweep...\n", context.corpora->family_name);
+    fmt::println("  - testing {} alignment sweep...", context.corpora->family_name);
     utf8_corpus_alphabet_t const &alphabet = utf8_context_alphabet_(context);
     for (std::size_t round = 0; round != span_over(utf8_sweep_capacities).size(); ++round) {
         utf8_random_segmentation_corpus_(context.scratch, 256, utf8_corpus_flavor_t::valid_k, alphabet,
@@ -1106,7 +1107,7 @@ inline void utf8_differential_alignment_sweep_(utf8_differential_context_t &cont
 /** @brief Deterministic: each marathon unit repeated past several windows, behind every prefix, closed by every
  *         terminator — the shape that exposes open-bridge / parity / shadow / pending carry bugs. */
 inline void utf8_differential_marathon_runs_(utf8_differential_context_t &context) {
-    std::printf("  - testing %s marathon carry runs...\n", context.corpora->family_name);
+    fmt::println("  - testing {} marathon carry runs...", context.corpora->family_name);
     std::size_t const unit_count = span_over(utf8_marathon_units).size();
     std::size_t iteration = 0;
     for (std::size_t unit_index = 0; unit_index < unit_count; unit_index += sweep_stride(unit_count)) {
@@ -1127,7 +1128,7 @@ inline void utf8_differential_marathon_runs_(utf8_differential_context_t &contex
 /** @brief Deterministic: place each family motif at every byte offset 0..63 within ASCII filler so it straddles the
  *         64-byte window edge at every alignment (phase 0 lands the motif at true start-of-text). */
 inline void utf8_differential_phase_sweep_(utf8_differential_context_t &context) {
-    std::printf("  - testing %s all-phase straddle sweep...\n", context.corpora->family_name);
+    fmt::println("  - testing {} all-phase straddle sweep...", context.corpora->family_name);
     for (std::size_t motif_index = 0; motif_index != context.corpora->motifs.size(); ++motif_index) {
         sz::string_view_t const motif = context.corpora->motifs[motif_index];
         for (std::size_t phase = 0; phase < utf8_window_k; phase += sweep_stride(utf8_window_k)) {
@@ -1144,7 +1145,7 @@ inline void utf8_differential_phase_sweep_(utf8_differential_context_t &context)
  *         an ATerm, between a base and a combining mark, ...) at the window-edge phases. Both backends apply the same
  *         U+FFFD substitution, so they must still agree (malformed flavor relaxes the alignment invariant). */
 inline void utf8_differential_malformed_seams_(utf8_differential_context_t &context) {
-    std::printf("  - testing %s malformed-at-seam injection...\n", context.corpora->family_name);
+    fmt::println("  - testing {} malformed-at-seam injection...", context.corpora->family_name);
     std::size_t const host_count = span_over(utf8_malformed_seam_prefixes).size();
     for (char const *fragment : utf8_malformed_seam_fragments)
         for (std::size_t host = 0; host < host_count; host += sweep_stride(host_count))
@@ -1165,7 +1166,7 @@ inline void utf8_differential_malformed_seams_(utf8_differential_context_t &cont
  *         of the edge handling the random fuzz only hits probabilistically. Compared at full batch (single call).
  */
 inline void utf8_differential_byte_edge_exhaustive_(utf8_differential_context_t &context) {
-    std::printf("  - testing %s window-edge byte partition (exhaustive)...\n", context.corpora->family_name);
+    fmt::println("  - testing {} window-edge byte partition (exhaustive)...", context.corpora->family_name);
     unsigned char buffer[96];
     std::size_t iteration = 0;
     auto compare_one = [&](sz_size_t length) {
@@ -1210,7 +1211,7 @@ inline void check_utf8_segment_equivalence_(sz_utf8_segmenter_t reference,
                                             sz::span<utf8_segment_backend_t const> candidates,
                                             utf8_segment_corpora_t const &corpora,
                                             std::size_t iterations = scale_iterations(5000)) {
-    std::printf("  - testing %s serial-vs-ISA differential...\n", corpora.family_name);
+    fmt::println("  - testing {} serial-vs-ISA differential...", corpora.family_name);
     utf8_differential_context_t context;
     context.reference = reference, context.candidates = candidates, context.corpora = &corpora,
     context.generator = &global_random_generator(), context.input_index = 0;

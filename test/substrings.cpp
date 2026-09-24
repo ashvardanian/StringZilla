@@ -11,7 +11,6 @@
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -22,7 +21,6 @@
 
 #include <cctype>  // `std::toupper`
 #include <cmath>   // `std::fabs`
-#include <cstdio>  // `std::printf`
 #include <cstdlib> // `std::malloc`, `std::free`
 #include <cstring> // `std::memcmp`
 
@@ -268,8 +266,8 @@ static void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
             std::vector<double> const expected = oracle_bm25_(overlapping, haystacks, needles_count, lengths,
                                                               parameters, weights);
             std::vector<sz_f32_t> scores(haystacks.size(), -1);
-            verify(tier.bm25_scores(engine, haystack_sequence, lengths.empty() ? nullptr : lengths.data(),
-                                    &parameters, weights.data(), scores.data(), 1) == sz_success_k);
+            verify(tier.bm25_scores(engine, haystack_sequence, lengths.empty() ? nullptr : lengths.data(), &parameters,
+                                    weights.data(), scores.data(), 1) == sz_success_k);
             for (std::size_t index = 0; index != haystacks.size(); ++index)
                 verify(std::fabs(scores[index] - expected[index]) <= 1e-5 * std::max(1.0, std::fabs(expected[index])));
         }
@@ -566,8 +564,8 @@ void test_substrings_safety() {
     // A substitution over matches that share bytes is not a function, so the overlapping policy is refused.
     {
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
-        verify(sz_substrings_replace(&engine, &haystack_sequence, &replacement_sequence, nullptr, 0,
-                                     offsets.data()) == sz_status_unknown_k);
+        verify(sz_substrings_replace(&engine, &haystack_sequence, &replacement_sequence, nullptr, 0, offsets.data()) ==
+               sz_status_unknown_k);
     }
 
     // An output stride of zero cannot address one entry per haystack, whatever the haystack count.

@@ -11,7 +11,9 @@
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-#include <cstdio> // `std::printf`
+#include <cstdio> // `stdout`
+
+#include <fmt/format.h>
 
 #include <stringzilla/stringzilla.h> // Primary C API
 
@@ -22,7 +24,7 @@ using namespace ashvardanian::stringzilla::test;
 int main(int argc, char const **argv) {
     sz_unused_(argc && argv);
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Hi, dear tester! You look nice today!\n");
+    fmt::println("Hi, dear tester! You look nice today!");
     if (auto code = log_environment(); code != 0) return code;
     print_test_environment();
 
@@ -37,9 +39,9 @@ int main(int argc, char const **argv) {
     failures += run_test("test_substrings_safety", test_substrings_safety);
 
     if (failures) {
-        std::printf("Fail! %zu tests failed.\n", failures);
+        fmt::println("Fail! {} tests failed.", failures);
         return 1;
     }
-    std::printf("All tests passed... Unbelievable!\n");
+    fmt::println("All tests passed... Unbelievable!");
     return 0;
 }

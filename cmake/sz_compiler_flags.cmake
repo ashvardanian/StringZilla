@@ -1,7 +1,7 @@
-# cmake/sz_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla and
-# StringZillas target: warnings, optimization, standards, architecture baselines, and the per-capability
-# `SZ_USE_*` stamps. Included after the option block: the helpers read `STRINGZILLA_USE_SANITIZERS`,
-# `STRINGZILLA_BUILD_COVERAGE`, and the `SZ_IS_64BIT_*` platform facts at call time.
+# cmake/sz_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla target: warnings,
+# optimization, standards, architecture baselines, and the per-capability `SZ_USE_*` stamps. Included after the option
+# block: the helpers read `STRINGZILLA_USE_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the `SZ_IS_64BIT_*` platform
+# facts at call time.
 
 # Maximum warnings level & warnings as error. MSVC uses numeric values: > 4068 for "unknown pragmas",
 # > 4146 for "unary minus operator applied to unsigned type"; `/utf-8` keeps UTF-8 symbols in tests intact.

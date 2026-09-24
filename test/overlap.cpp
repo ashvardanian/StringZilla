@@ -23,7 +23,6 @@
  #define SZ_USE_HASWELL 0
  #define SZ_USE_SKYLAKE 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -38,7 +37,6 @@
 
 #include <cmath>   // `std::fabs`
 #include <cstdint> // `std::uint64_t`
-#include <cstdio>  // `std::printf`, `std::fprintf`
 #include <cstring> // `std::memcmp`, `std::strcmp`
 
 #include <algorithm> // `std::sort`, `std::unique`, `std::binary_search`
@@ -46,6 +44,8 @@
 #include <set>       // Window-overlap oracle
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
+
+#include <fmt/format.h>
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`, `refusing_allocator_`
 
@@ -199,8 +199,8 @@ static std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, s
     if (backend.init(&query_sequence, widths.data(), widths.size(), &alloc, &engine) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
     std::vector<sz_f32_t> scores(queries.size() * candidates.size() * widths.size(), -1.0f);
-    if (backend.scores(&engine, &candidate_sequence, scores.data(), candidates.size() * widths.size(),
-                       widths.size()) != sz_success_k)
+    if (backend.scores(&engine, &candidate_sequence, scores.data(), candidates.size() * widths.size(), widths.size()) !=
+        sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
     sz_overlap_engine_free(&engine);
     return scores;
@@ -209,8 +209,7 @@ static std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, s
 /** @brief Runs @p queries against @p candidates through @p backend at @p widths, asserting each share matches the
  *         oracle to within one rounding. */
 static void check_overlap_scores_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
-                                  std::vector<std::string> const &candidates,
-                                  std::vector<std::size_t> const &widths) {
+                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths) {
     std::vector<sz_f32_t> const computed = overlap_tensor_(backend, queries, candidates, widths);
     std::size_t const candidate_stride = widths.size(), query_stride = candidates.size() * widths.size();
     for (std::size_t query = 0; query != queries.size(); ++query)
@@ -326,7 +325,7 @@ static void check_overlap_btree_(overlap_step_backend_t const &backend, std::siz
 
 /** @brief Known answers: the constants, the capacities, the strides, and shares readable off the texts. */
 void test_overlap_unit() {
-    std::printf("  - testing window-overlap known-answer vectors...\n");
+    fmt::println("  - testing window-overlap known-answer vectors...");
 
     // The modulus is prime, by trial division up to its root.
     std::uint64_t const prime = static_cast<std::uint64_t>(sz_overlap_modulus_k);
@@ -448,7 +447,7 @@ static void check_overlap_safety_(overlap_backend_t const &backend) {
  *         allocation are reported, and no failure writes an output.
  */
 void test_overlap_safety() {
-    std::printf("  - testing degenerate inputs and refused allocations of the window-overlap kernels...\n");
+    fmt::println("  - testing degenerate inputs and refused allocations of the window-overlap kernels...");
     for (overlap_backend_t const &backend : overlap_backends) check_overlap_safety_(backend);
 }
 

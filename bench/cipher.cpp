@@ -18,6 +18,8 @@
 #include <string>  // `std::string`
 #include <vector>  // `std::vector`
 
+#include <fmt/format.h>
+
 #include "shared.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
@@ -369,21 +371,21 @@ void bench_cipher_stream(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla AES-256 Cipher Benchmarks!\n");
+    fmt::println("Welcome to StringZilla AES-256 Cipher Benchmarks!");
     if (auto code = log_environment(); code != 0) return code;
 
-    std::printf("Building up the environment...\n");
+    fmt::println("Building up the environment...");
     environment_t env = build_environment( //
         argc, argv,                        //
         "leipzig1M.txt",                   //
         environment_t::tokenization_t::lines_k);
 
-    std::printf("Starting AES-256 cipher benchmarks...\n");
+    fmt::println("Starting AES-256 cipher benchmarks...");
 
     bench_cipher_ctr(env);
     bench_cipher_gcm(env);
     bench_cipher_stream(env);
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

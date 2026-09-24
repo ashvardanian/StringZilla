@@ -292,11 +292,23 @@ endif ()
 
 include(cmake/sz_compiler_flags.cmake)
 
+# {fmt} formats the suites' assertion messages and reports. `FIND_PACKAGE_ARGS` lets a system copy satisfy it without
+# touching the network, but only from the pinned version up, since older copies lack `fmt::println`.
+if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCHMARK)
+    include(FetchContent)
+    FetchContent_Declare(
+        fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG 12.2.0
+        FIND_PACKAGE_ARGS 12.2.0
+    )
+    FetchContent_MakeAvailable(fmt)
+endif ()
+
 function (define_launcher exec_name cpp_standard target_arch)
     add_executable(${exec_name})
     target_sources(${exec_name} PRIVATE ${ARGN})
     target_include_directories(${exec_name} PRIVATE test bench)
-    target_link_libraries(${exec_name} PRIVATE forkunion::header)
     set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}" "${CMAKE_CXX_COMPILER_ID}")
     # Launchers dispatch at compile time, so a capability must be BOTH compilable by this toolchain AND runnable on
     # this machine — the intersection the RUN verdicts encode. When the caller pins an explicit `target_arch`, that
@@ -304,7 +316,7 @@ function (define_launcher exec_name cpp_standard target_arch)
     if ("${target_arch}" STREQUAL "")
         set_architecture_simd_definitions(${exec_name} RUN)
     endif ()
-    target_link_libraries(${exec_name} PRIVATE stringzilla_header)
+    target_link_libraries(${exec_name} PRIVATE stringzilla_header fmt::fmt)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction ()
 
@@ -321,15 +333,14 @@ function (define_gpu_launcher exec_name cuda_standard target_arch)
     )
     set_compiler_flags(${exec_name} ${cuda_standard} "${target_arch}" "${CMAKE_CUDA_COMPILER_ID}")
     target_link_libraries(${exec_name} PRIVATE CUDA::cudart CUDA::cuda_driver)
-    # Match the StringZillas CUDA static library's base tier, so the test harness and the precompiled
-    # engines it links target the same GPUs.
+    # Match the CUDA library's base tier, so the test harness and the precompiled engines it links target the same GPUs.
     set_property(TARGET ${exec_name} PROPERTY CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHS}")
-    target_link_libraries(${exec_name} PRIVATE stringzilla_header)
+    target_link_libraries(${exec_name} PRIVATE stringzilla_header fmt::fmt)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction ()
 
-# Tests and benchmarks are defined after the libraries (below), so the StringZillas consumers can link the precompiled
-# static archives instead of recompiling the engines header-only.
+# Tests and benchmarks are defined after the libraries (below), so the GPU launchers can link the precompiled static
+# archive instead of recompiling the engines header-only.
 
 # Define our libraries, first the header-only version.
 #
@@ -396,8 +407,8 @@ endfunction ()
 if (STRINGZILLA_BUILD_SHARED)
 
     # The shim units default `SZ_OVERRIDE_LIBC` to `SZ_AVOID_LIBC`, so this library exports no `memcpy` of its
-    # own and interposes nothing. That is what lets anything link it - StringZillas, the tests, a consumer's
-    # program - without ELF redirecting `libstdc++`'s internal calls into a dispatch table that is not up yet.
+    # own and interposes nothing. That is what lets anything link it - the tests, a consumer's program -
+    # without ELF redirecting `libstdc++`'s internal calls into a dispatch table that is not up yet.
     # `stringzilla_bare` is the artifact that replaces LibC, and it still does.
     define_stringzilla_library(stringzilla_shared shared SHARED)
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")

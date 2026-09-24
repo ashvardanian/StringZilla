@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::memcpy`
 
@@ -56,6 +54,7 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
+#include <fmt/format.h>
 
 #include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 
@@ -208,7 +207,7 @@ static utf8_runes_backend_t const utf8_runes_backends[] = {
  *  otherwise only fuzzed against serial.
  */
 void test_utf8_runes_unit() {
-    std::printf("  - testing UTF-8 codepoints known-answer vectors...\n");
+    fmt::println("  - testing UTF-8 codepoints known-answer vectors...");
 
     // The mixed-script anchor: "a\xC3\x9F\xE4\xB8\xAD" is `a` (1 byte) + U+00DF (2 bytes) + U+4E2D (3 bytes),
     // so 6 bytes encode exactly 3 codepoints {0x61, 0xDF, 0x4E2D}.
@@ -371,7 +370,7 @@ void test_utf8_runes_unit() {
  *  every 1/2/3/4-byte neighbor pair, so a kernel that assumes a homogeneous byte-width run is caught here.
  */
 void test_utf8_runes_scripts_unit() {
-    std::printf("  - testing UTF-8 codepoints across Unicode scripts...\n");
+    fmt::println("  - testing UTF-8 codepoints across Unicode scripts...");
 
     // C++ API: codepoint iteration materialized as a vector, since every check below indexes by position.
     {
@@ -671,14 +670,14 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
 
 /** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
 void test_utf8_runes_safety() {
-    std::printf("  - testing malformed-input safety of UTF-8 codepoint kernels...\n");
+    fmt::println("  - testing malformed-input safety of UTF-8 codepoint kernels...");
 
     // Serial is the reference contract; the dispatched and native backends below face the same probe.
     check_utf8_runes_safety_(sz_utf8_count_serial, sz_utf8_decode_serial);
     for (utf8_runes_backend_t const &backend : utf8_runes_backends)
         check_utf8_runes_safety_(backend.count, backend.decode);
 
-    std::printf("    malformed-input safety passed!\n");
+    fmt::println("    malformed-input safety passed!");
 }
 
 #pragma endregion // Safety

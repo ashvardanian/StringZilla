@@ -55,6 +55,8 @@
 #include <numeric> // `std::accumulate`
 #include <array>   // `std::array`
 
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
@@ -792,16 +794,16 @@ void bench_comparing_order(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
-    std::printf("Building up the environment...\n");
+    fmt::println("Building up the environment...");
     environment_t env = build_environment( //
         argc, argv,                        //
         "leipzig1M.txt",                   //
         environment_t::tokenization_t::lines_k);
 
-    std::printf("Starting individual token-level benchmarks...\n");
+    fmt::println("Starting individual token-level benchmarks...");
 
     // Unary operations
     bench_checksums(env);
@@ -815,6 +817,6 @@ int main(int argc, char const **argv) {
     bench_comparing_equality(env);
     bench_comparing_order(env);
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

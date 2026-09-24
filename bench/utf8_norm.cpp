@@ -44,6 +44,8 @@
  *  This file is the sibling of `utf8_uncased.cpp`, `utf8_traverse.cpp`, `utf8_scan.cpp`, `utf8_segment.cpp`,
  *  `token.cpp`, `find.cpp`, `sequence.cpp`, and `memory.cpp`.
  */
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
@@ -218,21 +220,21 @@ void bench_utf8_find_denormalized(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla UTF-8 Normalization Benchmarks!\n");
+    fmt::println("Welcome to StringZilla UTF-8 Normalization Benchmarks!");
     if (auto code = log_environment(); code != 0) return code;
 
-    std::printf("Building up the environment...\n");
+    fmt::println("Building up the environment...");
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual testing
         environment_t::tokenization_t::lines_k, compute_bound_slice_bytes_k);
 
-    std::printf("Starting Unicode benchmarks...\n");
+    fmt::println("Starting Unicode benchmarks...");
 
     // Unicode operations
     bench_utf8_norm(env);
     bench_utf8_find_denormalized(env);
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

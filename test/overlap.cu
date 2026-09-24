@@ -16,11 +16,12 @@
 #undef NDEBUG // ! Enable all assertions for testing
 
 #include <cstddef> // `std::size_t`
-#include <cstdio>  // `std::printf`
 
 #include <array>  // `std::array`
 #include <string> // `std::string`
 #include <vector> // `std::vector`
+
+#include <fmt/format.h>
 
 #include <stringzilla/overlap.h>     // `sz_overlap_*`
 #include <stringzilla/stringzilla.h> // Primary C API
@@ -206,8 +207,8 @@ static void check_overlap_cuda_asynchrony_() {
     verify(cudaStreamCreate(&stream) == cudaSuccess);
 
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init_gpu(&corpus.query_sequence, widths.data(), widths.size(), SZ_NULL, stream,
-                                      &engine) == sz_success_k);
+    verify(sz_overlap_engine_init_gpu(&corpus.query_sequence, widths.data(), widths.size(), SZ_NULL, stream, &engine) ==
+           sz_success_k);
     verify(sz_overlap_scores(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.query_stride(),
                              corpus.candidate_stride()) == sz_success_k);
     verify(cudaStreamQuery(stream) == cudaErrorNotReady && "the scoring verb joined the stream it enqueued on");
@@ -222,7 +223,7 @@ static void check_overlap_cuda_asynchrony_() {
 
 /** @brief Every CUDA backend this device carries, against serial, over generated corpora. */
 void test_overlap_all() {
-    std::printf("  - testing the CUDA window-overlap scores against the serial backend...\n");
+    fmt::println("  - testing the CUDA window-overlap scores against the serial backend...");
     for (overlap_cuda_backend_t const &backend : overlap_cuda_backends) {
         if ((sz_capabilities() & backend.required) != backend.required) continue;
         check_overlap_cuda_equivalence_(backend);
@@ -231,7 +232,7 @@ void test_overlap_all() {
 
 /** @brief Degenerate inputs, stated refusals, the bounds the per-thread ring imposes, and the asynchrony promised. */
 void test_overlap_safety() {
-    std::printf("  - testing degenerate inputs and refused batches of the CUDA window-overlap kernels...\n");
+    fmt::println("  - testing degenerate inputs and refused batches of the CUDA window-overlap kernels...");
     for (overlap_cuda_backend_t const &backend : overlap_cuda_backends) {
         if ((sz_capabilities() & backend.required) != backend.required) continue;
         check_overlap_cuda_memory_safety_(backend);

@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,7 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
+#include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`
 
 #include <array>       // `std::array`
@@ -55,6 +54,7 @@
 #include <string_view> // Baseline
 #include <vector>      // `std::vector`
 
+#include <fmt/format.h>
 
 #include "utf8.hpp" // `print_utf8_test_bytes_`, `encoded_rune_`
 
@@ -204,10 +204,10 @@ static void check_uncased_find_three_way_(                                  //
     long const base_offset = base_result ? (long)(base_result - haystack) : -1L;
     long const simd_offset = simd_result ? (long)(simd_result - haystack) : -1L;
     long const reference_offset = reference_result ? (long)(reference_result - haystack) : -1L;
-    std::fprintf(
-        stderr, "%s FAIL: base offset=%ld len=%zu | simd offset=%ld len=%zu kernel=%u | reference offset=%ld len=%zu\n",
-        test_name, base_offset, (std::size_t)base_matched, simd_offset, (std::size_t)simd_matched,
-        simd_metadata.kernel_id, reference_offset, (std::size_t)reference_matched);
+    fmt::println(stderr,
+                 "{} FAIL: base offset={} len={} | simd offset={} len={} kernel={} | reference offset={} len={}",
+                 test_name, base_offset, (std::size_t)base_matched, simd_offset, (std::size_t)simd_matched,
+                 simd_metadata.kernel_id, reference_offset, (std::size_t)reference_matched);
     print_utf8_test_bytes_("needle  ", needle, needle_length);
     print_utf8_test_bytes_("haystack", haystack, haystack_length);
     verify(base_matches_reference && "Uncased find base backend disagrees with the reference");
@@ -239,7 +239,7 @@ static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_ut
                                      std::size_t max_needles_per_haystack, std::size_t total_queries) {
 
     char const *mode = max_needles_per_haystack == 0 ? "exhaustive" : "sampled";
-    std::printf("    - fuzz testing (%s, haystack_len=%zu, queries=%zu)...\n", mode, haystack_length, total_queries);
+    fmt::println("    - fuzz testing ({}, haystack_len={}, queries={})...", mode, haystack_length, total_queries);
 
     auto &generator = global_random_generator();
 
@@ -462,33 +462,32 @@ static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_ut
                                               &simd_matched);
 
             if (serial_result != simd_result || serial_matched != simd_matched) {
-                std::fprintf(stderr, "FUZZ FAIL haystack=%zu start=%zu rune_count=%zu\n", haystacks_tested, start,
-                             rune_count);
-                std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle_bytes);
-
-                std::fprintf(stderr, "  Needle bytes: ");
-                for (sz_size_t j = 0; j < needle_bytes && j < 50; ++j)
-                    std::fprintf(stderr, "%02X ", (unsigned char)needle_start[j]);
-                std::fprintf(stderr, "\n");
-
                 sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack.data()) : SZ_SIZE_MAX;
                 sz_size_t simd_off = simd_result ? (sz_size_t)(simd_result - haystack.data()) : SZ_SIZE_MAX;
-                std::fprintf(stderr, "  Serial: offset=%zu, len=%zu\n",
-                             serial_off == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_off, serial_matched);
-                std::fprintf(stderr, "  SIMD:   offset=%zu, len=%zu\n",
-                             simd_off == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_off, simd_matched);
-                std::fprintf(stderr, "  SIMD metadata: kernel=%u offset_in_unfolded=%zu, length_in_unfolded=%zu\n",
-                             simd_meta.kernel_id, simd_meta.offset_in_unfolded, simd_meta.length_in_unfolded);
-                // Print haystack bytes around the match
-                std::fprintf(stderr, "  Haystack bytes (offset %zu-20 to offset %zu+20):\n    ",
-                             serial_off == SZ_SIZE_MAX ? 0 : serial_off, serial_off == SZ_SIZE_MAX ? 0 : serial_off);
                 sz_size_t print_start = (serial_off != SZ_SIZE_MAX && serial_off > 20) ? serial_off - 20 : 0;
                 sz_size_t print_end = (serial_off != SZ_SIZE_MAX)
                                           ? std::min(serial_off + needle_bytes + 20, haystack.size())
                                           : std::min((sz_size_t)50, haystack.size());
-                for (sz_size_t j = print_start; j < print_end; ++j)
-                    std::fprintf(stderr, "%02X ", (unsigned char)haystack[j]);
-                std::fprintf(stderr, "\n");
+                std::string_view const needle_shown(needle_start, std::min(needle_bytes, (sz_size_t)50));
+                std::string_view const haystack_shown(haystack.data() + print_start, print_end - print_start);
+                fmt::print(stderr, R"(FUZZ FAIL haystack={haystacks} start={start} rune_count={runes}
+  Haystack len={haystack_length}, needle len={needle_length}
+  Needle bytes: {needle:02X}
+  Serial: offset={serial_offset}, len={serial_length}
+  SIMD:   offset={simd_offset}, len={simd_length}
+  SIMD metadata: kernel={kernel} offset_in_unfolded={unfolded_offset}, length_in_unfolded={unfolded_length}
+  Haystack bytes from offset {shown_from}:
+    {haystack:02X}
+)",
+                           fmt::arg("haystacks", haystacks_tested), fmt::arg("start", start),
+                           fmt::arg("runes", rune_count), fmt::arg("haystack_length", haystack.size()),
+                           fmt::arg("needle_length", needle_bytes), fmt::arg("needle", hex_bytes(needle_shown)),
+                           fmt::arg("serial_offset", (sz_ssize_t)serial_off), fmt::arg("serial_length", serial_matched),
+                           fmt::arg("simd_offset", (sz_ssize_t)simd_off), fmt::arg("simd_length", simd_matched),
+                           fmt::arg("kernel", simd_meta.kernel_id),
+                           fmt::arg("unfolded_offset", simd_meta.offset_in_unfolded),
+                           fmt::arg("unfolded_length", simd_meta.length_in_unfolded),
+                           fmt::arg("shown_from", print_start), fmt::arg("haystack", hex_bytes(haystack_shown)));
                 verify(serial_result == simd_result && "Fuzz offset mismatch");
                 verify(serial_matched == simd_matched && "Fuzz length mismatch");
             }
@@ -524,7 +523,7 @@ static void check_uncased_find_fuzz_(sz_utf8_uncased_search_t find_serial, sz_ut
         ++haystacks_tested;
     }
 
-    std::printf("    passed %zu fuzz tests across %zu haystacks\n", total_passed, haystacks_tested);
+    fmt::println("    passed {} fuzz tests across {} haystacks", total_passed, haystacks_tested);
 }
 
 /** @brief One codepoint whose case fold isn't the identity, in runes and in UTF-8. */
@@ -578,7 +577,7 @@ static std::vector<uncased_fold_t> const &uncased_folds_() {
  */
 static void check_uncased_find_preimages_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
 
-    std::printf("  - testing uncased find against all fold preimages...\n");
+    fmt::println("  - testing uncased find against all fold preimages...");
 
     std::size_t const offsets[] = {0, 14, 15, 16, 17, 30, 31, 32, 33, 61, 62, 63, 64, 65};
     std::size_t const offsets_count = span_over(offsets).size();
@@ -623,7 +622,7 @@ static void check_uncased_find_preimages_(sz_utf8_uncased_search_t find_base, sz
             }
         }
     }
-    std::printf("    passed %zu cases across %zu fold preimages\n", cases_tested, preimages_tested);
+    fmt::println("    passed {} cases across {} fold preimages", cases_tested, preimages_tested);
 }
 
 /**
@@ -639,7 +638,7 @@ static void check_uncased_find_preimages_(sz_utf8_uncased_search_t find_base, sz
  */
 static void check_uncased_find_tails_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
 
-    std::printf("  - testing uncased find with expanding preimages at haystack tails...\n");
+    fmt::println("  - testing uncased find with expanding preimages at haystack tails...");
 
     std::vector<uncased_fold_t> expanding_preimages;
     for (uncased_fold_t const &fold : uncased_folds_())
@@ -691,7 +690,7 @@ static void check_uncased_find_tails_(sz_utf8_uncased_search_t find_base, sz_utf
             }
         }
     }
-    std::printf("    passed %zu cases across %zu expanding preimages\n", cases_tested, expanding_preimages.size());
+    fmt::println("    passed {} cases across {} expanding preimages", cases_tested, expanding_preimages.size());
 }
 
 /**
@@ -709,7 +708,7 @@ static void check_uncased_find_tails_(sz_utf8_uncased_search_t find_base, sz_utf
  */
 static void check_uncased_find_crossing_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
 
-    std::printf("  - testing uncased find across adjacent expansion boundaries...\n");
+    fmt::println("  - testing uncased find across adjacent expansion boundaries...");
 
     // Codepoints whose fold emits more than one rune, so a needle can slice through the middle of their
     // expansion - ligatures, sharp-s, decomposed accents.
@@ -772,7 +771,7 @@ static void check_uncased_find_crossing_(sz_utf8_uncased_search_t find_base, sz_
             }
         }
     }
-    std::printf("    passed %zu cases across %zu adjacent expander pairs\n", cases_tested, pairs_tested);
+    fmt::println("    passed {} cases across {} adjacent expander pairs", cases_tested, pairs_tested);
 }
 
 /**
@@ -787,7 +786,7 @@ static void check_uncased_find_crossing_(sz_utf8_uncased_search_t find_base, sz_
  */
 static void check_uncased_find_long_crossing_fuzz_(sz_utf8_uncased_search_t find_base,
                                                    sz_utf8_uncased_search_t find_simd) {
-    std::printf("  - testing uncased find across long (Rabin-Karp) expansion runs...\n");
+    fmt::println("  - testing uncased find across long (Rabin-Karp) expansion runs...");
 
     struct expander_t {
         char const *utf8;
@@ -836,7 +835,7 @@ static void check_uncased_find_long_crossing_fuzz_(sz_utf8_uncased_search_t find
             }
         }
     }
-    std::printf("    passed %zu long Rabin-Karp crossing cases\n", cases_tested);
+    fmt::println("    passed {} long Rabin-Karp crossing cases", cases_tested);
 }
 
 /**
@@ -865,7 +864,7 @@ static void check_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
     // A long ASCII needle (well past the 32-rune ring buffer and the 3-rune short helpers) drives the
     // pure Rabin-Karp path inside a large random haystack, both where the needle was spliced in (so a
     // match exists) and where it was not (so the not-found path is exercised at scale).
-    std::printf("  - testing uncased find with a long Rabin-Karp ASCII needle in a large haystack...\n");
+    fmt::println("  - testing uncased find with a long Rabin-Karp ASCII needle in a large haystack...");
     auto &random_generator = global_random_generator();
     std::uniform_int_distribution<int> letter_distribution(0, 25);
     // The independent reference oracle caps its folded haystack at 512 runes, so keep the haystack under
@@ -1097,7 +1096,7 @@ void test_uncased_unit() {
  *  byte length, including the runs that straddle a 64-byte SIMD block.
  */
 void test_uncased_scripts_unit() {
-    std::printf("  - testing uncased search and order across Unicode scripts...\n");
+    fmt::println("  - testing uncased search and order across Unicode scripts...");
 
     using str = sz::string_view_t;
 
@@ -1687,7 +1686,7 @@ void test_uncased_scripts_unit() {
  *  landing on a 64-byte block edge - so the fix stays nailed down at a fixed cost.
  */
 void test_uncased_regressions_unit() {
-    std::printf("  - testing uncased fuzz-discovered regressions...\n");
+    fmt::println("  - testing uncased fuzz-discovered regressions...");
 
     using str = sz::string_view_t;
 
@@ -2035,12 +2034,12 @@ void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate,
         sz_size_t len_simd = candidate(text.data(), text.size(), output_simd.data());
 
         if (len_base != len_simd) {
-            std::fprintf(stderr, "Case fold length mismatch: base=%zu, simd=%zu, input_len=%zu\n", //
+            fmt::println(stderr, "Case fold length mismatch: base={}, simd={}, input_len={}", //
                          len_base, len_simd, text.size());
             // Print first divergence
             for (std::size_t i = 0; i < std::min(len_base, len_simd); ++i) {
                 if (output_base[i] != output_simd[i]) {
-                    std::fprintf(stderr, "First byte diff at output[%zu]: base=0x%02X, simd=0x%02X\n", //
+                    fmt::println(stderr, "First byte diff at output[{}]: base=0x{:02X}, simd=0x{:02X}", //
                                  i, (unsigned char)output_base[i], (unsigned char)output_simd[i]);
                     break;
                 }
@@ -2050,16 +2049,15 @@ void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate,
 
         for (sz_size_t i = 0; i < len_base; ++i) {
             if (output_base[i] != output_simd[i]) {
-                std::fprintf(stderr, "Case fold content mismatch at byte %zu: base=0x%02X, simd=0x%02X\n", //
+                fmt::println(stderr, "Case fold content mismatch at byte {}: base=0x{:02X}, simd=0x{:02X}", //
                              i, (unsigned char)output_base[i], (unsigned char)output_simd[i]);
                 // Show context around the mismatch
                 std::size_t start = i > 10 ? i - 10 : 0;
                 std::size_t end = std::min(i + 10, (std::size_t)len_base);
-                std::fprintf(stderr, "Base output[%zu..%zu]: ", start, end);
-                for (std::size_t j = start; j < end; ++j) std::fprintf(stderr, "%02X ", (unsigned char)output_base[j]);
-                std::fprintf(stderr, "\nSIMD output[%zu..%zu]: ", start, end);
-                for (std::size_t j = start; j < end; ++j) std::fprintf(stderr, "%02X ", (unsigned char)output_simd[j]);
-                std::fprintf(stderr, "\n");
+                std::string_view const base_shown(output_base.data() + start, end - start);
+                std::string_view const simd_shown(output_simd.data() + start, end - start);
+                fmt::println(stderr, "Base output[{0}..{1}]: {2:02X}\nSIMD output[{0}..{1}]: {3:02X}", start, end,
+                             hex_bytes(base_shown), hex_bytes(simd_shown));
                 verify(output_base[i] == output_simd[i] && "Case fold content mismatch");
             }
         }
@@ -2145,7 +2143,7 @@ void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate,
 
     // Sweep the valid Unicode codepoints, first in order (0x0..0x10FFFF), then shuffled, so a single fold
     // differential drives both the structured strings and the whole-codepoint enumeration.
-    std::printf("  - testing case folding fuzz (ordered + shuffled codepoint sweep)...\n");
+    fmt::println("  - testing case folding fuzz (ordered + shuffled codepoint sweep)...");
     std::size_t const codepoint_stride = sweep_stride(0x110000);
     std::vector<sz_rune_t> all_runes;
     all_runes.reserve(0x110000 / codepoint_stride);
@@ -2164,7 +2162,7 @@ void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate,
         std::string const text(input_buffer.data(), (std::size_t)(write_cursor - input_buffer.data()));
         check(text);
     }
-    std::printf("    exhaustive fuzzing passed!\n");
+    fmt::println("    exhaustive fuzzing passed!");
 }
 
 /**
@@ -2178,27 +2176,27 @@ void check_uncased_fold_equivalence_(reference_ reference, candidate_ candidate,
  */
 void check_uncased_invariant_reference_() {
 
-    std::printf("  - testing case-invariant closure over the fold table...\n");
+    fmt::println("  - testing case-invariant closure over the fold table...");
     std::size_t preimages_checked = 0, outputs_checked = 0;
 
     for (uncased_fold_t const &fold : uncased_folds_()) {
         if (sz_rune_is_uncased_(fold.preimage) != sz_false_k) {
-            std::fprintf(stderr, "Fold preimage U+%04X is wrongly classified as case-invariant\n", fold.preimage);
+            fmt::println(stderr, "Fold preimage U+{:04X} is wrongly classified as case-invariant", fold.preimage);
             verify(false && "Fold preimages must not be case-invariant");
         }
         ++preimages_checked;
 
         for (sz_size_t index = 0; index < fold.folded_count; ++index) {
             if (sz_rune_is_uncased_(fold.folded_runes[index]) != sz_false_k) {
-                std::fprintf(stderr,
-                             "Fold output U+%04X (from preimage U+%04X) is wrongly classified as case-invariant\n",
+                fmt::println(stderr,
+                             "Fold output U+{:04X} (from preimage U+{:04X}) is wrongly classified as case-invariant",
                              fold.folded_runes[index], fold.preimage);
                 verify(false && "Fold outputs must not be case-invariant");
             }
             ++outputs_checked;
         }
     }
-    std::printf("    passed %zu preimages and %zu fold-output runes\n", preimages_checked, outputs_checked);
+    fmt::println("    passed {} preimages and {} fold-output runes", preimages_checked, outputs_checked);
 }
 
 #pragma endregion // Equivalence
@@ -2226,7 +2224,7 @@ struct uncased_safety_backend_t {
 static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backends,
                                   std::size_t random_inputs = scale_iterations(10000)) {
 
-    std::printf("  - testing invalid-input safety of case kernels (%zu random buffers)...\n", random_inputs);
+    fmt::println("  - testing invalid-input safety of case kernels ({} random buffers)...", random_inputs);
 
     char const *needle = "st"; // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
 
@@ -2238,7 +2236,7 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
             with_guarded_buffer_(output_bound, [&](sz_ptr_t output, std::size_t length) {
                 sz_size_t folded_length = candidate.fold(input, input_length, output);
                 if (folded_length > length) {
-                    std::fprintf(stderr, "%s fold of invalid input returned %zu bytes for %zu input bytes\n",
+                    fmt::println(stderr, "{} fold of invalid input returned {} bytes for {} input bytes",
                                  candidate.name, (std::size_t)folded_length, input_length);
                     print_utf8_test_bytes_("input", input, input_length);
                     verify(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
@@ -2255,7 +2253,7 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
 
     for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
 
-    std::printf("    invalid-input safety passed!\n");
+    fmt::println("    invalid-input safety passed!");
 }
 
 /**

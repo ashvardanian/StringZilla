@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,7 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
+#include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
@@ -65,6 +64,7 @@
 #include <string>      // Baseline
 #include <string_view> // Baseline
 
+#include <fmt/format.h>
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -83,9 +83,8 @@ inline void expect_equality(char const *first, char const *second, std::size_t s
     std::size_t mismatch_position = 0;
     for (; mismatch_position < size; ++mismatch_position)
         if (first[mismatch_position] != second[mismatch_position]) break;
-    std::fprintf(stderr, "Mismatch at position %zu: %c != %c\n", mismatch_position, first[mismatch_position],
-                 second[mismatch_position]);
-    verify(false);
+    fmt::println(stderr, "Mismatch at position {}", mismatch_position);
+    verify(first[mismatch_position] == second[mismatch_position]);
 }
 
 /**
@@ -493,7 +492,7 @@ void test_ascii_unit() {
  */
 void test_memory_unit(std::size_t max_l2_size) {
 
-    std::printf("  - testing memory primitive known-answer vectors...\n");
+    fmt::println("  - testing memory primitive known-answer vectors...");
 
     // Movement known-answers, through the dispatched C API and every natively-compiled backend.
     check_memory_unit_(sz_copy, sz_move, sz_fill);
@@ -1534,7 +1533,7 @@ void test_extensions_updates_unit() {
  *  offsets. A needle, by contrast, is copied into the matcher, so a temporary one may outlive the expression.
  */
 void test_extensions_ranges_unit() {
-    std::printf("  - testing lazy search ranges and splitting...\n");
+    fmt::println("  - testing lazy search ranges and splitting...");
 
     // Searching for a set of characters
     verify(sz::string_view_t("a").find_first_of("az") == 0);

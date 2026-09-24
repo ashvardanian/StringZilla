@@ -10,18 +10,18 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 #include <cstddef> // `std::size_t`
-#include <cstdio>  // `std::printf`
 
 #include <random> // `std::mt19937`, `std::uniform_int_distribution`
 #include <string> // `std::string`
 #include <vector> // `std::vector`
+
+#include <fmt/format.h>
 
 #include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
 
@@ -62,7 +62,7 @@ static utf8_segment_backend_t const utf8_sentences_backends[] = {
 
 /** @brief Known-answer sentence-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
 void test_utf8_sentences_unit() {
-    std::printf("  - testing UTF-8 sentence-break known-answer vectors...\n");
+    fmt::println("  - testing UTF-8 sentence-break known-answer vectors...");
 
     check_utf8_segment_unit_("sentence", sz_utf8_sentences_serial, span_over(utf8_sentences_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_sentences_backends)
@@ -210,7 +210,7 @@ static utf8_segment_corpora_t utf8_sentences_corpora_() {
 
 /** @brief Rule-coverage gate: every SB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
 void test_utf8_sentences_rules() {
-    std::printf("  - testing UTF-8 sentence rule-coverage matrix...\n");
+    fmt::println("  - testing UTF-8 sentence rule-coverage matrix...");
 
     // One motif per UAX-29 Sentence_Break rule, tagged with the direction it demonstrates (break or no-break).
     utf8_rule_case_t const rule_cases[] = {
@@ -245,11 +245,11 @@ void test_utf8_sentences_rules() {
 
 /** @brief Malformed-input safety of the UTF-8 sentence kernels (serial / dispatched / icelake). */
 void test_utf8_sentences_safety() {
-    std::printf("  - testing malformed-input safety of UTF-8 sentence kernels...\n");
+    fmt::println("  - testing malformed-input safety of UTF-8 sentence kernels...");
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_sentences_serial}};
     check_utf8_segment_safety_("sentence", span_over(serial_only));
     check_utf8_segment_safety_("sentence", span_over(utf8_sentences_backends));
-    std::printf("    sentence safety passed!\n");
+    fmt::println("    sentence safety passed!");
 }
 
 #pragma endregion // Safety

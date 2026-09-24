@@ -57,7 +57,8 @@
  */
 #include <functional> // `std::boyer_moore_searcher`
 
-#define SZ_USE_MISALIGNED_LOADS (1)
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
@@ -772,20 +773,20 @@ void bench_byteset_search(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
-    std::printf("Building up the environment...\n");
+    fmt::println("Building up the environment...");
     environment_t env = build_environment( //
         argc, argv,                        //
         "leipzig1M.txt",                   //
         environment_t::tokenization_t::words_k);
 
-    std::printf("Starting search benchmarks...\n");
+    fmt::println("Starting search benchmarks...");
     bench_substring_search(env);
     bench_byte_search(env);
     bench_byteset_search(env);
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

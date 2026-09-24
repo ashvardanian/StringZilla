@@ -52,6 +52,8 @@
 #include <string>    // `std::string`, `std::to_string`
 #include <vector>    // `std::vector`
 
+#include <fmt/format.h>
+
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_*`
 
 #include "shared.hpp"
@@ -265,16 +267,15 @@ struct levenshtein_distances_from_sz {
     levenshtein_cuda_batch_t batch;    /**< The same queries, prepared on the host. */
     std::vector<sz_size_t> distances;  /**< @b [queries, candidates], the CPU's own answers. */
 
-    levenshtein_distances_from_sz(environment_t const &env, levenshtein_cuda_corpus_t &corpus,
-                                  std::size_t query_bytes, levenshtein_cuda_order_t order,
+    levenshtein_distances_from_sz(environment_t const &env, levenshtein_cuda_corpus_t &corpus, std::size_t query_bytes,
+                                  levenshtein_cuda_order_t order,
                                   sz_levenshtein_symbol_t symbol = sz_levenshtein_bytes_k)
         : corpus(corpus), order(order), batch(env, query_bytes, symbol, sz_false_k),
           distances(corpus.count() * levenshtein_queries_per_batch_k) {}
 
     call_result_t operator()(std::size_t token_index) {
         sz_unused_(token_index);
-        if (distances_(&batch.engine, &corpus.host_candidates(order), distances.data(), corpus.count()) !=
-            sz_success_k)
+        if (distances_(&batch.engine, &corpus.host_candidates(order), distances.data(), corpus.count()) != sz_success_k)
             throw std::runtime_error("The CPU round failed.");
         call_result_t result(corpus.bytes, levenshtein_check_value(distances), batch.symbols() * corpus.bytes);
         result.inputs_processed = corpus.count() * levenshtein_queries_per_batch_k;
@@ -302,7 +303,7 @@ static void bench_levenshtein_word_counts(environment_t const &env, levenshtein_
 
 /** @brief Every arm at one query width, the width carried in each arm's name beside the resident count. */
 static void bench_levenshtein_cross_product(environment_t const &env, levenshtein_cuda_corpus_t &corpus,
-                                          std::size_t query_bytes) {
+                                            std::size_t query_bytes) {
     std::string const suffix = ":q" + std::to_string(query_bytes) + ":c" + std::to_string(corpus.count());
     auto validator = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {
         env, corpus, query_bytes, levenshtein_cuda_order_t::shuffled_k};
@@ -322,8 +323,8 @@ static void bench_levenshtein_cross_product(environment_t const &env, levenshtei
     // The warped rung spreads a query across a warp's thirty-two lanes, and a wider one is reported as out of
     // reach rather than thrown.
     if (sz_levenshtein_query_words(query_bytes) > sz_levenshtein_cuda_words_max_k) {
-        std::printf("Skipping `sz_levenshtein_distances_cuda%s`: %zu words past the device's %d.\n", suffix.c_str(),
-                    sz_levenshtein_query_words(query_bytes), (int)sz_levenshtein_cuda_words_max_k);
+        fmt::println("Skipping `sz_levenshtein_distances_cuda{}`: {} words past the device's {}.", suffix.c_str(),
+                     sz_levenshtein_query_words(query_bytes), (int)sz_levenshtein_cuda_words_max_k);
         return;
     }
     // Both orderings hold the same texts, so the gap between the two arms is the warp's `max(L)` tax alone.
@@ -352,22 +353,22 @@ static void bench_levenshtein_cross_product(environment_t const &env, levenshtei
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
     try {
-        std::printf("Building up the environment...\n");
+        fmt::println("Building up the environment...");
         environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         levenshtein_cuda_corpus_t corpus(env);
-        std::printf("Starting Levenshtein benchmarks over %zu resident candidates...\n", corpus.count());
+        fmt::println("Starting Levenshtein benchmarks over {} resident candidates...", corpus.count());
         bench_levenshtein_cross_product(env, corpus, median_token_bytes(env));
         bench_levenshtein_word_counts(env, corpus);
     }
     catch (std::exception const &e) {
-        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

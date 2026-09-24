@@ -29,7 +29,6 @@
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
  */
-#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -46,7 +45,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
 #include <limits>      // `std::numeric_limits`
@@ -55,6 +53,7 @@
 #include <string_view> // `std::string_view` baseline
 #include <vector>      // `std::vector`
 
+#include <fmt/format.h>
 
 #include "stringzilla.hpp" // `global_random_generator`, `random_string`
 
@@ -133,7 +132,7 @@ static void check_sha256_multistate_unit_(                                      
  *  miss - because both share a wrong constant - is still caught against an external ground truth.
  */
 void test_hash_unit() {
-    std::printf("  - testing hashing known-answer vectors...\n");
+    fmt::println("  - testing hashing known-answer vectors...");
 
     // SHA256: the three canonical FIPS 180-4 vectors (empty, "abc", and the 56-byte two-block message).
     known_sha256_t const sha256_vectors[] = {
@@ -196,8 +195,8 @@ void test_hash_unit() {
     char const *fox = "The quick brown fox";
     sz_size_t const fox_length = (sz_size_t)std::strlen(fox);
     let_verify(auto hash_fox = sz_hash(fox, fox_length, 0u), hash_fox == sz_hash(fox, fox_length, 0u)); // Deterministic
-    verify(sz_hash(fox, fox_length, 0u) == sz_hash_serial(fox, fox_length, 0u));     // Dispatch == serial
-    verify(sz_hash(fox, fox_length, 0u) != sz_hash(fox, fox_length, 1u));            // Seed changes output
+    verify(sz_hash(fox, fox_length, 0u) == sz_hash_serial(fox, fox_length, 0u));       // Dispatch == serial
+    verify(sz_hash(fox, fox_length, 0u) != sz_hash(fox, fox_length, 1u));              // Seed changes output
     verify(sz::string_view_t(fox, fox_length).hash() == sz_hash(fox, fox_length, 0u)); // C++ wrapper
 
     // The seed reaches the serial kernel too, at both a short and a multi-word length.
@@ -635,7 +634,7 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
  *  overruns by one byte produces a perfectly plausible value.
  */
 void test_hash_safety() {
-    std::printf("  - testing degenerate lengths and alignments of the hashing kernels...\n");
+    fmt::println("  - testing degenerate lengths and alignments of the hashing kernels...");
 
     // The empty input is hashable, and its digest is stable across calls.
     verify(sz_hash("", 0, 0) == sz_hash("", 0, 0));
@@ -674,7 +673,7 @@ void test_hash_safety() {
         });
     }
 
-    std::printf("    degenerate-input safety passed!\n");
+    fmt::println("    degenerate-input safety passed!");
 }
 
 #pragma endregion // Safety

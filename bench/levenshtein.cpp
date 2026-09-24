@@ -49,6 +49,8 @@
 #include <string_view> // `std::string_view`
 #include <vector>      // `std::vector`
 
+#include <fmt/format.h>
+
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_*`
 
 #include "shared.hpp"
@@ -208,8 +210,8 @@ void bench_levenshtein_cross_product(environment_t const &env, std::size_t query
         .log(base);
 #endif
     // The rune-level entries decode every candidate byte, so their cost over the byte entries is the decoder's.
-    auto validator_utf8 = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {
-        env, query_bytes, candidates, sz_levenshtein_runes_k};
+    auto validator_utf8 = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {env, query_bytes, candidates,
+                                                                                          sz_levenshtein_runes_k};
     bench_result_t base_utf8 =
         bench_unary(env, "sz_levenshtein_distances_serial:utf8" + suffix, validator_utf8).log(base);
 #if SZ_USE_HASWELL
@@ -486,17 +488,17 @@ void bench_levenshtein_steps(environment_t const &env, std::size_t query_bytes) 
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {
-        std::printf("Building up the environment...\n");
+        fmt::println("Building up the environment...");
         environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         std::size_t const candidates = candidates_per_call(env);
         // The long arm is the 1024 bytes whose match masks fill a 32 KiB L1, where the multi-word regime starts.
         std::size_t const query_lengths[] = {median_token_bytes(env), 1024};
-        std::printf("Starting Levenshtein benchmarks...\n");
+        fmt::println("Starting Levenshtein benchmarks...");
         bench_levenshtein_one_pair(env, median_token_bytes(env));
         for (std::size_t const query_bytes : query_lengths) {
             bench_levenshtein_cross_product(env, query_bytes, candidates);
@@ -505,10 +507,10 @@ int main(int argc, char const **argv) {
         }
     }
     catch (std::exception const &e) {
-        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

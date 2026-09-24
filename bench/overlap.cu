@@ -45,6 +45,8 @@
 #include <string>    // `std::string`, `std::to_string`
 #include <vector>    // `std::vector`
 
+#include <fmt/format.h>
+
 #include <stringzilla/overlap.h> // `sz_overlap_*`
 
 #include "shared.hpp"
@@ -66,8 +68,8 @@ static std::size_t overlap_width_(environment_t const &env, std::size_t query_by
     std::size_t token_bytes = 0;
     for (token_view_t const token : env.tokens) token_bytes += token.size();
     double const mean_candidate_bytes = static_cast<double>(token_bytes) / static_cast<double>(env.tokens.size());
-    double const width =
-        std::ceil(std::log2(static_cast<double>(query_bytes) * mean_candidate_bytes) / collision_entropy);
+    double const width = std::ceil(std::log2(static_cast<double>(query_bytes) * mean_candidate_bytes) /
+                                   collision_entropy);
     return width > 1.0 ? static_cast<std::size_t>(width) : 1;
 }
 
@@ -210,21 +212,21 @@ static void bench_overlap_scores(environment_t const &env, overlap_cuda_corpus_t
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
     try {
-        std::printf("Building up the environment...\n");
+        fmt::println("Building up the environment...");
         environment_t env = build_environment(argc, argv, "xlsum.csv", environment_t::tokenization_t::lines_k);
         overlap_cuda_corpus_t corpus(env);
-        std::printf("Starting window overlap benchmarks over %zu resident candidates...\n", corpus.views.size());
+        fmt::println("Starting window overlap benchmarks over {} resident candidates...", corpus.views.size());
         bench_overlap_scores(env, corpus, median_token_bytes(env));
     }
     catch (std::exception const &e) {
-        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }

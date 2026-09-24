@@ -51,7 +51,8 @@
 #include <cstdlib> // `std::aligned_alloc`
 #endif
 
-#define SZ_USE_MISALIGNED_LOADS (1)
+#include <fmt/format.h>
+
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
@@ -484,21 +485,21 @@ void bench_lookup(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla!\n");
+    fmt::println("Welcome to StringZilla!");
     if (auto code = log_environment(); code != 0) return code;
 
-    std::printf("Building up the environment...\n");
+    fmt::println("Building up the environment...");
     environment_t env = build_environment( //
         argc, argv,                        //
         "leipzig1M.txt",                   //
         environment_t::tokenization_t::lines_k);
 
-    std::printf("Starting low-level memory-operation benchmarks...\n");
+    fmt::println("Starting low-level memory-operation benchmarks...");
     bench_copy(env);
     bench_move(env);
     bench_fill(env);
     bench_lookup(env);
 
-    std::printf("All benchmarks passed.\n");
+    fmt::println("All benchmarks passed.");
     return 0;
 }
