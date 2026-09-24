@@ -70,8 +70,8 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
-using sz::literals::operator""_sv; // for `sz::string_view`
-using sz::literals::operator""_bs; // for `sz::byteset`
+using sz::literals::operator""_sv; // for `sz::string_view_t`
+using sz::literals::operator""_bs; // for `sz::byteset_t`
 
 using namespace std::literals; // for ""sv
 
@@ -101,52 +101,31 @@ inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size
     return sum;
 }
 
-/** @brief Allocator wrapper that counts the number of allocated and deallocated bytes. */
-struct accounting_allocator : public std::allocator<char> {
-    inline static bool &verbose_ref() {
-        static bool global_value = false;
-        return global_value;
-    }
-    inline static std::size_t &counter_ref() {
-        static std::size_t global_value = 0ul;
-        return global_value;
+/** A stateful allocator charging every byte to the counter it points at, so two over different counters differ. */
+struct accounting_allocator_t {
+    using value_type = char;
+    std::size_t *live_bytes = nullptr;
+
+    char *allocate(std::size_t count) {
+        *live_bytes += count;
+        return std::allocator<char> {}.allocate(count);
     }
 
-    template <typename... args_types_>
-    static void print_if_verbose(char const *fmt, args_types_... args) {
-        if (!verbose_ref()) return;
-        std::printf(fmt, args...);
+    void deallocate(char *block, std::size_t count) noexcept {
+        verify(count <= *live_bytes && "Deallocated more bytes than were tracked as allocated");
+        *live_bytes -= count;
+        std::allocator<char> {}.deallocate(block, count);
     }
 
-    char *allocate(std::size_t n) {
-        counter_ref() += n;
-        print_if_verbose("alloc %zd -> %zd\n", n, counter_ref());
-        return std::allocator<char>::allocate(n);
-    }
-
-    void deallocate(char *val, std::size_t n) {
-        verify(n <= counter_ref() && "Deallocated more bytes than were tracked as allocated");
-        counter_ref() -= n;
-        print_if_verbose("dealloc: %zd -> %zd\n", n, counter_ref());
-        std::allocator<char>::deallocate(val, n);
-    }
-
-    template <typename callback_type>
-    static std::size_t account_block(callback_type callback) {
-        auto before = accounting_allocator::counter_ref();
-        print_if_verbose("starting block: %zd\n", before);
-        callback();
-        auto after = accounting_allocator::counter_ref();
-        print_if_verbose("ending block: %zd\n", after);
-        return after - before;
-    }
+    bool operator==(accounting_allocator_t const &) const noexcept = default;
 };
 
-/** @brief Runs @p callback and asserts that it leaves the global allocation counter unchanged. */
-template <typename callback_type>
-void assert_balanced_memory(callback_type callback) {
-    auto bytes = accounting_allocator::account_block(callback);
-    verify(bytes == 0 && "Callback leaked or double-freed tracked allocator bytes");
+/** Runs @p callback and asserts that it leaves @p live_bytes unchanged. */
+template <typename callback_type_>
+void assert_balanced_memory(std::size_t const &live_bytes, callback_type_ callback) {
+    std::size_t const before = live_bytes;
+    callback();
+    verify(live_bytes == before && "Callback leaked or double-freed tracked allocator bytes");
 }
 
 /**
@@ -350,9 +329,9 @@ void test_strings_tape_assign_unit() {
     std::forward_list<std::string> strings {"alpha", "", "gamma"};
     verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::success_k);
     verify(tape.size() == 3);
-    verify(sz::string_view(tape[0].data(), tape[0].size()) == "alpha"_sv);
+    verify(sz::string_view_t(tape[0].data(), tape[0].size()) == "alpha"_sv);
     verify(tape[1].size() == 0);
-    verify(sz::string_view(tape[2].data(), tape[2].size()) == "gamma"_sv);
+    verify(sz::string_view_t(tape[2].data(), tape[2].size()) == "gamma"_sv);
 }
 
 /** @brief Validates that `arrow_strings_tape` refuses to grow past the range of its offset type. */
@@ -443,7 +422,7 @@ void test_byteset_unit() {
 
 /**
  *  @brief Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
- *         provided by `sz::string` and `sz::string_view`.
+ *         provided by `sz::string_t` and `sz::string_view_t`.
  */
 /** @brief Known-answer coverage for ASCII classification methods (`is_alpha`, `is_digit`, `contains_only`, ...). */
 template <typename string_type>
@@ -578,17 +557,17 @@ void test_memory_unit(std::size_t max_l2_size) {
     check_lookup_unit_(sz_lookup_powervsx);
 #endif
 
-    // C++ wrapper sanity: a couple of `sz::string` / `sz::string_view` known-answer reads alongside the C API.
+    // C++ wrapper sanity: a couple of `sz::string_t` / `sz::string_view_t` known-answer reads alongside the C API.
     {
-        sz::string_view const view = "Hello, World!"_sv;
+        sz::string_view_t const view = "Hello, World!"_sv;
         verify(view.size() == 13u);
         verify(view.substr(7, 5) == "World"_sv);
         verify(view.front() == 'H' && view.back() == '!');
 
-        sz::string const owned = "Hello, World!";
+        sz::string_t const owned = "Hello, World!";
         verify(owned.size() == 13u);
         verify(owned == view);
-        verify(sz::string("apple").compare("banana") < 0);
+        verify(sz::string_t("apple").compare("banana") < 0);
     }
 
     // The C++ movement wrappers must agree with the known-answers, including overlapping `memmove`.
@@ -607,15 +586,15 @@ void test_memory_unit(std::size_t max_l2_size) {
                    (sz::memset(asterisks, '*', 5), std::memcmp(asterisks, "*****", 5) == 0) && asterisks[5] == '#');
     }
 
-    // Embedded NUL must be preserved verbatim by a stored `sz::string`: the size is the full byte length, and
+    // Embedded NUL must be preserved verbatim by a stored `sz::string_t`: the size is the full byte length, and
     // indexing past the interior NUL reaches the trailing bytes rather than stopping at the C-string boundary.
     {
         char const with_nul[] = {'a', 'b', '\0', 'c', 'd'};
-        sz::string const owned(with_nul, sizeof(with_nul));
+        sz::string_t const owned(with_nul, sizeof(with_nul));
         verify(owned.size() == sizeof(with_nul));   // Full length, NUL is a stored byte
         verify(owned[2] == '\0');                   // The interior NUL survives
         verify(owned[3] == 'c' && owned[4] == 'd'); // Indexing past the NUL works
-        verify(owned == sz::string_view(with_nul, sizeof(with_nul)));
+        verify(owned == sz::string_view_t(with_nul, sizeof(with_nul)));
     }
 
     // We will be mirroring the operations on both standard and StringZilla strings.
@@ -1023,10 +1002,10 @@ void test_stl_reads_unit() {
     verify(str("C++20").ends_with('3') == false);
 
     // Prefix and suffix checks against C-style strings.
-    verify(str("string_view").starts_with("string") == true);
-    verify(str("string_view").starts_with("String") == false);
-    verify(str("string_view").ends_with("view") == true);
-    verify(str("string_view").ends_with("View") == false);
+    verify(str("string_view_t").starts_with("string") == true);
+    verify(str("string_view_t").starts_with("String") == false);
+    verify(str("string_view_t").ends_with("view") == true);
+    verify(str("string_view_t").ends_with("View") == false);
 
 #if defined(__cpp_lib_string_contains)
     // Checking basic substring presence.
@@ -1151,7 +1130,7 @@ void test_stl_updates_unit() {
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (SZ_IS_64BIT_) scope_verify(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+    if (SZ_IS_64BIT_) scope_verify(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string_t::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -1226,9 +1205,9 @@ void test_stl_conversions_unit() {
     // From a mutable STL string to StringZilla and vice-versa.
     {
         std::string stl {"hello"};
-        sz::string sz = stl;
-        sz::string_view szv = stl;
-        sz::string_span szs = stl;
+        sz::string_t sz = stl;
+        sz::string_view_t szv = stl;
+        sz::string_span_t szs = stl;
         verify(sz == "hello");
         verify(szv == "hello");
         verify(szs == "hello");
@@ -1241,27 +1220,27 @@ void test_stl_conversions_unit() {
     }
     // From StringZilla views back into a fresh STL string.
     {
-        sz::string const sz {"hello"};
+        sz::string_t const sz {"hello"};
         std::string stl;
         stl = sz;
         verify(stl == "hello");
-        stl = sz::string_view {"world"};
+        stl = sz::string_view_t {"world"};
         verify(stl == "world");
     }
     // From an immutable STL string to StringZilla.
     {
         std::string const stl {"hello"};
-        sz::string const sz = stl;
-        sz::string_view const szv = stl;
+        sz::string_t const sz = stl;
+        sz::string_view_t const szv = stl;
         verify(sz == "hello");
         verify(szv == "hello");
         verify(szv.data() == stl.data()); // A view borrows, a string owns
     }
-    // From STL `string_view` to StringZilla and vice-versa.
+    // From STL `string_view_t` to StringZilla and vice-versa.
     {
         std::string_view stl {"hello"};
-        sz::string sz = stl;
-        sz::string_view szv = stl;
+        sz::string_t sz = stl;
+        sz::string_view_t szv = stl;
         verify(sz == "hello");
         verify(szv == "hello");
         stl = sz;
@@ -1278,8 +1257,8 @@ void test_stl_containers_unit() {
     // and each prefix precedes its own extension.
     char const *const ascending_keys[] = {"Zebra", "app", "apple", "apples", "banana"};
 
-    // The `sz::string` keys use the native ordering, the `std::string` keys go through `sz::less`.
-    std::map<sz::string, int> sorted_words_sz;
+    // The `sz::string_t` keys use the native ordering, the `std::string` keys go through `sz::less`.
+    std::map<sz::string_t, int> sorted_words_sz;
     std::map<std::string, int, sz::less> sorted_words_stl;
     for (int insertion = 4; insertion >= 0; --insertion) { // Reverse order, so sorting has work to do
         sorted_words_sz.emplace(ascending_keys[insertion], insertion);
@@ -1290,9 +1269,9 @@ void test_stl_containers_unit() {
 
     std::size_t rank_sz = 0;
     for (auto const &entry : sorted_words_sz) {
-        verify(entry.first == ascending_keys[rank_sz] && "sz::string map produced the wrong key at sorted rank_sz");
+        verify(entry.first == ascending_keys[rank_sz] && "sz::string_t map produced the wrong key at sorted rank_sz");
         verify(entry.second == static_cast<int>(rank_sz) &&
-               "sz::string map produced the wrong value at sorted rank_sz");
+               "sz::string_t map produced the wrong value at sorted rank_sz");
         ++rank_sz;
     }
     verify(rank_sz == 5);
@@ -1321,11 +1300,11 @@ void test_stl_containers_unit() {
 
     // Equal-valued keys assembled from different storage must hash alike and compare equal,
     // so the second insertion collapses onto the first instead of adding a bucket.
-    std::unordered_map<sz::string, int> words_sz;
+    std::unordered_map<sz::string_t, int> words_sz;
     words_sz.emplace("banana", 7);
-    sz::string grown_sz = "bana";
+    sz::string_t grown_sz = "bana";
     grown_sz.append("na");
-    verify(std::hash<sz::string> {}(grown_sz) == std::hash<sz::string> {}(sz::string("banana")) &&
+    verify(std::hash<sz::string_t> {}(grown_sz) == std::hash<sz::string_t> {}(sz::string_t("banana")) &&
            "std::hash disagreed for equal-content strings built via different construction paths");
     verify(words_sz.find(grown_sz) != words_sz.end());
     verify(words_sz.emplace(grown_sz, 9).second == false);
@@ -1430,9 +1409,9 @@ void test_extensions_reads_unit() {
                s.bytesum() == accumulate_bytes(s));
 }
 
-/** @brief Exercises StringZilla's non-STL mutating string extensions on `sz::string`. */
+/** @brief Exercises StringZilla's non-STL mutating string extensions on `sz::string_t`. */
 void test_extensions_updates_unit() {
-    using str = sz::string;
+    using str = sz::string_t;
 
     // Try methods.
     verify(str("obsolete").try_assign("hello"));
@@ -1454,7 +1433,7 @@ void test_extensions_updates_unit() {
     scope_verify(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
                  s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
                      s.try_shrink_to_fit(),
-                 s.capacity() < sz::string::min_capacity);
+                 s.capacity() < sz::string_t::min_capacity);
 
     // Same length replacements.
     scope_verify(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
@@ -1483,7 +1462,7 @@ void test_extensions_updates_unit() {
     scope_verify(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
 
     // Directly mapping bytes using a Look-Up Table.
-    sz::look_up_table invert_case = sz::look_up_table::identity();
+    sz::look_up_table_t invert_case = sz::look_up_table_t::identity();
     for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
     for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
     scope_verify(str s = "hello", s.lookup(invert_case), s == "HELLO");
@@ -1507,7 +1486,7 @@ void test_extensions_updates_unit() {
         verify(str(sz::concatenate("@", name)) == "@ash");
 
         // Materializing uses an implicit conversion, so the concatenation constructor is not explicit.
-        sz::string email = name | "@" | domain;
+        sz::string_t email = name | "@" | domain;
         verify(email == "ash@mail");
     }
 
@@ -1558,24 +1537,24 @@ void test_extensions_ranges_unit() {
     std::printf("  - testing lazy search ranges and splitting...\n");
 
     // Searching for a set of characters
-    verify(sz::string_view("a").find_first_of("az") == 0);
-    verify(sz::string_view("a").find_last_of("az") == 0);
-    verify(sz::string_view("a").find_first_of("xz") == sz::string_view::npos);
-    verify(sz::string_view("a").find_last_of("xz") == sz::string_view::npos);
+    verify(sz::string_view_t("a").find_first_of("az") == 0);
+    verify(sz::string_view_t("a").find_last_of("az") == 0);
+    verify(sz::string_view_t("a").find_first_of("xz") == sz::string_view_t::npos);
+    verify(sz::string_view_t("a").find_last_of("xz") == sz::string_view_t::npos);
 
-    verify(sz::string_view("a").find_first_not_of("xz") == 0);
-    verify(sz::string_view("a").find_last_not_of("xz") == 0);
-    verify(sz::string_view("a").find_first_not_of("az") == sz::string_view::npos);
-    verify(sz::string_view("a").find_last_not_of("az") == sz::string_view::npos);
+    verify(sz::string_view_t("a").find_first_not_of("xz") == 0);
+    verify(sz::string_view_t("a").find_last_not_of("xz") == 0);
+    verify(sz::string_view_t("a").find_first_not_of("az") == sz::string_view_t::npos);
+    verify(sz::string_view_t("a").find_last_not_of("az") == sz::string_view_t::npos);
 
-    verify(sz::string_view("aXbYaXbY").find_first_of("XY") == 1);
-    verify(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
-    verify(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
-    verify(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
-    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("_") == sz::string_view::npos);
-    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("+") == 62);
-    verify(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
-           sz::string_view::npos);
+    verify(sz::string_view_t("aXbYaXbY").find_first_of("XY") == 1);
+    verify(sz::string_view_t("axbYaxbY").find_first_of("Y") == 3);
+    verify(sz::string_view_t("YbXaYbXa").find_last_of("XY") == 6);
+    verify(sz::string_view_t("YbxaYbxa").find_last_of("Y") == 4);
+    verify(sz::string_view_t(sz::base64(), sizeof(sz::base64())).find_first_of("_") == sz::string_view_t::npos);
+    verify(sz::string_view_t(sz::base64(), sizeof(sz::base64())).find_first_of("+") == 62);
+    verify(sz::string_view_t(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
+           sz::string_view_t::npos);
 
     verify("aabaa"_sv.remove_prefix("a") == "abaa");
     verify("aabaa"_sv.remove_suffix("a") == "aaba");
@@ -1597,26 +1576,26 @@ void test_extensions_ranges_unit() {
     verify("hello"_sv.find_all("l").size() == 2);
     verify("hello"_sv.rfind_all("l").size() == 2);
 
-    verify(""_sv.find_all(".", sz::include_overlaps_type {}).size() == 0);
-    verify(""_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    verify("."_sv.find_all(".", sz::include_overlaps_type {}).size() == 1);
-    verify("."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    verify(".."_sv.find_all(".", sz::include_overlaps_type {}).size() == 2);
-    verify(".."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
-    verify(""_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
-    verify(""_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    verify("."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
-    verify("."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    verify(".."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
-    verify(".."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
+    verify(""_sv.find_all(".", sz::include_overlaps_t {}).size() == 0);
+    verify(""_sv.find_all(".", sz::exclude_overlaps_t {}).size() == 0);
+    verify("."_sv.find_all(".", sz::include_overlaps_t {}).size() == 1);
+    verify("."_sv.find_all(".", sz::exclude_overlaps_t {}).size() == 1);
+    verify(".."_sv.find_all(".", sz::include_overlaps_t {}).size() == 2);
+    verify(".."_sv.find_all(".", sz::exclude_overlaps_t {}).size() == 2);
+    verify(""_sv.rfind_all(".", sz::include_overlaps_t {}).size() == 0);
+    verify(""_sv.rfind_all(".", sz::exclude_overlaps_t {}).size() == 0);
+    verify("."_sv.rfind_all(".", sz::include_overlaps_t {}).size() == 1);
+    verify("."_sv.rfind_all(".", sz::exclude_overlaps_t {}).size() == 1);
+    verify(".."_sv.rfind_all(".", sz::include_overlaps_t {}).size() == 2);
+    verify(".."_sv.rfind_all(".", sz::exclude_overlaps_t {}).size() == 2);
 
     verify("a.b.c.d"_sv.find_all(".").size() == 3);
     verify("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
     verify("a.,b.,c.,d"_sv.rfind_all(".,").size() == 3);
     verify("a.b,c.d"_sv.find_all(".,"_bs).size() == 3);
     verify("a...b...c"_sv.rfind_all("..").size() == 4);
-    verify("a...b...c"_sv.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
-    verify("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
+    verify("a...b...c"_sv.rfind_all("..", sz::include_overlaps_t {}).size() == 4);
+    verify("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_t {}).size() == 2);
 
     let_verify(auto finds = "a.b.c"_sv.find_all("abcd"_bs).template to<std::vector<std::string>>(),
                finds.size() == 3 && finds[0] == "a");
@@ -1629,33 +1608,33 @@ void test_extensions_ranges_unit() {
     verify(sz::rfind_all("abc"_sv, "b"_sv).size() == 1);
 
     {
-        sz::string h("abc"), n("b");
+        sz::string_t h("abc"), n("b");
         verify(sz::find_all(h, n).size() == 1);
     }
     {
-        sz::string h("hello"), n("l");
+        sz::string_t h("hello"), n("l");
         verify(sz::find_all(h, n).size() == 2);
     }
     {
-        sz::string h("abc"), n("b");
+        sz::string_t h("abc"), n("b");
         verify(sz::rfind_all(h, n).size() == 1);
     }
 
-    verify(sz::find_all(sz::string("abc"), sz::string("b")).size() == 1);
-    verify(sz::find_all(sz::string("hello"), sz::string("l")).size() == 2);
-    verify(sz::rfind_all(sz::string("abc"), sz::string("b")).size() == 1);
+    verify(sz::find_all(sz::string_t("abc"), sz::string_t("b")).size() == 1);
+    verify(sz::find_all(sz::string_t("hello"), sz::string_t("l")).size() == 2);
+    verify(sz::rfind_all(sz::string_t("abc"), sz::string_t("b")).size() == 1);
 
     // Lvalue haystacks are borrowed, so slices land inside the caller's own buffer. A copied
     // haystack would offset into a private copy - and under SSO those offsets look plausible.
     {
-        sz::string haystack("hello world, hello cpp");
-        sz::string sso("a b a");
-        let_verify(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view>>(),
+        sz::string_t haystack("hello world, hello cpp");
+        sz::string_t sso("a b a");
+        let_verify(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view_t>>(),
                    matches.size() == 2 &&                          //
                        matches[0].data() - haystack.data() == 0 && //
                        matches[1].data() - haystack.data() == 13 &&
                        "Match offsets did not land inside the borrowed lvalue haystack's own buffer");
-        let_verify(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view>>(),
+        let_verify(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view_t>>(),
                    in_sso.size() == 2 &&                     //
                        in_sso[0].data() - sso.data() == 0 && //
                        in_sso[1].data() - sso.data() == 4 &&
@@ -1663,13 +1642,13 @@ void test_extensions_ranges_unit() {
     }
 
     // Needles are copied into the matcher, so a temporary one outlives the expression that built it.
-    verify(sz::find_all(sz::string("hello world, hello cpp"), sz::string("hello")).size() == 2);
+    verify(sz::find_all(sz::string_t("hello world, hello cpp"), sz::string_t("hello")).size() == 2);
 
     // Haystack and needle need not share a type - literals, views, and owning strings mix.
     {
-        sz::string owning("a-b-c");
-        sz::string_view view("a-b-c");
-        sz::string needle("-");
+        sz::string_t owning("a-b-c");
+        sz::string_view_t view("a-b-c");
+        sz::string_t needle("-");
         verify(sz::find_all(view, "-").size() == 2);
         verify(sz::find_all(owning, "-").size() == 2);
         verify(sz::find_all(owning, view.substr(1, 1)).size() == 2);
@@ -1714,13 +1693,13 @@ void test_extensions_ranges_unit() {
 
 #pragma region String Class
 
-/** @brief Tests copy constructor and copy-assignment constructor of `sz::string`. */
+/** @brief Tests copy constructor and copy-assignment constructor of `sz::string_t`. */
 void test_string_constructors_unit() {
     std::string alphabet {sz::ascii_printables(), sizeof(sz::ascii_printables())};
-    std::vector<sz::string> strings;
+    std::vector<sz::string_t> strings;
     for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
         strings.push_back(alphabet.substr(0, alphabet_slice));
-    std::vector<sz::string> copies {strings};
+    std::vector<sz::string_t> copies {strings};
     verify(copies.size() == strings.size());
     for (size_t i = 0; i < copies.size(); ++i) {
         verify(copies[i].size() == strings[i].size() && "Copy-constructed string has the wrong length at index i");
@@ -1728,7 +1707,7 @@ void test_string_constructors_unit() {
         for (size_t j = 0; j < strings[i].size(); j++)
             verify(copies[i][j] == strings[i][j] && "Copy-constructed string mismatched a byte at index i, j");
     }
-    std::vector<sz::string> assignments = strings;
+    std::vector<sz::string_t> assignments = strings;
     for (size_t i = 0; i < assignments.size(); ++i) {
         verify(assignments[i].size() == strings[i].size() && "Copy-assigned string has the wrong length at index i");
         verify(assignments[i] == strings[i] && "Copy-assigned string diverged from its source at index i");
@@ -1766,40 +1745,43 @@ void test_string_reserve_unit() {
 
         sz_string_free(&str, &alloc);
     }
-    // C++ API: `sz::string::reserve` shrinking must match `std::string` behavior - keep the contents.
+    // C++ API: `sz::string_t::reserve` shrinking must match `std::string` behavior - keep the contents.
     {
-        sz::string str(100, 'a');
+        sz::string_t str(100, 'a');
         std::size_t const capacity_before = str.capacity();
         str.reserve(50);
         verify(str.size() == 100);
         verify(str.capacity() == capacity_before);
-        verify(str == sz::string(100, 'a'));
+        verify(str == sz::string_t(100, 'a'));
     }
 }
 
-/** @brief Checks for memory leaks in the string class using the `accounting_allocator`. */
+/** Checks for memory leaks in the string class, and that each block returns to the allocator that granted it. */
 void test_memory_stability_equivalence(std::size_t length, std::size_t iterations) {
+    using accounting_string_t = sz::basic_string<accounting_allocator_t>;
+    static_assert(sizeof(accounting_string_t) == sizeof(sz::string_t) + sizeof(std::size_t *),
+                  "Only a stateful allocator may widen the string");
 
-    verify(accounting_allocator::counter_ref() == 0 && "Allocator counter was not zero before the stability run");
-    using string = sz::basic_string<char, accounting_allocator>;
-    string base;
-
+    std::size_t live_bytes = 0, foreign_bytes = 0;
+    accounting_allocator_t const allocator {&live_bytes}, foreign_allocator {&foreign_bytes};
+    accounting_string_t base(allocator);
     for (std::size_t i = 0; i < length; ++i) base.push_back('c');
     verify(base.length() == length && "Base string has the wrong length after `push_back` construction");
 
     // Do copies leak?
-    assert_balanced_memory([&]() {
+    assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            string copy(base);
+            accounting_string_t copy(base);
+            verify(copy.get_allocator() == allocator);
             verify(copy.length() == length && "Copy-constructed string has the wrong length at iteration i");
             verify(copy == base && "Copy-constructed string diverged from `base` at iteration i");
         }
     });
 
     // How about assignments?
-    assert_balanced_memory([&]() {
+    assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            string copy;
+            accounting_string_t copy(allocator);
             copy = base;
             verify(copy.length() == length && "Copy-assigned string has the wrong length at iteration i");
             verify(copy == base && "Copy-assigned string diverged from `base` at iteration i");
@@ -1807,22 +1789,22 @@ void test_memory_stability_equivalence(std::size_t length, std::size_t iteration
     });
 
     // How about the move constructor?
-    assert_balanced_memory([&]() {
+    assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            string unique_item(base);
+            accounting_string_t unique_item(base);
             verify(unique_item.length() == length && "Pre-move string has the wrong length at iteration i");
             verify(unique_item == base && "Pre-move string diverged from `base` at iteration i");
-            string copy(std::move(unique_item));
+            accounting_string_t copy(std::move(unique_item));
             verify(copy.length() == length && "Move-constructed string has the wrong length at iteration i");
             verify(copy == base && "Move-constructed string diverged from `base` at iteration i");
         }
     });
 
     // And the move assignment operator with an empty target payload?
-    assert_balanced_memory([&]() {
+    assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            string unique_item(base);
-            string copy;
+            accounting_string_t unique_item(base);
+            accounting_string_t copy(allocator);
             copy = std::move(unique_item);
             verify(copy.length() == length &&
                    "Move-assigned (empty target) string has the wrong length at iteration i");
@@ -1831,10 +1813,10 @@ void test_memory_stability_equivalence(std::size_t length, std::size_t iteration
     });
 
     // And move assignment where the target had a payload?
-    assert_balanced_memory([&]() {
+    assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            string unique_item(base);
-            string copy;
+            accounting_string_t unique_item(base);
+            accounting_string_t copy(allocator);
             for (std::size_t j = 0; j < 317; j++) copy.push_back('q');
             copy = std::move(unique_item);
             verify(copy.length() == length &&
@@ -1843,9 +1825,24 @@ void test_memory_stability_equivalence(std::size_t length, std::size_t iteration
         }
     });
 
+    // Across unequal allocators, both assignments copy bytes and the target keeps its own allocator.
+    assert_balanced_memory(live_bytes, [&]() {
+        for (std::size_t i = 0; i < iterations; ++i) {
+            accounting_string_t unique_item(base);
+            accounting_string_t moved(foreign_allocator), copied(foreign_allocator);
+            for (std::size_t j = 0; j < 317; j++) moved.push_back('q');
+            moved = std::move(unique_item);
+            copied = base;
+            verify(moved.get_allocator() == foreign_allocator && copied.get_allocator() == foreign_allocator);
+            verify(moved == base && "Move-assigned (foreign target) string diverged from `base` at iteration i");
+            verify(copied == base && "Copy-assigned (foreign target) string diverged from `base` at iteration i");
+        }
+        verify(foreign_bytes == 0);
+    });
+
     // Now let's clear the base and check that we're back to zero
-    base = string();
-    verify(accounting_allocator::counter_ref() == 0 && "Allocator counter did not return to zero after clearing");
+    base = accounting_string_t(allocator);
+    verify(live_bytes == 0 && "Allocator counter did not return to zero after clearing");
 }
 
 /** @brief Tests the correctness of the string class update methods, such as `push_back` and `erase`. */
@@ -1855,13 +1852,13 @@ void test_string_updates_equivalence(std::size_t repetitions) {
     auto &generator = global_random_generator();
     for (std::size_t repetition = 0; repetition != repetitions; ++repetition) {
         std::string stl_string;
-        sz::string sz_string;
+        sz::string_t sz_string;
         for (std::size_t length = 1; length != 200; ++length) {
             char c = alphabet_chars[generator() % 26];
             stl_string.push_back(c);
             sz_string.push_back(c);
-            verify(sz::string_view(stl_string) == sz::string_view(sz_string) &&
-                   "sz::string diverged from std::string after `push_back`");
+            verify(sz::string_view_t(stl_string) == sz::string_view_t(sz_string) &&
+                   "sz::string_t diverged from std::string after `push_back`");
         }
 
         // Compare STL and StringZilla strings erase functionality.
@@ -1870,8 +1867,8 @@ void test_string_updates_equivalence(std::size_t repetitions) {
             std::size_t chars_to_erase = generator() % (stl_string.length() - offset_to_erase) + 1;
             stl_string.erase(offset_to_erase, chars_to_erase);
             sz_string.erase(offset_to_erase, chars_to_erase);
-            verify(sz::string_view(stl_string) == sz::string_view(sz_string) &&
-                   "sz::string diverged from std::string after `erase`");
+            verify(sz::string_view_t(stl_string) == sz::string_view_t(sz_string) &&
+                   "sz::string_t diverged from std::string after `erase`");
         }
     }
 }
@@ -2250,13 +2247,13 @@ void test_memory_all() {
 #pragma endregion // Drivers
 
 // Explicit template instantiations for the entry points invoked from `main()` (see `stringzilla.cpp`).
-template void test_ascii_unit<sz::string>();
-template void test_ascii_unit<sz::string_view>();
+template void test_ascii_unit<sz::string_t>();
+template void test_ascii_unit<sz::string_view_t>();
 template void test_stl_reads_unit<std::string_view>();
 template void test_stl_reads_unit<std::string>();
-template void test_stl_reads_unit<sz::string_view>();
-template void test_stl_reads_unit<sz::string>();
+template void test_stl_reads_unit<sz::string_view_t>();
+template void test_stl_reads_unit<sz::string_t>();
 template void test_stl_updates_unit<std::string>();
-template void test_stl_updates_unit<sz::string>();
-template void test_extensions_reads_unit<sz::string_view>();
-template void test_extensions_reads_unit<sz::string>();
+template void test_stl_updates_unit<sz::string_t>();
+template void test_extensions_reads_unit<sz::string_view_t>();
+template void test_extensions_reads_unit<sz::string_t>();

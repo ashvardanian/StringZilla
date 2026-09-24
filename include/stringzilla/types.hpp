@@ -1302,7 +1302,6 @@ class safe_vector {
     operator span<value_type const>() const noexcept { return {data_, size_}; }
 };
 
-
 #if SZ_USE_CUDA
 #pragma region CUDA Allocators
 

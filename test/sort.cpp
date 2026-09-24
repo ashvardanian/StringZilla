@@ -69,8 +69,8 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
-using sz::literals::operator""_sv; // for `sz::string_view`
-using sz::literals::operator""_bs; // for `sz::byteset`
+using sz::literals::operator""_sv; // for `sz::string_view_t`
+using sz::literals::operator""_bs; // for `sz::byteset_t`
 
 using namespace std::literals; // for ""sv
 
@@ -221,7 +221,7 @@ void test_sort_unit() {
 
     // Low-level `try_*` API takes sized `sz::span` outputs and returns the count via `sz::expected`.
     {
-        auto as_view = [](std::string const &s) -> sz::string_view { return {s.data(), s.size()}; };
+        auto as_view = [](std::string const &s) -> sz::string_view_t { return {s.data(), s.size()}; };
 
         std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
         order_t order(fruits.size());

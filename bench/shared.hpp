@@ -205,17 +205,13 @@ static void do_not_optimize(argument_type_ &&value) noexcept {
 #endif
 }
 
-/** @brief The device-measured kernel time an engine reports, in milliseconds, or @b 0 for CPU engines, whose
- *         plain `status_t` carries no such timer. */
-template <typename status_type_, typename = void>
-struct engine_elapsed_milliseconds_trait {
-    static float read(status_type_ const &) noexcept { return 0.0f; }
-};
+/** The device-measured kernel time an engine reports, in milliseconds, or @b 0 for CPU engines, whose plain
+ *  `status_t` carries no such timer. */
 template <typename status_type_>
-struct engine_elapsed_milliseconds_trait<status_type_,
-                                         decltype((void)std::declval<status_type_ const &>().elapsed_milliseconds)> {
-    static float read(status_type_ const &materialized) noexcept { return materialized.elapsed_milliseconds; }
-};
+float engine_elapsed_milliseconds(status_type_ const &status) noexcept {
+    if constexpr (requires { status.elapsed_milliseconds; }) return status.elapsed_milliseconds;
+    else return 0.0f;
+}
 
 /** @brief A status paired with the device-measured kernel time, both read out of one materialized copy. */
 struct engine_timing_t {
@@ -244,7 +240,7 @@ SZ_NOINLINE engine_timing_t invoke_engine_(invocable_type_ &&invocable) noexcept
 
     engine_timing_t timing;
     timing.status = static_cast<sz::status_t>(materialized);
-    timing.kernel_milliseconds = engine_elapsed_milliseconds_trait<status_t>::read(materialized);
+    timing.kernel_milliseconds = engine_elapsed_milliseconds(materialized);
     return timing;
 }
 
@@ -327,9 +323,9 @@ tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separat
  *  Each step of the underlying `split` issues one `sz_find_byteset` scan. The whole corpus is already
  *  bounded by the dataset read, so the walk runs to the end rather than carrying its own cap.
  */
-inline tokens_t tokenize(std::string_view str, sz::byteset separators) {
+inline tokens_t tokenize(std::string_view str, sz::byteset_t separators) {
     tokens_t tokens;
-    for (auto token : sz::string_view {str.data(), str.size()}.split(separators)) {
+    for (auto token : sz::string_view_t {str.data(), str.size()}.split(separators)) {
         if (token.size() == 0) continue; // ? Runs of separators yield empty segments
         tokens.push_back({token.data(), token.size()});
     }
@@ -542,7 +538,7 @@ inline environment_t build_environment(                                        /
     // Tokenize the dataset according to the tokenization mode. The corpus is already bounded by the read,
     // so each mode walks it to the end.
     if (env.tokenization == environment_t::file_k) { env.tokens.push_back({env.dataset.data(), env.dataset.size()}); }
-    else if (env.tokenization == environment_t::lines_k) { env.tokens = tokenize(env.dataset, sz::byteset {'\n'}); }
+    else if (env.tokenization == environment_t::lines_k) { env.tokens = tokenize(env.dataset, sz::byteset_t {'\n'}); }
     else if (env.tokenization == environment_t::words_k) { env.tokens = tokenize(env.dataset); }
     else {
         std::size_t n = static_cast<std::size_t>(env.tokenization);

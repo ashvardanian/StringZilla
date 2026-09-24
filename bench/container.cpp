@@ -225,27 +225,27 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
             .log(base_umap);
     }
 
-    // Try using StringZilla's `sz::string_view` for keys
+    // Try using StringZilla's `sz::string_view_t` for keys
     {
-        auto callable_map = callable_for_associative_lookups<std::map<sz::string_view, unsigned, less_through_std_t>>(
+        auto callable_map = callable_for_associative_lookups<std::map<sz::string_view_t, unsigned, less_through_std_t>>(
             env);
-        bench_unary(env, "map<sz::string_view>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
+        bench_unary(env, "map<sz::string_view_t>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
             .log(base_map);
         auto callable_umap = callable_for_associative_lookups<
-            std::unordered_map<sz::string_view, unsigned, hash_through_std_t, equal_to_through_std_t>>(env);
-        bench_unary(env, "unordered_map<sz::string_view>::find", callable_no_op_t(), callable_umap,
+            std::unordered_map<sz::string_view_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(env);
+        bench_unary(env, "unordered_map<sz::string_view_t>::find", callable_no_op_t(), callable_umap,
                     callable_umap.preprocessor())
             .log(base_umap);
     }
 
-    // Try StringZilla's "Small String Optimization" class - `sz::string`
+    // Try StringZilla's "Small String Optimization" class - `sz::string_t`
     {
-        auto callable_map = callable_for_associative_lookups<std::map<sz::string, unsigned, less_through_std_t>>(env);
-        bench_unary(env, "map<sz::string>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
+        auto callable_map = callable_for_associative_lookups<std::map<sz::string_t, unsigned, less_through_std_t>>(env);
+        bench_unary(env, "map<sz::string_t>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
             .log(base_map);
         auto callable_umap = callable_for_associative_lookups<
-            std::unordered_map<sz::string, unsigned, hash_through_std_t, equal_to_through_std_t>>(env);
-        bench_unary(env, "unordered_map<sz::string>::find", callable_no_op_t(), callable_umap,
+            std::unordered_map<sz::string_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(env);
+        bench_unary(env, "unordered_map<sz::string_t>::find", callable_no_op_t(), callable_umap,
                     callable_umap.preprocessor())
             .log(base_umap);
     }

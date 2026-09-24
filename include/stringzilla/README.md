@@ -194,23 +194,23 @@ The one owning C string type is `sz_string_t`, documented under [Memory Operatio
 
 The C++ layer lives in `namespace ashvardanian::stringzilla`, conventionally aliased as `sz`, and is built on two class templates plus a 256-bit `byteset`.
 
-- `sz::basic_string_slice<char_type>` — a non-owning, length-bounded view.
-  Two aliases exist: the read-only `sz::string_view = basic_string_slice<char const>` and the mutable `sz::string_span = basic_string_slice<char>`.
-- `sz::basic_string<char_type, allocator = std::allocator<char_type>>` — an owning, Small-String-Optimized container; the alias `sz::string` uses `char` and the default `std::allocator`.
-  The allocator must be stateless, i.e. empty.
-- `sz::byteset = sz::basic_byteset<char>` — the C++ wrapper around `sz_byteset_t`, constructible from an initializer list, a `(pointer, count)` pair, or a `std::array`, and composable with `operator|`.
+- `sz::basic_string_slice<char_type>` — a non-owning, length-bounded view over `char` or `char const`.
+  Two aliases exist: the read-only `sz::string_view_t = basic_string_slice<char const>` and the mutable `sz::string_span_t = basic_string_slice<char>`.
+- `sz::basic_string<allocator = std::allocator<char>>` — an owning, Small-String-Optimized `char` container; the alias `sz::string_t` uses the default `std::allocator`.
+  A stateful allocator travels with the string under the usual `std::allocator_traits` propagation rules, and an empty one costs no bytes.
+- `sz::byteset_t` — the C++ wrapper around `sz_byteset_t`, constructible from an initializer list, a `(pointer, count)` pair, or a `std::array`, and composable with `operator|`.
 - `sz::status_t` — a scoped enum mirroring `sz_status_t` with `success_k`, `bad_alloc_k`, `invalid_utf8_k`, `contains_duplicates_k`, and the rest, returned by the fallible `try_*` free functions.
 
-`sz::string_view` is implicitly constructible from a `char const *`, a `(pointer, length)` pair, `std::string`, and `std::string_view`, and converts back to both; `sz::string` adds construction from repeats, sub-ranges, initializer lists, and lazy `sz::concatenate(...)` expressions.
+`sz::string_view_t` is implicitly constructible from a `char const *`, a `(pointer, length)` pair, `std::string`, and `std::string_view`, and converts back to both; `sz::string_t` adds construction from repeats, sub-ranges, initializer lists, and lazy `sz::concatenate(...)` expressions.
 Both satisfy the `std::string`/`std::string_view` member surface — `data`, `size`, `length`, `empty`, `at`, `front`, `back`, iterators, `substr`, `compare`, the relational operators, and on C++20 `operator<=>` — so they are drop-in for most code.
-Both also stream through `operator<<`, and `std::hash<sz::string>` / `std::hash<sz::string_view>` specializations are provided so they work as unordered-container keys out of the box.
+Both also stream through `operator<<`, and `std::hash<sz::string_t>` / `std::hash<sz::string_view_t>` specializations are provided so they work as unordered-container keys out of the box.
 
 User-defined literals live in `sz::literals`:
 
 ```cpp
 using namespace sz::literals;
-sz::string_view v = "needle"_sv;   // a view, no allocation
-sz::byteset s = " \t\n\r"_bs;      // a byte-set from a literal
+sz::string_view_t v = "needle"_sv;   // a view, no allocation
+sz::byteset_t s = " \t\n\r"_bs;      // a byte-set from a literal
 ```
 
 Convenience byte-sets are available as free functions: `sz::whitespaces_set()`, `sz::newlines_set()`, `sz::digits_set()`, `sz::hexdigits_set()`, `sz::octdigits_set()`, and `sz::ascii_letters_set()`.
@@ -282,9 +282,9 @@ For repeated matching the view offers lazy, allocation-free ranges: `find_all(ne
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::string_view haystack = "the quick brown fox";
+    sz::string_view_t haystack = "the quick brown fox";
 
-    auto pos = haystack.find("quick");           // index, or sz::string_view::npos
+    auto pos = haystack.find("quick");           // index, or sz::string_view_t::npos
     assert(pos == 4);
     assert(haystack.contains("brown"));
     assert(haystack.starts_with("the"));
@@ -293,7 +293,7 @@ int main() {
     std::size_t words = 0;
     for (auto word : haystack.find_all(sz::whitespaces_set())) (void)word, ++words;
 
-    auto vowels = sz::byteset {"aeiou", 5};
+    auto vowels = sz::byteset_t {"aeiou", 5};
     auto first_vowel = haystack.find_first_of(vowels);
     assert(first_vowel == 2); // index of 'e'
     return 0;
@@ -322,34 +322,34 @@ This is the decisive contrast with the idiomatic STL approach, where splitting b
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::string_view csv = "alice,30,engineer";
+    sz::string_view_t csv = "alice,30,engineer";
 
-    sz::string_partition_result<sz::string_view> first = csv.partition(',');
-    sz::string_view name = first.before;
+    sz::string_partition_result<sz::string_view_t> first = csv.partition(',');
+    sz::string_view_t name = first.before;
     assert(name == "alice");
     assert(first.match == ",");
     assert(first.after == "30,engineer");
 
     std::size_t fields = 0;
-    for (sz::string_view field : csv.split(",")) // "alice", "30", "engineer"
+    for (sz::string_view_t field : csv.split(",")) // "alice", "30", "engineer"
         ++fields;                                // no string is allocated per field
     assert(fields == 3);
 
-    sz::string_view doc = "line one\nline two\nline three";
-    for (sz::string_view line : doc.splitlines()) (void)line;
+    sz::string_view_t doc = "line one\nline two\nline three";
+    for (sz::string_view_t line : doc.splitlines()) (void)line;
 
     return 0;
 }
 ```
 
-Each range exposes `begin`/`end`, dereferences to a `sz::string_view`, and can be consumed in a single pass.
-When you genuinely need the tokens to outlive the source you can still materialize them into a `std::vector<sz::string_view>`, but only then do you pay for storage — the default path stays allocation-free.
+Each range exposes `begin`/`end`, dereferences to a `sz::string_view_t`, and can be consumed in a single pass.
+When you genuinely need the tokens to outlive the source you can still materialize them into a `std::vector<sz::string_view_t>`, but only then do you pay for storage — the default path stays allocation-free.
 
 ## UTF-8 Segmentation
 
 Splitting Unicode text into the units a human actually perceives is deceptively hard, and getting it wrong corrupts data.
 A single emoji can be dozens of bytes and several codepoints yet one perceived character, CJK runs carry no spaces, and a period is not always the end of a sentence.
-StringZilla ships the real algorithms — UAX-29 graphemes, words, and sentences, plus UAX-14 line-break opportunities — as lazy ranges that borrow from the source and yield one `sz::string_view` per segment with no per-segment allocation.
+StringZilla ships the real algorithms — UAX-29 graphemes, words, and sentences, plus UAX-14 line-break opportunities — as lazy ranges that borrow from the source and yield one `sz::string_view_t` per segment with no per-segment allocation.
 
 A string's length is really three different numbers, and only the grapheme count matches what a user sees:
 
@@ -359,12 +359,12 @@ A string's length is really three different numbers, and only the grapheme count
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::string_view family = "👨‍👩‍👧‍👦"; // one emoji, one perceived character
+    sz::string_view_t family = "👨‍👩‍👧‍👦"; // one emoji, one perceived character
 
     std::size_t codepoints = 0;
     for (sz_rune_t r : family.utf8_runes()) (void)r, ++codepoints;
     std::size_t graphemes = 0;
-    for (sz::string_view g : family.utf8_graphemes()) (void)g, ++graphemes;
+    for (sz::string_view_t g : family.utf8_graphemes()) (void)g, ++graphemes;
 
     assert(family.size() == 25); // 25 bytes on the wire
     assert(codepoints == 7); // four people joined by three zero-width joiners
@@ -377,9 +377,9 @@ This is exactly why truncating by bytes or codepoints tears emoji apart — it c
 Iterating graphemes lets you cut on a real boundary:
 
 ```cpp
-sz::string_view msg = "🙏🏽👍🏿✨ thanks";
+sz::string_view_t msg = "🙏🏽👍🏿✨ thanks";
 std::size_t cut = 0, seen = 0;
-for (sz::string_view g : msg.utf8_graphemes()) { if (seen++ == 3) break; cut += g.size(); }
+for (sz::string_view_t g : msg.utf8_graphemes()) { if (seen++ == 3) break; cut += g.size(); }
 assert(msg.sub(0, cut) == "🙏🏽👍🏿✨"); // the three emoji keep their skin-tone modifiers
 ```
 
@@ -387,16 +387,16 @@ Word and sentence boundaries are just as treacherous: contractions, CJK, decimal
 UAX-29 keeps `can't` whole while separating CJK ideographs that no space divides, and refuses to break a sentence inside `$9.99`:
 
 ```cpp
-sz::string_view phrase = "can't stop 北京!";
+sz::string_view_t phrase = "can't stop 北京!";
 assert(*phrase.utf8_wordbreaks().begin() == "can't"); // apostrophe is interior; 北 and 京 split apart
 
-sz::string_view prose = "She paid $9.99. Cheap.";
+sz::string_view_t prose = "She paid $9.99. Cheap.";
 std::size_t sentences = 0;
-for (sz::string_view s : prose.utf8_sentences()) (void)s, ++sentences;
+for (sz::string_view_t s : prose.utf8_sentences()) (void)s, ++sentences;
 assert(sentences == 2); // the dot inside $9.99 is not a sentence break
 ```
 
-The full family of ranges, each borrowing from the source and yielding `sz::string_view` segments, or `sz_rune_t` for runes.
+The full family of ranges, each borrowing from the source and yielding `sz::string_view_t` segments, or `sz_rune_t` for runes.
 Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the __separators__ the kernel finds, while `split_*` yields the content __between__ them:
 
 - `utf8_runes()` — every codepoint as a decoded `sz_rune_t` UTF-32 scalar.
@@ -423,7 +423,7 @@ Case-insensitive matching across full Unicode is more than ASCII `tolower` — `
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::string_view hay = "Take the STRAßE downtown";
+    sz::string_view_t hay = "Take the STRAßE downtown";
     auto m = hay.utf8_uncased_find("strasse"); // no folded copy of `hay` is made
     assert(m.offset == 9);
     assert(hay.sub(m.offset, m.offset + m.length) == "STRAßE"); // matched the mixed-case ß form
@@ -432,10 +432,10 @@ int main() {
 ```
 
 The result carries both the `offset` and the matched `length`, since folding can make the matched span longer or shorter than the needle.
-When you need the folded text itself, fold a `sz::string` in place:
+When you need the folded text itself, fold a `sz::string_t` in place:
 
 ```cpp
-sz::string greeting = "Grüße";
+sz::string_t greeting = "Grüße";
 greeting.try_utf8_uncased_fold(); // in place; `ß` expands to `ss`
 assert(greeting == "grüsse");
 ```
@@ -460,8 +460,8 @@ Trimming is exposed in C++ on the view: `strip(byteset)`, `lstrip(byteset)`, and
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::string_view padded = "  \t spaced out \n";
-    sz::string_view tight = padded.strip(sz::whitespaces_set());
+    sz::string_view_t padded = "  \t spaced out \n";
+    sz::string_view_t tight = padded.strip(sz::whitespaces_set());
     assert(tight == "spaced out");
     return 0;
 }
@@ -474,10 +474,10 @@ Translation — mapping every byte through a 256-entry lookup table — is offer
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::basic_look_up_table<char> to_upper;        // identity by default; fill as needed
+    sz::look_up_table_t to_upper = sz::look_up_table_t::identity();
     for (int i = 'a'; i <= 'z'; ++i) to_upper[(char)i] = (char)(i - 32);
 
-    sz::string text = "hello";
+    sz::string_t text = "hello";
     text.lookup(to_upper); // in place
     assert(text == "HELLO");
     return 0;
@@ -568,11 +568,11 @@ int main() {
     assert(counts["apple"] == 2);
     assert(counts.size() == 2);
 
-    // `sz::string` keys also work in the plain containers, via the bundled `std::hash` specialization.
-    std::unordered_set<sz::string> uniq = {"apple", "banana"};
+    // `sz::string_t` keys also work in the plain containers, via the bundled `std::hash` specialization.
+    std::unordered_set<sz::string_t> uniq = {"apple", "banana"};
     assert(uniq.count("apple") == 1);
 
-    sz::string noise(16, '\0');
+    sz::string_t noise(16, '\0');
     sz::fill_random(noise.span(), /*nonce*/ 7); // reproducible noise
     assert(noise.size() == 16);
     return 0;
@@ -670,11 +670,11 @@ Size each position span to `min(first.size(), second.size())`.
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    std::vector<sz::string> names = {"banana", "apple", "cherry"};
+    std::vector<sz::string_t> names = {"banana", "apple", "cherry"};
 
     sz::sorted_idx_t order[3];
     sz::status_t status = sz::try_argsort(
-        names, [](sz::string const &s) -> sz::string_view { return s; }, {order, 3});
+        names, [](sz::string_t const &s) -> sz::string_view_t { return s; }, {order, 3});
     assert(status == sz::status_t::success_k);
     assert(order[0] == 1 && order[1] == 0 && order[2] == 2); // apple, banana, cherry
     return 0;
@@ -768,7 +768,7 @@ int main(void) {
 
 ### C++
 
-In C++, `sz::string` is the owning, SSO container and `sz::string_span` is its mutable view; both rebuild the `std::string` surface.
+In C++, `sz::string_t` is the owning, SSO container and `sz::string_span_t` is its mutable view; both rebuild the `std::string` surface.
 Mutating members (`append`, `push_back`, `insert`, `erase`, `replace`, `resize`, `reserve`, `shrink_to_fit`, `clear`, `swap`, `operator+=`, `operator+`, `assign`) are present, alongside `data`/`c_str`/`size`/`capacity` and the relational operators.
 Every potentially-allocating mutation also has a non-throwing `try_*` twin — `try_append`, `try_reserve`, `try_resize`, `try_assign`, `try_insert`, `try_replace`, `try_replace_all`, and so on — that returns a `bool`/`size_type` instead of throwing, for allocation-failure-aware code.
 
@@ -777,7 +777,7 @@ Every potentially-allocating mutation also has a non-throwing `try_*` twin — `
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::string greeting = "hello";
+    sz::string_t greeting = "hello";
     greeting.append(", ");
     greeting += "world";
     assert(greeting == "hello, world");
@@ -944,7 +944,7 @@ The standard API and our alternative can be conditionally disabled with `SZ_SAFE
 When it's enabled, the _~~subjectively~~_ risky overloads from the Standard will be disabled.
 
 ```cpp
-using str = sz::string;
+using str = sz::string_t;
 
 str("a:b").front(1) == "a"; // no checks, unlike `substr`
 str("a:b").front(2) == "a:"; // take first 2 characters
@@ -980,7 +980,7 @@ StringZilla provides a convenient `partition` function, which returns a tuple of
 ```cpp
 auto parts = haystack.partition(':'); // Matching a character
 auto [before, match, after] = haystack.partition(':'); // Structure unpacking
-auto [before, match, after] = haystack.partition(sz::byteset(":;", 2)); // Character-set argument
+auto [before, match, after] = haystack.partition(sz::byteset_t(":;", 2)); // Character-set argument
 auto [before, match, after] = haystack.partition(" : "); // String argument
 auto [before, match, after] = haystack.rpartition(sz::whitespaces_set()); // Split around the last whitespace
 ```
@@ -1008,15 +1008,15 @@ Here is a sneak peek of the most useful ones.
 ```cpp
 text.hash(); // -> 64 bit unsigned integer 
 text.ssize(); // -> 64 bit signed length to avoid `static_cast<std::ssize_t>(text.size())`
-text.contains_only(sz::byteset(" \t", 2)); // == text.find_first_not_of(sz::byteset(" \t", 2)) == npos;
+text.contains_only(sz::byteset_t(" \t", 2)); // == text.find_first_not_of(sz::byteset_t(" \t", 2)) == npos;
 text.contains(' '); // == text.find(' ') != npos;
 
 // Simpler slicing than `substr`
-text.front(10); // -> sz::string_view
-text.back(10); // -> sz::string_view
+text.front(10); // -> sz::string_view_t
+text.back(10); // -> sz::string_view_t
 
 // Safe variants, which clamp the range into the string bounds
-using sz::string::cap;
+using sz::string_t::cap;
 text.front(10, cap) == text.front(std::min(10, text.size()));
 text.back(10, cap) == text.back(std::min(10, text.size()));
 
@@ -1026,7 +1026,7 @@ text.front(sz::whitespaces_set()); // all leading whitespaces
 text.back(sz::digits_set()); // all numerical symbols forming the suffix
 
 // Incremental construction
-using sz::string::unchecked;
+using sz::string_t::unchecked;
 text.push_back('x'); // no surprises here
 text.push_back('x', unchecked); // no bounds checking, Rust style
 text.try_push_back('x'); // returns `false` if the string is full and the allocation failed
@@ -1080,7 +1080,7 @@ __`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 
 __`SZ_AVOID_STL`__ and __`SZ_SAFETY_OVER_COMPATIBILITY`__:
 
-> When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string` and back.
+> When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string_t` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
 > Moreover, if STL compatibility is a low priority, one can make the API safer by disabling the overloads, which are subjectively error prone.
 

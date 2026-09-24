@@ -60,8 +60,8 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
-using sz::literals::operator""_sv; // for `sz::string_view`
-using sz::literals::operator""_bs; // for `sz::byteset`
+using sz::literals::operator""_sv; // for `sz::string_view_t`
+using sz::literals::operator""_bs; // for `sz::byteset_t`
 
 using namespace std::literals; // for ""sv
 
@@ -920,7 +920,7 @@ static void check_uncased_order_(sz_utf8_uncased_order_t order) {
  */
 void test_uncased_unit() {
 
-    using str = sz::string_view;
+    using str = sz::string_view_t;
 
     // Known-answer vectors through the dispatched C API, the backend kernels, and the C++ wrappers.
     {
@@ -952,7 +952,7 @@ void test_uncased_unit() {
         check_uncased_find_unit_(sz_utf8_uncased_search_icelake, sharp_s, sharp_s_length, "SS", 2, 0, 2);
 #endif
 
-        // C++ wrapper on `sz::string_view`: same two cases through `utf8_uncased_search`.
+        // C++ wrapper on `sz::string_view_t`: same two cases through `utf8_uncased_search`.
         { let_verify(auto match = str(greeting).utf8_uncased_search("world"), match.offset == 6 && match.length == 5); }
         { let_verify(auto match = str(sharp_s).utf8_uncased_search("SS"), match.offset == 0 && match.length == 2); }
 
@@ -984,14 +984,14 @@ void test_uncased_unit() {
         check_uncased_fold_unit_(sz_utf8_uncased_fold_icelake, "\xC3\x9F", 2, "ss");
 #endif
 
-        // C++ wrapper: in-place fold on a mutable `sz::string`.
+        // C++ wrapper: in-place fold on a mutable `sz::string_t`.
         {
-            sz::string folded("HeLLo");
+            sz::string_t folded("HeLLo");
             verify(folded.try_utf8_uncased_fold());
             verify(folded == "hello");
         }
         {
-            sz::string folded("\xC3\x9F");
+            sz::string_t folded("\xC3\x9F");
             verify(folded.try_utf8_uncased_fold());
             verify(folded == "ss");
         }
@@ -1099,7 +1099,7 @@ void test_uncased_unit() {
 void test_uncased_scripts_unit() {
     std::printf("  - testing uncased search and order across Unicode scripts...\n");
 
-    using str = sz::string_view;
+    using str = sz::string_view_t;
 
     // Equal strings (ASCII)
     verify(str("hello").utf8_uncased_order("HELLO") == sz_equal_k);
@@ -1689,7 +1689,7 @@ void test_uncased_scripts_unit() {
 void test_uncased_regressions_unit() {
     std::printf("  - testing uncased fuzz-discovered regressions...\n");
 
-    using str = sz::string_view;
+    using str = sz::string_view_t;
 
     // Fuzz-Discovered Regressions (Serial vs SIMD mismatches)
 

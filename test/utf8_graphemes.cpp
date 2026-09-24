@@ -78,7 +78,7 @@ void test_utf8_graphemes_unit() {
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's clusters.
     std::vector<std::string> const clusters =
-        sz::string_view("ab").utf8_graphemes().template to<std::vector<std::string>>();
+        sz::string_view_t("ab").utf8_graphemes().template to<std::vector<std::string>>();
     verify(clusters.size() == 2 && clusters[0] == "a" && clusters[1] == "b" && "C++ utf8_graphemes range");
 
     // Grapheme-cluster counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
@@ -110,7 +110,7 @@ void test_utf8_graphemes_unit() {
  *         skin-tone modifiers, regional-indicator runs of varying parity, Indic virama clusters, Hangul jamo
  *         combinations, and bare CR/LF shapes. All non-ASCII bytes are `\xHH` escapes.
  */
-static sz::string_view const utf8_graphemes_motifs[] = {
+static sz::string_view_t const utf8_graphemes_motifs[] = {
     "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D" // three-link ZWJ chain
     "\xF0\x9F\x91\xA7"_sv,
     "\xF0\x9F\x91\xA9\xE2\x80\x8D"_sv,     // dangling trailing ZWJ
@@ -326,7 +326,7 @@ void test_utf8_graphemes_all() {
                                     scale_iterations(8)); // This family's share of the suite budget
 
     // The streaming segmenter against the per-position GB1-GB999 transcription, which nothing else calls.
-    for (sz::string_view const motif : span_over(utf8_graphemes_motifs))
+    for (sz::string_view_t const motif : span_over(utf8_graphemes_motifs))
         check_utf8_segment_against_oracle_("grapheme", sz_utf8_graphemes_serial, sz_utf8_is_grapheme_boundary_serial,
                                            motif.data(), motif.size());
 }

@@ -546,9 +546,9 @@ void bench_byte_search(environment_t const &env) {
 template <sz_find_byteset_t find_func_>
 struct matcher_from_sz_find_byteset {
     using size_type = std::size_t;
-    sz::byteset needles_; // Pick C++ alternative over `sz_byteset_t` for `constexp` constructor
+    sz::byteset_t needles_; // Pick C++ alternative over `sz_byteset_t` for `constexp` constructor
 
-    constexpr matcher_from_sz_find_byteset(sz::byteset needles) noexcept : needles_(needles) {}
+    constexpr matcher_from_sz_find_byteset(sz::byteset_t needles) noexcept : needles_(needles) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match_pointer = find_func_(haystack.data(), haystack.size(), &needles_.raw());
@@ -636,14 +636,14 @@ void bench_byteset_search(environment_t const &env) {
     // First, benchmark the serial function
     // The "check value" for normal and reverse search is the same - simply the number of matches.
     auto base_call = callable_for_byteset_search<sz::find_matches_view,
-                                                 matcher_from_sz_find_byteset<sz_find_byteset_serial>, sz::byteset>(
+                                                 matcher_from_sz_find_byteset<sz_find_byteset_serial>, sz::byteset_t>(
         env);
     bench_result_t base = bench_unary(env, "sz_find_byteset_serial", base_call).log();
     bench_result_t base_reverse =
         bench_unary(
             env, "sz_rfind_byteset_serial",
             callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_serial>,
-                                        sz::byteset>(env))
+                                        sz::byteset_t>(env))
             .log();
 
     // Conditionally include SIMD-accelerated backends
@@ -651,104 +651,104 @@ void bench_byteset_search(environment_t const &env) {
     bench_unary( //
         env, "sz_find_byteset_haswell", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_haswell>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base);
     bench_unary( //
         env, "sz_rfind_byteset_haswell", base_call,
         callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_haswell>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_ICELAKE
     bench_unary( //
         env, "sz_find_byteset_icelake", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_icelake>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base);
     bench_unary( //
         env, "sz_rfind_byteset_icelake", base_call,
         callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_icelake>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_find_byteset_neon", base_call,
                 callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_neon>,
-                                            sz::byteset>(env))
+                                            sz::byteset_t>(env))
         .log(base);
     bench_unary(env, "sz_rfind_byteset_neon", base_call,
                 callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_neon>,
-                                            sz::byteset>(env))
+                                            sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_SVE2
     bench_unary(env, "sz_find_byteset_sve2", base_call,
                 callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_sve2>,
-                                            sz::byteset>(env))
+                                            sz::byteset_t>(env))
         .log(base);
     bench_unary(env, "sz_rfind_byteset_sve2", base_call,
                 callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_sve2>,
-                                            sz::byteset>(env))
+                                            sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_V128
     bench_unary( //
         env, "sz_find_byteset_v128", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_v128>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base);
     bench_unary( //
         env, "sz_rfind_byteset_v128", base_call,
         callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_v128>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_V128RELAXED
     bench_unary( //
         env, "sz_find_byteset_v128relaxed", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_v128relaxed>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base);
     bench_unary( //
         env, "sz_rfind_byteset_v128relaxed", base_call,
         callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_v128relaxed>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_RVV
     bench_unary( //
         env, "sz_find_byteset_rvv", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_rvv>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base);
     bench_unary( //
         env, "sz_rfind_byteset_rvv", base_call,
         callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_rvv>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_LASX
     bench_unary( //
         env, "sz_find_byteset_lasx", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_lasx>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base);
     bench_unary( //
         env, "sz_rfind_byteset_lasx", base_call,
         callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_lasx>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_POWERVSX
     bench_unary( //
         env, "sz_find_byteset_powervsx", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_powervsx>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base);
     bench_unary( //
         env, "sz_rfind_byteset_powervsx", base_call,
         callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_powervsx>,
-                                    sz::byteset>(env))
+                                    sz::byteset_t>(env))
         .log(base_reverse);
 #endif
 

@@ -68,8 +68,8 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
-using sz::literals::operator""_sv; // for `sz::string_view`
-using sz::literals::operator""_bs; // for `sz::byteset`
+using sz::literals::operator""_sv; // for `sz::string_view_t`
+using sz::literals::operator""_bs; // for `sz::byteset_t`
 
 using namespace std::literals; // for ""sv
 
@@ -80,16 +80,16 @@ using namespace std::literals; // for ""sv
 template class std::basic_string_view<char>;
 template class sz::basic_string_slice<char>;
 template class std::basic_string<char>;
-template class sz::basic_string<char>;
-template class sz::basic_byteset<char>;
+template class sz::basic_string<>;
+template class sz::basic_string_slice<char const>;
 
-template class std::vector<sz::string>;
-template class std::map<sz::string, int>;
-template class std::unordered_map<sz::string, int>;
+template class std::vector<sz::string_t>;
+template class std::map<sz::string_t, int>;
+template class std::unordered_map<sz::string_t, int>;
 
-template class std::vector<sz::string_view>;
-template class std::map<sz::string_view, int>;
-template class std::unordered_map<sz::string_view, int>;
+template class std::vector<sz::string_view_t>;
+template class std::map<sz::string_view_t, int>;
+template class std::unordered_map<sz::string_view_t, int>;
 
 int main(int argc, char const **argv) {
 
@@ -134,8 +134,8 @@ int main(int argc, char const **argv) {
     failures += run_test("test_substrings_all", test_substrings_all);
     failures += run_test("test_substrings_safety", test_substrings_safety);
 
-    failures += run_test("test_ascii_unit<sz::string>", test_ascii_unit<sz::string>);
-    failures += run_test("test_ascii_unit<sz::string_view>", test_ascii_unit<sz::string_view>);
+    failures += run_test("test_ascii_unit<sz::string_t>", test_ascii_unit<sz::string_t>);
+    failures += run_test("test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
     failures += run_test("test_memory_unit", [] { test_memory_unit(); }); // ! Defaulted arg
     failures += run_test("test_memory_large_unit", test_memory_large_unit);
     failures += run_test("test_memory_all", test_memory_all);
@@ -143,15 +143,15 @@ int main(int argc, char const **argv) {
 
     failures += run_test("test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
     failures += run_test("test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
-    failures += run_test("test_stl_reads_unit<sz::string_view>", test_stl_reads_unit<sz::string_view>);
-    failures += run_test("test_stl_reads_unit<sz::string>", test_stl_reads_unit<sz::string>);
+    failures += run_test("test_stl_reads_unit<sz::string_view_t>", test_stl_reads_unit<sz::string_view_t>);
+    failures += run_test("test_stl_reads_unit<sz::string_t>", test_stl_reads_unit<sz::string_t>);
     failures += run_test("test_stl_updates_unit<std::string>", test_stl_updates_unit<std::string>);
-    failures += run_test("test_stl_updates_unit<sz::string>", test_stl_updates_unit<sz::string>);
+    failures += run_test("test_stl_updates_unit<sz::string_t>", test_stl_updates_unit<sz::string_t>);
     failures += run_test("test_stl_conversions_unit", test_stl_conversions_unit);
     failures += run_test("test_stl_containers_unit", test_stl_containers_unit);
 
-    failures += run_test("test_extensions_reads_unit<sz::string_view>", test_extensions_reads_unit<sz::string_view>);
-    failures += run_test("test_extensions_reads_unit<sz::string>", test_extensions_reads_unit<sz::string>);
+    failures += run_test("test_extensions_reads_unit<sz::string_view_t>", test_extensions_reads_unit<sz::string_view_t>);
+    failures += run_test("test_extensions_reads_unit<sz::string_t>", test_extensions_reads_unit<sz::string_t>);
     failures += run_test("test_extensions_updates_unit", test_extensions_updates_unit);
     failures += run_test("test_extensions_ranges_unit", test_extensions_ranges_unit);
 

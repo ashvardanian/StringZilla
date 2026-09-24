@@ -60,8 +60,8 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
-using sz::literals::operator""_sv; // for `sz::string_view`
-using sz::literals::operator""_bs; // for `sz::byteset`
+using sz::literals::operator""_sv; // for `sz::string_view_t`
+using sz::literals::operator""_bs; // for `sz::byteset_t`
 
 using namespace std::literals; // for ""sv
 
@@ -129,7 +129,7 @@ static void check_sha256_multistate_unit_(                                      
  *
  *  Exercises each function through the dispatched C API (automatic kernel resolution), through the
  *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through
- *  the C++ `sz::string_view` wrappers, so a regression that the serial-vs-SIMD agreement tests would
+ *  the C++ `sz::string_view_t` wrappers, so a regression that the serial-vs-SIMD agreement tests would
  *  miss - because both share a wrong constant - is still caught against an external ground truth.
  */
 void test_hash_unit() {
@@ -198,7 +198,7 @@ void test_hash_unit() {
     let_verify(auto hash_fox = sz_hash(fox, fox_length, 0u), hash_fox == sz_hash(fox, fox_length, 0u)); // Deterministic
     verify(sz_hash(fox, fox_length, 0u) == sz_hash_serial(fox, fox_length, 0u));     // Dispatch == serial
     verify(sz_hash(fox, fox_length, 0u) != sz_hash(fox, fox_length, 1u));            // Seed changes output
-    verify(sz::string_view(fox, fox_length).hash() == sz_hash(fox, fox_length, 0u)); // C++ wrapper
+    verify(sz::string_view_t(fox, fox_length).hash() == sz_hash(fox, fox_length, 0u)); // C++ wrapper
 
     // The seed reaches the serial kernel too, at both a short and a multi-word length.
     verify(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));

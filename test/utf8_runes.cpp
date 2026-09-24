@@ -61,7 +61,7 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
-using sz::literals::operator""_sv; // for `sz::string_view`
+using sz::literals::operator""_sv; // for `sz::string_view_t`
 
 #pragma region Helpers
 
@@ -202,7 +202,7 @@ static utf8_runes_backend_t const utf8_runes_backends[] = {
  *
  *  Exercises each function through the dispatched C API (automatic kernel resolution), through the
  *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through
- *  the C++ `sz::string_view` wrappers, so a regression that the serial-vs-SIMD agreement tests would
+ *  the C++ `sz::string_view_t` wrappers, so a regression that the serial-vs-SIMD agreement tests would
  *  miss - because both share a wrong constant - is still caught against an external ground truth. This
  *  is the isolated coverage for `sz_utf8_seek` and `sz_utf8_decode`, whose SIMD variants are
  *  otherwise only fuzzed against serial.
@@ -262,104 +262,104 @@ void test_utf8_runes_unit() {
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 
-    // C++ API: character counting vs byte length through the `sz::string_view` wrappers.
-    verify(sz::string_view(mixed, mixed_length).utf8_count() == 3u);
+    // C++ API: character counting vs byte length through the `sz::string_view_t` wrappers.
+    verify(sz::string_view_t(mixed, mixed_length).utf8_count() == 3u);
     verify("hello"_sv.utf8_count() == 5);
     verify("hello"_sv.size() == 5);
     verify("Hello World"_sv.utf8_count() == 11);
-    verify(sz::string_view("").utf8_count() == 0);
-    verify(sz::string_view("Hello \xE4\xB8\x96\xE7\x95\x8C").utf8_count() == 8); // "Hello " (6) + 2 CJK chars
-    verify(sz::string_view("Hello \xE4\xB8\x96\xE7\x95\x8C").size() == 12);      // "Hello " (6) + 6 bytes
-    verify(sz::string_view("Hello \xF0\x9F\x98\x80").utf8_count() == 7);         // "Hello " (6) + 1 emoji
-    verify(sz::string_view("Hello \xF0\x9F\x98\x80").size() == 10);              // "Hello " (6) + 4 bytes
-    verify(sz::string_view("\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82").utf8_count() == 3);
-    verify(sz::string_view("\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82").size() == 12);
-    verify(sz::string_view("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82").utf8_count() == 6);
-    verify(sz::string_view("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82").size() == 12);
+    verify(sz::string_view_t("").utf8_count() == 0);
+    verify(sz::string_view_t("Hello \xE4\xB8\x96\xE7\x95\x8C").utf8_count() == 8); // "Hello " (6) + 2 CJK chars
+    verify(sz::string_view_t("Hello \xE4\xB8\x96\xE7\x95\x8C").size() == 12);      // "Hello " (6) + 6 bytes
+    verify(sz::string_view_t("Hello \xF0\x9F\x98\x80").utf8_count() == 7);         // "Hello " (6) + 1 emoji
+    verify(sz::string_view_t("Hello \xF0\x9F\x98\x80").size() == 10);              // "Hello " (6) + 4 bytes
+    verify(sz::string_view_t("\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82").utf8_count() == 3);
+    verify(sz::string_view_t("\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82").size() == 12);
+    verify(sz::string_view_t("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82").utf8_count() == 6);
+    verify(sz::string_view_t("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82").size() == 12);
 
     // C++ API: byte offset of the nth character (and the npos beyond-end sentinel).
     {
-        sz::string_view text = "Hello";
+        sz::string_view_t text = "Hello";
         verify(text.utf8_seek(0) == 0);
         verify(text.utf8_seek(1) == 1);
         verify(text.utf8_seek(4) == 4);
-        verify(text.utf8_seek(5) == sz::string_view::npos);
-        verify(text.utf8_seek(100) == sz::string_view::npos);
+        verify(text.utf8_seek(5) == sz::string_view_t::npos);
+        verify(text.utf8_seek(100) == sz::string_view_t::npos);
     }
     {
-        sz::string_view text = "Hello \xE4\xB8\x96\xE7\x95\x8C";
+        sz::string_view_t text = "Hello \xE4\xB8\x96\xE7\x95\x8C";
         verify(text.utf8_seek(0) == 0); // 'H' at byte 0
         verify(text.utf8_seek(5) == 5); // ' ' at byte 5
         verify(text.utf8_seek(6) == 6); // '世' at byte 6
         verify(text.utf8_seek(7) == 9); // '界' at byte 9
-        verify(text.utf8_seek(8) == sz::string_view::npos);
+        verify(text.utf8_seek(8) == sz::string_view_t::npos);
     }
     {
-        sz::string_view text = "\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82";
+        sz::string_view_t text = "\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82";
         verify(text.utf8_seek(0) == 0); // First emoji at byte 0
         verify(text.utf8_seek(1) == 4); // Second emoji at byte 4
         verify(text.utf8_seek(2) == 8); // Third emoji at byte 8
-        verify(text.utf8_seek(3) == sz::string_view::npos);
+        verify(text.utf8_seek(3) == sz::string_view_t::npos);
     }
 
     // 64-byte chunk boundaries and batch limits, materialized via the vector wrapper.
     {
         // Critical 63, 64, 65 byte boundaries
-        let_verify(std::string s63(63, 'x'), sz::string_view(s63).utf8_runes().size() == 63);
-        let_verify(std::string s64(64, 'x'), sz::string_view(s64).utf8_runes().size() == 64);
-        let_verify(std::string s65(65, 'x'), sz::string_view(s65).utf8_runes().size() == 65);
+        let_verify(std::string s63(63, 'x'), sz::string_view_t(s63).utf8_runes().size() == 63);
+        let_verify(std::string s64(64, 'x'), sz::string_view_t(s64).utf8_runes().size() == 64);
+        let_verify(std::string s65(65, 'x'), sz::string_view_t(s65).utf8_runes().size() == 65);
 
         // ASCII batch limit: 16 characters max per Ice Lake iteration
-        let_verify(std::string s17(17, 'x'), sz::string_view(s17).utf8_runes().size() == 17);
-        let_verify(std::string s20(20, 'x'), sz::string_view(s20).utf8_runes().size() == 20);
+        let_verify(std::string s17(17, 'x'), sz::string_view_t(s17).utf8_runes().size() == 17);
+        let_verify(std::string s20(20, 'x'), sz::string_view_t(s20).utf8_runes().size() == 20);
 
         // 2-byte batch limit: 32 characters (64 bytes) max per iteration
         scope_verify(std::string cyr32, for (int i = 0; i < 32; ++i) cyr32 += "\xD0\x9F",
-                     sz::string_view(cyr32).utf8_count() == 32);
+                     sz::string_view_t(cyr32).utf8_count() == 32);
         scope_verify(std::string cyr33, for (int i = 0; i < 33; ++i) cyr33 += "\xD0\x9F",
-                     sz::string_view(cyr33).utf8_count() == 33);
+                     sz::string_view_t(cyr33).utf8_count() == 33);
 
         // 3-byte batch limit: 16 characters (48 bytes) max per iteration
         scope_verify(std::string cjk16, for (int i = 0; i < 16; ++i) cjk16 += "\xE4\xB8\x96",
-                     sz::string_view(cjk16).utf8_count() == 16);
+                     sz::string_view_t(cjk16).utf8_count() == 16);
         scope_verify(std::string cjk17, for (int i = 0; i < 17; ++i) cjk17 += "\xE4\xB8\x96",
-                     sz::string_view(cjk17).utf8_count() == 17);
+                     sz::string_view_t(cjk17).utf8_count() == 17);
 
         // 4-byte batch limit: 16 characters (64 bytes) max per iteration
         scope_verify(std::string emoji16, for (int i = 0; i < 16; ++i) emoji16 += "\xF0\x9F\x98\x80",
-                     sz::string_view(emoji16).utf8_count() == 16);
+                     sz::string_view_t(emoji16).utf8_count() == 16);
         scope_verify(std::string emoji17, for (int i = 0; i < 17; ++i) emoji17 += "\xF0\x9F\x98\x80",
-                     sz::string_view(emoji17).utf8_count() == 17);
+                     sz::string_view_t(emoji17).utf8_count() == 17);
 
         // Asymmetric at chunk boundary: 60 ASCII + "ПП世" = 63 chars, 67 bytes
         scope_verify(std::string boundary_asym(60, 'x'), boundary_asym += "\xD0\x9F\xD0\x9F\xE4\xB8\x96",
-                     sz::string_view(boundary_asym).utf8_count() == 63);
+                     sz::string_view_t(boundary_asym).utf8_count() == 63);
 
         // Sequences exceeding batch limits
         scope_verify(std::string cyr100, for (int i = 0; i < 100; ++i) cyr100 += "\xD0\x9F",
-                     sz::string_view(cyr100).utf8_runes().size() == 100);
+                     sz::string_view_t(cyr100).utf8_runes().size() == 100);
         scope_verify(std::string cjk50, for (int i = 0; i < 50; ++i) cjk50 += "\xE4\xB8\x96",
-                     sz::string_view(cjk50).utf8_runes().size() == 50);
+                     sz::string_view_t(cjk50).utf8_runes().size() == 50);
         scope_verify(std::string emoji50, for (int i = 0; i < 50; ++i) emoji50 += "\xF0\x9F\x98\x80",
-                     sz::string_view(emoji50).utf8_runes().size() == 50);
+                     sz::string_view_t(emoji50).utf8_runes().size() == 50);
 
         // Asymmetric overflow: 20x (2 ASCII + 3 Cyrillic) = 100 chars, 140 bytes
         scope_verify(std::string overflow_asym,
                      for (int i = 0; i < 20; ++i) overflow_asym += "aa\xD0\x9F\xD0\xA0\xD0\xA1",
-                     sz::string_view(overflow_asym).utf8_count() == 100);
+                     sz::string_view_t(overflow_asym).utf8_count() == 100);
 
         // Transitions at chunk boundaries
         scope_verify(std::string boundary_test(63, 'x'), boundary_test += "\xD0\x9F",
-                     sz::string_view(boundary_test).utf8_runes().size() == 64);
+                     sz::string_view_t(boundary_test).utf8_runes().size() == 64);
         scope_verify(
             std::string span_asym,
             {
                 for (int i = 0; i < 30; ++i) span_asym += "aa";
                 for (int i = 0; i < 8; ++i) span_asym += "\xD0\x9F\xD0\xA0\xD0\xA1";
             },
-            sz::string_view(span_asym).utf8_count() == 84);
+            sz::string_view_t(span_asym).utf8_count() == 84);
         scope_verify(std::string exact_boundary(64, 'x'), exact_boundary += "\xD0\x9F\xE4\xB8\x96\xF0\x9F\x98\x80",
-                     sz::string_view(exact_boundary).utf8_count() == 67);
+                     sz::string_view_t(exact_boundary).utf8_count() == 67);
     }
 }
 
@@ -376,7 +376,7 @@ void test_utf8_runes_scripts_unit() {
     // C++ API: codepoint iteration materialized as a vector, since every check below indexes by position.
     {
         auto runes_of = [](char const *t) {
-            return sz::string_view(t).utf8_runes().template to<std::vector<sz_rune_t>>();
+            return sz::string_view_t(t).utf8_runes().template to<std::vector<sz_rune_t>>();
         };
 
         // Basic ASCII and edge cases
@@ -491,7 +491,7 @@ void test_utf8_runes_scripts_unit() {
 
         // Extended asymmetric: 30x "xxППП" = 150 chars, 210 bytes (crosses multiple 64-byte chunks)
         scope_verify(std::string asym_long, for (int i = 0; i < 30; ++i) asym_long += "xx\xD0\x9F\xD0\x9F\xD0\x9F",
-                     sz::string_view(asym_long).utf8_count() == 150);
+                     sz::string_view_t(asym_long).utf8_count() == 150);
     }
 }
 
@@ -589,7 +589,7 @@ static void check_utf8_runes_large_count_() {
     sz_size_t const count_serial = sz_utf8_count_serial(mixed.data(), mixed.size());
     verify(count_serial == expected_codepoints);
     verify(sz_utf8_count(mixed.data(), mixed.size()) == count_serial);
-    verify(sz::string_view(mixed).utf8_count() == count_serial); // C++ wrapper matches serial
+    verify(sz::string_view_t(mixed).utf8_count() == count_serial); // C++ wrapper matches serial
 }
 
 #pragma endregion // Equivalence

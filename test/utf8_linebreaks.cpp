@@ -68,7 +68,7 @@ void test_utf8_linebreaks_unit() {
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's segments.
     std::vector<std::string> const wrapped =
-        sz::string_view("a\nb").utf8_linebreaks().template to<std::vector<std::string>>();
+        sz::string_view_t("a\nb").utf8_linebreaks().template to<std::vector<std::string>>();
     verify(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b" && "C++ utf8_linebreaks range");
 
     // Line-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
@@ -85,7 +85,7 @@ void test_utf8_linebreaks_unit() {
 #pragma region Equivalence
 
 /** @brief UAX-14 line-break corner motifs (sprinkled into the random corpus): mandatory breaks, OP/CL, HY, GL, NU. */
-static sz::string_view const utf8_linebreaks_motifs[] = {
+static sz::string_view_t const utf8_linebreaks_motifs[] = {
     "a\nb"_sv,              // LF mandatory break
     "a\rb"_sv,              // CR mandatory break
     "a\r\nb"_sv,            // CRLF mandatory break (one segment)

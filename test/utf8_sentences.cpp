@@ -70,7 +70,7 @@ void test_utf8_sentences_unit() {
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's sentence segments.
     std::vector<std::string> const sentences =
-        sz::string_view("Hi. Yo.").utf8_sentences().template to<std::vector<std::string>>();
+        sz::string_view_t("Hi. Yo.").utf8_sentences().template to<std::vector<std::string>>();
     verify(sentences.size() == 2 && "C++ utf8_sentences range");
 
     // Sentence counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
@@ -92,7 +92,7 @@ void test_utf8_sentences_unit() {
  *  @brief UAX-29 sentence-break corner motifs (sprinkled into the random corpus): ATerm vs STerm, terminator +
  *         Close + Space + case, paragraph separators after a terminator, SContinue, abbreviation-like and numeric.
  */
-static sz::string_view const utf8_sentences_motifs[] = {
+static sz::string_view_t const utf8_sentences_motifs[] = {
     "End. Next"_sv,               // ATerm + space + uppercase (SB break)
     "End! Next"_sv,               // STerm + space + uppercase (SB break)
     "End? Next"_sv,               // STerm '?' + space + uppercase

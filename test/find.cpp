@@ -61,8 +61,8 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
-using sz::literals::operator""_sv; // for `sz::string_view`
-using sz::literals::operator""_bs; // for `sz::byteset`
+using sz::literals::operator""_sv; // for `sz::string_view_t`
+using sz::literals::operator""_bs; // for `sz::byteset_t`
 
 using namespace std::literals; // for ""sv
 
@@ -70,7 +70,7 @@ using namespace std::literals; // for ""sv
 
 /**
  *  @brief Runs one substring-search known-answer case through the dispatched `sz_find`/`sz_rfind`,
- *         every natively-compiled backend kernel, and the C++ `sz::string_view` wrapper.
+ *         every natively-compiled backend kernel, and the C++ `sz::string_view_t` wrapper.
  *
  *  Asserts each backend resolves the @p needle to the expected offset within @p haystack, or to
  *  `SZ_NULL_CHAR` when @p expected_offset is `SZ_SIZE_MAX` (the not-found sentinel). The forward
@@ -119,15 +119,15 @@ static void check_find_unit_(                      //
     verify(sz_find_sve(haystack, haystack_length, needle, needle_length) == forward_expected);
 #endif
 
-    // The C++ `sz::string_view` wrapper resolves to the same offsets.
-    sz::string_view const haystack_view(haystack, haystack_length);
-    sz::string_view const needle_view(needle, needle_length);
+    // The C++ `sz::string_view_t` wrapper resolves to the same offsets.
+    sz::string_view_t const haystack_view(haystack, haystack_length);
+    sz::string_view_t const needle_view(needle, needle_length);
     verify(haystack_view.find(needle_view) ==
-               (forward_offset == SZ_SIZE_MAX ? sz::string_view::npos : forward_offset) &&
-           "sz::string_view::find must agree with the C API's forward offset");
+               (forward_offset == SZ_SIZE_MAX ? sz::string_view_t::npos : forward_offset) &&
+           "sz::string_view_t::find must agree with the C API's forward offset");
     verify(haystack_view.rfind(needle_view) ==
-               (backward_offset == SZ_SIZE_MAX ? sz::string_view::npos : backward_offset) &&
-           "sz::string_view::rfind must agree with the C API's backward offset");
+               (backward_offset == SZ_SIZE_MAX ? sz::string_view_t::npos : backward_offset) &&
+           "sz::string_view_t::rfind must agree with the C API's backward offset");
 }
 
 /** @brief Lengths every comparison and byte-scan size ladder switches at, plus one either side of each. */
@@ -221,7 +221,7 @@ static void check_find_byte_unit_(char const *name, sz_find_byte_t find_byte, sz
  *
  *  Begins with known-answer vectors exercising each function through the dispatched C API
  *  (automatic kernel resolution), through the natively-compiled backend kernels directly (manual
- *  propagation to a specific kernel), and - where it applies - through the C++ `sz::string_view`
+ *  propagation to a specific kernel), and - where it applies - through the C++ `sz::string_view_t`
  *  wrappers, so a regression that the serial-vs-SIMD agreement tests would miss - because both share a
  *  wrong constant - is still caught against an external ground truth. The remainder covers the string
  *  class search methods (`find`, `find_first_of`, `find_all`, `split`, …) over haystacks and needles of
@@ -426,8 +426,8 @@ struct find_backend_t {
 struct byteset_backend_t {
     char const *name;
     sz_find_byteset_t kernel;
-    sz_cptr_t operator()(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *byteset) const noexcept {
-        return kernel(haystack, haystack_length, byteset);
+    sz_cptr_t operator()(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *byteset_t) const noexcept {
+        return kernel(haystack, haystack_length, byteset_t);
     }
 };
 
@@ -507,18 +507,18 @@ void check_byteset_equivalence_(reference_ reference, candidate_ candidate, sz_s
     sz_byteset_add(&vowels, 'u');
 
     // Replays one haystack at every intra-cacheline alignment and compares the backends.
-    auto compare_on = [&](std::string const &haystack_pattern, sz_byteset_t const &byteset) {
+    auto compare_on = [&](std::string const &haystack_pattern, sz_byteset_t const &byteset_t) {
         for_each_cacheline_offset_(
             haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
                 std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
                 sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
 
-                sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset);
-                sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset);
+                sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset_t);
+                sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset_t);
                 if (result_reference != result_candidate) {
                     std::fprintf(stderr, "%s vs %s: byteset search disagreed on a %zu-byte haystack\n", reference.name,
                                  candidate.name, (std::size_t)haystack_length);
-                    verify(false && "Candidate backend must resolve every byteset to the same offset as the reference");
+                    verify(false && "Candidate backend must resolve every byteset_t to the same offset as the reference");
                 }
             });
     };
@@ -589,8 +589,8 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
         std::memcpy(haystack + repeats * haystack_pattern.size(), haystack_pattern.data(), haystack_pattern.size());
 
         auto haystack_stl = std::string_view(haystack, haystack_length);
-        auto haystack_sz = sz::string_view(haystack, haystack_length);
-        auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
+        auto haystack_sz = sz::string_view_t(haystack, haystack_length);
+        auto needle_sz = sz::string_view_t(needle_stl.data(), needle_stl.size());
 
         // Wrap into ranges
         auto matches_stl = stl_matcher_(haystack_stl, {needle_stl});
@@ -655,32 +655,32 @@ void check_find_misaligned_(std::string_view haystack_pattern, std::string_view 
 
     check_find_misaligned_<                                                          //
         sz::find_matches_view<std::string_view, sz::matcher_find<std::string_view>>, //
-        sz::find_matches_view<sz::string_view, sz::matcher_find<sz::string_view>>>(  //
+        sz::find_matches_view<sz::string_view_t, sz::matcher_find<sz::string_view_t>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
     check_find_misaligned_<                                                            //
         sz::rfind_matches_view<std::string_view, sz::matcher_rfind<std::string_view>>, //
-        sz::rfind_matches_view<sz::string_view, sz::matcher_rfind<sz::string_view>>>(  //
+        sz::rfind_matches_view<sz::string_view_t, sz::matcher_rfind<sz::string_view_t>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
     check_find_misaligned_<                                                                   //
         sz::find_matches_view<std::string_view, sz::matcher_find_first_of<std::string_view>>, //
-        sz::find_matches_view<sz::string_view, sz::matcher_find_first_of<sz::string_view>>>(  //
+        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_of<sz::string_view_t>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
     check_find_misaligned_<                                                                   //
         sz::rfind_matches_view<std::string_view, sz::matcher_find_last_of<std::string_view>>, //
-        sz::rfind_matches_view<sz::string_view, sz::matcher_find_last_of<sz::string_view>>>(  //
+        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_of<sz::string_view_t>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
     check_find_misaligned_<                                                                       //
         sz::find_matches_view<std::string_view, sz::matcher_find_first_not_of<std::string_view>>, //
-        sz::find_matches_view<sz::string_view, sz::matcher_find_first_not_of<sz::string_view>>>(  //
+        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_not_of<sz::string_view_t>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
     check_find_misaligned_<                                                                       //
         sz::rfind_matches_view<std::string_view, sz::matcher_find_last_not_of<std::string_view>>, //
-        sz::rfind_matches_view<sz::string_view, sz::matcher_find_last_not_of<sz::string_view>>>(  //
+        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_not_of<sz::string_view_t>>>(  //
         haystack_pattern, needle_stl, misalignment);
 }
 
@@ -759,7 +759,7 @@ void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slice
 
     // One scaled count over the whole slice budget, so the cost tracks the multiplier linearly rather than
     // compounding across nested loops. A fresh table every `slices_per_table` slices keeps the original mix.
-    sz::look_up_table lut;
+    sz::look_up_table_t lut;
     for (std::size_t slice = 0; slice != scale_iterations(lookup_tables_to_try * slices_per_table); ++slice) {
         if (slice % slices_per_table == 0)
             for (std::size_t index = 0; index < 256; ++index)
@@ -770,7 +770,7 @@ void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slice
         std::uniform_int_distribution<std::size_t> length_distribution(0, body_length - slice_offset - 1);
         std::size_t const slice_length = length_distribution(global_random_generator());
 
-        sz::lookup<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
+        sz::lookup(sz::string_view_t(body.data() + slice_offset, slice_length), lut,
                          &transformed[0] + slice_offset);
         for (std::size_t index = 0; index != slice_length; ++index)
             verify(transformed[slice_offset + index] == lut[body[slice_offset + index]]);

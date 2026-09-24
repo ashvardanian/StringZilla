@@ -118,7 +118,7 @@ Python
   Streaming SHA-256        hashlib.sha256()          sz.Sha256()
 
 C++
-  Find a substring         std::string::find         sz::string::find
+  Find a substring         std::string::find         sz::string_t::find
   Sort a collection        std::sort of indices      sz::argsort
   Intersect string sets    std::set_intersection     sz::try_intersect
   Hash map, string keys    std::unordered_map<K, V>  sz::hash + sz::equal_to
@@ -207,7 +207,7 @@ sz_find(haystack, h_length, "brown", 5); // pointer to the match, or NULL
 ```cpp
 #include <stringzilla/stringzilla.hpp>
 namespace sz = ashvardanian::stringzilla;
-sz::string_view("the quick brown fox").find("brown"); // 10
+sz::string_view_t("the quick brown fox").find("brown"); // 10
 ```
 
 The header-only library covers search, hashing, sorting, comparison, set intersection, memory operations, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm and a CUDA one.

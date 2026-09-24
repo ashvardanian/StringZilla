@@ -189,7 +189,7 @@ void test_utf8_wordbreaks_unit() {
     // C++ range wrapper known-answer: `utf8_wordbreaks()` faithfully tiles the input into the UAX-29 segments
     // (words and the separators between them); concatenating them reconstructs the input.
     {
-        sz::string_view const text("Hello, world!");
+        sz::string_view_t const text("Hello, world!");
         auto segments = text.utf8_wordbreaks().template to<std::vector<std::string>>();
         verify(segments.size() == 5 && segments[0] == "Hello" && segments[3] == "world" && "C++ utf8_wordbreaks");
         std::string rejoined;
@@ -215,7 +215,7 @@ void test_utf8_wordbreaks_unit() {
 #pragma region Equivalence
 
 /** @brief UAX-29 word-break corner motifs (sprinkled into the random corpus): Mid-bridges, MidNum, RI parity, etc. */
-static sz::string_view const utf8_wordbreaks_motifs[] = {
+static sz::string_view_t const utf8_wordbreaks_motifs[] = {
     "don't"_sv,                                // WB6/7: apostrophe bridges two letter runs
     "l'avion"_sv,                              // WB7a/b: leading apostrophe shape
     "can't_stop"_sv,                           // WB13a/b: ExtendNumLet underscore keeps the word whole
@@ -238,7 +238,7 @@ static sz::string_view const utf8_wordbreaks_motifs[] = {
  *         Mid-bridge carry state, each pinned across the 64-byte window boundary. Stored as raw bytes so the
  *         differential driver feeds them to serial-vs-ISA directly (no inline agreement asserts).
  */
-static sz::string_view const utf8_wordbreaks_seam_regressions[] = {
+static sz::string_view_t const utf8_wordbreaks_seam_regressions[] = {
     // ri_after_newline (65 bytes)
     "\xE3\x82\xAB\x2D\x0A\xF0\x9F\x87\xA6\x62\xC2\xAD\xF0\x9F\x87\xA6\xCC\x80\x0A\x5F\xF0\x9F\x87\xA6" //
     "\xF0\x9F\x87\xA6\xC2\xAD\x0A\xCC\x88\xF0\x9F\x87\xBA\xF0\x9F\x8F\xBB\xCC\x88\xC2\xAD\xE2\x81\xA0" //
@@ -426,7 +426,7 @@ void test_utf8_wordbreaks_all() {
                                     utf8_wordbreaks_corpora_(), scale_iterations(20));
 
     // The streaming segmenter against the per-position WB1-WB16 transcription, which nothing else calls.
-    for (sz::string_view const motif : span_over(utf8_wordbreaks_motifs))
+    for (sz::string_view_t const motif : span_over(utf8_wordbreaks_motifs))
         check_utf8_segment_against_oracle_("word", sz_utf8_wordbreaks_serial, sz_utf8_is_word_boundary_serial,
                                            motif.data(), motif.size());
 }
