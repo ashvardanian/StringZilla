@@ -17,7 +17,7 @@
     },
     {
       "label": "Build Benchmarks: Debug",
-      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_debug && cmake --build build_debug --config Debug",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCH=1 -B build_debug && cmake --build build_debug --config Debug",
       "args": [],
       "type": "shell",
       "osx": {
@@ -31,7 +31,7 @@
     },
     {
       "label": "Build Benchmarks: Release",
-      "command": "cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release && cmake --build build_release --config Release",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCH=1 -B build_release && cmake --build build_release --config Release",
       "args": [],
       "type": "shell",
       "osx": {

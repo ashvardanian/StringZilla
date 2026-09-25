@@ -1,20 +1,36 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 25,
-    "patch": 0
-  },
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
   "configurePresets": [
     {
       "name": "base",
       "hidden": true,
+      "description": "Ninja, a build tree named after the preset, and a compilation database. No compiler is pinned: CC/CXX pick it, or a preset inherits `clang`.",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build_${presetName}",
       "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "STRINGZILLA_BUILD_TEST": "ON",
-        "STRINGZILLA_BUILD_BENCHMARK": "ON"
+        "STRINGZILLA_BUILD_BENCH": "ON"
       }
     },
+    {
+      "name": "clang",
+      "hidden": true,
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++" }
+    },
+    {
+      "name": "cross",
+      "hidden": true,
+      "description": "Static binaries run under the toolchain file's QEMU emulator; the benchmarks stay host-only.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_CUDA": "OFF"
+      }
+    },
+
     {
       "name": "debug",
       "inherits": "base",
@@ -30,8 +46,17 @@
       "name": "release",
       "inherits": "base",
       "displayName": "Release, no CUDA",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "STRINGZILLA_BUILD_CUDA": "OFF" }
+    },
+    {
+      "name": "release_shared",
+      "inherits": "base",
+      "displayName": "Release, the shared libraries alone, for the Go, C# and Java bindings and packaging",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "STRINGZILLA_BUILD_TEST": "OFF",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_SHARED": "ON",
         "STRINGZILLA_BUILD_CUDA": "OFF"
       }
     },
@@ -40,69 +65,119 @@
       "inherits": "base",
       "displayName": "Release with CUDA",
       "description": "NVCC over whichever host compiler it defaults to. A toolkit accepts only a range of host versions, so a machine whose default sits outside its own toolkit's range pins one through CMAKE_CUDA_HOST_COMPILER in CMakeUserPresets.json - the version that fits is a fact about the machine, not about this project.",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "STRINGZILLA_BUILD_CUDA": "ON"
-      }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_CUDA": "ON" }
     },
     {
       "name": "cuda_clang",
-      "inherits": "cuda",
+      "inherits": ["cuda", "clang"],
       "displayName": "Release with CUDA, Clang host",
       "description": "NVCC over Clang, and Clang for the C and C++ sources too - the three must agree. Clang mangles a C++20 requires-clause into the symbol name and GCC does not, so a build that compiled .cpp with GCC and .cu with NVCC-over-Clang would give the tree's constrained engine entry points two different symbols and fail to link. GCC also miscompiles the engines' return-by-value in the large benchmark translation units, handing the caller the kernel timing where the status belongs, which is why measured numbers come from here. Each toolkit supports a range of Clang versions and parses that Clang's own headers, so the version that fits belongs in CMakeUserPresets.json; Clang additionally reads its standard library from the newest GCC installed, which -Xcompiler=--gcc-install-dir=<path> redirects when that one is ahead of the toolkit too.",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "CMAKE_CUDA_HOST_COMPILER": "clang++"
-      }
+      "cacheVariables": { "CMAKE_CUDA_HOST_COMPILER": "clang++" }
+    },
+
+    { "name": "linux_aarch64", "inherits": "cross", "toolchainFile": "${sourceDir}/cmake/toolchain-aarch64.cmake" },
+    { "name": "linux_riscv64", "inherits": "cross", "toolchainFile": "${sourceDir}/cmake/toolchain-riscv64.cmake" },
+    {
+      "name": "linux_loongarch64",
+      "inherits": "cross",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-loongarch64.cmake"
+    },
+    { "name": "linux_ppc64le", "inherits": "cross", "toolchainFile": "${sourceDir}/cmake/toolchain-ppc64le.cmake" },
+    {
+      "name": "wasm32_wasi",
+      "inherits": "cross",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32.cmake",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_SHARED": "OFF" }
+    },
+    {
+      "name": "wasm32_wasi_threads",
+      "inherits": "cross",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32-threads.cmake",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_SHARED": "OFF" }
     }
   ],
   "buildPresets": [
-    {
-      "name": "debug",
-      "configurePreset": "debug"
-    },
-    {
-      "name": "release",
-      "configurePreset": "release"
-    },
-    {
-      "name": "cuda",
-      "configurePreset": "cuda"
-    },
-    {
-      "name": "cuda_clang",
-      "configurePreset": "cuda_clang"
-    }
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "release_shared", "configurePreset": "release_shared" },
+    { "name": "cuda", "configurePreset": "cuda" },
+    { "name": "cuda_clang", "configurePreset": "cuda_clang" },
+    { "name": "linux_aarch64", "configurePreset": "linux_aarch64" },
+    { "name": "linux_riscv64", "configurePreset": "linux_riscv64" },
+    { "name": "linux_loongarch64", "configurePreset": "linux_loongarch64" },
+    { "name": "linux_ppc64le", "configurePreset": "linux_ppc64le" },
+    { "name": "wasm32_wasi", "configurePreset": "wasm32_wasi", "targets": ["stringzilla_test_cpp20"] },
+    { "name": "wasm32_wasi_threads", "configurePreset": "wasm32_wasi_threads", "targets": ["stringzilla_test_cpp20"] }
   ],
   "testPresets": [
     {
+      "name": "base",
+      "hidden": true,
+      "description": "The benchmarks register as tests too, but need the StringWars datasets; only the test suites run here.",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" },
+      "filter": { "include": { "name": "^stringzilla_test_" } }
+    },
+    {
+      "name": "emulated",
+      "hidden": true,
+      "inherits": "base",
+      "environment": { "STRINGZILLA_IN_QEMU": "1", "STRINGZILLA_SCALE": "0.05" }
+    },
+    { "name": "debug", "inherits": "base", "configurePreset": "debug" },
+    { "name": "release", "inherits": "base", "configurePreset": "release" },
+    { "name": "cuda", "inherits": "base", "configurePreset": "cuda" },
+    { "name": "cuda_clang", "inherits": "base", "configurePreset": "cuda_clang" },
+    { "name": "linux_aarch64", "inherits": "emulated", "configurePreset": "linux_aarch64" },
+    { "name": "linux_riscv64", "inherits": "emulated", "configurePreset": "linux_riscv64" },
+    { "name": "linux_loongarch64", "inherits": "emulated", "configurePreset": "linux_loongarch64" },
+    { "name": "linux_ppc64le", "inherits": "emulated", "configurePreset": "linux_ppc64le" },
+    {
+      "name": "wasm32_wasi",
+      "inherits": "emulated",
+      "configurePreset": "wasm32_wasi",
+      "filter": { "include": { "name": "^stringzilla_test_cpp20$" } },
+      "environment": { "STRINGZILLA_FILTER": "utf8" }
+    },
+    {
+      "name": "wasm32_wasi_threads",
+      "inherits": "emulated",
+      "configurePreset": "wasm32_wasi_threads",
+      "filter": { "include": { "name": "^stringzilla_test_cpp20$" } },
+      "environment": { "STRINGZILLA_FILTER": "utf8" }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "cuda",
+      "steps": [
+        { "type": "configure", "name": "cuda" },
+        { "type": "build", "name": "cuda" }
+      ]
+    },
+    {
       "name": "debug",
-      "configurePreset": "debug",
-      "output": {
-        "outputOnFailure": true
-      }
+      "steps": [
+        { "type": "configure", "name": "debug" },
+        { "type": "build", "name": "debug" },
+        { "type": "test", "name": "debug" }
+      ]
     },
     {
       "name": "release",
-      "configurePreset": "release",
-      "output": {
-        "outputOnFailure": true
-      }
+      "steps": [
+        { "type": "configure", "name": "release" },
+        { "type": "build", "name": "release" },
+        { "type": "test", "name": "release" }
+      ]
     },
     {
-      "name": "cuda",
-      "configurePreset": "cuda",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "cuda_clang",
-      "configurePreset": "cuda_clang",
-      "output": {
-        "outputOnFailure": true
-      }
+      "name": "wasm32_wasi",
+      "steps": [
+        { "type": "configure", "name": "wasm32_wasi" },
+        { "type": "build", "name": "wasm32_wasi" },
+        { "type": "test", "name": "wasm32_wasi" }
+      ]
     }
   ]
 }

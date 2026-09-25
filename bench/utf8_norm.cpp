@@ -43,7 +43,7 @@
  *  Here are a few build & run commands:
  *
  *  @code{.sh}
- *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
+ *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_utf8_norm_cpp20
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_UNIQUE=1 \
  *      build_release/stringzilla_bench_utf8_norm_cpp20

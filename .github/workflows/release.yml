@@ -19,7 +19,7 @@ permissions:
 jobs:
   versioning:
     name: Update Version
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -65,7 +65,7 @@ jobs:
 
   rebase:
     name: Rebase Dev. Branch
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: github.ref == 'refs/heads/main'
     needs: versioning
     steps:
@@ -91,7 +91,7 @@ jobs:
   # Native x86_64 - full SIMD, full test depth, single image.
   build_wheels_stringzilla_linux_x86:
     name: Build StringZilla ${{ matrix.python-version }} for Ubuntu x86
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: versioning
     strategy:
       fail-fast: false
@@ -123,7 +123,7 @@ jobs:
   # Native aarch64 on an ARM runner - no QEMU, mirrors the CUDA job's approach.
   build_wheels_stringzilla_linux_arm:
     name: Build StringZilla ${{ matrix.python-version }} for Ubuntu ARM
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: versioning
     strategy:
       fail-fast: false
@@ -155,7 +155,7 @@ jobs:
   # Emulated arches - one image per runner, all Pythons per arch, fuzz depth thinned under QEMU.
   build_wheels_stringzilla_linux_emulated:
     name: Build StringZilla wheels for ${{ matrix.arch }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: versioning
     strategy:
       fail-fast: false
@@ -285,7 +285,7 @@ jobs:
 
   build_sdist_stringzilla:
     name: Build StringZilla Source Distribution
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: versioning
     steps:
       - name: Checkout
@@ -320,7 +320,7 @@ jobs:
         build_sdist_stringzilla,
       ]
     if: ${{ always() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     environment:
       name: pypi-stringzilla
       url: https://pypi.org/p/stringzilla
@@ -361,7 +361,7 @@ jobs:
 
   publish_rust:
     name: Publish Rust
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     needs: versioning
     steps:
       - name: Checkout
@@ -446,7 +446,7 @@ jobs:
     name: Publish JS @stringzilla/${{ matrix.platform }}
     needs: [build_javascript_native]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     environment:
       name: npm-stringzilla
     permissions:
@@ -489,7 +489,7 @@ jobs:
   publish_javascript_main:
     name: Publish JavaScript
     needs: [publish_javascript_platforms]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     environment:
       name: npm-stringzilla
       url: https://www.npmjs.com/package/stringzilla
@@ -515,6 +515,7 @@ jobs:
 
   create_linux_deb_package:
     name: Create Debian Package for ${{ matrix.arch }}
+    # The oldest runner still offered: the shipped `.so` needs no newer glibc than the one it was linked against
     runs-on: ubuntu-22.04
     needs: versioning
     env:
@@ -549,7 +550,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make build-essential crossbuild-essential-arm64 crossbuild-essential-armhf  libjemalloc-dev
+          sudo apt-get install -y ninja-build build-essential crossbuild-essential-arm64 crossbuild-essential-armhf libjemalloc-dev
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
@@ -557,26 +558,21 @@ jobs:
       - name: Build C/C++
         run: |
           # Configure and build the project
-          cmake -B build_release \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
-            -DSTRINGZILLA_BUILD_SHARED=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+          cmake --preset release_shared \
+            -D CMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+            -D CMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
+            -D CMAKE_SYSTEM_NAME=Linux \
+            -D CMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
 
-          cmake --build build_release --config Release
+          cmake --build --preset release_shared
 
-          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
+          cp build_release_shared/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
           mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
           touch "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
           mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
           mkdir "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
           cp include/stringzilla/stringzilla.h "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
-          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
+          cp build_release_shared/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
           echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
           dpkg-deb --build "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
 
@@ -628,9 +624,9 @@ jobs:
       - name: Build library
         shell: cmd
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -GNinja -B build_release -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_release --config Release
-          tar -cvf "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release\stringzilla_bare.dll" "build_release\stringzilla_bare.lib" ".\include\stringzilla\stringzilla.h"
+          cmake --preset release_shared
+          cmake --build --preset release_shared
+          tar -cvf "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release_shared\stringzilla_bare.dll" "build_release_shared\stringzilla_bare.lib" ".\include\stringzilla\stringzilla.h"
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
@@ -663,9 +659,9 @@ jobs:
 
       - name: Build library
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_release --config Release
-          zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzilla_shared.dylib include/stringzilla/stringzilla.h
+          cmake --preset release_shared
+          cmake --build --preset release_shared
+          zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release_shared/libstringzilla_shared.dylib include/stringzilla/stringzilla.h
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
@@ -684,7 +680,7 @@ jobs:
       - build_wheels_stringzilla_linux_emulated
       - create_linux_deb_package
     if: ${{ always() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Aggregate Linux status
         run: |
@@ -708,7 +704,7 @@ jobs:
       - build_wheels_stringzilla_windows_arm
       - create_windows_dll_library
     if: ${{ always() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Aggregate Windows status
         run: |
@@ -729,7 +725,7 @@ jobs:
       - build_wheels_stringzilla_macos
       - create_macos_library
     if: ${{ always() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Aggregate macOS status
         run: |

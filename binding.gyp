@@ -3,7 +3,7 @@
     {
       "target_name": "stringzilla",
       "sources": [
-        "javascript/lib.c",
+        "javascript/stringzilla.c",
         "c/stringzilla/runtime.c",
         "c/stringzilla/compare.c",
         "c/stringzilla/memory.c",

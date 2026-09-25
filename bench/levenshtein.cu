@@ -48,7 +48,7 @@
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  @code{.sh}
- *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
+ *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cu20
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines build_release/stringzilla_bench_levenshtein_cu20
  *  @endcode

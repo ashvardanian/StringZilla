@@ -29,7 +29,7 @@ permissions:
 jobs:
   versioning:
     name: Update Version
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm]
+        os: [ubuntu-26.04, ubuntu-26.04-arm]
     env:
       CC: gcc-12
       CXX: g++-12
@@ -97,21 +97,17 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y cmake build-essential gcc-12 g++-12
+          sudo apt install -y build-essential gcc-12 g++-12
 
       - name: Build C/C++
         run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+          cmake --preset release
 
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+          cmake --build --preset release > build_release/logs.txt 2>&1 || {
             echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
+            cat build_release/logs.txt
             echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
+            cat build_release/compile_commands.json
             echo "GCC Version:"
             gcc-12 --version
             echo "G++ Version:"
@@ -119,13 +115,13 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: ctest --preset release
       - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+        run: test -z "$(ldd build_release/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
-          cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
+          cmake --preset release_shared
+          cmake --build --preset release_shared
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -134,15 +130,15 @@ jobs:
       - name: Test Go binding
         working-directory: golang
         env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build_release_shared
         run: go test -v -tags no_sha256 # Skip SHA tests for GCC
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
-          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}       # for substring search
-          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}   # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH}  # for STL containers with string keys
+          build_release/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
+          build_release/stringzilla_bench_find_cpp20 ${DATASET_PATH}       # for substring search
+          build_release/stringzilla_bench_token_cpp20 ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          build_release/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}   # for sorting arrays of strings
+          build_release/stringzilla_bench_container_cpp20 ${DATASET_PATH}  # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -198,6 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Clang 16 is the floor, and neither Ubuntu 26.04 nor apt.llvm.org packages it for 26.04
         os: [ubuntu-22.04, ubuntu-22.04-arm]
     env:
       CC: clang-16
@@ -219,24 +216,20 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y cmake build-essential libjemalloc-dev
+          sudo apt install -y build-essential ninja-build libjemalloc-dev
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
 
       - name: Build C/C++
         run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+          cmake --preset release
 
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+          cmake --build --preset release > build_release/logs.txt 2>&1 || {
             echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
+            cat build_release/logs.txt
             echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
+            cat build_release/compile_commands.json
             echo "Clang Version:"
             clang-16 --version
             echo "Clang++ Version:"
@@ -244,13 +237,13 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: ctest --preset release
       - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+        run: test -z "$(ldd build_release/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
-          cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
+          cmake --preset release_shared
+          cmake --build --preset release_shared
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -259,14 +252,14 @@ jobs:
       - name: Test Go binding
         working-directory: golang
         env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build_release_shared
         run: go test -v
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
-          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
+          build_release/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+          build_release/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          build_release/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+          build_release/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -305,9 +298,9 @@ jobs:
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
 
-  test_ubuntu_cuda:
-    name: Ubuntu CUDA
-    runs-on: ubuntu-22.04
+  test_ubuntu_debug:
+    name: Test Debug build with sanitizers on Ubuntu
+    runs-on: ubuntu-26.04
     env:
       CC: gcc-12
       CXX: g++-12
@@ -316,12 +309,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-        # Install CUDA Toolkit
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.36
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential gcc-12 g++-12
+
+        # Debug sanitizes the executables and builds the shared library alongside, all with `STRINGZILLA_DEBUG` asserts live.
+      - name: Build C/C++
+        run: |
+          cmake --preset debug
+          cmake --build --preset debug
+      - name: Test C++
+        env:
+          STRINGZILLA_SCALE: "0.1"
+        run: ctest --preset debug
+      - name: Set up Go
+        uses: actions/setup-go@v7
         with:
-          cuda: "12.9.1"
-          method: "network"
+          go-version: ">=1.24"
+          cache: false
+      - name: Test Go binding against the Debug shared library
+        working-directory: golang
+        env:
+          CGO_LDFLAGS: -L${{ github.workspace }}/build_debug
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build_debug
+        run: go test -v -tags no_sha256 # Skip SHA tests for GCC
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Python with asserts
+        env:
+          CFLAGS: -DSTRINGZILLA_DEBUG=1
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-repeat numpy pyarrow
+          python -m pip install .
+      - name: Test Python
+        run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
+
+  test_ubuntu_cuda:
+    name: Ubuntu CUDA
+    runs-on: ubuntu-26.04
+    # NVIDIA publishes no Ubuntu 26.04 CUDA image yet, so the toolkit comes in a 24.04 container.
+    container: nvidia/cuda:13.0.1-devel-ubuntu24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Log hardware capabilities
         run: |
@@ -331,46 +366,39 @@ jobs:
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
           echo ""
           echo "GPU Info:"
-          nvcc --version 2>/dev/null || echo "nvcc not yet installed"
-          nvidia-smi 2>/dev/null || echo "nvidia-smi not yet available"
+          nvcc --version
+          nvidia-smi 2>/dev/null || echo "nvidia-smi not available, as expected on a GPU-less runner"
 
         # C/C++
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential gcc-12 g++-12
+          apt-get update
+          apt-get install -y cmake ninja-build build-essential git
 
       - name: Build C/C++ with CUDA
         run: |
-          # Note: Using Release build type instead of RelWithDebInfo
-          # Optimized debugging not supported in CUDA and results in PTXAS fatal errors
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+          # Release rather than RelWithDebInfo: optimized debugging is unsupported in CUDA and fails in PTXAS
+          cmake --preset cuda
 
-          cmake --build build_artifacts --config Release > build_artifacts/logs.txt 2>&1 || {
+          cmake --build --preset cuda > build_cuda/logs.txt 2>&1 || {
             echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
+            cat build_cuda/logs.txt
             echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
+            cat build_cuda/compile_commands.json
             echo "CUDA Version:"
             nvcc --version
-            echo "GCC Version:"
-            gcc-12 --version
             echo "G++ Version:"
-            g++-12 --version
+            g++ --version
             exit 1
           }
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: ctest --preset cuda -R '^stringzilla_test_cpp20$'
       - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+        run: test -z "$(ldd build_cuda/libstringzilla_bare.so | grep '.so')"
 
   test_ubuntu_swift:
     name: Swift on Linux ${{ matrix.arch }}
-    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
     container: swift:6.4
     strategy:
       fail-fast: false
@@ -392,27 +420,22 @@ jobs:
 
   test_ubuntu_dotnet:
     name: C# on Linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install build tools
-        run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential
-
       - name: Build shared library
         run: |
-          cmake -B build_shared -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_shared --target stringzilla_shared --config Release
+          cmake --preset release_shared
+          cmake --build --preset release_shared
 
         # The runtime resolver probes runtimes/{rid}/native first; the shared target emits
         # libstringzilla_shared.so, so copy it under the name the binding looks up.
       - name: Stage native library
         run: |
           mkdir -p csharp/runtimes/linux-x64/native
-          cp -L build_shared/libstringzilla_shared.so csharp/runtimes/linux-x64/native/libstringzilla.so
+          cp -L build_release_shared/libstringzilla_shared.so csharp/runtimes/linux-x64/native/libstringzilla.so
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
@@ -429,27 +452,22 @@ jobs:
 
   test_ubuntu_java:
     name: Java on Linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install build tools
-        run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential
-
       - name: Build shared library
         run: |
-          cmake -B build_shared -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_shared --target stringzilla_shared --config Release
+          cmake --preset release_shared
+          cmake --build --preset release_shared
 
         # NativeLoader extracts /native/{os}-{arch}/libstringzilla.so from the classpath at runtime;
         # Maven copies src/main/resources into target/classes before the tests run.
       - name: Stage native library
         run: |
           mkdir -p java/src/main/resources/native/linux-x86_64
-          cp -L build_shared/libstringzilla_shared.so java/src/main/resources/native/linux-x86_64/libstringzilla.so
+          cp -L build_release_shared/libstringzilla_shared.so java/src/main/resources/native/linux-x86_64/libstringzilla.so
 
         # JDK 23: finalized Foreign Function & Memory API (since 22) and Palantir Java Format (needs <= 23).
       - name: Set up JDK
@@ -475,7 +493,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             arch: x86-64
             target_arch: aarch64
             target: aarch64-linux-gnu
@@ -483,7 +501,7 @@ jobs:
             cross_package: crossbuild-essential-arm64
             cflags: ""
             file_id: aarch64 # substring `file` prints for this ELF
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             arch: aarch64
             target_arch: x86-64
             target: x86_64-linux-gnu
@@ -491,7 +509,7 @@ jobs:
             cross_package: crossbuild-essential-amd64
             cflags: ""
             file_id: x86-64
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             arch: x86-64
             target_arch: riscv64
             target: riscv64-linux-gnu
@@ -499,7 +517,7 @@ jobs:
             cross_package: crossbuild-essential-riscv64
             cflags: "-march=rv64gcv"
             file_id: RISC-V # `file` prints "UCB RISC-V", not "riscv64"
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             arch: x86-64
             target_arch: loongarch64
             target: loongarch64-linux-gnu
@@ -507,7 +525,7 @@ jobs:
             cross_package: g++-13-loongarch64-linux-gnu
             cflags: "-mlasx"
             file_id: LoongArch
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             arch: x86-64
             target_arch: ppc64le
             target: powerpc64le-linux-gnu
@@ -538,10 +556,7 @@ jobs:
       - name: Install cross-compilation toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y make build-essential ${{ matrix.cross_package }}
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
+          sudo apt-get install -y build-essential clang-20 lld-20 llvm-20 ${{ matrix.cross_package }}
 
       - name: Build C/C++ for ${{ matrix.target_arch }}
         run: |
@@ -549,35 +564,30 @@ jobs:
           # cross dynamic loader + sysroot library paths. `clang` drives the GNU linker directly and does not
           # add `-lstdc++` on its own, so we point it at the cross libstdc++ and pull it in explicitly.
           gcc_libdir=$(dirname "$(find /usr/lib/gcc-cross/${{ matrix.target }} -name 'libstdc++.a' 2>/dev/null | head -1)")
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.target_processor }} \
-            -DCMAKE_C_FLAGS="${{ matrix.cflags }}" \
-            -DCMAKE_CXX_FLAGS="${{ matrix.cflags }}" \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -L${gcc_libdir} -lstdc++ -lm" \
-            -DSTRINGZILLA_BUILD_SHARED=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+          cmake --preset release \
+            -D CMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+            -D CMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
+            -D CMAKE_SYSTEM_NAME=Linux \
+            -D CMAKE_SYSTEM_PROCESSOR=${{ matrix.target_processor }} \
+            -D CMAKE_C_FLAGS="${{ matrix.cflags }}" \
+            -D CMAKE_CXX_FLAGS="${{ matrix.cflags }}" \
+            -D CMAKE_EXE_LINKER_FLAGS="-static -L${gcc_libdir} -lstdc++ -lm"
 
-          cmake --build build_artifacts --config RelWithDebInfo
+          cmake --build --preset release
 
       - name: Verify ${{ matrix.target_arch }} binaries
         run: |
-          test -e build_artifacts/libstringzilla_bare.so
-          test -e build_artifacts/libstringzilla_shared.so
-          test -e build_artifacts/stringzilla_test_cpp20
-          file build_artifacts/stringzilla_test_cpp20 | grep -q "${{ matrix.file_id }}"
+          test -e build_release/libstringzilla_bare.so
+          test -e build_release/libstringzilla_shared.so
+          test -e build_release/stringzilla_test_cpp20
+          file build_release/stringzilla_test_cpp20 | grep -q "${{ matrix.file_id }}"
           echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
       - name: Upload ${{ matrix.target_arch }} test binaries
         uses: actions/upload-artifact@v7
         with:
           name: cross-tests-${{ matrix.target_arch }}
-          path: build_artifacts/stringzilla*_test_*
+          path: build_release/stringzilla*_test_*
           if-no-files-found: error
           retention-days: 1
 
@@ -667,7 +677,7 @@ jobs:
 
   test_wasm:
     name: WebAssembly wasm32-wasip1 ${{ matrix.tier }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -717,16 +727,8 @@ jobs:
       # The `utf8` filter stays until `test_hash_unit` stops asserting on wasm.
       - name: Build C++ tests for wasm32-wasip1
         run: |
-          cmake -B build_wasi \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32.cmake \
-            -DWASI_SDK_PREFIX=${WASI_SDK_PATH} \
-            -DSTRINGZILLA_TARGET_V128RELAXED=${{ matrix.use_v128relaxed }} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSTRINGZILLA_BUILD_TEST=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=0 \
-            -DSTRINGZILLA_BUILD_SHARED=0 \
-            -DSTRINGZILLA_BUILD_CUDA=0
-          cmake --build build_wasi --target stringzilla_test_cpp20
+          cmake --preset wasm32_wasi -D WASI_SDK_PREFIX="${WASI_SDK_PATH}" -D STRINGZILLA_TARGET_V128RELAXED=${{ matrix.use_v128relaxed }}
+          cmake --build --preset wasm32_wasi
       - name: Test C++ UTF-8 suites under Wasmtime
         env:
           STRINGZILLA_FILTER: utf8
@@ -734,7 +736,7 @@ jobs:
         run: |
           wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} -W exceptions=y \
             --dir . --env STRINGZILLA_FILTER --env STRINGZILLA_SCALE \
-            build_wasi/stringzilla_test_cpp20
+            build_wasm32_wasi/stringzilla_test_cpp20
 
   test_macos:
     name: MacOS
@@ -758,20 +760,16 @@ jobs:
           brew reinstall cmake
       - name: Build C/C++
         run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-          cmake --build build_artifacts --config RelWithDebInfo
+          cmake --preset release
+          cmake --build --preset release
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: ctest --preset release
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
-          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
+          build_release/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+          build_release/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          build_release/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+          build_release/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -864,7 +862,7 @@ jobs:
 
   test_swift_wasm:
     name: Swift on WebAssembly WASI
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     container: swift:6.4
     steps:
       - name: Checkout
@@ -906,30 +904,26 @@ jobs:
       - name: Build C/C++
         shell: cmd
         run: |
-          cmake -GNinja -B build_artifacts ^
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 ^
-            -DSTRINGZILLA_BUILD_TEST=1
+          cmake --preset release
 
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || (
+          cmake --build --preset release > build_release/logs.txt 2>&1 || (
             echo "Compilation failed. Here are the logs:"
-            type build_artifacts\logs.txt
+            type build_release\logs.txt
             echo "The original compilation commands:"
-            type build_artifacts\compile_commands.json
+            type build_release\compile_commands.json
             exit 1
           )
       - name: Test C++
-        run: .\build_artifacts\stringzilla_test_cpp20.exe
+        run: ctest --preset release
       - name: Check stringzilla_bare is built correctly
         shell: cmd
-        run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "[a-zA-Z0-9]\.dll" | findstr /r /v "KERNEL32.dll stringzilla" && exit /b 1 || exit /b 0
+        run: dumpbin /nologo /dependents .\build_release\stringzilla_bare.dll | findstr /r "[a-zA-Z0-9]\.dll" | findstr /r /v "KERNEL32.dll stringzilla" && exit /b 1 || exit /b 0
       - name: Test on Real World Data
         run: |
-          .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
-          .\build_artifacts\stringzilla_bench_token_cpp20.exe ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          .\build_artifacts\stringzilla_bench_sequence_cpp20.exe ${DATASET_PATH}  # for sorting arrays of strings
-          .\build_artifacts\stringzilla_bench_container_cpp20.exe ${DATASET_PATH} # for STL containers with string keys
+          .\build_release\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
+          .\build_release\stringzilla_bench_token_cpp20.exe ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          .\build_release\stringzilla_bench_sequence_cpp20.exe ${DATASET_PATH}  # for sorting arrays of strings
+          .\build_release\stringzilla_bench_container_cpp20.exe ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -961,7 +955,7 @@ jobs:
 
   test_alpine:
     name: Alpine Linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     container:
       image: alpine:latest
       options: --privileged # If needed for certain Docker operations
@@ -988,17 +982,13 @@ jobs:
         # C/C++
       - name: Build C/C++
         run: |
-          apk add --update make cmake g++ gcc
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-          cmake --build build_artifacts --config RelWithDebInfo
+          apk add --update cmake samurai g++ gcc
+          cmake --preset release
+          cmake --build --preset release
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: ctest --preset release
       - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so' | grep '=>')"
+        run: test -z "$(ldd build_release/libstringzilla_bare.so | grep '.so' | grep '=>')"
 
         # Python
       - name: Build Python
@@ -1020,7 +1010,7 @@ jobs:
   # check spellings by linking them: an undefined name fails at generate time.
   test_packaging:
     name: CMake Packaging
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       HEADER_PREFIX: ${{ github.workspace }}/prefix_header
       FULL_PREFIX: ${{ github.workspace }}/prefix_full
@@ -1051,7 +1041,7 @@ jobs:
       - name: Install the header-only package
         run: |
           cmake -B build_header -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_TEST=OFF \
-            -DSTRINGZILLA_BUILD_BENCHMARK=OFF -DSTRINGZILLA_BUILD_SHARED=OFF \
+            -DSTRINGZILLA_BUILD_BENCH=OFF -DSTRINGZILLA_BUILD_SHARED=OFF \
             -DSTRINGZILLA_BUILD_CUDA=OFF -DCMAKE_INSTALL_PREFIX="$HEADER_PREFIX"
           cmake --install build_header
 
@@ -1071,7 +1061,7 @@ jobs:
       - name: Install the compiled libraries
         run: |
           cmake -B build_full -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON \
-            -DSTRINGZILLA_BUILD_TEST=OFF -DSTRINGZILLA_BUILD_BENCHMARK=OFF \
+            -DSTRINGZILLA_BUILD_TEST=OFF -DSTRINGZILLA_BUILD_BENCH=OFF \
             -DSTRINGZILLA_BUILD_SHARED=ON -DSTRINGZILLA_BUILD_CUDA=OFF \
             -DCMAKE_INSTALL_PREFIX="$FULL_PREFIX"
           cmake --build build_full --parallel
@@ -1137,7 +1127,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2022, windows-11-arm]
+        os: [ubuntu-26.04, macos-15, windows-2022, windows-11-arm]
         python-version: ["310", "311", "312", "313", "314", "314t"]
         exclude:
           - os: windows-11-arm
@@ -1160,7 +1150,7 @@ jobs:
   # Emulated Linux wheels - one arch per runner so no runner pulls every image; fuzz depth thinned under QEMU.
   build_wheels_emulated:
     name: Build Python wheels for ${{ matrix.arch }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs:
       [
         test_ubuntu_gcc,

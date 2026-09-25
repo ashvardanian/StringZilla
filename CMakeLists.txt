@@ -187,7 +187,7 @@ endif ()
 # Installation options
 option(STRINGZILLA_INSTALL "Install CMake targets" OFF)
 option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
-option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
+option(STRINGZILLA_BUILD_BENCH "Compile a native benchmark in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_STATIC "Compile a static library with runtime dispatch" OFF)
 option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_DEFAULT_CUDA})
@@ -219,12 +219,13 @@ if (STRINGZILLA_BUILD_CUDA)
     # implementation for some ops even on sm_90, so it ships both generations; Kepler is superseded by Hopper there
     # and ships sm_80 alone; the DPX tier starts at sm_90 (plain sm_90, not the H100-locked sm_90a). The shared
     # library adds forward PTX on top of these; the static one, built for local testing, runs without any JIT.
-    set(STRINGZILLA_CUDA_ARCHS "80-real;90-real"
+    set(STRINGZILLA_CUDA_ARCHITECTURES
+        "80-real;90-real"
         CACHE STRING "Real SASS tiers every CUDA target carries; override to match the machine at hand"
     )
     set(STRINGZILLA_KEPLER_ARCHS "80-real")
     set(STRINGZILLA_HOPPER_ARCHS "90-real")
-    set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHS})
+    set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHITECTURES})
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
     # CUDA 13+ / CCCL 3.x ships CUB, Thrust, and libcudacxx under include/cccl/
@@ -256,7 +257,7 @@ function (set_gpu_definitions name backend)
     set(uses_rocm 0)
     if (backend STREQUAL "cuda")
         set(uses_cuda 1)
-        foreach (architecture IN LISTS STRINGZILLA_CUDA_ARCHS)
+        foreach (architecture IN LISTS STRINGZILLA_CUDA_ARCHITECTURES)
             string(REGEX MATCH "^[0-9]+" architecture_number "${architecture}")
             if (architecture_number AND NOT architecture_number LESS 90)
                 set(carries_hopper 1)
@@ -295,7 +296,7 @@ include(cmake/sz_compiler_flags.cmake)
 
 # {fmt} formats the suites' assertion messages and reports. `FIND_PACKAGE_ARGS` lets a system copy satisfy it without
 # touching the network, but only from the pinned version up, since older copies lack `fmt::println`.
-if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCHMARK)
+if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCH)
     include(FetchContent)
     FetchContent_Declare(
         fmt
@@ -335,7 +336,7 @@ function (define_gpu_launcher exec_name cuda_standard target_arch)
     set_compiler_flags(${exec_name} ${cuda_standard} "${target_arch}" "${CMAKE_CUDA_COMPILER_ID}")
     target_link_libraries(${exec_name} PRIVATE CUDA::cudart CUDA::cuda_driver)
     # Match the CUDA library's base tier, so the test harness and the precompiled engines it links target the same GPUs.
-    set_property(TARGET ${exec_name} PROPERTY CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHS}")
+    set_property(TARGET ${exec_name} PROPERTY CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}")
     target_link_libraries(${exec_name} PRIVATE stringzilla_header fmt::fmt)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction ()
@@ -459,7 +460,7 @@ endif ()
 # too: the cross-compiled runs are `-static` executables, which cannot take a `.so` at all.
 if (STRINGZILLA_BUILD_STATIC
     OR STRINGZILLA_BUILD_TEST
-    OR STRINGZILLA_BUILD_BENCHMARK
+    OR STRINGZILLA_BUILD_BENCH
 )
     define_stringzilla_library(stringzilla_static static STATIC)
     target_compile_definitions(stringzilla_static PRIVATE "STRINGZILLA_WITH_LIBC=1")
@@ -506,14 +507,14 @@ endfunction ()
 
 if (STRINGZILLA_BUILD_CUDA)
     # Static carries real SASS alone, so a local run needs no load-time JIT; shared adds forward PTX for distribution.
-    define_stringzilla_cuda_library(stringzilla_cuda_static cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}")
+    define_stringzilla_cuda_library(stringzilla_cuda_static cuda_static STATIC "${STRINGZILLA_CUDA_ARCHITECTURES}")
     define_stringzilla_cuda_library(
-        stringzilla_cuda_shared cuda_shared SHARED "${STRINGZILLA_CUDA_ARCHS};90-virtual"
+        stringzilla_cuda_shared cuda_shared SHARED "${STRINGZILLA_CUDA_ARCHITECTURES};90-virtual"
     )
 endif ()
 
 # Tests and benchmarks come after the libraries so they link the precompiled archives rather than recompiling.
-if (STRINGZILLA_BUILD_BENCHMARK)
+if (STRINGZILLA_BUILD_BENCH)
     define_launcher(stringzilla_bench_find_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/find.cpp)
     define_launcher(stringzilla_bench_sequence_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/sequence.cpp)
     define_launcher(stringzilla_bench_token_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/token.cpp)

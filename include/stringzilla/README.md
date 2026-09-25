@@ -1080,7 +1080,7 @@ __`STRINGZILLA_WITH_STL`__:
 > When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string_t` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
 
-__`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
+__`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
 
 > When compiling the tests and benchmarks, you can explicitly set the target hardware architecture.
 > It's synonymous to GCC's `-march` flag and is used to enable/disable the appropriate instruction sets.

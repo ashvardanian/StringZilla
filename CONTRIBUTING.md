@@ -137,13 +137,16 @@ sudo apt-get install g++-12 gcc-12      # You may already have a newer version o
 sudo apt install libstdc++6-12-dbg      # STL debugging symbols for GCC 12
 ```
 
-On Linux, after that, if you want to compile the mninmal set of tests:
+On Linux, after that, if you want to compile the minimal set of tests, use the presets CI uses:
 
 ```bash
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
-cmake --build build_release --config Release --target stringzilla_test_cpp20 --parallel
-build_release/stringzilla_test_cpp20
+cmake --preset release
+cmake --build --preset release --target stringzilla_test_cpp20
+ctest --preset release
 ```
+
+`cmake --list-presets` shows the rest - `debug`, `cuda`, the `linux_<arch>` cross builds, and WASI.
+Machine-specific settings, like a CUDA host compiler, belong in an untracked `CMakeUserPresets.json`.
 
 On macOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
 Replacing the default compiler is not recommended, as it may break the system, but you can pass it as an environment variable:
@@ -308,7 +311,7 @@ sudo apt install cppcheck clang-tidy-11
 cmake -B build_artifacts \
   -D CMAKE_BUILD_TYPE=RelWithDebInfo \
   -D CMAKE_EXPORT_COMPILE_COMMANDS=1 \
-  -D STRINGZILLA_BUILD_BENCHMARK=1 \
+  -D STRINGZILLA_BUILD_BENCH=1 \
   -D STRINGZILLA_BUILD_TEST=1
 
 cppcheck --project=build_artifacts/compile_commands.json --enable=all
@@ -328,7 +331,7 @@ I'd recommend putting the following breakpoints:
 For benchmarks, you can use the following commands:
 
 ```bash
-cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
+cmake -D STRINGZILLA_BUILD_BENCH=1 -B build_release
 cmake --build build_release --config Release --parallel    # Produces the following targets:
 build_release/stringzilla_bench_find_cpp20          # - for substring search
 build_release/stringzilla_bench_sequence_cpp20      # - for sorting arrays of strings
@@ -358,7 +361,7 @@ All of them support customization via environment variables.
 Let's say you want to benchmark large-batch DNA edit distances:
 
 ```sh
-cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
+cmake -D STRINGZILLA_BUILD_BENCH=1 -B build_release
 cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cpp20 --parallel # CPU
 cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cu20 --parallel  # GPU
 STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench_levenshtein_cpp20
@@ -414,13 +417,13 @@ The assumption would be that newer ISA extensions would provide better performan
 On x86_64, you can use the following commands to compile for Sandy Bridge, Haswell, and Sapphire Rapids:
 
 ```bash
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 \
     -D STRINGZILLA_TARGET_ARCH="ivybridge" -B build_release/ivybridge && \
     cmake --build build_release/ivybridge --config Release --parallel
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 \
     -D STRINGZILLA_TARGET_ARCH="haswell" -B build_release/haswell && \
     cmake --build build_release/haswell --config Release --parallel
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 \
     -D STRINGZILLA_TARGET_ARCH="sapphirerapids" -B build_release/sapphirerapids && \
     cmake --build build_release/sapphirerapids --config Release --parallel
 ```
@@ -431,10 +434,10 @@ Alternatively, you may want to compare the performance of the code compiled with
 On x86_64, you may want to compare GCC, Clang, and ICX.
 
 ```bash
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_SHARED=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_CXX_COMPILER=g++-12 -D CMAKE_C_COMPILER=gcc-12 \
     -B build_release/gcc && cmake --build build_release/gcc --config Release --parallel
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_SHARED=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_CXX_COMPILER=clang++-14 -D CMAKE_C_COMPILER=clang-14 \
     -B build_release/clang && cmake --build build_release/clang --config Release --parallel
 ```
@@ -445,7 +448,7 @@ To simplify tracing and profiling, build with symbols using the `RelWithDebInfo`
 Here is an example for profiling one target - `stringzilla_bench_token_cpp20`.
 
 ```bash
-cmake -D STRINGZILLA_BUILD_BENCHMARK=1 \
+cmake -D STRINGZILLA_BUILD_BENCH=1 \
     -D STRINGZILLA_BUILD_TEST=1 \
     -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -499,7 +502,7 @@ build_debug/stringzilla_test_cpp20
 For benchmarks:
 
 ```bash
-cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
+cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_BENCH=1 -B build_release
 cmake --build build_release --config Release --parallel
 ```
 
@@ -808,7 +811,7 @@ If you want to run benchmarks against third-party implementations, check out the
 First, precompile the C library:
 
 ```bash
-cmake -D STRINGZILLA_BUILD_SHARED=1 -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCHMARK=0 -B build_golang
+cmake -D STRINGZILLA_BUILD_SHARED=1 -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCH=0 -B build_golang
 cmake --build build_golang --parallel
 ```
 

@@ -31,7 +31,7 @@
   },
   "files": [
     "javascript/stringzilla.js",
-    "javascript/lib.c",
+    "javascript/stringzilla.c",
     "include/",
     "c/",
     "binding.gyp",

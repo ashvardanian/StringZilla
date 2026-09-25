@@ -14,8 +14,6 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 - `container.cpp` — STL associative containers with string keys.
 - `levenshtein.cpp` — one-to-one and one-to-many edit distances, over bytes and over runes.
 - `overlap.cpp` — window hashing, key extraction, B-tree probes, and whole-verb overlap scoring.
-- `similarities.cpp` — Levenshtein, Needleman-Wunsch, and Smith-Waterman scoring.
-- `fingerprints.cpp` — MinHash rolling fingerprints.
 - `substrings.cpp` — multi-pattern Aho-Corasick counting, locating, rewriting, and BM25 scoring.
 - `utf8_traverse.cpp` — codepoint counting, Nth-codepoint seeking, and codepoint iteration.
 - `utf8_scan.cpp` — codepoint-class enumeration: newlines, whitespace, and delimiter runs.
@@ -25,8 +23,6 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 
 ## CUDA
 
-- `similarities.cu` — similarity scoring on CUDA GPUs.
-- `fingerprints.cu` — fingerprinting on CUDA GPUs.
 - `substrings.cu` — multi-pattern search on CUDA GPUs.
 - `levenshtein.cu` — one-to-many edit distances on CUDA GPUs.
 - `overlap.cu` — window-overlap scoring on CUDA GPUs.

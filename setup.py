@@ -34,8 +34,8 @@ def _memory_available_and_total_gb():
 def _max_compile_workers() -> int:
     """Concurrency cap for compiling translation units, bounded by cores and by memory alike. Core count
     alone is the wrong bound on a small many-core box: a compiler killed by the out-of-memory killer takes
-    the whole build down with no diagnostic. `STRINGZILLA_MAX_COMPILE_WORKERS` overrides both bounds."""
-    requested = os.environ.get("STRINGZILLA_MAX_COMPILE_WORKERS", "")
+    the whole build down with no diagnostic. `STRINGZILLA_BUILD_JOBS` overrides both bounds."""
+    requested = os.environ.get("STRINGZILLA_BUILD_JOBS", "")
     if requested.isdigit() and int(requested) > 0:
         return int(requested)
     workers = min(os.cpu_count() or 1, 8)
