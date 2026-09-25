@@ -294,13 +294,13 @@ SZ_API_COMPTIME sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t
     // Two scratch buffers, each over-allocated by `sz_sort_haswell_partition_slack_` (region gaps + spill).
     sz_size_t const slack = sz_sort_haswell_partition_slack_;
     sz_size_t memory_usage = sizeof(sz_pgram_t) * (count + slack) + sizeof(sz_sorted_idx_t) * (count + slack);
-    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + slack);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
     sz_sequence_argsort_haswell_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
-    alloc->free(temporary_pgrams, memory_usage, alloc);
+    alloc->free(temporary_pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 
@@ -366,7 +366,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *seq
     sz_size_t const slack = sz_sort_haswell_partition_slack_;
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + (count + slack)) // global + pgram scratch
                                    + sizeof(sz_sorted_idx_t) * (count + slack);   // order scratch
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + slack);
     if (!global_pgrams) return sz_bad_alloc_k;
@@ -374,7 +374,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *seq
     sz_sequence_argsort_haswell_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
                                                    count, 0, top_count, reverse);
 
-    alloc->free(global_pgrams, memory_usage, alloc);
+    alloc->free(global_pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 
@@ -438,7 +438,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_haswell( //
     sz_size_t const slack = sz_sort_haswell_partition_slack_;
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + (count + slack)) // global + pgram scratch
                                    + sizeof(sz_sorted_idx_t) * (count + slack);   // order scratch
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + slack);
@@ -446,7 +446,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_haswell( //
     sz_sequence_argsort_haswell_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams,
                                                        temporary_order, 0, count, 0, top_count, reverse);
 
-    alloc->free(global_pgrams, memory_usage, alloc);
+    alloc->free(global_pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 

@@ -265,7 +265,8 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
     sz_size_t const words = sz_levenshtein_query_words(query->length);
     sz_levenshtein_u64x8_vertical_skylake_t resident_verticals[2];
     for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
-        sz_size_t const sweep_count = sz_min_of_two(candidates_per_position_k, candidates->count - sweep_first);
+        sz_size_t const sweep_count = sz_min_of_two((sz_size_t)candidates_per_position_k,
+                                                    candidates->count - sweep_first);
         sz_cptr_t texts[candidates_per_position_k] = {0};
         sz_u64_t byte_counts[candidates_per_position_k] = {0}, symbol_counts[candidates_per_position_k] = {0};
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate) {

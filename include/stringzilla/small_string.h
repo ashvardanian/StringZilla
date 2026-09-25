@@ -352,7 +352,7 @@ SZ_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_ca
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return SZ_NULL_CHAR;
 
-    sz_copy(new_start, string_start, string_length);
+    sz_copy(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
     string->external.start = new_start;
     string->external.space = new_space;
     string->external.padding = 0;
@@ -380,7 +380,7 @@ SZ_API_COMPTIME sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return SZ_NULL_CHAR;
 
-    sz_copy(new_start, string_start, string_length);
+    sz_copy(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
     string->external.start = new_start;
     string->external.space = new_space;
     string->external.padding = 0;

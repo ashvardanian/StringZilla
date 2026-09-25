@@ -449,8 +449,8 @@ SZ_HELPER_AUTO sz_capability_t sz_levenshtein_tier_for(sz_capability_t caps, sz_
 
 /** The page table and the class rows of query @p index, which the rune alphabet keeps one
  *  block per query. */
-SZ_HELPER_AUTO void sz_levenshtein_engine_pages_(sz_levenshtein_engine_t const *engine, sz_size_t index,
-                                                 sz_u16_t const **page_rows, sz_u32_t const **class_rows) {
+SZ_HELPER_INLINE void sz_levenshtein_engine_pages_(sz_levenshtein_engine_t const *engine, sz_size_t index,
+                                                   sz_u16_t const **page_rows, sz_u32_t const **class_rows) {
     sz_size_t const *const pages_offsets = (sz_size_t const *)engine->symbol_to_class;
     sz_u16_t const *const pages = (sz_u16_t const *)((sz_cptr_t)engine->symbol_to_class + pages_offsets[index]);
     *page_rows = pages;
@@ -891,7 +891,8 @@ SZ_HELPER_INLINE void sz_levenshtein_serial_u64x1_distances_(sz_levenshtein_quer
     sz_size_t const words = sz_levenshtein_query_words(query->length);
     sz_levenshtein_u64x1_vertical_serial_t resident_verticals[candidates_per_position_k * 2];
     for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
-        sz_size_t const sweep_count = sz_min_of_two(candidates_per_position_k, candidates->count - sweep_first);
+        sz_size_t const sweep_count = sz_min_of_two((sz_size_t)candidates_per_position_k,
+                                                    candidates->count - sweep_first);
         sz_cptr_t texts[candidates_per_position_k] = {0};
         sz_u64_t byte_counts[candidates_per_position_k] = {0}, symbol_counts[candidates_per_position_k] = {0};
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate) {

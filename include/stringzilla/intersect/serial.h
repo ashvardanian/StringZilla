@@ -55,7 +55,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                       
     // but the less likely the collisions will be.
     sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) * (1u << SZ_SEQUENCE_INTERSECT_BUDGET);
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
-    sz_size_t *const table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc);
+    sz_size_t *const table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc->handle);
     if (!table_positions) return sz_bad_alloc_k;
     sz_u64_t *const table_hashes = (sz_u64_t *)(table_positions + hash_table_slots);
     sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
@@ -119,7 +119,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                       
         }
     }
 
-    alloc->free(table_positions, hash_table_slots * bytes_per_entry, alloc);
+    alloc->free(table_positions, hash_table_slots * bytes_per_entry, alloc->handle);
     *intersection_count_ptr = intersection_count;
     return sz_success_k;
 }

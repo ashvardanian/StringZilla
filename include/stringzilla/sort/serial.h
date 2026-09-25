@@ -609,14 +609,14 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequ
     // is included in those P-long words. So, in reality, we will be taking (P-1) bytes from each string on every
     // iteration of a recursive algorithm.
     sz_size_t memory_usage = sequence->count * sizeof(sz_pgram_t);
-    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     if (!pgrams) return sz_bad_alloc_k;
 
     // Recursively sort the whole sequence.
     sz_sequence_argsort_serial_sort_byte_windows_(sequence, pgrams, order, 0, sequence->count, 0, top_count, reverse);
 
     // Free temporary storage.
-    alloc->free(pgrams, memory_usage, alloc);
+    alloc->free(pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 
@@ -790,12 +790,12 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_serial(  //
 
     // Just a pgram buffer: the sort is stateless across windows, re-folding each string's prefix on demand.
     sz_size_t const memory_usage = count * sizeof(sz_pgram_t);
-    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     if (!pgrams) return sz_bad_alloc_k;
 
     sz_sequence_argsort_serial_sort_casefold_windows_(sequence, pgrams, order, 0, count, 0, top_count, reverse);
 
-    alloc->free(pgrams, memory_usage, alloc);
+    alloc->free(pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 

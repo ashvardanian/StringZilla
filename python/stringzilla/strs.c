@@ -277,7 +277,7 @@ static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_all
 static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_allocator_t *old_allocator,
                                                     sz_memory_allocator_t *allocator) {
     struct fragmented_t *fragmented = &strs->data.fragmented;
-    sz_assert_(fragmented->spans && "Expected spans to be allocated");
+    sz_assert_((fragmented->spans || !fragmented->count) && "Expected spans to be allocated");
 
     // Calculate total size needed for consolidated tape
     sz_size_t total_bytes = 0;

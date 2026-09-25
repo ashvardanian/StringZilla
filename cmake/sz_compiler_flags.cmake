@@ -164,12 +164,6 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     set_warning_flags(${target} "${compiler_id}")
     set_optimization_flags(${target} "${compiler_id}" "${target_type}")
 
-    # If available, enable Position Independent Code
-    get_target_property(target_pic ${target} POSITION_INDEPENDENT_CODE)
-    if (target_pic)
-        target_compile_definitions(${target} PRIVATE "SZ_PIC")
-    endif ()
-
     # Avoid builtin functions where we know what we are doing.
     if (compiler_id MATCHES "MSVC")
         target_compile_options(${target} PRIVATE "/Oi-")

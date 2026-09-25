@@ -39,6 +39,7 @@
 
 #include <cstdint> // `std::uintptr_t`
 #include <cstdio>  // `stderr`
+#include <cstdlib> // `std::malloc`, `std::free`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
@@ -68,12 +69,38 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
+/** A heap whose callbacks refuse every handle but its own, so a kernel passing the allocator where
+ *  its @c handle belongs fails with @c sz_bad_alloc_k instead of reinterpreting the allocator. */
+struct handle_checked_heap_t {
+    handle_checked_heap_t const *self = this;
+    std::size_t live_allocations = 0;
+    sz_memory_allocator_t allocator {};
+
+    handle_checked_heap_t() noexcept {
+        allocator.allocate = +[](sz_size_t length, void *handle) -> void * {
+            handle_checked_heap_t &heap = *static_cast<handle_checked_heap_t *>(handle);
+            if (heap.self != &heap) return nullptr;
+            ++heap.live_allocations;
+            return std::malloc(length);
+        };
+        allocator.free = +[](void *pointer, sz_size_t, void *handle) {
+            --static_cast<handle_checked_heap_t *>(handle)->live_allocations;
+            std::free(pointer);
+        };
+        allocator.handle = this;
+    }
+    handle_checked_heap_t(handle_checked_heap_t const &) = delete;
+    handle_checked_heap_t &operator=(handle_checked_heap_t const &) = delete;
+};
+
 /** Runs one sequence arg-sort backend over @c sequence and asserts the produced permutation matches
  *  @c expected. */
 static void check_sort_unit_(sz_sequence_argsort_t argsort, sz_sequence_t const *sequence,
                              std::vector<sz_sorted_idx_t> const &expected) {
     std::vector<sz_sorted_idx_t> order(expected.size());
-    verify(argsort(sequence, nullptr, order.data(), 0, sz_false_k) == sz_success_k && "Kernel call failed");
+    handle_checked_heap_t heap;
+    verify(argsort(sequence, &heap.allocator, order.data(), 0, sz_false_k) == sz_success_k && "Kernel call failed");
+    verify(heap.live_allocations == 0);
     verify(order == expected);
 }
 
@@ -100,9 +127,11 @@ static void check_intersect_unit_(sz_sequence_intersect_t intersect, sz_sequence
                                                                               : second_sequence->count;
     std::vector<sz_sorted_idx_t> first_positions(capacity), second_positions(capacity);
     sz_size_t intersection_size = 0;
-    verify(intersect(first_sequence, second_sequence, nullptr, 0u, &intersection_size, //
+    handle_checked_heap_t heap;
+    verify(intersect(first_sequence, second_sequence, &heap.allocator, 0u, &intersection_size, //
                      first_positions.data(), second_positions.data()) == sz_success_k &&
            "Kernel call failed");
+    verify(heap.live_allocations == 0);
     verify(intersection_size == expected_pairs.size() && "Kernel reported the wrong intersection size");
     std::set<intersect_match_t> produced;
     for (sz_size_t index = 0; index != intersection_size; ++index)

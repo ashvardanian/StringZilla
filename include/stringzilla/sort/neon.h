@@ -258,13 +258,13 @@ SZ_API_COMPTIME sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t co
 
     // `+ 24` of slack absorbs the two inter-region gaps (8 each) plus the final compaction spill past `count`.
     sz_size_t memory_usage = sizeof(sz_pgram_t) * (count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
-    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
     sz_sequence_argsort_neon_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
-    alloc->free(temporary_pgrams, memory_usage, alloc);
+    alloc->free(temporary_pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 
@@ -327,7 +327,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequen
 
     // `global_pgrams` (count) + two scratch buffers (count + 24 slack each: two inter-region gaps + spill).
     sz_size_t memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!global_pgrams) return sz_bad_alloc_k;
@@ -335,7 +335,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequen
     sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
                                                 count, 0, top_count, reverse);
 
-    alloc->free(global_pgrams, memory_usage, alloc);
+    alloc->free(global_pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 
@@ -397,7 +397,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon(    //
     // two inter-region gaps + spill, since the NEON table compaction overruns). The folded export is stateless
     // (re-folds the prefix on demand), so unlike the earlier design there is no per-string cursor array.
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
@@ -405,7 +405,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon(    //
     sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order,
                                                     0, count, 0, top_count, reverse);
 
-    alloc->free(global_pgrams, memory_usage, alloc);
+    alloc->free(global_pgrams, memory_usage, alloc->handle);
     return sz_success_k;
 }
 

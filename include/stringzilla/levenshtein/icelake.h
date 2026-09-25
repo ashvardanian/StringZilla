@@ -250,7 +250,8 @@ SZ_HELPER_INLINE void sz_levenshtein_icelake_u8x64_distances_(sz_levenshtein_que
                                                               sz_sequence_t const *candidates, sz_size_t *distances) {
     enum { candidates_per_position_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
     for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
-        sz_size_t const sweep_count = sz_min_of_two(candidates_per_position_k, candidates->count - sweep_first);
+        sz_size_t const sweep_count = sz_min_of_two((sz_size_t)candidates_per_position_k,
+                                                    candidates->count - sweep_first);
         sz_cptr_t texts[candidates_per_position_k] = {0};
         sz_u64_t byte_counts[candidates_per_position_k] = {0};
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate) {

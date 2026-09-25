@@ -336,9 +336,9 @@
 #endif
 
 /*  The headers needed for the @c sz_assert_failure_ function. */
-#if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
+#if SZ_DEBUG && !SZ_AVOID_LIBC
 #include <stdio.h>  // `fprintf`, `stderr`
-#include <stdlib.h> // `EXIT_FAILURE`
+#include <stdlib.h> // `abort`
 #endif
 
 /*  The toolkit version behind the NVIDIA GPU tiers below. No compiler macro can report the toolkit
@@ -1643,21 +1643,11 @@ SZ_HELPER_AUTO sz_size_t sz_size_max_(void) { return SZ_SIZE_MAX; }
 SZ_HELPER_AUTO sz_ssize_t sz_ssize_max_(void) { return SZ_SSIZE_MAX; }
 
 /**
- *  @brief Similar to @c assert, the @c sz_assert_ is used in the @c SZ_DEBUG mode to check the
- *      invariants of the library. It's a no-op in the "Release" mode.
- *  @note If you want to catch it, put a breakpoint at @c __GI_exit.
+ *  @brief Similar to @c assert, the @c sz_assert_ checks library invariants in @c SZ_DEBUG builds,
+ *      aborting on failure; in release it type-checks the condition without evaluating it.
+ *  @note If you want to catch it, put a breakpoint at @c abort.
  */
-#if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC) && \
-    !defined(__CUDA_ARCH__) // ? CPU code w/out LibC access
-SZ_API_COMPTIME void sz_assert_failure_(char const *condition, char const *file, int line) {
-    fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
-    exit(EXIT_FAILURE);
-}
-#define sz_assert_(condition)                                                     \
-    do {                                                                          \
-        if (!(condition)) { sz_assert_failure_(#condition, __FILE__, __LINE__); } \
-    } while (0)
-#elif SZ_DEBUG && defined(__CUDA_ARCH__) // ? CUDA code for GPUs
+#if SZ_DEBUG && defined(__CUDA_ARCH__) // ? CUDA code for GPUs
 SZ_DEVICE_NOINLINE void sz_assert_cuda_failure_(char const *condition, char const *file, int line) {
     printf("Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     __trap();
@@ -1666,8 +1656,27 @@ SZ_DEVICE_NOINLINE void sz_assert_cuda_failure_(char const *condition, char cons
     do {                                                                               \
         if (!(condition)) { sz_assert_cuda_failure_(#condition, __FILE__, __LINE__); } \
     } while (0)
+#elif SZ_DEBUG && !SZ_AVOID_LIBC // ? CPU code with LibC, PIC included
+SZ_API_COMPTIME void sz_assert_failure_(char const *condition, char const *file, int line) {
+    fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
+    abort();
+}
+#define sz_assert_(condition)                                                     \
+    do {                                                                          \
+        if (!(condition)) { sz_assert_failure_(#condition, __FILE__, __LINE__); } \
+    } while (0)
+#elif SZ_DEBUG && defined(_MSC_VER) && !defined(__clang__) // ? No LibC, and MSVC has no `__builtin_trap`
+#define sz_assert_(condition)             \
+    do {                                  \
+        if (!(condition)) __debugbreak(); \
+    } while (0)
+#elif SZ_DEBUG // ? No LibC: nothing to print with, so trap in place
+#define sz_assert_(condition)               \
+    do {                                    \
+        if (!(condition)) __builtin_trap(); \
+    } while (0)
 #else
-#define sz_assert_(condition) ((void)(condition))
+#define sz_assert_(condition) sz_unused_(sizeof(!(condition)))
 #endif
 
 /*  Intrinsics aliases for MSVC, GCC, Clang, and Clang-Cl. The following section of compiler

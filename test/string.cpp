@@ -41,6 +41,7 @@
 #endif
 
 #include <cstdio>  // `stderr`
+#include <cstdlib> // `std::malloc`, `std::free`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
@@ -1698,13 +1699,21 @@ void test_string_constructors_unit() {
     verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
-/** Validates that shrinking @c reserve calls are harmless no-ops, just like in the STL. Regression
- *  test: shrinking used to overflow the heap buffer in release builds. */
+/** Validates that shrinking @c reserve calls are harmless no-ops, just like in the STL, and that
+ *  every reallocation carries the terminator. Regression tests: shrinking used to overflow the heap
+ *  buffer in release builds, and growing or fitting left the new buffer unterminated. */
 void test_string_reserve_unit() {
-    // C API: grow, then shrink - the buffer, length, and contents must stay intact.
+    // C API: grow, shrink, then fit - the buffer, length, contents and terminator stay intact.
     {
+        // Fresh blocks arrive full of noise, so a terminator never copied cannot read as one.
         sz_memory_allocator_t alloc;
-        sz_memory_allocator_init_default(&alloc);
+        alloc.allocate = +[](sz_size_t length, void *) -> void * {
+            void *const block = std::malloc(length);
+            if (block) std::memset(block, '#', length);
+            return block;
+        };
+        alloc.free = +[](void *block, sz_size_t, void *) { std::free(block); };
+        alloc.handle = nullptr;
 
         sz_string_t str;
         sz_ptr_t start = sz_string_init_length(&str, 100, &alloc);
@@ -1714,12 +1723,18 @@ void test_string_reserve_unit() {
         sz_ptr_t grown = sz_string_reserve(&str, 200, &alloc);
         verify(grown != nullptr);
         verify(sz_string_length(&str) == 100);
+        verify(grown[100] == '\0' && "Growing left the new buffer unterminated");
 
         // Shrinking must be a no-op: same buffer, same length, same contents.
         sz_ptr_t shrunk = sz_string_reserve(&str, 50, &alloc);
         verify(shrunk == grown);
         verify(sz_string_length(&str) == 100);
         for (sz_size_t i = 0; i != 100; ++i) verify(shrunk[i] == 'a');
+
+        sz_ptr_t fitted = sz_string_shrink_to_fit(&str, &alloc);
+        verify(fitted != nullptr);
+        verify(sz_string_length(&str) == 100);
+        verify(fitted[100] == '\0' && "Fitting left the new buffer unterminated");
 
         sz_string_free(&str, &alloc);
     }

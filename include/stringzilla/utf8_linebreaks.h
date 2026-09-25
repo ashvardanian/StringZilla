@@ -103,7 +103,7 @@ SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz
 #elif SZ_USE_HASWELL
     return sz_utf8_linebreaks_haswell(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
-    return sz_utf8_linebreaks_sve2(text, length, starts, lengths, capacity, bytes_consumed);
+    return sz_utf8_linebreaks_sve2(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #elif SZ_USE_NEON
     return sz_utf8_linebreaks_neon(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #else
