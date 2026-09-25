@@ -102,12 +102,16 @@ static levenshtein_backend_t const levenshtein_backends[] = {
 
 /** One prepared batch, released with the scope that named it. */
 struct levenshtein_engine_t {
+    handle_checked_heap_t heap;
     sz_levenshtein_engine_t engine {};
 
     levenshtein_engine_t(sz_sequence_t const &queries, sz_levenshtein_symbol_t symbol) {
-        verify(sz_levenshtein_engine_init_cpu(&queries, symbol, nullptr, &engine) == sz_success_k);
+        verify(sz_levenshtein_engine_init_cpu(&queries, symbol, &heap.allocator, &engine) == sz_success_k);
     }
-    ~levenshtein_engine_t() { sz_levenshtein_engine_free(&engine); }
+    ~levenshtein_engine_t() {
+        sz_levenshtein_engine_free(&engine);
+        verify(heap.live_allocations == 0);
+    }
     levenshtein_engine_t(levenshtein_engine_t const &) = delete;
     levenshtein_engine_t &operator=(levenshtein_engine_t const &) = delete;
 };

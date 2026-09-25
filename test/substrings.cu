@@ -106,6 +106,9 @@ struct substrings_cuda_vocabulary_t {
  */
 struct substrings_cuda_engines_t {
 
+    /** What the serial oracle's engine is built from. */
+    handle_checked_heap_t heap;
+
     /** The serial oracle's engine, in plain host memory. */
     sz_substrings_engine_t host {};
 
@@ -114,10 +117,8 @@ struct substrings_cuda_engines_t {
 
     substrings_cuda_engines_t(substrings_cuda_vocabulary_t &vocabulary, sz_substrings_case_sensitivity_t sensitivity,
                               sz_substrings_overlap_policy_t policy) {
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
         verify(sz_substrings_engine_init_cpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0,
-                                             &allocator, &host) == sz_success_k);
+                                             &heap.allocator, &host) == sz_success_k);
         verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0,
                                              &vocabulary.unified, nullptr, &device) == sz_success_k);
         verify(sz_memory_reaches_device(device.memory) && "A device engine's block is one a kernel addresses");
@@ -128,6 +129,7 @@ struct substrings_cuda_engines_t {
     ~substrings_cuda_engines_t() noexcept {
         sz_substrings_engine_free(&device);
         sz_substrings_engine_free(&host);
+        verify(heap.live_allocations == 0);
     }
 };
 

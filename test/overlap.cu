@@ -97,15 +97,15 @@ struct overlap_cuda_corpus_t {
 /** The serial backend's answers for the same corpus, read off the very bytes the device reads. */
 static std::vector<sz_f32_t> overlap_serial_reference_(overlap_cuda_corpus_t const &corpus,
                                                        sz::span<sz_size_t const> widths) {
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
+    handle_checked_heap_t heap;
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init_serial(&corpus.query_sequence, widths.data(), widths.size(), &host, &engine) ==
-           sz_success_k);
+    verify(sz_overlap_engine_init_serial(&corpus.query_sequence, widths.data(), widths.size(), &heap.allocator,
+                                         &engine) == sz_success_k);
     std::vector<sz_f32_t> expected(corpus.scores.size(), -1.0f);
     verify(sz_overlap_scores_serial(&engine, &corpus.host_candidates, expected.data(), corpus.query_stride(),
                                     corpus.candidate_stride()) == sz_success_k);
     sz_overlap_engine_free(&engine);
+    verify(heap.live_allocations == 0);
     return expected;
 }
 

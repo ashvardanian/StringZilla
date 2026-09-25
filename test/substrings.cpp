@@ -366,15 +366,14 @@ static std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tie
 static void check_corpus_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                           sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
                           std::size_t hot_states = SZ_SUBSTRINGS_HOT_STATES_AUTO) {
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
+    handle_checked_heap_t heap;
     std::vector<sz_string_view_t> haystack_views, needle_views, replacement_views;
     sz_sequence_t const haystack_sequence = sequence_over_(haystacks, haystack_views);
     sz_sequence_t const needle_sequence = sequence_over_(needles, needle_views);
 
     sz_substrings_engine_t engine;
-    verify(sz_substrings_engine_init_cpu(&needle_sequence, sensitivity, policy, hot_states, 0, &alloc, &engine) ==
-           sz_success_k);
+    verify(sz_substrings_engine_init_cpu(&needle_sequence, sensitivity, policy, hot_states, 0, &heap.allocator,
+                                         &engine) == sz_success_k);
     verify(engine.needles_count == needles.size());
     verify(engine.root == 0);
 
@@ -430,6 +429,7 @@ static void check_corpus_(std::vector<std::string> const &haystacks, std::vector
     }
 
     sz_substrings_engine_free(&engine);
+    verify(heap.live_allocations == 0);
 }
 
 /** The same corpus under every policy, so one call covers a vocabulary's whole behaviour. */
@@ -517,23 +517,22 @@ void test_substrings_unit() {
 
     // An all-cold automaton, so every step probes the double array and chases failure links.
     {
-        sz_memory_allocator_t alloc;
-        sz_memory_allocator_init_default(&alloc);
+        handle_checked_heap_t heap;
         std::vector<std::string> const needles {"he", "she", "his", "hers"};
         std::vector<sz_string_view_t> views;
         sz_sequence_t const sequence = sequence_over_(needles, views);
         sz_substrings_engine_t engine;
         verify(sz_substrings_engine_init_cpu(&sequence, sz_substrings_cased_k, sz_substrings_overlapping_k, 0, 0,
-                                             &alloc, &engine) == sz_success_k);
+                                             &heap.allocator, &engine) == sz_success_k);
         verify(engine.hot_count == 0);
         sz_substrings_engine_free(&engine);
+        verify(heap.live_allocations == 0);
     }
 }
 
 /** What the verbs refuse, which is as much of the contract as what they accept. */
 void test_substrings_safety() {
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
+    handle_checked_heap_t heap;
     sz_substrings_engine_t engine;
     std::vector<sz_string_view_t> views;
 
@@ -541,20 +540,21 @@ void test_substrings_safety() {
     // every later needle's reported index.
     {
         std::vector<std::string> const empty_needle {"ab", "", "cd"};
-        verify(build_over_(empty_needle, sz_substrings_cased_k, &alloc, &engine) == sz_unexpected_dimensions_k);
+        verify(build_over_(empty_needle, sz_substrings_cased_k, &heap.allocator, &engine) ==
+               sz_unexpected_dimensions_k);
     }
 
     // An empty vocabulary has no automaton to build.
     {
         std::vector<std::string> const no_needles;
-        verify(build_over_(no_needles, sz_substrings_cased_k, &alloc, &engine) == sz_unexpected_dimensions_k);
+        verify(build_over_(no_needles, sz_substrings_cased_k, &heap.allocator, &engine) == sz_unexpected_dimensions_k);
     }
 
     // A folded vocabulary needs well-formed UTF-8, since the walk resets on a malformed haystack byte and a
     // needle carrying one could never match.
     {
         std::vector<std::string> const malformed {std::string("ab\xFF", 3)};
-        verify(build_over_(malformed, sz_substrings_uncased_k, &alloc, &engine) == sz_invalid_utf8_k);
+        verify(build_over_(malformed, sz_substrings_uncased_k, &heap.allocator, &engine) == sz_invalid_utf8_k);
     }
 
     std::vector<std::string> const needles {"ab", "cd"};
@@ -565,7 +565,7 @@ void test_substrings_safety() {
     sz_sequence_t const haystack_sequence = sequence_over_(haystacks, haystack_views);
     sz_sequence_t const replacement_sequence = sequence_over_(replacements, replacement_views);
     verify(sz_substrings_engine_init_cpu(&needle_sequence, sz_substrings_cased_k, sz_substrings_overlapping_k,
-                                         SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &alloc, &engine) == sz_success_k);
+                                         SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &heap.allocator, &engine) == sz_success_k);
 
     // A capacity that cannot hold the matches is not an error: the report names the true total and the
     // shortfall beside it, which is the one contract a device verb can also keep.
@@ -623,11 +623,13 @@ void test_substrings_safety() {
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
         sz_substrings_engine_t covering;
         verify(sz_substrings_engine_init_cpu(&needle_sequence, sz_substrings_cased_k, sz_substrings_leftmost_first_k,
-                                             SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &alloc, &covering) == sz_success_k);
+                                             SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &heap.allocator,
+                                             &covering) == sz_success_k);
         verify(sz_substrings_replace(&covering, &haystack_sequence, &one_sequence, nullptr, 0, offsets.data()) ==
                sz_unexpected_dimensions_k);
         sz_substrings_engine_free(&covering);
     }
+    verify(heap.live_allocations == 0);
 
     // A refused allocation is reported as `sz_bad_alloc_k`, and construction is the only verb that allocates.
     {

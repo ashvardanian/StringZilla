@@ -39,7 +39,6 @@
 
 #include <cstdint> // `std::uintptr_t`
 #include <cstdio>  // `stderr`
-#include <cstdlib> // `std::malloc`, `std::free`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
@@ -68,30 +67,6 @@ using sz::literals::operator""_bs; // for `sz::byteset_t`
 using namespace std::literals; // for ""sv
 
 #pragma region Helpers
-
-/** A heap whose callbacks refuse every handle but its own, so a kernel passing the allocator where
- *  its @c handle belongs fails with @c sz_bad_alloc_k instead of reinterpreting the allocator. */
-struct handle_checked_heap_t {
-    handle_checked_heap_t const *self = this;
-    std::size_t live_allocations = 0;
-    sz_memory_allocator_t allocator {};
-
-    handle_checked_heap_t() noexcept {
-        allocator.allocate = +[](sz_size_t length, void *handle) -> void * {
-            handle_checked_heap_t &heap = *static_cast<handle_checked_heap_t *>(handle);
-            if (heap.self != &heap) return nullptr;
-            ++heap.live_allocations;
-            return std::malloc(length);
-        };
-        allocator.free = +[](void *pointer, sz_size_t, void *handle) {
-            --static_cast<handle_checked_heap_t *>(handle)->live_allocations;
-            std::free(pointer);
-        };
-        allocator.handle = this;
-    }
-    handle_checked_heap_t(handle_checked_heap_t const &) = delete;
-    handle_checked_heap_t &operator=(handle_checked_heap_t const &) = delete;
-};
 
 /** Runs one sequence arg-sort backend over @c sequence and asserts the produced permutation matches
  *  @c expected. */
@@ -593,6 +568,7 @@ void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size
 
     using strs_t = std::vector<std::string>;
     auto &generator = global_random_generator();
+    handle_checked_heap_t heap;
 
     // Each repetition draws fresh random datasets and covers one top-K mode, so a larger `inputs` widens the
     // fuzzing coverage rather than enlarging a fixed dataset. The datasets span the vectorized block, the scalar
@@ -636,19 +612,20 @@ void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size
                 std::size_t const head = (top != 0 && top < count) ? top : count;
 
                 // Byte arg-sort: stable, so the permutations must match exactly over the ordered prefix.
-                reference.argsort(&sequence, nullptr, order_reference.data(), top, reverse);
-                candidate.argsort(&sequence, nullptr, order_candidate.data(), top, reverse);
+                reference.argsort(&sequence, &heap.allocator, order_reference.data(), top, reverse);
+                candidate.argsort(&sequence, &heap.allocator, order_candidate.data(), top, reverse);
                 for (std::size_t i = 0; i < head; ++i)
                     verify(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
 
                 // Uncased arg-sort: also stable, same exact-match requirement.
-                reference.argsort_uncased(&sequence, nullptr, order_reference.data(), top, reverse);
-                candidate.argsort_uncased(&sequence, nullptr, order_candidate.data(), top, reverse);
+                reference.argsort_uncased(&sequence, &heap.allocator, order_reference.data(), top, reverse);
+                candidate.argsort_uncased(&sequence, &heap.allocator, order_candidate.data(), top, reverse);
                 for (std::size_t i = 0; i < head; ++i)
                     verify(order_reference[i] == order_candidate[i] && "SIMD uncased arg-sort disagrees with serial");
             }
         }
     }
+    verify(heap.live_allocations == 0);
 }
 
 #pragma endregion Equivalence
@@ -674,7 +651,10 @@ void test_sort_safety() {
     auto check_is_permutation_ = [](char const *name, sz_sequence_argsort_t argsort, strs_t const &input) {
         sz_sequence_t const sequence = sequence_from_(input);
         std::vector<sz_sorted_idx_t> order(input.size());
-        verify(argsort(&sequence, nullptr, order.data(), 0, sz_false_k) == sz_success_k && "Kernel call failed");
+        handle_checked_heap_t heap;
+        verify(argsort(&sequence, &heap.allocator, order.data(), 0, sz_false_k) == sz_success_k &&
+               "Kernel call failed");
+        verify(heap.live_allocations == 0);
         std::vector<bool> seen(input.size(), false);
         for (sz_sorted_idx_t const index : order) {
             if ((std::size_t)index >= input.size() || seen[(std::size_t)index]) {

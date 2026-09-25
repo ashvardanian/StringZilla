@@ -59,7 +59,7 @@
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstdint> // `std::uintptr_t` for cache-line alignment
 #include <cstdio>  // `std::FILE`, `std::fopen`, `stderr`
-#include <cstdlib> // `std::getenv`, `std::strtoul`
+#include <cstdlib> // `std::getenv`, `std::strtoul`, `std::malloc`, `std::free`
 #include <cstring> // `std::strcmp`
 
 #include <algorithm>   // `std::copy`, `std::generate`
@@ -86,9 +86,7 @@
 
 #pragma region Assertion Helpers
 
-namespace ashvardanian {
-namespace stringzilla {
-namespace test {
+namespace ashvardanian::stringzilla::test {
 
 /** One operand of a failed comparison, cut at a few hundred bytes so a megabyte string cannot drown
  *  the report printed on failure. */
@@ -180,9 +178,7 @@ left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &va
     return {assertion, value};
 }
 
-} // namespace test
-} // namespace stringzilla
-} // namespace ashvardanian
+} // namespace ashvardanian::stringzilla::test
 
 /** Test-suite verification - always active, regardless of @c NDEBUG or @c SZ_DEBUG. Unlike
  *  @c sz_assert_, a debug-only invariant check for the library, a test's oracle must never be a
@@ -253,9 +249,7 @@ backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], cha
 
 #pragma endregion Backend Tables
 
-namespace ashvardanian {
-namespace stringzilla {
-namespace test {
+namespace ashvardanian::stringzilla::test {
 
 using arrow_strings_view_t = arrow_strings_view<char, sz_size_t>;
 
@@ -555,6 +549,31 @@ inline sz_memory_allocator_t refusing_allocator_() noexcept {
     return refusing;
 }
 
+/** A heap whose callbacks refuse every handle but its own, so a kernel passing the allocator where
+ *  its @c handle belongs fails with @c sz_bad_alloc_k instead of reinterpreting the allocator. It
+ *  counts the blocks it holds, so a test can assert that every one of them came back. */
+struct handle_checked_heap_t {
+    handle_checked_heap_t const *self = this;
+    std::size_t live_allocations = 0;
+    sz_memory_allocator_t allocator {};
+
+    handle_checked_heap_t() noexcept {
+        allocator.allocate = +[](sz_size_t length, void *handle) -> void * {
+            handle_checked_heap_t &heap = *static_cast<handle_checked_heap_t *>(handle);
+            if (heap.self != &heap) return nullptr;
+            ++heap.live_allocations;
+            return std::malloc(length);
+        };
+        allocator.free = +[](void *pointer, sz_size_t, void *handle) {
+            --static_cast<handle_checked_heap_t *>(handle)->live_allocations;
+            std::free(pointer);
+        };
+        allocator.handle = this;
+    }
+    handle_checked_heap_t(handle_checked_heap_t const &) = delete;
+    handle_checked_heap_t &operator=(handle_checked_heap_t const &) = delete;
+};
+
 /**
  *  @brief Splits @p alphabet into its UTF-8 characters, so a multi-byte alphabet yields valid text.
  *
@@ -825,9 +844,7 @@ inline std::size_t run_test(char const *name, function_type_ &&test_function) no
 
 #pragma endregion Test Runner
 
-} // namespace test
-} // namespace stringzilla
-} // namespace ashvardanian
+} // namespace ashvardanian::stringzilla::test
 
 /*  Cross-translation-unit test declarations. These live at global scope to match the TU
  *  definitions; the using-declaration exposes @c scale_iterations to the default arguments. */

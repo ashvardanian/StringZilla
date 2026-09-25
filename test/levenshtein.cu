@@ -148,12 +148,14 @@ struct levenshtein_cuda_corpus_t {
 /** The serial backend's answers for the same corpus, read off the very bytes the device reads. */
 static std::vector<sz_size_t> levenshtein_serial_reference_(levenshtein_cuda_corpus_t const &corpus,
                                                             sz_levenshtein_symbol_t symbol) {
+    handle_checked_heap_t heap;
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init_cpu(&corpus.queries, symbol, nullptr, &engine) == sz_success_k);
+    verify(sz_levenshtein_engine_init_cpu(&corpus.queries, symbol, &heap.allocator, &engine) == sz_success_k);
     std::vector<sz_size_t> expected(corpus.distances.size());
     verify(sz_levenshtein_distances_serial(&engine, &corpus.host_candidates, expected.data(), corpus.count()) ==
            sz_success_k);
     sz_levenshtein_engine_free(&engine);
+    verify(heap.live_allocations == 0);
     return expected;
 }
 
@@ -267,8 +269,7 @@ static void check_levenshtein_cuda_equivalence_(char const *name, levenshtein_cu
  */
 static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtein_distances_t device) {
     enum { arena_bytes_k = 256, longest_candidate_k = 33, offsets_k = 97 };
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
+    handle_checked_heap_t heap;
 
     std::size_t const count = sz_levenshtein_cuda_lanes_candidates_min_();
     if (count == SZ_SIZE_MAX || count == 0) return;
@@ -301,7 +302,8 @@ static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtei
         sz_sequence_t host_candidates {};
         sz_sequence_from_string_views(views.data(), views.size(), &host_candidates);
         sz_levenshtein_engine_t host_engine {};
-        verify(sz_levenshtein_engine_init_cpu(&queries, sz_levenshtein_bytes_k, &host, &host_engine) == sz_success_k);
+        verify(sz_levenshtein_engine_init_cpu(&queries, sz_levenshtein_bytes_k, &heap.allocator, &host_engine) ==
+               sz_success_k);
         std::vector<sz_size_t> expected(count);
         verify(sz_levenshtein_distances_serial(&host_engine, &host_candidates, expected.data(), count) == sz_success_k);
         sz_levenshtein_engine_free(&host_engine);
@@ -309,13 +311,14 @@ static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtei
             if (distances[index] != expected[index])
                 fail_backend_(name, "a narrow rung's distance differs from serial");
     }
+    verify(heap.live_allocations == 0);
 }
 
 /** The tiled wavefront against serial's answer at the same lengths, on the one pair it takes. */
 static void check_levenshtein_cuda_tiled_() {
-    sz_memory_allocator_t unified, host;
+    sz_memory_allocator_t unified;
     sz_memory_allocator_init_unified(&unified, SZ_NULL);
-    sz_memory_allocator_init_default(&host);
+    handle_checked_heap_t heap;
 
     for (std::size_t const query_symbols : levenshtein_cuda_query_symbols_k) {
         levenshtein_cuda_corpus_t corpus(1, query_symbols, 1, levenshtein_cuda_alphabet_t::bytes_k);
@@ -326,12 +329,14 @@ static void check_levenshtein_cuda_tiled_() {
             fail_backend_("cuda", "the wavefront refused a device-resident pair");
 
         sz_levenshtein_engine_t engine {};
-        verify(sz_levenshtein_engine_init_cpu(&corpus.queries, sz_levenshtein_bytes_k, &host, &engine) == sz_success_k);
+        verify(sz_levenshtein_engine_init_cpu(&corpus.queries, sz_levenshtein_bytes_k, &heap.allocator, &engine) ==
+               sz_success_k);
         sz_size_t expected = 0;
         verify(sz_levenshtein_distances_serial(&engine, &corpus.host_candidates, &expected, 1) == sz_success_k);
         sz_levenshtein_engine_free(&engine);
         if (distance != expected) fail_backend_("cuda", "a wavefront distance differs from serial");
     }
+    verify(heap.live_allocations == 0);
 }
 
 /** One backend refusing host memory, sequence handle and outputs alike, rather than staging it. */

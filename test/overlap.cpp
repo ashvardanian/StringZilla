@@ -183,18 +183,18 @@ static std::vector<sz_u32_t> overlap_repeating_keys_(std::size_t count) {
 static std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
                                              std::vector<std::string> const &candidates,
                                              std::vector<std::size_t> const &widths) {
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
+    handle_checked_heap_t heap;
     sz_sequence_t const query_sequence = sequence_from_(queries);
     sz_sequence_t const candidate_sequence = sequence_from_(candidates);
     sz_overlap_engine_t engine {};
-    if (backend.init(&query_sequence, widths.data(), widths.size(), &alloc, &engine) != sz_success_k)
+    if (backend.init(&query_sequence, widths.data(), widths.size(), &heap.allocator, &engine) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
     std::vector<sz_f32_t> scores(queries.size() * candidates.size() * widths.size(), -1.0f);
     if (backend.scores(&engine, &candidate_sequence, scores.data(), candidates.size() * widths.size(), widths.size()) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
     sz_overlap_engine_free(&engine);
+    verify(heap.live_allocations == 0);
     return scores;
 }
 
@@ -218,16 +218,16 @@ static void check_overlap_scores_(overlap_backend_t const &backend, std::vector<
 /** One pair through the dispatched engine at one width, asserting the literal @p expected share. */
 static void check_overlap_pair_(std::string const &query, std::string const &candidate, std::size_t width,
                                 sz_f32_t expected) {
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
+    handle_checked_heap_t heap;
     std::vector<std::string> const queries = {query}, candidates = {candidate};
     sz_sequence_t const query_sequence = sequence_from_(queries);
     sz_sequence_t const candidate_sequence = sequence_from_(candidates);
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init_cpu(&query_sequence, &width, 1, &alloc, &engine) == sz_success_k);
+    verify(sz_overlap_engine_init_cpu(&query_sequence, &width, 1, &heap.allocator, &engine) == sz_success_k);
     sz_f32_t share = -1.0f;
     verify(sz_overlap_scores(&engine, &candidate_sequence, &share, 1, 1) == sz_success_k);
     sz_overlap_engine_free(&engine);
+    verify(heap.live_allocations == 0);
     verify(share == expected);
 }
 
@@ -337,12 +337,12 @@ void test_overlap_unit() {
     std::vector<std::string> const queries = {fox};
     std::vector<std::string> const candidates = {fox, "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", "the", ""};
     std::vector<std::size_t> const widths = {1, 2, 3, 4, 6, 8, 43};
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
+    handle_checked_heap_t heap;
     sz_sequence_t const query_sequence = sequence_from_(queries);
     sz_sequence_t const sequence = sequence_from_(candidates);
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init_cpu(&query_sequence, widths.data(), widths.size(), &alloc, &engine) == sz_success_k);
+    verify(sz_overlap_engine_init_cpu(&query_sequence, widths.data(), widths.size(), &heap.allocator, &engine) ==
+           sz_success_k);
     sz_f32_t shares[4 * 7];
     verify(sz_overlap_scores(&engine, &sequence, shares, 4 * 7, 7) == sz_success_k);
     for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
@@ -373,8 +373,9 @@ void test_overlap_unit() {
 
     // Zero widths answer nothing, and are refused before anything is prepared.
     sz_overlap_engine_t refused {};
-    verify(sz_overlap_engine_init_cpu(&query_sequence, widths.data(), 0, &alloc, &refused) ==
+    verify(sz_overlap_engine_init_cpu(&query_sequence, widths.data(), 0, &heap.allocator, &refused) ==
            sz_unexpected_dimensions_k);
+    verify(heap.live_allocations == 0);
 
     // "aaaa" holds one distinct window at width one, so "ab" finds one in four; the other way finds all four.
     check_overlap_pair_("aaaa", "ab", 1, 0.25f);
@@ -394,8 +395,7 @@ void test_overlap_unit() {
  *  does a candidate narrower than the width; zero widths, a refused allocation and a stride under
  *  its own axis are reported without touching the outputs. */
 static void check_overlap_safety_(overlap_backend_t const &backend) {
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
+    handle_checked_heap_t heap;
     sz_memory_allocator_t refusing = refusing_allocator_();
     std::vector<std::string> const words = {"sitting", "kitten"};
     std::vector<std::string> const kitten = {"kitten"};
@@ -414,11 +414,11 @@ static void check_overlap_safety_(overlap_backend_t const &backend) {
     sz_sequence_t const kitten_sequence = sequence_from_(kitten);
     sz_sequence_t const words_sequence = sequence_from_(words);
     sz_overlap_engine_t engine {};
-    if (backend.init(&kitten_sequence, widths.data(), 0, &alloc, &engine) != sz_unexpected_dimensions_k)
+    if (backend.init(&kitten_sequence, widths.data(), 0, &heap.allocator, &engine) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted zero widths");
     if (backend.init(&kitten_sequence, widths.data(), widths.size(), &refusing, &engine) != sz_bad_alloc_k)
         fail_backend_(backend.name, "the engine did not report the refused allocation");
-    if (backend.init(&kitten_sequence, widths.data(), widths.size(), &alloc, &engine) != sz_success_k)
+    if (backend.init(&kitten_sequence, widths.data(), widths.size(), &heap.allocator, &engine) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
 
     sz_f32_t refused[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
@@ -431,6 +431,7 @@ static void check_overlap_safety_(overlap_backend_t const &backend) {
     for (sz_f32_t const untouched : refused)
         if (untouched != -1.0f) fail_backend_(backend.name, "a refused call still wrote a score");
     sz_overlap_engine_free(&engine);
+    verify(heap.live_allocations == 0);
 }
 
 /** Degenerate inputs for the window-overlap family, asserting survival and the stated refusals.
