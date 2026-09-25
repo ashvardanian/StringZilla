@@ -203,11 +203,11 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
 
     // Validate UTF-8 input only if requested
     if (validate) {
-        if (sz_utf8_find_malformed(haystack.start, haystack.length) != SZ_NULL_CHAR) {
+        if (sz_utf8_find_malformed(haystack.start, haystack.length) != STRINGZILLA_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Haystack is not valid UTF-8");
             return NULL;
         }
-        if (sz_utf8_find_malformed(needle.start, needle.length) != SZ_NULL_CHAR) {
+        if (sz_utf8_find_malformed(needle.start, needle.length) != STRINGZILLA_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Needle is not valid UTF-8");
             return NULL;
         }
@@ -297,11 +297,11 @@ PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_
 
     // Validate UTF-8 input only if requested
     if (validate) {
-        if (sz_utf8_find_malformed(a.start, a.length) != SZ_NULL_CHAR) {
+        if (sz_utf8_find_malformed(a.start, a.length) != STRINGZILLA_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "First argument is not valid UTF-8");
             return NULL;
         }
-        if (sz_utf8_find_malformed(b.start, b.length) != SZ_NULL_CHAR) {
+        if (sz_utf8_find_malformed(b.start, b.length) != STRINGZILLA_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Second argument is not valid UTF-8");
             return NULL;
         }

@@ -16,18 +16,18 @@
 extern "C" {
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-SZ_API_COMPTIME sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Lexicographic ordering needs the byte-reversed comparison of the first differing word,
     //! which has no cheap SIMD128 equivalent that beats the serial SWAR variant. Delegate.
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 16) return sz_equal_serial(a, b, length);
 
     // Per block we `xor` the inputs and test with `wasm_v128_any_true` (a single cheap reduction the
@@ -59,7 +59,7 @@ SZ_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t leng
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // SZ_USE_V128
+#endif // STRINGZILLA_TARGET_V128
 
 #ifdef __cplusplus
 }

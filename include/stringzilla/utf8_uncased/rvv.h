@@ -19,10 +19,10 @@ extern "C" {
 
 /*  The per-script fold and alarm strips are invoked through constant function pointers from the
  *  force-inlined driver; GCC 14 devirtualizes and inlines them and miscompiles the result, silently
- *  dropping matches, so they are @c SZ_HELPER_NOINLINE to keep their out-of-line shape. Toolchain
- *  artifact: -O1 still drops matches even out-of-line; -O0, -O2, and -O3 are byte-exact with
- *  serial, and StringZilla ships -O2 or -O3. */
-#if SZ_USE_RVV
+ *  dropping matches, so they are @c STRINGZILLA_HELPER_NOINLINE to keep their out-of-line shape.
+ *  Toolchain artifact: -O1 still drops matches even out-of-line; -O0, -O2, and -O3 are byte-exact
+ *  with serial, and StringZilla ships -O2 or -O3. */
+#if STRINGZILLA_TARGET_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -33,7 +33,7 @@ extern "C" {
 /*  Forward declaration: the substring dispatcher uses the invariance check, defined further below,
  *  to take the exact-search fast path for case-less needles, matching
  *  @ref sz_utf8_uncased_search_serial. */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length);
 
 /*  The RVV substring port mirrors the NEON architecture: a shared, force-inlined "scripted" driver
  *  walks the haystack in @c e8m8 strips; each per-script kernel supplies two callbacks: a
@@ -72,8 +72,9 @@ typedef long (*sz_utf8_uncased_alarm_strip_rvv_t)(sz_u8_t const *source_ptr, sz_
 
 /** ASCII: `c + ((c - 'A' <= 25) * 0x20)`. Pure ASCII never changes byte width, so this is also the
  *  Georgian-Mkhedruli fold, as Mkhedruli is caseless. */
-SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                              sz_u8_t *destination_ptr) {
+STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                       sz_size_t vector_length,
+                                                                       sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -87,9 +88,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *sou
 /** Western Europe: ASCII A-Z, Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' 0x97) +0x20, and
  *  the in-place ß → "ss" where both bytes of C3 9F become 's'. Length-changing folds are routed to
  *  the alarm instead. */
-SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                       sz_size_t vector_length,
-                                                                       sz_u8_t *destination_ptr) {
+STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                                sz_size_t vector_length,
+                                                                                sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -123,9 +124,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t c
 
 /** Central Europe: Latin-1 Supplement +0x20 (C3 80-9E, except '×' 0x97) and Latin Extended-A +1
  *  parity deltas from the C4/C5 LUTs. Irregulars ('İ', 'ŉ', 'Ŀ', 'Ÿ', 'ſ', …) are alarm-routed. */
-SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                       sz_size_t vector_length,
-                                                                       sz_u8_t *destination_ptr) {
+STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                                sz_size_t vector_length,
+                                                                                sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -169,8 +170,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t c
 /** Cyrillic: basic D0/D1. Second-byte offset by high nibble after a D0 lead (8 → +0x10, 9 → +0x20,
  *  A → −0x20) plus the masked D0 → D1 (+1) lead rewrite. Extended Cyrillic needles are banned at
  *  needle-analysis time. */
-SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                                 sz_u8_t *destination_ptr) {
+STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                          sz_size_t vector_length,
+                                                                          sz_u8_t *destination_ptr) {
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
@@ -239,8 +241,9 @@ static sz_u8_t const sz_utf8_uncased_greek_ce_table_rvv_[128] = {
  *  table, one indexed load over the delta window; the CE → CF lead promotion comes from the same
  *  table's promote window carried one lane back; final sigma 'ς' (CF 82) gets +1, and 'µ' (C2 B5) →
  *  'μ' (CE BC). Accented 'ΐ'/'ΰ', symbols, polytonic and archaic letters are alarm-routed. */
-SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                              sz_u8_t *destination_ptr) {
+STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                       sz_size_t vector_length,
+                                                                       sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -293,8 +296,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *sou
 /** Armenian: D4/D5/D6. Disjoint second-byte offsets (D4 B1-BF and D5 90-96 fold −0x10, D5 80-8F
  *  folds +0x30) plus the lead +1 rewrites D4 → D5 (next B1-BF) and D5 → D6 (next 90-96). The 'և'
  *  ligature is alarm-routed. */
-SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                                 sz_u8_t *destination_ptr) {
+STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                          sz_size_t vector_length,
+                                                                          sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -339,8 +343,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *
  *  Extended Additional (E1 B8-BB) even-third +1, all length-preserving, with expanding folds
  *  alarm-routed. Reuses the C4/C5/C6 delta LUTs from `utf8_uncased_fold/rvv.h`, masked to the +1
  *  bit of each entry. */
-SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                                   sz_u8_t *destination_ptr) {
+STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                            sz_size_t vector_length,
+                                                                            sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -409,27 +414,29 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const
  *  onto the lead and reports the first set. */
 #pragma region Per Script Alarm Strips
 
-SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_eq_byte_(vuint8m8_t bytes_u8m8, sz_u8_t value, sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint8m8_t sz_utf8_uncased_eq_byte_(vuint8m8_t bytes_u8m8, sz_u8_t value,
+                                                              sz_size_t vector_length) {
     return __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1,
                                    __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, value, vector_length), vector_length);
 }
 
-SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_in_range_byte_(vuint8m8_t bytes_u8m8, sz_u8_t start, sz_u8_t length,
-                                                           sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint8m8_t sz_utf8_uncased_in_range_byte_(vuint8m8_t bytes_u8m8, sz_u8_t start,
+                                                                    sz_u8_t length, sz_size_t vector_length) {
     vbool1_t in_range_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, start, vector_length), length,
                                                      vector_length);
     return __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1, in_range_b1, vector_length);
 }
 
-SZ_HELPER_INLINE long sz_utf8_uncased_alarm_to_lead_(vuint8m8_t danger_at_second_u8m8, sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE long sz_utf8_uncased_alarm_to_lead_(vuint8m8_t danger_at_second_u8m8,
+                                                              sz_size_t vector_length) {
     // Carry the second-byte flags back one lane onto the lead (the lower index), then report the first set
     // lane. The lead precedes its second byte, so this is a slide-down (`dst[i] = src[i+1]`).
     vuint8m8_t flag_at_lead_u8m8 = __riscv_vslide1down_vx_u8m8(danger_at_second_u8m8, 0, vector_length);
     return __riscv_vfirst_m_b1(__riscv_vmsne_vx_u8m8_b1(flag_at_lead_u8m8, 0, vector_length), vector_length);
 }
 
-SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                        sz_size_t vector_length) {
+STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                                 sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -476,8 +483,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_rvv_(sz_u8_t 
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                        sz_size_t vector_length) {
+STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                                 sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -522,7 +529,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_rvv_(sz_u8_t 
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
+STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                           sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -537,7 +545,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_rvv_(sz_u8_t const 
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
+STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                        sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -589,7 +598,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const *so
     return lead_danger < blanket_danger ? lead_danger : blanket_danger;
 }
 
-SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
+STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                           sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -608,8 +618,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_rvv_(sz_u8_t const 
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                    sz_size_t vector_length) {
+STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                             sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -667,7 +677,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t cons
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
+STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                           sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -702,8 +713,8 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const 
  *  pointer into a caller-provided buffer whose first @p length bytes are the data and the rest
  *  zero. The padding lets the fold and alarm strips read `source_ptr[vector_length]` for their
  *  @c next carry and keeps range compares safe-negative. */
-SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
-                                                                 sz_size_t buffer_capacity) {
+STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t source, sz_size_t length,
+                                                                          sz_u8_t *buffer, sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return buffer;
@@ -715,12 +726,12 @@ SZ_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t sourc
  *  serial danger-zone handler; clean strips are folded and probe-filtered, with each survivor
  *  re-folded, byte-compared against the needle window, and verified by
  *  @ref sz_utf8_uncased_verify_match_. */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
-    sz_utf8_uncased_fold_strip_rvv_t fold,                       //
-    sz_utf8_uncased_alarm_strip_rvv_t alarm,                     //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,    //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
+    sz_utf8_uncased_fold_strip_rvv_t fold,                                //
+    sz_utf8_uncased_alarm_strip_rvv_t alarm,                              //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+    sz_cptr_t needle, sz_size_t needle_length,                            //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,             //
     sz_size_t *matched_length) {
 
     sz_assert_(needle_metadata && "needle_metadata must be provided");
@@ -855,79 +866,79 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
         if (match) return match;
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 #pragma endregion Scripted Driver
 
 #pragma region Per Script Kernels
 
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,            //
-    sz_cptr_t needle, sz_size_t needle_length,                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
-                                                (sz_utf8_uncased_alarm_strip_rvv_t)SZ_NULL, haystack, haystack_length,
-                                                needle, needle_length, needle_metadata, matched_length);
-}
-
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_western_europe_( //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                     //
     sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
+    return sz_utf8_uncased_search_rvv_scripted_(
+        sz_utf8_uncased_fold_ascii_strip_rvv_, (sz_utf8_uncased_alarm_strip_rvv_t)STRINGZILLA_NULL, haystack,
+        haystack_length, needle, needle_length, needle_metadata, matched_length);
+}
+
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_western_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                              //
+    sz_cptr_t needle, sz_size_t needle_length,                                  //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(
         sz_utf8_uncased_fold_western_europe_strip_rvv_, sz_utf8_uncased_alarm_western_europe_strip_rvv_, haystack,
         haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_central_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                     //
-    sz_cptr_t needle, sz_size_t needle_length,                         //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_central_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                              //
+    sz_cptr_t needle, sz_size_t needle_length,                                  //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(
         sz_utf8_uncased_fold_central_europe_strip_rvv_, sz_utf8_uncased_alarm_central_europe_strip_rvv_, haystack,
         haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_cyrillic_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_cyrillic_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+    sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_cyrillic_strip_rvv_,
                                                 sz_utf8_uncased_alarm_cyrillic_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_greek_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,            //
-    sz_cptr_t needle, sz_size_t needle_length,                //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_greek_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_greek_strip_rvv_,
                                                 sz_utf8_uncased_alarm_greek_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_armenian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_armenian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+    sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_armenian_strip_rvv_,
                                                 sz_utf8_uncased_alarm_armenian_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_vietnamese_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                 //
-    sz_cptr_t needle, sz_size_t needle_length,                     //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_vietnamese_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                          //
+    sz_cptr_t needle, sz_size_t needle_length,                              //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_vietnamese_strip_rvv_,
                                                 sz_utf8_uncased_alarm_vietnamese_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+    sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     // Mkhedruli is caseless, so the fold is the bare ASCII fold; the alarm watches the historical scripts.
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
@@ -937,9 +948,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
 
 #pragma endregion Per Script Kernels
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
-    sz_cptr_t haystack, sz_size_t haystack_length,    //
-    sz_cptr_t needle, sz_size_t needle_length,        //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
+    sz_cptr_t haystack, sz_size_t haystack_length,             //
+    sz_cptr_t needle, sz_size_t needle_length,                 //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
 
     // Handle the obvious edge cases first.
@@ -951,7 +962,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
     // If the needle is entirely case-less, perform a direct (exact) substring search.
     int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
     int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
-    if (known_agnostic || (is_unknown && sz_utf8_find_cased_rvv(needle, needle_length) == SZ_NULL_CHAR)) {
+    if (known_agnostic || (is_unknown && sz_utf8_find_cased_rvv(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
         sz_cptr_t result = sz_find_rvv(haystack, haystack_length, needle, needle_length);
         *matched_length = result ? needle_length : 0;
         return result;
@@ -1008,7 +1019,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
  *  hit, always a lead since the scan starts on a codepoint boundary, is decoded and checked by the
  *  value-exact serial @ref sz_rune_is_uncased_. Caseless ASCII (digits, punctuation, control) is
  *  skipped a whole vector strip at a time. */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *cursor = (sz_u8_t const *)str;
     sz_u8_t const *end = cursor + length;
     while (cursor < end) {
@@ -1047,11 +1058,11 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length
         if (sz_rune_is_uncased_(rune) == sz_false_k) return (sz_cptr_t)cursor;
         cursor += rune_length;
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                        sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                                 sz_size_t b_length) {
     return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
 }
 
@@ -1060,7 +1071,7 @@ SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_rvv(sz_cptr_t a, sz_size_t a
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_RVV
+#endif // STRINGZILLA_TARGET_RVV
 
 #ifdef __cplusplus
 }

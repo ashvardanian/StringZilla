@@ -15,13 +15,13 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /** Peels the tile's first @p emit_count matches with a @c __lasx_xvperm_w left-pack, 4 lanes per
  *  sub-block. Each sub-block gathers its set `(position + lane, length)` pairs to the front, with
  *  the same dword-index table as @ref sz_utf8_iterate_peel_haswell_, and element-stores
  *  `min(popcount, remaining)` at the advancing cursor. */
-SZ_HELPER_INLINE void sz_utf8_iterate_peel_lasx_(                              //
+STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_lasx_(                     //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -69,9 +69,9 @@ SZ_HELPER_INLINE void sz_utf8_iterate_peel_lasx_(                              /
     }
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_lasx(        //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_lasx( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -141,9 +141,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_newlines_lasx(        //
     return count;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_lasx(     //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_lasx( //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,      //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -225,7 +225,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_lasx(     //
 }
 
 #pragma endregion Multistep newline and whitespace iteration
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

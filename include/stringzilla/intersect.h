@@ -31,8 +31,8 @@ extern "C" {
  *  between throughput and memory usage. The higher the budget, the more memory is used, but the
  *  fewer collisions will be observed.
  */
-#if !defined(SZ_SEQUENCE_INTERSECT_BUDGET)
-#define SZ_SEQUENCE_INTERSECT_BUDGET (1)
+#if !defined(STRINGZILLA_SEQUENCE_INTERSECT_BUDGET)
+#define STRINGZILLA_SEQUENCE_INTERSECT_BUDGET (1)
 #endif
 
 #pragma region Core API
@@ -42,9 +42,9 @@ extern "C" {
  *
  *  Outputs the @p first_positions from the @p first_sequence and @p second_positions from the
  *  @p second_sequence, that contain matched strings. Missing matches are represented as
- *  @c SZ_SIZE_MAX. Tolerates duplicate strings within either sequence: each distinct shared value
- *  is emitted exactly once, a distinct-set intersection, so @p intersection_size never exceeds the
- *  smaller of the two sequence counts and can't overflow the output arrays.
+ *  @c STRINGZILLA_SIZE_MAX. Tolerates duplicate strings within either sequence: each distinct
+ *  shared value is emitted exactly once, a distinct-set intersection, so @p intersection_size never
+ *  exceeds the smaller of the two sequence counts and can't overflow the output arrays.
  *
  *  @param[in] first_sequence First immutable sequence of strings to intersect.
  *  @param[in] second_sequence Second immutable sequence of strings to intersect.
@@ -79,13 +79,13 @@ extern "C" {
  *  @note The algorithm has linear memory complexity and linear time complexity.
  *  @see SQL joins: https://en.wikipedia.org/wiki/Join_(SQL)
  *
- *  @note Picks the fastest implementation at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Picks the fastest implementation at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_sequence_intersect_serial, sz_sequence_intersect_icelake, sz_sequence_intersect_sve
  */
-SZ_API_RUNTIME sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence,
-                                                 sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
-                                                 sz_u64_t seed, sz_size_t *intersection_size,
-                                                 sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+STRINGZILLA_API_RUNTIME sz_status_t sz_sequence_intersect(
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
+    sz_u64_t seed, sz_size_t *intersection_size, sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
 /**
  *  @brief Defines various JOIN semantics for string sequences, including handling of duplicates.
@@ -247,25 +247,25 @@ typedef enum {
 } sz_sequence_join_semantics_t;
 
 /** @copydoc sz_sequence_intersect */
-SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                      //
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_serial(             //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_sequence_intersect */
-SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                     //
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(            //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_sequence_intersect */
-SZ_API_COMPTIME sz_status_t sz_sequence_intersect_sve(                         //
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_sve(                //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
@@ -278,21 +278,20 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_sve(                         /
 #include "stringzilla/intersect/icelake.h"
 #include "stringzilla/intersect/sve.h"
 
-/*  Pick the right implementation for the string search algorithms.
- *  To override this behavior and precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
+/*  Pick the right implementation for the string search algorithms. To override this behavior and
+ *  precompile all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence,
-                                                 sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
-                                                 sz_u64_t seed, sz_size_t *intersection_size,
-                                                 sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_status_t sz_sequence_intersect(
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
+    sz_u64_t seed, sz_size_t *intersection_size, sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_sequence_intersect_icelake( //
         first_sequence, second_sequence,  //
         alloc, seed, intersection_size,   //
         first_positions, second_positions);
-#elif SZ_USE_SVE
+#elif STRINGZILLA_TARGET_SVE
     return sz_sequence_intersect_sve(    //
         first_sequence, second_sequence, //
         alloc, seed, intersection_size,  //
@@ -305,7 +304,7 @@ SZ_API_RUNTIME sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequ
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 #pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus

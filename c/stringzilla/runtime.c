@@ -4,13 +4,13 @@
  *  @date January 16, 2024
  *  @brief StringZilla C library with dynamic dispatch to the most appropriate implementation.
  *
- *  This translation unit owns only the cross-cutting glue: the shared
- *  @c sz_dispatch_cpu_table definition, its one-time initialization, the version &
- *  capabilities exports, and the device and allocator constructors a binding reaches a GPU
- *  engine through. The per-domain backends and @c SZ_API_RUNTIME wrappers live in sibling
- *  translation units: `compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`,
- *  `utf8_runes.c`, `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`,
- *  `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`, and `utf8_uncased.c`.
+ *  This translation unit owns only the cross-cutting glue: the shared @c sz_dispatch_cpu_table
+ *  definition, its one-time initialization, the version & capabilities exports, and the device and
+ *  allocator constructors a binding reaches a GPU engine through. The per-domain backends and
+ *  @c STRINGZILLA_API_RUNTIME wrappers live in sibling translation units: `compare.c`, `memory.c`,
+ *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`, `utf8_tokens.c`,
+ *  `utf8_wordbreaks.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`,
+ *  `utf8_uncased_fold.c`, and `utf8_uncased.c`.
  */
 #if defined(_WIN32)
 #include <windows.h> // `DllMain`
@@ -21,7 +21,7 @@
 
 #include "dispatch.h"
 
-#if SZ_AVOID_LIBC
+#if !STRINGZILLA_WITH_LIBC
 #ifdef _MSC_VER
 typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
 #else
@@ -30,13 +30,13 @@ typedef __SIZE_TYPE__ size_t; // For GCC/Clang
 #endif
 
 #if defined(_MSC_VER)
-__declspec(align(64)) SZ_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_cpu_table;
+__declspec(align(64)) STRINGZILLA_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_cpu_table;
 #else
-__attribute__((aligned(64))) SZ_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_cpu_table;
+__attribute__((aligned(64))) STRINGZILLA_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_cpu_table;
 #endif
 
 /*  The device table needs no alignment pragma: it is read once per round rather than per verb. */
-SZ_DISPATCH_INTERNAL sz_implementations_gpu_t sz_dispatch_gpu_table;
+STRINGZILLA_DISPATCH_INTERNAL sz_implementations_gpu_t sz_dispatch_gpu_table;
 
 static void sz_dispatch_cpu_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_compare_update_(caps);
@@ -62,12 +62,12 @@ static void sz_dispatch_cpu_table_update_implementation_(sz_capability_t caps) {
 
 /** Initializes a global static "virtual table" of supported backends. Run it just once to avoid
  *  unnecessary @c if checks. */
-SZ_API_RUNTIME void sz_dispatch_cpu_table_init(void) {
+STRINGZILLA_API_RUNTIME void sz_dispatch_cpu_table_init(void) {
     sz_capability_t caps = sz_capabilities();
     sz_dispatch_cpu_table_update_implementation_(caps);
 }
 
-SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) {
+STRINGZILLA_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) {
     sz_dispatch_cpu_table_update_implementation_(caps);
 }
 
@@ -77,7 +77,7 @@ SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) {
  *  Called by the engines' @c _init_gpu rather than from the startup constructor, so a process that
  *  only ever scores on the host never initializes a driver it does not use.
  */
-SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void) {
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void) {
     sz_dispatch_levenshtein_gpu_update_();
     sz_dispatch_overlap_gpu_update_();
     sz_dispatch_substrings_gpu_update_();
@@ -111,7 +111,7 @@ BOOL WINAPI DllMain(HINSTANCE instance_handle, DWORD reason, LPVOID reserved_poi
 }
 
 /*  Called when the DLL is loaded, and there is no CRT code. */
-#if SZ_AVOID_LIBC
+#if !STRINGZILLA_WITH_LIBC
 BOOL WINAPI _DllMainCRTStartup(HINSTANCE instance_handle, DWORD reason, LPVOID reserved_pointer) {
     DllMain(instance_handle, reason, reserved_pointer);
     return TRUE;
@@ -124,16 +124,20 @@ __attribute__((constructor)) static void sz_dispatch_cpu_table_init_on_gcc_or_cl
 }
 #endif
 
-SZ_API_RUNTIME int sz_dynamic_dispatch(void) { return 1; }
-SZ_API_RUNTIME int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-SZ_API_RUNTIME int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-SZ_API_RUNTIME int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
-SZ_API_RUNTIME sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
-SZ_API_RUNTIME sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
-SZ_API_RUNTIME sz_capability_t sz_capabilities(void) {
+STRINGZILLA_API_RUNTIME int sz_dynamic_dispatch(void) { return 1; }
+STRINGZILLA_API_RUNTIME int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+STRINGZILLA_API_RUNTIME int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+STRINGZILLA_API_RUNTIME int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities_comptime(void) {
+    return sz_capabilities_comptime_implementation_();
+}
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities_runtime(void) {
+    return sz_capabilities_runtime_implementation_();
+}
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities(void) {
     return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 }
-SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     // The one place that must own storage, because the signature returns a string it does not receive.
     static char names[256];
     sz_capabilities_to_string_implementation_(caps, names, sizeof(names));
@@ -144,38 +148,43 @@ SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
  *  exports call. */
 #pragma region Devices
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
-SZ_API_RUNTIME sz_status_t sz_cuda_device_init(int ordinal, sz_cuda_device_t *device) {
+STRINGZILLA_API_RUNTIME sz_status_t sz_cuda_device_init(int ordinal, sz_cuda_device_t *device) {
     return sz_cuda_device_init_implementation_(ordinal, device);
 }
 
-SZ_API_RUNTIME void sz_cuda_device_free(sz_cuda_device_t *device) { sz_cuda_device_free_implementation_(device); }
+STRINGZILLA_API_RUNTIME void sz_cuda_device_free(sz_cuda_device_t *device) {
+    sz_cuda_device_free_implementation_(device);
+}
 
-SZ_API_RUNTIME sz_bool_t sz_memory_reaches_device(void const *pointer) {
+STRINGZILLA_API_RUNTIME sz_bool_t sz_memory_reaches_device(void const *pointer) {
     return sz_memory_reaches_device_implementation_(pointer);
 }
 
-SZ_API_RUNTIME void sz_memory_allocator_init_unified(sz_memory_allocator_t *allocator, sz_cuda_device_t *device) {
+STRINGZILLA_API_RUNTIME void sz_memory_allocator_init_unified(sz_memory_allocator_t *allocator,
+                                                              sz_cuda_device_t *device) {
     sz_memory_allocator_init_unified_implementation_(allocator, device);
 }
 
-SZ_API_RUNTIME void sz_memory_allocator_init_device(sz_memory_allocator_t *allocator, sz_cuda_device_t *device) {
+STRINGZILLA_API_RUNTIME void sz_memory_allocator_init_device(sz_memory_allocator_t *allocator,
+                                                             sz_cuda_device_t *device) {
     sz_memory_allocator_init_device_implementation_(allocator, device);
 }
 
-SZ_API_RUNTIME void sz_memory_allocator_init_pinned(sz_memory_allocator_t *allocator, sz_cuda_device_t *device) {
+STRINGZILLA_API_RUNTIME void sz_memory_allocator_init_pinned(sz_memory_allocator_t *allocator,
+                                                             sz_cuda_device_t *device) {
     sz_memory_allocator_init_pinned_implementation_(allocator, device);
 }
 
 /*  The accessors' addresses are link-time device values, readable only by a device compilation. */
 #ifdef __CUDACC__
-SZ_API_RUNTIME sz_status_t sz_sequence_from_string_views_cuda(sz_string_view_t const *views, sz_size_t count,
-                                                              sz_sequence_t *sequence) {
+STRINGZILLA_API_RUNTIME sz_status_t sz_sequence_from_string_views_cuda(sz_string_view_t const *views, sz_size_t count,
+                                                                       sz_sequence_t *sequence) {
     return sz_sequence_from_string_views_cuda_implementation_(views, count, sequence);
 }
 #endif
 
-#endif // SZ_USE_CUDA
+#endif // STRINGZILLA_TARGET_CUDA
 
 #pragma endregion Devices

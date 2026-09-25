@@ -3,7 +3,7 @@
 
 package sz
 
-// #cgo CFLAGS: -O3 -I../include -DSZ_DYNAMIC_DISPATCH=1
+// #cgo CFLAGS: -O3 -I../include -DSTRINGZILLA_RUNTIME_DISPATCH=1
 // #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_golang -L../build_release -L../build_shared -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo nocallback sz_find
@@ -29,7 +29,7 @@ package sz
 // #cgo nocallback sz_utf8_count
 // #cgo noescape sz_utf8_norm
 // #cgo nocallback sz_utf8_norm
-// #define SZ_DYNAMIC_DISPATCH 1
+// #define STRINGZILLA_RUNTIME_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
 import (

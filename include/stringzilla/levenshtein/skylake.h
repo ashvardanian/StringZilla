@@ -22,8 +22,8 @@ extern "C" {
 #endif
 
 #pragma region Skylake Implementation
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,bmi,evex512"))), apply_to = function)
 #elif defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx,avx512f,bmi"))), apply_to = function)
@@ -51,9 +51,9 @@ typedef struct sz_levenshtein_u64x8_vertical_skylake_t {
 
 /** Starts eight candidates: the scores at the query's length, and @p words verticals at
  *  the top boundary. */
-SZ_API_COMPTIME void sz_levenshtein_u64x8_init_skylake(sz_levenshtein_u64x8_state_skylake_t *state,
-                                                       sz_levenshtein_u64x8_vertical_skylake_t *verticals,
-                                                       sz_size_t words, sz_levenshtein_query_t const *query) {
+STRINGZILLA_API_COMPTIME void sz_levenshtein_u64x8_init_skylake(sz_levenshtein_u64x8_state_skylake_t *state,
+                                                                sz_levenshtein_u64x8_vertical_skylake_t *verticals,
+                                                                sz_size_t words, sz_levenshtein_query_t const *query) {
     state->scores_vec.zmm = _mm512_set1_epi64((long long)query->length);
     for (sz_size_t word = 0; word != words; ++word) {
         verticals[word].positive_vec.zmm = _mm512_set1_epi64(-1);
@@ -62,14 +62,14 @@ SZ_API_COMPTIME void sz_levenshtein_u64x8_init_skylake(sz_levenshtein_u64x8_stat
 }
 
 /** Eight byte-wide class ids, as the byte transpose emits them, widened to gather indices. */
-SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u8_skylake(sz_u8_t const *classes) {
+STRINGZILLA_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u8_skylake(sz_u8_t const *classes) {
     sz_u512_vec_t classes_vec;
     classes_vec.zmm = _mm512_cvtepu8_epi64(_mm_loadl_epi64((__m128i const *)classes));
     return classes_vec;
 }
 
 /** Eight four-byte class ids, as the UTF-8 transpose emits them, widened to gather indices. */
-SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u32_skylake(sz_u32_t const *classes) {
+STRINGZILLA_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u32_skylake(sz_u32_t const *classes) {
     sz_u512_vec_t classes_vec;
     classes_vec.zmm = _mm512_cvtepu32_epi64(_mm256_loadu_si256((__m256i const *)classes));
     return classes_vec;
@@ -78,10 +78,10 @@ SZ_API_COMPTIME sz_u512_vec_t sz_levenshtein_u64x8_classes_u32_skylake(sz_u32_t 
 /** Advances eight candidates one symbol through exactly @p words verticals; the score moves on the
  *  last word. A candidate past its text keeps stepping whatever class the transpose emits; its
  *  score is read where its text ends. */
-SZ_API_COMPTIME void sz_levenshtein_u64x8_step_skylake(sz_levenshtein_u64x8_state_skylake_t *state,
-                                                       sz_levenshtein_u64x8_vertical_skylake_t *verticals,
-                                                       sz_size_t words, sz_levenshtein_query_t const *query,
-                                                       sz_u512_vec_t classes_vec) {
+STRINGZILLA_API_COMPTIME void sz_levenshtein_u64x8_step_skylake(sz_levenshtein_u64x8_state_skylake_t *state,
+                                                                sz_levenshtein_u64x8_vertical_skylake_t *verticals,
+                                                                sz_size_t words, sz_levenshtein_query_t const *query,
+                                                                sz_u512_vec_t classes_vec) {
     enum { ternary_xor_or_k = 0xBE, ternary_or_nor_k = 0xF1 };
     sz_u512_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec, rows_vec;
     last_symbol_bit_vec.zmm = _mm512_set1_epi64((long long)sz_levenshtein_last_symbol_bit_(query->length));
@@ -128,10 +128,10 @@ SZ_API_COMPTIME void sz_levenshtein_u64x8_step_skylake(sz_levenshtein_u64x8_stat
 
 /** Whether any of the eight candidates can still come under @p radius at @p position: a score
  *  falls by at most one per remaining symbol. Monotone, so once false it stays false;
- *  @c SZ_SSIZE_MAX bounds nothing. */
-SZ_API_COMPTIME sz_bool_t sz_levenshtein_u64x8_any_active_skylake(sz_levenshtein_u64x8_state_skylake_t const *state,
-                                                                  sz_u512_vec_t symbol_counts_vec, sz_size_t position,
-                                                                  sz_ssize_t radius) {
+ *  @c STRINGZILLA_SSIZE_MAX bounds nothing. */
+STRINGZILLA_API_COMPTIME sz_bool_t sz_levenshtein_u64x8_any_active_skylake(
+    sz_levenshtein_u64x8_state_skylake_t const *state, sz_u512_vec_t symbol_counts_vec, sz_size_t position,
+    sz_ssize_t radius) {
     sz_u512_vec_t position_vec, floor_vec;
     position_vec.zmm = _mm512_set1_epi64((long long)position);
     floor_vec.zmm = _mm512_sub_epi64(_mm512_add_epi64(state->scores_vec.zmm, position_vec.zmm), symbol_counts_vec.zmm);
@@ -141,19 +141,18 @@ SZ_API_COMPTIME sz_bool_t sz_levenshtein_u64x8_any_active_skylake(sz_levenshtein
 }
 
 /** The running score of candidate @p candidate, read at the position where its text ends. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x8_score_skylake(sz_levenshtein_u64x8_state_skylake_t const *state,
-                                                             sz_size_t candidate) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_levenshtein_u64x8_score_skylake(sz_levenshtein_u64x8_state_skylake_t const *state,
+                                                                      sz_size_t candidate) {
     return state->scores_vec.u64s[candidate];
 }
 
 /** The byte transpose for eight candidates: eight positions per eight loads and three rounds of
  *  unpacks while every candidate has eight bytes left, one byte at a time after that; emits the
  *  @c sz_u8_t class of every byte. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x8_transpose_skylake(sz_levenshtein_query_t const *query,
-                                                                sz_cptr_t const *texts, sz_u64_t const *byte_counts,
-                                                                sz_size_t candidates, sz_size_t *cursors,
-                                                                sz_u64_t *symbol_counts, sz_size_t transpose_start,
-                                                                sz_size_t positions, void *transpose_classes) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_levenshtein_u8x8_transpose_skylake(
+    sz_levenshtein_query_t const *query, sz_cptr_t const *texts, sz_u64_t const *byte_counts, sz_size_t candidates,
+    sz_size_t *cursors, sz_u64_t *symbol_counts, sz_size_t transpose_start, sz_size_t positions,
+    void *transpose_classes) {
     sz_unused_(symbol_counts), sz_unused_(transpose_start), sz_unused_(candidates);
     sz_u8_t const *const byte_to_class = query->byte_to_class;
     sz_u8_t *const classes = (sz_u8_t *)transpose_classes;
@@ -203,13 +202,13 @@ enum {
 /** Sweeps eight candidates through every transpose; @p words is a constant, keeping short queries'
  *  verticals in registers. A candidate's score is read where its text ends; @p symbol_counts seeds
  *  as byte counts, refined by the transpose. */
-SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t const *shared_query,
-                                                          sz_cptr_t const *texts, sz_u64_t const *byte_counts,
-                                                          sz_u64_t *symbol_counts, sz_size_t sweep_count,
-                                                          sz_levenshtein_transpose_t transpose,
-                                                          sz_levenshtein_classes_width_t width,
-                                                          sz_levenshtein_u64x8_vertical_skylake_t *verticals,
-                                                          sz_size_t words, sz_size_t *distances) {
+STRINGZILLA_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t const *shared_query,
+                                                                   sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                                   sz_u64_t *symbol_counts, sz_size_t sweep_count,
+                                                                   sz_levenshtein_transpose_t transpose,
+                                                                   sz_levenshtein_classes_width_t width,
+                                                                   sz_levenshtein_u64x8_vertical_skylake_t *verticals,
+                                                                   sz_size_t words, sz_size_t *distances) {
     enum { candidates_per_position_k = 8, positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k };
     // A local copy: nothing stored through the verticals can alias it, so the step keeps its fields in registers.
     sz_levenshtein_query_t const local_query = *shared_query;
@@ -258,7 +257,7 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t
 
 /** Streams every candidate through a prepared @p query, eight at a time, with @p transpose emitting
  *  their classes at @p width; @p verticals holds enough for a runtime word count. */
-SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
+STRINGZILLA_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
     sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x8_vertical_skylake_t *verticals, sz_size_t *distances) {
     enum { candidates_per_position_k = 8 };
@@ -286,9 +285,10 @@ SZ_HELPER_INLINE void sz_levenshtein_skylake_u64x8_distances_(
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engine_t *engine,
-                                                             sz_sequence_t const *candidates, sz_size_t *distances,
-                                                             sz_size_t distances_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engine_t *engine,
+                                                                      sz_sequence_t const *candidates,
+                                                                      sz_size_t *distances,
+                                                                      sz_size_t distances_stride) {
     enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_bool_t const over_bytes = engine->symbol == sz_levenshtein_bytes_k ? sz_true_k : sz_false_k;
@@ -320,7 +320,7 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engi
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 #pragma endregion Skylake Implementation
 
 #ifdef __cplusplus

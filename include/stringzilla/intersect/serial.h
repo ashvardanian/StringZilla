@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                           //
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                  //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
@@ -53,16 +53,17 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                       
     // Allocate memory for the hash table and initialize it with 0xFF.
     // The higher is the `hash_table_slots` multiple - the more memory we will use,
     // but the less likely the collisions will be.
-    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) * (1u << SZ_SEQUENCE_INTERSECT_BUDGET);
+    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) *
+                                       (1u << STRINGZILLA_SEQUENCE_INTERSECT_BUDGET);
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
     sz_size_t *const table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc->handle);
     if (!table_positions) return sz_bad_alloc_k;
     sz_u64_t *const table_hashes = (sz_u64_t *)(table_positions + hash_table_slots);
     sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
     // Empty-slot sentinel for the 64-bit `table_hashes`: the `0xFF` fill makes every slot all-ones.
-    // It must be a 64-bit constant, not `SZ_SIZE_MAX` - on 32-bit targets (e.g. wasm32) `sz_size_t`
-    // is 32-bit, so `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill, and the probe loop
-    // would never terminate.
+    // It must be a 64-bit constant, not `STRINGZILLA_SIZE_MAX` - on 32-bit targets (e.g. wasm32)
+    // `sz_size_t` is 32-bit, so `STRINGZILLA_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill,
+    // and the probe loop would never terminate.
     sz_u64_t const empty_slot = ~(sz_u64_t)0;
     // The top bit of a stored position marks a slot whose (distinct) value has already produced a pair,
     // so duplicate keys on either sequence don't emit again, keeping the result a set whose size never

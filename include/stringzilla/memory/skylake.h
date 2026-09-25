@@ -16,8 +16,8 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
 #elif defined(__clang__)
@@ -27,7 +27,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #endif
 
-SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     __m512i value_u8x64 = _mm512_set1_epi8(value);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores".
@@ -57,7 +57,7 @@ SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t 
     }
 }
 
-SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
     //
@@ -138,7 +138,7 @@ SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
     }
 }
 
-SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target == source) return; // Don't be silly, don't move the data if it's already there.
 
     // On very short buffers, that are one cache line in width or less, we don't need any loops.
@@ -248,7 +248,7 @@ SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #ifdef __cplusplus
 }

@@ -19,7 +19,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
@@ -47,8 +47,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -126,7 +125,7 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
     }
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     {
         auto callable_map =
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_skylake>>>(env);
@@ -140,7 +139,7 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
     }
 
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {
         auto callable_map =
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_haswell>>>(env);
@@ -150,7 +149,7 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
 #endif
     // There is no AVX2 hasher, so the fastest x86 pairing mixes a Westmere hash with a Haswell comparator -
     // and needs both guards, as either family can be compiled out on its own.
-#if SZ_USE_WESTMERE && SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_WESTMERE && STRINGZILLA_TARGET_HASWELL
     {
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<
             std::string_view, unsigned, hash_from_sz<sz_hash_westmere>, equal_to_from_sz<sz_equal_haswell>>>(env);
@@ -159,9 +158,10 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             .log(base_umap);
     }
 #endif
-    // The comparator and the hasher come from different families, so they carry different guards - one block
-    // under `SZ_USE_NEONAES` would drop the ordered map on a NEON target that ships no crypto extension.
-#if SZ_USE_NEON
+    // The comparator and the hasher come from different families, so they carry different guards -
+    // one block under `STRINGZILLA_TARGET_NEONAES` would drop the ordered map on a NEON target that
+    // ships no crypto extension.
+#if STRINGZILLA_TARGET_NEON
     {
         auto callable_map =
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_neon>>>(env);
@@ -169,7 +169,7 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             .log(base_map);
     }
 #endif
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
     {
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<
             std::string_view, unsigned, hash_from_sz<sz_hash_neonaes>, equal_to_from_sz<sz_equal_neon>>>(env);
@@ -259,8 +259,8 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

@@ -32,7 +32,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
@@ -54,8 +54,7 @@
  */
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -99,38 +98,38 @@ void bench_utf8_norm(environment_t const &env) {
     auto validator = utf8_norm_from_sz<sz_utf8_norm_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_norm_serial", validator).log();
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_norm_icelake", validator, utf8_norm_from_sz<sz_utf8_norm_icelake> {env}).log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_utf8_norm_skylake", validator, utf8_norm_from_sz<sz_utf8_norm_skylake> {env}).log(base);
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_norm_haswell", validator, utf8_norm_from_sz<sz_utf8_norm_haswell> {env}).log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_norm_neon", validator, utf8_norm_from_sz<sz_utf8_norm_neon> {env}).log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_norm_sve2", validator, utf8_norm_from_sz<sz_utf8_norm_sve2> {env}).log(base);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_utf8_norm_sve", validator, utf8_norm_from_sz<sz_utf8_norm_sve> {env}).log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_norm_rvv", validator, utf8_norm_from_sz<sz_utf8_norm_rvv> {env}).log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_norm_lasx", validator, utf8_norm_from_sz<sz_utf8_norm_lasx> {env}).log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_norm_powervsx", validator, utf8_norm_from_sz<sz_utf8_norm_powervsx> {env}).log(base);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_utf8_norm_v128relaxed", validator, utf8_norm_from_sz<sz_utf8_norm_v128relaxed> {env})
         .log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_norm_v128", validator, utf8_norm_from_sz<sz_utf8_norm_v128> {env}).log(base);
 #endif
 }
@@ -167,57 +166,57 @@ void bench_utf8_find_denormalized(environment_t const &env) {
     auto validator = utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_find_denormalized_serial", validator).log();
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_find_denormalized_icelake", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_utf8_find_denormalized_skylake", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_skylake> {env})
         .log(base);
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_find_denormalized_haswell", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_find_denormalized_neon", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_neon> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_find_denormalized_sve2", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_sve2> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_utf8_find_denormalized_sve", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_sve> {env})
         .log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_find_denormalized_rvv", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_rvv> {env})
         .log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_find_denormalized_lasx", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_lasx> {env})
         .log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_find_denormalized_powervsx", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_powervsx> {env})
         .log(base);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_utf8_find_denormalized_v128relaxed", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_v128relaxed> {env})
         .log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_find_denormalized_v128", validator,
                 utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_v128> {env})
         .log(base);
@@ -228,8 +227,8 @@ void bench_utf8_find_denormalized(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla UTF-8 Normalization Benchmarks!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

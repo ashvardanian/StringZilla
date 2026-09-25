@@ -26,7 +26,7 @@ extern "C" {
  *  run a strip at @c e8m8. The three `sz_utf8_fold_latin_c{4,5,6}_deltas_rvv_` names alias the
  *  matching 64-byte windows so the @c utf8_uncased strips can keep loading a single family with one
  *  @c vle8. */
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -56,7 +56,7 @@ static sz_u8_t const *const sz_utf8_fold_latin_c6_deltas_rvv_ = sz_utf8_fold_lat
 
 /*  Case-fold a strip of ASCII bytes: `c + ((c - 'A' <= 25) * 0x20)`, the vector form of
  *  @c sz_ascii_fold_. Only `[0x41, 0x5A]` shifts by `+0x20`; other lanes pass through unchanged. */
-SZ_HELPER_INLINE vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_size_t vector_length) {
     vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
                                                      vector_length);
     vuint8m8_t lowered_u8m8 = __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length);
@@ -67,8 +67,8 @@ SZ_HELPER_INLINE vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_s
  *  final strip (`vector_length == remaining`) the whole input ends here, so nothing is trimmed;
  *  otherwise a last codepoint whose declared length runs past @c vector_length is excluded and
  *  reprocessed in the next strip. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                         sz_size_t remaining) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                                  sz_size_t remaining) {
     if (vector_length >= remaining) return vector_length;
     sz_size_t boundary = vector_length;
     while (boundary && (source_ptr[boundary - 1] & 0xC0) == 0x80) --boundary; // back up to the last lead
@@ -91,8 +91,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_p
  *  with the indices, which would pin a gather-based form to @c e8m4. Sets `*needs_serial` when it
  *  stopped on a non-handled codepoint (vs. merely trimming a trailing incomplete sequence). Returns
  *  the number of bytes folded and written. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                         sz_u8_t *destination_ptr, int *needs_serial) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                                  sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
@@ -196,8 +196,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_p
  *  Runs at @c e8m8: the offset table is read from memory, so it need not share a register group
  *  with the indices the way a @c vrgather would, which avoids the @c e8m4 ceiling. Same
  *  stop-and-serial contract as @c sz_utf8_fold_latin_strip_rvv_. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                            sz_u8_t *destination_ptr, int *needs_serial) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                                     sz_u8_t *destination_ptr, int *needs_serial) {
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -264,8 +264,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *sourc
  *  folds to 'σ' (+1). Accented uppercase (CE 84-90), the expanding 'ΰ' (CE B0), the CF 8F+ symbols,
  *  and any non-CE/CF lead are stops routed to serial. Same @c e8m8 strip / stop-and-serial contract
  *  as the other handlers. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                         sz_u8_t *destination_ptr, int *needs_serial) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                                  sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
@@ -349,8 +349,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_p
  *  (next B1-BF) and D5 → D6 (next 90-96). The 'և' ligature (D6 87, expands), the D4
  *  Cyrillic-Supplement range (next < B1), and any non-D4/D5/D6 lead are stops routed to serial.
  *  Same @c e8m8 strip / stop-and-serial contract. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                            sz_u8_t *destination_ptr, int *needs_serial) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                                     sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
@@ -431,8 +431,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *sourc
  *  the third-byte offset: lead E1 → E2, second 82/83 → B4, third -0x20 (E1 82) or +0x20 (E1 83).
  *  Non-Georgian E1 second bytes and any non-E1 lead are stops routed to serial. Same @c e8m8 strip
  *  / stop-and-serial contract. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                            sz_u8_t *destination_ptr, int *needs_serial) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                                     sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t carry1 = (vector_length < remaining) ? source_ptr[vector_length] : 0;
@@ -523,7 +523,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *sourc
  *  fold is handled by the value-exact serial decode/fold/encode for that one codepoint before
  *  re-entering the vector path. These folds are 1:1 in length, so the destination tracks the source
  *  for those runs. */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_length,
+                                                            sz_ptr_t destination) {
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
     sz_u8_t *destination_ptr = (sz_u8_t *)destination;
@@ -587,7 +588,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t s
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_RVV
+#endif // STRINGZILLA_TARGET_RVV
 
 #ifdef __cplusplus
 }

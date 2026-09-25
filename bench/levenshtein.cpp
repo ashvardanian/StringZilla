@@ -36,7 +36,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
@@ -60,8 +60,7 @@
 
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_*`
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -218,19 +217,19 @@ void bench_levenshtein_cross_product(environment_t const &env, std::size_t query
     auto validator = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {env, query_bytes, candidates,
                                                                                      sz_levenshtein_bytes_k};
     bench_result_t base = bench_unary(env, "sz_levenshtein_distances_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_levenshtein_distances_haswell" + suffix, validator,
                 levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {env, query_bytes, candidates,
                                                                                  sz_levenshtein_bytes_k})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_levenshtein_distances_skylake" + suffix, validator,
                 levenshtein_distances_from_sz<sz_levenshtein_distances_skylake> {env, query_bytes, candidates,
                                                                                  sz_levenshtein_bytes_k})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_levenshtein_distances_icelake" + suffix, validator,
                 levenshtein_distances_from_sz<sz_levenshtein_distances_icelake> {env, query_bytes, candidates,
                                                                                  sz_levenshtein_bytes_k})
@@ -241,13 +240,13 @@ void bench_levenshtein_cross_product(environment_t const &env, std::size_t query
                                                                                           sz_levenshtein_runes_k};
     bench_result_t base_utf8 =
         bench_unary(env, "sz_levenshtein_distances_serial:utf8" + suffix, validator_utf8).log(base);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_levenshtein_distances_haswell:utf8" + suffix, validator_utf8,
                 levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {env, query_bytes, candidates,
                                                                                  sz_levenshtein_runes_k})
         .log(base_utf8);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_levenshtein_distances_skylake:utf8" + suffix, validator_utf8,
                 levenshtein_distances_from_sz<sz_levenshtein_distances_skylake> {env, query_bytes, candidates,
                                                                                  sz_levenshtein_runes_k})
@@ -363,7 +362,7 @@ struct levenshtein_step_from_serial {
     }
 };
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 
 /** The serial step's eight lanes, four per YMM, so the two arms answer the same scores. */
 struct levenshtein_step_from_haswell {
@@ -424,7 +423,7 @@ struct levenshtein_step_from_haswell {
 
 #endif
 
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
 
 /** The serial step's eight lanes, eight per ZMM, so the two arms answer the same scores. */
 struct levenshtein_step_from_skylake {
@@ -479,7 +478,7 @@ struct levenshtein_step_from_skylake {
 
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 
 /**
  *  @brief Sixty-four byte lanes stepped per call, of which the first eight carry the serial arm's
@@ -550,17 +549,17 @@ void bench_levenshtein_steps(environment_t const &env, std::size_t query_bytes) 
     std::string const suffix = ":q" + std::to_string(query_bytes);
     auto validator = levenshtein_step_from_serial {env, query_bytes};
     bench_result_t base = bench_unary(env, "sz_levenshtein_u64x1_step_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_levenshtein_u64x4_step_haswell" + suffix, validator,
                 levenshtein_step_from_haswell {env, query_bytes})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_levenshtein_u64x8_step_skylake" + suffix, validator,
                 levenshtein_step_from_skylake {env, query_bytes})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     if (query_bytes <= 8)
         bench_unary(env, "sz_levenshtein_u8x64_step_icelake" + suffix, validator,
                     levenshtein_step_from_icelake_narrow {env, query_bytes})
@@ -572,8 +571,8 @@ void bench_levenshtein_steps(environment_t const &env, std::size_t query_bytes) 
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {

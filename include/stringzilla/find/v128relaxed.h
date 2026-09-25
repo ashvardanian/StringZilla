@@ -26,26 +26,28 @@ extern "C" {
  *  @c rfind_byte, @c find, and @c rfind delegate to the baseline. @c relaxed_swizzle is the one
  *  find-family win, and it is already used by the byteset kernels below, whose bit-table index is
  *  provably in [0, 7], so relaxed equals strict. */
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                            sz_cptr_t needle) {
     return sz_find_byte_v128(haystack, haystack_length, needle);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                             sz_cptr_t needle) {
     return sz_rfind_byte_v128(haystack, haystack_length, needle);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                              sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                       sz_size_t needle_length) {
     return sz_find_v128(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                               sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                        sz_size_t needle_length) {
     return sz_rfind_v128(haystack, haystack_length, needle, needle_length);
 }
 
@@ -65,8 +67,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t hay
  *  @param[in] set_bottom_u8x16 Bottom half of the byteset (byte indices 16..31).
  *  @return 0xFF per lane where the byte belongs to the set, 0x00 otherwise.
  */
-SZ_HELPER_INLINE v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_u8x16, v128_t set_top_u8x16,
-                                                           v128_t set_bottom_u8x16) {
+STRINGZILLA_HELPER_INLINE v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_u8x16, v128_t set_top_u8x16,
+                                                                    v128_t set_bottom_u8x16) {
     v128_t byte_index_u8x16 = wasm_u8x16_shr(haystack_u8x16, 3); // c >> 3, in [0, 31]
     v128_t bit_table_u8x16 = wasm_i8x16_make(1, 2, 4, 8, 16, 32, 64, (sz_i8_t)128, 0, 0, 0, 0, 0, 0, 0, 0);
     // Index `c & 7` is in [0, 7] -> always in range -> relaxed swizzle is exact.
@@ -80,8 +82,8 @@ SZ_HELPER_INLINE v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_u8x16
     return wasm_i8x16_ne(wasm_v128_and(matches_u8x16, byte_mask_u8x16), wasm_i8x16_splat(0));
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                      sz_byteset_t const *set) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                               sz_byteset_t const *set) {
     v128_t set_top_u8x16 = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_u8x16 = wasm_v128_load(&set->_u8s[16]);
 
@@ -116,8 +118,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_siz
     return sz_find_byteset_serial(haystack, haystack_length, set);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                       sz_byteset_t const *set) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                                sz_byteset_t const *set) {
     v128_t set_top_u8x16 = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_u8x16 = wasm_v128_load(&set->_u8s[16]);
 
@@ -157,7 +159,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_si
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // SZ_USE_V128RELAXED
+#endif // STRINGZILLA_TARGET_V128RELAXED
 
 #ifdef __cplusplus
 }

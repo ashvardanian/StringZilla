@@ -16,12 +16,12 @@
 /*  ! Overload the following with caution. Those parameters must never be explicitly set during
  *  releases, but they come handy during development to validate ISA-specific implementations.
  *
- *  #define SZ_USE_HASWELL 0
- *  #define SZ_USE_SKYLAKE 0 */
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+ *  #define STRINGZILLA_TARGET_HASWELL 0
+ *  #define STRINGZILLA_TARGET_SKYLAKE 0 */
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Make sure to include the StringZilla headers before anything else, to intercept missing
  *  `#include` directives and other issues. */
@@ -38,9 +38,7 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
-#include <fmt/format.h>
-
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`, `refusing_allocator_`
+#include "harness.hpp" // `random_string`, `refusing_allocator_`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -82,13 +80,13 @@ static overlap_step_backend_t const overlap_step_backends[] = {
      sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
      sz_overlap_f64x1_window_hash_step_tail_serial, sz_overlap_u32x1_btree_sort_serial,
      sz_overlap_u32x1_btree_probe_serial},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_overlap_haswell_f64x4_positions_per_step_k, sz_overlap_f64x4_prefix_hash_step_haswell,
      sz_overlap_f64x4_prefix_hash_step_tail_haswell, sz_overlap_f64x4_window_hash_step_haswell,
      sz_overlap_f64x4_window_hash_step_tail_haswell, sz_overlap_u32x8_btree_sort_haswell,
      sz_overlap_u32x8_btree_probe_haswell},
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     {"skylake", sz_overlap_skylake_f64x8_positions_per_step_k, sz_overlap_f64x8_prefix_hash_step_skylake,
      sz_overlap_f64x8_prefix_hash_step_tail_skylake, sz_overlap_f64x8_window_hash_step_skylake,
      sz_overlap_f64x8_window_hash_step_tail_skylake, sz_overlap_u32x16_btree_sort_skylake,
@@ -100,10 +98,10 @@ static overlap_step_backend_t const overlap_step_backends[] = {
 static overlap_backend_t const overlap_backends[] = {
     {"dispatched", sz_overlap_engine_init_cpu, sz_overlap_scores},
     {"serial", sz_overlap_engine_init_serial, sz_overlap_scores_serial},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_overlap_engine_init_haswell, sz_overlap_scores_haswell},
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     {"skylake", sz_overlap_engine_init_skylake, sz_overlap_scores_skylake},
 #endif
 };
@@ -278,8 +276,7 @@ static void check_overlap_probes_(overlap_step_backend_t const &backend, sz_over
 }
 
 /** One backend's sort, layout and probe of @p count repeating keys, on hit- and miss-heavy runs. */
-static void check_overlap_btree_(overlap_step_backend_t const &backend, std::size_t count) {
-    std::mt19937 &generator = global_random_generator();
+static void check_overlap_btree_(std::mt19937 &generator, overlap_step_backend_t const &backend, std::size_t count) {
     std::uniform_int_distribution<sz_u32_t> below_modulus(0, sz_overlap_modulus_k - 1);
     std::vector<sz_u32_t> const raw = overlap_repeating_keys_(count);
     std::vector<sz_u32_t> nodes(sz_overlap_btree_entries(count), 0);
@@ -317,8 +314,6 @@ static void check_overlap_btree_(overlap_step_backend_t const &backend, std::siz
 
 /** Known answers: the constants, the capacities, the strides, and shares readable off the texts. */
 void test_overlap_unit() {
-    fmt::println("  - testing window-overlap known-answer vectors...");
-
     // The modulus is prime, by trial division up to its root.
     std::uint64_t const prime = static_cast<std::uint64_t>(sz_overlap_modulus_k);
     for (std::uint64_t divisor = 2; divisor * divisor <= prime; ++divisor) verify(prime % divisor != 0);
@@ -437,8 +432,7 @@ static void check_overlap_safety_(overlap_backend_t const &backend) {
 /** Degenerate inputs for the window-overlap family, asserting survival and the stated refusals.
  *  Answers are not the subject here: empties and narrow candidates are accepted, zero widths and a
  *  refused allocation are reported, and no failure writes an output. */
-void test_overlap_safety() {
-    fmt::println("  - testing degenerate inputs and refused allocations of the window-overlap kernels...");
+void test_overlap_safety(test_context_t &) {
     for (overlap_backend_t const &backend : overlap_backends) check_overlap_safety_(backend);
 }
 
@@ -448,43 +442,43 @@ void test_overlap_safety() {
 
 /** One backend's step verbs against oracles over generated corpora: sort against @c std::sort, tree
  *  against @c std::binary_search, and chain and window hashes against integer hashing. */
-static void check_overlap_step_oracles_(overlap_step_backend_t const &backend) {
-    std::mt19937 &generator = global_random_generator();
+static void check_overlap_step_oracles_(test_context_t &context, overlap_step_backend_t const &backend) {
+    std::mt19937 &generator = context.generator;
     std::size_t const key_counts[] = {0, 1, 9, 63, 64, 65, 117, 512, 1000, 8187};
     for (std::size_t const count : key_counts) check_overlap_sort_(backend, count);
-    for (std::size_t const count : key_counts) check_overlap_btree_(backend, count);
+    for (std::size_t const count : key_counts) check_overlap_btree_(generator, backend, count);
 
     std::size_t const lengths[] = {0, 1, 2, 7, 8, 9, 15, 16, 17, 64, 127, 293, 1024};
     for (std::size_t const length : lengths) {
         std::string text(length, '\0');
-        randomize_string(&text[0], text.size());
+        randomize_string(generator, text);
         check_overlap_steps_(backend, text);
     }
-    for (std::size_t round = 0; round != scale_iterations(8); ++round) {
+    for (std::size_t round = 0; round != context.iterations(8); ++round) {
         std::string query(std::uniform_int_distribution<std::size_t>(0, 700)(generator), '\0');
-        randomize_string(&query[0], query.size());
+        randomize_string(generator, query);
         check_overlap_steps_(backend, query);
     }
 }
 
 /** One backend's engine against the @c std::set oracle over generated corpora, and one engine over
  *  every query against one engine per query, since batched and lone rows walk different forests. */
-static void check_overlap_score_oracles_(overlap_backend_t const &backend) {
-    std::mt19937 &generator = global_random_generator();
+static void check_overlap_score_oracles_(test_context_t &context, overlap_backend_t const &backend) {
+    std::mt19937 &generator = context.generator;
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
-    for (std::size_t round = 0; round != scale_iterations(8); ++round) {
+    for (std::size_t round = 0; round != context.iterations(8); ++round) {
         std::size_t const query_length = std::uniform_int_distribution<std::size_t>(0, 700)(generator);
         std::string query(query_length, '\0');
-        randomize_string(&query[0], query.size());
+        randomize_string(generator, query);
 
         // Full bytes rarely repeat a window past width three, so half the candidates are cut from the query itself
         // and the rest come from a two-letter alphabet where every width repeats.
         std::vector<std::string> candidates;
-        randomize_strings(fuzzy_config_t("ab", 12, 0, 900), candidates);
+        randomize_strings(generator, fuzzy_config_t("ab", 12, 0, 900), candidates);
         candidates.push_back(query);
         candidates.push_back(query.substr(query_length / 3));
         candidates.push_back(query + query);
-        std::vector<std::string> const queries = {query, random_string(query_length, "ab", 2), std::string()};
+        std::vector<std::string> const queries = {query, random_string(generator, query_length, "ab"), std::string()};
         check_overlap_scores_(backend, queries, candidates, widths);
 
         std::vector<sz_f32_t> const batched = overlap_tensor_(backend, queries, candidates, widths);
@@ -500,15 +494,14 @@ static void check_overlap_score_oracles_(overlap_backend_t const &backend) {
 
 /** One backend's engine against the serial backend's, bit for bit, over random query batches and
  *  two-letter candidate batches at every width. */
-static void check_overlap_equivalence_(overlap_backend_t const &reference, overlap_backend_t const &candidate,
-                                       std::size_t rounds) {
-    std::mt19937 &generator = global_random_generator();
+static void check_overlap_equivalence_(std::mt19937 &generator, overlap_backend_t const &reference,
+                                       overlap_backend_t const &candidate, std::size_t rounds) {
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
     std::vector<std::string> candidates;
     for (std::size_t round = 0; round != rounds; ++round) {
         std::string query(std::uniform_int_distribution<std::size_t>(0, 700)(generator), '\0');
-        randomize_string(&query[0], query.size());
-        randomize_strings(fuzzy_config_t("ab", 12, 0, 900), candidates);
+        randomize_string(generator, query);
+        randomize_strings(generator, fuzzy_config_t("ab", 12, 0, 900), candidates);
         candidates.push_back(query);
         candidates.push_back(query.substr(query.size() / 3));
         std::vector<std::string> const queries = {query, query.substr(query.size() / 2), std::string()};
@@ -523,14 +516,14 @@ static void check_overlap_equivalence_(overlap_backend_t const &reference, overl
 /** Drives the oracles and the serial-versus-SIMD differential across every backend compiled here:
  *  the step verbs against their integer and @c std:: oracles, the engines against @c std::set, and
  *  every engine against serial's answers bit for bit. */
-void test_overlap_all() {
-    for (overlap_step_backend_t const &backend : overlap_step_backends) check_overlap_step_oracles_(backend);
-    for (overlap_backend_t const &backend : overlap_backends) check_overlap_score_oracles_(backend);
+void test_overlap_all(test_context_t &context) {
+    for (overlap_step_backend_t const &backend : overlap_step_backends) check_overlap_step_oracles_(context, backend);
+    for (overlap_backend_t const &backend : overlap_backends) check_overlap_score_oracles_(context, backend);
 
     // Serial is the reference for everything, itself included.
     overlap_backend_t const &reference = backend_named_(overlap_backends, "serial");
     for (overlap_backend_t const &candidate : overlap_backends)
-        check_overlap_equivalence_(reference, candidate, scale_iterations(8));
+        check_overlap_equivalence_(context.generator, reference, candidate, context.iterations(8));
 }
 
 #pragma endregion Drivers

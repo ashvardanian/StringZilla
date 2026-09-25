@@ -30,7 +30,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
@@ -68,9 +68,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
-#include "stringzilla.hpp" // `global_random_generator`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -79,9 +77,14 @@ using strings_t = std::vector<std::string_view>;
 using permute_t = std::vector<sz_sorted_idx_t>;
 
 #if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
-#define SZ_HAS_QSORT_R_ 1
-#elif defined(_MSC_VER)
-#define SZ_HAS_QSORT_S_ 1
+#define STRINGZILLA_HAS_QSORT_R_ 1
+#else
+#define STRINGZILLA_HAS_QSORT_R_ 0
+#endif
+#if defined(_MSC_VER)
+#define STRINGZILLA_HAS_QSORT_S_ 1
+#else
+#define STRINGZILLA_HAS_QSORT_S_ 0
 #endif
 
 /** Helper function to distill a large @b permute_t object down to one comparable hash integer. */
@@ -111,7 +114,7 @@ static sz_size_t get_length(void const *handle, sz_size_t i) {
     return array[i].size();
 }
 
-#if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
+#if STRINGZILLA_HAS_QSORT_R_ || STRINGZILLA_HAS_QSORT_S_
 
 /**
  *  @brief Callback function for the @b qsort_r re-entrant sorting function.
@@ -159,7 +162,7 @@ struct argsort_strings_via_std_t {
     }
 };
 
-#if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
+#if STRINGZILLA_HAS_QSORT_R_ || STRINGZILLA_HAS_QSORT_S_
 
 struct argsort_strings_via_qsort_t {
     strings_t const &input;
@@ -175,9 +178,9 @@ struct argsort_strings_via_qsort_t {
         array.handle = &input;
         array.get_start = get_start;
         array.get_length = get_length;
-#if defined(SZ_HAS_QSORT_R_)
+#if STRINGZILLA_HAS_QSORT_R_
         qsort_r(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
-#elif defined(SZ_HAS_QSORT_S_)
+#elif STRINGZILLA_HAS_QSORT_S_
         qsort_s(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
 #endif
 
@@ -231,29 +234,29 @@ void bench_sequencing_strings(environment_t const &env) {
     bench_nullary(env, "sz_sequence_argsort_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     auto haswell_call = argsort_strings_via_sz<sz_sequence_argsort_haswell> {env.tokens, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_haswell", base_call, haswell_call).log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     auto skylake_call = argsort_strings_via_sz<sz_sequence_argsort_skylake> {env.tokens, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_skylake", base_call, skylake_call).log(base);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     auto sve_call = argsort_strings_via_sz<sz_sequence_argsort_sve> {env.tokens, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_sve", base_call, sve_call).log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     auto neon_call = argsort_strings_via_sz<sz_sequence_argsort_neon> {env.tokens, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_neon", base_call, neon_call).log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     auto rvv_call = argsort_strings_via_sz<sz_sequence_argsort_rvv> {env.tokens, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_rvv", base_call, rvv_call).log(base);
 #endif
 
     // Include POSIX and WinAPI functionality
-#if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
+#if STRINGZILLA_HAS_QSORT_R_ || STRINGZILLA_HAS_QSORT_S_
     auto qsort_call = argsort_strings_via_qsort_t {env.tokens, permute_buffer};
     bench_nullary(env, "sequence_argsort<qsort>", base_call, qsort_call).log(base);
 #endif
@@ -343,25 +346,25 @@ void bench_sequencing_strings_uncased(environment_t const &env) {
     bench_nullary(env, "sz_sequence_argsort_uncased_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     auto haswell_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_haswell> {env.tokens, folded,
                                                                                         permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_uncased_haswell", base_call, haswell_call).log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     auto skylake_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_skylake> {env.tokens, folded,
                                                                                         permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_uncased_skylake", base_call, skylake_call).log(base);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     auto sve_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_sve> {env.tokens, folded, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_uncased_sve", base_call, sve_call).log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     auto neon_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_neon> {env.tokens, folded, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_uncased_neon", base_call, neon_call).log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     auto rvv_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_rvv> {env.tokens, folded, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_uncased_rvv", base_call, rvv_call).log(base);
 #endif
@@ -438,23 +441,23 @@ void bench_sequencing_pgrams(environment_t const &env) {
     bench_nullary(env, "sz_pgrams_sort_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     auto haswell_call = sort_pgrams_via_sz<sz_pgrams_sort_haswell> {pgrams_buffer, pgrams_sorted, permute_buffer};
     bench_nullary(env, "sz_pgrams_sort_haswell", base_call, haswell_call).log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     auto skylake_call = sort_pgrams_via_sz<sz_pgrams_sort_skylake> {pgrams_buffer, pgrams_sorted, permute_buffer};
     bench_nullary(env, "sz_pgrams_sort_skylake", base_call, skylake_call).log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     auto neon_call = sort_pgrams_via_sz<sz_pgrams_sort_neon> {pgrams_buffer, pgrams_sorted, permute_buffer};
     bench_nullary(env, "sz_pgrams_sort_neon", base_call, neon_call).log(base);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     auto sve_call = sort_pgrams_via_sz<sz_pgrams_sort_sve> {pgrams_buffer, pgrams_sorted, permute_buffer};
     bench_nullary(env, "sz_pgrams_sort_sve", base_call, sve_call).log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     auto rvv_call = sort_pgrams_via_sz<sz_pgrams_sort_rvv> {pgrams_buffer, pgrams_sorted, permute_buffer};
     bench_nullary(env, "sz_pgrams_sort_rvv", base_call, rvv_call).log(base);
 #endif
@@ -552,8 +555,9 @@ void bench_intersections(environment_t const &env) {
     std::vector<std::string_view> tokens_a(unique_tokens.begin(), unique_tokens.end());
     std::vector<std::string_view> tokens_b;
     std::size_t const tokens_b_size = env.tokens.size() / 2;
+    std::mt19937 generator(env.seed);
     std::sample(unique_tokens.begin(), unique_tokens.end(), //
-                std::back_inserter(tokens_b), tokens_b_size, global_random_generator());
+                std::back_inserter(tokens_b), tokens_b_size, generator);
 
     std::size_t const max_tokens_in_intersection = (std::min)(tokens_a.size(), tokens_b.size());
     permute_t permute_a(max_tokens_in_intersection), permute_b(max_tokens_in_intersection);
@@ -566,11 +570,11 @@ void bench_intersections(environment_t const &env) {
     bench_nullary(env, "sz_sequence_intersect_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     auto ice_call = intersect_strings_via_sz<sz_sequence_intersect_icelake> {tokens_a, tokens_b, permute_a, permute_b};
     bench_nullary(env, "sz_sequence_intersect_icelake", base_call, ice_call).log(base);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     auto sve_call = intersect_strings_via_sz<sz_sequence_intersect_sve> {tokens_a, tokens_b, permute_a, permute_b};
     bench_nullary(env, "sz_sequence_intersect_sve", base_call, sve_call).log(base);
 #endif
@@ -580,8 +584,8 @@ void bench_intersections(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

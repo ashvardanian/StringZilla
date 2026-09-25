@@ -8,39 +8,39 @@
 
 #include "dispatch.h"
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps) {
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->equal = sz_equal_serial;
     impl->order = sz_order_serial;
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     if (caps & sz_cap_westmere_k) {
         impl->equal = sz_equal_westmere;
         impl->order = sz_order_westmere;
     }
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     if (caps & sz_cap_haswell_k) {
         impl->equal = sz_equal_haswell;
         impl->order = sz_order_haswell;
     }
 #endif
 
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     if (caps & sz_cap_skylake_k) {
         impl->equal = sz_equal_skylake;
         impl->order = sz_order_skylake;
     }
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     if (caps & sz_cap_neon_k) { impl->equal = sz_equal_neon; }
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     if (caps & sz_cap_sve_k) {
         // Wider-than-NEON registers are where the scalable comparison kernels win; at the common
         // 128-bit vector length the NEON kernels stay faster, so keep them.
@@ -51,35 +51,35 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     if (caps & sz_cap_v128_k) {
         impl->equal = sz_equal_v128;
         impl->order = sz_order_v128;
     }
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     if (caps & sz_cap_v128relaxed_k) {
         impl->equal = sz_equal_v128relaxed;
         impl->order = sz_order_v128relaxed;
     }
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     if (caps & sz_cap_rvv_k) {
         impl->equal = sz_equal_rvv;
         impl->order = sz_order_rvv;
     }
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     if (caps & sz_cap_lasx_k) {
         impl->equal = sz_equal_lasx;
         impl->order = sz_order_lasx;
     }
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     if (caps & sz_cap_powervsx_k) {
         impl->equal = sz_equal_powervsx;
         impl->order = sz_order_powervsx;
@@ -87,10 +87,10 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps) {
 #endif
 }
 
-SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_dispatch_cpu_table.equal(a, b, length);
 }
 
-SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     return sz_dispatch_cpu_table.order(a, a_length, b, b_length);
 }

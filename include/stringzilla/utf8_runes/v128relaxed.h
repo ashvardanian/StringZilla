@@ -20,23 +20,23 @@ extern "C" {
  *  none of which map onto a relaxed op), so they delegate to the baseline SIMD128. The multistep
  *  newline/whitespace iterators are not defined here at all: the dispatch table routes the
  *  @c v128relaxed capability straight to the @c v128 kernels. */
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-SZ_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) {
     return sz_utf8_count_v128(text, length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     return sz_utf8_seek_v128(text, length, n);
 }
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // SZ_USE_V128RELAXED
+#endif // STRINGZILLA_TARGET_V128RELAXED
 
 #ifdef __cplusplus
 }

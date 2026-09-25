@@ -74,7 +74,7 @@ static int LevenshteinEngine_init(LevenshteinEngine *self, PyObject *args, PyObj
 
     sz_engine_lock_(self);
     sz_levenshtein_engine_free(&self->engine);
-    sz_status_t const status = sz_levenshtein_engine_init_cpu(&queries, symbol, SZ_NULL, &self->engine);
+    sz_status_t const status = sz_levenshtein_engine_init_cpu(&queries, symbol, STRINGZILLA_NULL, &self->engine);
     sz_engine_unlock_(self);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "LevenshteinEngine()");
@@ -140,7 +140,8 @@ static PyObject *LevenshteinEngine_on_gpu(PyObject *type_obj, PyObject *const *a
     PyTypeObject *const type = (PyTypeObject *)type_obj;
     LevenshteinEngine *const self = (LevenshteinEngine *)type->tp_alloc(type, 0);
     if (!self) return NULL;
-    sz_status_t const status = sz_levenshtein_engine_init_gpu(&queries, symbol, SZ_NULL, stream, &self->engine);
+    sz_status_t const status = sz_levenshtein_engine_init_gpu(&queries, symbol, STRINGZILLA_NULL, stream,
+                                                              &self->engine);
     if (status != sz_success_k) {
         Py_DECREF(self);
         sz_py_raise_status(status, "LevenshteinEngine.on_gpu()");
@@ -249,8 +250,9 @@ static char const doc_LevenshteinEngine[] =                                     
     "  1";
 
 static PyMethodDef LevenshteinEngine_methods[] = {
-    {"on_gpu", (PyCFunction)LevenshteinEngine_on_gpu, SZ_METHOD_FLAGS | METH_CLASS, doc_LevenshteinEngine_on_gpu},
-    {"distances", (PyCFunction)LevenshteinEngine_distances, SZ_METHOD_FLAGS, doc_LevenshteinEngine_distances},
+    {"on_gpu", (PyCFunction)LevenshteinEngine_on_gpu, STRINGZILLA_METHOD_FLAGS | METH_CLASS,
+     doc_LevenshteinEngine_on_gpu},
+    {"distances", (PyCFunction)LevenshteinEngine_distances, STRINGZILLA_METHOD_FLAGS, doc_LevenshteinEngine_distances},
     {NULL, NULL, 0, NULL},
 };
 

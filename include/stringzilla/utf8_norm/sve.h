@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -49,7 +49,8 @@ extern "C" {
  *
  *  @return The first such byte, or NULL.
  */
-SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_t length,
+                                                                 sz_normal_form_t form) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
     sz_u8_t const *const end = text_u8 + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -121,15 +122,16 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_
         // `verify_block` advances `position` to `block_end`; resume the loop from there.
         offset = (sz_size_t)(position - text_u8) - step; // loop adds `step` back
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_sve(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                           sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_sve(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                                    sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_sve_);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve(sz_cptr_t source, sz_size_t length,
+                                                                 sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_sve_);
 }
 
@@ -138,7 +140,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve(sz_cptr_t source, sz_siz
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE
+#endif // STRINGZILLA_TARGET_SVE
 
 #ifdef __cplusplus
 }

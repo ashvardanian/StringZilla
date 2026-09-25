@@ -17,8 +17,8 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,aes,evex512"))), \
                              apply_to = function)
 #elif defined(__clang__)
@@ -28,7 +28,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "aes")
 #endif
 
-SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "loads".
     //
@@ -128,7 +128,7 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
     }
 }
 
-SZ_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed) {
+STRINGZILLA_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m512i seed_u64x8 = _mm512_set1_epi64(seed);
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
@@ -147,7 +147,8 @@ SZ_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t
     state->ins_length = 0;
 }
 
-SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
+STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length,
+                                                                                  sz_u64_t seed) {
 
     if (length <= 16) {
         // Initialize the AES block with a given seed
@@ -223,7 +224,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
     return sz_hash_westmere(start, length, seed);
 }
 
-SZ_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text,
+                                                           sz_size_t length) {
     // Skylake has AVX-512BW but neither VBMI (no `vpermb` byte slide) nor VAES, so the absorb stays the four-lane
     // AES-NI Westmere kernel. What Westmere lacks is a masked load: it merges incoming bytes one at a time into
     // `ins.u8s[...]`, then reads `ins` back as wide lanes - a ~12-cycle store-forwarding stall on every cross-call
@@ -250,12 +252,12 @@ SZ_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz
     sz_hash_state_store_westmere_(state_ptr, &state);
 }
 
-SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {
     // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
     return sz_hash_state_digest_westmere(state);
 }
 
-SZ_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+STRINGZILLA_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_fill_random_westmere(text, length, nonce);
 }
 
@@ -264,38 +266,38 @@ SZ_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_
  *  that both sigma families need is the parity truth table. */
 
 /** Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16,
-                                                   __m512i state_g_u32x16) {
+STRINGZILLA_HELPER_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16,
+                                                            __m512i state_g_u32x16) {
     return _mm512_ternarylogic_epi32(state_e_u32x16, state_f_u32x16, state_g_u32x16, 0xCA);
 }
 
 /** Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16,
-                                                     __m512i state_c_u32x16) {
+STRINGZILLA_HELPER_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16,
+                                                              __m512i state_c_u32x16) {
     return _mm512_ternarylogic_epi32(state_a_u32x16, state_b_u32x16, state_c_u32x16, 0xE8);
 }
 
 /** Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_big_sigma0_skylake_(__m512i state_a_u32x16) {
+STRINGZILLA_HELPER_INLINE __m512i sz_sha256_big_sigma0_skylake_(__m512i state_a_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_a_u32x16, 2), _mm512_ror_epi32(state_a_u32x16, 13),
                                      _mm512_ror_epi32(state_a_u32x16, 22), 0x96);
 }
 
 /** Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_u32x16) {
+STRINGZILLA_HELPER_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_e_u32x16, 6), _mm512_ror_epi32(state_e_u32x16, 11),
                                      _mm512_ror_epi32(state_e_u32x16, 25), 0x96);
 }
 
 /** Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_u32x16) {
+STRINGZILLA_HELPER_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 7),
                                      _mm512_ror_epi32(message_word_u32x16, 18),
                                      _mm512_srli_epi32(message_word_u32x16, 3), 0x96);
 }
 
 /** Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 16 lanes. */
-SZ_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u32x16) {
+STRINGZILLA_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 17),
                                      _mm512_ror_epi32(message_word_u32x16, 19),
                                      _mm512_srli_epi32(message_word_u32x16, 10), 0x96);
@@ -315,7 +317,7 @@ SZ_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u3
  *  there, and no cost model available for AMD parts describes their gather and scatter at all - so
  *  the form built from ordinary shuffles is the one whose cost is knowable everywhere.
  */
-SZ_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8]) {
+STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8]) {
     __m512i const low_halves_u32x16 = _mm512_setr_epi32(0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27);
     __m512i const high_halves_u32x16 = _mm512_setr_epi32(4, 5, 6, 7, 20, 21, 22, 23, 12, 13, 14, 15, 28, 29, 30, 31);
     // Pair 32-bit neighbours inside every 128-bit sub-lane.
@@ -363,10 +365,10 @@ SZ_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8])
  *  its own staging area and no stage needs a second array - the same shape the 8x16 butterfly
  *  already has. Written with intermediate buffers instead, the four live arrays push this kernel's
  *  frame past 4 KB, and MSVC then reaches for the CRT's @c __chkstk to probe it, which the
- *  @c SZ_AVOID_LIBC build has no way to resolve.
+ *  @c STRINGZILLA_WITH_LIBC=0 build has no way to resolve.
  */
-SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks,
-                                                         __m512i schedule_u32x16[16]) {
+STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks,
+                                                                  __m512i schedule_u32x16[16]) {
     __m512i const byte_swap_u8x64 = _mm512_set_epi8(                    //
         60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
         44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
@@ -417,8 +419,8 @@ SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *l
  *  @param[in] ninth_word_u32x16 The word nine positions ahead.
  *  @param[in] fourteenth_word_u32x16 The word fourteen positions ahead, feeding the high sigma.
  */
-SZ_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, __m512i next_word_u32x16,
-                                                   __m512i ninth_word_u32x16, __m512i fourteenth_word_u32x16) {
+STRINGZILLA_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, __m512i next_word_u32x16,
+                                                            __m512i ninth_word_u32x16, __m512i fourteenth_word_u32x16) {
     return _mm512_add_epi32(
         _mm512_add_epi32(oldest_word_u32x16, sz_sha256_small_sigma0_skylake_(next_word_u32x16)),
         _mm512_add_epi32(ninth_word_u32x16, sz_sha256_small_sigma1_skylake_(fourteenth_word_u32x16)));
@@ -432,7 +434,7 @@ SZ_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, _
  *  @c state_h are written: @c state_d becomes the next round's @c state_e, and @c state_h is dead
  *  on entry so it receives the next round's @c state_a.
  */
-SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                                      //
+STRINGZILLA_HELPER_INLINE void sz_sha256_round_skylake_(                                             //
     __m512i state_a_u32x16, __m512i state_b_u32x16, __m512i state_c_u32x16, __m512i *state_d_u32x16, //
     __m512i state_e_u32x16, __m512i state_f_u32x16, __m512i state_g_u32x16, __m512i *state_h_u32x16, //
     __m512i message_word_u32x16, sz_u32_t round_constant) {
@@ -478,8 +480,8 @@ SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                 
  *  for the CRT's @c __chkstk. One turn of sixteen rounds is far too much work for a call to show up
  *  against, and the window stays local either way.
  */
-SZ_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
-                                                    __mmask16 active_m16) {
+STRINGZILLA_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8],
+                                                             sz_u8_t const *const *lane_blocks, __mmask16 active_m16) {
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
     __m512i schedule_u32x16[16];
     sz_sha256_transpose_16x16_skylake_(lane_blocks, schedule_u32x16);
@@ -640,9 +642,10 @@ SZ_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz
  *  union, whose store-to-load forwarding was the largest fixed cost of a call and the one short
  *  messages cannot amortize.
  */
-SZ_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
-                                                           sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
-                                                           sz_size_t const *blocks_per_lane) {
+STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states,
+                                                                    sz_size_t active_lanes_count,
+                                                                    sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
+                                                                    sz_size_t const *blocks_per_lane) {
     __m512i hashes_u32x16[8];
     sz_u512_vec_t counts_vec;
     sz_u8_t const *sources[16];
@@ -686,7 +689,7 @@ SZ_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *st
         __mmask16 const advance_m16 = _mm512_cmpgt_epu32_mask(counts_u32x16, ones_u32x16);
         sz_sha256_compress_skylake_(hashes_u32x16, sources, active_m16);
         for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
-            sources[lane_index] += ((advance_m16 >> lane_index) & 1u) * SZ_SHA256_BLOCK_LENGTH;
+            sources[lane_index] += ((advance_m16 >> lane_index) & 1u) * STRINGZILLA_SHA256_BLOCK_LENGTH;
         counts_u32x16 = _mm512_mask_sub_epi32(counts_u32x16, active_m16, counts_u32x16, ones_u32x16);
     }
 
@@ -699,10 +702,11 @@ SZ_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *st
                                 _mm512_extracti64x4_epi64(hashes_u32x16[pair_index], 1));
     }
     for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
-        cursors[lane_index] += blocks_per_lane[lane_index] * SZ_SHA256_BLOCK_LENGTH;
+        cursors[lane_index] += blocks_per_lane[lane_index] * STRINGZILLA_SHA256_BLOCK_LENGTH;
 }
 
-SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts) {
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *states,
+                                                                  sz_sequence_t const *texts) {
     sz_size_t const lanes_count = texts->count;
 
     for (sz_size_t first_lane_index = 0; first_lane_index < lanes_count; first_lane_index += 16) {
@@ -722,7 +726,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
 
             // The countdown rides in 32-bit lanes, so a chunk longer than that many blocks goes through the
             // single-state kernel over the very same state and the lane sits the group out.
-            if (remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH > 0xFFFFFFFFull) {
+            if (remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH > 0xFFFFFFFFull) {
                 sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
                 remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
                 continue;
@@ -730,7 +734,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
 
             state->total_length += remaining[lane_index];
             if (state->block_length != 0) {
-                sz_size_t const missing = SZ_SHA256_BLOCK_LENGTH - state->block_length;
+                sz_size_t const missing = STRINGZILLA_SHA256_BLOCK_LENGTH - state->block_length;
                 if (remaining[lane_index] >= missing) {
                     for (sz_size_t byte_index = 0; byte_index != missing; ++byte_index)
                         state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
@@ -739,7 +743,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
                     cursors[lane_index] += missing, remaining[lane_index] -= missing;
                 }
             }
-            blocks_per_lane[lane_index] = remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH;
+            blocks_per_lane[lane_index] = remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH;
         }
 
         sz_sha256_multistate_blocks_skylake_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
@@ -748,7 +752,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
         // Whatever is left cannot fill a block, so it only ever buffers.
         for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
-            sz_size_t const tail_length = remaining[lane_index] % SZ_SHA256_BLOCK_LENGTH;
+            sz_size_t const tail_length = remaining[lane_index] % STRINGZILLA_SHA256_BLOCK_LENGTH;
             for (sz_size_t byte_index = 0; byte_index != tail_length; ++byte_index)
                 state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
             state->block_length += tail_length;
@@ -767,8 +771,9 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
  *  one block keeps its state bit-for-bit. Inactive lanes borrow lane zero's hash so the gather
  *  stays in bounds.
  */
-SZ_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
-                                                                 sz_size_t active_lanes_count, sz_u8_t *digests) {
+STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
+                                                                          sz_size_t active_lanes_count,
+                                                                          sz_u8_t *digests) {
     sz_u512_vec_t staged_vec[16];
     sz_u8_t const *staged_blocks[16];
     __m512i hashes_u32x16[8];
@@ -777,7 +782,7 @@ SZ_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state
     for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
         sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
         staged_blocks[lane_index] = staged_vec[lane_index].u8s;
-        if (states[source_lane].block_length + 1 > SZ_SHA256_BLOCK_LENGTH - 8)
+        if (states[source_lane].block_length + 1 > STRINGZILLA_SHA256_BLOCK_LENGTH - 8)
             overflow_m16 |= (__mmask16)((sz_u32_t)1 << lane_index);
     }
 
@@ -849,19 +854,19 @@ SZ_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state
     for (sz_size_t pair_index = 0; pair_index != 8; ++pair_index) {
         __mmask8 const first_m8 = pair_index * 2 + 0 < active_lanes_count ? (__mmask8)0x0F : (__mmask8)0;
         __mmask8 const second_m8 = pair_index * 2 + 1 < active_lanes_count ? (__mmask8)0xF0 : (__mmask8)0;
-        _mm512_mask_storeu_epi64(&digests[pair_index * 2 * SZ_SHA256_DIGEST_LENGTH], first_m8 | second_m8,
+        _mm512_mask_storeu_epi64(&digests[pair_index * 2 * STRINGZILLA_SHA256_DIGEST_LENGTH], first_m8 | second_m8,
                                  hashes_u32x16[pair_index]);
     }
 }
 
-SZ_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                         sz_u8_t *digests) {
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states,
+                                                                  sz_size_t states_count, sz_u8_t *digests) {
     sz_size_t first_lane_index = 0;
     for (; first_lane_index < states_count; first_lane_index += 16) {
         sz_size_t const remaining = states_count - first_lane_index;
         sz_size_t const active_lanes_count = remaining < 16 ? remaining : 16;
         sz_sha256_multistate_digest_lanes_skylake_(&states[first_lane_index], active_lanes_count,
-                                                   &digests[first_lane_index * SZ_SHA256_DIGEST_LENGTH]);
+                                                   &digests[first_lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
     }
 }
 
@@ -870,7 +875,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #ifdef __cplusplus
 }

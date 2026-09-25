@@ -13,7 +13,7 @@ fn main() {
         .include("include")
         .include("c/stringzilla") // for the same-directory `dispatch.h`
         .warnings(false)
-        .define("SZ_DEBUG", "0")
+        .define("STRINGZILLA_DEBUG", "0")
         .flag("-std=c99") // Enforce C99 standard
         .flag_if_supported("-fdiagnostics-color=always")
         .flag_if_supported("-fPIC");
@@ -27,10 +27,10 @@ fn main() {
     //    indirection per call.
     //  - OFF: compile a single amalgamation TU, `#include <stringzilla/stringzilla.h>`, that
     //    resolves each public function to one ISA tier at compile time and exports it via
-    //    `SZ_EXPORT`, as `types.h` describes. No table or indirection; the tier is baked in, which
-    //    is less portable but faster on some workloads.
+    //    `STRINGZILLA_EXPORT_`, as `types.h` describes. No table or indirection; the tier is baked
+    //    in, which is less portable but faster on some workloads.
     if env::var("CARGO_FEATURE_DYNAMIC_DISPATCH").is_ok() {
-        build.define("SZ_DYNAMIC_DISPATCH", "1");
+        build.define("STRINGZILLA_RUNTIME_DISPATCH", "1");
         build.files([
             "c/stringzilla/runtime.c",
             "c/stringzilla/compare.c",
@@ -57,8 +57,8 @@ fn main() {
         // One translation unit includes the umbrella header once, generated into `OUT_DIR` so there
         // is no checked-in source, the same pattern as the relaxed-SIMD probe. Exactly one TU
         // avoids duplicate symbols.
-        build.define("SZ_DYNAMIC_DISPATCH", "0");
-        build.define("SZ_EXPORT", "1");
+        build.define("STRINGZILLA_RUNTIME_DISPATCH", "0");
+        build.define("STRINGZILLA_EXPORT_", "1");
         let amalgam_path = std::path::Path::new(&env::var("OUT_DIR").unwrap_or_default()).join("sz_stringzilla.c");
         std::fs::write(&amalgam_path, "#include <stringzilla/stringzilla.h>\n").expect("write amalgamation TU");
         build.file(&amalgam_path);
@@ -74,13 +74,16 @@ fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     let avoid_libc = target_os == "unknown" || target_os.is_empty();
-    build.define("SZ_AVOID_LIBC", if avoid_libc { "1" } else { "0" });
+    build.define("STRINGZILLA_WITH_LIBC", if avoid_libc { "0" } else { "1" });
 
     let is_64bit_x86 = target_arch == "x86_64" && target_bits == "64";
     let is_64bit_arm = target_arch == "aarch64" && target_bits == "64";
-    build.define("SZ_IS_BIG_ENDIAN_", if target_endian == "big" { "1" } else { "0" });
-    build.define("SZ_IS_64BIT_X86_", if is_64bit_x86 { "1" } else { "0" });
-    build.define("SZ_IS_64BIT_ARM_", if is_64bit_arm { "1" } else { "0" });
+    build.define(
+        "STRINGZILLA_ARCH_BIG_ENDIAN_",
+        if target_endian == "big" { "1" } else { "0" },
+    );
+    build.define("STRINGZILLA_ARCH_X86_64_", if is_64bit_x86 { "1" } else { "0" });
+    build.define("STRINGZILLA_ARCH_ARM64_", if is_64bit_arm { "1" } else { "0" });
 
     // SIMD tier selection - two probed facts per tier, shared with the CMake build through the same
     // checked-in `probes/` sources:
@@ -123,10 +126,10 @@ fn main() {
                 runnable
             };
 
-        // Overrides: `SZ_USE_NEON=0 SZ_USE_SVE=1 cargo build`. "0"/"false"/"off"/"no" disable, an
-        // empty value means unset, anything else force-enables - past the RUN gate (the deployment
-        // CPU may differ from this machine), never past the COMPILE gate (an instruction the
-        // compiler refuses to produce cannot be linked).
+        // Overrides: `STRINGZILLA_TARGET_NEON=0 STRINGZILLA_TARGET_SVE=1 cargo build`.
+        // "0"/"false"/"off"/"no" disable, an empty value means unset, anything else force-enables -
+        // past the RUN gate, as the deployment CPU may differ from this machine, but never past the
+        // COMPILE gate, as an instruction the compiler refuses to produce cannot be linked.
         let env_value = env::var(probe.define)
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -184,7 +187,7 @@ fn main() {
         println!(
             "cargo:warning=Static dispatch: tiers beyond the declared target features were enabled because \
              this machine supports them. The binary is tuned to this machine and is NOT portable to older \
-             CPUs; pin `-C target-feature=…` or set `SZ_USE_X=0` for portable builds."
+             CPUs; pin `-C target-feature=…` or set `STRINGZILLA_TARGET_X=0` for portable builds."
         );
     }
     if gated_by_description {
@@ -219,8 +222,8 @@ fn main() {
 /// "can this toolchain emit this tier?" honestly - including ICE-prone toolchains, which only trip
 /// when SIMD values actually cross function boundaries.
 struct IsaProbe {
-    /// The `SZ_USE_*` macro handed to the C build - also the env var that force-enables or disables
-    /// the tier.
+    /// The `STRINGZILLA_TARGET_*` macro handed to the C build - also the env var that force-enables
+    /// or disables the tier.
     define: &'static str,
     /// The checked-in probe program, `probes/<arch>_<tier>.c`.
     probe_file: &'static str,
@@ -243,7 +246,7 @@ struct IsaProbe {
 
 const ARM_PROBES: &[IsaProbe] = &[
     IsaProbe {
-        define: "SZ_USE_SVE2AES",
+        define: "STRINGZILLA_TARGET_SVE2AES",
         probe_file: "probes/arm_sve2aes.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -251,7 +254,7 @@ const ARM_PROBES: &[IsaProbe] = &[
         runs_on: &["neon", "sve", "sve2", "sve2-aes"],
     },
     IsaProbe {
-        define: "SZ_USE_SVE2",
+        define: "STRINGZILLA_TARGET_SVE2",
         probe_file: "probes/arm_sve2.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -259,7 +262,7 @@ const ARM_PROBES: &[IsaProbe] = &[
         runs_on: &["neon", "sve", "sve2"],
     },
     IsaProbe {
-        define: "SZ_USE_SVE",
+        define: "STRINGZILLA_TARGET_SVE",
         probe_file: "probes/arm_sve.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -267,7 +270,7 @@ const ARM_PROBES: &[IsaProbe] = &[
         runs_on: &["neon", "sve"],
     },
     IsaProbe {
-        define: "SZ_USE_NEONSHA",
+        define: "STRINGZILLA_TARGET_NEONSHA",
         probe_file: "probes/arm_neonsha.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -275,7 +278,7 @@ const ARM_PROBES: &[IsaProbe] = &[
         runs_on: &["neon", "sha2"],
     },
     IsaProbe {
-        define: "SZ_USE_NEONAES",
+        define: "STRINGZILLA_TARGET_NEONAES",
         probe_file: "probes/arm_neonaes.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -283,7 +286,7 @@ const ARM_PROBES: &[IsaProbe] = &[
         runs_on: &["neon", "aes"],
     },
     IsaProbe {
-        define: "SZ_USE_NEON",
+        define: "STRINGZILLA_TARGET_NEON",
         probe_file: "probes/arm_neon.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -294,7 +297,7 @@ const ARM_PROBES: &[IsaProbe] = &[
 
 const X86_PROBES: &[IsaProbe] = &[
     IsaProbe {
-        define: "SZ_USE_ICELAKE",
+        define: "STRINGZILLA_TARGET_ICELAKE",
         probe_file: "probes/x86_icelake.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -317,7 +320,7 @@ const X86_PROBES: &[IsaProbe] = &[
         ],
     },
     IsaProbe {
-        define: "SZ_USE_SKYLAKE",
+        define: "STRINGZILLA_TARGET_SKYLAKE",
         probe_file: "probes/x86_skylake.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -325,7 +328,7 @@ const X86_PROBES: &[IsaProbe] = &[
         runs_on: &["sse4.2", "aes", "avx2", "avx512f", "avx512vl", "avx512bw"],
     },
     IsaProbe {
-        define: "SZ_USE_HASWELL",
+        define: "STRINGZILLA_TARGET_HASWELL",
         probe_file: "probes/x86_haswell.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -333,7 +336,7 @@ const X86_PROBES: &[IsaProbe] = &[
         runs_on: &["sse4.2", "aes", "avx2"],
     },
     IsaProbe {
-        define: "SZ_USE_GOLDMONT",
+        define: "STRINGZILLA_TARGET_GOLDMONT",
         probe_file: "probes/x86_goldmont.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -343,7 +346,7 @@ const X86_PROBES: &[IsaProbe] = &[
         runs_on: &["sse3", "ssse3", "sse4.1", "sha"],
     },
     IsaProbe {
-        define: "SZ_USE_WESTMERE",
+        define: "STRINGZILLA_TARGET_WESTMERE",
         probe_file: "probes/x86_westmere.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -354,7 +357,7 @@ const X86_PROBES: &[IsaProbe] = &[
 
 const WASM_PROBES: &[IsaProbe] = &[
     IsaProbe {
-        define: "SZ_USE_V128RELAXED",
+        define: "STRINGZILLA_TARGET_V128RELAXED",
         probe_file: "probes/wasm_v128relaxed.c",
         gcc_flags: &["-msimd128", "-mrelaxed-simd"],
         msvc_flags: &[],
@@ -362,7 +365,7 @@ const WASM_PROBES: &[IsaProbe] = &[
         runs_on: &["simd128", "relaxed-simd"],
     },
     IsaProbe {
-        define: "SZ_USE_V128",
+        define: "STRINGZILLA_TARGET_V128",
         probe_file: "probes/wasm_v128.c",
         gcc_flags: &["-msimd128"],
         msvc_flags: &[],
@@ -373,7 +376,7 @@ const WASM_PROBES: &[IsaProbe] = &[
 
 const RISCV_PROBES: &[IsaProbe] = &[
     IsaProbe {
-        define: "SZ_USE_RVVCRYPTO",
+        define: "STRINGZILLA_TARGET_RVVCRYPTO",
         probe_file: "probes/riscv_rvvcrypto.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -381,7 +384,7 @@ const RISCV_PROBES: &[IsaProbe] = &[
         runs_on: &["v", "zvkned", "zvknhb"],
     },
     IsaProbe {
-        define: "SZ_USE_RVV",
+        define: "STRINGZILLA_TARGET_RVV",
         probe_file: "probes/riscv_rvv.c",
         gcc_flags: &[],
         msvc_flags: &[],
@@ -391,7 +394,7 @@ const RISCV_PROBES: &[IsaProbe] = &[
 ];
 
 const LOONGARCH_PROBES: &[IsaProbe] = &[IsaProbe {
-    define: "SZ_USE_LASX",
+    define: "STRINGZILLA_TARGET_LASX",
     probe_file: "probes/loongarch_lasx.c",
     gcc_flags: &[],
     msvc_flags: &[],
@@ -400,7 +403,7 @@ const LOONGARCH_PROBES: &[IsaProbe] = &[IsaProbe {
 }];
 
 const POWER_PROBES: &[IsaProbe] = &[IsaProbe {
-    define: "SZ_USE_POWERVSX",
+    define: "STRINGZILLA_TARGET_POWERVSX",
     probe_file: "probes/power_vsx.c",
     gcc_flags: &[],
     msvc_flags: &[],
@@ -473,10 +476,10 @@ fn probe_isa(probe: &IsaProbe) -> bool {
 /// Compile-probe `probes/runtime_detection.c`: `true` means the library built for this target
 /// performs real runtime capability detection, so its load-time dispatch table will mask tiers the
 /// CPU lacks and dynamic dispatch may safely enable everything the toolchain can emit. The header
-/// owns the answer through `SZ_CAPABILITIES_RUNTIME_DETECTABLE_`, defined next to the detectors,
+/// owns the answer through `STRINGZILLA_HAS_RUNTIME_DETECTION_`, defined next to the detectors,
 /// which is why this is a compile probe against it rather than a platform list here. Works for
-/// cross targets - nothing runs. `SZ_AVOID_LIBC` must match the real build: detectability hinges on
-/// it where detection reads the auxiliary vector.
+/// cross targets - nothing runs. `STRINGZILLA_WITH_LIBC` must match the real build: detectability
+/// hinges on it where detection reads the auxiliary vector.
 fn probe_runtime_detection(avoid_libc: bool) -> bool {
     let out_dir = match env::var("OUT_DIR") {
         Ok(dir) => std::path::PathBuf::from(dir),
@@ -488,7 +491,7 @@ fn probe_runtime_detection(avoid_libc: bool) -> bool {
     };
     let source = manifest_dir.join("probes").join("runtime_detection.c");
     let include_dir = manifest_dir.join("include");
-    let avoid_libc_define = format!("SZ_AVOID_LIBC={}", if avoid_libc { "1" } else { "0" });
+    let avoid_libc_define = format!("STRINGZILLA_WITH_LIBC={}", if avoid_libc { "0" } else { "1" });
 
     let mut build = cc::Build::new();
     build.cargo_metadata(false).warnings(false);
@@ -585,10 +588,10 @@ fn machine_capabilities() -> Option<std::collections::HashSet<String>> {
 }
 
 /// Flags that stop the compiler from substituting its own builtins for the bytewise primitives
-/// StringZilla provides — and, under `SZ_OVERRIDE_LIBC`, from lowering those implementations back
-/// into a self-recursive LibC call. Mirrors the "avoid builtin functions" block in
-/// CMakeLists.txt: MSVC disables intrinsic generation with `/Oi-`, GCC and Clang disable the
-/// specific `mem*` builtins.
+/// StringZilla provides — and, under `STRINGZILLA_OVERRIDE_LIBC`, from lowering those
+/// implementations back into a self-recursive LibC call. Mirrors the "avoid builtin functions"
+/// block in CMakeLists.txt: MSVC disables intrinsic generation with `/Oi-`, GCC and Clang disable
+/// the specific `mem*` builtins.
 fn no_builtin_flags() -> &'static [&'static str] {
     if matches!(env::var("CARGO_CFG_TARGET_ENV").as_deref(), Ok("msvc")) {
         &["/Oi-"]

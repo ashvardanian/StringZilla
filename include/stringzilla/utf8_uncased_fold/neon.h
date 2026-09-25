@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #endif
 
 /** Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
-SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_ascii_(uint8x16_t source_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_ascii_(uint8x16_t source_u8x16) {
     // Unsigned wrap-around turns the two-sided 'A' ≤ x ≤ 'Z' test into one compare: bytes below
     // 'A' wrap past 0xE5 and bytes above 'Z' land at 26+, so only A-Z stay under 26.
     uint8x16_t is_ascii_upper_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8('A')), vdupq_n_u8(26));
@@ -41,13 +41,13 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_ascii_(uint8x16_t source_u8x16) {
  *
  *  @see Porting x86 vector bitmask optimizations to Arm NEON: https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
  */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_fold_neon_nibble_mask_(uint8x16_t mask_u8x16) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_fold_neon_nibble_mask_(uint8x16_t mask_u8x16) {
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(mask_u8x16), 4)), 0) &
            0x8888888888888888ull;
 }
 
 /** OR-reduces all 16 byte lanes of one register into a single byte of accumulated flags. */
-SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_neon_reduce_or_u8_(uint8x16_t flags_u8x16) {
+STRINGZILLA_HELPER_INLINE sz_u8_t sz_utf8_fold_neon_reduce_or_u8_(uint8x16_t flags_u8x16) {
     uint8x8_t flags_u8x8 = vorr_u8(vget_low_u8(flags_u8x16), vget_high_u8(flags_u8x16));
     sz_u64_t flags_u64 = vget_lane_u64(vreinterpret_u64_u8(flags_u8x8), 0);
     flags_u64 |= flags_u64 >> 32, flags_u64 |= flags_u64 >> 16, flags_u64 |= flags_u64 >> 8;
@@ -56,8 +56,8 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_neon_reduce_or_u8_(uint8x16_t flags_u8x16)
 
 /** Maps every lead byte in one register onto its folding-family flag; non-leads map to zero. One
  *  @c vqtbl4q_u8 covers the full 64-entry table - the NEON twin of Ice Lake's single VPERMB. */
-SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16,
-                                                        uint8x16x4_t lead_families_lut_u8x16x4) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16,
+                                                                 uint8x16x4_t lead_families_lut_u8x16x4) {
     uint8x16_t is_non_ascii_u8x16 = vcgeq_u8(source_u8x16, vdupq_n_u8(0x80));
     // Continuations are 10xxxxxx, i.e. exactly the [0x80, 0xBF] range - one wrap-around compare
     uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
@@ -84,7 +84,8 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16,
  *
  *  @return Per-byte mask (0xFF) set on every lead byte that does not begin a well-formed rune.
  */
-SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16, uint8x16_t next_register_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16,
+                                                                       uint8x16_t next_register_u8x16) {
     uint8x16_t const continuation_low_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t const continuation_span_u8x16 = vdupq_n_u8(0x40);
 
@@ -146,7 +147,8 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_
  *  @return Bytes consumed; always 62..64, never zero - 62 bytes of any valid UTF-8 cover at least
  *      one complete sequence, so the superchunk cannot start with an incomplete one.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_t source_u8x16x4, sz_ptr_t target) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_t source_u8x16x4,
+                                                                              sz_ptr_t target) {
 
     uint8x16_t last_u8x16 = source_u8x16x4.val[3];
     uint8x16_t is_two_byte_lead_u8x16 = vcltq_u8(vsubq_u8(last_u8x16, vdupq_n_u8(0xC0)), vdupq_n_u8(0x20));
@@ -192,8 +194,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                                  sz_ptr_t target) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source_u8x16x4,
+                                                                           sz_cptr_t source, sz_ptr_t target) {
 
     uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_fold_c4_deltas_lut_);
     uint8x16x4_t const c5_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_fold_c5_deltas_lut_);
@@ -365,8 +367,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t s
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                                     sz_ptr_t target) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4,
+                                                                              sz_cptr_t source, sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     uint8x16_t const offsets_lut_u8x16 = vld1q_u8(second_byte_offsets_lut_);
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
@@ -442,8 +444,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                                  sz_ptr_t target) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source_u8x16x4,
+                                                                           sz_cptr_t source, sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_ce_u8x16 = zero_u8x16, previous_is_cf_u8x16 = zero_u8x16;
     uint8x16_t stop_masks_u8x16[4];
@@ -539,8 +541,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t s
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                                     sz_ptr_t target) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t source_u8x16x4,
+                                                                              sz_cptr_t source, sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_d4_u8x16 = zero_u8x16, previous_is_d5_u8x16 = zero_u8x16;
     uint8x16_t stop_masks_u8x16[4];
@@ -642,8 +644,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                                     sz_ptr_t target) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t source_u8x16x4,
+                                                                              sz_cptr_t source, sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_82_upper_lead_u8x16 = zero_u8x16, previous_is_83_upper_lead_u8x16 = zero_u8x16;
     uint8x16_t previous_is_82_upper_second_u8x16 = zero_u8x16, previous_is_83_upper_second_u8x16 = zero_u8x16;
@@ -739,8 +741,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                                    sz_ptr_t target) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t source_u8x16x4,
+                                                                             sz_cptr_t source, sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t stop_masks_u8x16[4];
     uint8x16_t any_stop_u8x16 = zero_u8x16;
@@ -796,7 +798,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t
     return 64;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t source_length,
+                                                             sz_ptr_t target) {
     // The main loop processes a 64-byte logical superchunk - four 16-byte NEON registers - so
     // chunk decisions stay comparable to the Ice Lake kernel on the same input, which makes
     // three-way differential debugging (serial / icelake / neon) tractable.
@@ -938,7 +941,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
 #pragma GCC pop_options
 #endif
 
-#endif // SZ_USE_NEON
+#endif // STRINGZILLA_TARGET_NEON
 
 #ifdef __cplusplus
 }

@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +25,7 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-SZ_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
     sz_u64_t sum = 0;
     sz_size_t progress = 0;
     sz_size_t const vector_length = svcntb();
@@ -55,7 +55,7 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE2
+#endif // STRINGZILLA_TARGET_SVE2
 
 #ifdef __cplusplus
 }

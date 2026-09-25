@@ -52,60 +52,60 @@ extern "C" {
  *  @warning The caller must ensure the destination buffer is large enough. No bounds checking is
  *      performed. Use `source_length * 3` for safety.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold( //
-    sz_cptr_t source, sz_size_t source_length, //
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_uncased_fold( //
+    sz_cptr_t source, sz_size_t source_length,          //
     sz_ptr_t destination);
 
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial( //
-    sz_cptr_t source, sz_size_t source_length,         //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial( //
+    sz_cptr_t source, sz_size_t source_length,                  //
     sz_ptr_t destination);
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_sve2( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_sve2( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_v128( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_v128( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_lasx( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_lasx( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_uncased_fold */
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
@@ -127,31 +127,32 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx( //
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length,
+                                                       sz_ptr_t destination) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_uncased_fold_icelake(source, source_length, destination);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_uncased_fold_haswell(source, source_length, destination);
-#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE2 && STRINGZILLA_SVE_WIDER_THAN_NEON_
     return sz_utf8_uncased_fold_sve2(source, source_length, destination);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_uncased_fold_neon(source, source_length, destination);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_utf8_uncased_fold_v128(source, source_length, destination);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_uncased_fold_rvv(source, source_length, destination);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_uncased_fold_lasx(source, source_length, destination);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_uncased_fold_powervsx(source, source_length, destination);
 #else
     return sz_utf8_uncased_fold_serial(source, source_length, destination);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma endregion
 

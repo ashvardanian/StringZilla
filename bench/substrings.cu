@@ -26,7 +26,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test the GPU backend against the serial baseline.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
@@ -44,8 +44,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 #include "substrings.cuh"  // `substrings_dictionary_t`, `substrings_counts_from_sz`
 
 using namespace ashvardanian::stringzilla::bench;
@@ -170,7 +169,7 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
                                    sz_sequence_t const &device_haystacks, substrings_slice_t slice,
                                    sz_substrings_case_sensitivity_t sensitivity) {
     sz_memory_allocator_t allocator;
-    sz_memory_allocator_init_unified(&allocator, SZ_NULL);
+    sz_memory_allocator_init_unified(&allocator, STRINGZILLA_NULL);
     substrings_dictionary_t const dictionary(env, slice, sensitivity, allocator);
     std::string const suffix = substrings_label(slice, sensitivity);
     if (dictionary.needles.empty()) {
@@ -211,8 +210,9 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
+    if (!log_cuda_device()) return 0;
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {

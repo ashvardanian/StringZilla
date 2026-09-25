@@ -3,7 +3,7 @@ Shared pytest configuration for the StringZilla per-family test modules.
 
 Hosts the session-wide environment banner and the QEMU capability mask so every split test file
 (string.py, find.py, utf8_wordbreaks.py, …) inherits them without importing anything. The
-seeded-RNG helpers and `SEED_VALUES` live in `test.sz_helpers` and are imported by each module directly.
+seeded-RNG helpers and `SEED_VALUES` live in `test.helpers` and are imported by each module directly.
 
 File: test/conftest.py
 Author: Ash Vardanian
@@ -15,11 +15,10 @@ import platform
 
 import pytest
 
-from test.sz_helpers import (
+from test.helpers import (
     ITERATIONS_MULTIPLIER,
     SEED_VALUES,
     UnicodeDataDownloadError,
-    _random_seed_for_run,
     get_combining_classes,
     get_extended_pictographic,
     get_grapheme_break_properties,
@@ -45,6 +44,14 @@ if pyarrow_available:
     import pyarrow as pa
 
 
+def pytest_report_header() -> list[str]:
+    """Prints the seeds and scale in pytest's own header, which shows without `-s`."""
+    header = [f"seeds: {SEED_VALUES}, pin one with STRINGZILLA_SEED"]
+    if ITERATIONS_MULTIPLIER != 1.0:
+        header.append(f"scale: {ITERATIONS_MULTIPLIER}")
+    return header
+
+
 @pytest.fixture(scope="session", autouse=True)
 def log_test_environment():
     """Automatically log environment info before running any tests."""
@@ -63,14 +70,9 @@ def log_test_environment():
     print(f"PyArrow available: {pyarrow_available}")
     if pyarrow_available:
         print(f"PyArrow version: {pa.__version__}")
-    print(f"Test seeds: {SEED_VALUES}")
-    if _random_seed_for_run in SEED_VALUES:
-        print(f"  (random seed for this run: {_random_seed_for_run})")
-    if ITERATIONS_MULTIPLIER != 1.0:
-        print(f"Iterations multiplier: {ITERATIONS_MULTIPLIER:.2f}x")
 
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
-    is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
+    is_qemu = os.environ.get("STRINGZILLA_IN_QEMU", "") not in ("", "0", "false")
     if is_qemu:
         sve_like = {"sve", "sve2", "sve2aes"}
         current = list(getattr(sz, "__capabilities__", ()))

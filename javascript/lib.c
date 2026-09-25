@@ -83,7 +83,7 @@ napi_value utf8UncasedFoldAPI(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
-    if (validate && sz_utf8_find_malformed((sz_cptr_t)source_data, source_length) != SZ_NULL_CHAR) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)source_data, source_length) != STRINGZILLA_NULL_CHAR) {
         napi_throw_error(env, NULL, "Input is not valid UTF-8");
         return NULL;
     }
@@ -141,8 +141,8 @@ napi_value utf8UncasedFindAPI(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 2) { napi_get_value_bool(env, args[2], &validate); }
-    if (validate && (sz_utf8_find_malformed((sz_cptr_t)haystack_data, haystack_length) != SZ_NULL_CHAR ||
-                     sz_utf8_find_malformed((sz_cptr_t)needle_data, needle_length) != SZ_NULL_CHAR)) {
+    if (validate && (sz_utf8_find_malformed((sz_cptr_t)haystack_data, haystack_length) != STRINGZILLA_NULL_CHAR ||
+                     sz_utf8_find_malformed((sz_cptr_t)needle_data, needle_length) != STRINGZILLA_NULL_CHAR)) {
         napi_throw_error(env, NULL, "Input is not valid UTF-8");
         return NULL;
     }
@@ -190,7 +190,7 @@ napi_value utf8UncasedNeedleConstructor(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
-    if (validate && sz_utf8_find_malformed((sz_cptr_t)needle_data, needle_length) != SZ_NULL_CHAR) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)needle_data, needle_length) != STRINGZILLA_NULL_CHAR) {
         napi_throw_error(env, NULL, "Needle is not valid UTF-8");
         return NULL;
     }
@@ -246,7 +246,7 @@ napi_value utf8UncasedNeedleFindIn(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
-    if (validate && sz_utf8_find_malformed((sz_cptr_t)haystack_data, haystack_length) != SZ_NULL_CHAR) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)haystack_data, haystack_length) != STRINGZILLA_NULL_CHAR) {
         napi_throw_error(env, NULL, "Haystack is not valid UTF-8");
         return NULL;
     }
@@ -286,7 +286,7 @@ napi_value utf8NormAPI(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 2) { napi_get_value_bool(env, args[2], &validate); }
-    if (validate && sz_utf8_find_malformed((sz_cptr_t)source_data, source_length) != SZ_NULL_CHAR) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)source_data, source_length) != STRINGZILLA_NULL_CHAR) {
         napi_throw_error(env, NULL, "Input is not valid UTF-8");
         return NULL;
     }
@@ -348,7 +348,7 @@ napi_value utf8FindDenormalizedAPI(napi_env env, napi_callback_info info) {
     sz_cptr_t violation = sz_utf8_find_denormalized((sz_cptr_t)source_data, source_length, form);
 
     napi_value js_result;
-    if (violation == SZ_NULL_CHAR) { napi_create_bigint_int64(env, -1, &js_result); }
+    if (violation == STRINGZILLA_NULL_CHAR) { napi_create_bigint_int64(env, -1, &js_result); }
     else { napi_create_bigint_uint64(env, violation - (sz_cptr_t)source_data, &js_result); }
     return js_result;
 }
@@ -394,7 +394,7 @@ napi_value utf8SegmentsConstructor(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
-    if (validate && sz_utf8_find_malformed((sz_cptr_t)text_data, text_length) != SZ_NULL_CHAR) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)text_data, text_length) != STRINGZILLA_NULL_CHAR) {
         napi_throw_error(env, NULL, "Input is not valid UTF-8");
         return NULL;
     }

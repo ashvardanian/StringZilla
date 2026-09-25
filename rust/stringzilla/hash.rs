@@ -806,7 +806,10 @@ mod tests {
     fn sha256_multistate_size_checks() {
         let mut states = vec![sz::Sha256::new(); 3];
         let too_few: Vec<&[u8]> = vec![b"a".as_slice(), b"b".as_slice()];
-        assert_eq!(sz::sha256_multistate_update(&mut states, &too_few), Err(sz::Status::BadAlloc));
+        assert_eq!(
+            sz::sha256_multistate_update(&mut states, &too_few),
+            Err(sz::Status::BadAlloc)
+        );
 
         let mut too_few_digests = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 2];
         assert_eq!(

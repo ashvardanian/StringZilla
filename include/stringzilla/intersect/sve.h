@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -27,12 +27,12 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_API_COMPTIME sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_sequence,
-                                                      sz_sequence_t const *second_sequence, //
-                                                      sz_memory_allocator_t *alloc, sz_u64_t seed,
-                                                      sz_size_t *intersection_count_ptr,
-                                                      sz_sorted_idx_t *first_positions,
-                                                      sz_sorted_idx_t *second_positions) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_sequence,
+                                                               sz_sequence_t const *second_sequence, //
+                                                               sz_memory_allocator_t *alloc, sz_u64_t seed,
+                                                               sz_size_t *intersection_count_ptr,
+                                                               sz_sorted_idx_t *first_positions,
+                                                               sz_sorted_idx_t *second_positions) {
     // Serial passthrough - a batched SVE2+AES kernel was built and measured, then rejected.
     //
     // The design mirrored the Ice Lake donor (`sz_sequence_intersect_icelake`): hash four ≤16-byte
@@ -62,7 +62,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE
+#endif // STRINGZILLA_TARGET_SVE
 
 #ifdef __cplusplus
 }

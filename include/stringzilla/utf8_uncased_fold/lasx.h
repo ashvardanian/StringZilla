@@ -15,13 +15,14 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_lasx(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_lasx(sz_cptr_t source, sz_size_t source_length,
+                                                             sz_ptr_t destination) {
     return sz_utf8_uncased_fold_serial(source, source_length, destination);
 }
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

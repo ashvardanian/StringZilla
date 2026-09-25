@@ -15,8 +15,8 @@
 extern "C" {
 #endif
 
-#if SZ_USE_ICELAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_ICELAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                    \
     __attribute__((                                                                                              \
         target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt,evex512"))), \
@@ -67,13 +67,14 @@ extern "C" {
  *  @param[in] chunk_size Number of bytes in the current chunk, returned when all of them are valid.
  *  @return Index of the first invalid byte, or @p chunk_size if all loaded bytes are valid.
  */
-SZ_HELPER_INLINE sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mask, sz_size_t chunk_size) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mask,
+                                                              sz_size_t chunk_size) {
     sz_u64_t invalid_mask = ~is_valid | ~load_mask;
     return invalid_mask ? (sz_size_t)_tzcnt_u64(invalid_mask) : chunk_size;
 }
 
 /** OR-reduces all 64 byte lanes of a ZMM register into one byte of accumulated flags. */
-SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x64) {
+STRINGZILLA_HELPER_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x64) {
     __m256i upper_u8x32 = _mm512_extracti64x4_epi64(flags_u8x64, 1);
     __m256i or256_u8x32 = _mm256_or_si256(_mm512_castsi512_si256(flags_u8x64), upper_u8x32);
     __m128i or128_u8x16 = _mm_or_si128(_mm256_castsi256_si128(or256_u8x32), _mm256_extracti128_si256(or256_u8x32, 1));
@@ -90,8 +91,8 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x64)
  *
  *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
-    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,      //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
+    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,               //
     __mmask64 is_two_byte_lead_m64, __mmask64 is_three_byte_lead_m64, __mmask64 malformed_lead_m64, sz_ptr_t target) {
 
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
@@ -125,8 +126,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
-    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,   //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
+    __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,            //
     __mmask64 is_continuation_m64, __mmask64 is_three_byte_lead_m64, __mmask64 malformed_lead_m64, sz_ptr_t target) {
 
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
@@ -247,7 +248,8 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
     return fold_length;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t source_length,
+                                                                sz_ptr_t target) {
     // This algorithm exploits the idea, that most text in a single ZMM register is either:
     //
     // 1. All ASCII single-byte codepoints
@@ -1610,7 +1612,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
 #pragma GCC pop_options
 #endif
 
-#endif // SZ_USE_ICELAKE
+#endif // STRINGZILLA_TARGET_ICELAKE
 
 #ifdef __cplusplus
 }

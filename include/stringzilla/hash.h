@@ -108,12 +108,13 @@ extern "C" {
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_bytesum_serial, sz_bytesum_haswell, sz_bytesum_skylake, sz_bytesum_icelake,
  *      sz_bytesum_neon, sz_bytesum_sve, sz_bytesum_sve2, sz_bytesum_v128, sz_bytesum_v128relaxed,
  *      sz_bytesum_rvv, sz_bytesum_lasx, sz_bytesum_powervsx
  */
-SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Computes the 64-bit unsigned hash of a string, similar to @c std::hash in C++.
@@ -136,13 +137,14 @@ SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @note The output is the same on all platforms, in both single-shot and incremental modes.
  *  @sa sz_hash_serial, sz_hash_westmere, sz_hash_skylake, sz_hash_icelake, sz_hash_neonaes,
  *      sz_hash_sve2aes, sz_hash_v128, sz_hash_rvv, sz_hash_lasx, sz_hash_powervsx
  *  @sa sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
  */
-SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+STRINGZILLA_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /**
  *  @brief Hashes one string under @b many seeds at once, the "multi-seed" hash.
@@ -174,11 +176,12 @@ SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed)
  *  @endcode
  *
  *  @note Biggest speedups are for @p length ≤ 64; above that only the input load is shared.
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake,
  *      sz_hash_multiseed_neonaes
  */
-SZ_API_RUNTIME void sz_hash_multiseed(            //
+STRINGZILLA_API_RUNTIME void sz_hash_multiseed(   //
     sz_cptr_t text, sz_size_t length,             //
     sz_u64_t const *seeds, sz_size_t seeds_count, //
     sz_u64_t *hashes);
@@ -213,12 +216,13 @@ SZ_API_RUNTIME void sz_hash_multiseed(            //
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_fill_random_serial, sz_fill_random_westmere, sz_fill_random_skylake,
  *      sz_fill_random_icelake, sz_fill_random_neonaes, sz_fill_random_sve2aes, sz_fill_random_v128,
  *      sz_fill_random_rvv, sz_fill_random_lasx, sz_fill_random_powervsx
  */
-SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+STRINGZILLA_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /**
  *  @brief The state for incremental construction of a hash.
@@ -249,14 +253,14 @@ typedef struct __attribute__((packed)) sz_hash_state_t {
 #endif
 
 /** Bytes in a SHA256 digest, fixed by FIPS 180-4. */
-#define SZ_SHA256_DIGEST_LENGTH (32)
+#define STRINGZILLA_SHA256_DIGEST_LENGTH (32)
 
 /**
  *  @brief Bytes in a SHA256 message block, fixed by FIPS 180-4.
- *  @note Coincides with @c SZ_CACHE_LINE_WIDTH and the ZMM width, which are unrelated reasons for
- *      the same 64.
+ *  @note Coincides with @c STRINGZILLA_CACHE_LINE_BYTES and the ZMM width, which are unrelated
+ *      reasons for the same 64.
  */
-#define SZ_SHA256_BLOCK_LENGTH (64)
+#define STRINGZILLA_SHA256_BLOCK_LENGTH (64)
 
 /**
  *  @brief The state for incremental construction of a SHA256 hash.
@@ -265,7 +269,7 @@ typedef struct __attribute__((packed)) sz_hash_state_t {
 typedef struct sz_sha256_state_t {
 
     /** Message block buffer. */
-    sz_u8_t block[SZ_SHA256_BLOCK_LENGTH];
+    sz_u8_t block[STRINGZILLA_SHA256_BLOCK_LENGTH];
 
     /** Current hash state: 8x 32-bit values. */
     sz_u32_t hash[8];
@@ -295,7 +299,7 @@ sz_static_assert(sizeof(sz_sha256_state_t) == 128, sha256_state_is_two_cache_lin
  *  @param[out] state The state to initialize.
  *  @param[in] seed The 64-bit unsigned seed for the hash.
  */
-SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
+STRINGZILLA_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
 
 /**
  *  @brief Updates the state with new data.
@@ -304,7 +308,7 @@ SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
  *  @param[in] text The new data to include in the hash.
  *  @param[in] length The number of bytes in the new data.
  */
-SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Finalizes the immutable state and returns the hash.
@@ -312,14 +316,14 @@ SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text,
  *  @param[in] state The state to fold.
  *  @return The 64-bit hash value.
  */
-SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
+STRINGZILLA_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
 
 /**
  *  @brief Initializes the state for incremental SHA256 hashing.
  *
  *  @param[out] state The state to initialize.
  */
-SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state);
+STRINGZILLA_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state);
 
 /**
  *  @brief Updates the SHA256 state with new data.
@@ -328,7 +332,7 @@ SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state);
  *  @param[in] data The new data to hash.
  *  @param[in] length The number of bytes in the new data.
  */
-SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+STRINGZILLA_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
 
 /**
  *  @brief Finalizes the SHA256 state and returns the digest, leaving the state open to more data.
@@ -336,8 +340,8 @@ SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t d
  *  @param[in] state The state to finalize.
  *  @param[out] digest Output buffer for the 32-byte (256-bit) digest.
  */
-SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
-                                           sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]);
+STRINGZILLA_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
+                                                    sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]);
 
 /**
  *  @brief Advances many independent SHA256 states, one message per lane.
@@ -360,7 +364,7 @@ SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
  *      int main() {
  *          sz_cptr_t chunks[2] = {"hello", "world"};
  *          sz_sha256_state_t states[2];
- *          sz_u8_t digests[2 * SZ_SHA256_DIGEST_LENGTH];
+ *          sz_u8_t digests[2 * STRINGZILLA_SHA256_DIGEST_LENGTH];
  *          sz_sequence_t texts;
  *          sz_sequence_from_null_terminated_strings(chunks, 2, &texts);
  *          sz_sha256_state_init(&states[0]), sz_sha256_state_init(&states[1]);
@@ -370,7 +374,8 @@ SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @note Every lane is correct whatever its length, but throughput is best sorted by length.
  *  @sa sz_sha256_multistate_update_serial, sz_sha256_multistate_update_haswell,
  *      sz_sha256_multistate_update_skylake
@@ -379,249 +384,259 @@ SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
  *  longest member. Inputs sorted by length put similar lengths in the same group, and
  *  @c sz_sequence_argsort gives that ordering.
  */
-SZ_API_RUNTIME void sz_sha256_multistate_update(sz_sha256_state_t *states, sz_sequence_t const *texts);
+STRINGZILLA_API_RUNTIME void sz_sha256_multistate_update(sz_sha256_state_t *states, sz_sequence_t const *texts);
 
 /**
  *  @brief Finalizes many independent SHA256 states, one digest per lane.
  *
  *  @param[in] states Array of @p states_count states.
  *  @param[in] states_count Number of states to finalize, which is the lane count.
- *  @param[out] digests Output buffer of `states_count * SZ_SHA256_DIGEST_LENGTH` bytes, one
- *      big-endian digest per lane, in lane order.
+ *  @param[out] digests Output buffer of `states_count * STRINGZILLA_SHA256_DIGEST_LENGTH` bytes,
+ *      one big-endian digest per lane, in lane order.
  *
  *  Leaves every state unmodified, so a streaming caller can take an interim digest and append more.
  *
  *  @sa sz_sha256_state_digest, sz_sha256_multistate_update
  */
-SZ_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                sz_u8_t *digests);
-
-/** @copydoc sz_bytesum */
-SZ_API_COMPTIME sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash */
-SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
-
-/** @copydoc sz_hash_multiseed */
-SZ_API_COMPTIME void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                              sz_size_t seeds_count, sz_u64_t *hashes);
-
-/** @copydoc sz_fill_random */
-SZ_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
-
-/** @copydoc sz_hash_state_init */
-SZ_API_COMPTIME void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed);
-
-/** @copydoc sz_hash_state_update */
-SZ_API_COMPTIME void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash_state_digest */
-SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state);
-
-/** @copydoc sz_sha256_state_init */
-SZ_API_COMPTIME void sz_sha256_state_init_serial(sz_sha256_state_t *state);
-
-/** @copydoc sz_sha256_state_update */
-SZ_API_COMPTIME void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_sha256_state_digest */
-SZ_API_COMPTIME void sz_sha256_state_digest_serial(sz_sha256_state_t const *state,
-                                                   sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]);
-
-/** @copydoc sz_sha256_multistate_update */
-SZ_API_COMPTIME void sz_sha256_multistate_update_serial(sz_sha256_state_t *states, sz_sequence_t const *texts);
-
-/** @copydoc sz_sha256_multistate_digest */
-SZ_API_COMPTIME void sz_sha256_multistate_digest_serial(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                        sz_u8_t *digests);
-
-#if SZ_USE_WESTMERE
-
-/** @copydoc sz_hash */
-SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
-
-/** @copydoc sz_hash_multiseed */
-SZ_API_COMPTIME void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                                sz_size_t seeds_count, sz_u64_t *hashes);
-
-/** @copydoc sz_fill_random */
-SZ_API_COMPTIME void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
-
-/** @copydoc sz_hash_state_init */
-SZ_API_COMPTIME void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed);
-
-/** @copydoc sz_hash_state_update */
-SZ_API_COMPTIME void sz_hash_state_update_westmere(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash_state_digest */
-SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state);
-
-#endif
-
-#if SZ_USE_GOLDMONT
-
-/** @copydoc sz_sha256_state_init */
-SZ_API_COMPTIME void sz_sha256_state_init_goldmont(sz_sha256_state_t *state);
-
-/** @copydoc sz_sha256_state_update */
-SZ_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_sha256_state_digest */
-SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state,
-                                                     sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]);
-
-/** @copydoc sz_sha256_multistate_update */
-SZ_API_COMPTIME void sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states, sz_sequence_t const *texts);
-
-/** @copydoc sz_sha256_multistate_digest */
-SZ_API_COMPTIME void sz_sha256_multistate_digest_goldmont(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                          sz_u8_t *digests);
-
-#endif
-
-#if SZ_USE_HASWELL
-
-/** @copydoc sz_bytesum */
-SZ_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_sha256_multistate_update */
-SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *states, sz_sequence_t const *texts);
-
-/** @copydoc sz_sha256_multistate_digest */
-SZ_API_COMPTIME void sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states, sz_size_t states_count,
+STRINGZILLA_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states, sz_size_t states_count,
                                                          sz_u8_t *digests);
 
-#endif
-
-#if SZ_USE_SKYLAKE
-
 /** @copydoc sz_bytesum */
-SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash */
-SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
-
-/** @copydoc sz_fill_random */
-SZ_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
-
-/** @copydoc sz_hash_state_init */
-SZ_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed);
-
-/** @copydoc sz_hash_state_update */
-SZ_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash_state_digest */
-SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state);
-
-/** @copydoc sz_sha256_multistate_update */
-SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts);
-
-/** @copydoc sz_sha256_multistate_digest */
-SZ_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                         sz_u8_t *digests);
-
-#endif
-
-#if SZ_USE_ICELAKE
-
-/** @copydoc sz_bytesum */
-SZ_API_COMPTIME sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash */
-SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length,
+                                                                                 sz_u64_t seed);
 
 /** @copydoc sz_hash_multiseed */
-SZ_API_COMPTIME void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                               sz_size_t seeds_count, sz_u64_t *hashes);
+STRINGZILLA_API_COMPTIME void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                                       sz_size_t seeds_count, sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
-SZ_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+STRINGZILLA_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_API_COMPTIME void sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed);
+STRINGZILLA_API_COMPTIME void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_icelake(sz_hash_state_t const *state);
-
-#endif
-
-#if SZ_USE_NEON
-
-/** @copydoc sz_bytesum */
-SZ_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
-
-#endif
-
-#if SZ_USE_NEONAES
-
-/** @copydoc sz_hash */
-SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
-
-/** @copydoc sz_hash_multiseed */
-SZ_API_COMPTIME void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                               sz_size_t seeds_count, sz_u64_t *hashes);
-
-/** @copydoc sz_fill_random */
-SZ_API_COMPTIME void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
-
-/** @copydoc sz_hash_state_init */
-SZ_API_COMPTIME void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed);
-
-/** @copydoc sz_hash_state_update */
-SZ_API_COMPTIME void sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash_state_digest */
-SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state);
-
-#endif
-
-#if SZ_USE_NEONSHA
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state);
 
 /** @copydoc sz_sha256_state_init */
-SZ_API_COMPTIME void sz_sha256_state_init_neonsha(sz_sha256_state_t *state);
+STRINGZILLA_API_COMPTIME void sz_sha256_state_init_serial(sz_sha256_state_t *state);
 
 /** @copydoc sz_sha256_state_update */
-SZ_API_COMPTIME void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_API_COMPTIME void sz_sha256_state_digest_neonsha(sz_sha256_state_t const *state,
-                                                    sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]);
+STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_serial(
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]);
 
-#endif
+/** @copydoc sz_sha256_multistate_update */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_serial(sz_sha256_state_t *states, sz_sequence_t const *texts);
 
-#if SZ_USE_SVE
+/** @copydoc sz_sha256_multistate_digest */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_serial(sz_sha256_state_t const *states,
+                                                                 sz_size_t states_count, sz_u8_t *digests);
 
-/** @copydoc sz_bytesum */
-SZ_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length);
-
-#endif
-
-#if SZ_USE_SVE2
-
-/** @copydoc sz_bytesum */
-SZ_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length);
-
-#endif
-
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_WESTMERE
 
 /** @copydoc sz_hash */
-SZ_API_COMPTIME sz_u64_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere(sz_cptr_t text, sz_size_t length,
+                                                                                   sz_u64_t seed);
+
+/** @copydoc sz_hash_multiseed */
+STRINGZILLA_API_COMPTIME void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                                         sz_size_t seeds_count, sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
-SZ_API_COMPTIME void sz_fill_random_sve2aes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+STRINGZILLA_API_COMPTIME void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_API_COMPTIME void sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed);
+STRINGZILLA_API_COMPTIME void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_API_COMPTIME void sz_hash_state_update_sve2aes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_hash_state_update_westmere(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state);
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state);
+
+#endif
+
+#if STRINGZILLA_TARGET_GOLDMONT
+
+/** @copydoc sz_sha256_state_init */
+STRINGZILLA_API_COMPTIME void sz_sha256_state_init_goldmont(sz_sha256_state_t *state);
+
+/** @copydoc sz_sha256_state_update */
+STRINGZILLA_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr_t text,
+                                                              sz_size_t length);
+
+/** @copydoc sz_sha256_state_digest */
+STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_goldmont(
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]);
+
+/** @copydoc sz_sha256_multistate_update */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states,
+                                                                   sz_sequence_t const *texts);
+
+/** @copydoc sz_sha256_multistate_digest */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_goldmont(sz_sha256_state_t const *states,
+                                                                   sz_size_t states_count, sz_u8_t *digests);
+
+#endif
+
+#if STRINGZILLA_TARGET_HASWELL
+
+/** @copydoc sz_bytesum */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_sha256_multistate_update */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *states,
+                                                                  sz_sequence_t const *texts);
+
+/** @copydoc sz_sha256_multistate_digest */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states,
+                                                                  sz_size_t states_count, sz_u8_t *digests);
+
+#endif
+
+#if STRINGZILLA_TARGET_SKYLAKE
+
+/** @copydoc sz_bytesum */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash */
+STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake(sz_cptr_t text, sz_size_t length,
+                                                                                  sz_u64_t seed);
+
+/** @copydoc sz_fill_random */
+STRINGZILLA_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+
+/** @copydoc sz_hash_state_init */
+STRINGZILLA_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed);
+
+/** @copydoc sz_hash_state_update */
+STRINGZILLA_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash_state_digest */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state);
+
+/** @copydoc sz_sha256_multistate_update */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *states,
+                                                                  sz_sequence_t const *texts);
+
+/** @copydoc sz_sha256_multistate_digest */
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states,
+                                                                  sz_size_t states_count, sz_u8_t *digests);
+
+#endif
+
+#if STRINGZILLA_TARGET_ICELAKE
+
+/** @copydoc sz_bytesum */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash */
+STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_icelake(sz_cptr_t text, sz_size_t length,
+                                                                                  sz_u64_t seed);
+
+/** @copydoc sz_hash_multiseed */
+STRINGZILLA_API_COMPTIME void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                                        sz_size_t seeds_count, sz_u64_t *hashes);
+
+/** @copydoc sz_fill_random */
+STRINGZILLA_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+
+/** @copydoc sz_hash_state_init */
+STRINGZILLA_API_COMPTIME void sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed);
+
+/** @copydoc sz_hash_state_update */
+STRINGZILLA_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash_state_digest */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_icelake(sz_hash_state_t const *state);
+
+#endif
+
+#if STRINGZILLA_TARGET_NEON
+
+/** @copydoc sz_bytesum */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if STRINGZILLA_TARGET_NEONAES
+
+/** @copydoc sz_hash */
+STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length,
+                                                                                  sz_u64_t seed);
+
+/** @copydoc sz_hash_multiseed */
+STRINGZILLA_API_COMPTIME void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                                        sz_size_t seeds_count, sz_u64_t *hashes);
+
+/** @copydoc sz_fill_random */
+STRINGZILLA_API_COMPTIME void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+
+/** @copydoc sz_hash_state_init */
+STRINGZILLA_API_COMPTIME void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed);
+
+/** @copydoc sz_hash_state_update */
+STRINGZILLA_API_COMPTIME void sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash_state_digest */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state);
+
+#endif
+
+#if STRINGZILLA_TARGET_NEONSHA
+
+/** @copydoc sz_sha256_state_init */
+STRINGZILLA_API_COMPTIME void sz_sha256_state_init_neonsha(sz_sha256_state_t *state);
+
+/** @copydoc sz_sha256_state_update */
+STRINGZILLA_API_COMPTIME void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t data,
+                                                             sz_size_t length);
+
+/** @copydoc sz_sha256_state_digest */
+STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_neonsha(
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]);
+
+#endif
+
+#if STRINGZILLA_TARGET_SVE
+
+/** @copydoc sz_bytesum */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if STRINGZILLA_TARGET_SVE2
+
+/** @copydoc sz_bytesum */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if STRINGZILLA_TARGET_SVE2AES
+
+/** @copydoc sz_hash */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+
+/** @copydoc sz_fill_random */
+STRINGZILLA_API_COMPTIME void sz_fill_random_sve2aes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+
+/** @copydoc sz_hash_state_init */
+STRINGZILLA_API_COMPTIME void sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed);
+
+/** @copydoc sz_hash_state_update */
+STRINGZILLA_API_COMPTIME void sz_hash_state_update_sve2aes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash_state_digest */
+STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state);
 
 #endif
 
@@ -633,7 +648,7 @@ SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *sta
  *  @brief Compares the state of two running hashes.
  *  @note The current content of the @c ins buffer and its length is ignored.
  */
-SZ_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs) {
     // Compare byte-by-byte using sz_equal (safe for packed struct)
     if (!sz_equal((sz_cptr_t)lhs->aes, (sz_cptr_t)rhs->aes, 64)) return sz_false_k;
     if (!sz_equal((sz_cptr_t)lhs->sum, (sz_cptr_t)rhs->sum, 64)) return sz_false_k;
@@ -663,283 +678,283 @@ SZ_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_has
 #include "stringzilla/hash/powervsx.h"
 
 /*  Pick the right implementation for the hashing and checksum kernels. To override this behavior
- *  and precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
+ *  and precompile all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_bytesum_v128relaxed(text, length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_bytesum_v128(text, length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_bytesum_rvv(text, length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_bytesum_lasx(text, length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_bytesum_powervsx(text, length);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_bytesum_icelake(text, length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_bytesum_skylake(text, length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_bytesum_haswell(text, length);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_bytesum_sve2(text, length);
-#elif SZ_USE_SVE
+#elif STRINGZILLA_TARGET_SVE
     return sz_bytesum_sve(text, length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_bytesum_neon(text, length);
 #else
     return sz_bytesum_serial(text, length);
 #endif
 }
 
-SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_hash_v128relaxed(text, length, seed);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_hash_v128(text, length, seed);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     return sz_hash_rvvcrypto(text, length, seed);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_hash_rvv(text, length, seed);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_hash_lasx(text, length, seed);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_hash_powervsx(text, length, seed);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_hash_icelake(text, length, seed);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_hash_skylake(text, length, seed);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     return sz_hash_westmere(text, length, seed);
-#elif SZ_USE_SVE2AES
+#elif STRINGZILLA_TARGET_SVE2AES
     return sz_hash_sve2aes(text, length, seed);
-#elif SZ_USE_NEONAES
+#elif STRINGZILLA_TARGET_NEONAES
     return sz_hash_neonaes(text, length, seed);
 #else
     return sz_hash_serial(text, length, seed);
 #endif
 }
 
-SZ_API_RUNTIME void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             //
-                                      sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                      sz_u64_t *hashes) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             //
+                                               sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                               sz_u64_t *hashes) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_hash_multiseed_v128relaxed(text, length, seeds, seeds_count, hashes);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_hash_multiseed_v128(text, length, seeds, seeds_count, hashes);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     sz_hash_multiseed_icelake(text, length, seeds, seeds_count, hashes);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     sz_hash_multiseed_westmere(text, length, seeds, seeds_count, hashes);
-#elif SZ_USE_NEONAES
+#elif STRINGZILLA_TARGET_NEONAES
     sz_hash_multiseed_neonaes(text, length, seeds, seeds_count, hashes);
 #else
     sz_hash_multiseed_serial(text, length, seeds, seeds_count, hashes);
 #endif
 }
 
-SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_fill_random_v128relaxed(text, length, nonce);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_fill_random_v128(text, length, nonce);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     sz_fill_random_rvvcrypto(text, length, nonce);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_fill_random_rvv(text, length, nonce);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_fill_random_lasx(text, length, nonce);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_fill_random_powervsx(text, length, nonce);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     sz_fill_random_icelake(text, length, nonce);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     sz_fill_random_skylake(text, length, nonce);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     sz_fill_random_westmere(text, length, nonce);
-#elif SZ_USE_SVE2AES
+#elif STRINGZILLA_TARGET_SVE2AES
     sz_fill_random_sve2aes(text, length, nonce);
-#elif SZ_USE_NEONAES
+#elif STRINGZILLA_TARGET_NEONAES
     sz_fill_random_neonaes(text, length, nonce);
 #else
     sz_fill_random_serial(text, length, nonce);
 #endif
 }
 
-SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_hash_state_init_v128relaxed(state, seed);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_hash_state_init_v128(state, seed);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     sz_hash_state_init_rvvcrypto(state, seed);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_hash_state_init_rvv(state, seed);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_hash_state_init_lasx(state, seed);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_hash_state_init_powervsx(state, seed);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     sz_hash_state_init_icelake(state, seed);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     sz_hash_state_init_skylake(state, seed);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     sz_hash_state_init_westmere(state, seed);
-#elif SZ_USE_SVE2AES
+#elif STRINGZILLA_TARGET_SVE2AES
     sz_hash_state_init_sve2aes(state, seed);
-#elif SZ_USE_NEONAES
+#elif STRINGZILLA_TARGET_NEONAES
     sz_hash_state_init_neonaes(state, seed);
 #else
     sz_hash_state_init_serial(state, seed);
 #endif
 }
 
-SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_hash_state_update_v128relaxed(state, text, length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_hash_state_update_v128(state, text, length);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     sz_hash_state_update_rvvcrypto(state, text, length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_hash_state_update_rvv(state, text, length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_hash_state_update_lasx(state, text, length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_hash_state_update_powervsx(state, text, length);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     sz_hash_state_update_icelake(state, text, length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     sz_hash_state_update_skylake(state, text, length);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     sz_hash_state_update_westmere(state, text, length);
-#elif SZ_USE_SVE2AES
+#elif STRINGZILLA_TARGET_SVE2AES
     sz_hash_state_update_sve2aes(state, text, length);
-#elif SZ_USE_NEONAES
+#elif STRINGZILLA_TARGET_NEONAES
     sz_hash_state_update_neonaes(state, text, length);
 #else
     sz_hash_state_update_serial(state, text, length);
 #endif
 }
 
-SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_hash_state_digest_v128relaxed(state);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_hash_state_digest_v128(state);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     return sz_hash_state_digest_rvvcrypto(state);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_hash_state_digest_rvv(state);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_hash_state_digest_lasx(state);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_hash_state_digest_powervsx(state);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_hash_state_digest_icelake(state);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_hash_state_digest_skylake(state);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     return sz_hash_state_digest_westmere(state);
-#elif SZ_USE_SVE2AES
+#elif STRINGZILLA_TARGET_SVE2AES
     return sz_hash_state_digest_sve2aes(state);
-#elif SZ_USE_NEONAES
+#elif STRINGZILLA_TARGET_NEONAES
     return sz_hash_state_digest_neonaes(state);
 #else
     return sz_hash_state_digest_serial(state);
 #endif
 }
 
-SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state) {
-#if SZ_USE_V128
+STRINGZILLA_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state) {
+#if STRINGZILLA_TARGET_V128
     sz_sha256_state_init_v128(state);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     sz_sha256_state_init_rvvcrypto(state);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_sha256_state_init_rvv(state);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_sha256_state_init_lasx(state);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_sha256_state_init_powervsx(state);
-#elif SZ_USE_NEONSHA
+#elif STRINGZILLA_TARGET_NEONSHA
     sz_sha256_state_init_neonsha(state);
-#elif SZ_USE_GOLDMONT
+#elif STRINGZILLA_TARGET_GOLDMONT
     sz_sha256_state_init_goldmont(state);
 #else
     sz_sha256_state_init_serial(state);
 #endif
 }
 
-SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
-#if SZ_USE_V128
+STRINGZILLA_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+#if STRINGZILLA_TARGET_V128
     sz_sha256_state_update_v128(state, data, length);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     sz_sha256_state_update_rvvcrypto(state, data, length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_sha256_state_update_rvv(state, data, length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_sha256_state_update_lasx(state, data, length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_sha256_state_update_powervsx(state, data, length);
-#elif SZ_USE_NEONSHA
+#elif STRINGZILLA_TARGET_NEONSHA
     sz_sha256_state_update_neonsha(state, data, length);
-#elif SZ_USE_GOLDMONT
+#elif STRINGZILLA_TARGET_GOLDMONT
     sz_sha256_state_update_goldmont(state, data, length);
 #else
     sz_sha256_state_update_serial(state, data, length);
 #endif
 }
 
-SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
-                                           sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]) {
-#if SZ_USE_V128
+STRINGZILLA_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
+                                                    sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
+#if STRINGZILLA_TARGET_V128
     sz_sha256_state_digest_v128(state, digest);
-#elif SZ_USE_RVVCRYPTO
+#elif STRINGZILLA_TARGET_RVVCRYPTO
     sz_sha256_state_digest_rvvcrypto(state, digest);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_sha256_state_digest_rvv(state, digest);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_sha256_state_digest_lasx(state, digest);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_sha256_state_digest_powervsx(state, digest);
-#elif SZ_USE_NEONSHA
+#elif STRINGZILLA_TARGET_NEONSHA
     sz_sha256_state_digest_neonsha(state, digest);
-#elif SZ_USE_GOLDMONT
+#elif STRINGZILLA_TARGET_GOLDMONT
     sz_sha256_state_digest_goldmont(state, digest);
 #else
     sz_sha256_state_digest_serial(state, digest);
 #endif
 }
 
-SZ_API_RUNTIME void sz_sha256_multistate_update(sz_sha256_state_t *states, sz_sequence_t const *texts) {
-#if SZ_USE_SKYLAKE
+STRINGZILLA_API_RUNTIME void sz_sha256_multistate_update(sz_sha256_state_t *states, sz_sequence_t const *texts) {
+#if STRINGZILLA_TARGET_SKYLAKE
     sz_sha256_multistate_update_skylake(states, texts);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     sz_sha256_multistate_update_haswell(states, texts);
-#elif SZ_USE_GOLDMONT
+#elif STRINGZILLA_TARGET_GOLDMONT
     sz_sha256_multistate_update_goldmont(states, texts);
 #else
     sz_sha256_multistate_update_serial(states, texts);
 #endif
 }
 
-SZ_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                sz_u8_t *digests) {
-#if SZ_USE_SKYLAKE
+STRINGZILLA_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                         sz_u8_t *digests) {
+#if STRINGZILLA_TARGET_SKYLAKE
     sz_sha256_multistate_digest_skylake(states, states_count, digests);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     sz_sha256_multistate_digest_haswell(states, states_count, digests);
-#elif SZ_USE_GOLDMONT
+#elif STRINGZILLA_TARGET_GOLDMONT
     sz_sha256_multistate_digest_goldmont(states, states_count, digests);
 #else
     sz_sha256_multistate_digest_serial(states, states_count, digests);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 #pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus

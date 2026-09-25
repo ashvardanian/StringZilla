@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -23,7 +23,8 @@ extern "C" {
 #endif
 
 /** Widen @p count ASCII bytes (u8 → u16 → u32) and store them as runes. */
-SZ_HELPER_INLINE void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_t const *src, sz_size_t count) {
+STRINGZILLA_HELPER_INLINE void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_t const *src,
+                                                             sz_size_t count) {
     sz_size_t done = 0;
     while (done < count) {
         sz_size_t widened_vector_length = __riscv_vsetvl_e8m2(count - done);
@@ -56,7 +57,7 @@ SZ_HELPER_INLINE void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_
  *  @param[out] consumed_bytes Set to `2 * runes_emitted` (the byte span of the decoded prefix).
  *  @return Number of runes emitted (0 if the very first pair is not a well-formed 2-byte sequence).
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
     sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     sz_u8_t const *bytes = (sz_u8_t const *)text;
@@ -114,7 +115,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
  *  @return Number of runes emitted (0 if the very first triple is not a
  *      well-formed 3-byte sequence).
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_decode_three_byte_run_rvv_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_decode_three_byte_run_rvv_( //
     sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     sz_u8_t const *bytes = (sz_u8_t const *)text;
@@ -206,7 +207,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_decode_three_byte_run_rvv_( //
  *      resume-cursor delta).
  *  @return Number of runes emitted.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_rvv_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_rvv_( //
     vuint8m1_t window_bytes_u8m1, vbool8_t emit_mask_b8, vbool8_t ill_mask_b8, vuint8m1_t consumed_length_u8m1,
     sz_size_t decodable, sz_size_t vector_length, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
@@ -295,9 +296,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_rvv_( //
  *  reference. The step declines (`*runes_unpacked == 0`, cursor unchanged) only when the first
  *  lead's declared sequence crosses the window edge (a boundary truncation), which the public entry
  *  finalizes without a serial re-decode. */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_rune_t *runes, sz_size_t runes_capacity,      //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_rune_t *runes, sz_size_t runes_capacity,               //
     sz_size_t *runes_unpacked) {
 
     // Cap the window at 192 bytes so every lane index, length, and `lane + length` stays exact in the `u8` domain
@@ -498,9 +499,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
  *  public entry finalizes with a single bounded @c sz_utf8_maximal_subpart_ step - never a
  *  per-codepoint serial re-decode.
  */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv(   //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_rune_t *runes, sz_size_t runes_capacity,        //
     sz_size_t *runes_unpacked) {
 
     sz_u8_t const *text_cursor = (sz_u8_t const *)text;
@@ -584,7 +585,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv(   //
 }
 
 /** Count UTF-8 codepoints: @c vcpop the leading (non-continuation) bytes per strip. */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t count = 0;
     while (length) {
@@ -607,7 +608,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
  *  @c e8m4 so the @c vbool2 lead mask pairs with a @c u16m8 iota whose lane count never
  *  overflows the prefix counts.
  */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t seen = 0;
     while (length) {
@@ -626,7 +627,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_
         seen += strip_leads;
         text_u8 += vector_length, length -= vector_length;
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /*  Multistep newline / whitespace iteration (RVV 1.0).
@@ -676,7 +677,7 @@ typedef struct sz_utf8_rune_window_rvv_t {
 /** Load up to 64 window bytes with a guaranteed-zero tail: a zero splat at VLMAX then a
  *  tail-undisturbed @c vle8, so @c vslidedown neighbour reads past the window are deterministic
  *  zeros at any VLEN. */
-SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_load64_rvv_(sz_u8_t const *bytes, sz_size_t loaded) {
+STRINGZILLA_HELPER_INLINE vuint8m4_t sz_utf8_rune_load64_rvv_(sz_u8_t const *bytes, sz_size_t loaded) {
     vuint8m4_t const zero_u8m4 = __riscv_vmv_v_x_u8m4(0, __riscv_vsetvlmax_e8m4());
     return __riscv_vle8_v_u8m4_tu(zero_u8m4, bytes, loaded);
 }
@@ -687,7 +688,7 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_load64_rvv_(sz_u8_t const *bytes, sz_si
  *  domain at every genuine engine boundary (the window struct fields, the frame's per-class masks).
  *  The producing compare must have run at `vl = 64` so all 64 bits are defined; the mask register's
  *  tail bits past lane 63 are never read. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_rune_mask_to_bits_rvv_(vbool2_t lanes_b2) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_rune_mask_to_bits_rvv_(vbool2_t lanes_b2) {
     vuint64m1_t const words_u64m1 = __riscv_vreinterpret_v_u8m1_u64m1(__riscv_vreinterpret_v_b2_u8m1(lanes_b2));
     return __riscv_vmv_x_s_u64m1_u64(words_u64m1);
 }
@@ -698,7 +699,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_rune_mask_to_bits_rvv_(vbool2_t lanes_b2) {
  *  portable @c sz_u64_t domain (a partition-resolver output, an engine @c breaks mask, a scalar
  *  @c loaded-clamped mix); a compare that was only just lowered must be recomputed in-register
  *  instead, never round-tripped. Consumers read only lanes `[0, 64)`. */
-SZ_HELPER_INLINE vbool2_t sz_utf8_rune_bits_to_mask_rvv_(sz_u64_t bits) {
+STRINGZILLA_HELPER_INLINE vbool2_t sz_utf8_rune_bits_to_mask_rvv_(sz_u64_t bits) {
     vuint64m1_t const words_u64m1 = __riscv_vmv_s_x_u64m1(bits, 1);
     return __riscv_vreinterpret_v_u8m1_b2(__riscv_vreinterpret_v_u64m1_u8m1(words_u64m1));
 }
@@ -708,7 +709,7 @@ SZ_HELPER_INLINE vbool2_t sz_utf8_rune_bits_to_mask_rvv_(sz_u64_t bits) {
  *  partition mask stays bit-identical across backends. Requires the window's lanes past 63
  *  to be zero (see @ref sz_utf8_rune_load64_rvv_), so the @c vslidedown spill lanes OR
  *  cleanly with the wrapped head. */
-SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_forward_neighbour_rvv_(vuint8m4_t window_u8m4, sz_size_t distance) {
+STRINGZILLA_HELPER_INLINE vuint8m4_t sz_utf8_rune_forward_neighbour_rvv_(vuint8m4_t window_u8m4, sz_size_t distance) {
     vuint8m4_t const zero_u8m4 = __riscv_vmv_v_x_u8m4(0, __riscv_vsetvlmax_e8m4());
     vuint8m4_t const slid_u8m4 = __riscv_vslidedown_vx_u8m4(window_u8m4, distance, 64);
     vuint8m4_t const wrapped_u8m4 = __riscv_vslideup_vx_u8m4(zero_u8m4, window_u8m4, 64 - distance, 64);
@@ -719,8 +720,8 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_forward_neighbour_rvv_(vuint8m4_t windo
  *  @ref sz_utf8_rune_decode_window_neon_. The raw window vector arrives from the driver's single
  *  @ref sz_utf8_rune_load64_rvv_ materialization; the BMP halves are recomputed in-leaf via
  *  @ref sz_utf8_rune_bmp_halves_rvv_, so no byte array is ever staged. */
-SZ_HELPER_INLINE sz_utf8_rune_window_rvv_t sz_utf8_rune_decode_window_rvv_(vuint8m4_t const raw_u8m4,
-                                                                           sz_size_t const loaded) {
+STRINGZILLA_HELPER_INLINE sz_utf8_rune_window_rvv_t sz_utf8_rune_decode_window_rvv_(vuint8m4_t const raw_u8m4,
+                                                                                    sz_size_t const loaded) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(loaded);
     sz_utf8_rune_window_rvv_t window;
     window.loaded = loaded;
@@ -745,7 +746,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_rvv_t sz_utf8_rune_decode_window_rvv_(vuint
  *  mask, bit-identical to the NEON decode. ASCII and 4-byte lanes carry don't-cares, exactly
  *  like NEON. Recomputed in each consuming leaf instead of threaded, so no 8-register liveness
  *  spans the leaves. */
-SZ_HELPER_INLINE vuint8m4x2_t sz_utf8_rune_bmp_halves_rvv_(vuint8m4_t const raw_u8m4) {
+STRINGZILLA_HELPER_INLINE vuint8m4x2_t sz_utf8_rune_bmp_halves_rvv_(vuint8m4_t const raw_u8m4) {
     vuint8m4_t const next1_u8m4 = sz_utf8_rune_forward_neighbour_rvv_(raw_u8m4, 1);
     vuint8m4_t const next2_u8m4 = sz_utf8_rune_forward_neighbour_rvv_(raw_u8m4, 2);
     vbool2_t const three_byte_b2 = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(raw_u8m4, 0xF0, 64), 0xE0, 64);
@@ -773,7 +774,7 @@ SZ_HELPER_INLINE vuint8m4x2_t sz_utf8_rune_bmp_halves_rvv_(vuint8m4_t const raw_
  *  the LUT being total over the byte domain, so every lane is in-bounds by construction. Then
  *  `flat[(page << 8) | low]` by a masked @c vluxei16 gather. @p inactive_u8m4 rides through on
  *  masked-off lanes, which perform no memory access. Index safety never depends on @p active_b2. */
-SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
+STRINGZILLA_HELPER_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, vuint8m4_t high_u8m4, vuint8m4_t low_u8m4, vbool2_t active_b2,
     vuint8m4_t inactive_u8m4) {
     vuint8m4_t const page_u8m4 = __riscv_vluxei8_v_u8m4(page_lut, high_u8m4, 64);
@@ -787,7 +788,7 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
  *  absolute positions, and emit as a shifted-difference stream:
  *  `starts = vslide1up(positions, previous)`, `lengths = positions - starts`, honoring @p capacity
  *  and the carried open-word start @p previous_io. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_rvv_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_rvv_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     if (!boundary || produced >= capacity) return produced;
@@ -826,7 +827,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_rvv_( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_RVV
+#endif // STRINGZILLA_TARGET_RVV
 
 #ifdef __cplusplus
 }

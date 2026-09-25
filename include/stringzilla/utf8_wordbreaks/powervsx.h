@@ -39,7 +39,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -47,7 +47,7 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-#if !SZ_IS_BIG_ENDIAN_
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_
 
 #pragma region UAX 29 Word Boundaries forward kernel
 
@@ -56,7 +56,8 @@ extern "C" {
 /** Build a per-quarter byte-boolean selector (0x00/0xFF) from the 16 lane bits of @p bits at
  *  offset @p shift, the VSX twin of @ref sz_utf8_word_break_byte_mask_from_bits_neon_ confined
  *  to one quarter. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_byte_mask_from_bits_powervsx_(sz_u64_t bits, int shift) {
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_word_break_byte_mask_from_bits_powervsx_(sz_u64_t bits,
+                                                                                                  int shift) {
     static unsigned char const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     static unsigned char const lane_half[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     unsigned char const low_byte = (unsigned char)((bits >> shift) & 0xFF);
@@ -71,8 +72,8 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_byte_mask_from_bits_p
  *  flat page-compressed table via @ref sz_utf8_rune_flat_lookup_powervsx_, the VSX twin of
  *  @ref sz_utf8_word_break_bmp_class_neon_. Bit-exact with @c sz_rune_word_break_property over the
  *  whole BMP. Addresses one quarter; the caller iterates the four quarters. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_bmp_class_powervsx_(__vector unsigned char high_bytes_u8x16,
-                                                                               __vector unsigned char low_bytes_u8x16) {
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_word_break_bmp_class_powervsx_(
+    __vector unsigned char high_bytes_u8x16, __vector unsigned char low_bytes_u8x16) {
     return sz_utf8_rune_flat_lookup_powervsx_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
                                               (int)sz_utf8_word_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
@@ -82,7 +83,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_bmp_class_powervsx_(_
  *  @p plane_off = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low =
  *  offset&0xFF. Bit-exact with @c sz_rune_word_break_property over the Supplementary Planes.
  *  Addresses one quarter. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_astral_class_powervsx_( //
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_word_break_astral_class_powervsx_( //
     __vector unsigned char plane_off_u8x16, __vector unsigned char high_u8x16, __vector unsigned char low_u8x16) {
     __vector unsigned char const low_nibble_mask_u8x16 = vec_splats((unsigned char)0x0F);
     __vector unsigned char const shift_four_u8x16 = vec_splats((unsigned char)4);
@@ -122,7 +123,8 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_astral_class_powervsx
 /** Word_Break class byte for sixteen ASCII codepoints (cp < 0x80) via the existing 128-entry
  *  property table, the VSX twin of @ref sz_utf8_word_break_ascii_class_neon_, read by a bounded
  *  scalar L1 walk (the window byte equals the codepoint on ASCII lanes). Addresses one quarter. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_ascii_class_powervsx_(__vector unsigned char bytes_u8x16) {
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_word_break_ascii_class_powervsx_(
+    __vector unsigned char bytes_u8x16) {
     sz_u128_vec_t bytes_vec, result_vec;
     bytes_vec.vsx_u8 = bytes_u8x16;
     for (int lane = 0; lane < 16; ++lane)
@@ -137,10 +139,10 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_ascii_class_powervsx_
  *  scatters the dense class bytes back to their original byte lanes in @p bmp_out_u8x16 (zeroed
  *  elsewhere). Bit-identical to four full @ref sz_utf8_word_break_bmp_class_powervsx_ quarters
  *  on every BMP-start lane. */
-SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_starts,
-                                                               __vector unsigned char const *high_u8x16,
-                                                               __vector unsigned char const *low_u8x16,
-                                                               __vector unsigned char *bmp_out_u8x16) {
+STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_starts,
+                                                                        __vector unsigned char const *high_u8x16,
+                                                                        __vector unsigned char const *low_u8x16,
+                                                                        __vector unsigned char *bmp_out_u8x16) {
     sz_u512_vec_t high_bytes_vec, low_bytes_vec;
     for (int quarter = 0; quarter < 4; ++quarter) {
         vec_xst(high_u8x16[quarter], 0, high_bytes_vec.u8s + quarter * 16);
@@ -180,7 +182,7 @@ SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_star
  *  bit-identical on every start lane. ASCII through the property table, BMP through the flat
  *  lookup, 4-byte leads through the astral cascade with the codepoint high/low/plane reconstructed
  *  from the forward neighbours. */
-SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_powervsx_( //
+STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_classify_window_powervsx_( //
     sz_utf8_rune_window_powervsx_t window, __vector unsigned char *classes_u8x16) {
     __vector unsigned char const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
@@ -254,8 +256,8 @@ SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_powervsx_( //
 
 /** A 64-bit "class byte == @p value" lane mask over the four class quarters (four @c vec_cmpeq →
  *  combine). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_powervsx_(__vector unsigned char const *classes_u8x16,
-                                                                  sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_powervsx_(__vector unsigned char const *classes_u8x16,
+                                                                           sz_u8_t value) {
     __vector unsigned char const value_u8x16 = vec_splats(value);
     __vector unsigned char equal_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter)
@@ -264,8 +266,8 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_powervsx_(__vector unsig
 }
 
 /** A 64-bit "raw window byte == @p value" lane mask over the four window quarters. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_powervsx_(__vector unsigned char const *quarters,
-                                                                  sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_powervsx_(__vector unsigned char const *quarters,
+                                                                           sz_u8_t value) {
     __vector unsigned char const value_u8x16 = vec_splats(value);
     __vector unsigned char equal_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter)
@@ -275,7 +277,8 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_powervsx_(__vector unsig
 
 /** A 64-bit "raw window byte >= @p bound" (unsigned) lane mask over the four window quarters
  *  (vec_cmpge). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_powervsx_(__vector unsigned char const *quarters, sz_u8_t bound) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_powervsx_(__vector unsigned char const *quarters,
+                                                                        sz_u8_t bound) {
     __vector unsigned char const bound_u8x16 = vec_splats(bound);
     __vector unsigned char ge_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter)
@@ -286,9 +289,8 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_powervsx_(__vector unsigned
 /** Per-quarter "(high,low) 16-bit value in `[lo, hi]`" membership for one range, the VSX unsigned
  *  16-bit window-compare building block of @ref sz_utf8_word_break_range16_mask_powervsx_.
  *  @c vec_cmpge/vec_cmplt are native, so no @c max_epu8 emulation is needed. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_range16_one_powervsx_(__vector unsigned char high_u8x16,
-                                                                                 __vector unsigned char low_u8x16,
-                                                                                 sz_u16_t lo, sz_u16_t hi) {
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_word_break_range16_one_powervsx_(
+    __vector unsigned char high_u8x16, __vector unsigned char low_u8x16, sz_u16_t lo, sz_u16_t hi) {
     __vector unsigned char const lo_high_u8x16 = vec_splats((unsigned char)(lo >> 8)),
                                  lo_low_u8x16 = vec_splats((unsigned char)(lo & 0xFF));
     __vector unsigned char const hi_high_u8x16 = vec_splats((unsigned char)(hi >> 8)),
@@ -309,7 +311,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_range16_one_powervsx_
 /** A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window
  *  quarters, the VSX twin of @ref sz_utf8_word_break_range16_mask_neon_ (WSegSpace /
  *  Extended_Pictographic). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_powervsx_( //
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_powervsx_( //
     __vector unsigned char const *high_u8x16, __vector unsigned char const *low_u8x16, sz_u16_t const *lo_table,
     sz_u16_t const *hi_table, int count) {
     __vector unsigned char hit_u8x16[4] = {vec_splats((unsigned char)0), vec_splats((unsigned char)0),
@@ -327,7 +329,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_powervsx_( //
  *  Applies the truncated-edge U+FFFD reclassify to the class quarters, materializes every per-class
  *  lane mask + the raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range
  *  scan), and the per-lane class byte array. */
-SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervsx_(
+STRINGZILLA_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervsx_(
     sz_utf8_rune_window_powervsx_t window, __vector unsigned char *classes_u8x16, sz_u64_t start_bytes_all,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
@@ -443,7 +445,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_power
 /** Resolve one window into the maximal-subpart partition, the VSX twin of
  *  @ref sz_utf8_word_break_partition_neon_: compute the per-ISA @c sz_u64_t masks and delegate to
  *  the portable @ref sz_utf8_word_break_partition_from_masks_. */
-SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_powervsx_( //
+STRINGZILLA_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_powervsx_( //
     sz_utf8_rune_window_powervsx_t window, sz_u64_t valid, int at_end_of_text) {
     __vector unsigned char const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const real_continuation = window.continuation & valid;
@@ -484,9 +486,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_pow
  *  advancing driver, mirroring @ref sz_utf8_wordbreaks_neon over the VSX
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
  *  every other windowed backend. */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *word_starts, sz_size_t *word_lengths,   //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
+    sz_cptr_t text, sz_size_t length,                           //
+    sz_size_t *word_starts, sz_size_t *word_lengths,            //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {
@@ -613,26 +615,26 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
 
 #pragma endregion UAX 29 Word Boundaries forward kernel
 
-#else // SZ_IS_BIG_ENDIAN_
+#else // STRINGZILLA_ARCH_BIG_ENDIAN_
 
 /*  The vectorized substrate (movemasks, @c vec_perm neighbours) is validated only for the
  *  little-endian element order shipped on ppc64le CI; the big-endian entry defers to the serial
  *  reference rather than ship an untested branch. */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *word_starts, sz_size_t *word_lengths,   //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
+    sz_cptr_t text, sz_size_t length,                           //
+    sz_size_t *word_starts, sz_size_t *word_lengths,            //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
     return sz_utf8_wordbreaks_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 
-#endif // !SZ_IS_BIG_ENDIAN_
+#endif // !STRINGZILLA_ARCH_BIG_ENDIAN_
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_POWERVSX
+#endif // STRINGZILLA_TARGET_POWERVSX
 
 #ifdef __cplusplus
 }

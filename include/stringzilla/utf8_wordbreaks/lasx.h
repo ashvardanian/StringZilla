@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 #pragma region UAX 29 Word Boundaries forward kernel
 
@@ -43,7 +43,8 @@ extern "C" {
  *  the flat page-compressed table via @ref sz_utf8_rune_flat_lookup_lasx_, the LASX twin of
  *  @ref sz_utf8_word_break_bmp_class_haswell_. Bit-exact over the BMP with
  *  @c sz_rune_word_break_property. */
-SZ_HELPER_INLINE __m256i sz_utf8_word_break_bmp_class_lasx_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_bmp_class_lasx_(__m256i high_bytes_u8x32,
+                                                                     __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_lasx_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
                                           (int)sz_utf8_word_break_flat_pages_k, high_bytes_u8x32, low_bytes_u8x32);
 }
@@ -53,8 +54,9 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_bmp_class_lasx_(__m256i high_bytes_u
  *  256-entry stage-1 and stage-4 tables resolve by a bounded scalar walk; the 16-byte
  *  stage-2/stage-3 rows by `xvshuf.b` over a double-broadcast row. Bit-exact with
  *  @c sz_rune_word_break_property over the Supplementary Planes. */
-SZ_HELPER_INLINE __m256i sz_utf8_word_break_astral_class_lasx_(__m256i plane_offset_u8x32, __m256i high_byte_u8x32,
-                                                               __m256i low_byte_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_astral_class_lasx_(__m256i plane_offset_u8x32,
+                                                                        __m256i high_byte_u8x32,
+                                                                        __m256i low_byte_u8x32) {
     __m256i const low_nibble_mask_u8x32 = __lasx_xvreplgr2vr_b(0x0F);
     __m256i const nibble_4_u8x32 = __lasx_xvand_v(plane_offset_u8x32, low_nibble_mask_u8x32);
     __m256i const nibble_3_u8x32 = sz_utf8_high_nibble_lasx_(high_byte_u8x32);
@@ -97,7 +99,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_astral_class_lasx_(__m256i plane_off
 /** Word_Break class byte for thirty-two ASCII codepoints (cp < 0x80) via the existing 128-entry
  *  property table, read by a bounded scalar walk (the window byte equals the codepoint on ASCII
  *  lanes). The LASX twin of @ref sz_utf8_word_break_ascii_class_haswell_. */
-SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_lasx_(__m256i bytes_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_lasx_(__m256i bytes_u8x32) {
     sz_u256_vec_t byte_vec, result_vec;
     byte_vec.lasx = bytes_u8x32;
     for (int lane = 0; lane < 32; ++lane)
@@ -113,7 +115,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_lasx_(__m256i bytes_u8x3
  *  then scatters the dense class bytes back. Bit-identical to a full
  *  @ref sz_utf8_word_break_bmp_class_lasx_ over both halves on every BMP-start lane; every other
  *  lane is a don't-care left at its incoming value. */
-SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_lasx_( //
+STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_bmp_compact_lasx_( //
     sz_u64_t bmp_starts, __m256i high_byte_low_u8x32, __m256i high_byte_high_u8x32, __m256i low_byte_low_u8x32,
     __m256i low_byte_high_u8x32, __m256i *out_low_u8x32, __m256i *out_high_u8x32) {
     sz_u8_t high_bytes[64], low_bytes[64];
@@ -159,7 +161,7 @@ SZ_HELPER_INLINE void sz_utf8_word_break_bmp_compact_lasx_( //
  *  every start lane. ASCII through the property table, BMP through the compacted flat lookup,
  *  4-byte leads through the astral cascade with the codepoint high/low/plane reconstructed from
  *  the forward neighbours. */
-SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_lasx_( //
+STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_classify_window_lasx_( //
     sz_utf8_rune_window_lasx_t window, __m256i *classes_low_u8x32, __m256i *classes_high_u8x32) {
     __m256i const raw_low_u8x32 = window.window_low_u8x32, raw_high_u8x32 = window.window_high_u8x32;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
@@ -238,16 +240,16 @@ SZ_HELPER_INLINE void sz_utf8_word_break_classify_window_lasx_( //
 
 /** A 64-bit "class byte == @p value" lane mask over both class halves (two `xvseq.b` →
  *  mask_combine). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_lasx_(__m256i classes_low_u8x32, __m256i classes_high_u8x32,
-                                                              sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_lasx_(__m256i classes_low_u8x32,
+                                                                       __m256i classes_high_u8x32, sz_u8_t value) {
     __m256i const value_broadcast_u8x32 = __lasx_xvreplgr2vr_b((char)value);
     return sz_utf8_mask_combine_lasx_(__lasx_xvseq_b(classes_low_u8x32, value_broadcast_u8x32),
                                       __lasx_xvseq_b(classes_high_u8x32, value_broadcast_u8x32));
 }
 
 /** A 64-bit "raw window byte == @p value" lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_lasx_(__m256i low_half_u8x32, __m256i high_half_u8x32,
-                                                              sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_lasx_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                       sz_u8_t value) {
     __m256i const value_broadcast_u8x32 = __lasx_xvreplgr2vr_b((char)value);
     return sz_utf8_mask_combine_lasx_(__lasx_xvseq_b(low_half_u8x32, value_broadcast_u8x32),
                                       __lasx_xvseq_b(high_half_u8x32, value_broadcast_u8x32));
@@ -255,8 +257,8 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_lasx_(__m256i low_half_u
 
 /** A 64-bit "raw window byte >= @p bound" (unsigned) lane mask over both window halves (native
  *  `xvsle.bu`). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_lasx_(__m256i low_half_u8x32, __m256i high_half_u8x32,
-                                                           sz_u8_t bound) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_lasx_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                    sz_u8_t bound) {
     __m256i const bound_broadcast_u8x32 = __lasx_xvreplgr2vr_b((char)bound);
     return sz_utf8_mask_combine_lasx_(__lasx_xvsle_bu(bound_broadcast_u8x32, low_half_u8x32),
                                       __lasx_xvsle_bu(bound_broadcast_u8x32, high_half_u8x32));
@@ -265,8 +267,8 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_lasx_(__m256i low_half_u8x3
 /** Per-half "(high_byte, low_byte) 16-bit value in `[floor, ceiling]`" membership for one range
  *  (native unsigned compares), the LASX building block of
  *  @ref sz_utf8_word_break_range16_mask_lasx_. */
-SZ_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_lasx_(__m256i high_byte_u8x32, __m256i low_byte_u8x32,
-                                                              sz_u16_t floor, sz_u16_t ceiling) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_lasx_(__m256i high_byte_u8x32, __m256i low_byte_u8x32,
+                                                                       sz_u16_t floor, sz_u16_t ceiling) {
     __m256i const floor_high_byte_u8x32 = __lasx_xvreplgr2vr_b((char)(floor >> 8)),
                   floor_low_byte_u8x32 = __lasx_xvreplgr2vr_b((char)(floor & 0xFF));
     __m256i const ceiling_high_byte_u8x32 = __lasx_xvreplgr2vr_b((char)(ceiling >> 8)),
@@ -289,7 +291,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_lasx_(__m256i high_byte_
 /** A 64-bit "(high_byte, low_byte) 16-bit value in any sorted `[floor, ceiling]` range" lane mask
  *  over both window halves, the LASX twin of @ref sz_utf8_word_break_range16_mask_haswell_
  *  (WSegSpace / Extended_Pictographic). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_lasx_( //
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_lasx_( //
     __m256i high_byte_low_u8x32, __m256i high_byte_high_u8x32, __m256i low_byte_low_u8x32, __m256i low_byte_high_u8x32,
     sz_u16_t const *floor_table, sz_u16_t const *ceiling_table, int count) {
     __m256i hit_low_u8x32 = __lasx_xvreplgr2vr_b(0), hit_high_u8x32 = __lasx_xvreplgr2vr_b(0);
@@ -309,7 +311,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_lasx_( //
  *  Applies the truncated-edge U+FFFD reclassify to the class halves, materializes every per-class
  *  lane mask + the raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range
  *  scan), and the per-lane class byte array. */
-SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_lasx_(
+STRINGZILLA_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_lasx_(
     sz_utf8_rune_window_lasx_t window, __m256i classes_low_u8x32, __m256i classes_high_u8x32, sz_u64_t start_bytes_all,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
@@ -440,8 +442,8 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_lasx_
 /** Resolve one window into the maximal-subpart partition - the LASX twin of
  *  @ref sz_utf8_word_break_partition_haswell_: compute the per-ISA @c sz_u64_t masks and delegate
  *  to the portable @ref sz_utf8_word_break_partition_from_masks_. */
-SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_lasx_(sz_utf8_rune_window_lasx_t window,
-                                                                                   sz_u64_t valid, int at_end_of_text) {
+STRINGZILLA_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_lasx_(
+    sz_utf8_rune_window_lasx_t window, sz_u64_t valid, int at_end_of_text) {
     __m256i const raw_low_u8x32 = window.window_low_u8x32, raw_high_u8x32 = window.window_high_u8x32;
     sz_u64_t const real_continuation = window.continuation & valid;
     __m256i const high_nibble_low_u8x32 = sz_utf8_srl8_lasx_(raw_low_u8x32, 4, 0x0F);
@@ -498,9 +500,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_las
  *  driver, mirroring @ref sz_utf8_wordbreaks_haswell over the LASX
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
  *  every other windowed backend. */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx(   //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_size_t *word_starts, sz_size_t *word_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *word_starts, sz_size_t *word_lengths,        //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {
@@ -627,7 +629,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx(   //
 
 #pragma endregion UAX 29 Word Boundaries forward kernel
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

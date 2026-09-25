@@ -12,10 +12,10 @@
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
@@ -29,7 +29,7 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`, `refusing_allocator_`, `verify`
+#include "harness.hpp" // `random_string`, `refusing_allocator_`, `test_context_t`, `verify`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -209,15 +209,15 @@ struct substrings_tier_t {
 static std::vector<substrings_tier_t> substrings_tiers_() {
     std::vector<substrings_tier_t> tiers {{&sz_substrings_counts_serial, &sz_substrings_find_serial,
                                            &sz_substrings_replace_serial, &sz_substrings_bm25_scores_serial}};
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     tiers.push_back({&sz_substrings_counts_haswell, &sz_substrings_find_haswell, &sz_substrings_replace_haswell,
                      &sz_substrings_bm25_scores_haswell});
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     tiers.push_back({&sz_substrings_counts_icelake, &sz_substrings_find_icelake, &sz_substrings_replace_icelake,
                      &sz_substrings_bm25_scores_icelake});
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     tiers.push_back({&sz_substrings_counts_neon, &sz_substrings_find_neon, &sz_substrings_replace_neon,
                      &sz_substrings_bm25_scores_neon});
 #endif
@@ -286,7 +286,7 @@ static sz_status_t build_over_(std::vector<std::string> const &needles, sz_subst
     std::vector<sz_string_view_t> views;
     sz_sequence_t const sequence = sequence_over_(needles, views);
     return sz_substrings_engine_init_cpu(&sequence, sensitivity, sz_substrings_overlapping_k,
-                                         SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, alloc, engine);
+                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, alloc, engine);
 }
 
 /** An allocator granting its first @c grants requests and refusing the rest, tallying the
@@ -365,7 +365,7 @@ static std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tie
  *  all three verbs. */
 static void check_corpus_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                           sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
-                          std::size_t hot_states = SZ_SUBSTRINGS_HOT_STATES_AUTO) {
+                          std::size_t hot_states = STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO) {
     handle_checked_heap_t heap;
     std::vector<sz_string_view_t> haystack_views, needle_views, replacement_views;
     sz_sequence_t const haystack_sequence = sequence_over_(haystacks, haystack_views);
@@ -435,7 +435,7 @@ static void check_corpus_(std::vector<std::string> const &haystacks, std::vector
 /** The same corpus under every policy, so one call covers a vocabulary's whole behaviour. */
 static void check_policies_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                             sz_substrings_case_sensitivity_t sensitivity,
-                            std::size_t hot_states = SZ_SUBSTRINGS_HOT_STATES_AUTO) {
+                            std::size_t hot_states = STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO) {
     check_corpus_(haystacks, needles, sensitivity, sz_substrings_overlapping_k, hot_states);
     check_corpus_(haystacks, needles, sensitivity, sz_substrings_leftmost_longest_k, hot_states);
     check_corpus_(haystacks, needles, sensitivity, sz_substrings_leftmost_first_k, hot_states);
@@ -451,7 +451,7 @@ static void check_policies_(std::vector<std::string> const &haystacks, std::vect
 static void check_tier_splits_(std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                                sz_substrings_case_sensitivity_t sensitivity) {
     for (std::size_t hot_states : {(std::size_t)0, (std::size_t)1, (std::size_t)2, (std::size_t)4, (std::size_t)8,
-                                   (std::size_t)32, SZ_SUBSTRINGS_HOT_STATES_AUTO})
+                                   (std::size_t)32, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO})
         check_policies_(haystacks, needles, sensitivity, hot_states);
 }
 
@@ -531,7 +531,7 @@ void test_substrings_unit() {
 }
 
 /** What the verbs refuse, which is as much of the contract as what they accept. */
-void test_substrings_safety() {
+void test_substrings_safety(test_context_t &context) {
     handle_checked_heap_t heap;
     sz_substrings_engine_t engine;
     std::vector<sz_string_view_t> views;
@@ -565,12 +565,13 @@ void test_substrings_safety() {
     sz_sequence_t const haystack_sequence = sequence_over_(haystacks, haystack_views);
     sz_sequence_t const replacement_sequence = sequence_over_(replacements, replacement_views);
     verify(sz_substrings_engine_init_cpu(&needle_sequence, sz_substrings_cased_k, sz_substrings_overlapping_k,
-                                         SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &heap.allocator, &engine) == sz_success_k);
+                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &heap.allocator,
+                                         &engine) == sz_success_k);
 
     // A capacity that cannot hold the matches is not an error: the report names the true total and the
     // shortfall beside it, which is the one contract a device verb can also keep.
     {
-        std::vector<sz_size_t> offsets(haystacks.size() + 1, SZ_SIZE_MAX);
+        std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX);
         verify(sz_substrings_find(&engine, &haystack_sequence, nullptr, 0, offsets.data()) == sz_success_k);
         verify(engine.report->matches_emitted == 2);
         verify(engine.report->matches_stored == 0 && engine.report->shortfall == 2);
@@ -586,14 +587,14 @@ void test_substrings_safety() {
 
     // An output stride of zero cannot address one entry per haystack, whatever the haystack count.
     {
-        std::vector<sz_size_t> counts(haystacks.size(), SZ_SIZE_MAX);
+        std::vector<sz_size_t> counts(haystacks.size(), STRINGZILLA_SIZE_MAX);
         sz_substrings_bm25_t const unnormalized {1.2f, 0.0f, 0.0f};
         sz_f32_t const weights[] {1.0f, 2.0f};
         sz_f32_t score = -1;
         verify(sz_substrings_counts(&engine, &haystack_sequence, counts.data(), 0) == sz_unexpected_dimensions_k);
         verify(sz_substrings_bm25_scores(&engine, &haystack_sequence, nullptr, &unnormalized, weights, &score, 0) ==
                sz_unexpected_dimensions_k);
-        verify(counts[0] == SZ_SIZE_MAX && score == -1);
+        verify(counts[0] == STRINGZILLA_SIZE_MAX && score == -1);
     }
 
     // BM25 needs one weight per needle, and a mean to normalize by whenever it normalizes at all.
@@ -623,7 +624,7 @@ void test_substrings_safety() {
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
         sz_substrings_engine_t covering;
         verify(sz_substrings_engine_init_cpu(&needle_sequence, sz_substrings_cased_k, sz_substrings_leftmost_first_k,
-                                             SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &heap.allocator,
+                                             STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &heap.allocator,
                                              &covering) == sz_success_k);
         verify(sz_substrings_replace(&covering, &haystack_sequence, &one_sequence, nullptr, 0, offsets.data()) ==
                sz_unexpected_dimensions_k);
@@ -643,7 +644,7 @@ void test_substrings_safety() {
     {
         std::vector<std::string> wide;
         for (std::size_t index = 0; index != 600; ++index)
-            wide.push_back(random_string(3 + index % 6, "abcdefghijklmnopqrstuvwxyz", 26));
+            wide.push_back(random_string(context.generator, 3 + index % 6, "abcdefghijklmnopqrstuvwxyz"));
         std::sort(wide.begin(), wide.end());
         wide.erase(std::unique(wide.begin(), wide.end()), wide.end());
         check_build_refusals_(wide, sz_substrings_cased_k);
@@ -653,19 +654,19 @@ void test_substrings_safety() {
 
 /** Random vocabularies over random corpora, which is what reaches the
  *  packing search's fallbacks. */
-void test_substrings_all() {
+void test_substrings_all(test_context_t &context) {
+    std::mt19937 &generator = context.generator;
     char const *const alphabets[] = {"ab", "abcdefgh", "abcdefghijklmnopqrstuvwxyz"};
-    std::size_t const rounds = scale_iterations(24);
+    std::size_t const rounds = context.iterations(24);
 
     for (std::size_t round = 0; round != rounds; ++round) {
         char const *const alphabet = alphabets[round % 3];
-        std::size_t const cardinality = std::strlen(alphabet);
         std::size_t const needles_count = 1 + (round * 7) % 24;
         std::size_t const haystacks_count = 1 + (round * 5) % 9;
 
         std::vector<std::string> needles;
         for (std::size_t index = 0; index != needles_count; ++index)
-            needles.push_back(random_string(1 + (index * 3 + round) % 7, alphabet, cardinality));
+            needles.push_back(random_string(generator, 1 + (index * 3 + round) % 7, alphabet));
         // A vocabulary may not repeat a needle under folding either, and a duplicate would make two needle
         // indices report the same span - which the oracle's own ordering could not distinguish.
         std::sort(needles.begin(), needles.end());
@@ -673,7 +674,7 @@ void test_substrings_all() {
 
         std::vector<std::string> haystacks;
         for (std::size_t index = 0; index != haystacks_count; ++index)
-            haystacks.push_back(random_string((index * 11 + round * 3) % 200, alphabet, cardinality));
+            haystacks.push_back(random_string(generator, (index * 11 + round * 3) % 200, alphabet));
 
         check_policies_(haystacks, needles, sz_substrings_cased_k);
         check_policies_(haystacks, needles, sz_substrings_uncased_k);
@@ -681,16 +682,15 @@ void test_substrings_all() {
 
     // Haystacks spanning several ordered rounds, so leftmost covers stitch windows and rounds together, and
     // folded vocabularies meet single-byte and multi-byte text alike.
-    for (std::size_t round = 0; round != scale_iterations(6); ++round) {
+    for (std::size_t round = 0; round != context.iterations(6); ++round) {
         char const *const alphabet = alphabets[round % 3];
-        std::size_t const cardinality = std::strlen(alphabet);
         std::vector<std::string> needles, haystacks;
         for (std::size_t index = 0; index != 1 + (round * 5) % 17; ++index)
-            needles.push_back(random_string(1 + (index + round) % 9, alphabet, cardinality));
+            needles.push_back(random_string(generator, 1 + (index + round) % 9, alphabet));
         std::sort(needles.begin(), needles.end());
         needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
         for (std::size_t index = 0; index != 3; ++index)
-            haystacks.push_back(random_string(2048 * (1 + index) + round * 131, alphabet, cardinality));
+            haystacks.push_back(random_string(generator, 2048 * (1 + index) + round * 131, alphabet));
         std::string mixed = haystacks.back();
         mixed.insert(mixed.size() / 3, "Straße ÄÖÜ \xE2\x84\xAA");
         haystacks.push_back(mixed);
@@ -703,11 +703,12 @@ void test_substrings_all() {
 
     // Needles opening on letters the text rarely holds, so fewer than one byte in eight leaves the root and the
     // tiers skip between live bytes rather than stepping every one.
-    for (std::size_t round = 0; round != scale_iterations(4); ++round) {
+    for (std::size_t round = 0; round != context.iterations(4); ++round) {
         std::vector<std::string> const needles {"zebra", "quartz", "qu", "zz", "quiz", "z"};
         std::vector<std::string> haystacks;
         for (std::size_t index = 0; index != 4; ++index) {
-            std::string haystack = random_string(3000 + index * 777 + round * 13, "abcdefghijklmnoprstuvwxy", 24);
+            std::string haystack = random_string(generator, 3000 + index * 777 + round * 13,
+                                                 "abcdefghijklmnoprstuvwxy");
             for (std::size_t insert = 0; insert != 20; ++insert)
                 haystack.insert((insert * 997 + round) % haystack.size(), needles[insert % needles.size()]);
             haystacks.push_back(haystack);
@@ -720,21 +721,22 @@ void test_substrings_all() {
 
     // Small alphabets, where hot rows are only a few classes wide: nucleotides with bytes no needle spells
     // mixed in, a two-letter alphabet, and every tier split over them.
-    for (std::size_t round = 0; round != scale_iterations(4); ++round) {
+    for (std::size_t round = 0; round != context.iterations(4); ++round) {
         std::vector<std::string> nucleotides, bits, haystacks, binary_haystacks;
         for (std::size_t index = 0; index != 20 + round * 30; ++index)
-            nucleotides.push_back(random_string(3 + (index + round) % 14, "ACGT", 4));
-        for (std::size_t index = 0; index != 12; ++index) bits.push_back(random_string(1 + index % 9, "\x00\x01", 2));
+            nucleotides.push_back(random_string(generator, 3 + (index + round) % 14, "ACGT"));
+        for (std::size_t index = 0; index != 12; ++index)
+            bits.push_back(random_string(generator, 1 + index % 9, std::string_view("\x00\x01", 2)));
         for (std::vector<std::string> *vocabulary : {&nucleotides, &bits}) {
             std::sort(vocabulary->begin(), vocabulary->end());
             vocabulary->erase(std::unique(vocabulary->begin(), vocabulary->end()), vocabulary->end());
         }
         for (std::size_t index = 0; index != 3; ++index) {
-            std::string haystack = random_string(1500 + index * 2111 + round * 7, "ACGT", 4);
+            std::string haystack = random_string(generator, 1500 + index * 2111 + round * 7, "ACGT");
             for (std::size_t offset = 97; offset < haystack.size(); offset += 389)
                 haystack[offset] = "N\n>"[offset % 3];
             haystacks.push_back(haystack);
-            binary_haystacks.push_back(random_string(2000 + index * 333, "\x00\x01", 2));
+            binary_haystacks.push_back(random_string(generator, 2000 + index * 333, std::string_view("\x00\x01", 2)));
         }
         haystacks.push_back("ACGTNNACGT\nACG");
         check_policies_(haystacks, nucleotides, sz_substrings_cased_k);
@@ -763,11 +765,11 @@ void test_substrings_all() {
     {
         std::vector<std::string> needles, haystacks;
         for (std::size_t index = 0; index != 400; ++index)
-            needles.push_back(random_string(2 + index % 9, "abcdefghijklmnopqrstuvwxyz", 26));
+            needles.push_back(random_string(generator, 2 + index % 9, "abcdefghijklmnopqrstuvwxyz"));
         std::sort(needles.begin(), needles.end());
         needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
         for (std::size_t index = 0; index != 8; ++index)
-            haystacks.push_back(random_string(500 + index * 37, "abcdefghijklmnopqrstuvwxyz", 26));
+            haystacks.push_back(random_string(generator, 500 + index * 37, "abcdefghijklmnopqrstuvwxyz"));
         check_policies_(haystacks, needles, sz_substrings_cased_k);
     }
 }

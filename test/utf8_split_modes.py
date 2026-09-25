@@ -15,7 +15,7 @@ Run:
     uv pip install numpy pyarrow pytest pytest-repeat
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/utf8_split_modes.py -q
-    SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/utf8_split_modes.py -q
+    STRINGZILLA_SEED=42 STRINGZILLA_SCALE=10 uv run --no-project python -m pytest test/utf8_split_modes.py -q
 
 File: test/utf8_split_modes.py
 Author: Ash Vardanian
@@ -27,7 +27,7 @@ import pytest
 import stringzilla as sz
 from stringzilla import Str
 
-from test.sz_helpers import (
+from test.helpers import (
     assert_backends_agree,
     malformed_utf8_corpus,
     run_across_backends,

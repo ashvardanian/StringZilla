@@ -24,8 +24,8 @@ extern "C" {
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
  *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
-#if SZ_USE_ICELAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_ICELAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                        \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
     apply_to = function)
@@ -39,16 +39,19 @@ extern "C" {
                    "lzcnt")
 #endif
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length,
+                                                           sz_byteset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
     // In practice, that only hurts, even when we have matches every 5-ish bytes.
     //
-    //      if (length < SZ_SWAR_THRESHOLD) return sz_find_byteset_serial(text, length, filter);
-    //      sz_cptr_t early_result = sz_find_byteset_serial(text, SZ_SWAR_THRESHOLD, filter);
+    //      if (length < STRINGZILLA_SWAR_THRESHOLD)
+    //          return sz_find_byteset_serial(text, length, filter);
+    //      sz_cptr_t early_result =
+    //          sz_find_byteset_serial(text, STRINGZILLA_SWAR_THRESHOLD, filter);
     //      if (early_result) return early_result;
-    //      text += SZ_SWAR_THRESHOLD;
-    //      length -= SZ_SWAR_THRESHOLD;
+    //      text += STRINGZILLA_SWAR_THRESHOLD;
+    //      length -= STRINGZILLA_SWAR_THRESHOLD;
     //
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm512_shuffle_epi8` we can use the same mask for both lanes.
@@ -151,10 +154,11 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t leng
         else { text += load_length, length -= load_length; }
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t length,
+                                                            sz_byteset_t const *filter) {
 
     // Reverse mirror of `sz_find_byteset_icelake`: identical membership computation, but we scan
     // 64-byte windows from the end of the buffer and take the highest set bit, the one closest to
@@ -199,7 +203,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t len
         else { length -= load_length; }
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 #if defined(__clang__)
@@ -207,7 +211,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t len
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_ICELAKE
+#endif // STRINGZILLA_TARGET_ICELAKE
 
 #ifdef __cplusplus
 }

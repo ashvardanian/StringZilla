@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -22,7 +22,7 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-SZ_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
 
@@ -63,12 +63,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t lengt
  *  (lowest-addressed byte → bit 0) via @c vec_vbpermq, identical to @c sz_utf8_movemask_powervsx_
  *  below but reachable before its first user (namely @c sz_utf8_seek_powervsx and the multistep
  *  iterators); distinctly named so both coexist in one translation unit. */
-SZ_HELPER_INLINE sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char boolean_lanes_u8x16) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char boolean_lanes_u8x16) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
     __vector unsigned long long const gathered_mask_u64x2 = (__vector unsigned long long)vec_vbpermq(
         boolean_lanes_u8x16, gather_indices_u8x16);
-#if SZ_IS_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_BIG_ENDIAN_
     return (sz_u32_t)(gathered_mask_u64x2[0] & 0xFFFFull);
 #else
     return (sz_u32_t)(gathered_mask_u64x2[1] & 0xFFFFull);
@@ -79,7 +79,7 @@ SZ_HELPER_INLINE sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned c
  *  @c sz_utf8_seek_serial. Per tile a code-point-start bitmask `~continuation_mask` is
  *  popcounted to skip whole tiles; the n-th start's lane comes from @c sz_u32_nth_set_bit.
  *  The `< 16` tail defers to the serial reference. */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     __vector unsigned char const header_mask_u8x16 = vec_splats((unsigned char)0xC0);
@@ -110,7 +110,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length
  *  the 32-byte register pairs. The gate algebra (well-formed, maximal-subpart length, orphan
  *  promotion, U+FFFD substitution) is byte-for-byte the Ice Lake / serial contract: one U+FFFD per
  *  Unicode 17.0 §3.9 maximal ill-formed subpart. */
-#if !SZ_IS_BIG_ENDIAN_
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_
 #pragma region Shared SIMD leaf substrate
 
 /** Left-pack shuffle table: row @c mask holds the ascending byte indices (in [0,8)) of the set bits
@@ -379,7 +379,7 @@ static sz_u8_t const sz_utf8_compress8_powervsx_[256][8] = {{255, 255, 255, 255,
  *  (bit @c i ↔ lane @c i, lowest-addressed byte → bit 0), the VSX @c vpmovmskb via @c vec_vbpermq.
  *  Mirror of @ref sz_utf8_iterate_movemask_powervsx_ but kept local to the decode path for clarity
  *  at the call sites. */
-SZ_HELPER_INLINE sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char boolean_lanes_u8x16) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char boolean_lanes_u8x16) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
     __vector unsigned long long const gathered_mask_u64x2 = (__vector unsigned long long)vec_vbpermq(
@@ -390,7 +390,7 @@ SZ_HELPER_INLINE sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char bo
 /** Combine the four per-register VSX movemasks of @p booleans_u8x16 into one 64-bit lane mask:
  *  register @c r → bits [16*r, 16*r+16). The VSX twin of the NEON @c mask_combine and the Ice Lake
  *  native @c __mmask64. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_powervsx_( //
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_powervsx_( //
     __vector unsigned char const *booleans_u8x16) {
     sz_u64_t mask = (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans_u8x16[0]);
     mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans_u8x16[1]) << 16;
@@ -404,7 +404,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_powervsx_( //
  *  low half `(regs_u8x16[0],regs_u8x16[1])` and high half `(regs_u8x16[2],regs_u8x16[3])` are each
  *  permuted and the per-lane `index_u8x16 >= 32` predicate selects the half. Lanes whose offset
  *  runs past the window read the zero padding (the value is discarded downstream). */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_gather16_powervsx_( //
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_gather16_powervsx_( //
     __vector unsigned char const *regs_u8x16, __vector unsigned char index_u8x16) {
     __vector unsigned char const half_select_threshold_u8x16 = vec_splats((unsigned char)32);
     __vector unsigned char const gathered_low_u8x16 = vec_perm(regs_u8x16[0], regs_u8x16[1], index_u8x16);
@@ -419,7 +419,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_gather16_powervsx_( //
  *  VSX @c vpcompressb analogue: split @p emit16 into low8 / high8, @c vec_perm the byte-index
  *  identity vector by the matching 2 KB shuffle-LUT rows, add the register base @p base, and stitch
  *  the two halves by `popcount(low8)`. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_compress_starts_powervsx_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_compress_starts_powervsx_( //
     sz_u32_t emit16, int base, sz_u8_t *packed, sz_size_t produced) {
     sz_u32_t const low8 = emit16 & 0xFFu;
     sz_u32_t const high8 = (emit16 >> 8) & 0xFFu;
@@ -464,7 +464,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_compress_starts_powervsx_( //
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the
  *      resume cursor delta).
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_powervsx_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_powervsx_( //
     __vector unsigned char const *regs_u8x16, sz_u64_t emit_starts, sz_u64_t ill_formed, sz_u8_t const *consumed_length,
     int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity,
     sz_size_t *consumed_bytes) {
@@ -589,9 +589,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_powervsx_( //
  *  step declines (`*runes_unpacked == 0`, cursor unchanged) only when the first lead's declared
  *  sequence crosses the window edge (a boundary truncation), which the public entry finalizes
  *  without a serial re-decode. */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_powervsx_( //
-    sz_cptr_t text, sz_size_t length,                     //
-    sz_rune_t *runes, sz_size_t runes_capacity,           //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_powervsx_( //
+    sz_cptr_t text, sz_size_t length,                              //
+    sz_rune_t *runes, sz_size_t runes_capacity,                    //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 64 ? length : 64;
@@ -933,16 +933,16 @@ typedef struct sz_utf8_rune_window_powervsx_t {
 
 /** Per-byte logical right shift by @p shift keeping the low @p keep bits, the VSX twin of @c srl8_;
  *  VSX @c vec_sr takes a per-lane vector shift count, so no immediate switch is needed. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_srl8_powervsx_(__vector unsigned char value_u8x16, unsigned char shift,
-                                                               unsigned char keep) {
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_srl8_powervsx_(__vector unsigned char value_u8x16,
+                                                                        unsigned char shift, unsigned char keep) {
     return vec_and(vec_sr(value_u8x16, vec_splats(shift)), vec_splats(keep));
 }
 
 /** Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero, staged through a zeroed
  *  @c sz_u512_vec_t byte buffer so no read runs past `text + loaded` (the sanctioned union tail
  *  idiom). Mirrors @ref sz_utf8_load_window_neon_. */
-SZ_HELPER_INLINE void sz_utf8_load_window_powervsx_(sz_u8_t const *text, sz_size_t loaded,
-                                                    __vector unsigned char *out_u8x16) {
+STRINGZILLA_HELPER_INLINE void sz_utf8_load_window_powervsx_(sz_u8_t const *text, sz_size_t loaded,
+                                                             __vector unsigned char *out_u8x16) {
     if (loaded >= 64) {
         out_u8x16[0] = vec_xl(0, text + 0);
         out_u8x16[1] = vec_xl(0, text + 16);
@@ -965,7 +965,7 @@ SZ_HELPER_INLINE void sz_utf8_load_window_powervsx_(sz_u8_t const *text, sz_size
  *  distance over the register pair `{window[r], window[(r+1)&3]}`, indexed by `{k, k+1, ..., k+15}`
  *  (index `>= 16` reads the successor). Requires the zero-padded window so wrapped lanes past
  *  @c loaded are deterministic zeros. */
-SZ_HELPER_INLINE void sz_utf8_forward_neighbours_powervsx_( //
+STRINGZILLA_HELPER_INLINE void sz_utf8_forward_neighbours_powervsx_( //
     __vector unsigned char const *window_u8x16, __vector unsigned char *next1_u8x16,
     __vector unsigned char *next2_u8x16, __vector unsigned char *next3_u8x16) {
     __vector unsigned char const index_next1_u8x16 = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
@@ -982,7 +982,7 @@ SZ_HELPER_INLINE void sz_utf8_forward_neighbours_powervsx_( //
 
 /** Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves, the VSX twin of
  *  @ref sz_utf8_rune_decode_window_neon_, bit-identical on every lane. */
-SZ_HELPER_INLINE sz_utf8_rune_window_powervsx_t sz_utf8_rune_decode_window_powervsx_( //
+STRINGZILLA_HELPER_INLINE sz_utf8_rune_window_powervsx_t sz_utf8_rune_decode_window_powervsx_( //
     sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_powervsx_t result;
     result.loaded = available < 64 ? available : 64;
@@ -1064,7 +1064,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_powervsx_t sz_utf8_rune_decode_window_power
  *  it is @c vec_perm-gathered by the nibble @p within over its own register pair `{row, row}` and
  *  blended in for the lanes whose @p selector equals that row. Selectors past the table match no
  *  row, so those lanes stay 0 (the NEON `< tile_count` clamp). Gather-free. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_rune_cascade_stage_powervsx_( //
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_rune_cascade_stage_powervsx_( //
     sz_u8_t const *table, int tile_count, __vector unsigned char selector_u8x16, __vector unsigned char within_u8x16) {
     __vector unsigned char const within_nibble_u8x16 = vec_and(within_u8x16, vec_splats((unsigned char)0x0F));
     __vector unsigned char result_u8x16 = vec_splats((unsigned char)0);
@@ -1081,8 +1081,8 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_rune_cascade_stage_powervsx_( //
  *  reading the entry its index names, the VSX twin of @ref sz_utf8_rune_lut256_neon_. VSX
  *  @c vec_perm reaches only 32 bytes, so the 256-byte table is read by a bounded scalar L1 walk
  *  staged through a @c sz_u128_vec_t union. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_rune_lut256_powervsx_(sz_u8_t const *group_base,
-                                                                      __vector unsigned char index_u8x16) {
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_rune_lut256_powervsx_(sz_u8_t const *group_base,
+                                                                               __vector unsigned char index_u8x16) {
     sz_u128_vec_t index_vec, result_vec;
     index_vec.vsx_u8 = index_u8x16;
     for (int lane = 0; lane < 16; ++lane) result_vec.u8s[lane] = group_base[index_vec.u8s[lane]];
@@ -1093,7 +1093,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_rune_lut256_powervsx_(sz_u8_t co
  *  @ref sz_utf8_rune_flat_lookup_neon_: `page_lut[high]` selects one 256-byte page, then
  *  `flat[page*256 + low]` is read per lane. VSX has no gather, so the whole lookup is a bounded
  *  scalar L1 walk over the fused index; lanes whose page reaches @p page_count return 0. */
-SZ_HELPER_INLINE __vector unsigned char sz_utf8_rune_flat_lookup_powervsx_( //
+STRINGZILLA_HELPER_INLINE __vector unsigned char sz_utf8_rune_flat_lookup_powervsx_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, __vector unsigned char high_bytes_u8x16,
     __vector unsigned char low_bytes_u8x16) {
     sz_u128_vec_t high_vec, low_vec, result_vec;
@@ -1111,7 +1111,7 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_rune_flat_lookup_powervsx_( //
  *  @p capacity and the carried previous boundary @p previous_io. The set boundary lanes are
  *  left-packed to ascending byte offsets by the shuffle-LUT compaction (no scalar @c ctz walk);
  *  that compaction's return value is the boundary count, so no popcount is needed either. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_powervsx_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_powervsx_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t previous = *previous_io;
@@ -1140,13 +1140,13 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_powervsx_( //
 
 #pragma endregion Windowed engine leaf substrate
 
-#endif // !SZ_IS_BIG_ENDIAN_
+#endif // !STRINGZILLA_ARCH_BIG_ENDIAN_
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
-    sz_cptr_t text, sz_size_t length,              //
-    sz_rune_t *runes, sz_size_t runes_capacity,    //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_rune_t *runes, sz_size_t runes_capacity,             //
     sz_size_t *runes_unpacked) {
-#if !SZ_IS_BIG_ENDIAN_
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_
     sz_cptr_t cursor = text;
     sz_cptr_t const end = text + length;
     sz_size_t runes_written = 0;
@@ -1183,7 +1183,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_POWERVSX
+#endif // STRINGZILLA_TARGET_POWERVSX
 
 #ifdef __cplusplus
 }

@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -34,7 +34,7 @@ extern "C" {
  *  64-bit widening, so multi-gigabyte inputs never truncate. The caller's @c while loop resumes
  *  past the last emitted match when the capacity cuts the tile.
  */
-SZ_HELPER_INLINE void sz_utf8_token_drain_sve2_(                                    //
+STRINGZILLA_HELPER_INLINE void sz_utf8_token_drain_sve2_(                           //
     svbool_t starts_b8x, svuint8_t lengths_u8x, sz_size_t position, sz_size_t span, //
     sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
@@ -75,9 +75,9 @@ SZ_HELPER_INLINE void sz_utf8_token_drain_sve2_(                                
     }
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_sve2(        //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_sve2( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -169,9 +169,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_newlines_sve2(        //
     return count;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(     //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2( //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,      //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -275,8 +275,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(     //
  *  16-byte table vectors: the byte at `value >> 3` rides two @c svtbl tables - the second addressed
  *  at `index - 16`, where the wrap past the zero-padded table reads zero at any vector length - and
  *  the bit `value & 7` decides. The in-register alternative to a gathered two-level walk. */
-SZ_HELPER_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svuint8_t table_low_u8x,
-                                                           svuint8_t table_high_u8x, svuint8_t value_u8x) {
+STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svuint8_t table_low_u8x,
+                                                                    svuint8_t table_high_u8x, svuint8_t value_u8x) {
     svuint8_t const byte_index_u8x = svlsr_n_u8_x(pg_b8x, value_u8x, 3);
     svuint8_t const bitmap_u8x = svorr_u8_x(pg_b8x, svtbl_u8(table_low_u8x, byte_index_u8x),
                                             svtbl_u8(table_high_u8x, svsub_n_u8_x(pg_b8x, byte_index_u8x, 16)));
@@ -284,9 +284,9 @@ SZ_HELPER_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svui
     return svcmpne_n_u8(pg_b8x, svand_u8_x(pg_b8x, bitmap_u8x, bit_mask_u8x), 0);
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2(      //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -498,7 +498,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2(      //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE2
+#endif // STRINGZILLA_TARGET_SVE2
 
 #ifdef __cplusplus
 }

@@ -100,7 +100,7 @@ PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t p
     }
 
     // Validate UTF-8 input only if requested
-    if (validate && sz_utf8_find_malformed(str.start, str.length) != SZ_NULL_CHAR) {
+    if (validate && sz_utf8_find_malformed(str.start, str.length) != STRINGZILLA_NULL_CHAR) {
         PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }
@@ -216,7 +216,7 @@ PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
     }
 
     sz_cptr_t violation = sz_utf8_find_denormalized(str.start, str.length, form);
-    if (violation == SZ_NULL_CHAR) { Py_RETURN_NONE; }
+    if (violation == STRINGZILLA_NULL_CHAR) { Py_RETURN_NONE; }
 
     sz_size_t offset = (sz_size_t)(violation - str.start);
     return PyLong_FromSize_t(offset);

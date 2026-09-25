@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -28,7 +28,7 @@ extern "C" {
 
 /** Left-packs the @p submask -selected lanes of a 4-lane sub-block to @p out_offsets and
  *  @p out_lengths in lane order via a @c vqtbl2q_u8 table; returns the count of lanes written. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_compact4_neon_(                  //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_iterate_compact4_neon_(         //
     uint8x16x2_t const offsets_u8x16x2, uint8x16x2_t const lengths_u8x16x2, //
     sz_u32_t const submask, sz_size_t *const out_offsets, sz_size_t *const out_lengths) {
 
@@ -68,7 +68,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_compact4_neon_(                  //
 /** Peels the tile's first @p emit_count matches by SIMD left-pack over four 4-lane sub-blocks into
  *  a fixed-width stack scratch, then copies the surviving prefix to the caller, with no @c ctz and
  *  no per-match branch. */
-SZ_HELPER_INLINE void sz_utf8_iterate_peel_neon_(          //
+STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_neon_( //
     sz_u64_t start_bits, uint8x16_t length_per_lane_u8x16, //
     sz_size_t emit_count, sz_size_t position,              //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -109,9 +109,9 @@ SZ_HELPER_INLINE void sz_utf8_iterate_peel_neon_(          //
         match_offsets[emitted] = scratch_offsets[emitted], match_lengths[emitted] = scratch_lengths[emitted];
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_neon(        //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_neon( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -197,9 +197,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_newlines_neon(        //
     return count;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon( //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,      //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -306,7 +306,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
 
 /** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one quarter, returned as 0x00/0xFF
  *  lanes. */
-SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte_u8x16, uint8x16_t low_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte_u8x16, uint8x16_t low_u8x16) {
     static sz_u8_t const bit_for_low3[16] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
     uint8x16_t const bit_table_u8x16 = vld1q_u8(bit_for_low3);
     uint8x16_t const bit_mask_u8x16 = vqtbl1q_u8(bit_table_u8x16, vandq_u8(low_u8x16, vdupq_n_u8(0x07)));
@@ -325,8 +325,9 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte_u
  *  per quarter, and each round loads that block's 32-byte row into a @c vqtbl2q_u8 pair and settles
  *  every lane carrying it, with no per-lane scalar walk.
  */
-SZ_HELPER_INLINE uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_u8x16, uint8x16_t high_in_u8x16,
-                                                              uint8x16_t low_in_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_u8x16,
+                                                                       uint8x16_t high_in_u8x16,
+                                                                       uint8x16_t low_in_u8x16) {
     uint8x16_t const is_ascii_u8x16 = vcltq_u8(window_u8x16, vdupq_n_u8(0x80));
     uint8x16_t const high_u8x16 = vbicq_u8(high_in_u8x16, is_ascii_u8x16);             // high = is_ascii ? 0 : high_in
     uint8x16_t const low_u8x16 = vbslq_u8(is_ascii_u8x16, window_u8x16, low_in_u8x16); // low = is_ascii ? byte : low_in
@@ -366,8 +367,10 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window_
  *  selects an L1 group; group × 256 + sub selects a bitmap row id (group < 2, so the two 256-entry
  *  halves of the L2 table are read and blended by the group bit); the bit `(low8 & 7)` is tested.
  */
-SZ_HELPER_INLINE uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window_u8x16, uint8x16_t next1_u8x16,
-                                                                 uint8x16_t next2_u8x16, uint8x16_t next3_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window_u8x16,
+                                                                          uint8x16_t next1_u8x16,
+                                                                          uint8x16_t next2_u8x16,
+                                                                          uint8x16_t next3_u8x16) {
     uint8x16_t const b0_u8x16 = vandq_u8(window_u8x16, vdupq_n_u8(0x07));
     uint8x16_t const b1_u8x16 = vandq_u8(next1_u8x16, vdupq_n_u8(0x3F));
     uint8x16_t const b2_u8x16 = vandq_u8(next2_u8x16, vdupq_n_u8(0x3F));
@@ -415,9 +418,10 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t wind
  *  caller via @c byte_span; here the substrate masks are already loaded-clamped. An invalid lead is
  *  never reported, as serial advances one byte and re-syncs.
  */
-SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded,
-                                                          uint8x16_t const *next1_u8x16, uint8x16_t const *next2_u8x16,
-                                                          uint8x16_t const *next3_u8x16) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded,
+                                                                   uint8x16_t const *next1_u8x16,
+                                                                   uint8x16_t const *next2_u8x16,
+                                                                   uint8x16_t const *next3_u8x16) {
     uint8x16_t const continuation_mask_u8x16 = vdupq_n_u8(0xC0), continuation_pattern_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t valid_bool_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter) {
@@ -479,9 +483,9 @@ SZ_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_ne
 
 #pragma region Forward driver
 
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(      //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_neon( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
 
@@ -578,7 +582,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(      //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_NEON
+#endif // STRINGZILLA_TARGET_NEON
 
 #ifdef __cplusplus
 }

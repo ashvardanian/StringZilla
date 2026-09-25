@@ -16,12 +16,12 @@
 /*  ! Overload the following with caution. Those parameters must never be explicitly set during
  *  releases, but they come handy during development to validate ISA-specific implementations.
  *
- *  #define SZ_USE_HASWELL 0
- *  #define SZ_USE_ICELAKE 0 */
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+ *  #define STRINGZILLA_TARGET_HASWELL 0
+ *  #define STRINGZILLA_TARGET_ICELAKE 0 */
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Make sure to include the StringZilla headers before anything else, to intercept missing
  *  `#include` directives and other issues. */
@@ -35,9 +35,7 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
-#include <fmt/format.h>
-
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`, `refusing_allocator_`
+#include "harness.hpp" // `random_string`, `refusing_allocator_`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -89,13 +87,13 @@ struct levenshtein_backend_t {
 /** Every cross-product backend compiled into this translation unit, dispatched first. */
 static levenshtein_backend_t const levenshtein_backends[] = {
     {"dispatched", sz_levenshtein_distances},      {"serial", sz_levenshtein_distances_serial},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_levenshtein_distances_haswell},
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     {"skylake", sz_levenshtein_distances_skylake},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_levenshtein_distances_icelake},
 #endif
 };
@@ -125,7 +123,7 @@ static void check_levenshtein_distances_(char const *name, std::vector<std::stri
     sz_sequence_t const query_sequence = sequence_from_(queries);
     sz_sequence_t const candidate_sequence = sequence_from_(candidates);
     levenshtein_engine_t prepared(query_sequence, symbol);
-    std::vector<sz_size_t> computed(queries.size() * candidates.size(), SZ_SIZE_MAX);
+    std::vector<sz_size_t> computed(queries.size() * candidates.size(), STRINGZILLA_SIZE_MAX);
     if (distances(&prepared.engine, &candidate_sequence, computed.data(), candidates.size()) != sz_success_k)
         fail_backend_(name, "the cross-product verb refused a well-formed batch");
     if (computed != expected) fail_backend_(name, "the cross-product distances differ from the expected answers");
@@ -161,18 +159,17 @@ static void check_levenshtein_case_(std::vector<std::string> const &queries,
 
 /** One backend's answers against the serial backend's, bit for bit, over random batches on a
  *  two-letter and a multi-byte rune alphabet, with several queries in flight to cover that axis. */
-static void check_levenshtein_equivalence_(levenshtein_backend_t const &reference,
+static void check_levenshtein_equivalence_(std::mt19937 &generator, levenshtein_backend_t const &reference,
                                            levenshtein_backend_t const &candidate, std::size_t rounds) {
-    std::mt19937 &generator = global_random_generator();
     std::vector<std::string> candidates, queries;
     std::vector<sz_size_t> from_reference, from_candidate;
     for (std::size_t round = 0; round != rounds; ++round)
         for (char const *alphabet : {"ab", "aé日€𝄞"}) {
-            randomize_strings(fuzzy_config_t(alphabet, 16, 0, 900), candidates);
+            randomize_strings(generator, fuzzy_config_t(alphabet, 16, 0, 900), candidates);
             queries.clear();
             for (std::size_t query = 0; query != 5; ++query) {
                 std::size_t const query_length = std::uniform_int_distribution<std::size_t>(1, 700)(generator);
-                queries.push_back(random_string(query_length, alphabet_characters(alphabet)));
+                queries.push_back(random_string(generator, query_length, alphabet_characters(alphabet)));
             }
             sz_sequence_t const query_sequence = sequence_from_(queries);
             sz_sequence_t const candidate_sequence = sequence_from_(candidates);
@@ -180,7 +177,7 @@ static void check_levenshtein_equivalence_(levenshtein_backend_t const &referenc
 
             for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
                 levenshtein_engine_t prepared(query_sequence, symbol);
-                from_reference.assign(cells, SZ_SIZE_MAX), from_candidate.assign(cells, SZ_SIZE_MAX);
+                from_reference.assign(cells, STRINGZILLA_SIZE_MAX), from_candidate.assign(cells, STRINGZILLA_SIZE_MAX);
                 verify(reference.distances(&prepared.engine, &candidate_sequence, from_reference.data(),
                                            candidates.size()) == sz_success_k);
                 if (candidate.distances(&prepared.engine, &candidate_sequence, from_candidate.data(),
@@ -217,7 +214,6 @@ static void check_levenshtein_unit_(std::string const &query, std::vector<levens
 /** Known answers: the classic pairs, empties on either side, identity, the 64-symbol word boundary,
  *  and multi-byte runes, through every backend row. */
 void test_levenshtein_unit() {
-    fmt::println("  - testing edit-distance known-answer vectors...");
     check_levenshtein_unit_(
         "kitten", {{"sitting", 3, 3}, {"kitten", 0, 0}, {"", 6, 6}, {"k", 5, 5}, {"kittens", 1, 1}, {"mitten", 1, 1}});
     check_levenshtein_unit_("flaw", {{"lawn", 2, 2}, {"flaw", 0, 0}, {"flaws", 1, 1}, {"law", 1, 1}});
@@ -259,18 +255,19 @@ static void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
     sz_sequence_t const none_sequence = sequence_from_(none);
     for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
         levenshtein_engine_t prepared(query_sequence, symbol);
-        sz_size_t answers[4] = {SZ_SIZE_MAX, SZ_SIZE_MAX, SZ_SIZE_MAX, SZ_SIZE_MAX};
+        sz_size_t answers[4] = {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
         if (backend.distances(&prepared.engine, &words_sequence, answers, 2) != sz_success_k)
             fail_backend_(backend.name, "a batch holding an empty query was refused");
         if (backend.distances(&prepared.engine, &empty_sequence, answers, 1) != sz_success_k)
             fail_backend_(backend.name, "an empty candidate was refused");
         if (backend.distances(&prepared.engine, &none_sequence, answers, 0) != sz_success_k)
             fail_backend_(backend.name, "an empty batch of candidates was refused");
-        sz_size_t narrow[4] = {SZ_SIZE_MAX, SZ_SIZE_MAX, SZ_SIZE_MAX, SZ_SIZE_MAX};
+        sz_size_t narrow[4] = {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
         if (backend.distances(&prepared.engine, &words_sequence, narrow, 1) != sz_unexpected_dimensions_k)
             fail_backend_(backend.name, "a stride too narrow for one row was not refused");
         for (sz_size_t const written : narrow)
-            if (written != SZ_SIZE_MAX) fail_backend_(backend.name, "a refused round still wrote the distances");
+            if (written != STRINGZILLA_SIZE_MAX)
+                fail_backend_(backend.name, "a refused round still wrote the distances");
     }
 }
 
@@ -290,8 +287,7 @@ static void check_levenshtein_build_safety_() {
 /** Degenerate inputs for the edit-distance family, asserting survival and the stated refusals.
  *  Answers are not the subject here: empties are accepted, a refused allocation is reported, and no
  *  failure writes an output. */
-void test_levenshtein_safety() {
-    fmt::println("  - testing degenerate inputs and refused allocations of the edit-distance kernels...");
+void test_levenshtein_safety(test_context_t &) {
     for (levenshtein_backend_t const &backend : levenshtein_backends) check_levenshtein_safety_(backend);
     check_levenshtein_build_safety_();
 }
@@ -304,16 +300,16 @@ void test_levenshtein_safety() {
  *  here: query and candidate lengths sweep every 64-symbol word boundary and reach past the
  *  register-resident word tiers, on a two-letter alphabet that forces matches, on a multi-byte rune
  *  alphabet, and on full bytes. */
-void test_levenshtein_all() {
+void test_levenshtein_all(test_context_t &context) {
     std::size_t const lengths[] = {0, 1, 2, 5, 63, 64, 65, 127, 128, 129, 255, 256, 257, 300, 511, 512, 513, 640, 1000};
     char const binary_alphabet[] = "ab";
     std::vector<std::string> const rune_alphabet = {"a", "é", "日", "€", "𝄞"};
-    std::mt19937 &generator = global_random_generator();
+    std::mt19937 &generator = context.generator;
     for (std::size_t query_length : lengths) {
         std::vector<std::string> candidates;
         for (std::size_t candidate_length : lengths)
-            candidates.push_back(random_string(candidate_length, binary_alphabet, 2));
-        std::string const query = random_string(query_length, binary_alphabet, 2);
+            candidates.push_back(random_string(generator, candidate_length, binary_alphabet));
+        std::string const query = random_string(generator, query_length, binary_alphabet);
         candidates.push_back(query);
         candidates.push_back(query.substr(0, query_length / 2));
         check_levenshtein_case_({query}, candidates);
@@ -321,8 +317,8 @@ void test_levenshtein_all() {
     for (std::size_t query_runes : {0, 1, 63, 64, 65, 129, 300, 640, 1000}) {
         std::vector<std::string> candidates;
         for (std::size_t candidate_runes : {0, 1, 64, 65, 200, 256, 512, 513})
-            candidates.push_back(random_string(candidate_runes, rune_alphabet));
-        std::string const query = random_string(query_runes, rune_alphabet);
+            candidates.push_back(random_string(generator, candidate_runes, rune_alphabet));
+        std::string const query = random_string(generator, query_runes, rune_alphabet);
         candidates.push_back(query);
         check_levenshtein_case_({query}, candidates);
     }
@@ -335,17 +331,17 @@ void test_levenshtein_all() {
     }
     check_levenshtein_case_({wide_query}, {wide_query, wide_query.substr(0, 150), wide_query.substr(300), "abc", ""});
     check_levenshtein_case_({"abc"}, {});
-    for (std::size_t round = 0; round != scale_iterations(8); ++round) {
+    for (std::size_t round = 0; round != context.iterations(8); ++round) {
         std::vector<std::string> queries;
         for (std::size_t index = 0; index != 3; ++index) {
             std::size_t const query_length = std::uniform_int_distribution<std::size_t>(1, 700)(generator);
             queries.push_back(std::string(query_length, '\0'));
-            randomize_string(&queries.back()[0], queries.back().size());
+            randomize_string(generator, queries.back());
         }
         std::vector<std::string> candidates;
         for (std::size_t index = 0; index != 40; ++index) {
             std::string candidate(std::uniform_int_distribution<std::size_t>(0, 900)(generator), '\0');
-            randomize_string(&candidate[0], candidate.size());
+            randomize_string(generator, candidate);
             candidates.push_back(candidate);
         }
         check_levenshtein_case_(queries, candidates);
@@ -354,7 +350,7 @@ void test_levenshtein_all() {
     // Serial is the reference for everything, itself included.
     levenshtein_backend_t const &reference = backend_named_(levenshtein_backends, "serial");
     for (levenshtein_backend_t const &candidate : levenshtein_backends)
-        check_levenshtein_equivalence_(reference, candidate, scale_iterations(8));
+        check_levenshtein_equivalence_(generator, reference, candidate, context.iterations(8));
 }
 
 #pragma endregion Drivers

@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +25,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
     sz_size_t progress = 0;
     sz_size_t const vector_length = svcntb();
     // Base SVE lacks the `svaddwb`/`svaddwt` widening accumulators that the SVE2 sibling uses, but `UDOT`
@@ -49,7 +49,7 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE
+#endif // STRINGZILLA_TARGET_SVE
 
 #ifdef __cplusplus
 }

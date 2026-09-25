@@ -26,8 +26,8 @@ extern "C" {
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
  *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
-#if SZ_USE_ICELAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_ICELAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                   \
     __attribute__((                                                                                             \
         target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2,aes,vaes,sha,evex512"))), \
@@ -50,7 +50,7 @@ extern "C" {
  *  @param[in] values_u64x4 A 256-bit vector holding four 64-bit values [a, b, c, d].
  *  @return Non-zero if at least two of the four values are identical, zero otherwise.
  */
-SZ_HELPER_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4) {
+STRINGZILLA_HELPER_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4) {
     // Assume `values_u64x4` stores: [a, b, c, d].
     // 0xB1 produces [b, a, d, c], 0x4E produces [c, d, a, b], 0x1B produces [d, c, b, a].
     __m256i cmp1_u64x4 = _mm256_cmpeq_epi64(values_u64x4, _mm256_permute4x64_epi64(values_u64x4, 0xB1));
@@ -65,7 +65,7 @@ SZ_HELPER_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4)
     return matches_mask;
 }
 
-SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                          //
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                 //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
@@ -100,7 +100,8 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
     // Allocate memory for the hash table and initialize it with 0xFF.
     // The higher is the `hash_table_slots` multiple - the more memory we will use,
     // but the less likely the collisions will be.
-    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) * (1u << SZ_SEQUENCE_INTERSECT_BUDGET);
+    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) *
+                                       (1u << STRINGZILLA_SEQUENCE_INTERSECT_BUDGET);
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
     sz_size_t *table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc->handle);
     if (!table_positions) return sz_bad_alloc_k;
@@ -108,8 +109,9 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
     sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
 
     // Empty-slot sentinel for the 64-bit `table_hashes`: the `0xFF` fill makes every slot all-ones.
-    // It must be a 64-bit constant, not `SZ_SIZE_MAX` - on 32-bit targets `sz_size_t` is 32-bit, so
-    // `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe loop spins forever.
+    // It must be a 64-bit constant, not `STRINGZILLA_SIZE_MAX` - on 32-bit targets `sz_size_t` is
+    // 32-bit, so `STRINGZILLA_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe
+    // loop spins forever.
     sz_u64_t const empty_slot = ~(sz_u64_t)0;
     // Top bit of a stored position marks a slot whose (distinct) value already produced a pair, so a
     // duplicate key on either sequence doesn't re-emit, so the result stays a set of size <= min(counts)
@@ -196,7 +198,8 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
             existing_hashes_vec.ymm = _mm256_mmask_i64gather_epi64(_mm256_setzero_si256(), 0xFF, batch_slots_vec.ymm,
                                                                    table_hashes, 8);
 
-            // Check that we don't have any collisions - in that case each value will be equal to `SZ_SIZE_MAX`
+            // Check that we don't have any collisions - in that case each value will be
+            // equal to `STRINGZILLA_SIZE_MAX`
             int const all_empty = _mm256_testc_si256(existing_hashes_vec.ymm, _mm256_set1_epi64x(-1));
             if (all_empty && !has_slot_collisions) {
                 // Scatter the new positions
@@ -454,7 +457,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_ICELAKE
+#endif // STRINGZILLA_TARGET_ICELAKE
 
 #ifdef __cplusplus
 }

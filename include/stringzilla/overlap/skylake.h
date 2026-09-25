@@ -19,8 +19,8 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                       \
     __attribute__((target("avx,avx2,avx512f,avx512vl,avx512dq,avx512bw,bmi,bmi2,popcnt,evex512"))), \
     apply_to = function)
@@ -42,8 +42,8 @@ enum { sz_overlap_skylake_keys_per_register_k = 16, sz_overlap_skylake_keys_per_
 
 /** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
  *  product's rounded head and exact tail reduce together, so the 53-bit mantissa never binds. */
-SZ_API_COMPTIME __m512d sz_overlap_skylake_multiply_add_(__m512d multiplier_vec, __m512d multiplicand_vec,
-                                                         __m512d addend_vec) {
+STRINGZILLA_API_COMPTIME __m512d sz_overlap_skylake_multiply_add_(__m512d multiplier_vec, __m512d multiplicand_vec,
+                                                                  __m512d addend_vec) {
     sz_u512_vec_t modulus_vec, reciprocal_vec, high_vec, low_vec, quotient_vec, folded_vec, second_vec, residue_vec;
     modulus_vec.zmm_pd = _mm512_set1_pd((sz_f64_t)sz_overlap_modulus_k);
     reciprocal_vec.zmm_pd = _mm512_set1_pd(1.0 / (sz_f64_t)sz_overlap_modulus_k);
@@ -62,17 +62,17 @@ SZ_API_COMPTIME __m512d sz_overlap_skylake_multiply_add_(__m512d multiplier_vec,
 }
 
 /** Advances the chain over eight bytes, writing the eight prefix hashes ending inside that word. */
-SZ_API_COMPTIME sz_f64_t sz_overlap_f64x8_prefix_hash_step_skylake(sz_f64_t prior, sz_cptr_t text,
-                                                                   sz_f64_t *prefix_hashes) {
+STRINGZILLA_API_COMPTIME sz_f64_t sz_overlap_f64x8_prefix_hash_step_skylake(sz_f64_t prior, sz_cptr_t text,
+                                                                            sz_f64_t *prefix_hashes) {
 
     // The word's halves as big-endian integers, each exact in `f64`; shifts past 32 answer zero.
     sz_u32_t const high_word = sz_u32_bytes_reverse(sz_u32_load(text).u32);
     sz_u32_t const low_word = sz_u32_bytes_reverse(sz_u32_load(text + 4).u32);
-    __m256i const high_shifts_vec = _mm256_setr_epi32(24, 16, 8, 0, 0, 0, 0, 0);
-    __m256i const low_shifts_vec = _mm256_setr_epi32(32, 32, 32, 32, 24, 16, 8, 0);
+    __m256i const high_shifts_u32x8 = _mm256_setr_epi32(24, 16, 8, 0, 0, 0, 0, 0);
+    __m256i const low_shifts_u32x8 = _mm256_setr_epi32(32, 32, 32, 32, 24, 16, 8, 0);
     sz_u512_vec_t high_parts_vec, low_parts_vec, joining_vec, powers_vec, chunks_vec, values_vec;
-    high_parts_vec.zmm_pd = _mm512_cvtepu32_pd(_mm256_srlv_epi32(_mm256_set1_epi32((int)high_word), high_shifts_vec));
-    low_parts_vec.zmm_pd = _mm512_cvtepu32_pd(_mm256_srlv_epi32(_mm256_set1_epi32((int)low_word), low_shifts_vec));
+    high_parts_vec.zmm_pd = _mm512_cvtepu32_pd(_mm256_srlv_epi32(_mm256_set1_epi32((int)high_word), high_shifts_u32x8));
+    low_parts_vec.zmm_pd = _mm512_cvtepu32_pd(_mm256_srlv_epi32(_mm256_set1_epi32((int)low_word), low_shifts_u32x8));
 
     // Positions 0-3 take the high half alone; positions 4-7 scale it past however much of the low half they cover.
     joining_vec.zmm_pd = _mm512_setr_pd(1.0, 1.0, 1.0, 1.0, sz_overlap_powers_of_256_k[1],
@@ -87,8 +87,9 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_f64x8_prefix_hash_step_skylake(sz_f64_t prio
 }
 
 /** The last step over @p count positions, fewer than a full step's. */
-SZ_API_COMPTIME sz_f64_t sz_overlap_f64x8_prefix_hash_step_tail_skylake(sz_f64_t prior, sz_cptr_t text, sz_size_t count,
-                                                                        sz_f64_t *prefix_hashes) {
+STRINGZILLA_API_COMPTIME sz_f64_t sz_overlap_f64x8_prefix_hash_step_tail_skylake(sz_f64_t prior, sz_cptr_t text,
+                                                                                 sz_size_t count,
+                                                                                 sz_f64_t *prefix_hashes) {
     for (sz_size_t position = 0; position != count; ++position)
         prior = sz_overlap_f64x1_prefix_hash_step_serial(prior, text + position, prefix_hashes + position);
     return prior;
@@ -96,9 +97,10 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_f64x8_prefix_hash_step_tail_skylake(sz_f64_t
 
 /** Eight positions' window hashes: H(i, w) = P(i + w) − P(i) · bʷ, a full-width hash
  *  under the modulus. */
-SZ_API_COMPTIME void sz_overlap_f64x8_window_hash_step_skylake(sz_f64_t const *prefix_hashes_at_start,
-                                                               sz_f64_t const *prefix_hashes_at_end,
-                                                               sz_f64_t window_power, sz_u32_t *window_hashes) {
+STRINGZILLA_API_COMPTIME void sz_overlap_f64x8_window_hash_step_skylake(sz_f64_t const *prefix_hashes_at_start,
+                                                                        sz_f64_t const *prefix_hashes_at_end,
+                                                                        sz_f64_t window_power,
+                                                                        sz_u32_t *window_hashes) {
     sz_u512_vec_t start_vec, end_vec, shifted_vec, difference_vec, residues_vec;
     start_vec.zmm_pd = _mm512_loadu_pd(prefix_hashes_at_start);
     end_vec.zmm_pd = _mm512_loadu_pd(prefix_hashes_at_end);
@@ -112,10 +114,10 @@ SZ_API_COMPTIME void sz_overlap_f64x8_window_hash_step_skylake(sz_f64_t const *p
 }
 
 /** The last step over @p count positions, fewer than a full step's. */
-SZ_API_COMPTIME void sz_overlap_f64x8_window_hash_step_tail_skylake(sz_f64_t const *prefix_hashes_at_start,
-                                                                    sz_f64_t const *prefix_hashes_at_end,
-                                                                    sz_f64_t window_power, sz_size_t count,
-                                                                    sz_u32_t *window_hashes) {
+STRINGZILLA_API_COMPTIME void sz_overlap_f64x8_window_hash_step_tail_skylake(sz_f64_t const *prefix_hashes_at_start,
+                                                                             sz_f64_t const *prefix_hashes_at_end,
+                                                                             sz_f64_t window_power, sz_size_t count,
+                                                                             sz_u32_t *window_hashes) {
     __mmask8 const tail_mask_m8 = sz_u8_mask_until_(count);
     sz_u512_vec_t start_vec, end_vec, shifted_vec, difference_vec, residues_vec;
     start_vec.zmm_pd = _mm512_maskz_loadu_pd(tail_mask_m8, prefix_hashes_at_start);
@@ -131,7 +133,7 @@ SZ_API_COMPTIME void sz_overlap_f64x8_window_hash_step_tail_skylake(sz_f64_t con
 
 /** Positions @c i ^ @p flip for the sixteen keys of a register: the partner at a distance, or
  *  across a mirror. */
-SZ_API_COMPTIME __m512i sz_overlap_skylake_partners_(sz_u32_t flip) {
+STRINGZILLA_API_COMPTIME __m512i sz_overlap_skylake_partners_(sz_u32_t flip) {
     return _mm512_setr_epi32((int)(0u ^ flip), (int)(1u ^ flip), (int)(2u ^ flip), (int)(3u ^ flip),   //
                              (int)(4u ^ flip), (int)(5u ^ flip), (int)(6u ^ flip), (int)(7u ^ flip),   //
                              (int)(8u ^ flip), (int)(9u ^ flip), (int)(10u ^ flip), (int)(11u ^ flip), //
@@ -139,204 +141,204 @@ SZ_API_COMPTIME __m512i sz_overlap_skylake_partners_(sz_u32_t flip) {
 }
 
 /** The sixteen keys of a register in reverse order. */
-SZ_API_COMPTIME __m512i sz_overlap_skylake_reverse_(__m512i keys_vec) {
-    return _mm512_permutexvar_epi32(sz_overlap_skylake_partners_(15), keys_vec);
+STRINGZILLA_API_COMPTIME __m512i sz_overlap_skylake_reverse_(__m512i keys_u32x16) {
+    return _mm512_permutexvar_epi32(sz_overlap_skylake_partners_(15), keys_u32x16);
 }
 
-/** Compare-exchange inside a register: every key against the one @p partners_vec names, masked
+/** Compare-exchange inside a register: every key against the one @p partners_u32x16 names, masked
  *  positions take the larger. */
-SZ_API_COMPTIME __m512i sz_overlap_skylake_exchange_within_(__m512i keys_vec, __m512i partners_vec,
-                                                            __mmask16 take_larger_mask_m16) {
-    __m512i const partner_keys_vec = _mm512_permutexvar_epi32(partners_vec, keys_vec);
-    return _mm512_mask_mov_epi32(_mm512_min_epu32(keys_vec, partner_keys_vec), take_larger_mask_m16,
-                                 _mm512_max_epu32(keys_vec, partner_keys_vec));
+STRINGZILLA_API_COMPTIME __m512i sz_overlap_skylake_exchange_within_(__m512i keys_u32x16, __m512i partners_u32x16,
+                                                                     __mmask16 take_larger_mask_m16) {
+    __m512i const partner_keys_u32x16 = _mm512_permutexvar_epi32(partners_u32x16, keys_u32x16);
+    return _mm512_mask_mov_epi32(_mm512_min_epu32(keys_u32x16, partner_keys_u32x16), take_larger_mask_m16,
+                                 _mm512_max_epu32(keys_u32x16, partner_keys_u32x16));
 }
 
 /** Two registers a fixed distance apart: @p lower keeps the minima, @p upper the maxima. */
-SZ_HELPER_INLINE void sz_overlap_skylake_exchange_(__m512i *lower_vec, __m512i *upper_vec) {
-    __m512i const smaller_vec = _mm512_min_epu32(*lower_vec, *upper_vec);
-    __m512i const larger_vec = _mm512_max_epu32(*lower_vec, *upper_vec);
-    *lower_vec = smaller_vec, *upper_vec = larger_vec;
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_exchange_(__m512i *lower_u32x16, __m512i *upper_u32x16) {
+    __m512i const smaller_u32x16 = _mm512_min_epu32(*lower_u32x16, *upper_u32x16);
+    __m512i const larger_u32x16 = _mm512_max_epu32(*lower_u32x16, *upper_u32x16);
+    *lower_u32x16 = smaller_u32x16, *upper_u32x16 = larger_u32x16;
 }
 
 /** The mirrored stage opening a merge of two ascending runs: @p upper is read
  *  and written reversed. */
-SZ_HELPER_INLINE void sz_overlap_skylake_exchange_mirrored_(__m512i *lower_vec, __m512i *upper_vec) {
-    __m512i const reversed_vec = sz_overlap_skylake_reverse_(*upper_vec);
-    __m512i const smaller_vec = _mm512_min_epu32(*lower_vec, reversed_vec);
-    __m512i const larger_vec = _mm512_max_epu32(*lower_vec, reversed_vec);
-    *lower_vec = smaller_vec, *upper_vec = sz_overlap_skylake_reverse_(larger_vec);
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_exchange_mirrored_(__m512i *lower_u32x16, __m512i *upper_u32x16) {
+    __m512i const reversed_u32x16 = sz_overlap_skylake_reverse_(*upper_u32x16);
+    __m512i const smaller_u32x16 = _mm512_min_epu32(*lower_u32x16, reversed_u32x16);
+    __m512i const larger_u32x16 = _mm512_max_epu32(*lower_u32x16, reversed_u32x16);
+    *lower_u32x16 = smaller_u32x16, *upper_u32x16 = sz_overlap_skylake_reverse_(larger_u32x16);
 }
 
 /** Sorts the sixteen keys of one register ascending: the merges of two, four, eight and sixteen
  *  keys, all inside it. */
-SZ_API_COMPTIME __m512i sz_overlap_skylake_sort_within_(__m512i keys_vec) {
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(1), 0xAAAA);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(3), 0xCCCC);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(1), 0xAAAA);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(7), 0xF0F0);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(2), 0xCCCC);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(1), 0xAAAA);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(15), 0xFF00);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(4), 0xF0F0);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(2), 0xCCCC);
-    return sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(1), 0xAAAA);
+STRINGZILLA_API_COMPTIME __m512i sz_overlap_skylake_sort_within_(__m512i keys_u32x16) {
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(1), 0xAAAA);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(3), 0xCCCC);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(1), 0xAAAA);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(7), 0xF0F0);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(2), 0xCCCC);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(1), 0xAAAA);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(15), 0xFF00);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(4), 0xF0F0);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(2), 0xCCCC);
+    return sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(1), 0xAAAA);
 }
 
 /** The ascending half-cleaners at distances eight, four, two and one, closing a merge
  *  inside the register. */
-SZ_API_COMPTIME __m512i sz_overlap_skylake_merge_within_(__m512i keys_vec) {
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(8), 0xFF00);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(4), 0xF0F0);
-    keys_vec = sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(2), 0xCCCC);
-    return sz_overlap_skylake_exchange_within_(keys_vec, sz_overlap_skylake_partners_(1), 0xAAAA);
+STRINGZILLA_API_COMPTIME __m512i sz_overlap_skylake_merge_within_(__m512i keys_u32x16) {
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(8), 0xFF00);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(4), 0xF0F0);
+    keys_u32x16 = sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(2), 0xCCCC);
+    return sz_overlap_skylake_exchange_within_(keys_u32x16, sz_overlap_skylake_partners_(1), 0xAAAA);
 }
 
 /** Loads four registers, sixty-four keys. */
-SZ_HELPER_INLINE void sz_overlap_skylake_load_4_(sz_u32_t const *keys, __m512i *registers_vec) {
-    registers_vec[0] = _mm512_loadu_si512(keys + 0);
-    registers_vec[1] = _mm512_loadu_si512(keys + 16);
-    registers_vec[2] = _mm512_loadu_si512(keys + 32);
-    registers_vec[3] = _mm512_loadu_si512(keys + 48);
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_load_4_(sz_u32_t const *keys, __m512i *registers_u32x16) {
+    registers_u32x16[0] = _mm512_loadu_si512(keys + 0);
+    registers_u32x16[1] = _mm512_loadu_si512(keys + 16);
+    registers_u32x16[2] = _mm512_loadu_si512(keys + 32);
+    registers_u32x16[3] = _mm512_loadu_si512(keys + 48);
 }
 
 /** Stores four registers, sixty-four keys. */
-SZ_HELPER_INLINE void sz_overlap_skylake_store_4_(__m512i const *registers_vec, sz_u32_t *keys) {
-    _mm512_storeu_si512(keys + 0, registers_vec[0]);
-    _mm512_storeu_si512(keys + 16, registers_vec[1]);
-    _mm512_storeu_si512(keys + 32, registers_vec[2]);
-    _mm512_storeu_si512(keys + 48, registers_vec[3]);
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_store_4_(__m512i const *registers_u32x16, sz_u32_t *keys) {
+    _mm512_storeu_si512(keys + 0, registers_u32x16[0]);
+    _mm512_storeu_si512(keys + 16, registers_u32x16[1]);
+    _mm512_storeu_si512(keys + 32, registers_u32x16[2]);
+    _mm512_storeu_si512(keys + 48, registers_u32x16[3]);
 }
 
 /** Closes a merge inside each of four registers. */
-SZ_HELPER_INLINE void sz_overlap_skylake_merge_within_4_(__m512i *registers_vec) {
-    registers_vec[0] = sz_overlap_skylake_merge_within_(registers_vec[0]);
-    registers_vec[1] = sz_overlap_skylake_merge_within_(registers_vec[1]);
-    registers_vec[2] = sz_overlap_skylake_merge_within_(registers_vec[2]);
-    registers_vec[3] = sz_overlap_skylake_merge_within_(registers_vec[3]);
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_merge_within_4_(__m512i *registers_u32x16) {
+    registers_u32x16[0] = sz_overlap_skylake_merge_within_(registers_u32x16[0]);
+    registers_u32x16[1] = sz_overlap_skylake_merge_within_(registers_u32x16[1]);
+    registers_u32x16[2] = sz_overlap_skylake_merge_within_(registers_u32x16[2]);
+    registers_u32x16[3] = sz_overlap_skylake_merge_within_(registers_u32x16[3]);
 }
 
-/** The ascending stage, pairing each of the first eight @p registers_vec with the eighth after. */
-SZ_HELPER_INLINE void sz_overlap_skylake_exchange_stride_8_(__m512i *registers_vec) {
-    sz_overlap_skylake_exchange_(&registers_vec[0], &registers_vec[8]);
-    sz_overlap_skylake_exchange_(&registers_vec[1], &registers_vec[9]);
-    sz_overlap_skylake_exchange_(&registers_vec[2], &registers_vec[10]);
-    sz_overlap_skylake_exchange_(&registers_vec[3], &registers_vec[11]);
-    sz_overlap_skylake_exchange_(&registers_vec[4], &registers_vec[12]);
-    sz_overlap_skylake_exchange_(&registers_vec[5], &registers_vec[13]);
-    sz_overlap_skylake_exchange_(&registers_vec[6], &registers_vec[14]);
-    sz_overlap_skylake_exchange_(&registers_vec[7], &registers_vec[15]);
+/** Ascending stage, pairing each of the first eight @p registers_u32x16 with the eighth after. */
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_exchange_stride_8_(__m512i *registers_u32x16) {
+    sz_overlap_skylake_exchange_(&registers_u32x16[0], &registers_u32x16[8]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[1], &registers_u32x16[9]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[2], &registers_u32x16[10]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[3], &registers_u32x16[11]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[4], &registers_u32x16[12]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[5], &registers_u32x16[13]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[6], &registers_u32x16[14]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[7], &registers_u32x16[15]);
 }
 
-/** The ascending stage, pairing each of the first four @p registers_vec with the fourth after. */
-SZ_HELPER_INLINE void sz_overlap_skylake_exchange_stride_4_(__m512i *registers_vec) {
-    sz_overlap_skylake_exchange_(&registers_vec[0], &registers_vec[4]);
-    sz_overlap_skylake_exchange_(&registers_vec[1], &registers_vec[5]);
-    sz_overlap_skylake_exchange_(&registers_vec[2], &registers_vec[6]);
-    sz_overlap_skylake_exchange_(&registers_vec[3], &registers_vec[7]);
+/** Ascending stage, pairing each of the first four @p registers_u32x16 with the fourth after. */
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_exchange_stride_4_(__m512i *registers_u32x16) {
+    sz_overlap_skylake_exchange_(&registers_u32x16[0], &registers_u32x16[4]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[1], &registers_u32x16[5]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[2], &registers_u32x16[6]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[3], &registers_u32x16[7]);
 }
 
 /** The ascending stages at register strides two and one over four registers, then within each. */
-SZ_HELPER_INLINE void sz_overlap_skylake_merge_4_(__m512i *registers_vec) {
-    sz_overlap_skylake_exchange_(&registers_vec[0], &registers_vec[2]);
-    sz_overlap_skylake_exchange_(&registers_vec[1], &registers_vec[3]);
-    sz_overlap_skylake_exchange_(&registers_vec[0], &registers_vec[1]);
-    sz_overlap_skylake_exchange_(&registers_vec[2], &registers_vec[3]);
-    sz_overlap_skylake_merge_within_4_(registers_vec);
+STRINGZILLA_HELPER_INLINE void sz_overlap_skylake_merge_4_(__m512i *registers_u32x16) {
+    sz_overlap_skylake_exchange_(&registers_u32x16[0], &registers_u32x16[2]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[1], &registers_u32x16[3]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[0], &registers_u32x16[1]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[2], &registers_u32x16[3]);
+    sz_overlap_skylake_merge_within_4_(registers_u32x16);
 }
 
 /** Sorts sixty-four keys in four registers, in place. */
-SZ_API_COMPTIME void sz_overlap_skylake_sort_4_(sz_u32_t *keys) {
-    __m512i registers_vec[4];
-    sz_overlap_skylake_load_4_(keys, registers_vec);
-    registers_vec[0] = sz_overlap_skylake_sort_within_(registers_vec[0]);
-    registers_vec[1] = sz_overlap_skylake_sort_within_(registers_vec[1]);
-    registers_vec[2] = sz_overlap_skylake_sort_within_(registers_vec[2]);
-    registers_vec[3] = sz_overlap_skylake_sort_within_(registers_vec[3]);
+STRINGZILLA_API_COMPTIME void sz_overlap_skylake_sort_4_(sz_u32_t *keys) {
+    __m512i registers_u32x16[4];
+    sz_overlap_skylake_load_4_(keys, registers_u32x16);
+    registers_u32x16[0] = sz_overlap_skylake_sort_within_(registers_u32x16[0]);
+    registers_u32x16[1] = sz_overlap_skylake_sort_within_(registers_u32x16[1]);
+    registers_u32x16[2] = sz_overlap_skylake_sort_within_(registers_u32x16[2]);
+    registers_u32x16[3] = sz_overlap_skylake_sort_within_(registers_u32x16[3]);
     // Thirty-two keys: register pairs mirrored, then within.
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[0], &registers_vec[1]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[2], &registers_vec[3]);
-    sz_overlap_skylake_merge_within_4_(registers_vec);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[0], &registers_u32x16[1]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[2], &registers_u32x16[3]);
+    sz_overlap_skylake_merge_within_4_(registers_u32x16);
     // Sixty-four keys: the quad mirrored, then the stages below.
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[0], &registers_vec[3]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[1], &registers_vec[2]);
-    sz_overlap_skylake_exchange_(&registers_vec[0], &registers_vec[1]);
-    sz_overlap_skylake_exchange_(&registers_vec[2], &registers_vec[3]);
-    sz_overlap_skylake_merge_within_4_(registers_vec);
-    sz_overlap_skylake_store_4_(registers_vec, keys);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[0], &registers_u32x16[3]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[1], &registers_u32x16[2]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[0], &registers_u32x16[1]);
+    sz_overlap_skylake_exchange_(&registers_u32x16[2], &registers_u32x16[3]);
+    sz_overlap_skylake_merge_within_4_(registers_u32x16);
+    sz_overlap_skylake_store_4_(registers_u32x16, keys);
 }
 
 /** Sorts one hundred twenty-eight keys in eight registers, in place: two sorted quads,
  *  then their merge. */
-SZ_API_COMPTIME void sz_overlap_skylake_sort_8_(sz_u32_t *keys) {
+STRINGZILLA_API_COMPTIME void sz_overlap_skylake_sort_8_(sz_u32_t *keys) {
     sz_overlap_skylake_sort_4_(keys);
     sz_overlap_skylake_sort_4_(keys + 64);
-    __m512i registers_vec[8];
-    sz_overlap_skylake_load_4_(keys, registers_vec);
-    sz_overlap_skylake_load_4_(keys + 64, registers_vec + 4);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[0], &registers_vec[7]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[1], &registers_vec[6]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[2], &registers_vec[5]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[3], &registers_vec[4]);
-    sz_overlap_skylake_merge_4_(registers_vec);
-    sz_overlap_skylake_merge_4_(registers_vec + 4);
-    sz_overlap_skylake_store_4_(registers_vec, keys);
-    sz_overlap_skylake_store_4_(registers_vec + 4, keys + 64);
+    __m512i registers_u32x16[8];
+    sz_overlap_skylake_load_4_(keys, registers_u32x16);
+    sz_overlap_skylake_load_4_(keys + 64, registers_u32x16 + 4);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[0], &registers_u32x16[7]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[1], &registers_u32x16[6]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[2], &registers_u32x16[5]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[3], &registers_u32x16[4]);
+    sz_overlap_skylake_merge_4_(registers_u32x16);
+    sz_overlap_skylake_merge_4_(registers_u32x16 + 4);
+    sz_overlap_skylake_store_4_(registers_u32x16, keys);
+    sz_overlap_skylake_store_4_(registers_u32x16 + 4, keys + 64);
 }
 
 /** Sorts one 256-key run in sixteen registers, in place: two sorted halves, then their merge. */
-SZ_API_COMPTIME void sz_overlap_skylake_sort_16_(sz_u32_t *keys) {
+STRINGZILLA_API_COMPTIME void sz_overlap_skylake_sort_16_(sz_u32_t *keys) {
     sz_overlap_skylake_sort_8_(keys);
     sz_overlap_skylake_sort_8_(keys + 128);
-    __m512i registers_vec[16];
-    sz_overlap_skylake_load_4_(keys, registers_vec);
-    sz_overlap_skylake_load_4_(keys + 64, registers_vec + 4);
-    sz_overlap_skylake_load_4_(keys + 128, registers_vec + 8);
-    sz_overlap_skylake_load_4_(keys + 192, registers_vec + 12);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[0], &registers_vec[15]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[1], &registers_vec[14]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[2], &registers_vec[13]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[3], &registers_vec[12]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[4], &registers_vec[11]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[5], &registers_vec[10]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[6], &registers_vec[9]);
-    sz_overlap_skylake_exchange_mirrored_(&registers_vec[7], &registers_vec[8]);
-    sz_overlap_skylake_exchange_stride_4_(registers_vec);
-    sz_overlap_skylake_exchange_stride_4_(registers_vec + 8);
-    sz_overlap_skylake_merge_4_(registers_vec);
-    sz_overlap_skylake_merge_4_(registers_vec + 4);
-    sz_overlap_skylake_merge_4_(registers_vec + 8);
-    sz_overlap_skylake_merge_4_(registers_vec + 12);
-    sz_overlap_skylake_store_4_(registers_vec, keys);
-    sz_overlap_skylake_store_4_(registers_vec + 4, keys + 64);
-    sz_overlap_skylake_store_4_(registers_vec + 8, keys + 128);
-    sz_overlap_skylake_store_4_(registers_vec + 12, keys + 192);
+    __m512i registers_u32x16[16];
+    sz_overlap_skylake_load_4_(keys, registers_u32x16);
+    sz_overlap_skylake_load_4_(keys + 64, registers_u32x16 + 4);
+    sz_overlap_skylake_load_4_(keys + 128, registers_u32x16 + 8);
+    sz_overlap_skylake_load_4_(keys + 192, registers_u32x16 + 12);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[0], &registers_u32x16[15]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[1], &registers_u32x16[14]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[2], &registers_u32x16[13]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[3], &registers_u32x16[12]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[4], &registers_u32x16[11]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[5], &registers_u32x16[10]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[6], &registers_u32x16[9]);
+    sz_overlap_skylake_exchange_mirrored_(&registers_u32x16[7], &registers_u32x16[8]);
+    sz_overlap_skylake_exchange_stride_4_(registers_u32x16);
+    sz_overlap_skylake_exchange_stride_4_(registers_u32x16 + 8);
+    sz_overlap_skylake_merge_4_(registers_u32x16);
+    sz_overlap_skylake_merge_4_(registers_u32x16 + 4);
+    sz_overlap_skylake_merge_4_(registers_u32x16 + 8);
+    sz_overlap_skylake_merge_4_(registers_u32x16 + 12);
+    sz_overlap_skylake_store_4_(registers_u32x16, keys);
+    sz_overlap_skylake_store_4_(registers_u32x16 + 4, keys + 64);
+    sz_overlap_skylake_store_4_(registers_u32x16 + 8, keys + 128);
+    sz_overlap_skylake_store_4_(registers_u32x16 + 12, keys + 192);
 }
 
 /** Closes a merge inside one 256-key run: the ascending stages at distances one hundred
  *  twenty-eight down to one. */
-SZ_API_COMPTIME void sz_overlap_skylake_merge_run_(sz_u32_t *keys) {
-    __m512i registers_vec[16];
-    sz_overlap_skylake_load_4_(keys, registers_vec);
-    sz_overlap_skylake_load_4_(keys + 64, registers_vec + 4);
-    sz_overlap_skylake_load_4_(keys + 128, registers_vec + 8);
-    sz_overlap_skylake_load_4_(keys + 192, registers_vec + 12);
-    sz_overlap_skylake_exchange_stride_8_(registers_vec);
-    sz_overlap_skylake_exchange_stride_4_(registers_vec);
-    sz_overlap_skylake_exchange_stride_4_(registers_vec + 8);
-    sz_overlap_skylake_merge_4_(registers_vec);
-    sz_overlap_skylake_merge_4_(registers_vec + 4);
-    sz_overlap_skylake_merge_4_(registers_vec + 8);
-    sz_overlap_skylake_merge_4_(registers_vec + 12);
-    sz_overlap_skylake_store_4_(registers_vec, keys);
-    sz_overlap_skylake_store_4_(registers_vec + 4, keys + 64);
-    sz_overlap_skylake_store_4_(registers_vec + 8, keys + 128);
-    sz_overlap_skylake_store_4_(registers_vec + 12, keys + 192);
+STRINGZILLA_API_COMPTIME void sz_overlap_skylake_merge_run_(sz_u32_t *keys) {
+    __m512i registers_u32x16[16];
+    sz_overlap_skylake_load_4_(keys, registers_u32x16);
+    sz_overlap_skylake_load_4_(keys + 64, registers_u32x16 + 4);
+    sz_overlap_skylake_load_4_(keys + 128, registers_u32x16 + 8);
+    sz_overlap_skylake_load_4_(keys + 192, registers_u32x16 + 12);
+    sz_overlap_skylake_exchange_stride_8_(registers_u32x16);
+    sz_overlap_skylake_exchange_stride_4_(registers_u32x16);
+    sz_overlap_skylake_exchange_stride_4_(registers_u32x16 + 8);
+    sz_overlap_skylake_merge_4_(registers_u32x16);
+    sz_overlap_skylake_merge_4_(registers_u32x16 + 4);
+    sz_overlap_skylake_merge_4_(registers_u32x16 + 8);
+    sz_overlap_skylake_merge_4_(registers_u32x16 + 12);
+    sz_overlap_skylake_store_4_(registers_u32x16, keys);
+    sz_overlap_skylake_store_4_(registers_u32x16 + 4, keys + 64);
+    sz_overlap_skylake_store_4_(registers_u32x16 + 8, keys + 128);
+    sz_overlap_skylake_store_4_(registers_u32x16 + 12, keys + 192);
 }
 
 /** Sorts @p count keys ascending in place, unsigned, and drops repeats, answering how many remain;
  *  the buffer holds @ref sz_overlap_btree_sorted_capacity entries. */
-SZ_API_COMPTIME sz_size_t sz_overlap_u32x16_btree_sort_skylake(sz_u32_t *keys, sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_u32x16_btree_sort_skylake(sz_u32_t *keys, sz_size_t count) {
     sz_size_t const keys_per_register = sz_overlap_skylake_keys_per_register_k;
     sz_size_t const keys_per_run = sz_overlap_skylake_keys_per_run_k;
     sz_size_t const capacity = sz_overlap_btree_sorted_capacity(count);
@@ -352,20 +354,20 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x16_btree_sort_skylake(sz_u32_t *keys, s
     for (sz_size_t phase = 2 * keys_per_run; phase <= capacity; phase *= 2) {
         for (sz_size_t start = 0; start != capacity; start += phase)
             for (sz_size_t offset = 0; offset != phase / 2; offset += keys_per_register) {
-                __m512i lower_vec = _mm512_loadu_si512(keys + start + offset);
-                __m512i upper_vec = _mm512_loadu_si512(keys + start + phase - keys_per_register - offset);
-                sz_overlap_skylake_exchange_mirrored_(&lower_vec, &upper_vec);
-                _mm512_storeu_si512(keys + start + offset, lower_vec);
-                _mm512_storeu_si512(keys + start + phase - keys_per_register - offset, upper_vec);
+                __m512i lower_u32x16 = _mm512_loadu_si512(keys + start + offset);
+                __m512i upper_u32x16 = _mm512_loadu_si512(keys + start + phase - keys_per_register - offset);
+                sz_overlap_skylake_exchange_mirrored_(&lower_u32x16, &upper_u32x16);
+                _mm512_storeu_si512(keys + start + offset, lower_u32x16);
+                _mm512_storeu_si512(keys + start + phase - keys_per_register - offset, upper_u32x16);
             }
         for (sz_size_t distance = phase / 4; distance >= keys_per_run; distance /= 2)
             for (sz_size_t start = 0; start != capacity; start += 2 * distance)
                 for (sz_size_t offset = 0; offset != distance; offset += keys_per_register) {
-                    __m512i lower_vec = _mm512_loadu_si512(keys + start + offset);
-                    __m512i upper_vec = _mm512_loadu_si512(keys + start + distance + offset);
-                    sz_overlap_skylake_exchange_(&lower_vec, &upper_vec);
-                    _mm512_storeu_si512(keys + start + offset, lower_vec);
-                    _mm512_storeu_si512(keys + start + distance + offset, upper_vec);
+                    __m512i lower_u32x16 = _mm512_loadu_si512(keys + start + offset);
+                    __m512i upper_u32x16 = _mm512_loadu_si512(keys + start + distance + offset);
+                    sz_overlap_skylake_exchange_(&lower_u32x16, &upper_u32x16);
+                    _mm512_storeu_si512(keys + start + offset, lower_u32x16);
+                    _mm512_storeu_si512(keys + start + distance + offset, upper_u32x16);
                 }
         for (sz_size_t run = 0; run != capacity / keys_per_run; ++run)
             sz_overlap_skylake_merge_run_(keys + run * keys_per_run);
@@ -373,57 +375,58 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x16_btree_sort_skylake(sz_u32_t *keys, s
     return sz_overlap_btree_unique_(keys, count);
 }
 
-/** One branch level: the child ordinal a flipped @p key_vec descends into, the count of
+/** One branch level: the child ordinal a flipped @p key_u32x16 descends into, the count of
  *  separators below it. */
-SZ_API_COMPTIME sz_size_t sz_overlap_skylake_branch_step_(sz_u32_t const *node, __m512i key_vec) {
-    __mmask16 const below_mask_m16 = _mm512_cmpgt_epi32_mask(key_vec, _mm512_loadu_si512(node));
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_skylake_branch_step_(sz_u32_t const *node, __m512i key_u32x16) {
+    __mmask16 const below_mask_m16 = _mm512_cmpgt_epi32_mask(key_u32x16, _mm512_loadu_si512(node));
     return (sz_size_t)_mm_popcnt_u32((unsigned)below_mask_m16);
 }
 
-/** The leaf compare: one when the flipped @p key_vec sits in this node, zero otherwise. */
-SZ_API_COMPTIME sz_size_t sz_overlap_skylake_leaf_step_(sz_u32_t const *node, __m512i key_vec) {
-    return _mm512_cmpeq_epi32_mask(key_vec, _mm512_loadu_si512(node)) != 0;
+/** The leaf compare: one when the flipped @p key_u32x16 sits in this node, zero otherwise. */
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_skylake_leaf_step_(sz_u32_t const *node, __m512i key_u32x16) {
+    return _mm512_cmpeq_epi32_mask(key_u32x16, _mm512_loadu_si512(node)) != 0;
 }
 
 /** Walks the whole tree for one flipped key, the root included. */
-SZ_API_COMPTIME sz_size_t sz_overlap_skylake_probe_key_(sz_overlap_btree_t const *btree, sz_u32_t flipped_key) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_skylake_probe_key_(sz_overlap_btree_t const *btree,
+                                                                 sz_u32_t flipped_key) {
     sz_size_t const keys_per_node = sz_overlap_keys_per_node_k, branches_per_node = sz_overlap_branches_per_node_k;
-    __m512i const key_vec = _mm512_set1_epi32((int)flipped_key);
+    __m512i const key_u32x16 = _mm512_set1_epi32((int)flipped_key);
     sz_size_t node = 0;
     for (sz_size_t level = 0; level + 1 != btree->levels; ++level)
         node = node * branches_per_node +
                sz_overlap_skylake_branch_step_(btree->nodes + (btree->level_bases[level] + node) * keys_per_node,
-                                               key_vec);
+                                               key_u32x16);
     return sz_overlap_skylake_leaf_step_(btree->nodes + (btree->level_bases[btree->levels - 1] + node) * keys_per_node,
-                                         key_vec);
+                                         key_u32x16);
 }
 
 /** Counts how many of @p count raw keys of one candidate the tree holds. */
-SZ_API_COMPTIME sz_size_t sz_overlap_u32x16_btree_probe_skylake(sz_overlap_btree_t const *btree, sz_u32_t const *keys,
-                                                                sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_u32x16_btree_probe_skylake(sz_overlap_btree_t const *btree,
+                                                                         sz_u32_t const *keys, sz_size_t count) {
     sz_size_t const keys_per_node = sz_overlap_keys_per_node_k, branches_per_node = sz_overlap_branches_per_node_k;
     sz_size_t const keys_per_register = sz_overlap_skylake_keys_per_register_k;
     sz_u32_t const *const root = btree->nodes + btree->level_bases[0] * keys_per_node;
     sz_u32_t const *const leaves = btree->nodes + btree->level_bases[btree->levels - 1] * keys_per_node;
-    __m512i const flip_vec = _mm512_set1_epi32((int)sz_overlap_sign_flip_k);
-    __m512i const ones_vec = _mm512_set1_epi32(1);
+    __m512i const flip_u32x16 = _mm512_set1_epi32((int)sz_overlap_sign_flip_k);
+    __m512i const ones_u32x16 = _mm512_set1_epi32(1);
     sz_size_t matches = 0, index = 0;
 
     // Sixteen keys meet the root transposed, each separator broadcast against all sixteen; the deeper levels are
     // sixteen interleaved walks.
     if (btree->levels > 1)
         for (; index + keys_per_register <= count; index += keys_per_register) {
-            __m512i const keys_vec = _mm512_xor_si512(_mm512_loadu_si512(keys + index), flip_vec);
-            __m512i children_vec = _mm512_setzero_si512();
+            __m512i const keys_u32x16 = _mm512_xor_si512(_mm512_loadu_si512(keys + index), flip_u32x16);
+            __m512i children_u32x16 = _mm512_setzero_si512();
             for (sz_size_t separator = 0; separator != keys_per_node; ++separator) {
-                __mmask16 const below_mask_m16 = _mm512_cmpgt_epi32_mask(keys_vec,
+                __mmask16 const below_mask_m16 = _mm512_cmpgt_epi32_mask(keys_u32x16,
                                                                          _mm512_set1_epi32((int)root[separator]));
-                children_vec = _mm512_mask_add_epi32(children_vec, below_mask_m16, children_vec, ones_vec);
+                children_u32x16 = _mm512_mask_add_epi32(children_u32x16, below_mask_m16, children_u32x16, ones_u32x16);
             }
 
             sz_u32_t flipped_keys[16], walks[16];
-            _mm512_storeu_si512(flipped_keys, keys_vec);
-            _mm512_storeu_si512(walks, children_vec);
+            _mm512_storeu_si512(flipped_keys, keys_u32x16);
+            _mm512_storeu_si512(walks, children_u32x16);
             for (sz_size_t level = 1; level + 1 != btree->levels; ++level) {
                 sz_u32_t const *const level_nodes = btree->nodes + btree->level_bases[level] * keys_per_node;
                 for (sz_size_t walk = 0; walk != keys_per_register; ++walk)
@@ -444,15 +447,15 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x16_btree_probe_skylake(sz_overlap_btree
 /**
  *  @brief Prepares every query of @p queries into one block, hashing and sorting on
  *      the Skylake tier.
- *  @param[in] alloc Where the forest's block comes from, or @c SZ_NULL for the
+ *  @param[in] alloc Where the forest's block comes from, or @c STRINGZILLA_NULL for the
  *      default host allocator.
  *  @sa sz_overlap_engine_init_cpu
  */
-SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_skylake(sz_sequence_t const *queries,
-                                                           sz_size_t const *window_widths,
-                                                           sz_size_t window_widths_count,
-                                                           sz_memory_allocator_t *alloc,
-                                                           sz_overlap_engine_t *engine) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_engine_init_skylake(sz_sequence_t const *queries,
+                                                                    sz_size_t const *window_widths,
+                                                                    sz_size_t window_widths_count,
+                                                                    sz_memory_allocator_t *alloc,
+                                                                    sz_overlap_engine_t *engine) {
     sz_size_t const step = sz_overlap_skylake_f64x8_positions_per_step_k;
     sz_memory_allocator_t host;
     if (alloc) host = *alloc;
@@ -514,9 +517,10 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_skylake(sz_sequence_t const *
     return sz_success_k;
 }
 
-SZ_API_COMPTIME sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
-                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine,
+                                                               sz_sequence_t const *candidates, sz_f32_t *scores,
+                                                               sz_size_t scores_query_stride,
+                                                               sz_size_t scores_candidate_stride) {
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                               scores_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
@@ -543,7 +547,7 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
         sz_cptr_t texts[sz_overlap_interleaved_chains_k];
         sz_size_t lengths[sz_overlap_interleaved_chains_k];
         sz_f64_t priors[sz_overlap_interleaved_chains_k];
-        sz_size_t shortest = SZ_SIZE_MAX;
+        sz_size_t shortest = STRINGZILLA_SIZE_MAX;
         for (sz_size_t chain = 0; chain != interleaved; ++chain) {
             texts[chain] = candidates->get_start(candidates->handle, first + chain);
             lengths[chain] = candidates->get_length(candidates->handle, first + chain);
@@ -611,7 +615,7 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #ifdef __cplusplus
 }

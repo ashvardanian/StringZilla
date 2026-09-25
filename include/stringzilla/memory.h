@@ -56,11 +56,12 @@ extern "C" {
  *  @pre The @p target and @p source must not overlap.
  *  @sa sz_move
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_copy_serial, sz_copy_haswell, sz_copy_skylake, sz_copy_neon, sz_copy_sve, sz_copy_v128,
  *      sz_copy_v128relaxed, sz_copy_rvv, sz_copy_lasx, sz_copy_powervsx
  */
-SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief Similar to @c memmove, copies (moves) contents of one string into another. Unlike
@@ -82,11 +83,12 @@ SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_move_serial, sz_move_haswell, sz_move_skylake, sz_move_neon, sz_move_sve, sz_move_v128,
  *      sz_move_v128relaxed, sz_move_rvv, sz_move_lasx, sz_move_powervsx
  */
-SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief Similar to @c memset, fills a string with a given value.
@@ -107,11 +109,12 @@ SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
  *     }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_fill_serial, sz_fill_haswell, sz_fill_skylake, sz_fill_neon, sz_fill_sve, sz_fill_v128,
  *      sz_fill_v128relaxed, sz_fill_rvv, sz_fill_lasx, sz_fill_powervsx
  */
-SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+STRINGZILLA_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /**
  *  @brief Look Up Table @b (LUT) transformation of a @p source string, the same as
@@ -144,170 +147,172 @@ SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
  *  @pre The @p lut must be exactly 256 bytes long, even if @p source has no bytes in the top range.
  *  @pre The @p target and @p source can be the same, but must not overlap.
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_lookup_serial, sz_lookup_haswell, sz_lookup_icelake, sz_lookup_neon, sz_lookup_sve,
  *      sz_lookup_v128, sz_lookup_v128relaxed, sz_lookup_rvv, sz_lookup_lasx, sz_lookup_powervsx
  */
-SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
-
-/** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-
-/** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                      char const lut[sz_at_least_(256)]);
-
-#if SZ_USE_HASWELL
-
-/** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-
-/** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+STRINGZILLA_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                        char const lut[sz_at_least_(256)]);
-#endif
-
-#if SZ_USE_SKYLAKE
 
 /** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-#endif
-
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                       char const lut[sz_at_least_(256)]);
-#endif
+STRINGZILLA_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                               char const lut[sz_at_least_(256)]);
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+STRINGZILLA_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                    char const lut[sz_at_least_(256)]);
+STRINGZILLA_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                                char const lut[sz_at_least_(256)]);
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SKYLAKE
 
 /** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-
-/** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                   char const lut[sz_at_least_(256)]);
+STRINGZILLA_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
-#if SZ_USE_V128
-
-/** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+#if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                    char const lut[sz_at_least_(256)]);
+STRINGZILLA_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                                char const lut[sz_at_least_(256)]);
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+STRINGZILLA_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                           char const lut[sz_at_least_(256)]);
+STRINGZILLA_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                             char const lut[sz_at_least_(256)]);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+STRINGZILLA_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                   char const lut[sz_at_least_(256)]);
+STRINGZILLA_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                            char const lut[sz_at_least_(256)]);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+STRINGZILLA_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                    char const lut[sz_at_least_(256)]);
+STRINGZILLA_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                             char const lut[sz_at_least_(256)]);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_copy */
-SZ_API_COMPTIME void sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_move */
-SZ_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /** @copydoc sz_fill */
-SZ_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+STRINGZILLA_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /** @copydoc sz_lookup */
-SZ_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                        char const lut[sz_at_least_(256)]);
+STRINGZILLA_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                                    char const lut[sz_at_least_(256)]);
+#endif
+
+#if STRINGZILLA_TARGET_RVV
+
+/** @copydoc sz_copy */
+STRINGZILLA_API_COMPTIME void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_move */
+STRINGZILLA_API_COMPTIME void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_fill */
+STRINGZILLA_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
+/** @copydoc sz_lookup */
+STRINGZILLA_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                            char const lut[sz_at_least_(256)]);
+#endif
+
+#if STRINGZILLA_TARGET_LASX
+
+/** @copydoc sz_copy */
+STRINGZILLA_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_move */
+STRINGZILLA_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_fill */
+STRINGZILLA_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
+/** @copydoc sz_lookup */
+STRINGZILLA_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                             char const lut[sz_at_least_(256)]);
+#endif
+
+#if STRINGZILLA_TARGET_POWERVSX
+
+/** @copydoc sz_copy */
+STRINGZILLA_API_COMPTIME void sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_move */
+STRINGZILLA_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_fill */
+STRINGZILLA_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
+/** @copydoc sz_lookup */
+STRINGZILLA_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                                 char const lut[sz_at_least_(256)]);
 #endif
 
 #pragma endregion Core API
@@ -324,7 +329,7 @@ SZ_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cp
  *  bit of each inappropriate character byte. This, however, breaks for extended ASCII, so a
  *  different solution is needed.
  */
-SZ_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
     static sz_u8_t const lowered[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -356,7 +361,7 @@ SZ_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
  *  bit of each inappropriate character byte. This, however, breaks for extended ASCII, so a
  *  different solution is needed.
  */
-SZ_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
     static sz_u8_t const upped[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -382,7 +387,7 @@ SZ_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
  *  @brief Initializes a lookup table for converting bytes to ASCII characters.
  *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
-SZ_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
     for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = (sz_u8_t)(byte_index & 0x7F);
 }
 
@@ -401,109 +406,110 @@ SZ_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
 #include "stringzilla/memory/powervsx.h"
 
 /*  Pick the right implementation for the memory kernels. To override this behavior and precompile
- *  all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
+ *  all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma region Core Functionality
 
-SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_copy_v128relaxed(target, source, length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_copy_v128(target, source, length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_copy_rvv(target, source, length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_copy_lasx(target, source, length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_copy_powervsx(target, source, length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     sz_copy_skylake(target, source, length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     sz_copy_haswell(target, source, length);
-#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
     sz_copy_sve(target, source, length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     sz_copy_neon(target, source, length);
 #else
     sz_copy_serial(target, source, length);
 #endif
 }
 
-SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_move_v128relaxed(target, source, length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_move_v128(target, source, length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_move_rvv(target, source, length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_move_lasx(target, source, length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_move_powervsx(target, source, length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     sz_move_skylake(target, source, length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     sz_move_haswell(target, source, length);
-#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
     sz_move_sve(target, source, length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     sz_move_neon(target, source, length);
 #else
     sz_move_serial(target, source, length);
 #endif
 }
 
-SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_fill_v128relaxed(target, length, value);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_fill_v128(target, length, value);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_fill_rvv(target, length, value);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_fill_lasx(target, length, value);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_fill_powervsx(target, length, value);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     sz_fill_skylake(target, length, value);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     sz_fill_haswell(target, length, value);
-#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
     sz_fill_sve(target, length, value);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     sz_fill_neon(target, length, value);
 #else
     sz_fill_serial(target, length, value);
 #endif
 }
 
-SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                       char const lut[sz_at_least_(256)]) {
+#if STRINGZILLA_TARGET_V128RELAXED
     sz_lookup_v128relaxed(target, length, source, lut);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     sz_lookup_v128(target, length, source, lut);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     sz_lookup_rvv(target, length, source, lut);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     sz_lookup_lasx(target, length, source, lut);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     sz_lookup_powervsx(target, length, source, lut);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     sz_lookup_icelake(target, length, source, lut);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     sz_lookup_haswell(target, length, source, lut);
-#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
     sz_lookup_sve(target, length, source, lut);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     sz_lookup_neon(target, length, source, lut);
 #else
     sz_lookup_serial(target, length, source, lut);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 #pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus

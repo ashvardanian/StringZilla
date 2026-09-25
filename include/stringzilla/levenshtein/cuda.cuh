@@ -34,7 +34,7 @@
 
 #include "stringzilla/levenshtein/serial.h"
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
 #pragma region Myers Threaded
 
@@ -49,7 +49,7 @@ enum { sz_levenshtein_cuda_warp_words_per_lane_max_k = 8 };
 enum { sz_levenshtein_cuda_warp_lanes_k = 32 };
 
 /** Words one lane of a warped candidate owns, which is what selects the rung's entry point. */
-SZ_HELPER_AUTO sz_size_t sz_levenshtein_cuda_warp_words_per_lane_(sz_size_t words) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_levenshtein_cuda_warp_words_per_lane_(sz_size_t words) {
     return sz_size_divide_round_up(words, sz_levenshtein_cuda_warp_lanes_k);
 }
 
@@ -97,9 +97,9 @@ extern "C" {
  *  @param[in] order The launch's own slice of the batch's bucketing, one query index per
  *      @c blockIdx.y row.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                 sz_sequence_t candidates, sz_size_t *distances,
-                                                 sz_size_t distances_stride, sz_size_t words) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                          sz_sequence_t candidates, sz_size_t *distances,
+                                                          sz_size_t distances_stride, sz_size_t words) {
     sz_size_t const candidate = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (candidate >= candidates.count) return;
 
@@ -307,9 +307,9 @@ static sz_size_t sz_levenshtein_cuda_per_block_(void const *entry_point) {
  *  @param[in] words_per_lane Exactly @c ceil(query_words/32); a literal, which keeps the
  *      verticals in registers.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_warp_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                      sz_sequence_t candidates, sz_size_t *distances,
-                                                      sz_size_t distances_stride, sz_size_t words_per_lane) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_warp_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                               sz_sequence_t candidates, sz_size_t *distances,
+                                                               sz_size_t distances_stride, sz_size_t words_per_lane) {
     unsigned const lane = threadIdx.x & 31u;
     sz_size_t const candidate = (sz_size_t)blockIdx.x * (blockDim.x >> 5) + (threadIdx.x >> 5);
     // Warp uniform, so the shuffles below still see a whole warp.
@@ -483,8 +483,9 @@ enum { sz_levenshtein_cuda_lanes_waves_min_k = 12 };
  *  standard way: the low bits of every lane sum on their own, where a carry cannot leave the lane,
  *  and each lane's top bit is folded back in by exclusive or.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_lanes_step_(sz_u32_t *positive, sz_u32_t *negative, sz_u32_t equality,
-                                                      sz_u32_t lane_low_bits, sz_u32_t lane_high_bits) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_lanes_step_(sz_u32_t *positive, sz_u32_t *negative,
+                                                               sz_u32_t equality, sz_u32_t lane_low_bits,
+                                                               sz_u32_t lane_high_bits) {
     sz_u32_t const vertical_positive = *positive, vertical_negative = *negative;
     sz_u32_t const vertical_carry = equality | vertical_negative;
     sz_u32_t const low_sum = (equality & vertical_positive & ~lane_high_bits) + (vertical_positive & ~lane_high_bits);
@@ -503,8 +504,9 @@ SZ_DEVICE_INLINE void sz_levenshtein_cuda_lanes_step_(sz_u32_t *positive, sz_u32
 /** One lane's distance, read off the verticals at the position that lane's text ends: the row
  *  above the query costs one edit per candidate symbol and the query column's own deltas
  *  carry the rest. */
-SZ_DEVICE_INLINE sz_size_t sz_levenshtein_cuda_lane_distance_(sz_u32_t positive, sz_u32_t negative,
-                                                              sz_size_t lane_shift, sz_u32_t live, sz_size_t length) {
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_levenshtein_cuda_lane_distance_(sz_u32_t positive, sz_u32_t negative,
+                                                                       sz_size_t lane_shift, sz_u32_t live,
+                                                                       sz_size_t length) {
     sz_u32_t const lane_positive = (positive >> lane_shift) & live;
     sz_u32_t const lane_negative = (negative >> lane_shift) & live;
     return (sz_size_t)((sz_ssize_t)length + __popc(lane_positive) - __popc(lane_negative));
@@ -528,10 +530,10 @@ SZ_DEVICE_INLINE sz_size_t sz_levenshtein_cuda_lane_distance_(sz_u32_t positive,
  *  @param[in] lanes Lanes the register carries - a literal too, which is what keeps the lane
  *      arrays in registers.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_lanes_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                       sz_sequence_t candidates, sz_size_t *distances,
-                                                       sz_size_t distances_stride, sz_size_t lane_bits,
-                                                       sz_size_t lanes) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_lanes_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                                sz_sequence_t candidates, sz_size_t *distances,
+                                                                sz_size_t distances_stride, sz_size_t lane_bits,
+                                                                sz_size_t lanes) {
     sz_size_t const query_index = order[blockIdx.y];
     sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
     sz_size_t *const row = distances + query_index * distances_stride;
@@ -576,7 +578,7 @@ SZ_DEVICE_INLINE void sz_levenshtein_cuda_lanes_sweep_(sz_levenshtein_engine_t e
     sz_u32_t const lane_high_bits = lane_bits == 8 ? 0x80808080u : 0x80008000u;
     sz_u32_t positive = ~(sz_u32_t)0, negative = 0;
     // The earliest position an unread lane's text ends at, so a step costs one compare rather than a rescan.
-    sz_size_t next_end = SZ_SIZE_MAX;
+    sz_size_t next_end = STRINGZILLA_SIZE_MAX;
 #pragma unroll
     for (sz_size_t lane = 0; lane != lanes; ++lane)
         if (unread & ((sz_u32_t)1 << lane)) next_end = sz_min_of_two(next_end, lengths[lane]);
@@ -605,7 +607,7 @@ SZ_DEVICE_INLINE void sz_levenshtein_cuda_lanes_sweep_(sz_levenshtein_engine_t e
             }
             sz_levenshtein_cuda_lanes_step_(&positive, &negative, equality, lane_low_bits, lane_high_bits);
             if (position + slot + 1 != next_end) continue;
-            next_end = SZ_SIZE_MAX;
+            next_end = STRINGZILLA_SIZE_MAX;
 #pragma unroll
             for (sz_size_t lane = 0; lane != lanes; ++lane) {
                 if ((unread & ((sz_u32_t)1 << lane)) == 0) continue;
@@ -642,17 +644,17 @@ static sz_size_t sz_levenshtein_cuda_lanes_per_thread_(sz_size_t length) {
     return length <= sz_levenshtein_cuda_byte_lanes_symbols_max_k ? 4 : 2;
 }
 
-/** Candidates a batch must carry before a narrow rung is launched at all, which the device's
- *  own residency scales. @c SZ_SIZE_MAX where the device cannot be asked, so the threaded rung
+/** Candidates a batch must carry before a narrow rung is launched at all, which the device's own
+ *  residency scales. @c STRINGZILLA_SIZE_MAX where the device cannot be asked, so the threaded rung
  *  keeps every batch. */
 static sz_size_t sz_levenshtein_cuda_lanes_candidates_min_(void) {
     int device = 0, multiprocessors = 0, threads_per_multiprocessor = 0;
-    if (cudaGetDevice(&device) != cudaSuccess) return SZ_SIZE_MAX;
+    if (cudaGetDevice(&device) != cudaSuccess) return STRINGZILLA_SIZE_MAX;
     if (cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, device) != cudaSuccess)
-        return SZ_SIZE_MAX;
+        return STRINGZILLA_SIZE_MAX;
     if (cudaDeviceGetAttribute(&threads_per_multiprocessor, cudaDevAttrMaxThreadsPerMultiProcessor, device) !=
         cudaSuccess)
-        return SZ_SIZE_MAX;
+        return STRINGZILLA_SIZE_MAX;
     return (sz_size_t)multiprocessors * (sz_size_t)threads_per_multiprocessor * sz_levenshtein_cuda_lanes_waves_min_k;
 }
 
@@ -669,9 +671,9 @@ static sz_size_t sz_levenshtein_cuda_lanes_candidates_min_(void) {
  *  comes from the query's page table - two dependent loads, and no scratch of its own per candidate
  *  - rather than a byte map.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_sweep_utf8_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                      sz_sequence_t candidates, sz_size_t *distances,
-                                                      sz_size_t distances_stride, sz_size_t words) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_sweep_utf8_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                               sz_sequence_t candidates, sz_size_t *distances,
+                                                               sz_size_t distances_stride, sz_size_t words) {
     sz_size_t const query_index = order[blockIdx.y];
     sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
     sz_size_t *const row = distances + query_index * distances_stride;
@@ -836,9 +838,10 @@ static void const *const sz_levenshtein_cuda_entry_points_utf8_[sz_levenshtein_c
  *  @param[in] words_per_lane Exactly @c ceil(query_words/32); a literal, which keeps the
  *      verticals in registers.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_warp_sweep_utf8_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                           sz_sequence_t candidates, sz_size_t *distances,
-                                                           sz_size_t distances_stride, sz_size_t words_per_lane) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_warp_sweep_utf8_(sz_levenshtein_engine_t engine,
+                                                                    sz_u32_t const *order, sz_sequence_t candidates,
+                                                                    sz_size_t *distances, sz_size_t distances_stride,
+                                                                    sz_size_t words_per_lane) {
     unsigned const lane = threadIdx.x & 31u;
     sz_size_t const candidate = (sz_size_t)blockIdx.x * (blockDim.x >> 5) + (threadIdx.x >> 5);
     // Warp uniform, so the shuffles below still see a whole warp.
@@ -1014,22 +1017,24 @@ typedef struct sz_levenshtein_cuda_head_t {
 
 /** The rung key a query of @p length symbols launches from: the two narrow lanes, then one
  *  key per word. */
-SZ_HELPER_AUTO sz_size_t sz_levenshtein_cuda_bucket_(sz_size_t length) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_levenshtein_cuda_bucket_(sz_size_t length) {
     if (length <= sz_levenshtein_cuda_byte_lanes_symbols_max_k) return 0;
     if (length <= sz_levenshtein_cuda_short_lanes_symbols_max_k) return 1;
     return 1 + sz_levenshtein_query_words(length);
 }
 
 /** Rung keys a batch whose widest query spans @p words words can reach. */
-SZ_HELPER_AUTO sz_size_t sz_levenshtein_cuda_buckets_(sz_size_t words) { return words + 2; }
+STRINGZILLA_HELPER_AUTO sz_size_t sz_levenshtein_cuda_buckets_(sz_size_t words) { return words + 2; }
 
 /** Query words the wide rung of @p bucket steps, the two narrow keys sharing the
  *  one-word entry points. */
-SZ_HELPER_AUTO sz_size_t sz_levenshtein_cuda_bucket_words_(sz_size_t bucket) { return bucket <= 1 ? 1 : bucket - 1; }
+STRINGZILLA_HELPER_AUTO sz_size_t sz_levenshtein_cuda_bucket_words_(sz_size_t bucket) {
+    return bucket <= 1 ? 1 : bucket - 1;
+}
 
 /** Bytes the tier-private head takes ahead of a batch of @p count queries spanning
  *  @p buckets rung keys. */
-SZ_HELPER_AUTO sz_size_t sz_levenshtein_cuda_head_bytes_(sz_size_t count, sz_size_t buckets) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_levenshtein_cuda_head_bytes_(sz_size_t count, sz_size_t buckets) {
     return sizeof(sz_levenshtein_cuda_head_t) + (2 * buckets + 1) * sizeof(sz_size_t) + count * sizeof(sz_u32_t);
 }
 
@@ -1201,14 +1206,14 @@ static sz_status_t sz_levenshtein_cuda_build_masks_(sz_levenshtein_engine_t *eng
     return drained == cudaSuccess ? sz_success_k : sz_device_code_mismatch_k;
 }
 
-SZ_API_COMPTIME sz_status_t sz_levenshtein_engine_init_cuda(sz_sequence_t const *queries,
-                                                            sz_levenshtein_symbol_t symbol,
-                                                            sz_memory_allocator_t *alloc, void *stream,
-                                                            sz_levenshtein_engine_t *engine) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_engine_init_cuda(sz_sequence_t const *queries,
+                                                                     sz_levenshtein_symbol_t symbol,
+                                                                     sz_memory_allocator_t *alloc, void *stream,
+                                                                     sz_levenshtein_engine_t *engine) {
     cudaStream_t const on = (cudaStream_t)stream;
     sz_memory_allocator_t unified;
     if (alloc) unified = *alloc;
-    else sz_memory_allocator_init_unified(&unified, SZ_NULL);
+    else sz_memory_allocator_init_unified(&unified, STRINGZILLA_NULL);
     if (queries->count == 0) return sz_unexpected_dimensions_k;
 
     // Every query seeds its score from its own last word, so an empty one has no word to read it off, and the
@@ -1261,9 +1266,9 @@ static cudaError_t sz_levenshtein_cuda_distances_(void const *entry_point, sz_si
     return cudaLaunchKernel(entry_point, grid, block, arguments, 0, stream);
 }
 
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_t *engine,
-                                                          sz_sequence_t const *candidates, sz_size_t *distances,
-                                                          sz_size_t distances_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_t *engine,
+                                                                   sz_sequence_t const *candidates,
+                                                                   sz_size_t *distances, sz_size_t distances_stride) {
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     if (candidates->count == 0) return sz_success_k;
 
@@ -1331,7 +1336,7 @@ enum {
 /** Longest text the wavefront indexes. Lengths and cells are @c sz_u32_t inside the kernel, and the
  *  last tile of each axis is padded up to 128 columns, so the ceiling leaves that padding room
  *  rather than letting a length near the word's top wrap a column index. */
-#define SZ_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX (0xFFFFFF00u)
+#define STRINGZILLA_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX (0xFFFFFF00u)
 
 /** Bytes standing in for a character past the end of a text. The two differ, so a padded row never
  *  matches a padded column, and a padded cell never reaches an in-bounds one. */
@@ -1357,14 +1362,14 @@ typedef enum {
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
 
 /** Three-way unsigned minimum, one instruction on Hopper and Blackwell. */
-SZ_DEVICE_INLINE sz_u32_t sz_levenshtein_cuda_min3_(sz_u32_t first, sz_u32_t second, sz_u32_t third) {
+STRINGZILLA_DEVICE_INLINE sz_u32_t sz_levenshtein_cuda_min3_(sz_u32_t first, sz_u32_t second, sz_u32_t third) {
     return __vimin3_u32(first, second, third);
 }
 
 #else
 
 /** Three-way unsigned minimum as a pair of comparisons, for targets without the fused form. */
-SZ_DEVICE_INLINE sz_u32_t sz_levenshtein_cuda_min3_(sz_u32_t first, sz_u32_t second, sz_u32_t third) {
+STRINGZILLA_DEVICE_INLINE sz_u32_t sz_levenshtein_cuda_min3_(sz_u32_t first, sz_u32_t second, sz_u32_t third) {
     sz_u32_t const smaller = first < second ? first : second;
     return smaller < third ? smaller : third;
 }
@@ -1381,7 +1386,7 @@ SZ_DEVICE_INLINE sz_u32_t sz_levenshtein_cuda_min3_(sz_u32_t first, sz_u32_t sec
  *  membar this form does not. Only the lane that wrote the frontier calls it, so the release orders
  *  its own stores and nothing has to argue about what a warp barrier carries across lanes.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_publish_(sz_u32_t *counter, sz_u32_t tile_row) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_publish_(sz_u32_t *counter, sz_u32_t tile_row) {
     sz_u32_t const published = tile_row + 1u;
     asm volatile("st.release.gpu.u32 [%0], %1;" : : "l"(counter), "r"(published) : "memory");
 }
@@ -1394,7 +1399,7 @@ SZ_DEVICE_INLINE void sz_levenshtein_cuda_publish_(sz_u32_t *counter, sz_u32_t t
  *  one transaction, so the traffic is a lane-0 poll's, and each lane's own acquire orders each
  *  lane's own reads.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_await_(sz_u32_t const *counter, sz_u32_t tile_row) {
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_await_(sz_u32_t const *counter, sz_u32_t tile_row) {
     sz_u32_t observed = 0;
     do {
         asm volatile("ld.acquire.gpu.u32 %0, [%1];" : "=r"(observed) : "l"(counter) : "memory");
@@ -1428,7 +1433,7 @@ SZ_DEVICE_INLINE void sz_levenshtein_cuda_await_(sz_u32_t const *counter, sz_u32
  *      column into it.
  *  @param[out] distance Written once, by the thread that computes the matrix corner.
  */
-SZ_DEVICE_INLINE void sz_levenshtein_cuda_march_tile_(                           //
+STRINGZILLA_DEVICE_INLINE void sz_levenshtein_cuda_march_tile_(                  //
     sz_levenshtein_cuda_march_t march, unsigned lane_index,                      //
     sz_u32_t tile_first_row, sz_u32_t tile_first_column,                         //
     sz_u32_t shorter_length, sz_u32_t longer_length,                             //
@@ -1529,9 +1534,9 @@ SZ_DEVICE_INLINE void sz_levenshtein_cuda_march_tile_(                          
  *  barrier and no cooperative launch.
  *
  *  @param[in] shorter_text Text along the row axis, device-reachable, @p shorter_length bytes.
- *  @param[in] shorter_length Its length, at most @c SZ_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX.
+ *  @param[in] shorter_length Its length, at most @c STRINGZILLA_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX.
  *  @param[in] longer_text Text along the column axis, device-reachable, @p longer_length bytes.
- *  @param[in] longer_length Its length, at most @c SZ_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX.
+ *  @param[in] longer_length Its length, at most @c STRINGZILLA_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX.
  *  @param[out] row_frontier Scratch of `round_up(shorter_length, 128) + 1` unseeded cells.
  *  @param[out] progress One counter per tile-column, zeroed before the launch.
  *  @param[out] distance The pair's distance, written once by the thread owning the matrix corner.
@@ -1649,17 +1654,20 @@ static cudaError_t sz_levenshtein_cuda_tiled_resident_blocks_(sz_size_t *blocks)
  *  @param[in] b_length Its length in bytes.
  *  @param[in] alloc Hands back the frontier scratch, which has to be memory the device reaches.
  *  @param[out] distance Host-readable slot receiving the distance.
- *  @param[in] stream The @c cudaStream_t to schedule on, or @c SZ_NULL for the default one.
+ *  @param[in] stream The @c cudaStream_t to schedule on, or @c STRINGZILLA_NULL for
+ *      the default one.
  *  @return @c sz_success_k, @c sz_unexpected_dimensions_k when either text is longer than the
  *      kernel indexes, or @c sz_device_memory_mismatch_k when a text or the scratch is not memory
  *      the device reaches.
  *  @sa sz_levenshtein_distances_cuda, which scores a whole batch through the
  *      bit-parallel rungs instead.
  */
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                               sz_size_t b_length, sz_memory_allocator_t *alloc,
-                                                               sz_size_t *distance, void *stream) {
-    if (a_length > SZ_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX || b_length > SZ_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX)
+STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                                        sz_size_t b_length,
+                                                                        sz_memory_allocator_t *alloc,
+                                                                        sz_size_t *distance, void *stream) {
+    if (a_length > STRINGZILLA_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX ||
+        b_length > STRINGZILLA_LEVENSHTEIN_CUDA_TILED_LENGTH_MAX)
         return sz_unexpected_dimensions_k;
 
     // The recurrence is symmetric, and putting the shorter text on the row axis keeps the frontier small and
@@ -1741,6 +1749,6 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_s
 #ifdef __cplusplus
 }
 #endif
-#endif // SZ_USE_CUDA
+#endif // STRINGZILLA_TARGET_CUDA
 #endif // STRINGZILLA_LEVENSHTEIN_CUDA_CUH_
 

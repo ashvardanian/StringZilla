@@ -29,12 +29,10 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include <fmt/format.h>
-
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_*`
 #include <stringzilla/stringzilla.h> // Primary C API
 
-#include "stringzilla.hpp" // `randomize_string`, `verify`
+#include "harness.hpp" // `randomize_string`, `test_context_t`, `verify`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -240,15 +238,15 @@ static void check_levenshtein_cuda_equivalence_(char const *name, levenshtein_cu
             levenshtein_cuda_corpus_t corpus(count, query_symbols, queries, alphabet);
 
             sz_levenshtein_engine_t engine {};
-            sz_status_t const prepared = sz_levenshtein_engine_init_gpu(&corpus.queries, symbol, SZ_NULL, SZ_NULL,
-                                                                        &engine);
+            sz_status_t const prepared = sz_levenshtein_engine_init_gpu(&corpus.queries, symbol, STRINGZILLA_NULL,
+                                                                        STRINGZILLA_NULL, &engine);
             if (prepared != levenshtein_cuda_expected_status_(query_symbols))
                 fail_backend_(name, "a device batch drew a status the rungs do not imply");
             if (prepared != sz_success_k) continue;
             sz_status_t const produced = device(&engine, &corpus.device_candidates, corpus.distances.data(),
                                                 corpus.count());
             // The planes the round reads live in the engine's block, so the join comes before it is released.
-            verify(cudaStreamSynchronize((cudaStream_t)SZ_NULL) == cudaSuccess);
+            verify(cudaStreamSynchronize((cudaStream_t)STRINGZILLA_NULL) == cudaSuccess);
             sz_levenshtein_engine_free(&engine);
             if (produced != sz_success_k) fail_backend_(name, "a device-resident round was refused");
 
@@ -267,18 +265,19 @@ static void check_levenshtein_cuda_equivalence_(char const *name, levenshtein_cu
  *  which is why they are checked here, over candidates that run past the eight bytes one refill
  *  hands a lane and start at every alignment.
  */
-static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtein_distances_t device) {
+static void check_levenshtein_cuda_narrow_lanes_(std::mt19937 &generator, char const *name,
+                                                 sz_levenshtein_distances_t device) {
     enum { arena_bytes_k = 256, longest_candidate_k = 33, offsets_k = 97 };
     handle_checked_heap_t heap;
 
     std::size_t const count = sz_levenshtein_cuda_lanes_candidates_min_();
-    if (count == SZ_SIZE_MAX || count == 0) return;
+    if (count == STRINGZILLA_SIZE_MAX || count == 0) return;
     for (std::size_t const query_symbols : {(std::size_t)8, (std::size_t)16}) {
 
         // Every third byte is one of the query's own, so a candidate draws both classed and absent symbols.
         unified_vector<char> query(query_symbols), arena(arena_bytes_k);
-        randomize_string(query.data(), query.size());
-        randomize_string(arena.data(), arena.size());
+        randomize_string(generator, query);
+        randomize_string(generator, arena);
         for (std::size_t index = 0; index < arena.size(); index += 3) arena[index] = query[index % query.size()];
 
         unified_vector<sz_string_view_t> query_views(1), views(count);
@@ -291,11 +290,11 @@ static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtei
         verify(sz_sequence_from_string_views_cuda(views.data(), views.size(), &candidates) == sz_success_k);
 
         sz_levenshtein_engine_t engine {};
-        verify(sz_levenshtein_engine_init_gpu(&queries, sz_levenshtein_bytes_k, SZ_NULL, SZ_NULL, &engine) ==
-               sz_success_k);
+        verify(sz_levenshtein_engine_init_gpu(&queries, sz_levenshtein_bytes_k, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                              &engine) == sz_success_k);
         sz_status_t const produced = device(&engine, &candidates, distances.data(), count);
         // The planes the round reads live in the engine's block, so the join comes before it is released.
-        verify(cudaStreamSynchronize((cudaStream_t)SZ_NULL) == cudaSuccess);
+        verify(cudaStreamSynchronize((cudaStream_t)STRINGZILLA_NULL) == cudaSuccess);
         sz_levenshtein_engine_free(&engine);
         if (produced != sz_success_k) fail_backend_(name, "a batch wide enough for the narrow rungs was refused");
 
@@ -317,7 +316,7 @@ static void check_levenshtein_cuda_narrow_lanes_(char const *name, sz_levenshtei
 /** The tiled wavefront against serial's answer at the same lengths, on the one pair it takes. */
 static void check_levenshtein_cuda_tiled_() {
     sz_memory_allocator_t unified;
-    sz_memory_allocator_init_unified(&unified, SZ_NULL);
+    sz_memory_allocator_init_unified(&unified, STRINGZILLA_NULL);
     handle_checked_heap_t heap;
 
     for (std::size_t const query_symbols : levenshtein_cuda_query_symbols_k) {
@@ -325,7 +324,7 @@ static void check_levenshtein_cuda_tiled_() {
         sz_string_view_t const query = corpus.query_views[0], candidate = corpus.views[0];
         sz_size_t distance = 0;
         if (sz_levenshtein_distance_tiled_cuda(query.start, query.length, candidate.start, candidate.length, &unified,
-                                               &distance, SZ_NULL) != sz_success_k)
+                                               &distance, STRINGZILLA_NULL) != sz_success_k)
             fail_backend_("cuda", "the wavefront refused a device-resident pair");
 
         sz_levenshtein_engine_t engine {};
@@ -340,9 +339,9 @@ static void check_levenshtein_cuda_tiled_() {
 }
 
 /** One backend refusing host memory, sequence handle and outputs alike, rather than staging it. */
-static void check_levenshtein_cuda_memory_safety_(levenshtein_cuda_backend_t const &backend) {
+static void check_levenshtein_cuda_memory_safety_(std::mt19937 &generator, levenshtein_cuda_backend_t const &backend) {
     std::string arena(660, '\0');
-    randomize_string(&arena[0], arena.size());
+    randomize_string(generator, arena);
     std::array<sz_string_view_t, 4> const views {sz_string_view_t {arena.data(), 1},
                                                  {arena.data() + 1, 60},
                                                  {arena.data() + 61, 199},
@@ -352,8 +351,8 @@ static void check_levenshtein_cuda_memory_safety_(levenshtein_cuda_backend_t con
 
     levenshtein_cuda_corpus_t corpus(1, 200, 1, levenshtein_cuda_alphabet_t::bytes_k);
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init_gpu(&corpus.queries, sz_levenshtein_bytes_k, SZ_NULL, SZ_NULL, &engine) ==
-           sz_success_k);
+    verify(sz_levenshtein_engine_init_gpu(&corpus.queries, sz_levenshtein_bytes_k, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                          &engine) == sz_success_k);
     std::vector<sz_size_t> produced(views.size());
     if (backend.distances(&engine, &candidates, produced.data(), views.size()) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host memory reached a kernel as an address");
@@ -367,21 +366,21 @@ static void check_levenshtein_cuda_query_safety_() {
          {levenshtein_cuda_alphabet_t::bytes_k, levenshtein_cuda_alphabet_t::runes_k}) {
         levenshtein_cuda_corpus_t corpus(1, symbols_k, 1, alphabet);
         sz_levenshtein_engine_t engine {};
-        if (sz_levenshtein_engine_init_gpu(&corpus.queries, levenshtein_cuda_symbol_(alphabet), SZ_NULL, SZ_NULL,
-                                           &engine) != sz_unexpected_dimensions_k)
+        if (sz_levenshtein_engine_init_gpu(&corpus.queries, levenshtein_cuda_symbol_(alphabet), STRINGZILLA_NULL,
+                                           STRINGZILLA_NULL, &engine) != sz_unexpected_dimensions_k)
             fail_backend_("cuda", "a query past the verticals was not refused");
-        if (engine.memory != SZ_NULL) fail_backend_("cuda", "a refused build still kept a block");
+        if (engine.memory != STRINGZILLA_NULL) fail_backend_("cuda", "a refused build still kept a block");
     }
 }
 
 /** An empty query has no last word to read a score off, so a batch holding one is refused. */
 static void check_levenshtein_cuda_empty_query_safety_() {
     unified_vector<sz_string_view_t> query_views(1);
-    query_views[0].start = SZ_NULL, query_views[0].length = 0;
+    query_views[0].start = STRINGZILLA_NULL, query_views[0].length = 0;
     sz_sequence_t queries {};
     sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
     sz_levenshtein_engine_t engine {};
-    if (sz_levenshtein_engine_init_gpu(&queries, sz_levenshtein_bytes_k, SZ_NULL, SZ_NULL, &engine) !=
+    if (sz_levenshtein_engine_init_gpu(&queries, sz_levenshtein_bytes_k, STRINGZILLA_NULL, STRINGZILLA_NULL, &engine) !=
         sz_unexpected_dimensions_k)
         fail_backend_("cuda", "an empty query was not refused");
 }
@@ -404,13 +403,13 @@ static void check_levenshtein_cuda_scheduled_asynchrony_() {
     levenshtein_cuda_corpus_t corpus(levenshtein_cuda_scheduled_candidates_k, levenshtein_cuda_scheduled_symbols_k,
                                      levenshtein_cuda_sweep_queries_k, levenshtein_cuda_alphabet_t::bytes_k);
 
-    cudaStream_t stream = SZ_NULL;
+    cudaStream_t stream = STRINGZILLA_NULL;
     verify(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess);
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init_gpu(&corpus.queries, sz_levenshtein_bytes_k, SZ_NULL, stream, &engine) ==
+    verify(sz_levenshtein_engine_init_gpu(&corpus.queries, sz_levenshtein_bytes_k, STRINGZILLA_NULL, stream, &engine) ==
            sz_success_k);
 
-    void *filler = SZ_NULL;
+    void *filler = STRINGZILLA_NULL;
     verify(cudaMallocAsync(&filler, levenshtein_cuda_filler_bytes_k, stream) == cudaSuccess);
     for (int pass = 0; pass != levenshtein_cuda_filler_passes_k; ++pass)
         verify(cudaMemsetAsync(filler, pass, levenshtein_cuda_filler_bytes_k, stream) == cudaSuccess);
@@ -436,14 +435,12 @@ static void check_levenshtein_cuda_scheduled_asynchrony_() {
 #pragma region Drivers
 
 /** Every CUDA backend this device carries, against serial, on generated corpora at rung edges. */
-void test_levenshtein_all() {
-    fmt::println("  - testing {} CUDA query lengths against serial over bytes and runes, refused past {} words",
-                 sizeof(levenshtein_cuda_query_symbols_k) / sizeof(std::size_t), (int)sz_levenshtein_cuda_words_max_k);
+void test_levenshtein_all(test_context_t &context) {
     for (levenshtein_cuda_backend_t const &backend : levenshtein_cuda_backends) {
         if ((sz_capabilities() & backend.required) != backend.required) continue;
         check_levenshtein_cuda_equivalence_(backend.name, levenshtein_cuda_alphabet_t::bytes_k, backend.distances);
         check_levenshtein_cuda_equivalence_(backend.name, levenshtein_cuda_alphabet_t::runes_k, backend.distances);
-        check_levenshtein_cuda_narrow_lanes_(backend.name, backend.distances);
+        check_levenshtein_cuda_narrow_lanes_(context.generator, backend.name, backend.distances);
     }
     if ((sz_capabilities() & sz_cap_cuda_k) == sz_cap_cuda_k) {
         check_levenshtein_cuda_tiled_();
@@ -452,11 +449,10 @@ void test_levenshtein_all() {
 }
 
 /** Degenerate inputs, stated refusals, and the bound each alphabet's widest rung imposes. */
-void test_levenshtein_safety() {
-    fmt::println("  - testing degenerate inputs and refused batches of the CUDA edit-distance kernels...");
+void test_levenshtein_safety(test_context_t &context) {
     for (levenshtein_cuda_backend_t const &backend : levenshtein_cuda_backends) {
         if ((sz_capabilities() & backend.required) != backend.required) continue;
-        check_levenshtein_cuda_memory_safety_(backend);
+        check_levenshtein_cuda_memory_safety_(context.generator, backend);
     }
     check_levenshtein_cuda_query_safety_();
     check_levenshtein_cuda_empty_query_safety_();

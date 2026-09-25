@@ -16,8 +16,8 @@
 extern "C" {
 #endif
 
-#if SZ_USE_ICELAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_ICELAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                    \
     __attribute__((                                                                                              \
         target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512,popcnt"))), \
@@ -46,7 +46,7 @@ extern "C" {
  *  The second half only runs when more than sixteen cold starts are present. Every other lane keeps
  *  its prior value.
  */
-SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
+STRINGZILLA_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
     __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
     __mmask64 const cold_start_mask_m64 = _cvtu64_mask64(cold_starts);
     __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, high_bytes_u8x64);
@@ -97,7 +97,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
  *      0x10000 astral test.
  *  @param[in] codepoint_starts_m64 Lanes that begin any codepoint, non-continuation and in range.
  */
-SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(                                //
+STRINGZILLA_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(                       //
     __m512i raw_window_u8x64, __m512i raw_next1_u8x64, __m512i raw_next2_u8x64, __m512i raw_next3_u8x64, //
     __m512i high_u8x64, __m512i low_u8x64,                                                               //
     __mmask64 four_byte_starts_m64, __mmask64 codepoint_starts_m64) {
@@ -254,7 +254,7 @@ SZ_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(       
  *  algebra is intrinsic-free and shared verbatim with serial and Haswell. Force-inlined so the
  *  24-byte window result stays in registers instead of spilling through an @c sret.
  */
-SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
+STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
     __m512i classes_u8x64, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t frame;
@@ -270,9 +270,9 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_br
 
 #pragma region Sentence_Break forward driver
 
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_icelake( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,  //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t sentences = 0;
@@ -468,7 +468,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_ICELAKE
+#endif // STRINGZILLA_TARGET_ICELAKE
 
 #ifdef __cplusplus
 }

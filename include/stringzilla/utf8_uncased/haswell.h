@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -41,8 +41,8 @@ extern "C" {
  *  @c VPMINUB with @c VPCMPEQB realize the unsigned ≤ in two single-uop instructions - cheaper and
  *  clearer than the sign-flip @c VPXOR and @c VPCMPGTB alternative.
  */
-SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_in_byte_range_(__m256i values_u8x32, sz_u8_t range_start,
-                                                                sz_u8_t range_length) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_uncased_haswell_in_byte_range_(__m256i values_u8x32, sz_u8_t range_start,
+                                                                         sz_u8_t range_length) {
     __m256i offsets_u8x32 = _mm256_sub_epi8(values_u8x32, _mm256_set1_epi8((char)range_start));
     return _mm256_cmpeq_epi8(_mm256_min_epu8(offsets_u8x32, _mm256_set1_epi8((char)(range_length - 1))), offsets_u8x32);
 }
@@ -56,20 +56,20 @@ SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_in_byte_range_(__m256i values_u
  *  with a full rune, never a continuation byte. AVX2 @c VPALIGNR works per 128-bit lane, so a
  *  @c VPERM2I128 first materializes the carry.
  */
-SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_previous_bytes_(__m256i source_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_uncased_haswell_previous_bytes_(__m256i source_u8x32) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x08); // [zero, source.low]
     return _mm256_alignr_epi8(source_u8x32, carry_u8x32, 15);
 }
 
 /** Shifts the 32 source bytes left by one lane, so lane @c i holds byte i + 1; lane 31 receives
  *  zero. Vector-domain equivalent of Ice Lake's `k-mask >> 1`. */
-SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_next_bytes_(__m256i source_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_uncased_haswell_next_bytes_(__m256i source_u8x32) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x81); // [source.high, zero]
     return _mm256_alignr_epi8(carry_u8x32, source_u8x32, 1);
 }
 
 /** First N bits set; BZHI keeps `n == 32` defined, unlike the `(1 << n) − 1` idiom. */
-SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_haswell_mask_until_(sz_size_t n) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_utf8_uncased_haswell_mask_until_(sz_size_t n) {
     return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n);
 }
 
@@ -77,7 +77,7 @@ SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_haswell_mask_until_(sz_size_t n) {
  *  @p length. The zero padding mirrors Ice Lake's @c maskz loads: zero bytes match no probe inside
  *  a valid window and trip no alarm, so tail chunks reuse the main-loop logic unchanged instead of
  *  branching into a separate epilogue. */
-SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_load_padded_ymm_(sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_uncased_haswell_load_padded_ymm_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t buffer[32] = {0};
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return _mm256_lddqu_si256((__m256i const *)buffer);
@@ -86,7 +86,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_uncased_haswell_load_padded_ymm_(sz_cptr_t sour
 /** Loads up to 16 bytes for candidate-window verification without over-reading the haystack: the
  *  fast full load is taken whenever 16 bytes remain, and only the last few candidates near the
  *  haystack end pay for the zero-padded stack copy. */
-SZ_HELPER_INLINE __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t source, sz_size_t available) {
+STRINGZILLA_HELPER_INLINE __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t source, sz_size_t available) {
     if (available >= 16) return _mm_lddqu_si128((__m128i const *)source);
     sz_u8_t buffer[16] = {0};
     for (sz_size_t byte_index = 0; byte_index < available; ++byte_index)
@@ -102,7 +102,7 @@ SZ_HELPER_INLINE __m128i sz_utf8_uncased_haswell_load_window_xmm_(sz_cptr_t sour
  *  @brief Fold a YMM register using ASCII case folding rules.
  *  @sa sz_utf8_uncased_rune_ascii_invariant_k
  */
-SZ_HELPER_INLINE __m256i sz_utf8_uncased_search_haswell_ascii_fold_ymm_(__m256i text_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_uncased_search_haswell_ascii_fold_ymm_(__m256i text_u8x32) {
     // Only fold bytes in range A-Z; the masked add avoids `VPBLENDVB` (2 uops on Haswell)
     __m256i is_ascii_upper_u8x32 = sz_utf8_uncased_haswell_in_byte_range_(text_u8x32, 'A', 26);
     return _mm256_add_epi8(text_u8x32, _mm256_and_si256(is_ascii_upper_u8x32, _mm256_set1_epi8(0x20)));
@@ -117,10 +117,10 @@ SZ_HELPER_INLINE __m256i sz_utf8_uncased_search_haswell_ascii_fold_ymm_(__m256i 
  *  the probe equality masks are shifted as 32-bit @c VPMOVMSKB integers: with windows ≤ 16 bytes
  *  every chunk still exposes ≥ 17 valid start positions per iteration.
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                       //
-    sz_cptr_t needle, sz_size_t needle_length,                           //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,            //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                                //
+    sz_cptr_t needle, sz_size_t needle_length,                                    //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                     //
     sz_size_t *matched_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
@@ -169,7 +169,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
         haystack_ptr += valid_starts;
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 #pragma endregion ASCII Uncased Find
@@ -206,12 +206,12 @@ typedef sz_u32_t (*sz_utf8_uncased_alarm_ymm_t)(__m256i text_u8x32, sz_u32_t loa
  *  @param[in] alarm Script-specific danger detection callback, or @c NULL if the script has no
  *      danger characters: the danger branch disappears and the full step is used.
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
-    sz_utf8_uncased_fold_ymm_t fold,                                 //
-    sz_utf8_uncased_alarm_ymm_t alarm,                               //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
+    sz_utf8_uncased_fold_ymm_t fold,                                          //
+    sz_utf8_uncased_alarm_ymm_t alarm,                                        //
+    sz_cptr_t haystack, sz_size_t haystack_length,                            //
+    sz_cptr_t needle, sz_size_t needle_length,                                //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
     sz_size_t *matched_length) {
 
     sz_assert_(needle_metadata && "needle_metadata must be provided");
@@ -332,20 +332,20 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
         if (match) { return match; }
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /** 4-probe ASCII uncased search: the shared scripted driver with the ASCII fold and no alarm -
  *  ASCII never changes byte width when folded, so the danger machinery compiles away entirely and
  *  the step covers every valid start position. */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                       //
-    sz_cptr_t needle, sz_size_t needle_length,                           //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,            //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                                //
+    sz_cptr_t needle, sz_size_t needle_length,                                    //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                     //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_ascii_fold_ymm_,
-        (sz_utf8_uncased_alarm_ymm_t)SZ_NULL, //
+        (sz_utf8_uncased_alarm_ymm_t)STRINGZILLA_NULL, //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
@@ -361,7 +361,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
  *  excluding the caseless '×' C3 97), and 'ß' (U+00DF, C3 9F) → "ss" where both bytes of the
  *  pair become 's' so the folded image matches the needle's "ss".
  */
-SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_western_europe_fold_ymm_(__m256i text_u8x32) {
+STRINGZILLA_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_western_europe_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_haswell_previous_bytes_(text_u8x32);
     __m256i is_after_c3_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC3));
@@ -405,8 +405,8 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_western_europe_fold_ym
  *  Lake's k-masks, including the boundary behavior where a lead at lane 31 defers to the next
  *  chunk, which overlaps this one.
  */
-SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_western_europe_alarm_ymm_(__m256i text_u8x32,
-                                                                                     sz_u32_t load_mask) {
+STRINGZILLA_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_western_europe_alarm_ymm_(__m256i text_u8x32,
+                                                                                              sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -448,10 +448,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_western_europe_alarm_
  *  @brief Western European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_western_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                         //
-    sz_cptr_t needle, sz_size_t needle_length,                             //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_western_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                                  //
+    sz_cptr_t needle, sz_size_t needle_length,                                      //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                       //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_western_europe_fold_ymm_,
@@ -479,7 +479,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_western_europe_( //
  *  In the C4 B9-BD sub-range, 'ĸ' (C4 B8) is caseless and 'Ŀ' (C4 BF) folds across leads to 'ŀ' (C5
  *  80), so it is routed through the alarm instead.
  */
-SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_central_europe_fold_ymm_(__m256i text_u8x32) {
+STRINGZILLA_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_central_europe_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_haswell_previous_bytes_(text_u8x32);
     __m256i is_after_c3_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC3));
@@ -524,8 +524,8 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_central_europe_fold_ym
  *  - C5 B8: 'Ÿ' (U+0178) → 'ÿ' (C3 BF), crosses lead bytes
  *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
  */
-SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_central_europe_alarm_ymm_(__m256i text_u8x32,
-                                                                                     sz_u32_t load_mask) {
+STRINGZILLA_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_central_europe_alarm_ymm_(__m256i text_u8x32,
+                                                                                              sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -557,10 +557,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_central_europe_alarm_
  *  @brief Central European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_central_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                         //
-    sz_cptr_t needle, sz_size_t needle_length,                             //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_central_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                                  //
+    sz_cptr_t needle, sz_size_t needle_length,                                      //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                       //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_central_europe_fold_ymm_,
@@ -587,7 +587,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_central_europe_( //
  *  both 128-bit lanes since @c VPSHUFB works per lane. Extended Cyrillic (D2/D3) needles are banned
  *  at classification time, so only the D0 continuations need any folding.
  */
-SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_(__m256i text_u8x32) {
+STRINGZILLA_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_haswell_previous_bytes_(text_u8x32);
     __m256i is_after_d0_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD0));
@@ -621,7 +621,8 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_(__m
  *  through the serial danger-zone scanner. The E1 B2 pair is absent from nearly all real Cyrillic
  *  text, so the third-byte refinement hides behind a branch and the hot path is two compares.
  */
-SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_cyrillic_alarm_ymm_(__m256i text_u8x32, sz_u32_t load_mask) {
+STRINGZILLA_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_cyrillic_alarm_ymm_(__m256i text_u8x32,
+                                                                                        sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
     sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_u8x32, _mm256_set1_epi8((char)0xE1)));
     sz_u32_t is_b2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_u8x32, _mm256_set1_epi8((char)0xB2)));
@@ -638,10 +639,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_cyrillic_alarm_ymm_(_
  *  @brief Cyrillic uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_cyrillic_k
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_cyrillic_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_cyrillic_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                            //
+    sz_cptr_t needle, sz_size_t needle_length,                                //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_,
@@ -668,7 +669,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_cyrillic_( //
  *  disjoint byte positions. The D4 range checks only the lower bound, mirroring the Ice Lake
  *  reference: valid continuation bytes never exceed BF.
  */
-SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_armenian_fold_ymm_(__m256i text_u8x32) {
+STRINGZILLA_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_armenian_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_haswell_previous_bytes_(text_u8x32);
     __m256i is_after_d4_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD4));
@@ -704,7 +705,8 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_armenian_fold_ymm_(__m
  *  reference: the only EF AC neighbors are the Latin/Hebrew presentation forms, which
  *  never appear inside Armenian haystacks, so the coarser test costs nothing in practice.
  */
-SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_armenian_alarm_ymm_(__m256i text_u8x32, sz_u32_t load_mask) {
+STRINGZILLA_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_armenian_alarm_ymm_(__m256i text_u8x32,
+                                                                                        sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (2 CMPEQ + movemask)
@@ -724,10 +726,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_armenian_alarm_ymm_(_
  *  @brief Armenian uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_armenian_k
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                            //
+    sz_cptr_t needle, sz_size_t needle_length,                                //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_armenian_fold_ymm_,
@@ -760,7 +762,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_armenian_( //
  *  propagated back from the second-byte flags through @c next_bytes like the Eszett rewrite in the
  *  Western European fold.
  */
-SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_greek_fold_ymm_(__m256i text_u8x32) {
+STRINGZILLA_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_greek_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_haswell_previous_bytes_(text_u8x32);
     __m256i is_after_ce_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xCE));
@@ -824,7 +826,8 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_greek_fold_ymm_(__m256
  *  never fire - but when they do, the driver's step−2 retreat keeps a 3-byte danger
  *  sequence straddling the chunk edge fully visible in the next chunk.
  */
-SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_greek_alarm_ymm_(__m256i text_u8x32, sz_u32_t load_mask) {
+STRINGZILLA_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_greek_alarm_ymm_(__m256i text_u8x32,
+                                                                                     sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -858,10 +861,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_greek_alarm_ymm_(__m2
  *  @brief Greek uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_greek_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                //
-    sz_cptr_t needle, sz_size_t needle_length,                    //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,     //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_greek_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                         //
+    sz_cptr_t needle, sz_size_t needle_length,                             //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_greek_fold_ymm_,
@@ -892,7 +895,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_greek_( //
  *  The third-byte rule needs the byte two lanes back, so a second @c previous_bytes pass
  *  materializes it; all rule masks flag disjoint positions and merge into one offset add.
  */
-SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(__m256i text_u8x32) {
+STRINGZILLA_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_haswell_ascii_fold_ymm_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_haswell_previous_bytes_(text_u8x32);
     __m256i previous2_bytes_u8x32 = sz_utf8_uncased_haswell_previous_bytes_(previous_bytes_u8x32);
@@ -962,8 +965,8 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_(_
  *  compare is exactly as safe-negative on tail chunks. Unlike the other alarms, the result is
  *  shifted back to the sequence-start positions, mirroring the Ice Lake reference bit-for-bit.
  */
-SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_vietnamese_alarm_ymm_(__m256i text_u8x32,
-                                                                                 sz_u32_t load_mask) {
+STRINGZILLA_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_vietnamese_alarm_ymm_(__m256i text_u8x32,
+                                                                                          sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -1002,10 +1005,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_vietnamese_alarm_ymm_
  *  @brief Vietnamese uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_vietnamese_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                     //
-    sz_cptr_t needle, sz_size_t needle_length,                         //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_vietnamese_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                              //
+    sz_cptr_t needle, sz_size_t needle_length,                                  //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                   //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_vietnamese_fold_ymm_,
@@ -1033,7 +1036,8 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_vietnamese_( //
  *  safe-negative. The result is shifted back to the sequence-start positions, mirroring the Ice
  *  Lake reference bit-for-bit.
  */
-SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_georgian_alarm_ymm_(__m256i text_u8x32, sz_u32_t load_mask) {
+STRINGZILLA_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_georgian_alarm_ymm_(__m256i text_u8x32,
+                                                                                        sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // Lead bytes (2 CMPEQ + movemask)
@@ -1063,10 +1067,10 @@ SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_georgian_alarm_ymm_(_
  *  The fastest non-ASCII kernel: Mkhedruli is caseless, so the fold callback is just the
  *  ASCII fold for mixed Latin text and the alarm only watches for the historical scripts.
  */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_georgian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_georgian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                            //
+    sz_cptr_t needle, sz_size_t needle_length,                                //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_ascii_fold_ymm_,
@@ -1076,9 +1080,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_georgian_( //
 
 #pragma endregion Georgian Uncased Find
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_haswell( //
-    sz_cptr_t haystack, sz_size_t haystack_length,        //
-    sz_cptr_t needle, sz_size_t needle_length,            //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_haswell( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                 //
+    sz_cptr_t needle, sz_size_t needle_length,                     //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
 
     // Handle the obvious edge cases first
@@ -1090,7 +1094,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_haswell( //
     // If the needle is entirely made of case-less characters - perform direct substring search
     int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
     int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
-    if (known_agnostic || (is_unknown && sz_utf8_find_cased_haswell(needle, needle_length) == SZ_NULL_CHAR)) {
+    if (known_agnostic || (is_unknown && sz_utf8_find_cased_haswell(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
         sz_cptr_t result = sz_find_haswell(haystack, haystack_length, needle, needle_length);
         *matched_length = result ? needle_length : 0;
         return result;
@@ -1149,7 +1153,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_haswell( //
                                          matched_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t length) {
     sz_cptr_t text_cursor = str;
 
     // Single loop: advance by min(length, 29), check leads in the first `block_length` positions;
@@ -1265,11 +1269,11 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
         length -= block_length;
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                            sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                                     sz_size_t b_length) {
     return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
 }
 
@@ -1278,7 +1282,7 @@ SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_haswell(sz_cptr_t a, sz_size
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_HASWELL
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #ifdef __cplusplus
 }

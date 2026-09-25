@@ -16,8 +16,8 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
 #elif defined(__clang__)
@@ -27,7 +27,8 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #endif
 
-SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                        sz_size_t b_length) {
     sz_u512_vec_t a_vec, b_vec;
 
     // Pointer arithmetic is cheap, fetching memory is not!
@@ -89,7 +90,7 @@ SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, 
     return sz_equal_k;
 }
 
-SZ_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     __mmask64 mask_m64;
     sz_u512_vec_t a_vec, b_vec;
 
@@ -118,7 +119,7 @@ SZ_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t l
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #ifdef __cplusplus
 }

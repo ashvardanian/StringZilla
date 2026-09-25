@@ -26,7 +26,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
@@ -45,8 +45,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 #include "stringzilla/utf8_runes.h" // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
 
@@ -123,32 +122,32 @@ struct utf8_unpack_from_sz {
 void bench_utf8_count(environment_t const &env) {
     auto base_v = utf8_count_from_sz<sz_utf8_count_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_count_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_count_haswell", base_v, utf8_count_from_sz<sz_utf8_count_haswell> {env}).log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_count_icelake", base_v, utf8_count_from_sz<sz_utf8_count_icelake> {env}).log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_count_neon", base_v, utf8_count_from_sz<sz_utf8_count_neon> {env}).log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_count_sve2", base_v, utf8_count_from_sz<sz_utf8_count_sve2> {env}).log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_count_v128", base_v, utf8_count_from_sz<sz_utf8_count_v128> {env}).log(base);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_utf8_count_v128relaxed", base_v, utf8_count_from_sz<sz_utf8_count_v128relaxed> {env})
         .log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_count_rvv", base_v, utf8_count_from_sz<sz_utf8_count_rvv> {env}).log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_count_powervsx", base_v, utf8_count_from_sz<sz_utf8_count_powervsx> {env}).log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_count_lasx", base_v, utf8_count_from_sz<sz_utf8_count_lasx> {env}).log(base);
 #endif
 }
@@ -156,31 +155,31 @@ void bench_utf8_count(environment_t const &env) {
 void bench_utf8_seek(environment_t const &env) {
     auto base_v = utf8_seek_from_sz<sz_utf8_seek_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_seek_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_seek_haswell", base_v, utf8_seek_from_sz<sz_utf8_seek_haswell> {env}).log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_seek_icelake", base_v, utf8_seek_from_sz<sz_utf8_seek_icelake> {env}).log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_seek_neon", base_v, utf8_seek_from_sz<sz_utf8_seek_neon> {env}).log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_seek_sve2", base_v, utf8_seek_from_sz<sz_utf8_seek_sve2> {env}).log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_seek_v128", base_v, utf8_seek_from_sz<sz_utf8_seek_v128> {env}).log(base);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_utf8_seek_v128relaxed", base_v, utf8_seek_from_sz<sz_utf8_seek_v128relaxed> {env}).log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_seek_rvv", base_v, utf8_seek_from_sz<sz_utf8_seek_rvv> {env}).log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_seek_powervsx", base_v, utf8_seek_from_sz<sz_utf8_seek_powervsx> {env}).log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_seek_lasx", base_v, utf8_seek_from_sz<sz_utf8_seek_lasx> {env}).log(base);
 #endif
 }
@@ -188,28 +187,28 @@ void bench_utf8_seek(environment_t const &env) {
 void bench_utf8_decode(environment_t const &env) {
     auto base_v = utf8_unpack_from_sz<sz_utf8_decode_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_decode_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_decode_haswell", base_v, utf8_unpack_from_sz<sz_utf8_decode_haswell> {env}).log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_decode_icelake", base_v, utf8_unpack_from_sz<sz_utf8_decode_icelake> {env}).log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_decode_neon", base_v, utf8_unpack_from_sz<sz_utf8_decode_neon> {env}).log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_decode_sve2", base_v, utf8_unpack_from_sz<sz_utf8_decode_sve2> {env}).log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_decode_v128", base_v, utf8_unpack_from_sz<sz_utf8_decode_v128> {env}).log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_decode_rvv", base_v, utf8_unpack_from_sz<sz_utf8_decode_rvv> {env}).log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_decode_powervsx", base_v, utf8_unpack_from_sz<sz_utf8_decode_powervsx> {env}).log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_decode_lasx", base_v, utf8_unpack_from_sz<sz_utf8_decode_lasx> {env}).log(base);
 #endif
 }
@@ -218,8 +217,8 @@ void bench_utf8_decode(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla UTF-8 Traversal Benchmarks!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

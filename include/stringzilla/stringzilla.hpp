@@ -41,7 +41,7 @@
 #define sz_no_unique_address_ [[no_unique_address]]
 #endif
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 #include <cstddef> // `std::size_t`
 #include <cstdint> // `std::int8_t`
 #include <cstdlib> // `std::rand`
@@ -1888,7 +1888,7 @@ std::size_t range_length(iterator_type first, iterator_type last) {
 
 #pragma region Helper Types
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 inline void raise(status_t status) noexcept(false) {
     switch (status) {
     case status_t::bad_alloc_k: throw std::bad_alloc();
@@ -2187,7 +2187,7 @@ class basic_string_slice {
      *  We take the largest 63-bit unsigned integer on 64-bit machines.
      *  We take the largest 31-bit unsigned integer on 32-bit machines.
      */
-    static constexpr size_type npos = SZ_SSIZE_MAX;
+    static constexpr size_type npos = STRINGZILLA_SSIZE_MAX;
 
 #pragma region Constructors and STL Utilities
 
@@ -2206,7 +2206,7 @@ class basic_string_slice {
         trivial_swap(length_, other.length_);
     }
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 
     constexpr basic_string_slice(std::string const &other) noexcept
         requires std::is_const_v<char_type>
@@ -2362,7 +2362,7 @@ class basic_string_slice {
         length_ -= n;
     }
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 
     /** Added for STL compatibility. */
     string_slice_t substr() const noexcept { return *this; }
@@ -2399,7 +2399,7 @@ class basic_string_slice {
         return count;
     }
 
-#endif // !SZ_AVOID_STL
+#endif // STRINGZILLA_WITH_STL
 
 #pragma endregion
 
@@ -2740,8 +2740,8 @@ class basic_string_slice {
      *  @brief Return a pointer to the first byte violating the given Unicode normalization form.
      *  @param[in] form One of @c sz_normal_form_nfd_k, @c sz_normal_form_nfc_k,
      *      @c sz_normal_form_nfkd_k, or @c sz_normal_form_nfkc_k.
-     *  @return @c SZ_NULL_CHAR if the string is already in @p form; otherwise a pointer into this
-     *      string at the first offending byte.
+     *  @return @c STRINGZILLA_NULL_CHAR if the string is already in @p form; otherwise a pointer
+     *      into this string at the first offending byte.
      */
     sz_cptr_t utf8_find_denormalized(sz_normal_form_t form) const noexcept {
         return sz_utf8_find_denormalized(start_, length_, form);
@@ -2753,7 +2753,9 @@ class basic_string_slice {
      *      @c sz_normal_form_nfkd_k, or @c sz_normal_form_nfkc_k.
      *  @return @c true if the string is in @p form, @c false otherwise.
      */
-    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_find_denormalized(form) == SZ_NULL_CHAR; }
+    bool is_normalized(sz_normal_form_t form) const noexcept {
+        return utf8_find_denormalized(form) == STRINGZILLA_NULL_CHAR;
+    }
 
     /**
      *  @brief Find the byte offset of the Nth UTF-8 character.
@@ -3278,11 +3280,11 @@ class basic_string {
      *  We take the largest 63-bit unsigned integer on 64-bit machines.
      *  We take the largest 31-bit unsigned integer on 32-bit machines.
      */
-    static constexpr size_type npos = SZ_SSIZE_MAX;
+    static constexpr size_type npos = STRINGZILLA_SSIZE_MAX;
 
     /** The number of characters that can be stored in the internal buffer.
      *  Depends on the size of the internal buffer for the "Small String Optimization". */
-    static constexpr size_type min_capacity = SZ_STRING_INTERNAL_SPACE - 1;
+    static constexpr size_type min_capacity = STRINGZILLA_STRING_INTERNAL_SPACE - 1;
 
 #pragma region Constructors and STL Utilities
 
@@ -3396,7 +3398,7 @@ class basic_string {
             trivial_swap(allocator_, other.allocator_);
     }
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 
     basic_string(std::string const &other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
@@ -3440,7 +3442,7 @@ class basic_string {
         return *this;
     }
 
-#endif // !SZ_AVOID_STL
+#endif // STRINGZILLA_WITH_STL
 
 #pragma endregion
 
@@ -3476,7 +3478,7 @@ class basic_string {
     pointer c_str() noexcept sz_lifetime_bound_ { return string_.internal.start; }
     const_pointer c_str() const noexcept sz_lifetime_bound_ { return string_.internal.start; }
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 
     reference at(size_type pos) noexcept(false) sz_lifetime_bound_ {
         if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
@@ -3487,7 +3489,7 @@ class basic_string {
         return string_.internal.start[pos];
     }
 
-#endif // !SZ_AVOID_STL
+#endif // STRINGZILLA_WITH_STL
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
     size_type size() const noexcept { return sz_string_length(&string_); }
@@ -4096,8 +4098,9 @@ class basic_string {
         // Allocate more space if needed, without initializing
         if (count >= string_space) {
             if (_with_alloc([&](sz_alloc_type &alloc) {
-                    return sz_string_expand(&string_, SZ_SIZE_MAX, count - string_length, &alloc) ? sz_success_k
-                                                                                                  : sz_bad_alloc_k;
+                    return sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, count - string_length, &alloc)
+                               ? sz_success_k
+                               : sz_bad_alloc_k;
                 }) != status_t::success_k)
                 return false;
             sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
@@ -4118,7 +4121,7 @@ class basic_string {
             // On big-endian, the struct layout places them at matching positions.
             string_.external.length += actual_count - string_length;
         }
-        else { sz_string_erase(&string_, actual_count, SZ_SIZE_MAX); }
+        else { sz_string_erase(&string_, actual_count, STRINGZILLA_SIZE_MAX); }
 
         return true;
     }
@@ -4127,7 +4130,7 @@ class basic_string {
 #pragma region STL Interfaces
 
     /** Clears the string contents, but @b no deallocations happen. */
-    void clear() noexcept { sz_string_erase(&string_, 0, SZ_SIZE_MAX); }
+    void clear() noexcept { sz_string_erase(&string_, 0, STRINGZILLA_SIZE_MAX); }
 
     /**
      *  @brief Erases ( @b in-place ) the given range of characters.
@@ -4146,7 +4149,7 @@ class basic_string {
      */
     iterator erase(const_iterator pos) noexcept sz_lifetime_bound_ { return erase(pos, pos + 1); }
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 
     /**
      *  @brief Resizes the string to match @p count, filling the new space with the given
@@ -4834,8 +4837,8 @@ class basic_string {
      *  @brief Return a pointer to the first byte violating the given Unicode normalization form.
      *  @param[in] form One of @c sz_normal_form_nfd_k, @c sz_normal_form_nfc_k,
      *      @c sz_normal_form_nfkd_k, or @c sz_normal_form_nfkc_k.
-     *  @return @c SZ_NULL_CHAR if the string is already in @p form; otherwise a pointer into this
-     *      string at the first offending byte.
+     *  @return @c STRINGZILLA_NULL_CHAR if the string is already in @p form; otherwise a pointer
+     *      into this string at the first offending byte.
      */
     sz_cptr_t utf8_find_denormalized(sz_normal_form_t form) const noexcept {
         sz_ptr_t string_start;
@@ -4850,7 +4853,9 @@ class basic_string {
      *      @c sz_normal_form_nfkd_k, or @c sz_normal_form_nfkc_k.
      *  @return @c true if the string is in @p form, @c false otherwise.
      */
-    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_find_denormalized(form) == SZ_NULL_CHAR; }
+    bool is_normalized(sz_normal_form_t form) const noexcept {
+        return utf8_find_denormalized(form) == STRINGZILLA_NULL_CHAR;
+    }
 
     /**
      *  @brief Transform the string in-place into the given Unicode normalization form.
@@ -4914,8 +4919,8 @@ bool basic_string<allocator_>::try_resize(size_type count, value_type character)
     // Allocate more space if needed.
     if (count >= string_space) {
         if (_with_alloc([&](sz_alloc_type &alloc) {
-                return sz_string_expand(&string_, SZ_SIZE_MAX, count - string_length, &alloc) ? sz_success_k
-                                                                                              : sz_bad_alloc_k;
+                return sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, count - string_length, &alloc) ? sz_success_k
+                                                                                                       : sz_bad_alloc_k;
             }) != status_t::success_k)
             return false;
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
@@ -4930,7 +4935,7 @@ bool basic_string<allocator_>::try_resize(size_type count, value_type character)
         // On big-endian, the struct layout places them at matching positions.
         string_.external.length += count - string_length;
     }
-    else { sz_string_erase(&string_, count, SZ_SIZE_MAX); }
+    else { sz_string_erase(&string_, count, STRINGZILLA_SIZE_MAX); }
     return true;
 }
 
@@ -4946,17 +4951,17 @@ bool basic_string<allocator_>::try_assign(string_view_t other) noexcept {
     if (other.data() >= string_start && other.data() < string_start + string_length) {
         auto offset_in_this = other.data() - string_start;
         sz_string_erase(&string_, 0, offset_in_this);
-        sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
+        sz_string_erase(&string_, other.length(), STRINGZILLA_SIZE_MAX);
     }
     // In some of the other cases, when the assigned string is short, we don't need to re-allocate.
     else if (string_length >= other.length()) {
         other.copy(string_start, other.length());
-        sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
+        sz_string_erase(&string_, other.length(), STRINGZILLA_SIZE_MAX);
     }
     // In the common case, however, we need to allocate.
     else {
         if (_with_alloc([&](sz_alloc_type &alloc) {
-                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length() - string_length, &alloc);
+                string_start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, other.length() - string_length, &alloc);
                 if (!string_start) return sz_bad_alloc_k;
                 other.copy(string_start, other.length());
                 return sz_success_k;
@@ -4970,7 +4975,7 @@ template <typename allocator_>
 bool basic_string<allocator_>::try_push_back(char_type c) noexcept {
     auto result = _with_alloc([&](sz_alloc_type &alloc) {
         auto old_size = size();
-        sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, 1, &alloc);
+        sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, 1, &alloc);
         if (!start) return sz_bad_alloc_k;
         start[old_size] = c;
         return sz_success_k;
@@ -4987,12 +4992,12 @@ bool basic_string<allocator_>::try_append(const_pointer str, size_type length) n
         auto this_span = span();
         if (str >= this_span.begin() && str < this_span.end()) {
             auto str_offset_in_this = str - data();
-            sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
+            sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &alloc);
             if (!start) return sz_bad_alloc_k;
             sz_copy(start + this_span.size(), start + str_offset_in_this, length);
         }
         else {
-            sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
+            sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &alloc);
             if (!start) return sz_bad_alloc_k;
             sz_copy(start + this_span.size(), str, length);
         }
@@ -5108,12 +5113,12 @@ bool basic_string<allocator_>::try_assign(concatenation<first_type_, second_type
     sz_string_range(&string_, &string_start, &string_length);
 
     if (string_length >= other.length()) {
-        sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
+        sz_string_erase(&string_, other.length(), STRINGZILLA_SIZE_MAX);
         other.copy(string_start, other.length());
     }
     else {
         if (_with_alloc([&](sz_alloc_type &alloc) {
-                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
+                string_start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, other.length(), &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
                 return true;
@@ -5402,7 +5407,7 @@ expected<std::size_t, status_t> try_intersect(                                  
     return {intersection_size, status};
 }
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 #if _SZ_DEPRECATED_FINGERPRINTS
 
 /**

@@ -20,7 +20,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
@@ -60,8 +60,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 constexpr std::size_t max_shift_length = 299;
@@ -98,7 +97,8 @@ struct copy_from_sz {
     inline call_result_t operator()(std::string_view slice) const noexcept {
         std::size_t output_offset = slice.data() - env.dataset.data();
         // Round down to the nearest multiple of a cache line width for aligned writes
-        output_offset = round_up_to_multiple<SZ_CACHE_LINE_WIDTH>(output_offset) - SZ_CACHE_LINE_WIDTH;
+        output_offset = round_up_to_multiple<STRINGZILLA_CACHE_LINE_BYTES>(output_offset) -
+                        STRINGZILLA_CACHE_LINE_BYTES;
         // Ensure unaligned exports if needed
         output_offset += page_misalignment_;
         copy_func_(output + output_offset, slice.data(), slice.size());
@@ -132,39 +132,39 @@ void bench_copy(environment_t const &env) {
     bench_result_t shift = bench_unary(env, "sz_copy_serial(shift)", copy_from_sz<sz_copy_serial, 1> {env, o}) //
                                .log(align);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_copy_haswell(align)", copy_from_sz<sz_copy_haswell> {env, o}).log(align);
     bench_unary(env, "sz_copy_haswell(shift)", copy_from_sz<sz_copy_haswell, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_copy_skylake(align)", copy_from_sz<sz_copy_skylake> {env, o}).log(align);
     bench_unary(env, "sz_copy_skylake(shift)", copy_from_sz<sz_copy_skylake, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_copy_neon(align)", copy_from_sz<sz_copy_neon> {env, o}).log(align);
     bench_unary(env, "sz_copy_neon(shift)", copy_from_sz<sz_copy_neon, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_copy_sve(align)", copy_from_sz<sz_copy_sve> {env, o}).log(align);
     bench_unary(env, "sz_copy_sve(shift)", copy_from_sz<sz_copy_sve, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_copy_v128(align)", copy_from_sz<sz_copy_v128> {env, o}).log(align);
     bench_unary(env, "sz_copy_v128(shift)", copy_from_sz<sz_copy_v128, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_copy_v128relaxed(align)", copy_from_sz<sz_copy_v128relaxed> {env, o}).log(align);
     bench_unary(env, "sz_copy_v128relaxed(shift)", copy_from_sz<sz_copy_v128relaxed, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_copy_rvv(align)", copy_from_sz<sz_copy_rvv> {env, o}).log(align);
     bench_unary(env, "sz_copy_rvv(shift)", copy_from_sz<sz_copy_rvv, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_copy_lasx(align)", copy_from_sz<sz_copy_lasx> {env, o}).log(align);
     bench_unary(env, "sz_copy_lasx(shift)", copy_from_sz<sz_copy_lasx, 1> {env, o}).log(align, shift);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_copy_powervsx(align)", copy_from_sz<sz_copy_powervsx> {env, o}).log(align);
     bench_unary(env, "sz_copy_powervsx(shift)", copy_from_sz<sz_copy_powervsx, 1> {env, o}).log(align, shift);
 #endif
@@ -223,39 +223,39 @@ void bench_move(environment_t const &env) {
     bench_result_t byte = bench_unary(env, "sz_move_serial(by1)", move_from_sz<sz_move_serial, 1> {env, o}).log();
     bench_result_t page = bench_unary(env, "sz_move_serial(by64)", move_from_sz<sz_move_serial, 64> {env, o}).log(byte);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_move_haswell(by1)", move_from_sz<sz_move_haswell, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_haswell(by64)", move_from_sz<sz_move_haswell, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_move_skylake(by1)", move_from_sz<sz_move_skylake, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_skylake(by64)", move_from_sz<sz_move_skylake, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_move_neon(by1)", move_from_sz<sz_move_neon, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_neon(by64)", move_from_sz<sz_move_neon, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_move_sve(by1)", move_from_sz<sz_move_sve, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_sve(by64)", move_from_sz<sz_move_sve, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_move_v128(by1)", move_from_sz<sz_move_v128, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_v128(by64)", move_from_sz<sz_move_v128, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_move_v128relaxed(by1)", move_from_sz<sz_move_v128relaxed, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_v128relaxed(by64)", move_from_sz<sz_move_v128relaxed, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_move_rvv(by1)", move_from_sz<sz_move_rvv, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_rvv(by64)", move_from_sz<sz_move_rvv, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_move_lasx(by1)", move_from_sz<sz_move_lasx, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_lasx(by64)", move_from_sz<sz_move_lasx, 64> {env, o}).log(byte, page);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_move_powervsx(by1)", move_from_sz<sz_move_powervsx, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_powervsx(by64)", move_from_sz<sz_move_powervsx, 64> {env, o}).log(byte, page);
 #endif
@@ -311,12 +311,14 @@ void memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value) { std::mem
 /**
  *  @brief The `std::` baseline for @c sz_generate, measuring generator throughput alone.
  *
- *  Reseeding per call would put a Mersenne-Twister state fill inside the measured loop, so the
- *  nonce is dropped and, unlike the @c sz_generate kernels, this baseline is not byte-reproducible.
+ *  Like the @c sz_generate kernels, the same nonce replays the same bytes: each call seeds a
+ *  @c std::minstd_rand from it, whose one word of state keeps the reseed out of the measurement
+ *  where a Mersenne-Twister state fill would not.
  */
-void generate_like_sz(sz_ptr_t output, sz_size_t length, [[maybe_unused]] sz_u64_t nonce) {
+void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
+    std::minstd_rand generator(static_cast<std::minstd_rand::result_type>(nonce));
     uniform_u8_distribution_t distribution;
-    std::generate(output, output + length, [&]() -> char { return distribution(global_random_generator()); });
+    std::generate(output, output + length, [&]() -> char { return distribution(generator); });
 }
 
 /**
@@ -343,58 +345,58 @@ void bench_fill(environment_t const &env) {
     auto random_call = fill_random_from_sz<sz_fill_random_serial> {env, o};
     bench_result_t random = bench_unary(env, "sz_fill_random_serial", random_call).log(zeros);
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     bench_unary(env, "sz_fill_random_westmere", random_call, fill_random_from_sz<sz_fill_random_westmere> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_fill_haswell", fill_from_sz<sz_fill_haswell> {env, o}).log(zeros);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_fill_skylake", fill_from_sz<sz_fill_skylake> {env, o}).log(zeros);
     bench_unary(env, "sz_fill_random_skylake", random_call, fill_random_from_sz<sz_fill_random_skylake> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_fill_random_icelake", random_call, fill_random_from_sz<sz_fill_random_icelake> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon> {env, o}).log(zeros);
 #endif
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
     bench_unary(env, "sz_fill_random_neonaes", random_call, fill_random_from_sz<sz_fill_random_neonaes> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve> {env, o}).log(zeros);
 #endif
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_SVE2AES
     bench_unary(env, "sz_fill_random_sve2aes", random_call, fill_random_from_sz<sz_fill_random_sve2aes> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_fill_v128", fill_from_sz<sz_fill_v128> {env, o}).log(zeros);
     bench_unary(env, "sz_fill_random_v128", random_call, fill_random_from_sz<sz_fill_random_v128> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_fill_v128relaxed", fill_from_sz<sz_fill_v128relaxed> {env, o}).log(zeros);
     bench_unary(env, "sz_fill_random_v128relaxed", random_call,
                 fill_random_from_sz<sz_fill_random_v128relaxed> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_fill_rvv", fill_from_sz<sz_fill_rvv> {env, o}).log(zeros);
     bench_unary(env, "sz_fill_random_rvv", random_call, fill_random_from_sz<sz_fill_random_rvv> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_fill_lasx", fill_from_sz<sz_fill_lasx> {env, o}).log(zeros);
     bench_unary(env, "sz_fill_random_lasx", random_call, fill_random_from_sz<sz_fill_random_lasx> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_fill_powervsx", fill_from_sz<sz_fill_powervsx> {env, o}).log(zeros);
     bench_unary(env, "sz_fill_random_powervsx", random_call, fill_random_from_sz<sz_fill_random_powervsx> {env, o})
         .log(zeros, random);
@@ -457,31 +459,31 @@ void bench_lookup(environment_t const &env) {
     sz_cptr_t lut = reinterpret_cast<sz_cptr_t>(lookup_table);
     bench_result_t zeros = bench_unary(env, "sz_lookup_serial", lookup_from_sz<sz_lookup_serial> {env, o, lut}).log();
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_lookup_haswell", lookup_from_sz<sz_lookup_haswell> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_lookup_icelake", lookup_from_sz<sz_lookup_icelake> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_lookup_neon", lookup_from_sz<sz_lookup_neon> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_lookup_sve", lookup_from_sz<sz_lookup_sve> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_lookup_v128", lookup_from_sz<sz_lookup_v128> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_lookup_v128relaxed", lookup_from_sz<sz_lookup_v128relaxed> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_lookup_rvv", lookup_from_sz<sz_lookup_rvv> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_lookup_lasx", lookup_from_sz<sz_lookup_lasx> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_lookup_powervsx", lookup_from_sz<sz_lookup_powervsx> {env, o, lut}).log(zeros);
 #endif
     bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
@@ -491,8 +493,8 @@ void bench_lookup(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

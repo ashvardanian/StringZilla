@@ -691,26 +691,26 @@ assert_verbatim_accepts "note opening a file inside its include guard" include/n
  *  @date January 1, 2026
  *  @brief One staged fixture for one rule.
  */
-#ifndef NK_PROBE_H_
-#define NK_PROBE_H_
+#ifndef PROBE_H_
+#define PROBE_H_
 
 /*  The probe family has one kernel. */
 int probe(void);
 
-#endif // NK_PROBE_H_
+#endif // PROBE_H_
 FIXTURE
 
 assert_accepts "note on a nested directive, a group label, and a guard spelled with defined" include/numkong/probe.h <<'FIXTURE'
-#if !defined(NK_PROBE_TYPES_H_)
-#define NK_PROBE_TYPES_H_
+#if !defined(PROBE_TYPES_H_)
+#define PROBE_TYPES_H_
 
 /*  Debugging and testing. */
-#if !defined(NK_PROBE_DEBUG)
-#define NK_PROBE_DEBUG 0
-#define NK_PROBE_TRACE 0
+#if !defined(PROBE_DEBUG)
+#define PROBE_DEBUG 0
+#define PROBE_TRACE 0
 #endif
 
-#if NK_PROBE_TARGET_EMSCRIPTEN
+#if PROBE_TARGET_EMSCRIPTEN
 #include <emscripten.h>
 
 /*  The probes trip strict-prototype warnings, silenced for this block alone. */
@@ -721,8 +721,8 @@ assert_accepts "note on a nested directive, a group label, and a guard spelled w
 /*  Loads: plain and acquire. */
 
 int probe(void);
-#endif // NK_PROBE_TARGET_EMSCRIPTEN
-#endif // NK_PROBE_TYPES_H_
+#endif // PROBE_TARGET_EMSCRIPTEN
+#endif // PROBE_TYPES_H_
 FIXTURE
 
 assert_accepts "note above a preprocessor section, and a branch note inside a body" include/numkong/probe.h <<'FIXTURE'
@@ -753,7 +753,7 @@ assert_accepts "note above its region" include/numkong/probe.h <<'FIXTURE'
  *  Every one derives from Layer 1. */
 #pragma region Platform Capabilities
 
-#define NK_PROBE_ 1
+#define PROBE_ 1
 
 #pragma endregion Platform Capabilities
 FIXTURE
@@ -817,7 +817,7 @@ int probe(void);
 FIXTURE
 
 assert_accepts "comment in a macro padded to its backslash" include/numkong/probe.h <<'FIXTURE'
-#define NK_PROBE_(name)                                                                                   \
+#define PROBE_(name)                                                                                   \
     /* Short note inside a macro body. */                                                             \
     int name(void)
 FIXTURE
@@ -966,11 +966,11 @@ assert_rejects "table split into adjacent verbatim blocks" "lays out a table out
  *  @brief Lists the variables.
  *
  *  @verbatim
- *  NK_SEED=N           - RNG seed
+ *  PROBE_SEED=N        - RNG seed
  *  @endverbatim
  *
  *  @verbatim
- *  NK_BUDGET_SECS=N    - Time budget
+ *  PROBE_BUDGET_SECS=N - Time budget
  *  @endverbatim
  */
 int probe(void);
@@ -1066,24 +1066,24 @@ FIXTURE
 assert_rejects "plain comment above a single-macro conditional" "explains a macro in a plain" include/numkong/probe.h <<'FIXTURE'
 /* True when the compiler supports multi-argument subscripts. */
 #if defined(__cpp_multidimensional_subscript)
-#define NK_PROBE_SUBSCRIPT_ 1
+#define PROBE_SUBSCRIPT_ 1
 #else
-#define NK_PROBE_SUBSCRIPT_ 0
+#define PROBE_SUBSCRIPT_ 0
 #endif
 FIXTURE
 
 assert_accepts "docblock above a single-macro conditional, plain comment above a mixed block" include/numkong/probe.h <<'FIXTURE'
 /** True when the compiler supports multi-argument subscripts. */
 #if defined(__cpp_multidimensional_subscript)
-#define NK_PROBE_SUBSCRIPT_ 1
+#define PROBE_SUBSCRIPT_ 1
 #else
-#define NK_PROBE_SUBSCRIPT_ 0
+#define PROBE_SUBSCRIPT_ 0
 #endif
 
 /* Silences a warning that the macros below would otherwise trigger under Clang. */
 #if defined(__clang__)
 #pragma clang diagnostic push
-#define NK_PROBE_FIRST_ 1
+#define PROBE_FIRST_ 1
 #endif
 FIXTURE
 
@@ -1232,6 +1232,10 @@ static char const *probe_text = "first half " //
                                 "second half";
 FIXTURE
 
+stage_edited_fixture include/numkong/probe.h 's/^#pragma once$/#pragma once\n#define PROBE_FIRST "first"/; s/^int settled(void);$/"second";/'
+run_precommit
+expect_acceptance "string lines apart in the file, split only by an unchanged line"
+
 assert_rejects "harness namespace missing" "does not open" bench/probe.hpp <<FIXTURE
 namespace other {}
 FIXTURE
@@ -1293,7 +1297,7 @@ FIXTURE
 # region Other Language Fixtures
 
 assert_rejects "CMake list mutation" "mutates a variable" CMakeLists.txt <<'FIXTURE'
-list(APPEND NK_SOURCES_ probe.c)
+list(APPEND PROBE_SOURCES_ probe.c)
 FIXTURE
 
 assert_rejects "CMake manual RPATH" "builds an RPATH by hand" CMakeLists.txt <<'FIXTURE'
@@ -1302,7 +1306,14 @@ FIXTURE
 
 assert_accepts "CMake variable written once" CMakeLists.txt <<'FIXTURE'
 # A variable is written once; never list(APPEND ...) it.
-set(NK_PROBE_SOURCES_ probe.c)
+set(PROBE_SOURCES_ probe.c)
+FIXTURE
+
+assert_accepts "CMake foreach builds its list" CMakeLists.txt <<'FIXTURE'
+set(probe_definitions_ "")
+foreach (probe_tier_ IN ITEMS haswell skylake)
+    list(APPEND probe_definitions_ "PROBE_${probe_tier_}=1")
+endforeach ()
 FIXTURE
 
 assert_rejects "Go pseudo-heading" "pseudo-heading" golang/probe.go <<'FIXTURE'
@@ -2171,12 +2182,12 @@ FIXTURE
 
 assert_rejects "copydoc in a backend" "repeats @copydoc in a backend" include/stringzilla/probe/haswell.h <<'FIXTURE'
 /** @copydoc sz_probe */
-SZ_API_COMPTIME void sz_probe_haswell(void);
+STRINGZILLA_API_COMPTIME void sz_probe_haswell(void);
 FIXTURE
 
 assert_accepts "copydoc in a family header" include/stringzilla/probe.h <<'FIXTURE'
 /** @copydoc sz_probe */
-SZ_API_COMPTIME void sz_probe_haswell(void);
+STRINGZILLA_API_COMPTIME void sz_probe_haswell(void);
 FIXTURE
 
 assert_rejects "C++ in a CUDA tier" "adds C++, but" include/stringzilla/probe.cuh <<'FIXTURE'
@@ -2189,7 +2200,7 @@ extern "C" void sz_probe_cuda(void);
 FIXTURE
 
 assert_rejects "export macro in a binding" "exports a binding-internal definition" python/probe.c <<'FIXTURE'
-SZ_API_RUNTIME void probe(void) {}
+STRINGZILLA_API_RUNTIME void probe(void) {}
 FIXTURE
 
 assert_accepts "plain definition in a binding" python/probe.c <<'FIXTURE'
@@ -2213,6 +2224,21 @@ FIXTURE
 assert_accepts "pinned coverage" test/probe.cpp <<'FIXTURE'
 void probe(void) {
     verify(saw_empty); // sz-nolint: coverage
+}
+FIXTURE
+
+assert_rejects "stdout print in a test body" "prints to stdout from a test body" test/probe.cpp <<'FIXTURE'
+void probe(void) { fmt::println("  - testing the probe..."); }
+FIXTURE
+
+assert_rejects "stdout fprintf in a test body" "prints to stdout from a test body" test/probe.cpp <<'FIXTURE'
+void probe(void) { std::fprintf(stdout, "probe passed\n"); }
+FIXTURE
+
+assert_accepts "stderr print in a test body, and prose naming the stdout one" test/probe.cpp <<'FIXTURE'
+/** Reports a failure to stderr, where a bare @c fmt::println would reach stdout. */
+void probe(int value) {
+    if (value < 0) fmt::println(stderr, "negative value {}", value);
 }
 FIXTURE
 
@@ -2241,7 +2267,7 @@ assert_rejects "scaffolding alias outside its header" "redefines scaffolding" te
 template <typename value_type_> using unified_vector = std::vector<value_type_>;
 FIXTURE
 
-assert_accepts "scaffolding alias in its header" test/stringzilla.hpp <<'FIXTURE'
+assert_accepts "scaffolding alias in its header" test/harness.hpp <<'FIXTURE'
 namespace ashvardanian::stringzilla::test {
 template <typename value_type_> using unified_vector = std::vector<value_type_>;
 } // namespace ashvardanian::stringzilla::test
@@ -2252,7 +2278,7 @@ def scale_iterations(count):
     return count
 FIXTURE
 
-assert_accepts "Python scaffolding in its helpers" test/sz_helpers.py <<'FIXTURE'
+assert_accepts "Python scaffolding in its helpers" test/helpers.py <<'FIXTURE'
 def scale_iterations(count):
     return count
 FIXTURE
@@ -2274,6 +2300,26 @@ assert_accepts "seed values and a scaled fuzz loop" test/probe.py <<'FIXTURE'
 def test_probe(seed_value):
     for _ in range(scale_iterations(100)):
         pass
+FIXTURE
+
+assert_rejects "retired prefix" "spells the retired SZ_ prefix" include/stringzilla/probe.h <<'FIXTURE'
+static int probe(void) { return SZ_DEBUG; }
+FIXTURE
+
+assert_accepts "full prefix, and a lowercase sz_ helper" include/stringzilla/probe.h <<'FIXTURE'
+static int probe(void) { return STRINGZILLA_DEBUG + sz_probe_(); }
+FIXTURE
+
+assert_rejects "fact tested with defined" "fact with defined; use #if" include/stringzilla/probe.h <<'FIXTURE'
+#if defined(STRINGZILLA_OS_LINUX_)
+static int probe(void) { return 1; }
+#endif
+FIXTURE
+
+assert_accepts "fact tested by value, under its default guard" include/stringzilla/probe.h <<'FIXTURE'
+#if !defined(STRINGZILLA_ARCH_BIG_ENDIAN_)
+static int probe(void) { return STRINGZILLA_OS_LINUX_; }
+#endif
 FIXTURE
 
 # endregion StringZilla Fixtures

@@ -34,7 +34,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test the GPU backend against the serial baseline.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
@@ -57,8 +57,7 @@
 
 #include <stringzilla/overlap.h> // `sz_overlap_*`
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -143,12 +142,12 @@ struct overlap_scores_from_cuda {
     overlap_scores_from_cuda(environment_t const &env, overlap_cuda_corpus_t &corpus, std::size_t query_bytes,
                              std::size_t width)
         : corpus(corpus), windows(corpus.windows_at(width)), query(overlap_query_text_(env, query_bytes)) {
-        sz_memory_allocator_init_unified(&alloc, SZ_NULL);
+        sz_memory_allocator_init_unified(&alloc, STRINGZILLA_NULL);
         sz_string_view_t const view {query.data(), query.size()};
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
         sz_size_t const scored_width = width;
-        if (sz_overlap_engine_init_gpu(&queries, &scored_width, 1, &alloc, SZ_NULL, &engine) != sz_success_k)
+        if (sz_overlap_engine_init_gpu(&queries, &scored_width, 1, &alloc, STRINGZILLA_NULL, &engine) != sz_success_k)
             throw std::runtime_error("The device forest could not be prepared.");
     }
     ~overlap_scores_from_cuda() { sz_overlap_engine_free(&engine); }
@@ -159,7 +158,8 @@ struct overlap_scores_from_cuda {
         if (sz_overlap_scores_cuda(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.scores.size(), 1) !=
             sz_success_k)
             throw std::runtime_error("The GPU round failed.");
-        if (cudaStreamSynchronize(SZ_NULL) != cudaSuccess) throw std::runtime_error("The GPU round did not finish.");
+        if (cudaStreamSynchronize(STRINGZILLA_NULL) != cudaSuccess)
+            throw std::runtime_error("The GPU round did not finish.");
         check_value_t mixed = 0;
         for (sz_f32_t const score : corpus.scores) mixed = mixed * 31u + (check_value_t)(score * 1048576.0f);
         call_result_t result(corpus.bytes, mixed, windows);
@@ -212,13 +212,13 @@ static void bench_overlap_scores(environment_t const &env, overlap_cuda_corpus_t
     auto validator = overlap_scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {
         env, corpus, query_bytes, width};
     bench_result_t base = bench_unary(env, std::string("sz_overlap_scores_serial") + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     base = bench_unary(env, std::string("sz_overlap_scores_haswell") + suffix, validator,
                        overlap_scores_from_sz<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell> {
                            env, corpus, query_bytes, width})
                .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     base = bench_unary(env, std::string("sz_overlap_scores_skylake") + suffix, validator,
                        overlap_scores_from_sz<sz_overlap_engine_init_skylake, sz_overlap_scores_skylake> {
                            env, corpus, query_bytes, width})
@@ -231,8 +231,9 @@ static void bench_overlap_scores(environment_t const &env, overlap_cuda_corpus_t
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
+    if (!log_cuda_device()) return 0;
 
     try {
         fmt::println("Building up the environment...");

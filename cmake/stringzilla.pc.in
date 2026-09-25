@@ -7,5 +7,5 @@ Name: StringZilla
 Description: @PROJECT_DESCRIPTION@
 URL: https://github.com/ashvardanian/StringZilla
 Version: @PROJECT_VERSION@
-Cflags: -I${includedir} -DSZ_DYNAMIC_DISPATCH=1
+Cflags: -I${includedir} -DSTRINGZILLA_RUNTIME_DISPATCH=1
 Libs: -L${libdir} -lstringzilla_shared

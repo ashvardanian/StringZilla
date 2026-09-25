@@ -38,7 +38,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
@@ -62,8 +62,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -191,14 +190,14 @@ static void bench_overlap_prefix_hashes(environment_t const &env, std::string co
         prefix_hashes_from_sz<sz_overlap_serial_f64x1_positions_per_step_k, sz_overlap_f64x1_prefix_hash_step_serial,
                               sz_overlap_f64x1_prefix_hash_step_tail_serial> {env};
     bench_result_t base = bench_unary(env, "sz_overlap_prefix_hashes_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(
         env, "sz_overlap_prefix_hashes_haswell" + suffix, validator,
         prefix_hashes_from_sz<sz_overlap_haswell_f64x4_positions_per_step_k, sz_overlap_f64x4_prefix_hash_step_haswell,
                               sz_overlap_f64x4_prefix_hash_step_tail_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(
         env, "sz_overlap_prefix_hashes_skylake" + suffix, validator,
         prefix_hashes_from_sz<sz_overlap_skylake_f64x8_positions_per_step_k, sz_overlap_f64x8_prefix_hash_step_skylake,
@@ -247,7 +246,7 @@ static void bench_overlap_window_hashes(environment_t const &env, overlap_query_
                               sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
                               sz_overlap_f64x1_window_hash_step_tail_serial> {env, query};
     bench_result_t base = bench_unary(env, "sz_overlap_window_hashes_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(
         env, "sz_overlap_window_hashes_haswell" + suffix, validator,
         window_hashes_from_sz<sz_overlap_haswell_f64x4_positions_per_step_k, sz_overlap_f64x4_prefix_hash_step_haswell,
@@ -255,7 +254,7 @@ static void bench_overlap_window_hashes(environment_t const &env, overlap_query_
                               sz_overlap_f64x4_window_hash_step_tail_haswell> {env, query})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(
         env, "sz_overlap_window_hashes_skylake" + suffix, validator,
         window_hashes_from_sz<sz_overlap_skylake_f64x8_positions_per_step_k, sz_overlap_f64x8_prefix_hash_step_skylake,
@@ -312,7 +311,7 @@ static void bench_overlap_window_lookups(environment_t const &env, overlap_query
                                sz_overlap_f64x1_window_hash_step_tail_serial, sz_overlap_u32x1_btree_sort_serial,
                                sz_overlap_u32x1_btree_probe_serial> {env, query};
     bench_result_t base = bench_unary(env, "sz_overlap_window_lookups_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(
         env, "sz_overlap_window_lookups_haswell" + suffix, validator,
         window_lookups_from_sz<sz_overlap_haswell_f64x4_positions_per_step_k, sz_overlap_f64x4_prefix_hash_step_haswell,
@@ -322,7 +321,7 @@ static void bench_overlap_window_lookups(environment_t const &env, overlap_query
                                sz_overlap_u32x8_btree_probe_haswell> {env, query})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(
         env, "sz_overlap_window_lookups_skylake" + suffix, validator,
         window_lookups_from_sz<sz_overlap_skylake_f64x8_positions_per_step_k, sz_overlap_f64x8_prefix_hash_step_skylake,
@@ -362,12 +361,12 @@ static void bench_overlap_query_preparation(environment_t const &env, overlap_qu
                                             std::string const &suffix) {
     auto validator = query_preparation_from_sz<sz_overlap_u32x1_btree_sort_serial> {query};
     bench_result_t base = bench_unary(env, "sz_overlap_query_preparation_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_overlap_query_preparation_haswell" + suffix, validator,
                 query_preparation_from_sz<sz_overlap_u32x8_btree_sort_haswell> {query})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_overlap_query_preparation_skylake" + suffix, validator,
                 query_preparation_from_sz<sz_overlap_u32x16_btree_sort_skylake> {query})
         .log(base);
@@ -433,12 +432,12 @@ static void bench_overlap_scores(environment_t const &env, overlap_query_t const
                                  std::string const &suffix) {
     auto validator = scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {env, query, candidates};
     bench_result_t base = bench_unary(env, "sz_overlap_scores_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_overlap_scores_haswell" + suffix, validator,
                 scores_from_sz<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell> {env, query, candidates})
         .log(base);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_overlap_scores_skylake" + suffix, validator,
                 scores_from_sz<sz_overlap_engine_init_skylake, sz_overlap_scores_skylake> {env, query, candidates})
         .log(base);
@@ -460,8 +459,8 @@ static void bench_overlap_query(environment_t const &env, std::size_t query_byte
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {

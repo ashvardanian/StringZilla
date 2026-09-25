@@ -27,9 +27,9 @@ The project is split into the following parts:
 
 For minimal test coverage, check the following scripts:
 
-- `test/stringzilla.cpp` - drives every per-ISA C kernel directly, spot-checking the C++ wrappers in the `_unit` tier.
-- `test/*.py` - tests the Python API against native strings, split per kernel family - `string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `utf8_*.py` - with shared helpers in `sz_helpers.py` and `utf8_helpers.py`.
-- `test/stringzilla.js`.
+- `test/main.cpp` - drives every per-ISA C kernel directly, spot-checking the C++ wrappers in the `_unit` tier.
+- `test/*.py` - tests the Python API against native strings, split per kernel family - `string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `utf8_*.py` - with shared helpers in `helpers.py` and `utf8_helpers.py`.
+- `test/main.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
 They have the broadest coverage of the library, and are the most important to keep up-to-date:
@@ -90,6 +90,23 @@ Modern IDEs, like VS Code, can be configured to automatically format the code on
 - For color-coded comments start the line with `!` for warnings or `?` for questions.
 - Sort the includes: standard libraries, third-party libraries, and only then internal project headers.
 
+Every all-caps name starts with the full project name, `STRINGZILLA_`.
+A trailing `_` marks a name as internal: it may change in any release, and nothing outside this repository may define or test it.
+A name without it is a public contract, either a switch you may set or a value you may read.
+
+| Family                       | Form                           | Example                              |
+| :--------------------------- | :----------------------------- | :----------------------------------- |
+| ISA tier, backend, GPU layer | `STRINGZILLA_TARGET_<TIER>`    | `STRINGZILLA_TARGET_HASWELL`         |
+| Dispatch mode                | `STRINGZILLA_RUNTIME_DISPATCH` |                                      |
+| Optional feature             | `STRINGZILLA_WITH_<FEATURE>`   | `STRINGZILLA_WITH_LIBC`              |
+| Permission for a liberty     | `STRINGZILLA_ALLOW_<LIBERTY>`  | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
+| Architecture fact            | `STRINGZILLA_ARCH_<ARCH>_`     | `STRINGZILLA_ARCH_X86_64_`           |
+| Operating-system fact        | `STRINGZILLA_OS_<OS>_`         | `STRINGZILLA_OS_LINUX_`              |
+| Toolchain fact               | `STRINGZILLA_HAS_<FEATURE>_`   | `STRINGZILLA_HAS_POSIX_EXTENSIONS_`  |
+
+Architectures are spelled `X86_64`, `X86_32`, `ARM64`, `RISCV64`, `PPC64`, `LOONGARCH64`, `S390X` and `WASM`.
+Every name in these families is always defined, as 0 or 1, and tested with `#if`, never with `defined(...)`.
+
 For C++ code:
 
 - Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
@@ -100,7 +117,6 @@ For C++ code:
 - Use lower-case names for everything, except settings/conditions macros.
   Function-like macros, that take arguments, should be lowercase as well.
 - In templates prefer `typename` over `class`.
-- Prepend "private" symbols with `_` underscore.
 
 For Python code:
 
@@ -197,16 +213,21 @@ Registration order is `_unit`, then `_rules` where it applies, then `_safety`, t
 
 The C++ and Python test suites support environment variables for reproducible stress testing and CI fuzzing:
 
-| Variable              | Description                                         | Default |
-| :-------------------- | :-------------------------------------------------- | ------: |
-| `SZ_TESTS_SEED`       | Seed for the random number generator                |  Random |
-| `SZ_TESTS_MULTIPLIER` | Scales all baseline iteration counts proportionally |     1.0 |
-| `SZ_TESTS_FILTER`     | ECMAScript regex over test names; only matches run  |   (all) |
+| Variable             | Description                                                                     |                         Default |
+| :------------------- | :------------------------------------------------------------------------------ | ------------------------------: |
+| `STRINGZILLA_SEED`   | Seed for the random number generator; `random` draws one, and the run prints it | C++ 42, Python 42, 0, 1, 314159 |
+| `STRINGZILLA_SCALE`  | Scales all baseline iteration counts proportionally                             |                             1.0 |
+| `STRINGZILLA_FILTER` | ECMAScript regex over C++ test names; only matches run                          |                           (all) |
+
+A value that does not parse stops the run with a message naming the variable, in both suites.
+A `STRINGZILLA_FILTER` that does not compile as a regex matches as a plain substring.
+Python runs each seeded test once per seed, so a numeric `STRINGZILLA_SEED` narrows the four defaults to one, `random` adds a drawn fifth, and pytest prints the list in its header.
+Python ignores `STRINGZILLA_FILTER`; select its tests with `pytest -k` instead.
 
 Each test has its own baseline iteration count tuned for its operation complexity.
-`SZ_TESTS_MULTIPLIER` is the suite's only tuning knob, and two helpers in `test/stringzilla.hpp` put work under it.
-`scale_iterations(baseline)` scales a loop count and floors at 1, so a baseline small enough for the floor to swallow the multiplier is effectively a constant - don't use tiny baselines on expensive loops.
-`sweep_stride(complete)` gives the step for walking an exhaustive space, such as every byte value, every byte pair, or every window phase.
+`STRINGZILLA_SCALE` is the suite's only tuning knob, and two members of the `test_context_t` a test takes put work under it.
+`context.iterations(baseline)` scales a loop count and floors at 1, so a baseline small enough for the floor to swallow the multiplier is effectively a constant - don't use tiny baselines on expensive loops.
+`context.sweep_stride(complete)` gives the step for walking an exhaustive space, such as every byte value, every byte pair, or every window phase.
 A sweep becomes complete at the `10x` stress point rather than at the default, so a default run samples every space evenly and a nightly or farm run covers them exhaustively.
 
 The intended operating points are a short default run for local iteration, `10x` for nightly CI, and `100x` for a stress farm.
@@ -214,30 +235,47 @@ Sizing is relative rather than absolute: each family gets a comparable share of 
 Each top-level test is also wall-clock timed and reported as `- name ... ok (N.NN s)`, so slow tests are obvious.
 
 ```bash
-# Run with a specific seed for reproducibility
-SZ_TESTS_SEED=42 build_debug/stringzilla_test_cpp20
+# Draw a fresh seed instead of the default 42; the run prints it
+STRINGZILLA_SEED=random build_debug/stringzilla_test_cpp20
 
 # Quick smoke test (10% of normal iterations)
-SZ_TESTS_MULTIPLIER=0.1 build_debug/stringzilla_test_cpp20
+STRINGZILLA_SCALE=0.1 build_debug/stringzilla_test_cpp20
 
 # Fast inner loop: only the UTF-8 tests, at 10% iterations, reproducibly
-SZ_TESTS_FILTER=utf8 SZ_TESTS_MULTIPLIER=0.1 SZ_TESTS_SEED=42 build_debug/stringzilla_test_cpp20
+STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 STRINGZILLA_SEED=42 build_debug/stringzilla_test_cpp20
 
 # Thorough CI stress test (10x normal iterations)
-SZ_TESTS_MULTIPLIER=10 build_debug/stringzilla_test_cpp20
+STRINGZILLA_SCALE=10 build_debug/stringzilla_test_cpp20
 
 # Combine both for CI fuzzing
-SZ_TESTS_SEED=12345 SZ_TESTS_MULTIPLIER=5 build_debug/stringzilla_test_cpp20
+STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 build_debug/stringzilla_test_cpp20
 
-# Python tests also respect SZ_TESTS_SEED
-SZ_TESTS_SEED=42 pytest test/ -v
+# Python tests also respect STRINGZILLA_SEED and STRINGZILLA_SCALE
+STRINGZILLA_SEED=random pytest test/ -v
+
+# Python ignores STRINGZILLA_FILTER, so select its tests by name instead
+pytest test/ -k utf8
 ```
 
-When a test fails, note the seed from the output and re-run with that exact seed to reproduce the issue.
+When a C++ test fails a `verify` or throws, the harness prints a `rerun:` line to stderr under the failure, naming the seed, a filter that selects only that test, and the binary, then moves on to the next test:
+
+```text
+- test_utf8_runes_all ... FAILED: verification failed
+  rerun: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^test_utf8_runes_all$' build_debug/stringzilla_test_cpp20
+```
+
+The run still exits with 1 at the end.
+A library assertion or a crash stops the run instead, printing a backtrace where the C library can, and the last `- <name> ...` line names the test to put into the template printed at startup:
+
+```text
+- Seed: 42
+- Rerun one test: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^<name>$' build_debug/stringzilla_test_cpp20
+```
+
 This is particularly useful for debugging SIMD edge cases that only manifest with specific input patterns.
 
-`SZ_TESTS_SEED` selects the seed, which is printed at startup, and `run_test` reseeds the shared generator per test from the test name.
-A test's inputs therefore never depend on which tests ran before it, so `SZ_TESTS_SEED` together with `SZ_TESTS_FILTER` is a faithful reproduction recipe.
+`STRINGZILLA_SEED` selects the seed, and `run_test` hands each test its own generator, seeded from that seed and the test name.
+A test's inputs therefore never depend on which tests ran before it, so `STRINGZILLA_SEED` together with `STRINGZILLA_FILTER` is a faithful reproduction recipe.
 Assertions use `verify`, `let_verify`, `scope_verify`, and `throws_verify`, deliberately independent of `NDEBUG`, because a plain `assert` compiles out in Release builds and silently disables the checks.
 
 The scalable-vector backends must stay correct at every hardware vector length, and the CI `test_cross_qemu` matrix sweeps them all.
@@ -248,14 +286,14 @@ sudo apt install qemu-user gcc-x86-64-linux-gnu gcc-riscv64-linux-gnu gcc-loonga
 
 # Sweep SVE vector lengths on the native Arm binary (sve-max-vq is VL/128)
 for vq in 1 2 4; do
-  SZ_TESTS_FILTER=utf8 SZ_TESTS_MULTIPLIER=0.1 qemu-aarch64 -cpu max,sve-max-vq=$vq build_release/stringzilla_test_cpp20
+  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 qemu-aarch64 -cpu max,sve-max-vq=$vq build_release/stringzilla_test_cpp20
 done
 
 # NEON-only dispatch (otherwise SVE2 always wins and NEON is never exercised)
 qemu-aarch64 -cpu max,sve=off build_release/stringzilla_test_cpp20
 
 # Cross-compile a single-TU probe against another backend and run it emulated
-x86_64-linux-gnu-gcc -O2 -mavx2 -mbmi -mbmi2 -mpopcnt -DSZ_USE_HASWELL=1 -Iinclude probe.c -o probe -static
+x86_64-linux-gnu-gcc -O2 -mavx2 -mbmi -mbmi2 -mpopcnt -DSTRINGZILLA_TARGET_HASWELL=1 -Iinclude probe.c -o probe -static
 qemu-x86_64 -cpu max ./probe
 ```
 
@@ -339,11 +377,11 @@ The benchmark harness reads these environment variables:
 | `STRINGWARS_TOKENS`          | Tokenization mode: `file`, `lines`, `words`, or a positive integer for N-grams               |          per-benchmark |
 | `STRINGWARS_UNIQUE`          | `1` sorts the tokenized set and drops duplicates before benchmarking                         |                    off |
 | `STRINGWARS_FILTER`          | Regex over benchmark names; only matching backends run                                       |                  (all) |
-| `STRINGWARS_DURATION`        | Seconds per benchmark (longer = steadier numbers)                                            |   1 debug / 10 release |
-| `STRINGWARS_SEED`            | Non-zero shuffles tokens; `0` keeps deterministic order                                      |                      0 |
+| `STRINGWARS_MAX_SECONDS`     | Whole seconds per benchmark (longer = steadier numbers)                                      |   1 debug / 10 release |
+| `STRINGWARS_SEED`            | A positive integer shuffles the tokens with that seed; unset keeps their order               |        unset, in order |
 | `STRINGWARS_BATCH`           | Comma-separated batch-size override, which skips the largest sweep                           |        backend default |
 | `STRINGWARS_STRESS`          | Run the correctness stress phase, `0` to skip while timing                                   |                     on |
-| `STRINGWARS_STRESS_DURATION` | Seconds per stress-test                                                                      |   1 debug / 10 release |
+| `STRINGWARS_STRESS_DURATION` | Whole seconds per stress-test                                                                |   1 debug / 10 release |
 | `STRINGWARS_STRESS_DIR`      | Directory for stress-test failure logs                                                       |                   .tmp |
 | `STRINGWARS_STRESS_LIMIT`    | Number of stress-test failures tolerated before aborting                                     |                      1 |
 
@@ -352,13 +390,13 @@ For a fast inner loop, scope to one backend on a small dataset, cap the dataset 
 ```bash
 STRINGWARS_FILTER='sz_find' STRINGWARS_DATASET=leipzig1M.txt \
     STRINGWARS_DATASET_LIMIT=65536 STRINGWARS_BATCH=1024 \
-    STRINGWARS_STRESS=0 STRINGWARS_DURATION=1 \
+    STRINGWARS_STRESS=0 STRINGWARS_MAX_SECONDS=1 \
     build_release/stringzilla_bench_find_cpp20
 ```
 
 Throughput is a time-bounded measurement: absolute GiB/s drifts ±10-15% on a loaded machine, while the ratio between two backends in the _same_ run stays stable.
-Compare A/B within one run; raise `STRINGWARS_DURATION` and use a quiet machine when you need stable absolute numbers.
-The work itself is deterministic at seed 0.
+Compare A/B within one run; raise `STRINGWARS_MAX_SECONDS` and use a quiet machine when you need stable absolute numbers.
+The work itself is deterministic: without `STRINGWARS_SEED` the tokens keep their order, and a given seed always shuffles them the same way.
 
 Each benchmark originates from an identically named single-source file in the `bench/` directory.
 All of them feature file-level documentation, and are designed to be self-explanatory.
@@ -561,7 +599,7 @@ ctest --test-dir build_wasm # runs each .wasm under Wasmtime
 ```
 
 A module carries one SIMD tier, so the relaxed-SIMD `v128relaxed` build above is a separate artifact from the strict `v128` one.
-Pass `-DSZ_USE_V128RELAXED=0` for the strict module; the override zeroes the macro and drops `-mrelaxed-simd` at once, so no relaxed opcode reaches the binary.
+Pass `-DSTRINGZILLA_TARGET_V128RELAXED=0` for the strict module; the override zeroes the macro and drops `-mrelaxed-simd` at once, so no relaxed opcode reaches the binary.
 Shared libraries stay off in both configurations, since WASI has no dynamic loader.
 
 ## CUDA
@@ -661,10 +699,11 @@ You may need root privileges for multi-architecture builds:
 sudo $(which cibuildwheel) --platform linux
 ```
 
-To avoid QEMU issues on SVE and some other uncommon instructions, you can inform the PyTest suite, that it's running in an emulated environment:
+To avoid QEMU issues on SVE, tell the PyTest suite that it runs emulated, and it masks out the SVE capabilities.
+`STRINGZILLA_IN_QEMU` set to anything but `0` or `false` turns that on:
 
 ```bash
-SZ_IS_QEMU_=1 sudo $(which cibuildwheel) --platform linux --archs s390x
+STRINGZILLA_IN_QEMU=1 sudo $(which cibuildwheel) --platform linux --archs s390x
 ```
 
 On Windows and macOS, to avoid frequent path resolution issues, you may want to use:

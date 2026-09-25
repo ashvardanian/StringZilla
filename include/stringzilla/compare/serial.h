@@ -15,10 +15,10 @@
 extern "C" {
 #endif
 
-SZ_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_cptr_t const a_end = a + length;
-#if SZ_USE_MISALIGNED_LOADS
-    if (length >= SZ_SWAR_THRESHOLD) {
+#if STRINGZILLA_ALLOW_MISALIGNED_LOADS
+    if (length >= STRINGZILLA_SWAR_THRESHOLD) {
         sz_u64_vec_t a_vec, b_vec;
         for (; a + 8 <= a_end; a += 8, b += 8) {
             a_vec = sz_u64_load(a);
@@ -31,11 +31,12 @@ SZ_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t le
     return (sz_bool_t)(a_end == a);
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                       sz_size_t b_length) {
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
-#if SZ_USE_MISALIGNED_LOADS && !SZ_IS_BIG_ENDIAN_
+#if STRINGZILLA_ALLOW_MISALIGNED_LOADS && !STRINGZILLA_ARCH_BIG_ENDIAN_
     for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
         a_vec = sz_u64_load(a);
         b_vec = sz_u64_load(b);

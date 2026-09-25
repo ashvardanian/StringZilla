@@ -11,10 +11,10 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 #include <cstddef> // `std::size_t`
 
@@ -22,9 +22,9 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include <fmt/format.h>
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `harness.hpp`)
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
+using namespace sz::test;
 
 #pragma region Unit
 
@@ -52,24 +52,22 @@ static utf8_unit_case_t const utf8_graphemes_unit_cases[] = {
  *  equivalence drivers all iterate this one ladder so their ISA coverage stays in lockstep. */
 static utf8_segment_backend_t const utf8_graphemes_backends[] = {
     {"dispatched", sz_utf8_graphemes},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_utf8_graphemes_haswell},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_utf8_graphemes_icelake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_utf8_graphemes_neon},
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     {"sve2", sz_utf8_graphemes_sve2},
 #endif
 };
 
 /** Known-answer grapheme-cluster vectors via dispatched, serial, each ISA, and the C++ range. */
 void test_utf8_graphemes_unit() {
-    fmt::println("  - testing UTF-8 grapheme-cluster known-answer vectors...");
-
     check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, span_over(utf8_graphemes_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
         check_utf8_segment_unit_("grapheme", backend.finder, span_over(utf8_graphemes_unit_cases));
@@ -268,8 +266,6 @@ static utf8_segment_corpora_t utf8_graphemes_corpora_() {
 
 /** Rule-coverage gate: every GB rule motif runs and agrees serial-vs-ISA at window phases. */
 void test_utf8_graphemes_rules() {
-    fmt::println("  - testing UTF-8 grapheme rule-coverage matrix...");
-
     // One motif per UAX-29 Grapheme_Cluster_Break rule (break or no-break direction).
     utf8_rule_case_t const rule_cases[] = {
         {"GB3", utf8_rule_joins_k, "\r\n"_sv},                                  // CR x LF (no break)
@@ -306,12 +302,10 @@ void test_utf8_graphemes_rules() {
 #pragma region Safety
 
 /** Malformed-input safety of the UTF-8 grapheme kernels: serial and every compiled ISA. */
-void test_utf8_graphemes_safety() {
-    fmt::println("  - testing malformed-input safety of UTF-8 grapheme kernels...");
+void test_utf8_graphemes_safety(test_context_t &context) {
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_graphemes_serial}};
-    check_utf8_segment_safety_("grapheme", span_over(serial_only));
-    check_utf8_segment_safety_("grapheme", span_over(utf8_graphemes_backends));
-    fmt::println("    grapheme safety passed!");
+    check_utf8_segment_safety_(context, "grapheme", span_over(serial_only));
+    check_utf8_segment_safety_(context, "grapheme", span_over(utf8_graphemes_backends));
 }
 
 #pragma endregion Safety
@@ -319,10 +313,10 @@ void test_utf8_graphemes_safety() {
 #pragma region Drivers
 
 /** Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
-void test_utf8_graphemes_all() {
+void test_utf8_graphemes_all(test_context_t &context) {
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
-    check_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
-                                    scale_iterations(8)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(context, sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
+                                    context.iterations(8)); // This family's share of the suite budget
 
     // The streaming segmenter against the per-position GB1-GB999 transcription, which nothing else calls.
     for (sz::string_view_t const motif : span_over(utf8_graphemes_motifs))

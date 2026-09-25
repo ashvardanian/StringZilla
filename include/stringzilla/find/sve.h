@@ -19,7 +19,7 @@ extern "C" {
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
  *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs. */
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -27,7 +27,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const n_scalar = *needle;
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
@@ -45,10 +45,10 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystac
         progress += vector_bytes;
     } while (progress < haystack_length);
     // No match found.
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const n_scalar = *needle;
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
@@ -68,14 +68,14 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haysta
         progress += vector_bytes;
     } while (progress < haystack_length);
     // No match found.
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                      sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length) {
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_sve(haystack, haystack_length, needle);
 
     // Determine the number of bytes in an SVE vector.
@@ -99,7 +99,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_len
                 return haystack + progress + svcntp_b8(pred_b8x, svbrkb_b_z(pred_b8x, matches_b8x));
             progress += vector_bytes;
         } while (progress < (haystack_length - 1));
-        return SZ_NULL_CHAR;
+        return STRINGZILLA_NULL_CHAR;
     }
     else if (needle_length == 3) {
         // Broadcast needle characters.
@@ -120,7 +120,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_len
                 return haystack + progress + svcntp_b8(pred_b8x, svbrkb_b_z(pred_b8x, matches_b8x));
             progress += vector_bytes;
         } while (progress < (haystack_length - 2));
-        return SZ_NULL_CHAR;
+        return STRINGZILLA_NULL_CHAR;
     }
     else {
         // For longer needles we first pick "anomalies" (i.e. informative offsets)
@@ -154,15 +154,15 @@ SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_len
             }
             progress += vector_bytes;
         } while (progress < haystack_length - (needle_length - 1));
-        return SZ_NULL_CHAR;
+        return STRINGZILLA_NULL_CHAR;
     }
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length) {
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_rfind_byte_sve(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -200,7 +200,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_le
         }
         progress += vector_bytes;
     } while (progress < candidates);
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 #if defined(__clang__)
@@ -208,7 +208,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_le
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE
+#endif // STRINGZILLA_TARGET_SVE
 
 #ifdef __cplusplus
 }

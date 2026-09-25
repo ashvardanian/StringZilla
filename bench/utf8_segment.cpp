@@ -27,7 +27,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
@@ -46,8 +46,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 #include "stringzilla/utf8_wordbreaks.h" // `sz_utf8_wordbreaks`
 #include "stringzilla/utf8_graphemes.h"  // `sz_utf8_graphemes`
@@ -90,36 +89,36 @@ struct utf8_word_forward_from_sz {
 void bench_utf8_wordbreaks(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_wordbreaks_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_wordbreaks_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_wordbreaks_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_wordbreaks_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_wordbreaks_neon", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_neon> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_wordbreaks_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_sve2> {env})
         .log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_wordbreaks_v128", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_v128> {env})
         .log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_wordbreaks_rvv", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_rvv> {env})
         .log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_wordbreaks_powervsx", base_v,
                 utf8_word_forward_from_sz<sz_utf8_wordbreaks_powervsx> {env})
         .log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_wordbreaks_lasx", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_lasx> {env})
         .log(base);
 #endif
@@ -128,19 +127,19 @@ void bench_utf8_wordbreaks(environment_t const &env) {
 void bench_utf8_graphemes(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_graphemes_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_graphemes_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_graphemes_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_graphemes_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_graphemes_neon", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_neon> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_graphemes_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_sve2> {env})
         .log(base);
 #endif
@@ -149,19 +148,19 @@ void bench_utf8_graphemes(environment_t const &env) {
 void bench_utf8_sentences(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_sentences_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_sentences_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_sentences_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_sentences_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_sentences_neon", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_neon> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_sentences_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_sve2> {env})
         .log(base);
 #endif
@@ -170,19 +169,19 @@ void bench_utf8_sentences(environment_t const &env) {
 void bench_utf8_linebreaks(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_linebreaks_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_linebreaks_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_linebreaks_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_linebreaks_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_linebreaks_neon", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_neon> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_linebreaks_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_sve2> {env})
         .log(base);
 #endif
@@ -192,8 +191,8 @@ void bench_utf8_linebreaks(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla UTF-8 Segmentation Benchmarks!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

@@ -1,5 +1,5 @@
 /**
- *  @file test/stringzilla.hpp
+ *  @file test/harness.hpp
  *  @author Ash Vardanian
  *  @date January 7, 2024
  *  @brief Helper structures and functions for C++ unit- and stress-tests.
@@ -9,13 +9,14 @@
  *  The test infrastructure supports the following environment variables for reproducible stress
  *  testing and fuzzing:
  *
- *  - @c SZ_TESTS_SEED : Seed for the random number generator. If not set, a random seed is
- *    generated using @c std::random_device. The seed used is always printed at startup, so any
- *    run can be reproduced.
- *  - @c SZ_TESTS_MULTIPLIER : Multiplier for stress-test iteration counts, 1.0 by default. It
+ *  - @c STRINGZILLA_SEED : Seed for the random number generator, 42 by default; @c random draws
+ *    one from @c std::random_device. The seed is printed at startup beside a rerun template, and
+ *    every failure @c run_test catches prints a @c rerun line reproducing it.
+ *  - @c STRINGZILLA_SCALE : Multiplier for stress-test iteration counts, 1.0 by default. It
  *    scales each test's own baseline, e.g. 0.1 for quick smoke tests, 10 for thorough CI fuzzing.
- *  - @c SZ_TESTS_FILTER : ECMAScript regex matched against test names; only matching tests run,
- *    e.g. `SZ_TESTS_FILTER=utf8`. Unset or empty runs everything. Honored by @c run_test.
+ *  - @c STRINGZILLA_FILTER : ECMAScript regex matched against test names; only matching tests run,
+ *    e.g. `STRINGZILLA_FILTER=utf8`. Unset or empty runs everything, and a pattern that does not
+ *    compile matches as a plain substring. Honored by @c run_test.
  *
  *  @section test_driver_tiers Driver Tiers
  *
@@ -26,12 +27,12 @@
  *  take a @c check_ prefix and a trailing underscore, and are never registered in a @c main.
  *
  *  - @c _unit : Known-answer vectors against an external ground truth. Fixed cost: it must run
- *    identically at every @c SZ_TESTS_MULTIPLIER, so no randomness and no sweeps.
+ *    identically at every @c STRINGZILLA_SCALE, so no randomness and no sweeps.
  *  - @c _equivalence : A reference against a candidate over generated corpora - serial against
  *    each compiled backend, or the library against `std::`. This tier owns randomness.
  *  - @c _safety : Malformed, adversarial and boundary inputs. Asserts survival, bounds and stated
  *    refusals - never answers, since a wrong answer is not what is under test here. Scales with
- *    @c SZ_TESTS_MULTIPLIER alongside @c _equivalence; only @c _unit is pinned.
+ *    @c STRINGZILLA_SCALE alongside @c _equivalence; only @c _unit is pinned.
  *  - @c _all : Walks the family's backend table and drives the tiers above. Holds no assertions
  *    of its own; a literal here belongs in @c _unit.
  *  - @c _rules : Annex rule coverage, where a family transcribes a published spec: UAX-29, UAX-14.
@@ -39,43 +40,50 @@
  *  @section test_example_usage Example Usage
  *
  *  @code{.sh}
- *  # Run with a specific seed for reproducibility
- *  SZ_TESTS_SEED=42 ./build_release/stringzilla_test_cpp20
+ *  # Draw a fresh seed instead of the default 42
+ *  STRINGZILLA_SEED=random ./build_release/stringzilla_test_cpp20
  *
  *  # Quick smoke test (10% of normal iterations)
- *  SZ_TESTS_MULTIPLIER=0.1 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test_cpp20
  *
  *  # Fast inner loop: only the UTF-8 tests, at 10% iterations
- *  SZ_TESTS_FILTER=utf8 SZ_TESTS_MULTIPLIER=0.1 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test_cpp20
  *
  *  # Thorough CI stress test (10x normal iterations)
- *  SZ_TESTS_MULTIPLIER=10 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_SCALE=10 ./build_release/stringzilla_test_cpp20
  *
  *  # Combine both for CI fuzzing
- *  SZ_TESTS_SEED=12345 SZ_TESTS_MULTIPLIER=5 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 ./build_release/stringzilla_test_cpp20
  *  @endcode
  */
 #pragma once
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstdint> // `std::uintptr_t` for cache-line alignment
 #include <cstdio>  // `std::FILE`, `std::fopen`, `stderr`
-#include <cstdlib> // `std::getenv`, `std::strtoul`, `std::malloc`, `std::free`
-#include <cstring> // `std::strcmp`
+#include <cstdlib> // `std::getenv`, `std::strtod`, `std::abort`, `std::malloc`, `std::free`
+#include <cstring> // `std::strcmp`, `std::strlen`
 
-#include <algorithm>   // `std::copy`, `std::generate`
-#include <chrono>      // `std::chrono::steady_clock` for per-test timing
-#include <exception>   // `std::exception`
-#include <random>      // `std::random_device`
-#include <regex>       // `std::regex_search` for `SZ_TESTS_FILTER`
-#include <span>        // `std::span`, `std::as_bytes`
-#include <string>      // `std::string`
-#include <string_view> // `std::string_view`
-#include <type_traits> // `std::is_enum_v`
-#include <vector>      // `std::vector`
+#include <algorithm>    // `std::copy`, `std::generate`
+#include <charconv>     // `std::from_chars`
+#include <chrono>       // `std::chrono::steady_clock` for per-test timing
+#include <exception>    // `std::exception`
+#include <optional>     // `std::optional`
+#include <random>       // `std::random_device`
+#include <regex>        // `std::regex_search` for `STRINGZILLA_FILTER`
+#include <span>         // `std::span`, `std::as_bytes`
+#include <string>       // `std::string`
+#include <string_view>  // `std::string_view`
+#include <system_error> // `std::errc`
+#include <type_traits>  // `std::is_enum_v`
+#include <vector>       // `std::vector`
 
+#if defined(_WIN32)
+#include <io.h> // `_write`
+#else
+#include <unistd.h> // `write`, `STDERR_FILENO`
+#endif
 #if defined(__linux__) && defined(__GLIBC__)
 #include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
-#include <unistd.h>   // `STDERR_FILENO`
 #endif
 
 #include <fmt/format.h>
@@ -113,14 +121,21 @@ std::string render_operand(value_type_ const &value) {
 /** The bytes of @p text, space-separated, printing a hex dump under @c {:02X}. */
 inline auto hex_bytes(std::string_view text) noexcept { return fmt::join(std::as_bytes(std::span(text)), " "); }
 
+/** What a failed @c verify throws once its diagnostic is printed, for @c run_test to report. */
+struct test_failure_t : std::exception {
+    char const *what() const noexcept override { return "verification failed"; }
+};
+
 /** The state of one @c verify: its leftmost comparison's operands, rendered only if it fails. */
 struct assertion_t {
     std::string expansion;
 
-    [[noreturn]] void fail(char const *expression, char const *file, int line) const noexcept {
+    /** Throws outside the checking function, so a @c verify in a @c noexcept one terminates without
+     *  tripping GCC's @c -Wterminate. */
+    [[noreturn]] void fail(char const *expression, char const *file, int line) const {
         fmt::println(stderr, "Test verification failed: {}, {}:{}", expression, file, line);
         if (!expansion.empty()) fmt::println(stderr, "  with expansion: {}", expansion);
-        std::abort();
+        throw test_failure_t {};
     }
 };
 
@@ -172,21 +187,22 @@ struct left_operand {
 #endif
 };
 
-/** Binds tighter than any comparison, so `assertion <= a == b` captures @c a before @c == runs. */
+/** Binds tighter than any comparison without being one, so `assertion <=> a == b` captures @c a
+ *  before @c == runs, and GCC's @c -Wparentheses sees no comparison nested in another. */
 template <typename left_type_>
-left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &value) noexcept {
+left_operand<left_type_> operator<=>(assertion_t &assertion, left_type_ const &value) noexcept {
     return {assertion, value};
 }
 
 } // namespace ashvardanian::stringzilla::test
 
-/** Test-suite verification - always active, regardless of @c NDEBUG or @c SZ_DEBUG. Unlike
+/** Test-suite verification - always active, regardless of @c NDEBUG or @c STRINGZILLA_DEBUG. Unlike
  *  @c sz_assert_, a debug-only invariant check for the library, a test's oracle must never be a
  *  no-op. A failing comparison prints both of its operands. */
-#define verify(condition)                                                                      \
-    do {                                                                                       \
-        ::ashvardanian::stringzilla::test::assertion_t sz_assertion_;                          \
-        if (!(sz_assertion_ <= condition)) sz_assertion_.fail(#condition, __FILE__, __LINE__); \
+#define verify(condition)                                                                       \
+    do {                                                                                        \
+        ::ashvardanian::stringzilla::test::assertion_t sz_assertion_;                           \
+        if (!(sz_assertion_ <=> condition)) sz_assertion_.fail(#condition, __FILE__, __LINE__); \
     } while (0)
 
 /**
@@ -229,11 +245,11 @@ left_operand<left_type_> operator<=(assertion_t &assertion, left_type_ const &va
 #pragma region Backend Tables
 
 /**
- *  @brief Reports which backend broke a check, then aborts through the suite's oracle.
+ *  @brief Reports which backend broke a check, then fails the test through the suite's oracle.
  *  @param[in] name The row's spelling in its family's backend table.
  *  @param[in] what What the row disagreed with: its oracle, known answer, or reference backend.
  */
-inline void fail_backend_(char const *name, char const *what) noexcept {
+inline void fail_backend_(char const *name, char const *what) {
     fmt::println(stderr, "Backend {} failed: {}", name, what);
     verify(false && "A backend disagreed with its oracle, its known answer, or the reference");
 }
@@ -253,7 +269,7 @@ namespace ashvardanian::stringzilla::test {
 
 using arrow_strings_view_t = arrow_strings_view<char, sz_size_t>;
 
-#if !SZ_USE_CUDA
+#if !STRINGZILLA_TARGET_CUDA
 using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, std::allocator<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
@@ -263,7 +279,7 @@ template <typename value_type_>
 using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 #endif
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
 /**
  *  @brief Page-locked host memory, which the driver reports as host and every engine refuses.
@@ -292,7 +308,7 @@ inline CUresult copy_device_to_host(device_vector<value_type_> const &source, sp
     if (destination.size() < source.size()) return CUDA_ERROR_INVALID_VALUE;
     return cuMemcpyDtoH(destination.data(), (CUdeviceptr)source.data(), source.size() * sizeof(value_type_));
 }
-#endif // SZ_USE_CUDA
+#endif // STRINGZILLA_TARGET_CUDA
 
 /**
  *  @brief Copies @p texts into unified memory a CUDA kernel can reach, as one span per string.
@@ -332,83 +348,111 @@ inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexce
     return content;
 }
 
-/**
- *  @brief Returns the seed used for the global random number generator.
- *
- *  If @c SZ_TESTS_SEED is set, returns its value. Otherwise, generates a random seed using
- *  @c std::random_device. The seed is cached after the first call.
- */
-inline std::mt19937::result_type global_random_seed() noexcept {
-    static std::mt19937::result_type seed = []() {
-        char const *seed_env = std::getenv("SZ_TESTS_SEED");
-        if (seed_env && seed_env[0] != '\0')
-            return static_cast<std::mt19937::result_type>(std::strtoul(seed_env, nullptr, 10));
-        std::random_device seed_source;
-        return static_cast<std::mt19937::result_type>(seed_source());
-    }();
-    return seed;
-}
-
-/** Returns true if the seed was set via environment variable. */
-inline bool global_random_seed_from_env() noexcept {
-    char const *seed_env = std::getenv("SZ_TESTS_SEED");
-    return seed_env && seed_env[0] != '\0';
-}
-
-/**
- *  @brief Returns a reference to the global random number generator.
- *
- *  The generator is seeded once using @c global_random_seed(), which respects the @c SZ_TESTS_SEED
- *  environment variable for reproducible testing.
- */
-inline std::mt19937 &global_random_generator() noexcept {
-    static std::mt19937 generator(global_random_seed());
-    return generator;
-}
-
-/**
- *  @brief Returns the multiplier for stress-test iteration counts.
- *
- *  Reads from the @c SZ_TESTS_MULTIPLIER environment variable. Defaults to 1.0. Use values < 1.0
- *  for quick smoke tests, > 1.0 for thorough stress testing in CI.
- */
-inline double get_iterations_multiplier() noexcept {
-    static double multiplier = []() {
-        char const *env = std::getenv("SZ_TESTS_MULTIPLIER");
-        if (env && env[0] != '\0') {
-            double parsed = std::strtod(env, nullptr);
-            if (parsed > 0.0) return parsed;
+/** Reads the environment variable @p name as @p value_type_, or returns @p fallback when it is
+ *  unset or empty; aborts naming the variable when the text does not parse, so a typo never becomes
+ *  a silent default. */
+template <typename value_type_>
+[[nodiscard]] value_type_ env_variable(char const *name, value_type_ fallback) noexcept {
+    char const *const text = std::getenv(name);
+    if (!text || !*text) return fallback;
+    if constexpr (std::is_same_v<value_type_, char const *>) return text;
+    else if constexpr (std::is_same_v<value_type_, bool>) return std::strcmp(text, "0") && std::strcmp(text, "false");
+    else {
+        value_type_ value {};
+        char *stop = nullptr;
+        if constexpr (std::is_floating_point_v<value_type_>) value = static_cast<value_type_>(std::strtod(text, &stop));
+        else {
+            auto const [end, error] = std::from_chars(text, text + std::strlen(text), value);
+            stop = error == std::errc {} ? const_cast<char *>(end) : const_cast<char *>(text);
         }
-        return 1.0;
-    }();
-    return multiplier;
+        if (stop != text && *stop == '\0') return value;
+        fmt::println(stderr, "{}=\"{}\" does not parse", name, text);
+        std::abort();
+    }
+}
+
+/** The run's knobs, read once by @c main and passed to every @c run_test. */
+struct test_environment_t {
+    std::uint32_t seed = 42;
+    double scale = 1.0;
+    char const *filter = nullptr;      // ? Points into `environ`, alive for the whole run
+    std::optional<std::regex> pattern; // ? The compiled @c filter, empty when it does not compile
+    char const *program = "";          // ? `argv[0]`, which closes every rerun line
+
+    /** Whether @c filter selects @p name: as a regex, or as a substring if it does not compile. */
+    bool selects(std::string_view name) const {
+        if (!filter) return true;
+        if (pattern) return std::regex_search(name.begin(), name.end(), *pattern);
+        return name.find(filter) != std::string_view::npos;
+    }
+};
+
+/** Reads @c STRINGZILLA_SEED, @c STRINGZILLA_SCALE and @c STRINGZILLA_FILTER, drawing a seed for
+ *  @c random; @p program is `argv[0]`. */
+inline test_environment_t read_test_environment(char const *program) {
+    test_environment_t environment;
+    environment.program = program;
+    bool const random_seed = std::strcmp(env_variable("STRINGZILLA_SEED", ""), "random") == 0;
+    environment.seed = random_seed ? std::random_device {}() : env_variable("STRINGZILLA_SEED", environment.seed);
+    environment.scale = env_variable("STRINGZILLA_SCALE", environment.scale);
+    environment.filter = env_variable("STRINGZILLA_FILTER", environment.filter);
+    try {
+        if (environment.filter) environment.pattern.emplace(environment.filter);
+    }
+    catch (std::regex_error const &) {
+        // ? `selects` then matches the pattern as a plain substring
+    }
+    return environment;
 }
 
 /**
- *  @brief Scales a baseline iteration count by the global multiplier.
+ *  @brief The seed of the test named @p name in a run seeded with @p seed.
  *
- *  Use this to wrap hardcoded iteration counts in stress tests, e.g.:
- *
- *  @code{.cpp}
- *  for (std::size_t i = 0; i < scale_iterations(1000); ++i) { ... }
- *  @endcode
- *
- *  @param[in] baseline The default number of iterations for this test.
- *  @return The scaled iteration count, guaranteed to be at least 1.
+ *  FNV-1a over @c std::uint32_t is exact on every platform, like @c std::seed_seq, and never
+ *  touches the kernels under test, unlike @c sz_hash. The harness must not draw its inputs through
+ *  the kernels it validates, and it must land on the same stream everywhere, or
+ *  `STRINGZILLA_SEED=7` stops meaning the same bytes on Arm as it does on x86.
  */
-inline std::size_t scale_iterations(std::size_t baseline) noexcept {
-    double scaled = baseline * get_iterations_multiplier();
-    return scaled < 1.0 ? 1 : static_cast<std::size_t>(scaled);
+constexpr std::uint32_t mix_seed(std::uint32_t seed, std::string_view name) noexcept {
+    std::uint32_t mixed = seed ^ 2166136261u;
+    for (char const character : name) mixed = (mixed ^ static_cast<unsigned char>(character)) * 16777619u;
+    return mixed;
 }
 
-/** Baseline for a loop whose work grows with the square of its trip count, like a sweep over
- *  lengths that re-scans a growing buffer, so doubling the multiplier only doubles the work. */
-inline std::size_t scale_iterations_quadratic(std::size_t baseline) noexcept {
-    std::size_t const work = scale_iterations(baseline * baseline);
-    std::size_t bound = 1;
-    while (bound * bound < work) ++bound;
-    return bound;
-}
+/** What one test draws its inputs from and sizes its loops by, built for it by @c run_test. */
+struct test_context_t {
+    std::mt19937 generator;
+    double scale = 1.0;
+
+    /** Scales a @p baseline iteration count by @c STRINGZILLA_SCALE, never below 1. */
+    std::size_t iterations(std::size_t baseline) const noexcept {
+        double const scaled = baseline * scale;
+        return scaled < 1.0 ? 1 : static_cast<std::size_t>(scaled);
+    }
+
+    /** Baseline for a loop whose work grows with the square of its trip count, like a sweep over
+     *  lengths that re-scans a growing buffer, so doubling the multiplier only doubles the work. */
+    std::size_t iterations_quadratic(std::size_t baseline) const noexcept {
+        std::size_t const work = iterations(baseline * baseline);
+        std::size_t bound = 1;
+        while (bound * bound < work) ++bound;
+        return bound;
+    }
+
+    /**
+     *  @brief Step for walking an exhaustive space, so the multiplier dials sweeps, not just loops.
+     *
+     *  Striding rather than truncating keeps the far end of the space - where the window-edge cases
+     *  live - reachable at a low multiplier. The sweep completes at the 10× stress point rather
+     *  than at the default, so a default run samples every space and a stress run covers them.
+     */
+    std::size_t sweep_stride(std::size_t complete) const noexcept {
+        double const coverage = scale / 10.0;
+        if (coverage >= 1.0 || complete == 0) return 1;
+        std::size_t const wanted = static_cast<std::size_t>(complete * coverage);
+        return wanted < 1 ? complete : complete / wanted;
+    }
+};
 
 /** The @p step -th value of a rotation over @p count items that also advances a phase each full
  *  turn, so crossing it with another rotation of the same length still reaches every pair. */
@@ -420,20 +464,6 @@ inline std::size_t rotating_index(std::size_t step, std::size_t count) noexcept 
 template <typename value_type_, std::size_t count_>
 constexpr span<value_type_ const> span_over(value_type_ const (&array)[count_]) noexcept {
     return span<value_type_ const>(array, count_);
-}
-
-/**
- *  @brief Step for walking an exhaustive space, so the multiplier dials sweeps as well as loops.
- *
- *  Striding rather than truncating keeps the far end of the space - where the window-edge cases
- *  live - reachable at a low multiplier. The sweep becomes complete at the 10× stress point rather
- *  than at the default, so a default run samples every space and a stress run covers them.
- */
-inline std::size_t sweep_stride(std::size_t complete) noexcept {
-    double const coverage = get_iterations_multiplier() / 10.0;
-    if (coverage >= 1.0 || complete == 0) return 1;
-    std::size_t const wanted = static_cast<std::size_t>(complete * coverage);
-    return wanted < 1 ? complete : complete / wanted;
 }
 
 template <typename string_type_, typename other_string_type_>
@@ -463,19 +493,21 @@ struct uniform_u8_distribution_t {
     }
 };
 
-inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) noexcept {
-    uniform_u8_distribution_t distribution(0, static_cast<char>(cardinality - 1));
-    std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
+/** Fills @p text with bytes drawn uniformly from @p alphabet, or from 1 to 255 when it is empty. */
+inline void randomize_string(std::mt19937 &generator, std::span<char> text, std::string_view alphabet = {}) noexcept {
+    if (alphabet.empty()) {
+        uniform_u8_distribution_t distribution;
+        std::generate(text.begin(), text.end(), [&]() -> char { return distribution(generator); });
+        return;
+    }
+    uniform_u8_distribution_t distribution(0, static_cast<char>(alphabet.size() - 1));
+    std::generate(text.begin(), text.end(), [&]() -> char { return alphabet[distribution(generator)]; });
 }
 
-inline void randomize_string(char *string, std::size_t length) noexcept {
-    uniform_u8_distribution_t distribution;
-    std::generate(string, string + length, [&]() -> char { return distribution(global_random_generator()); });
-}
-
-inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) noexcept(false) {
+inline std::string random_string(std::mt19937 &generator, std::size_t length,
+                                 std::string_view alphabet) noexcept(false) {
     std::string result(length, '\0');
-    randomize_string(&result[0], length, alphabet, cardinality);
+    randomize_string(generator, result, alphabet);
     return result;
 }
 
@@ -485,16 +517,14 @@ inline std::string repeat(std::string const &patten, std::size_t count) noexcept
     return result;
 }
 
-/**
- *  @brief Randomly slices a string into consecutive parts and passes those to @p slice_callback.
- *  @warning Is @b single-threaded in nature, as it depends on the @c global_random_generator.
- */
+/** Randomly slices a string into consecutive parts and passes those to @p slice_callback. */
 template <typename slice_callback_type_>
-inline void iterate_in_random_slices(std::string const &text, slice_callback_type_ &&slice_callback) noexcept {
+inline void iterate_in_random_slices(std::mt19937 &generator, std::string const &text,
+                                     slice_callback_type_ &&slice_callback) {
     std::size_t remaining = text.size();
     while (remaining > 0) {
         std::uniform_int_distribution<std::size_t> slice_length_distribution(1, remaining);
-        std::size_t slice_length = slice_length_distribution(global_random_generator());
+        std::size_t slice_length = slice_length_distribution(generator);
         slice_callback({text.data() + text.size() - remaining, slice_length});
         remaining -= slice_length;
     }
@@ -508,13 +538,13 @@ inline void iterate_in_random_slices(std::string const &text, slice_callback_typ
  *      zero-filled per offset.
  */
 template <typename body_type_>
-inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&body) noexcept {
+inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&body) {
     static constexpr std::size_t offsets[] = {0, 1, 7, 8, 15, 16, 31, 32, 33, 48, 63};
-    std::vector<char> storage(usable_length + 2 * SZ_CACHE_LINE_WIDTH + 1, '\0');
+    std::vector<char> storage(usable_length + 2 * STRINGZILLA_CACHE_LINE_BYTES + 1, '\0');
     for (std::size_t offset : offsets) {
         std::fill(storage.begin(), storage.end(), '\0');
         char *pointer = storage.data();
-        while (reinterpret_cast<std::uintptr_t>(pointer) % SZ_CACHE_LINE_WIDTH != offset) ++pointer;
+        while (reinterpret_cast<std::uintptr_t>(pointer) % STRINGZILLA_CACHE_LINE_BYTES != offset) ++pointer;
         body(reinterpret_cast<sz_ptr_t>(pointer), offset);
     }
 }
@@ -527,7 +557,7 @@ inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&b
  *      canary-filled per call.
  */
 template <typename body_type_>
-inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) noexcept {
+inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) {
     static constexpr std::size_t guard_width = 64;
     static constexpr unsigned char canary_value = 0xA5;
     std::vector<unsigned char> storage(length + 2 * guard_width, canary_value);
@@ -595,10 +625,11 @@ inline std::vector<std::string> alphabet_characters(std::string const &alphabet)
 }
 
 /** Concatenates @p length characters drawn uniformly from @p characters. */
-inline std::string random_string(std::size_t length, std::vector<std::string> const &characters) noexcept(false) {
+inline std::string random_string(std::mt19937 &generator, std::size_t length,
+                                 std::vector<std::string> const &characters) noexcept(false) {
     std::uniform_int_distribution<std::size_t> distribution(0, characters.size() - 1);
     std::string result;
-    while (length--) result += characters[distribution(global_random_generator())];
+    while (length--) result += characters[distribution(generator)];
     return result;
 }
 
@@ -635,22 +666,13 @@ struct fuzzy_config_t {
           max_string_length(max_string_length) {}
 };
 
-inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array) {
+inline void randomize_strings(std::mt19937 &generator, fuzzy_config_t config, std::vector<std::string> &array) {
     array.resize(config.batch_size);
 
     std::vector<std::string> const characters = alphabet_characters(config.alphabet);
     std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
     for (std::size_t index = 0; index != config.batch_size; ++index)
-        array[index] = random_string(length_distribution(global_random_generator()), characters);
-}
-
-inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape) {
-
-    randomize_strings(config, array);
-
-    // Convert to a GPU-friendly layout
-    status_t const status = tape.try_assign(array.data(), array.data() + array.size());
-    verify(status == status_t::success_k);
+        array[index] = random_string(generator, length_distribution(generator), characters);
 }
 
 inline char const *status_name(status_t s) noexcept {
@@ -669,88 +691,59 @@ inline char const *status_name(status_t s) noexcept {
     }
 }
 
-inline int log_environment() {
-    // The library already answers both questions; a wall of `SZ_USE_*` echoes only repeats the first one.
+/** Prints the lines every test and benchmark opens with: the version and both capability lists. */
+inline void log_environment() {
+    fmt::println("StringZilla {}.{}.{}", STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
+                 STRINGZILLA_H_VERSION_PATCH);
+    // The library already answers both questions; a wall of `STRINGZILLA_TARGET_*` echoes only repeats the first one.
     fmt::println("- Compiled for: {}", sz_capabilities_to_string(sz_capabilities_comptime()));
-    fmt::println("- This machine: {}", sz_capabilities_to_string(sz_capabilities()));
-
-#if SZ_USE_CUDA
-    // The device is asked directly rather than through `sz_capabilities`: that verb answers for the library this
-    // binary links, and `define_stringzilla_library` compiles the core without CUDA, so it reports none.
-    cudaError_t cuda_error = cudaFree(0); // Force context initialization
-    if (cuda_error != cudaSuccess) {
-        fmt::println("CUDA initialization error: {}", cudaGetErrorString(cuda_error));
-        return 1;
-    }
-    int device_count = 0;
-    cuda_error = cudaGetDeviceCount(&device_count);
-    if (cuda_error != cudaSuccess) {
-        fmt::println("CUDA error: {}", cudaGetErrorString(cuda_error));
-        return 1;
-    }
-    if (device_count == 0) {
-        fmt::println("- No CUDA device is visible - the GPU backends have nothing to run on.");
-        return 1;
-    }
-    fmt::println("- CUDA devices:");
-    for (int i = 0; i < device_count; ++i) {
-        cudaDeviceProp prop;
-        cuda_error = cudaGetDeviceProperties(&prop, i);
-        if (cuda_error != cudaSuccess) {
-            fmt::println("Error retrieving properties for device {}: {}", i, cudaGetErrorString(cuda_error));
-            continue;
-        }
-        std::size_t count = 1;
-        for (int j = i + 1; j < device_count; ++j) {
-            cudaDeviceProp next;
-            if (cudaGetDeviceProperties(&next, j) == cudaSuccess && std::strcmp(next.name, prop.name) == 0) { ++count; }
-            else { break; }
-        }
-        int warps_per_sm = prop.maxThreadsPerMultiProcessor / prop.warpSize;
-        std::size_t shared_memory_per_warp =
-            (warps_per_sm > 0) ? (prop.sharedMemPerMultiprocessor / static_cast<std::size_t>(warps_per_sm)) : 0;
-        fmt::print(R"(  - {count} x {name}
-    Shared Memory per SM: {shared_per_sm} bytes
-    Maximum Threads per SM: {threads_per_sm}
-    Warp Size: {warp_size} threads
-    Max Warps per SM: {warps_per_sm} warps
-    Shared Memory per Warp: {shared_per_warp} bytes
-    Managed memory: {managed}
-    Unified addressing: {unified}
-)",
-                   fmt::arg("count", count), fmt::arg("name", prop.name),
-                   fmt::arg("shared_per_sm", prop.sharedMemPerMultiprocessor),
-                   fmt::arg("threads_per_sm", prop.maxThreadsPerMultiProcessor), fmt::arg("warp_size", prop.warpSize),
-                   fmt::arg("warps_per_sm", warps_per_sm), fmt::arg("shared_per_warp", shared_memory_per_warp),
-                   fmt::arg("managed", prop.managedMemory ? "yes" : "no"),
-                   fmt::arg("unified", prop.unifiedAddressing ? "yes" : "no"));
-        i += static_cast<int>(count) - 1;
-    }
-#endif
-    return 0;
+    fmt::println("- This machine: {}", sz_capabilities_to_string(sz_capabilities_runtime()));
 }
 
+#if STRINGZILLA_TARGET_CUDA
+
 /**
- *  @brief Prints test environment configuration: seed and multiplier.
- *
- *  Call this at the start of @c main() to display test configuration alongside other environment
- *  info. Format matches capability flags style.
+ *  @brief Prints `- CUDA: <name> sm_<major><minor>` for the first visible device, or
+ *      `- CUDA: no device`.
+ *  @return Whether a device is visible; without one, the GPU tests and benchmarks skip.
  */
-inline void print_test_environment() noexcept {
-    auto seed = global_random_seed();
-    bool from_env = global_random_seed_from_env();
-    fmt::println("- Test seed: {}{}", static_cast<unsigned>(seed), from_env ? " (from SZ_TESTS_SEED)" : "");
-    double multiplier = get_iterations_multiplier();
-    if (multiplier != 1.0) fmt::println("- Iterations multiplier: {:.2f}x", multiplier);
+inline bool log_cuda_device() {
+    // The device is asked directly rather than through `sz_capabilities`: that verb answers for the library this
+    // binary links, and `define_stringzilla_library` compiles the core without CUDA, so it reports none.
+    int device_count = 0;
+    cudaDeviceProp properties;
+    if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0 ||
+        cudaGetDeviceProperties(&properties, 0) != cudaSuccess) {
+        fmt::println("- CUDA: no device");
+        return false;
+    }
+    fmt::println("- CUDA: {} sm_{}{}", properties.name, properties.major, properties.minor);
+    return true;
+}
+#endif // STRINGZILLA_TARGET_CUDA
+
+/** Prints the run's seed, how to rerun one test under it, and its scale unless 1, below the lines
+ *  of @c log_environment. */
+inline void print_test_environment(test_environment_t const &environment) noexcept {
+    fmt::println("- Seed: {}", environment.seed);
+    fmt::println("- Rerun one test: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^<name>$' {}", environment.seed,
+                 environment.program);
+    if (environment.scale != 1.0) fmt::println("- Scale: {}", environment.scale);
     std::fflush(stdout); // Ensure output is visible even on crash
 }
 
 #pragma region Test Runner
 
 /** Prints a backtrace on a fatal signal, so a crashing/aborting kernel self-localizes instead of
- *  dying silently - especially under output redirection in CI. */
+ *  dying silently - especially under output redirection in CI. Writes raw, since the crashing
+ *  thread may already hold the stdio lock that @c fmt::println takes. */
 inline void test_fatal_signal_handler(int signal_number) noexcept {
-    fmt::println(stderr, "\n*** Fatal signal {} - backtrace follows ***", signal_number);
+    std::string_view constexpr message = "\n*** Fatal signal - backtrace follows ***\n";
+#if defined(_WIN32)
+    [[maybe_unused]] auto const written = _write(2, message.data(), static_cast<unsigned>(message.size()));
+#else
+    [[maybe_unused]] auto const written = ::write(STDERR_FILENO, message.data(), message.size());
+#endif
 #if defined(__linux__) && defined(__GLIBC__)
     void *frames[64];
     int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
@@ -760,80 +753,47 @@ inline void test_fatal_signal_handler(int signal_number) noexcept {
     std::raise(signal_number);
 }
 
-/** Installs SIGSEGV/SIGABRT backtrace handlers and line-buffers stdout. Shared by the serial
+/** Installs the fatal-signal backtrace handler and line-buffers stdout. Shared by the serial
  *  @c .cpp and CUDA @c .cu test entry points; call once from @c main. */
 inline void install_test_signal_handlers() noexcept {
     // Line-buffer, so progress survives a crash under output redirection.
     // Size must be nonzero: Windows ucrt fast-fails on a zero-sized buffering mode.
     std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
-    std::signal(SIGSEGV, test_fatal_signal_handler);
-    std::signal(SIGABRT, test_fatal_signal_handler);
+    for (int signal_number : {SIGSEGV, SIGABRT, SIGILL, SIGFPE}) std::signal(signal_number, test_fatal_signal_handler);
+#if defined(SIGBUS)
+    std::signal(SIGBUS, test_fatal_signal_handler);
+#endif
 }
 
 /**
- *  @brief Returns true if a test named @p name should run, honoring the @c SZ_TESTS_FILTER regex.
+ *  @brief Runs one named test: honors @c STRINGZILLA_FILTER, times it, and reports the outcome.
+ *  @return The number of failures: 0 on success or when skipped, 1 on a failed check or a thrown
+ *      exception, which are reported with the line that reruns the test alone.
  *
- *  @c SZ_TESTS_FILTER is an ECMAScript regular expression matched against the test name, e.g.
- *  `SZ_TESTS_FILTER=fingerprint` runs only the rolling-hasher tests, skipping the slower similarity
- *  suite. An empty or unset filter runs everything; an invalid pattern runs everything rather than
- *  silently skipping the whole suite.
- */
-inline bool test_should_run(char const *name) noexcept {
-    static std::string const filter = []() -> std::string {
-        char const *env = std::getenv("SZ_TESTS_FILTER");
-        return env && env[0] != '\0' ? std::string(env) : std::string();
-    }();
-    if (filter.empty()) return true;
-    try {
-        return std::regex_search(name, std::regex(filter));
-    }
-    catch (std::regex_error const &) {
-        return true;
-    }
-}
-
-/**
- *  @brief Reseeds the global generator from the global seed and a test name.
- *
- *  Mixing happens in @c std::seed_seq, whose output the standard specifies exactly, rather than in
- *  @c sz_hash or @c std::hash. The harness must not draw its inputs through the kernels it
- *  validates, and it must land on the same stream everywhere, or `SZ_TESTS_SEED=7` stops meaning
- *  the same bytes on Arm as it does on x86.
- */
-inline void seed_generator_for_test(char const *name) noexcept {
-    std::vector<std::uint32_t> entropy {static_cast<std::uint32_t>(global_random_seed())};
-    for (char const *character = name; *character; ++character)
-        entropy.push_back(static_cast<std::uint32_t>(static_cast<unsigned char>(*character)));
-    std::seed_seq sequence(entropy.begin(), entropy.end());
-    global_random_generator().seed(sequence);
-}
-
-/**
- *  @brief Runs one named test: honors @c SZ_TESTS_FILTER, times it, and reports the outcome.
- *  @return The number of failures: 0 on success or when skipped, 1 on a thrown exception.
- *
- *  Hard failures via @c sz_assert_ abort the process and self-localize through the installed signal
- *  handler; this wrapper also turns thrown exceptions into a localized, named failure instead of a
- *  bare @c what() at the top of @c main, and surfaces per-test durations to expose slow tests.
+ *  A test taking a @c test_context_t draws from a generator seeded by @c mix_seed, so its inputs
+ *  never depend on which tests ran first. Library asserts via @c sz_assert_ still abort the
+ *  process, self-localizing through the installed signal handler.
  */
 template <typename function_type_>
-inline std::size_t run_test(char const *name, function_type_ &&test_function) noexcept {
-    if (!test_should_run(name)) {
-        fmt::println("- {} ... skipped (SZ_TESTS_FILTER)", name);
+inline std::size_t run_test(test_environment_t const &environment, std::string_view name,
+                            function_type_ &&test_function) noexcept {
+    if (!environment.selects(name)) {
+        fmt::println("- {} ... skipped (STRINGZILLA_FILTER)", name);
         std::fflush(stdout);
         return 0;
     }
     fmt::println("- {} ...", name);
     std::fflush(stdout);
-    // Reseed per test so inputs don't depend on which tests ran first, and `SZ_TESTS_FILTER` reproduces faithfully.
-    seed_generator_for_test(name);
+    test_context_t context {std::mt19937(mix_seed(environment.seed, name)), environment.scale};
     auto const start = std::chrono::steady_clock::now();
     try {
-        test_function();
+        if constexpr (std::is_invocable_v<function_type_ &, test_context_t &>) test_function(context);
+        else test_function();
     }
     catch (std::exception const &error) {
         fmt::println(stderr, "- {} ... FAILED: {}", name, error.what());
-        std::fflush(stderr);
+        fmt::println(stderr, "  rerun: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^{}$' {}", environment.seed, name,
+                     environment.program);
         return 1;
     }
     double const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -847,8 +807,8 @@ inline std::size_t run_test(char const *name, function_type_ &&test_function) no
 } // namespace ashvardanian::stringzilla::test
 
 /*  Cross-translation-unit test declarations. These live at global scope to match the TU
- *  definitions; the using-declaration exposes @c scale_iterations to the default arguments. */
-using ashvardanian::stringzilla::test::scale_iterations;
+ *  definitions; the using-declaration names the context the drawing tests take. */
+using ashvardanian::stringzilla::test::test_context_t;
 
 #pragma region Basic Utilities
 
@@ -865,16 +825,16 @@ void test_byteset_unit();
 
 void test_hash_unit();
 void test_hash_safety();
-void test_hash_all();
-void test_hash_multiseed_all();
+void test_hash_all(test_context_t &context);
+void test_hash_multiseed_all(test_context_t &context);
 
 #pragma endregion Hashing
 
 #pragma region Ciphers
 
 void test_cipher_unit();
-void test_cipher_safety();
-void test_cipher_all();
+void test_cipher_safety(test_context_t &context);
+void test_cipher_all(test_context_t &context);
 
 #pragma endregion Ciphers
 
@@ -882,34 +842,34 @@ void test_cipher_all();
 
 void test_utf8_runes_unit();
 void test_utf8_runes_scripts_unit();
-void test_utf8_runes_safety();
-void test_utf8_runes_all();
+void test_utf8_runes_safety(test_context_t &context);
+void test_utf8_runes_all(test_context_t &context);
 void test_utf8_tokens_unit();
 void test_utf8_tokens_scripts_unit();
-void test_utf8_tokens_safety();
-void test_utf8_tokens_all();
+void test_utf8_tokens_safety(test_context_t &context);
+void test_utf8_tokens_all(test_context_t &context);
 void test_utf8_wordbreaks_unit();
 void test_utf8_wordbreaks_rules();
-void test_utf8_wordbreaks_safety();
-void test_utf8_wordbreaks_all();
+void test_utf8_wordbreaks_safety(test_context_t &context);
+void test_utf8_wordbreaks_all(test_context_t &context);
 void test_utf8_graphemes_unit();
 void test_utf8_graphemes_rules();
-void test_utf8_graphemes_safety();
-void test_utf8_graphemes_all();
+void test_utf8_graphemes_safety(test_context_t &context);
+void test_utf8_graphemes_all(test_context_t &context);
 void test_utf8_sentences_unit();
 void test_utf8_sentences_rules();
-void test_utf8_sentences_safety();
-void test_utf8_sentences_all();
+void test_utf8_sentences_safety(test_context_t &context);
+void test_utf8_sentences_all(test_context_t &context);
 void test_utf8_linebreaks_unit();
 void test_utf8_linebreaks_rules();
-void test_utf8_linebreaks_safety();
-void test_utf8_linebreaks_all();
+void test_utf8_linebreaks_safety(test_context_t &context);
+void test_utf8_linebreaks_all(test_context_t &context);
 void test_utf8_norm_unit();
-void test_utf8_norm_safety();
-void test_utf8_norm_all();
+void test_utf8_norm_safety(test_context_t &context);
+void test_utf8_norm_all(test_context_t &context);
 void test_utf8_delimiters_unit();
-void test_utf8_delimiters_safety();
-void test_utf8_delimiters_all();
+void test_utf8_delimiters_safety(test_context_t &context);
+void test_utf8_delimiters_all(test_context_t &context);
 
 #pragma endregion UTF8
 
@@ -918,8 +878,8 @@ void test_utf8_delimiters_all();
 void test_uncased_unit();
 void test_uncased_scripts_unit();
 void test_uncased_regressions_unit();
-void test_uncased_all();
-void test_uncased_safety();
+void test_uncased_all(test_context_t &context);
+void test_uncased_safety(test_context_t &context);
 
 #pragma endregion Uncased UTF8
 
@@ -930,7 +890,7 @@ void test_ascii_unit();
 
 void test_memory_unit(std::size_t max_l2_size = 1024ull * 1024ull);
 void test_memory_large_unit();
-void test_memory_all();
+void test_memory_all(test_context_t &context);
 void test_memory_safety();
 
 template <typename string_type>
@@ -948,8 +908,8 @@ void test_extensions_reads_unit();
 void test_extensions_updates_unit();
 void test_string_constructors_unit();
 void test_string_reserve_unit();
-void test_memory_stability_equivalence(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100));
-void test_string_updates_equivalence(std::size_t repetitions = 1024);
+void test_memory_stability_equivalence(test_context_t &context, std::size_t length);
+void test_string_updates_equivalence(test_context_t &context, std::size_t repetitions = 1024);
 
 #pragma endregion String Class and STL Compatibility
 
@@ -959,28 +919,29 @@ void test_compare_unit();
 void test_extensions_ranges_unit();
 void test_find_unit();
 void test_find_safety();
-void test_find_all();
-void test_find_misaligned_equivalence();
-void test_lookup_equivalence(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
+void test_find_all(test_context_t &context);
+void test_find_misaligned_equivalence(test_context_t &context);
+void test_lookup_equivalence(test_context_t &context, std::size_t lookup_tables_to_try = 32,
+                             std::size_t slices_per_table = 16);
 
 #pragma endregion Search and Comparison
 
 #pragma region Sequence Algorithms
 
-void test_sort_all();
+void test_sort_all(test_context_t &context);
 void test_sort_unit();
 void test_sort_safety();
-void test_sort_reference_equivalence();
+void test_sort_reference_equivalence(test_context_t &context);
 void test_intersect_unit();
-void test_intersect_equivalence();
+void test_intersect_equivalence(test_context_t &context);
 void test_levenshtein_unit();
-void test_levenshtein_all();
-void test_levenshtein_safety();
+void test_levenshtein_all(test_context_t &context);
+void test_levenshtein_safety(test_context_t &context);
 void test_overlap_unit();
-void test_overlap_all();
-void test_overlap_safety();
+void test_overlap_all(test_context_t &context);
+void test_overlap_safety(test_context_t &context);
 void test_substrings_unit();
-void test_substrings_all();
-void test_substrings_safety();
+void test_substrings_all(test_context_t &context);
+void test_substrings_safety(test_context_t &context);
 
 #pragma endregion Sequence Algorithms

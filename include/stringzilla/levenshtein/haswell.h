@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 #pragma region Haswell Implementation
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -44,15 +44,17 @@ typedef struct sz_levenshtein_u64x4_vertical_haswell_t {
 } sz_levenshtein_u64x4_vertical_haswell_t;
 
 /** The AVX2 lowering of the shared Myers @c Ph and @c Pv' shape: first | ~(second | third). */
-SZ_HELPER_INLINE __m256i sz_levenshtein_haswell_or_nor_(__m256i first, __m256i second, __m256i third) {
-    return _mm256_or_si256(first, _mm256_andnot_si256(_mm256_or_si256(second, third), _mm256_set1_epi64x(-1)));
+STRINGZILLA_HELPER_INLINE __m256i sz_levenshtein_haswell_or_nor_(__m256i first_u64x4, __m256i second_u64x4,
+                                                                 __m256i third_u64x4) {
+    return _mm256_or_si256(first_u64x4,
+                           _mm256_andnot_si256(_mm256_or_si256(second_u64x4, third_u64x4), _mm256_set1_epi64x(-1)));
 }
 
 /** Starts four candidates: the scores at the query's length, and @p words verticals at
  *  the top boundary. */
-SZ_API_COMPTIME void sz_levenshtein_u64x4_init_haswell(sz_levenshtein_u64x4_state_haswell_t *state,
-                                                       sz_levenshtein_u64x4_vertical_haswell_t *verticals,
-                                                       sz_size_t words, sz_levenshtein_query_t const *query) {
+STRINGZILLA_API_COMPTIME void sz_levenshtein_u64x4_init_haswell(sz_levenshtein_u64x4_state_haswell_t *state,
+                                                                sz_levenshtein_u64x4_vertical_haswell_t *verticals,
+                                                                sz_size_t words, sz_levenshtein_query_t const *query) {
     state->scores_vec.ymm = _mm256_set1_epi64x((long long)query->length);
     for (sz_size_t word = 0; word != words; ++word) {
         verticals[word].positive_vec.ymm = _mm256_set1_epi64x(-1);
@@ -61,14 +63,14 @@ SZ_API_COMPTIME void sz_levenshtein_u64x4_init_haswell(sz_levenshtein_u64x4_stat
 }
 
 /** Four byte-wide class ids, as the byte transpose emits them, widened to gather indices. */
-SZ_API_COMPTIME sz_u256_vec_t sz_levenshtein_u64x4_classes_u8_haswell(sz_u8_t const *classes) {
+STRINGZILLA_API_COMPTIME sz_u256_vec_t sz_levenshtein_u64x4_classes_u8_haswell(sz_u8_t const *classes) {
     sz_u256_vec_t classes_vec;
     classes_vec.ymm = _mm256_cvtepu8_epi64(_mm_loadu_si32(classes));
     return classes_vec;
 }
 
 /** Four four-byte class ids, as the UTF-8 transpose emits them, widened to gather indices. */
-SZ_API_COMPTIME sz_u256_vec_t sz_levenshtein_u64x4_classes_u32_haswell(sz_u32_t const *classes) {
+STRINGZILLA_API_COMPTIME sz_u256_vec_t sz_levenshtein_u64x4_classes_u32_haswell(sz_u32_t const *classes) {
     sz_u256_vec_t classes_vec;
     classes_vec.ymm = _mm256_cvtepu32_epi64(_mm_loadu_si128((__m128i const *)classes));
     return classes_vec;
@@ -82,10 +84,10 @@ SZ_API_COMPTIME sz_u256_vec_t sz_levenshtein_u64x4_classes_u32_haswell(sz_u32_t 
  *      verticals in registers.
  *  @param[in] classes_vec The four candidates' classes at this position, one gather index each.
  */
-SZ_API_COMPTIME void sz_levenshtein_u64x4_step_haswell(sz_levenshtein_u64x4_state_haswell_t *state,
-                                                       sz_levenshtein_u64x4_vertical_haswell_t *verticals,
-                                                       sz_size_t words, sz_levenshtein_query_t const *query,
-                                                       sz_u256_vec_t classes_vec) {
+STRINGZILLA_API_COMPTIME void sz_levenshtein_u64x4_step_haswell(sz_levenshtein_u64x4_state_haswell_t *state,
+                                                                sz_levenshtein_u64x4_vertical_haswell_t *verticals,
+                                                                sz_size_t words, sz_levenshtein_query_t const *query,
+                                                                sz_u256_vec_t classes_vec) {
     sz_u256_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec, rows_vec;
     last_symbol_bit_vec.ymm = _mm256_set1_epi64x((long long)sz_levenshtein_last_symbol_bit_(query->length));
     last_symbol_shift_vec.ymm = _mm256_set1_epi64x((long long)sz_levenshtein_last_symbol_shift_(query->length));
@@ -130,10 +132,10 @@ SZ_API_COMPTIME void sz_levenshtein_u64x4_step_haswell(sz_levenshtein_u64x4_stat
 
 /** Whether any of the four candidates can still come under @p radius at @p position: a score
  *  falls by at most one per remaining symbol. Monotone, so once false it stays false;
- *  @c SZ_SSIZE_MAX bounds nothing. */
-SZ_API_COMPTIME sz_bool_t sz_levenshtein_u64x4_any_active_haswell(sz_levenshtein_u64x4_state_haswell_t const *state,
-                                                                  sz_u256_vec_t symbol_counts_vec, sz_size_t position,
-                                                                  sz_ssize_t radius) {
+ *  @c STRINGZILLA_SSIZE_MAX bounds nothing. */
+STRINGZILLA_API_COMPTIME sz_bool_t sz_levenshtein_u64x4_any_active_haswell(
+    sz_levenshtein_u64x4_state_haswell_t const *state, sz_u256_vec_t symbol_counts_vec, sz_size_t position,
+    sz_ssize_t radius) {
     sz_u256_vec_t position_vec, floor_vec, active_vec;
     position_vec.ymm = _mm256_set1_epi64x((long long)position);
     floor_vec.ymm = _mm256_sub_epi64(_mm256_add_epi64(state->scores_vec.ymm, position_vec.ymm), symbol_counts_vec.ymm);
@@ -143,19 +145,18 @@ SZ_API_COMPTIME sz_bool_t sz_levenshtein_u64x4_any_active_haswell(sz_levenshtein
 }
 
 /** The running score of candidate @p candidate, read at the position where its text ends. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_u64x4_score_haswell(sz_levenshtein_u64x4_state_haswell_t const *state,
-                                                             sz_size_t candidate) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_levenshtein_u64x4_score_haswell(sz_levenshtein_u64x4_state_haswell_t const *state,
+                                                                      sz_size_t candidate) {
     return state->scores_vec.u64s[candidate];
 }
 
 /** The byte transpose for four candidates: eight positions per four loads and three unpacks while
  *  every candidate has eight bytes left, one byte at a time after that; emits the @c sz_u8_t class
  *  of every byte. */
-SZ_API_COMPTIME sz_size_t sz_levenshtein_u8x4_transpose_haswell(sz_levenshtein_query_t const *query,
-                                                                sz_cptr_t const *texts, sz_u64_t const *byte_counts,
-                                                                sz_size_t candidates, sz_size_t *cursors,
-                                                                sz_u64_t *symbol_counts, sz_size_t transpose_start,
-                                                                sz_size_t positions, void *transpose_classes) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_levenshtein_u8x4_transpose_haswell(
+    sz_levenshtein_query_t const *query, sz_cptr_t const *texts, sz_u64_t const *byte_counts, sz_size_t candidates,
+    sz_size_t *cursors, sz_u64_t *symbol_counts, sz_size_t transpose_start, sz_size_t positions,
+    void *transpose_classes) {
     sz_unused_(symbol_counts), sz_unused_(transpose_start), sz_unused_(candidates);
     sz_u8_t const *const byte_to_class = query->byte_to_class;
     sz_u8_t *const classes = (sz_u8_t *)transpose_classes;
@@ -201,13 +202,13 @@ enum {
 /** Sweeps four candidates through every transpose; @p words is a constant, keeping short queries'
  *  verticals in registers. A candidate's score is read where its text ends; @p symbol_counts seeds
  *  as byte counts, refined by the transpose. */
-SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t const *shared_query,
-                                                          sz_cptr_t const *texts, sz_u64_t const *byte_counts,
-                                                          sz_u64_t *symbol_counts, sz_size_t sweep_count,
-                                                          sz_levenshtein_transpose_t transpose,
-                                                          sz_levenshtein_classes_width_t width,
-                                                          sz_levenshtein_u64x4_vertical_haswell_t *verticals,
-                                                          sz_size_t words, sz_size_t *distances) {
+STRINGZILLA_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t const *shared_query,
+                                                                   sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                                   sz_u64_t *symbol_counts, sz_size_t sweep_count,
+                                                                   sz_levenshtein_transpose_t transpose,
+                                                                   sz_levenshtein_classes_width_t width,
+                                                                   sz_levenshtein_u64x4_vertical_haswell_t *verticals,
+                                                                   sz_size_t words, sz_size_t *distances) {
     enum { candidates_per_position_k = 4, positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k };
     // A local copy: nothing stored through the verticals can alias it, so the step keeps its fields in registers.
     sz_levenshtein_query_t const local_query = *shared_query;
@@ -256,7 +257,7 @@ SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t
 
 /** Streams every candidate through a prepared @p query, four at a time, with @p transpose emitting
  *  their classes at @p width; @p verticals holds enough for a runtime word count. */
-SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_distances_(
+STRINGZILLA_HELPER_INLINE void sz_levenshtein_haswell_u64x4_distances_(
     sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x4_vertical_haswell_t *verticals, sz_size_t *distances) {
     enum { candidates_per_position_k = 4 };
@@ -284,9 +285,10 @@ SZ_HELPER_INLINE void sz_levenshtein_haswell_u64x4_distances_(
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engine_t *engine,
-                                                             sz_sequence_t const *candidates, sz_size_t *distances,
-                                                             sz_size_t distances_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engine_t *engine,
+                                                                      sz_sequence_t const *candidates,
+                                                                      sz_size_t *distances,
+                                                                      sz_size_t distances_stride) {
     enum { registers_k = sz_levenshtein_haswell_u64x4_registers_per_position_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_bool_t const over_bytes = engine->symbol == sz_levenshtein_bytes_k ? sz_true_k : sz_false_k;
@@ -318,7 +320,7 @@ SZ_API_COMPTIME sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_HASWELL
+#endif // STRINGZILLA_TARGET_HASWELL
 #pragma endregion Haswell Implementation
 
 #ifdef __cplusplus

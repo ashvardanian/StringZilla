@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date July 9, 2026
  *  @brief Platform probe that compiles only when `<stringzilla/stringzilla.h>` performs real
- *      runtime capability detection for this target, per @c SZ_CAPABILITIES_RUNTIME_DETECTABLE_.
+ *      runtime capability detection for this target, per @c STRINGZILLA_HAS_RUNTIME_DETECTION_.
  *
  *  The sibling `run_capabilities.c` answers "what does this machine support" by executing, which a
  *  cross build can never do. This probe answers the prior question, "will the built library mask
@@ -16,36 +16,36 @@
  *
  *  The answer lives in the header, next to the detectors themselves, so neither CMake nor
  *  @c build.rs carries a platform list that could drift out of sync. Compile with the same
- *  @c SZ_AVOID_LIBC value as the real build - detectability depends on it where the probe reads
- *  the auxiliary vector.
+ *  @c STRINGZILLA_WITH_LIBC value as the real build - detectability depends on it where the probe
+ *  reads the auxiliary vector.
  */
-#define SZ_DYNAMIC_DISPATCH 0
+#define STRINGZILLA_RUNTIME_DISPATCH 0
 
-#define SZ_USE_WESTMERE 0
-#define SZ_USE_GOLDMONT 0
-#define SZ_USE_HASWELL 0
-#define SZ_USE_SKYLAKE 0
-#define SZ_USE_ICELAKE 0
-#define SZ_USE_NEON 0
-#define SZ_USE_NEONAES 0
-#define SZ_USE_NEONSHA 0
-#define SZ_USE_SVE 0
-#define SZ_USE_SVE2 0
-#define SZ_USE_SVE2AES 0
-#define SZ_USE_V128 0
-#define SZ_USE_V128RELAXED 0
-#define SZ_USE_RVV 0
-#define SZ_USE_RVVCRYPTO 0
-#define SZ_USE_LASX 0
-#define SZ_USE_POWERVSX 0
-#define SZ_USE_CUDA 0
-#define SZ_USE_KEPLER 0
-#define SZ_USE_HOPPER 0
-#define SZ_USE_ROCM 0
+#define STRINGZILLA_TARGET_WESTMERE 0
+#define STRINGZILLA_TARGET_GOLDMONT 0
+#define STRINGZILLA_TARGET_HASWELL 0
+#define STRINGZILLA_TARGET_SKYLAKE 0
+#define STRINGZILLA_TARGET_ICELAKE 0
+#define STRINGZILLA_TARGET_NEON 0
+#define STRINGZILLA_TARGET_NEONAES 0
+#define STRINGZILLA_TARGET_NEONSHA 0
+#define STRINGZILLA_TARGET_SVE 0
+#define STRINGZILLA_TARGET_SVE2 0
+#define STRINGZILLA_TARGET_SVE2AES 0
+#define STRINGZILLA_TARGET_V128 0
+#define STRINGZILLA_TARGET_V128RELAXED 0
+#define STRINGZILLA_TARGET_RVV 0
+#define STRINGZILLA_TARGET_RVVCRYPTO 0
+#define STRINGZILLA_TARGET_LASX 0
+#define STRINGZILLA_TARGET_POWERVSX 0
+#define STRINGZILLA_TARGET_CUDA 0
+#define STRINGZILLA_TARGET_KEPLER 0
+#define STRINGZILLA_TARGET_HOPPER 0
+#define STRINGZILLA_TARGET_ROCM 0
 
 #include <stringzilla/stringzilla.h>
 
-#if !SZ_CAPABILITIES_RUNTIME_DETECTABLE_
+#if !STRINGZILLA_HAS_RUNTIME_DETECTION_
 #error "No runtime capability detection on this target - dispatch tables would mirror the compile-time mask"
 #endif
 

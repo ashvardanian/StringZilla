@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -23,11 +23,11 @@ extern "C" {
 #endif
 
 /** Mask for @c _mm256_maskstore_epi64 selecting the low @p count (0..4) of four 64-bit lanes. */
-SZ_HELPER_INLINE __m256i sz_mm256_store_mask_epi64_(sz_size_t count) {
+STRINGZILLA_HELPER_INLINE __m256i sz_mm256_store_mask_epi64_(sz_size_t count) {
     return _mm256_cmpgt_epi64(_mm256_set1_epi64x((long long)count), _mm256_setr_epi64x(0, 1, 2, 3));
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length) {
     // Continuation bytes are `0x80..0xBF` = signed `-128..-65`, so a signed `vpcmpgtb` against `-65` selects
     // character starts directly in one op, replacing the `AND(0xC0)`, `cmpeq(0x80)`, and mask-negate trio.
     sz_u256_vec_t start_threshold_vec;
@@ -52,7 +52,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length
     return char_count;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     // The logic of this function is similar to `sz_utf8_count_haswell`, but uses PDEP
     // instruction in the inner loop to locate Nth character start byte efficiently
     // without one more loop.
@@ -135,12 +135,12 @@ typedef struct sz_utf8_rune_window_haswell_t {
 
 /** Per-byte logical right shift by @p shift keeping the low @p keep bits — the AVX2 twin
  *  of @c srl8_. */
-SZ_HELPER_INLINE __m256i sz_utf8_srl8_haswell_(__m256i value_u8x32, int shift, sz_u8_t keep) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_srl8_haswell_(__m256i value_u8x32, int shift, sz_u8_t keep) {
     return _mm256_and_si256(_mm256_srli_epi16(value_u8x32, shift), _mm256_set1_epi8((char)keep));
 }
 
 /** Combine two per-half @c vpmovmskb results into one 64-bit lane mask. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32) {
     sz_u64_t const low_bits = (sz_u32_t)_mm256_movemask_epi8(low_half_u8x32);
     sz_u64_t const high_bits = (sz_u32_t)_mm256_movemask_epi8(high_half_u8x32);
     return low_bits | (high_bits << 32);
@@ -149,7 +149,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half_u8x32, 
 /** Masked 64-byte load into two halves; bytes [loaded, 64) read as zero (the AVX2 stand-in for
  *  @c _mm512_maskz_loadu_epi8). A small stack staging union covers the partial tail so we never
  *  read past `text + loaded`. */
-SZ_HELPER_INLINE void sz_utf8_load_window_haswell_( //
+STRINGZILLA_HELPER_INLINE void sz_utf8_load_window_haswell_( //
     sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32, __m256i *out_high_u8x32) {
     if (loaded >= 64) {
         *out_low_u8x32 = _mm256_loadu_si256((__m256i const *)(text + 0));
@@ -170,8 +170,8 @@ SZ_HELPER_INLINE void sz_utf8_load_window_haswell_( //
  *  byte permute, so each 128-bit lane is fed its following bytes via @c _mm256_permute2x128_si256
  *  (to rotate in the successor 128-bit block, the window head wrapping in after @c window_hi) then
  *  @c _mm256_alignr_epi8 to shift across the lane boundary. */
-SZ_HELPER_INLINE void sz_utf8_forward_neighbours_haswell_( //
-    __m256i window_low_u8x32, __m256i window_high_u8x32,   //
+STRINGZILLA_HELPER_INLINE void sz_utf8_forward_neighbours_haswell_( //
+    __m256i window_low_u8x32, __m256i window_high_u8x32,            //
     __m256i *next_byte_1_low_u8x32, __m256i *next_byte_1_high_u8x32, __m256i *next_byte_2_low_u8x32,
     __m256i *next_byte_2_high_u8x32) {
     // The 128-bit block following each 128-bit lane of window_low: its high lane (bytes 16..31) is followed by
@@ -190,7 +190,7 @@ SZ_HELPER_INLINE void sz_utf8_forward_neighbours_haswell_( //
  *  to drive @c _mm256_blendv_epi8 in place of Ice Lake's @c _mm512_mask_blend_epi8. In-register:
  *  broadcast the mask, route the right mask byte to each output byte via @c vpshufb, isolate the
  *  per-lane bit, then @c cmpeq. */
-SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_haswell_(sz_u32_t bits) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_haswell_(sz_u32_t bits) {
     __m256i const mask_broadcast_u32x8 = _mm256_set1_epi32((int)bits);
     __m256i const byte_router_shuffle_u8x32 = _mm256_setr_epi8( //
         0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,         //
@@ -205,7 +205,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_haswell_(sz_u32_t bits) {
 
 /** Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the AVX2 twin
  *  of @ref sz_utf8_rune_decode_window_, bit-identical to it on every lane. */
-SZ_HELPER_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_( //
+STRINGZILLA_HELPER_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_( //
     sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_haswell_t result;
     result.loaded = available < 64 ? available : 64;
@@ -315,7 +315,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswel
  *  ! blended on the shuffle port. The BMP classifiers use @ref sz_utf8_rune_flat_lookup_haswell_
  *  ! instead for that reason.
  */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_haswell_( //
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_haswell_( //
     sz_u8_t const *table, int tile_count, __m256i selector_u8x32, __m256i within_u8x32) {
     __m256i result_u8x32 = _mm256_setzero_si256();
     for (int tile = 0; tile < tile_count; ++tile) {
@@ -332,7 +332,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_haswell_( //
  *  reading the entry its index names. Two-stage @c vpshufb over 16 resident rows — the low nibble
  *  shuffles within a row, the high nibble selects the row. The AVX2 twin of the substrate
  *  @c lut256 leaf. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
     __m256i const index_within_low_u8x32 = _mm256_and_si256(index_u8x32, _mm256_set1_epi8(0x0F));
     __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index_u8x32, 4),
                                                                _mm256_set1_epi8(0x0F));
@@ -344,7 +344,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base,
  *  four rows wide - e.g. a 128-entry property table read as two 64-byte halves - so the loads never
  *  run past the array, and only a quarter of the shuffle/blend work is issued. @p group_base must
  *  point to at least 64 valid bytes. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
     __m256i const index_within_low_u8x32 = _mm256_and_si256(index_u8x32, _mm256_set1_epi8(0x0F));
     __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index_u8x32, 4),
                                                                _mm256_set1_epi8(0x03));
@@ -356,7 +356,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, 
  *  twin of @ref sz_utf8_rune_lut256_haswell_ for nibble-wide tables. @p group_base must point to at
  *  least 16 valid bytes, and @p index_u8x32 must have bit 7 clear on every lane or @c vpshufb
  *  zeroes that lane. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_lut16_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_lut16_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
     __m256i const lut_row_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)group_base));
     return _mm256_shuffle_epi8(lut_row_broadcast_u8x32, index_u8x32);
 }
@@ -366,7 +366,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut16_haswell_(sz_u8_t const *group_base, 
  *  @c vpgatherdd, which resolves eight lanes per gather and so needs four gathers per 32-lane
  *  window. @c packus saturates per 128-bit half, leaving the dwords interleaved, so a final
  *  @c vpermd restores the order. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_pack4_u32_to_u8_haswell_( //
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_pack4_u32_to_u8_haswell_( //
     __m256i first_u32x8, __m256i second_u32x8, __m256i third_u32x8, __m256i fourth_u32x8) {
     __m256i const first_second_u16x16 = _mm256_packus_epi32(first_u32x8, second_u32x8);
     __m256i const third_fourth_u16x16 = _mm256_packus_epi32(third_u32x8, fourth_u32x8);
@@ -380,7 +380,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_pack4_u32_to_u8_haswell_( //
  *  every stage on the shuffle port, while the gather issues on the load ports and leaves the
  *  shuffle port to the decode. @p flat must extend four bytes past its last index, since the dword
  *  gather over-reads three. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_haswell_( //
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_haswell_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, __m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     __m256i const page_indices_u8x32 = sz_utf8_rune_lut256_haswell_(page_lut, high_bytes_u8x32);
     __m128i const page_indices_low_u8x16 = _mm256_castsi256_si128(page_indices_u8x32);
@@ -411,7 +411,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_haswell_( //
  *  @p out[0..popcount). BMI2 path: @c tzcnt pulls the lowest set bit's index, @c blsr clears it. On
  *  Intel Haswell @c tzcnt and @c blsr are single-uop and beat a @c vpshufb left-pack LUT; the LUT
  *  only wins where @c pext and @c blsr are microcoded (AMD pre-Zen3). */
-SZ_HELPER_INLINE void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *out) {
+STRINGZILLA_HELPER_INLINE void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *out) {
     while (mask) {
         *out++ = (sz_u8_t)(int)_tzcnt_u64(mask);
         mask = _blsr_u64(mask); // clear the lowest set bit
@@ -424,7 +424,7 @@ SZ_HELPER_INLINE void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *ou
  *  index-unpacked once (BMI2), then streamed in waves of four u64 positions (a @c vpmovzxbq widen +
  *  @p base, segment starts via @c vpermq shift + @c vpblendd carry-seat, lengths via @c vpsubq),
  *  with a scalar tail for the final partial wave (no AVX2 masked store). */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
@@ -477,7 +477,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
 /** Low @p count bits set within a 32-bit lane mask (0 for `count==0`, all-ones for
  *  `count>=32`). The 32-bit twin of @ref sz_u64_mask_until_serial_, used to bound a sub-window
  *  of an AVX2 32-byte window. */
-SZ_HELPER_INLINE sz_u32_t sz_u32_mask_until_serial_(sz_size_t count) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_u32_mask_until_serial_(sz_size_t count) {
     return count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << count) - 1u);
 }
 
@@ -487,7 +487,7 @@ SZ_HELPER_INLINE sz_u32_t sz_u32_mask_until_serial_(sz_size_t count) {
  *  @p window_dup_hi_u8x32); a @c vpshufb per half routes `window[offset & 15]` into the low byte of
  *  every dword, and the high offset bit blends the two halves. Lanes pointing past lane 31 read the
  *  wrapped low half, but the caller only consults lanes whose offset is a real emitted start. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
     __m256i window_dup_lo_u8x32, __m256i window_dup_hi_u8x32, __m256i offsets_u32x8) {
     __m256i const offset_within_u32x8 = _mm256_and_si256(offsets_u32x8, _mm256_set1_epi32(0x0F));
     __m256i const shuffle_control_u8x32 = _mm256_or_si256(offset_within_u32x8, _mm256_set1_epi32((int)0x80808000u));
@@ -766,7 +766,7 @@ static sz_u8_t const sz_utf8_leftpack8_haswell_[256 * 8] = {
  *  a high byte, each @c vpshufb over the LUT row of its set-bit positions, the high half offset by
  *  +8, the two stitched at `popcount(low8)` via a gap-shift @c vpshufb (no scalar per-lane index
  *  walk). The half offset `h*16` is added in vector; one loop over the two halves. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *out) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *out) {
     __m128i const lane_iota_u8x16 = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     __m128i const constant_eight_u8x16 = _mm_set1_epi8(8);
 
@@ -822,7 +822,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u
  *      byte-offset (the caller turns it into the resume cursor by adding that lane's
  *      maximal-subpart length).
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_haswell_(                         //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_haswell_(                //
     __m256i window_u8x32, __m256i ill_formed_lanes_u8x32, sz_u32_t emit_starts, //
     int has_three, int has_four, int has_ill,                                   //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_u8_t *last_off_out) {
@@ -925,9 +925,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_haswell_(                         
  *  (`*runes_unpacked == 0`, cursor unchanged) only when the first lead's declared sequence crosses
  *  the window edge (a boundary truncation), which the public entry finalizes without a serial
  *  re-decode. The decode is total: no decline-to-serial. */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
-    sz_cptr_t text, sz_size_t length,                    //
-    sz_rune_t *runes, sz_size_t runes_capacity,          //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
+    sz_cptr_t text, sz_size_t length,                             //
+    sz_rune_t *runes, sz_size_t runes_capacity,                   //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 32 ? length : 32;
@@ -1180,9 +1180,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
  *  bit-exact with @ref sz_utf8_decode_serial. A pure-ASCII window widens with @c vpmovzxbd.
  *  Gather-free on the hot path: @c vbroadcasti128 and @c vpshufb window reads and BMI2 @c pext,
  *  @c tzcnt and @c blsr compaction, never a @c vpgatherdd. */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
-    sz_cptr_t text, sz_size_t length,             //
-    sz_rune_t *runes, sz_size_t runes_capacity,   //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_rune_t *runes, sz_size_t runes_capacity,            //
     sz_size_t *runes_unpacked) {
 
     sz_cptr_t cursor = text;
@@ -1221,7 +1221,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_HASWELL
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #ifdef __cplusplus
 }

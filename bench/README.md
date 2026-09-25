@@ -35,5 +35,8 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 
 - `stringzilla.go` — Go binding benchmark.
 
-`shared.hpp` is the common harness.
+`harness.hpp` is the common harness.
 All benchmarks read environment variables for configuration — backend filter, batch size, and stress mode — documented in each file's header.
+`STRINGWARS_FILTER` is a regex over benchmark names, and every backend runs when it is unset.
+`STRINGWARS_SEED` shuffles the tokens when set to a positive integer, and leaves them in order when unset, which is the default.
+`CONTRIBUTING.md` lists the rest, with their defaults.

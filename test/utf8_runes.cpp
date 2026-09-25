@@ -15,18 +15,18 @@
 /*  ! Overload the following with caution. Those parameters must never be explicitly set during
  *  releases, but they come handy during development to validate ISA-specific implementations.
  *
- *  #define SZ_USE_WESTMERE 0
- *  #define SZ_USE_HASWELL 0
- *  #define SZ_USE_GOLDMONT 0
- *  #define SZ_USE_SKYLAKE 0
- *  #define SZ_USE_ICELAKE 0
- *  #define SZ_USE_NEON 0
- *  #define SZ_USE_SVE 0
- *  #define SZ_USE_SVE2 0 */
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+ *  #define STRINGZILLA_TARGET_WESTMERE 0
+ *  #define STRINGZILLA_TARGET_HASWELL 0
+ *  #define STRINGZILLA_TARGET_GOLDMONT 0
+ *  #define STRINGZILLA_TARGET_SKYLAKE 0
+ *  #define STRINGZILLA_TARGET_ICELAKE 0
+ *  #define STRINGZILLA_TARGET_NEON 0
+ *  #define STRINGZILLA_TARGET_SVE 0
+ *  #define STRINGZILLA_TARGET_SVE2 0 */
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Make sure to include the StringZilla headers before anything else, to intercept missing
  *  `#include` directives and other issues. */
@@ -37,7 +37,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm> // `std::transform`
@@ -45,8 +44,6 @@
 #include <random>    // `std::random_device`
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
-
-#include <fmt/format.h>
 
 #include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 
@@ -125,7 +122,7 @@ static void check_utf8_runes_unit_(                                          //
         sz_u8_t bytes[4];
         byte_offset += (sz_size_t)sz_rune_encode(expected_runes[rune_index], bytes);
     }
-    verify(find_nth(text, length, expected_count) == SZ_NULL_CHAR); // Beyond the last codepoint
+    verify(find_nth(text, length, expected_count) == STRINGZILLA_NULL_CHAR); // Beyond the last codepoint
 
     // `sz_utf8_decode`: streaming the decoder must reproduce exactly the expected runes at every caller
     // capacity, the tiny ones landing mid-rune-sequence on each resume.
@@ -149,36 +146,36 @@ struct utf8_runes_backend_t {
     char const *name;
     sz_utf8_count_t count;
     sz_utf8_seek_t seek;
-    sz_utf8_decode_t decode; // Streaming decoder, or `SZ_NULL` when the backend has none (e.g. `v128relaxed`).
+    sz_utf8_decode_t decode; // Streaming decoder, or `STRINGZILLA_NULL` when the backend has none (e.g. `v128relaxed`).
 };
 
 static utf8_runes_backend_t const utf8_runes_backends[] = {
     {"dispatched", sz_utf8_count, sz_utf8_seek, sz_utf8_decode},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_utf8_count_haswell, sz_utf8_seek_haswell, sz_utf8_decode_haswell},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_utf8_count_icelake, sz_utf8_seek_icelake, sz_utf8_decode_icelake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_utf8_count_neon, sz_utf8_seek_neon, sz_utf8_decode_neon},
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     {"sve2", sz_utf8_count_sve2, sz_utf8_seek_sve2, sz_utf8_decode_sve2},
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     {"v128", sz_utf8_count_v128, sz_utf8_seek_v128, sz_utf8_decode_v128},
 #endif
-#if SZ_USE_V128RELAXED
-    {"v128relaxed", sz_utf8_count_v128relaxed, sz_utf8_seek_v128relaxed, SZ_NULL},
+#if STRINGZILLA_TARGET_V128RELAXED
+    {"v128relaxed", sz_utf8_count_v128relaxed, sz_utf8_seek_v128relaxed, STRINGZILLA_NULL},
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     {"rvv", sz_utf8_count_rvv, sz_utf8_seek_rvv, sz_utf8_decode_rvv},
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     {"lasx", sz_utf8_count_lasx, sz_utf8_seek_lasx, sz_utf8_decode_lasx},
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     {"powervsx", sz_utf8_count_powervsx, sz_utf8_seek_powervsx, sz_utf8_decode_powervsx},
 #endif
 };
@@ -198,8 +195,6 @@ static utf8_runes_backend_t const utf8_runes_backends[] = {
  *  SIMD variants are otherwise only fuzzed against serial.
  */
 void test_utf8_runes_unit() {
-    fmt::println("  - testing UTF-8 codepoints known-answer vectors...");
-
     // The mixed-script anchor: "a\xC3\x9F\xE4\xB8\xAD" is `a` (1 byte) + U+00DF (2 bytes) + U+4E2D (3 bytes),
     // so 6 bytes encode exactly 3 codepoints {0x61, 0xDF, 0x4E2D}.
     char const mixed[] = "a\xC3\x9F\xE4\xB8\xAD";
@@ -211,42 +206,42 @@ void test_utf8_runes_unit() {
     check_utf8_runes_unit_(sz_utf8_count, sz_utf8_seek, sz_utf8_decode, mixed, mixed_length, 3u, mixed_runes);
     check_utf8_runes_unit_(sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial, // serial
                            mixed, mixed_length, 3u, mixed_runes);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     check_utf8_runes_unit_(sz_utf8_count_haswell, sz_utf8_seek_haswell,
                            sz_utf8_decode_haswell, // haswell
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     check_utf8_runes_unit_(sz_utf8_count_icelake, sz_utf8_seek_icelake,
                            sz_utf8_decode_icelake, // icelake
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     check_utf8_runes_unit_(sz_utf8_count_neon, sz_utf8_seek_neon,
                            sz_utf8_decode_neon, // neon
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     check_utf8_runes_unit_(sz_utf8_count_sve2, sz_utf8_seek_sve2,
                            sz_utf8_decode_sve2, // sve2
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     check_utf8_runes_unit_(sz_utf8_count_v128, sz_utf8_seek_v128,
                            sz_utf8_decode_v128, // v128
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     check_utf8_runes_unit_(sz_utf8_count_rvv, sz_utf8_seek_rvv,
                            sz_utf8_decode_rvv, // rvv
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     check_utf8_runes_unit_(sz_utf8_count_powervsx, sz_utf8_seek_powervsx,
                            sz_utf8_decode_powervsx, // powervsx
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     check_utf8_runes_unit_(sz_utf8_count_lasx, sz_utf8_seek_lasx,
                            sz_utf8_decode_lasx, // lasx
                            mixed, mixed_length, 3u, mixed_runes);
@@ -362,8 +357,6 @@ void test_utf8_runes_unit() {
  *  homogeneous byte-width run is caught here.
  */
 void test_utf8_runes_scripts_unit() {
-    fmt::println("  - testing UTF-8 codepoints across Unicode scripts...");
-
     // C++ API: codepoint iteration materialized as a vector, since every check below indexes by position.
     {
         auto runes_of = [](char const *t) {
@@ -500,10 +493,10 @@ void test_utf8_runes_scripts_unit() {
  *  sees byte-identical bytes and a divergence reproduces on the next ladder entry.
  */
 static inline void check_utf8_runes_equivalence_(                                                 //
+    std::mt19937 &generator,                                                                      //
     sz_utf8_count_t count_serial, sz_utf8_seek_t find_nth_serial, sz_utf8_decode_t unpack_serial, //
     sz::span<utf8_runes_backend_t const> candidates, sz_size_t inputs) {
 
-    auto &generator = global_random_generator();
     std::vector<sz_rune_t> runes_serial, runes_candidate;
     std::vector<sz_cptr_t> offsets_serial;
 
@@ -565,11 +558,11 @@ static inline void check_utf8_runes_equivalence_(                               
 
 /** Large-buffer count agreement: a few hundred KB of mixed-width codepoints where the dispatched
  *  and C++ counts must equal the serial reference and the exact known total. */
-static void check_utf8_runes_large_count_() {
+static void check_utf8_runes_large_count_(test_context_t &context) {
     // Every repeat contributes one ASCII 'x', one 2-byte, one 3-byte, and one 4-byte codepoint - 4
     // codepoints in 10 bytes - so the total is exactly `repeats * 4`.
     char const unit[] = "x\xD0\x9F\xE4\xB8\xAD\xF0\x9F\x98\x80"; // 'x' + U+041F + U+4E2D + U+1F600, 10 bytes
-    std::size_t const repeats = scale_iterations(30000);         // ~300 KB at the default multiplier
+    std::size_t const repeats = context.iterations(30000);       // ~300 KB at the default multiplier
     std::string mixed;
     mixed.reserve(repeats * (sizeof(unit) - 1));
     for (std::size_t repeat = 0; repeat != repeats; ++repeat) mixed.append(unit, sizeof(unit) - 1);
@@ -597,10 +590,9 @@ static void check_utf8_runes_large_count_() {
  *
  *  @param[in] count Codepoint counter under test.
  *  @param[in] unpack Streaming chunk decoder under test, or NULL when this backend has none.
- *  @param[in] random_inputs Random garbage buffers to fuzz on top of the exhaustive byte sweeps.
  */
-static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unpack,
-                                     std::size_t random_inputs = scale_iterations(4000)) {
+static void check_utf8_runes_safety_(test_context_t &context, sz_utf8_count_t count, sz_utf8_decode_t unpack) {
+    std::size_t const random_inputs = context.iterations(4000);
 
     std::size_t const max_input_length = utf8_unit_capacity_k;
     std::vector<sz_rune_t> rune_destination;
@@ -641,8 +633,8 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
         }
     };
 
-    auto &generator = global_random_generator();
-    for_each_adversarial_utf8_input_(generator, random_inputs, check);
+    std::mt19937 &generator = context.generator;
+    for_each_adversarial_utf8_input_(context, random_inputs, check);
 
     // Valid text with a few bytes overwritten: damage surrounded by long well-formed runs, which neither the
     // battery's uniform garbage nor the well-formed equivalence corpus produces.
@@ -659,15 +651,11 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
 }
 
 /** Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
-void test_utf8_runes_safety() {
-    fmt::println("  - testing malformed-input safety of UTF-8 codepoint kernels...");
-
+void test_utf8_runes_safety(test_context_t &context) {
     // Serial is the reference contract; the dispatched and native backends below face the same probe.
-    check_utf8_runes_safety_(sz_utf8_count_serial, sz_utf8_decode_serial);
+    check_utf8_runes_safety_(context, sz_utf8_count_serial, sz_utf8_decode_serial);
     for (utf8_runes_backend_t const &backend : utf8_runes_backends)
-        check_utf8_runes_safety_(backend.count, backend.decode);
-
-    fmt::println("    malformed-input safety passed!");
+        check_utf8_runes_safety_(context, backend.count, backend.decode);
 }
 
 #pragma endregion Safety
@@ -676,18 +664,19 @@ void test_utf8_runes_safety() {
 
 /** Drives the serial-vs-SIMD UTF-8 codepoint differential (unpack + find-nth + count) across every
  *  backend compiled on this target, plus the large-buffer count agreement. */
-void test_utf8_runes_all() {
+void test_utf8_runes_all(test_context_t &context) {
     // This family's share of the suite budget: each input is checked at 11 cache-line offsets, over 5 decoder
     // capacities, per backend.
-    sz_size_t const inputs = (sz_size_t)scale_iterations(1000);
+    sz_size_t const inputs = (sz_size_t)context.iterations(1000);
 
-    // Serial is the reference; the dispatched entry and every native backend are differenced against it. A
-    // `SZ_NULL` decoder (e.g. `v128relaxed`) simply skips the streaming-decode leg inside the helper.
-    check_utf8_runes_equivalence_(sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial, //
+    // Serial is the reference; the dispatched entry and every native backend are differenced
+    // against it. A `STRINGZILLA_NULL` decoder (e.g. `v128relaxed`) simply skips the
+    // streaming-decode leg inside the helper.
+    check_utf8_runes_equivalence_(context.generator, sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial,
                                   span_over(utf8_runes_backends), inputs);
 
     // Large-buffer count agreement: serial == dispatched == C++ wrapper == known total.
-    check_utf8_runes_large_count_();
+    check_utf8_runes_large_count_(context);
 }
 
 #pragma endregion Drivers

@@ -18,7 +18,7 @@ extern "C" {
 
 /** Branchless ASCII case fold, converting A-Z to a-z. Uses the unsigned subtraction trick:
  *  (c − 'A') ≤ 25 holds only for uppercase letters. */
-SZ_HELPER_AUTO sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
+STRINGZILLA_HELPER_AUTO sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
 
 enum {
 
@@ -44,7 +44,7 @@ enum {
  *          mask[lead >> 6] |= 1 << (lead & 63)
  *  @endcode
  */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_lead_may_fold_(sz_u8_t lead) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_lead_may_fold_(sz_u8_t lead) {
     sz_u64_t word;
     switch (lead >> 6) {
     case 1: word = 0x0000000007FFFFFEull; break; // 0x40-0x7F: 'A'-'Z'
@@ -63,7 +63,7 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_lead_may_fold_(sz_u8_t lead) {
  *  valid rune U+00FC ('ü'). Two equal malformed bytes still produce equal tagged runes, preserving
  *  byte-for-byte matching.
  */
-SZ_HELPER_AUTO sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
+STRINGZILLA_HELPER_AUTO sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
 
 /** Bit flags describing which UTF-8 lead-byte families occur in a chunk, shared by every back-end.
  *  Each family shares one folding strategy, so the union of flags picks the chunk handler in a
@@ -148,7 +148,7 @@ static sz_u8_t const sz_utf8_fold_c6_deltas_lut_[64] = {
  *  @p stop_lanes and walks back over continuation bytes so the consumed prefix ends on a boundary.
  *  Shared u64 mask math for the windowed ISA fold handlers; landing on byte 0 routes one rune to
  *  the serial fallback path. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_fold_stop_boundary_serial_(sz_u64_t stop_lanes, sz_cptr_t source) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_fold_stop_boundary_serial_(sz_u64_t stop_lanes, sz_cptr_t source) {
     sz_size_t first_flagged_position = (sz_size_t)sz_u64_ctz(stop_lanes);
     while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80) --first_flagged_position;
     return first_flagged_position;
@@ -169,7 +169,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_fold_stop_boundary_serial_(sz_u64_t stop_lane
  *
  *  Each range check has an assertion with traditional bounds for SIMD implementation reference.
  */
-SZ_HELPER_AUTO sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *folded) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *folded) {
 
     // 1-byte UTF-8 (U+0000-007F): ASCII - only A-Z needs folding
     if (rune <= 0x7F) {
@@ -1421,7 +1421,7 @@ SZ_HELPER_AUTO sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *f
  *  @param[out] bytes_consumed Number of bytes read from source.
  *  @param[out] bytes_exported Number of bytes written to destination.
  */
-SZ_HELPER_INLINE void sz_utf8_uncased_fold_upto_(                   //
+STRINGZILLA_HELPER_INLINE void sz_utf8_uncased_fold_upto_(          //
     sz_cptr_t source, sz_size_t source_length,                      //
     sz_ptr_t destination, sz_size_t destination_length,             //
     sz_size_t *codepoints_consumed, sz_size_t *codepoints_exported, //
@@ -1485,7 +1485,8 @@ SZ_HELPER_INLINE void sz_utf8_uncased_fold_upto_(                   //
     if (bytes_exported) *bytes_exported = (sz_size_t)(destination_ptr - destination_start);
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_t source_length,
+                                                               sz_ptr_t destination) {
 
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
@@ -1531,7 +1532,8 @@ typedef struct {
 } sz_utf8_folded_iter_t;
 
 /** Initializes a folded rune iterator. */
-SZ_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iterator, sz_cptr_t string, sz_size_t length) {
+STRINGZILLA_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iterator, sz_cptr_t string,
+                                                       sz_size_t length) {
     iterator->ptr = string;
     iterator->end = string + length;
     iterator->pending_count = 0;
@@ -1550,7 +1552,7 @@ SZ_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iterator, s
  *  comes from, and stay put while the expansion drains - @c ptr cannot serve, having already moved
  *  past the codepoint.
  */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_rune_t *out_rune) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_rune_t *out_rune) {
     // Refill pending buffer if exhausted
     if (it->pending_idx >= it->pending_count) {
         if (it->ptr >= it->end) return sz_false_k;
@@ -1613,8 +1615,8 @@ typedef struct {
 } sz_utf8_folded_reverse_iter_t;
 
 /** Initializes a reverse folded rune iterator, which iterates from end towards start. */
-SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t *it, sz_cptr_t start,
-                                                      sz_cptr_t end) {
+STRINGZILLA_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t *it, sz_cptr_t start,
+                                                               sz_cptr_t end) {
     it->ptr = end;
     it->start = start;
     it->pending_count = 0;
@@ -1630,7 +1632,8 @@ SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_ite
  *  is emitted as a single tagged literal byte and the iterator resyncs by one byte, so the backward
  *  rune stream is exactly the reverse of the forward stream.
  */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t *it, sz_rune_t *out_rune) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t *it,
+                                                                    sz_rune_t *out_rune) {
     // Return pending runes if any (stored in reverse order, consumed in reverse)
     if (it->pending_idx < it->pending_count) {
         *out_rune = it->pending[it->pending_count - 1 - it->pending_idx];

@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-SZ_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // In most cases the `source` and the `target` are not aligned, but we should
     // at least make sure that writes don't touch many cache lines.
     // NEON has an instruction to load and write 64 bytes at once.
@@ -62,7 +62,7 @@ SZ_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t l
     }
 }
 
-SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // When moving small buffers, using a small buffer on stack as a temporary storage is faster.
 
     if (target < source || target >= source + length) {
@@ -99,7 +99,7 @@ SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t l
     }
 }
 
-SZ_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     uint8x16_t fill_u8x16 = vdupq_n_u8(value); // Broadcast the value across the register
 
     // Tiny buffers (`< 16`) can't use the overlapping trick, so the serial path handles them.
@@ -120,8 +120,8 @@ SZ_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t val
     if (length) vst1q_u8((sz_u8_t *)(target - (16 - length)), fill_u8x16);
 }
 
-SZ_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                    char const lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                             char const lut[sz_at_least_(256)]) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
@@ -176,7 +176,7 @@ SZ_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_NEON
+#endif // STRINGZILLA_TARGET_NEON
 
 #ifdef __cplusplus
 }

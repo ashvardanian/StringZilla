@@ -26,7 +26,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
@@ -45,8 +45,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 #include "stringzilla/utf8_tokens.h" // `sz_utf8_newlines`, `sz_utf8_whitespaces`, `sz_utf8_delimiters`
 
@@ -85,31 +84,31 @@ struct utf8_enumerate_delimiters {
 void bench_utf8_newlines(environment_t const &env) {
     auto base_v = utf8_enumerate_delimiters<sz_utf8_newlines_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_newlines_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_newlines_haswell", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_newlines_icelake", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_newlines_neon", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_neon> {env}).log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_newlines_sve2", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_sve2> {env}).log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_newlines_v128", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_v128> {env}).log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_newlines_rvv", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_rvv> {env}).log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_newlines_powervsx", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_powervsx> {env})
         .log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_newlines_lasx", base_v, utf8_enumerate_delimiters<sz_utf8_newlines_lasx> {env}).log(base);
 #endif
 }
@@ -117,38 +116,38 @@ void bench_utf8_newlines(environment_t const &env) {
 void bench_utf8_whitespaces(environment_t const &env) {
     auto base_v = utf8_enumerate_delimiters<sz_utf8_whitespaces_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_whitespaces_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_whitespaces_haswell", base_v,
                 utf8_enumerate_delimiters<sz_utf8_whitespaces_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_whitespaces_icelake", base_v,
                 utf8_enumerate_delimiters<sz_utf8_whitespaces_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_whitespaces_neon", base_v, utf8_enumerate_delimiters<sz_utf8_whitespaces_neon> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_whitespaces_sve2", base_v, utf8_enumerate_delimiters<sz_utf8_whitespaces_sve2> {env})
         .log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_utf8_whitespaces_v128", base_v, utf8_enumerate_delimiters<sz_utf8_whitespaces_v128> {env})
         .log(base);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_utf8_whitespaces_rvv", base_v, utf8_enumerate_delimiters<sz_utf8_whitespaces_rvv> {env})
         .log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_utf8_whitespaces_powervsx", base_v,
                 utf8_enumerate_delimiters<sz_utf8_whitespaces_powervsx> {env})
         .log(base);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_utf8_whitespaces_lasx", base_v, utf8_enumerate_delimiters<sz_utf8_whitespaces_lasx> {env})
         .log(base);
 #endif
@@ -157,19 +156,19 @@ void bench_utf8_whitespaces(environment_t const &env) {
 void bench_utf8_delimiters(environment_t const &env) {
     auto base_v = utf8_enumerate_delimiters<sz_utf8_delimiters_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_delimiters_serial", base_v).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_utf8_delimiters_haswell", base_v, utf8_enumerate_delimiters<sz_utf8_delimiters_haswell> {env})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_utf8_delimiters_icelake", base_v, utf8_enumerate_delimiters<sz_utf8_delimiters_icelake> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_utf8_delimiters_neon", base_v, utf8_enumerate_delimiters<sz_utf8_delimiters_neon> {env})
         .log(base);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_utf8_delimiters_sve2", base_v, utf8_enumerate_delimiters<sz_utf8_delimiters_sve2> {env})
         .log(base);
 #endif
@@ -179,8 +178,8 @@ void bench_utf8_delimiters(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla UTF-8 Class-Scan Benchmarks!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

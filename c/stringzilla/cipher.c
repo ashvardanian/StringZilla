@@ -4,14 +4,14 @@
  *  @date August 3, 2026
  *  @brief Per-domain dispatch shim for AES-256 counter and Galois/counter mode encryption.
  */
-#if !defined(SZ_OVERRIDE_LIBC)
-#define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
+#if !defined(STRINGZILLA_OVERRIDE_LIBC)
+#define STRINGZILLA_OVERRIDE_LIBC (!STRINGZILLA_WITH_LIBC)
 #endif
 #include <stringzilla/cipher.h>
 
 #include "dispatch.h"
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
@@ -31,7 +31,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
 
     // Blocks run weakest to strongest, because a later assignment simply overwrites an earlier one.
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     if (caps & sz_cap_westmere_k) {
         impl->aes256_key_init = sz_aes256_key_init_westmere;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_westmere;
@@ -49,7 +49,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     if (caps & sz_cap_icelake_k) {
         impl->aes256_key_init = sz_aes256_key_init_icelake;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_icelake;
@@ -67,7 +67,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
     if (caps & sz_cap_neonaes_k) {
         impl->aes256_key_init = sz_aes256_key_init_neonaes;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_neonaes;
@@ -85,7 +85,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_SVE2AES
     if (caps & sz_cap_sve2aes_k) {
         impl->aes256_key_init = sz_aes256_key_init_sve2aes;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_sve2aes;
@@ -103,7 +103,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     if (caps & sz_cap_v128_k) {
         impl->aes256_key_init = sz_aes256_key_init_v128;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_v128;
@@ -121,7 +121,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     if (caps & sz_cap_v128relaxed_k) {
         impl->aes256_key_init = sz_aes256_key_init_v128relaxed;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_v128relaxed;
@@ -139,7 +139,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_RVVCRYPTO
+#if STRINGZILLA_TARGET_RVVCRYPTO
     if (caps & sz_cap_rvvcrypto_k) {
         impl->aes256_key_init = sz_aes256_key_init_rvvcrypto;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_rvvcrypto;
@@ -157,7 +157,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     if (caps & sz_cap_powervsx_k) {
         impl->aes256_key_init = sz_aes256_key_init_powervsx;
         impl->aes256_gcm_key_init = sz_aes256_gcm_key_init_powervsx;
@@ -176,68 +176,73 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps) {
 #endif
 }
 
-SZ_API_RUNTIME void sz_aes256_key_init(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_RUNTIME void sz_aes256_key_init(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
     sz_dispatch_cpu_table.aes256_key_init(key, secret);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_key_init(sz_aes256_gcm_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_key_init(sz_aes256_gcm_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
     sz_dispatch_cpu_table.aes256_gcm_key_init(key, secret);
 }
 
-SZ_API_RUNTIME void sz_aes256_ctr_xor(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                      sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_RUNTIME void sz_aes256_ctr_xor(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
+                                               sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length,
+                                               sz_ptr_t output) {
     sz_dispatch_cpu_table.aes256_ctr_xor(key, nonce, byte_offset, text, length, output);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_encrypt(sz_aes256_gcm_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                          sz_cptr_t associated, sz_size_t associated_length, sz_cptr_t text,
-                                          sz_size_t length, sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_encrypt(sz_aes256_gcm_key_t const *key,
+                                                   sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                   sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
+                                                   sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
     sz_dispatch_cpu_table.aes256_gcm_encrypt(key, nonce, associated, associated_length, text, length, output, tag);
 }
 
-SZ_API_RUNTIME sz_status_t sz_aes256_gcm_decrypt(sz_aes256_gcm_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                                 sz_cptr_t associated, sz_size_t associated_length, sz_cptr_t text,
-                                                 sz_size_t length, sz_ptr_t output,
-                                                 sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_RUNTIME sz_status_t sz_aes256_gcm_decrypt(sz_aes256_gcm_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                          sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
+                                                          sz_ptr_t output, sz_u8_t const tag[sz_at_least_(16)]) {
     return sz_dispatch_cpu_table.aes256_gcm_decrypt(key, nonce, associated, associated_length, text, length, output, tag);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_encryptor_init(sz_aes256_gcm_encryptor_t *encryptor, sz_aes256_gcm_key_t const *key,
-                                                 sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_encryptor_init(sz_aes256_gcm_encryptor_t *encryptor,
+                                                          sz_aes256_gcm_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_dispatch_cpu_table.aes256_gcm_encryptor_init(encryptor, key, nonce);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_encryptor_associate(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                      sz_size_t length) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_encryptor_associate(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
+                                                               sz_size_t length) {
     sz_dispatch_cpu_table.aes256_gcm_encryptor_associate(encryptor, text, length);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_encryptor_update(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                   sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_encryptor_update(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
+                                                            sz_size_t length, sz_ptr_t output) {
     sz_dispatch_cpu_table.aes256_gcm_encryptor_update(encryptor, text, length, output);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_encryptor_digest(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                   sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_encryptor_digest(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                            sz_u8_t tag[sz_at_least_(16)]) {
     sz_dispatch_cpu_table.aes256_gcm_encryptor_digest(encryptor, tag);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_decryptor_init(sz_aes256_gcm_decryptor_t *decryptor, sz_aes256_gcm_key_t const *key,
-                                                 sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_decryptor_init(sz_aes256_gcm_decryptor_t *decryptor,
+                                                          sz_aes256_gcm_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_dispatch_cpu_table.aes256_gcm_decryptor_init(decryptor, key, nonce);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_decryptor_associate(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
-                                                      sz_size_t length) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_decryptor_associate(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
+                                                               sz_size_t length) {
     sz_dispatch_cpu_table.aes256_gcm_decryptor_associate(decryptor, text, length);
 }
 
-SZ_API_RUNTIME void sz_aes256_gcm_decryptor_update_unverified(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
-                                                              sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_RUNTIME void sz_aes256_gcm_decryptor_update_unverified(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                       sz_cptr_t text, sz_size_t length,
+                                                                       sz_ptr_t output) {
     sz_dispatch_cpu_table.aes256_gcm_decryptor_update_unverified(decryptor, text, length, output);
 }
 
-SZ_API_RUNTIME sz_status_t sz_aes256_gcm_decryptor_verify(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                          sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_RUNTIME sz_status_t sz_aes256_gcm_decryptor_verify(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                   sz_u8_t const tag[sz_at_least_(16)]) {
     return sz_dispatch_cpu_table.aes256_gcm_decryptor_verify(decryptor, tag);
 }

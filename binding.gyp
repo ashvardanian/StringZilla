@@ -35,7 +35,7 @@
         "-Wno-unused-function"
       ],
       "defines": [
-        "SZ_DYNAMIC_DISPATCH=1"
+        "STRINGZILLA_RUNTIME_DISPATCH=1"
       ],
       "conditions": [
         [
@@ -46,17 +46,17 @@
                 "target_arch=='x64'",
                 {
                   "defines": [
-                    "SZ_USE_WESTMERE=1",
-                    "SZ_USE_GOLDMONT=1",
-                    "SZ_USE_HASWELL=1",
-                    "SZ_USE_SKYLAKE=1",
-                    "SZ_USE_ICELAKE=1",
-                    "SZ_USE_NEON=0",
-                    "SZ_USE_NEONAES=0",
-                    "SZ_USE_NEONSHA=0",
-                    "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0",
-                    "SZ_USE_SVE2AES=0"
+                    "STRINGZILLA_TARGET_WESTMERE=1",
+                    "STRINGZILLA_TARGET_GOLDMONT=1",
+                    "STRINGZILLA_TARGET_HASWELL=1",
+                    "STRINGZILLA_TARGET_SKYLAKE=1",
+                    "STRINGZILLA_TARGET_ICELAKE=1",
+                    "STRINGZILLA_TARGET_NEON=0",
+                    "STRINGZILLA_TARGET_NEONAES=0",
+                    "STRINGZILLA_TARGET_NEONSHA=0",
+                    "STRINGZILLA_TARGET_SVE=0",
+                    "STRINGZILLA_TARGET_SVE2=0",
+                    "STRINGZILLA_TARGET_SVE2AES=0"
                   ]
                 }
               ],
@@ -64,16 +64,16 @@
                 "target_arch=='arm64'",
                 {
                   "defines": [
-                    "SZ_USE_WESTMERE=0",
-                    "SZ_USE_HASWELL=0",
-                    "SZ_USE_SKYLAKE=0",
-                    "SZ_USE_ICELAKE=0",
-                    "SZ_USE_NEON=1",
-                    "SZ_USE_NEONAES=1",
-                    "SZ_USE_NEONSHA=1",
-                    "SZ_USE_SVE=1",
-                    "SZ_USE_SVE2=1",
-                    "SZ_USE_SVE2AES=1"
+                    "STRINGZILLA_TARGET_WESTMERE=0",
+                    "STRINGZILLA_TARGET_HASWELL=0",
+                    "STRINGZILLA_TARGET_SKYLAKE=0",
+                    "STRINGZILLA_TARGET_ICELAKE=0",
+                    "STRINGZILLA_TARGET_NEON=1",
+                    "STRINGZILLA_TARGET_NEONAES=1",
+                    "STRINGZILLA_TARGET_NEONSHA=1",
+                    "STRINGZILLA_TARGET_SVE=1",
+                    "STRINGZILLA_TARGET_SVE2=1",
+                    "STRINGZILLA_TARGET_SVE2AES=1"
                   ]
                 }
               ]
@@ -88,17 +88,17 @@
                 "target_arch=='x64'",
                 {
                   "defines": [
-                    "SZ_USE_WESTMERE=1",
-                    "SZ_USE_GOLDMONT=1",
-                    "SZ_USE_HASWELL=1",
-                    "SZ_USE_SKYLAKE=0",
-                    "SZ_USE_ICELAKE=0",
-                    "SZ_USE_NEON=0",
-                    "SZ_USE_NEONAES=0",
-                    "SZ_USE_NEONSHA=0",
-                    "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0",
-                    "SZ_USE_SVE2AES=0"
+                    "STRINGZILLA_TARGET_WESTMERE=1",
+                    "STRINGZILLA_TARGET_GOLDMONT=1",
+                    "STRINGZILLA_TARGET_HASWELL=1",
+                    "STRINGZILLA_TARGET_SKYLAKE=0",
+                    "STRINGZILLA_TARGET_ICELAKE=0",
+                    "STRINGZILLA_TARGET_NEON=0",
+                    "STRINGZILLA_TARGET_NEONAES=0",
+                    "STRINGZILLA_TARGET_NEONSHA=0",
+                    "STRINGZILLA_TARGET_SVE=0",
+                    "STRINGZILLA_TARGET_SVE2=0",
+                    "STRINGZILLA_TARGET_SVE2AES=0"
                   ]
                 }
               ],
@@ -106,17 +106,17 @@
                 "target_arch=='arm64'",
                 {
                   "defines": [
-                    "SZ_USE_WESTMERE=0",
-                    "SZ_USE_GOLDMONT=0",
-                    "SZ_USE_HASWELL=0",
-                    "SZ_USE_SKYLAKE=0",
-                    "SZ_USE_ICELAKE=0",
-                    "SZ_USE_NEON=1",
-                    "SZ_USE_NEONAES=1",
-                    "SZ_USE_NEONSHA=1",
-                    "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0",
-                    "SZ_USE_SVE2AES=0"
+                    "STRINGZILLA_TARGET_WESTMERE=0",
+                    "STRINGZILLA_TARGET_GOLDMONT=0",
+                    "STRINGZILLA_TARGET_HASWELL=0",
+                    "STRINGZILLA_TARGET_SKYLAKE=0",
+                    "STRINGZILLA_TARGET_ICELAKE=0",
+                    "STRINGZILLA_TARGET_NEON=1",
+                    "STRINGZILLA_TARGET_NEONAES=1",
+                    "STRINGZILLA_TARGET_NEONSHA=1",
+                    "STRINGZILLA_TARGET_SVE=0",
+                    "STRINGZILLA_TARGET_SVE2=0",
+                    "STRINGZILLA_TARGET_SVE2AES=0"
                   ]
                 }
               ]
@@ -131,17 +131,17 @@
                 "target_arch=='x64'",
                 {
                   "defines": [
-                    "SZ_USE_WESTMERE=1",
-                    "SZ_USE_GOLDMONT=1",
-                    "SZ_USE_HASWELL=1",
-                    "SZ_USE_SKYLAKE=1",
-                    "SZ_USE_ICELAKE=1",
-                    "SZ_USE_NEON=0",
-                    "SZ_USE_NEONAES=0",
-                    "SZ_USE_NEONSHA=0",
-                    "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0",
-                    "SZ_USE_SVE2AES=0"
+                    "STRINGZILLA_TARGET_WESTMERE=1",
+                    "STRINGZILLA_TARGET_GOLDMONT=1",
+                    "STRINGZILLA_TARGET_HASWELL=1",
+                    "STRINGZILLA_TARGET_SKYLAKE=1",
+                    "STRINGZILLA_TARGET_ICELAKE=1",
+                    "STRINGZILLA_TARGET_NEON=0",
+                    "STRINGZILLA_TARGET_NEONAES=0",
+                    "STRINGZILLA_TARGET_NEONSHA=0",
+                    "STRINGZILLA_TARGET_SVE=0",
+                    "STRINGZILLA_TARGET_SVE2=0",
+                    "STRINGZILLA_TARGET_SVE2AES=0"
                   ]
                 }
               ],
@@ -149,17 +149,17 @@
                 "target_arch=='arm64'",
                 {
                   "defines": [
-                    "SZ_USE_WESTMERE=0",
-                    "SZ_USE_GOLDMONT=0",
-                    "SZ_USE_HASWELL=0",
-                    "SZ_USE_SKYLAKE=0",
-                    "SZ_USE_ICELAKE=0",
-                    "SZ_USE_NEON=1",
-                    "SZ_USE_NEONAES=1",
-                    "SZ_USE_NEONSHA=1",
-                    "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0",
-                    "SZ_USE_SVE2AES=0"
+                    "STRINGZILLA_TARGET_WESTMERE=0",
+                    "STRINGZILLA_TARGET_GOLDMONT=0",
+                    "STRINGZILLA_TARGET_HASWELL=0",
+                    "STRINGZILLA_TARGET_SKYLAKE=0",
+                    "STRINGZILLA_TARGET_ICELAKE=0",
+                    "STRINGZILLA_TARGET_NEON=1",
+                    "STRINGZILLA_TARGET_NEONAES=1",
+                    "STRINGZILLA_TARGET_NEONSHA=1",
+                    "STRINGZILLA_TARGET_SVE=0",
+                    "STRINGZILLA_TARGET_SVE2=0",
+                    "STRINGZILLA_TARGET_SVE2AES=0"
                   ]
                 }
               ]

@@ -15,7 +15,7 @@
  *
  *  - @c STRINGWARS_DATASET : path to the input dataset, used to size the pool of messages.
  *  - @c STRINGWARS_FILTER : regular expression selecting which kernels to run.
- *  - @c STRINGWARS_DURATION : seconds per kernel.
+ *  - @c STRINGWARS_MAX_SECONDS : seconds per kernel.
  */
 #include <cstring> // `std::memcmp`
 #include <string>  // `std::string`
@@ -23,7 +23,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -41,14 +41,14 @@ struct ctr_from_sz {
     std::vector<char> &pool;
     std::vector<char> &target;
     sz_aes256_key_t key;
-    sz_u8_t nonce[SZ_AES256_NONCE_LENGTH];
+    sz_u8_t nonce[STRINGZILLA_AES256_NONCE_LENGTH];
 
     ctr_from_sz(std::size_t configured, std::vector<char> &input, std::vector<char> &output)
         : message_bytes(configured), pool(input), target(output) {
-        sz_u8_t secret[SZ_AES256_KEY_LENGTH];
-        for (std::size_t index = 0; index != SZ_AES256_KEY_LENGTH; ++index)
+        sz_u8_t secret[STRINGZILLA_AES256_KEY_LENGTH];
+        for (std::size_t index = 0; index != STRINGZILLA_AES256_KEY_LENGTH; ++index)
             secret[index] = static_cast<sz_u8_t>(index * 7 + 1);
-        for (std::size_t index = 0; index != SZ_AES256_NONCE_LENGTH; ++index)
+        for (std::size_t index = 0; index != STRINGZILLA_AES256_NONCE_LENGTH; ++index)
             nonce[index] = static_cast<sz_u8_t>(index * 5 + 2);
         init_(&key, secret);
     }
@@ -77,14 +77,14 @@ struct gcm_from_sz {
     std::vector<char> &pool;
     std::vector<char> &target;
     sz_aes256_gcm_key_t key;
-    sz_u8_t nonce[SZ_AES256_NONCE_LENGTH];
+    sz_u8_t nonce[STRINGZILLA_AES256_NONCE_LENGTH];
 
     gcm_from_sz(std::size_t configured, std::vector<char> &input, std::vector<char> &output)
         : message_bytes(configured), pool(input), target(output) {
-        sz_u8_t secret[SZ_AES256_KEY_LENGTH];
-        for (std::size_t index = 0; index != SZ_AES256_KEY_LENGTH; ++index)
+        sz_u8_t secret[STRINGZILLA_AES256_KEY_LENGTH];
+        for (std::size_t index = 0; index != STRINGZILLA_AES256_KEY_LENGTH; ++index)
             secret[index] = static_cast<sz_u8_t>(index * 3 + 5);
-        for (std::size_t index = 0; index != SZ_AES256_NONCE_LENGTH; ++index)
+        for (std::size_t index = 0; index != STRINGZILLA_AES256_NONCE_LENGTH; ++index)
             nonce[index] = static_cast<sz_u8_t>(index + 9);
         init_(&key, secret);
     }
@@ -92,8 +92,8 @@ struct gcm_from_sz {
     inline call_result_t operator()(std::size_t call_index) const noexcept {
         std::size_t const messages = cipher_pool_bytes_ / message_bytes;
         std::size_t const offset = (call_index % messages) * message_bytes;
-        sz_u8_t tag[SZ_AES256_TAG_LENGTH];
-        encrypt_(&key, nonce, SZ_NULL, 0, pool.data() + offset, message_bytes, target.data() + offset, tag);
+        sz_u8_t tag[STRINGZILLA_AES256_TAG_LENGTH];
+        encrypt_(&key, nonce, STRINGZILLA_NULL, 0, pool.data() + offset, message_bytes, target.data() + offset, tag);
         sz_u64_t check = 0;
         std::memcpy(&check, tag, sizeof(check));
         do_not_optimize(check);
@@ -116,52 +116,52 @@ static void fill_cipher_pool_(std::vector<char> &pool) noexcept {
 void bench_cipher_ctr(environment_t const &env) {
 
     for (std::size_t message_bytes : cipher_message_sizes_) {
-        std::vector<char> pool(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
-        std::vector<char> target(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
+        std::vector<char> pool(cipher_pool_bytes_ + STRINGZILLA_AES_BLOCK_LENGTH);
+        std::vector<char> target(cipher_pool_bytes_ + STRINGZILLA_AES_BLOCK_LENGTH);
         fill_cipher_pool_(pool);
 
         std::string const suffix = ":" + std::to_string(message_bytes);
         auto validator = ctr_from_sz<sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial> {message_bytes, pool, target};
         bench_result_t base = bench_unary(env, "sz_aes256_ctr_xor_serial" + suffix, validator).log();
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
         bench_unary(env, "sz_aes256_ctr_xor_westmere" + suffix, validator,
                     ctr_from_sz<sz_aes256_key_init_westmere, sz_aes256_ctr_xor_westmere> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
         bench_unary(env, "sz_aes256_ctr_xor_icelake" + suffix, validator,
                     ctr_from_sz<sz_aes256_key_init_icelake, sz_aes256_ctr_xor_icelake> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
         bench_unary(env, "sz_aes256_ctr_xor_neonaes" + suffix, validator,
                     ctr_from_sz<sz_aes256_key_init_neonaes, sz_aes256_ctr_xor_neonaes> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_SVE2AES
         bench_unary(env, "sz_aes256_ctr_xor_sve2aes" + suffix, validator,
                     ctr_from_sz<sz_aes256_key_init_sve2aes, sz_aes256_ctr_xor_sve2aes> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
         bench_unary(env, "sz_aes256_ctr_xor_v128" + suffix, validator,
                     ctr_from_sz<sz_aes256_key_init_v128, sz_aes256_ctr_xor_v128> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
         bench_unary(
             env, "sz_aes256_ctr_xor_v128relaxed" + suffix, validator,
             ctr_from_sz<sz_aes256_key_init_v128relaxed, sz_aes256_ctr_xor_v128relaxed> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_RVVCRYPTO
+#if STRINGZILLA_TARGET_RVVCRYPTO
         bench_unary(
             env, "sz_aes256_ctr_xor_rvvcrypto" + suffix, validator,
             ctr_from_sz<sz_aes256_key_init_rvvcrypto, sz_aes256_ctr_xor_rvvcrypto> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
         bench_unary(env, "sz_aes256_ctr_xor_powervsx" + suffix, validator,
                     ctr_from_sz<sz_aes256_key_init_powervsx, sz_aes256_ctr_xor_powervsx> {message_bytes, pool, target})
             .log(base);
@@ -176,8 +176,8 @@ void bench_cipher_ctr(environment_t const &env) {
 void bench_cipher_gcm(environment_t const &env) {
 
     for (std::size_t message_bytes : cipher_message_sizes_) {
-        std::vector<char> pool(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
-        std::vector<char> target(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
+        std::vector<char> pool(cipher_pool_bytes_ + STRINGZILLA_AES_BLOCK_LENGTH);
+        std::vector<char> target(cipher_pool_bytes_ + STRINGZILLA_AES_BLOCK_LENGTH);
         fill_cipher_pool_(pool);
 
         std::string const suffix = ":" + std::to_string(message_bytes);
@@ -185,48 +185,48 @@ void bench_cipher_gcm(environment_t const &env) {
                                                                                                    target};
         bench_result_t base = bench_unary(env, "sz_aes256_gcm_encrypt_serial" + suffix, validator).log();
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
         bench_unary(
             env, "sz_aes256_gcm_encrypt_westmere" + suffix, validator,
             gcm_from_sz<sz_aes256_gcm_key_init_westmere, sz_aes256_gcm_encrypt_westmere> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
         bench_unary(
             env, "sz_aes256_gcm_encrypt_icelake" + suffix, validator,
             gcm_from_sz<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encrypt_icelake> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
         bench_unary(
             env, "sz_aes256_gcm_encrypt_neonaes" + suffix, validator,
             gcm_from_sz<sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encrypt_neonaes> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_SVE2AES
         bench_unary(
             env, "sz_aes256_gcm_encrypt_sve2aes" + suffix, validator,
             gcm_from_sz<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encrypt_sve2aes> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
         bench_unary(env, "sz_aes256_gcm_encrypt_v128" + suffix, validator,
                     gcm_from_sz<sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encrypt_v128> {message_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
         bench_unary(env, "sz_aes256_gcm_encrypt_v128relaxed" + suffix, validator,
                     gcm_from_sz<sz_aes256_gcm_key_init_v128relaxed, sz_aes256_gcm_encrypt_v128relaxed> {message_bytes,
                                                                                                         pool, target})
             .log(base);
 #endif
-#if SZ_USE_RVVCRYPTO
+#if STRINGZILLA_TARGET_RVVCRYPTO
         bench_unary(env, "sz_aes256_gcm_encrypt_rvvcrypto" + suffix, validator,
                     gcm_from_sz<sz_aes256_gcm_key_init_rvvcrypto, sz_aes256_gcm_encrypt_rvvcrypto> {message_bytes, pool,
                                                                                                     target})
             .log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
         bench_unary(
             env, "sz_aes256_gcm_encrypt_powervsx" + suffix, validator,
             gcm_from_sz<sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encrypt_powervsx> {message_bytes, pool, target})
@@ -257,14 +257,14 @@ struct gcm_stream_from_sz {
     std::vector<char> &pool;
     std::vector<char> &target;
     sz_aes256_gcm_key_t key;
-    sz_u8_t nonce[SZ_AES256_NONCE_LENGTH];
+    sz_u8_t nonce[STRINGZILLA_AES256_NONCE_LENGTH];
 
     gcm_stream_from_sz(std::size_t configured, std::size_t chunk, std::vector<char> &input, std::vector<char> &output)
         : message_bytes(configured), chunk_bytes(chunk), pool(input), target(output) {
-        sz_u8_t secret[SZ_AES256_KEY_LENGTH];
-        for (std::size_t index = 0; index != SZ_AES256_KEY_LENGTH; ++index)
+        sz_u8_t secret[STRINGZILLA_AES256_KEY_LENGTH];
+        for (std::size_t index = 0; index != STRINGZILLA_AES256_KEY_LENGTH; ++index)
             secret[index] = static_cast<sz_u8_t>(index * 3 + 5);
-        for (std::size_t index = 0; index != SZ_AES256_NONCE_LENGTH; ++index)
+        for (std::size_t index = 0; index != STRINGZILLA_AES256_NONCE_LENGTH; ++index)
             nonce[index] = static_cast<sz_u8_t>(index + 9);
         init_(&key, secret);
     }
@@ -272,7 +272,7 @@ struct gcm_stream_from_sz {
     inline call_result_t operator()(std::size_t call_index) const noexcept {
         std::size_t const messages = cipher_pool_bytes_ / message_bytes;
         std::size_t const offset = (call_index % messages) * message_bytes;
-        sz_u8_t tag[SZ_AES256_TAG_LENGTH];
+        sz_u8_t tag[STRINGZILLA_AES256_TAG_LENGTH];
         sz_aes256_gcm_encryptor_t encryptor;
         begin_(&encryptor, &key, nonce);
         for (std::size_t consumed = 0; consumed < message_bytes; consumed += chunk_bytes) {
@@ -296,8 +296,8 @@ void bench_cipher_stream(environment_t const &env) {
 
     std::size_t const message_bytes = 4096;
     for (std::size_t chunk_bytes : cipher_chunk_sizes_) {
-        std::vector<char> pool(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
-        std::vector<char> target(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
+        std::vector<char> pool(cipher_pool_bytes_ + STRINGZILLA_AES_BLOCK_LENGTH);
+        std::vector<char> target(cipher_pool_bytes_ + STRINGZILLA_AES_BLOCK_LENGTH);
         fill_cipher_pool_(pool);
 
         std::string const suffix = ":chunk" + std::to_string(chunk_bytes);
@@ -307,7 +307,7 @@ void bench_cipher_stream(environment_t const &env) {
                 message_bytes, chunk_bytes, pool, target};
         bench_result_t base = bench_unary(env, "sz_aes256_gcm_stream_serial" + suffix, validator).log();
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
         bench_unary(
             env, "sz_aes256_gcm_stream_westmere" + suffix, validator,
             gcm_stream_from_sz<sz_aes256_gcm_key_init_westmere, sz_aes256_gcm_encryptor_init_westmere,
@@ -315,35 +315,35 @@ void bench_cipher_stream(environment_t const &env) {
                 message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
         bench_unary(env, "sz_aes256_gcm_stream_icelake" + suffix, validator,
                     gcm_stream_from_sz<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encryptor_init_icelake,
                                        sz_aes256_gcm_encryptor_update_icelake, sz_aes256_gcm_encryptor_digest_icelake> {
                         message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
         bench_unary(env, "sz_aes256_gcm_stream_neonaes" + suffix, validator,
                     gcm_stream_from_sz<sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encryptor_init_neonaes,
                                        sz_aes256_gcm_encryptor_update_neonaes, sz_aes256_gcm_encryptor_digest_neonaes> {
                         message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_SVE2AES
         bench_unary(env, "sz_aes256_gcm_stream_sve2aes" + suffix, validator,
                     gcm_stream_from_sz<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encryptor_init_sve2aes,
                                        sz_aes256_gcm_encryptor_update_sve2aes, sz_aes256_gcm_encryptor_digest_sve2aes> {
                         message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
         bench_unary(env, "sz_aes256_gcm_stream_v128" + suffix, validator,
                     gcm_stream_from_sz<sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encryptor_init_v128,
                                        sz_aes256_gcm_encryptor_update_v128, sz_aes256_gcm_encryptor_digest_v128> {
                         message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
         bench_unary(
             env, "sz_aes256_gcm_stream_v128relaxed" + suffix, validator,
             gcm_stream_from_sz<sz_aes256_gcm_key_init_v128relaxed, sz_aes256_gcm_encryptor_init_v128relaxed,
@@ -351,7 +351,7 @@ void bench_cipher_stream(environment_t const &env) {
                 message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_RVVCRYPTO
+#if STRINGZILLA_TARGET_RVVCRYPTO
         bench_unary(
             env, "sz_aes256_gcm_stream_rvvcrypto" + suffix, validator,
             gcm_stream_from_sz<sz_aes256_gcm_key_init_rvvcrypto, sz_aes256_gcm_encryptor_init_rvvcrypto,
@@ -359,7 +359,7 @@ void bench_cipher_stream(environment_t const &env) {
                 message_bytes, chunk_bytes, pool, target})
             .log(base);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
         bench_unary(
             env, "sz_aes256_gcm_stream_powervsx" + suffix, validator,
             gcm_stream_from_sz<sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encryptor_init_powervsx,
@@ -374,8 +374,8 @@ void bench_cipher_stream(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla AES-256 Cipher Benchmarks!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

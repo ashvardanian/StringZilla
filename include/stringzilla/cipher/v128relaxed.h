@@ -26,7 +26,7 @@ extern "C" {
  *  negative index, and rely on an out-of-range index answering zero, so relaxing them would make
  *  the result engine dependent. Everything with no relaxed opportunity calls the @c _v128 kernel
  *  rather than restating it. */
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
@@ -44,8 +44,8 @@ extern "C" {
  *  Both index vectors are nibbles by construction, so neither swizzle can go out of range and the
  *  relaxed form's implementation-defined case is unreachable.
  */
-SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16, v128_t high_table_u8x16,
-                                                          v128_t bytes_u8x16) {
+STRINGZILLA_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16, v128_t high_table_u8x16,
+                                                                   v128_t bytes_u8x16) {
     v128_t const low_nibbles_u8x16 = wasm_v128_and(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
     v128_t const high_nibbles_u8x16 = wasm_u8x16_shr(bytes_u8x16, 4);
     return wasm_v128_xor(wasm_i8x16_relaxed_swizzle(low_table_u8x16, low_nibbles_u8x16),
@@ -60,7 +60,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16
  *
  *  The two logarithm lookups take nibbles and may be relaxed.
  */
-SZ_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16, v128_t second_u8x16) {
+STRINGZILLA_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16, v128_t second_u8x16) {
     v128_t const logarithm_table_u8x16 = wasm_v128_load(sz_aes256_nibble_logarithm_v128_());
     v128_t const exponent_low_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_low_v128_());
     v128_t const exponent_high_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_high_v128_());
@@ -79,7 +79,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x1
  *  The same tower-field construction the @c _v128 kernel uses, with every provably in-range swizzle
  *  taken in its relaxed form.
  */
-SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
+STRINGZILLA_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
     v128_t const mapped_u8x16 = sz_aes256_nibble_map_v128relaxed_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
                                                                   wasm_v128_load(sz_aes256_tower_forward_high_v128_()),
                                                                   bytes_u8x16);
@@ -115,7 +115,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
  *  @param[in] round_constant The round constant for this step.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, sz_u8_t round_constant) {
+STRINGZILLA_HELPER_INLINE v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, sz_u8_t round_constant) {
     v128_t const last_word_u8x16 = wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3);
     v128_t const rotated_u8x16 = wasm_i8x16_shuffle(last_word_u8x16, last_word_u8x16, 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11,
                                                     8, 13, 14, 15, 12);
@@ -127,11 +127,12 @@ SZ_HELPER_INLINE v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, s
  *  @param[in] previous_u8x16 The four schedule words immediately before the new quadruple.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_INLINE v128_t sz_aes256_key_half_turn_v128relaxed_(v128_t previous_u8x16) {
+STRINGZILLA_HELPER_INLINE v128_t sz_aes256_key_half_turn_v128relaxed_(v128_t previous_u8x16) {
     return sz_aes256_substitute_v128relaxed_(wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3));
 }
 
-SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key,
+                                                             sz_u8_t const secret[sz_at_least_(32)]) {
     v128_t even_round_key_u8x16 = wasm_v128_load(secret);
     v128_t odd_round_key_u8x16 = wasm_v128_load(secret + 16);
 
@@ -191,7 +192,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_
  *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
-SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const *key, v128_t block_u8x16) {
+STRINGZILLA_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const *key, v128_t block_u8x16) {
     sz_size_t round_index;
     block_u8x16 = wasm_v128_xor(block_u8x16, sz_aes256_round_key_v128_(key, 0));
     for (round_index = 1; round_index != 14; ++round_index)
@@ -206,14 +207,14 @@ SZ_HELPER_INLINE v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t con
 
 #pragma region Counter Mode
 
-SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                                   sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length,
-                                                   sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key,
+                                                            sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
+                                                            sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     v128_t const counter_base_u8x16 = sz_aes256_counter_base_v128_(nonce);
-    sz_u32_t block_index = (sz_u32_t)(byte_offset / SZ_AES_BLOCK_LENGTH);
-    sz_size_t within_block = (sz_size_t)(byte_offset % SZ_AES_BLOCK_LENGTH);
+    sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
+    sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
 
     // A start that is not block aligned generates its first block whole and discards the leading bytes.
@@ -221,12 +222,12 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
         sz_u128_vec_t keystream_vec;
         keystream_vec.v128 = sz_aes256_block_encrypt_v128relaxed_(
             key, sz_aes256_counter_block_v128_(counter_base_u8x16, block_index));
-        for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
+        for (; within_block != STRINGZILLA_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
         ++block_index;
     }
 
-    for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH, ++block_index) {
+    for (; produced + STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += STRINGZILLA_AES_BLOCK_LENGTH, ++block_index) {
         v128_t const original_u8x16 = wasm_v128_load(input_bytes + produced);
         v128_t const keystream_u8x16 = sz_aes256_block_encrypt_v128relaxed_(
             key, sz_aes256_counter_block_v128_(counter_base_u8x16, block_index));
@@ -246,8 +247,8 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
 
 #pragma region Galois Hashing
 
-SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key,
-                                                        sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key,
+                                                                 sz_u8_t const secret[sz_at_least_(32)]) {
     v128_t subkey_u8x16, power_u8x16;
     sz_size_t power_index;
 
@@ -257,7 +258,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key
     wasm_v128_store(&key->powers[0], power_u8x16);
     for (power_index = 1; power_index != 8; ++power_index) {
         power_u8x16 = sz_ghash_multiply_v128_(power_u8x16, subkey_u8x16);
-        wasm_v128_store(&key->powers[power_index * SZ_AES_BLOCK_LENGTH], power_u8x16);
+        wasm_v128_store(&key->powers[power_index * STRINGZILLA_AES_BLOCK_LENGTH], power_u8x16);
     }
 }
 
@@ -266,8 +267,9 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key
 #pragma region Streaming Interface
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
-                                                       sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *state,
+                                                                sz_aes256_gcm_key_t const *key,
+                                                                sz_u8_t const nonce[sz_at_least_(12)]) {
     v128_t initial_u8x16;
 
     state->key = *key;
@@ -284,7 +286,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *st
     state->associated_length = 0;
     state->text_length = 0;
     state->buffered = 0;
-    state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
+    state->keystream_used = STRINGZILLA_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
 /**
@@ -299,9 +301,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *st
  *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
  *  block, then whole blocks, then a trailing block that the next chunk will resume.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                           sz_size_t length, sz_ptr_t output,
-                                                           sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                                    sz_size_t length, sz_ptr_t output,
+                                                                    sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     v128_t const subkey_u8x16 = wasm_v128_load(state->key.powers);
@@ -317,7 +319,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t
     if (state->text_length == 0 && state->buffered != 0) {
         sz_u128_vec_t padded_vec;
         padded_vec.v128 = wasm_v128_load(state->partial);
-        for (byte_index = state->buffered; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
+        for (byte_index = state->buffered; byte_index != STRINGZILLA_AES_BLOCK_LENGTH; ++byte_index)
             padded_vec.u8s[byte_index] = 0;
         accumulator_u8x16 = sz_ghash_absorb_v128_(accumulator_u8x16, padded_vec.v128, subkey_u8x16);
         state->buffered = 0;
@@ -326,15 +328,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t
     counter_vec.v128 = wasm_v128_load(state->counter);
     block_index = sz_u32_bytes_reverse(counter_vec.u32s[3]);
 
-    if (state->keystream_used != SZ_AES_BLOCK_LENGTH) {
-        sz_size_t const available_bytes = SZ_AES_BLOCK_LENGTH - state->keystream_used;
+    if (state->keystream_used != STRINGZILLA_AES_BLOCK_LENGTH) {
+        sz_size_t const available_bytes = STRINGZILLA_AES_BLOCK_LENGTH - state->keystream_used;
         sz_size_t const taken_bytes = length < available_bytes ? length : available_bytes;
         accumulator_u8x16 = sz_aes256_gcm_spend_v128_(state, input_bytes, output_bytes, taken_bytes, accumulator_u8x16,
                                                       subkey_u8x16, direction);
         produced = taken_bytes;
     }
 
-    for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH) {
+    for (; produced + STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += STRINGZILLA_AES_BLOCK_LENGTH) {
         v128_t const original_u8x16 = wasm_v128_load(input_bytes + produced);
         v128_t counter_block_u8x16, keystream_u8x16, transformed_u8x16, ciphertext_u8x16;
         block_index += 1;
@@ -362,46 +364,46 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t
     wasm_v128_store(state->counter, sz_aes256_counter_block_v128_(counter_vec.v128, block_index));
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_init_v128relaxed(sz_aes256_gcm_encryptor_t *encryptor,
-                                                              sz_aes256_gcm_key_t const *key,
-                                                              sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_v128relaxed(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                       sz_aes256_gcm_key_t const *key,
+                                                                       sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_v128relaxed_(&encryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_associate_v128relaxed(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                                   sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_v128relaxed(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                            sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_encryptor_associate_v128(encryptor, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_update_v128relaxed(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                                sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_v128relaxed(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                         sz_cptr_t text, sz_size_t length,
+                                                                         sz_ptr_t output) {
     sz_aes256_gcm_transform_v128relaxed_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_digest_v128relaxed(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                                sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_v128relaxed(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                         sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_encryptor_digest_v128(encryptor, tag);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_init_v128relaxed(sz_aes256_gcm_decryptor_t *decryptor,
-                                                              sz_aes256_gcm_key_t const *key,
-                                                              sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_v128relaxed(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                       sz_aes256_gcm_key_t const *key,
+                                                                       sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_v128relaxed_(&decryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_associate_v128relaxed(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
-                                                                   sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_v128relaxed(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                            sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_decryptor_associate_v128(decryptor, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_v128relaxed(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                           sz_cptr_t text, sz_size_t length,
-                                                                           sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_v128relaxed(
+    sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
     sz_aes256_gcm_transform_v128relaxed_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_v128relaxed(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                       sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_v128relaxed(
+    sz_aes256_gcm_decryptor_t const *decryptor, sz_u8_t const tag[sz_at_least_(16)]) {
     return sz_aes256_gcm_decryptor_verify_v128(decryptor, tag);
 }
 
@@ -409,10 +411,11 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_v128relaxed(sz_aes256
 
 #pragma region One Shot Interface
 
-SZ_API_COMPTIME void sz_aes256_gcm_encrypt_v128relaxed(sz_aes256_gcm_key_t const *key,
-                                                       sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                       sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
-                                                       sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_v128relaxed(sz_aes256_gcm_key_t const *key,
+                                                                sz_u8_t const nonce[sz_at_least_(12)],
+                                                                sz_cptr_t associated, sz_size_t associated_length,
+                                                                sz_cptr_t text, sz_size_t length, sz_ptr_t output,
+                                                                sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_encryptor_t encryptor;
     sz_aes256_gcm_encryptor_init_v128relaxed(&encryptor, key, nonce);
     if (associated_length) sz_aes256_gcm_encryptor_associate_v128relaxed(&encryptor, associated, associated_length);
@@ -421,11 +424,12 @@ SZ_API_COMPTIME void sz_aes256_gcm_encrypt_v128relaxed(sz_aes256_gcm_key_t const
     sz_aes256_gcm_state_scrub_v128_(&encryptor.state);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_t const *key,
-                                                              sz_u8_t const nonce[sz_at_least_(12)],
-                                                              sz_cptr_t associated, sz_size_t associated_length,
-                                                              sz_cptr_t text, sz_size_t length, sz_ptr_t output,
-                                                              sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_t const *key,
+                                                                       sz_u8_t const nonce[sz_at_least_(12)],
+                                                                       sz_cptr_t associated,
+                                                                       sz_size_t associated_length, sz_cptr_t text,
+                                                                       sz_size_t length, sz_ptr_t output,
+                                                                       sz_u8_t const tag[sz_at_least_(16)]) {
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
     sz_aes256_gcm_decryptor_init_v128relaxed(&decryptor, key, nonce);
@@ -444,7 +448,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // SZ_USE_V128RELAXED
+#endif // STRINGZILLA_TARGET_V128RELAXED
 
 #ifdef __cplusplus
 }

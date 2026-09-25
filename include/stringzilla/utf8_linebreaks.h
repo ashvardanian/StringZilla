@@ -41,9 +41,9 @@ extern "C" {
  *  @note No zero-length segments are emitted; @p length == 0 returns 0.
  *  @note Line segmentation is forward-only.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(         //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_size_t *line_starts, sz_size_t *line_lengths, //
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_linebreaks( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_size_t *line_starts, sz_size_t *line_lengths,  //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed);
 
 #pragma endregion
@@ -51,35 +51,36 @@ SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(         //
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_linebreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                    sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                                    sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                             sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                             sz_size_t *bytes_consumed);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_linebreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                     sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                                     sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                              sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                              sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_linebreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                  sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                           sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_linebreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                     sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                                     sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                              sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                              sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_linebreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *starts,
-                                                  sz_size_t *lengths, sz_size_t capacity, sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *starts,
+                                                           sz_size_t *lengths, sz_size_t capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -93,25 +94,25 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2(sz_cptr_t text, sz_size_t leng
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                            sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                            sz_size_t *bytes_consumed) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                     sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                     sz_size_t *bytes_consumed) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_linebreaks_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_linebreaks_haswell(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
-#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE2 && STRINGZILLA_SVE_WIDER_THAN_NEON_
     return sz_utf8_linebreaks_sve2(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_linebreaks_neon(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #else
     return sz_utf8_linebreaks_serial(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma endregion
 

@@ -18,18 +18,18 @@
 /*  Overload the following with caution. Those parameters must never be explicitly set during
  *  releases, but they come handy during development, to validate different ISA-specific backends:
  *
- *      #define SZ_USE_WESTMERE 0
- *      #define SZ_USE_HASWELL 0
- *      #define SZ_USE_GOLDMONT 0
- *      #define SZ_USE_SKYLAKE 0
- *      #define SZ_USE_ICELAKE 0
- *      #define SZ_USE_NEON 0
- *      #define SZ_USE_SVE 0
- *      #define SZ_USE_SVE2 0 */
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+ *      #define STRINGZILLA_TARGET_WESTMERE 0
+ *      #define STRINGZILLA_TARGET_HASWELL 0
+ *      #define STRINGZILLA_TARGET_GOLDMONT 0
+ *      #define STRINGZILLA_TARGET_SKYLAKE 0
+ *      #define STRINGZILLA_TARGET_ICELAKE 0
+ *      #define STRINGZILLA_TARGET_NEON 0
+ *      #define STRINGZILLA_TARGET_SVE 0
+ *      #define STRINGZILLA_TARGET_SVE2 0 */
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Include the StringZilla headers before anything else, to intercept missing @c #include
  *  directives and other issues. */
@@ -62,7 +62,7 @@
 
 #include <fmt/format.h>
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "harness.hpp" // `randomize_string`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -73,7 +73,7 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/** Compares two byte ranges and aborts with a localized diagnostic on the first mismatch. */
+/** Compares two byte ranges and fails with a localized diagnostic on the first mismatch. */
 inline void expect_equality(char const *first, char const *second, std::size_t size) {
     if (std::memcmp(first, second, size) == 0) return;
     std::size_t mismatch_position = 0;
@@ -106,7 +106,7 @@ struct accounting_allocator_t {
         return std::allocator<char> {}.allocate(count);
     }
 
-    void deallocate(char *block, std::size_t count) noexcept {
+    void deallocate(char *block, std::size_t count) {
         verify(count <= *live_bytes && "Deallocated more bytes than were tracked as allocated");
         *live_bytes -= count;
         std::allocator<char> {}.deallocate(block, count);
@@ -241,7 +241,7 @@ void test_arithmetic_unit() {
     verify(sz_size_bit_ceil(1000000000ull) == (1ull << 30));
     verify(sz_size_bit_ceil(2000000000ull) == (1ull << 31));
 
-#if SZ_IS_64BIT_
+#if STRINGZILLA_ARCH_64BIT_
     verify(sz_size_bit_ceil(4000000000ull) == (1ull << 32));
     verify(sz_size_bit_ceil(8000000000ull) == (1ull << 33));
     verify(sz_size_bit_ceil(16000000000ull) == (1ull << 34));
@@ -481,68 +481,65 @@ void test_ascii_unit() {
  *  overlapping regions, and both forward and backward traversals.
  */
 void test_memory_unit(std::size_t max_l2_size) {
-
-    fmt::println("  - testing memory primitive known-answer vectors...");
-
     // Movement known-answers, through the dispatched C API and every natively-compiled backend.
     check_memory_unit_(sz_copy, sz_move, sz_fill);
     check_memory_unit_(sz_copy_serial, sz_move_serial, sz_fill_serial);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     check_memory_unit_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     check_memory_unit_(sz_copy_skylake, sz_move_skylake, sz_fill_skylake);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     check_memory_unit_(sz_copy_neon, sz_move_neon, sz_fill_neon);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     check_memory_unit_(sz_copy_sve, sz_move_sve, sz_fill_sve);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     check_memory_unit_(sz_copy_v128, sz_move_v128, sz_fill_v128);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     check_memory_unit_(sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     check_memory_unit_(sz_copy_rvv, sz_move_rvv, sz_fill_rvv);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     check_memory_unit_(sz_copy_lasx, sz_move_lasx, sz_fill_lasx);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     check_memory_unit_(sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx);
 #endif
 
     // Lookup known-answers, through the dispatched C API and every natively-compiled backend.
     check_lookup_unit_(sz_lookup);
     check_lookup_unit_(sz_lookup_serial);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     check_lookup_unit_(sz_lookup_haswell);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     check_lookup_unit_(sz_lookup_icelake);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     check_lookup_unit_(sz_lookup_neon);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     check_lookup_unit_(sz_lookup_sve);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     check_lookup_unit_(sz_lookup_v128);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     check_lookup_unit_(sz_lookup_v128relaxed);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     check_lookup_unit_(sz_lookup_rvv);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     check_lookup_unit_(sz_lookup_lasx);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     check_lookup_unit_(sz_lookup_powervsx);
 #endif
 
@@ -1112,7 +1109,8 @@ void test_stl_updates_unit() {
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (SZ_IS_64BIT_) scope_verify(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string_t::min_capacity);
+    if (STRINGZILLA_ARCH_64BIT_)
+        scope_verify(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string_t::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -1515,8 +1513,6 @@ void test_extensions_updates_unit() {
  *  matcher, so a temporary one may outlive the expression.
  */
 void test_extensions_ranges_unit() {
-    fmt::println("  - testing lazy search ranges and splitting...");
-
     // Searching for a set of characters
     verify(sz::string_view_t("a").find_first_of("az") == 0);
     verify(sz::string_view_t("a").find_last_of("az") == 0);
@@ -1750,11 +1746,12 @@ void test_string_reserve_unit() {
 }
 
 /** Checks the string class for leaks, and that blocks return to the allocator that granted them. */
-void test_memory_stability_equivalence(std::size_t length, std::size_t iterations) {
+void test_memory_stability_equivalence(test_context_t &context, std::size_t length) {
     using accounting_string_t = sz::basic_string<accounting_allocator_t>;
     static_assert(sizeof(accounting_string_t) == sizeof(sz::string_t) + sizeof(std::size_t *),
                   "Only a stateful allocator may widen the string");
 
+    std::size_t const iterations = context.iterations(100);
     std::size_t live_bytes = 0, foreign_bytes = 0;
     accounting_allocator_t const allocator {&live_bytes}, foreign_allocator {&foreign_bytes};
     accounting_string_t base(allocator);
@@ -1839,10 +1836,10 @@ void test_memory_stability_equivalence(std::size_t length, std::size_t iteration
 }
 
 /** Tests the correctness of the string class update methods, such as @c push_back and @c erase. */
-void test_string_updates_equivalence(std::size_t repetitions) {
+void test_string_updates_equivalence(test_context_t &context, std::size_t repetitions) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
-    auto &generator = global_random_generator();
+    std::mt19937 &generator = context.generator;
     for (std::size_t repetition = 0; repetition != repetitions; ++repetition) {
         std::string stl_string;
         sz::string_t sz_string;
@@ -1902,7 +1899,7 @@ inline std::vector<sz_size_t> memory_equivalence_lengths() noexcept {
  *  against the reference.
  */
 template <typename reference_, typename candidate_>
-void check_memory_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_memory_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     std::vector<sz_size_t> const lengths = memory_equivalence_lengths();
     sz_size_t const max_length = lengths.back();
@@ -1912,9 +1909,9 @@ void check_memory_equivalence_(reference_ reference, candidate_ candidate, sz_si
 
             // A randomized source with embedded NULs - the byte primitives must stay length-driven.
             // The source itself is read from a cache-line-shifted span so the load alignment varies too.
-            std::vector<char> source_storage(length + SZ_CACHE_LINE_WIDTH, '\0');
-            sz_cptr_t const source = source_storage.data() + (input % SZ_CACHE_LINE_WIDTH);
-            if (length) randomize_string(const_cast<char *>(source), length);
+            std::vector<char> source_storage(length + STRINGZILLA_CACHE_LINE_BYTES, '\0');
+            sz_cptr_t const source = source_storage.data() + (input % STRINGZILLA_CACHE_LINE_BYTES);
+            if (length) randomize_string(generator, {const_cast<char *>(source), length});
 
             // `copy` and `fill`: place the destination at every sub-cache-line alignment, comparing the
             // candidate output against a serial reference run at the same alignment.
@@ -1972,7 +1969,7 @@ void check_memory_equivalence_(reference_ reference, candidate_ candidate, sz_si
  *  table they share.
  */
 template <typename reference_, typename candidate_>
-void check_lookup_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_lookup_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     char upper_table[256], lower_table[256], ascii_table[256];
     sz_lookup_init_upper(upper_table);
@@ -1995,9 +1992,9 @@ void check_lookup_equivalence_(reference_ reference, candidate_ candidate, sz_si
         for (sz_size_t length : lengths) {
             for (sz_size_t input = 0; input != inputs; ++input) {
 
-                std::vector<char> source_storage(length + SZ_CACHE_LINE_WIDTH, '\0');
-                sz_cptr_t const source = source_storage.data() + (input % SZ_CACHE_LINE_WIDTH);
-                if (length) randomize_string(const_cast<char *>(source), length);
+                std::vector<char> source_storage(length + STRINGZILLA_CACHE_LINE_BYTES, '\0');
+                sz_cptr_t const source = source_storage.data() + (input % STRINGZILLA_CACHE_LINE_BYTES);
+                if (length) randomize_string(generator, {const_cast<char *>(source), length});
 
                 for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {
                     std::vector<char> reference_output(length, '\0');
@@ -2079,31 +2076,31 @@ void test_memory_safety() {
 
     // Manual propagation to each natively-compiled backend kernel.
     check_memory_safety_(sz_copy_serial, sz_move_serial, sz_fill_serial);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     check_memory_safety_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     check_memory_safety_(sz_copy_skylake, sz_move_skylake, sz_fill_skylake);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     check_memory_safety_(sz_copy_neon, sz_move_neon, sz_fill_neon);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     check_memory_safety_(sz_copy_sve, sz_move_sve, sz_fill_sve);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     check_memory_safety_(sz_copy_v128, sz_move_v128, sz_fill_v128);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     check_memory_safety_(sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     check_memory_safety_(sz_copy_rvv, sz_move_rvv, sz_fill_rvv);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     check_memory_safety_(sz_copy_lasx, sz_move_lasx, sz_fill_lasx);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     check_memory_safety_(sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx);
 #endif
 
@@ -2112,31 +2109,31 @@ void test_memory_safety() {
 
     // Manual propagation to each natively-compiled backend kernel.
     check_lookup_safety_(sz_lookup_serial);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     check_lookup_safety_(sz_lookup_haswell);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     check_lookup_safety_(sz_lookup_icelake);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     check_lookup_safety_(sz_lookup_neon);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     check_lookup_safety_(sz_lookup_sve);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     check_lookup_safety_(sz_lookup_v128);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     check_lookup_safety_(sz_lookup_v128relaxed);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     check_lookup_safety_(sz_lookup_rvv);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     check_lookup_safety_(sz_lookup_lasx);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     check_lookup_safety_(sz_lookup_powervsx);
 #endif
 }
@@ -2149,31 +2146,31 @@ void test_memory_safety() {
  *  keeps the table non-empty on a baseline build. This tier set has Skylake, but not Icelake. */
 static memory_backend_t const memory_backends[] = {
     {"dispatched", sz_copy, sz_move, sz_fill},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_copy_haswell, sz_move_haswell, sz_fill_haswell},
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     {"skylake", sz_copy_skylake, sz_move_skylake, sz_fill_skylake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_copy_neon, sz_move_neon, sz_fill_neon},
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     {"sve", sz_copy_sve, sz_move_sve, sz_fill_sve},
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     {"v128", sz_copy_v128, sz_move_v128, sz_fill_v128},
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     {"v128relaxed", sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed},
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     {"rvv", sz_copy_rvv, sz_move_rvv, sz_fill_rvv},
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     {"lasx", sz_copy_lasx, sz_move_lasx, sz_fill_lasx},
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     {"powervsx", sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx},
 #endif
 };
@@ -2182,45 +2179,47 @@ static memory_backend_t const memory_backends[] = {
  *  entry keeps the table non-empty on a baseline build. This tier set has Icelake, not Skylake. */
 static lookup_backend_t const lookup_backends[] = {
     {"dispatched", sz_lookup},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_lookup_haswell},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_lookup_icelake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_lookup_neon},
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     {"sve", sz_lookup_sve},
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     {"v128", sz_lookup_v128},
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     {"v128relaxed", sz_lookup_v128relaxed},
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     {"rvv", sz_lookup_rvv},
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     {"lasx", sz_lookup_lasx},
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     {"powervsx", sz_lookup_powervsx},
 #endif
 };
 
 /** Drives the serial-vs-SIMD movement and lookup differential tests across every backend compiled
  *  on this target, dispatched first. Copy, move and fill carry a tier set differing from lookup. */
-void test_memory_all() {
-    sz_size_t const inputs = (sz_size_t)scale_iterations(2);
+void test_memory_all(test_context_t &context) {
+    sz_size_t const inputs = (sz_size_t)context.iterations(2);
 
     memory_backend_t const memory_serial {"serial", sz_copy_serial, sz_move_serial, sz_fill_serial};
-    for (memory_backend_t const &backend : memory_backends) check_memory_equivalence_(memory_serial, backend, inputs);
+    for (memory_backend_t const &backend : memory_backends)
+        check_memory_equivalence_(context.generator, memory_serial, backend, inputs);
 
     lookup_backend_t const lookup_serial {"serial", sz_lookup_serial};
-    for (lookup_backend_t const &backend : lookup_backends) check_lookup_equivalence_(lookup_serial, backend, inputs);
+    for (lookup_backend_t const &backend : lookup_backends)
+        check_lookup_equivalence_(context.generator, lookup_serial, backend, inputs);
 }
 
 #pragma endregion Drivers

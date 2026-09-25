@@ -72,9 +72,9 @@ static sz_bool_t Sha256_bind_digests_(PyObject *out, sz_size_t digests_count, Py
         PyBuffer_Release(out_view);
         return sz_false_k;
     }
-    if ((sz_size_t)out_view->len < digests_count * SZ_SHA256_DIGEST_LENGTH) {
+    if ((sz_size_t)out_view->len < digests_count * STRINGZILLA_SHA256_DIGEST_LENGTH) {
         PyErr_Format(PyExc_ValueError, "out buffer holds %zd bytes, need %zu for %zu digests",
-                     (Py_ssize_t)out_view->len, digests_count * SZ_SHA256_DIGEST_LENGTH, digests_count);
+                     (Py_ssize_t)out_view->len, digests_count * STRINGZILLA_SHA256_DIGEST_LENGTH, digests_count);
         PyBuffer_Release(out_view);
         return sz_false_k;
     }
@@ -86,8 +86,8 @@ static PyObject *Sha256_digests_to_list_(sz_u8_t const *digests, sz_size_t diges
     PyObject *result = PyList_New((Py_ssize_t)digests_count);
     if (!result) return NULL;
     for (sz_size_t index = 0; index != digests_count; ++index) {
-        PyObject *digest = PyBytes_FromStringAndSize((char const *)&digests[index * SZ_SHA256_DIGEST_LENGTH],
-                                                     SZ_SHA256_DIGEST_LENGTH);
+        PyObject *digest = PyBytes_FromStringAndSize((char const *)&digests[index * STRINGZILLA_SHA256_DIGEST_LENGTH],
+                                                     STRINGZILLA_SHA256_DIGEST_LENGTH);
         if (!digest) {
             Py_DECREF(result);
             return NULL;
@@ -604,9 +604,9 @@ PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t posi
 static void Hmac_prime_(sz_sha256_state_t *inner, sz_sha256_state_t *outer, sz_cptr_t key, sz_size_t key_length) {
 
     // Keys longer than one block are replaced by their digest; shorter ones are zero-padded.
-    sz_u8_t key_pad[SZ_SHA256_BLOCK_LENGTH];
+    sz_u8_t key_pad[STRINGZILLA_SHA256_BLOCK_LENGTH];
     sz_fill((sz_ptr_t)key_pad, sizeof(key_pad), 0);
-    if (key_length > SZ_SHA256_BLOCK_LENGTH) {
+    if (key_length > STRINGZILLA_SHA256_BLOCK_LENGTH) {
         sz_sha256_state_t key_state;
         sz_sha256_state_init(&key_state);
         sz_sha256_state_update(&key_state, key, key_length);
@@ -614,16 +614,16 @@ static void Hmac_prime_(sz_sha256_state_t *inner, sz_sha256_state_t *outer, sz_c
     }
     else { sz_copy((sz_ptr_t)key_pad, key, key_length); }
 
-    sz_u8_t block[SZ_SHA256_BLOCK_LENGTH];
+    sz_u8_t block[STRINGZILLA_SHA256_BLOCK_LENGTH];
     sz_sha256_state_init(inner);
-    for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
+    for (sz_size_t byte_index = 0; byte_index != STRINGZILLA_SHA256_BLOCK_LENGTH; ++byte_index)
         block[byte_index] = key_pad[byte_index] ^ 0x36;
-    sz_sha256_state_update(inner, (sz_cptr_t)block, SZ_SHA256_BLOCK_LENGTH);
+    sz_sha256_state_update(inner, (sz_cptr_t)block, STRINGZILLA_SHA256_BLOCK_LENGTH);
 
     sz_sha256_state_init(outer);
-    for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
+    for (sz_size_t byte_index = 0; byte_index != STRINGZILLA_SHA256_BLOCK_LENGTH; ++byte_index)
         block[byte_index] = key_pad[byte_index] ^ 0x5c;
-    sz_sha256_state_update(outer, (sz_cptr_t)block, SZ_SHA256_BLOCK_LENGTH);
+    sz_sha256_state_update(outer, (sz_cptr_t)block, STRINGZILLA_SHA256_BLOCK_LENGTH);
 
     // The pads are derived from the secret, so don't leave them on the stack for the next frame.
     sz_fill((sz_ptr_t)key_pad, sizeof(key_pad), 0), sz_fill((sz_ptr_t)block, sizeof(block), 0);
@@ -634,10 +634,10 @@ static void Hmac_prime_(sz_sha256_state_t *inner, sz_sha256_state_t *outer, sz_c
  *  @note Consumes neither state, so a caller can take an interim tag and keep streaming.
  */
 static void Hmac_digest_one_(sz_sha256_state_t const *inner, sz_sha256_state_t const *outer, sz_u8_t *digest) {
-    sz_u8_t inner_digest[SZ_SHA256_DIGEST_LENGTH];
+    sz_u8_t inner_digest[STRINGZILLA_SHA256_DIGEST_LENGTH];
     sz_sha256_state_digest(inner, inner_digest);
     sz_sha256_state_t wrapping = *outer;
-    sz_sha256_state_update(&wrapping, (sz_cptr_t)inner_digest, SZ_SHA256_DIGEST_LENGTH);
+    sz_sha256_state_update(&wrapping, (sz_cptr_t)inner_digest, STRINGZILLA_SHA256_DIGEST_LENGTH);
     sz_sha256_state_digest(&wrapping, digest);
 }
 
@@ -661,8 +661,8 @@ static void Hmac_digest_many_(sz_sequence_t const *texts, sz_sha256_state_t cons
     sz_sha256_multistate_digest(states, count, digests);
 
     for (sz_size_t index = 0; index != count; ++index)
-        states[index] = *outer, views[index].start = (sz_cptr_t)&digests[index * SZ_SHA256_DIGEST_LENGTH],
-        views[index].length = SZ_SHA256_DIGEST_LENGTH;
+        states[index] = *outer, views[index].start = (sz_cptr_t)&digests[index * STRINGZILLA_SHA256_DIGEST_LENGTH],
+        views[index].length = STRINGZILLA_SHA256_DIGEST_LENGTH;
 
     sz_sequence_t inner_digests;
     sz_sequence_from_string_views(views, count, &inner_digests);
@@ -763,12 +763,12 @@ PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t position
         if (have_out && !Sha256_bind_digests_(out_obj, 1, &out_view)) return NULL;
 
         sz_sha256_state_t inner_state, outer_state;
-        sz_u8_t digest[SZ_SHA256_DIGEST_LENGTH];
+        sz_u8_t digest[STRINGZILLA_SHA256_DIGEST_LENGTH];
         Hmac_prime_(&inner_state, &outer_state, key.start, key.length);
         sz_sha256_state_update(&inner_state, message.start, message.length);
         Hmac_digest_one_(&inner_state, &outer_state, have_out ? (sz_u8_t *)out_view.buf : digest);
 
-        if (!have_out) return PyBytes_FromStringAndSize((char const *)digest, SZ_SHA256_DIGEST_LENGTH);
+        if (!have_out) return PyBytes_FromStringAndSize((char const *)digest, STRINGZILLA_SHA256_DIGEST_LENGTH);
         PyBuffer_Release(&out_view);
         Py_INCREF(out_obj);
         return out_obj;
@@ -809,7 +809,7 @@ PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t position
     sz_u8_t *digests = NULL;
     if (have_out) { digests = (sz_u8_t *)out_view.buf; }
     else if (texts.count) {
-        digests = (sz_u8_t *)malloc((size_t)texts.count * SZ_SHA256_DIGEST_LENGTH);
+        digests = (sz_u8_t *)malloc((size_t)texts.count * STRINGZILLA_SHA256_DIGEST_LENGTH);
         if (!digests) {
             Py_DECREF(pin);
             free(views), free(states);
@@ -1301,7 +1301,7 @@ static PyObject *Sha256s_digest(PyObject *self_obj, PyObject *const *args, Py_ss
     }
 
     if (!self->lanes_count) return PyList_New(0);
-    sz_u8_t *digests = (sz_u8_t *)malloc((size_t)self->lanes_count * SZ_SHA256_DIGEST_LENGTH);
+    sz_u8_t *digests = (sz_u8_t *)malloc((size_t)self->lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH);
     if (!digests) return PyErr_NoMemory();
     Py_BEGIN_ALLOW_THREADS;
     sz_sha256_multistate_digest(self->states, self->lanes_count, digests);
@@ -1316,7 +1316,7 @@ static PyObject *Sha256s_hexdigest(PyObject *self_obj, PyObject *noargs) {
     Sha256s *self = (Sha256s *)self_obj;
     if (!self->lanes_count) return PyList_New(0);
 
-    sz_u8_t *digests = (sz_u8_t *)malloc((size_t)self->lanes_count * SZ_SHA256_DIGEST_LENGTH);
+    sz_u8_t *digests = (sz_u8_t *)malloc((size_t)self->lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH);
     if (!digests) return PyErr_NoMemory();
     Py_BEGIN_ALLOW_THREADS;
     sz_sha256_multistate_digest(self->states, self->lanes_count, digests);
@@ -1328,9 +1328,9 @@ static PyObject *Sha256s_hexdigest(PyObject *self_obj, PyObject *noargs) {
         return NULL;
     }
     for (sz_size_t lane_index = 0; lane_index != self->lanes_count; ++lane_index) {
-        char text[SZ_SHA256_DIGEST_LENGTH * 2 + 1];
-        sz_u8_t const *digest = &digests[lane_index * SZ_SHA256_DIGEST_LENGTH];
-        for (int byte_index = 0; byte_index < SZ_SHA256_DIGEST_LENGTH; ++byte_index)
+        char text[STRINGZILLA_SHA256_DIGEST_LENGTH * 2 + 1];
+        sz_u8_t const *digest = &digests[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH];
+        for (int byte_index = 0; byte_index < STRINGZILLA_SHA256_DIGEST_LENGTH; ++byte_index)
             snprintf(text + byte_index * 2, 3, "%02x", digest[byte_index]);
         PyObject *hex = PyUnicode_FromString(text);
         if (!hex) {
@@ -1483,11 +1483,11 @@ static char const doc_Sha256s_copy[] =                                         /
     "  Sha256s: A new object that can be advanced separately from the original.";
 
 static PyMethodDef Sha256s_methods[] = {
-    {"update", (PyCFunction)Sha256s_update, METH_O, doc_Sha256s_update},               //
-    {"digest", (PyCFunction)Sha256s_digest, SZ_METHOD_FLAGS, doc_Sha256s_digest},      //
-    {"hexdigest", (PyCFunction)Sha256s_hexdigest, METH_NOARGS, doc_Sha256s_hexdigest}, //
-    {"reset", (PyCFunction)Sha256s_reset, METH_NOARGS, doc_Sha256s_reset},             //
-    {"copy", (PyCFunction)Sha256s_copy, METH_NOARGS, doc_Sha256s_copy},                //
+    {"update", (PyCFunction)Sha256s_update, METH_O, doc_Sha256s_update},                   //
+    {"digest", (PyCFunction)Sha256s_digest, STRINGZILLA_METHOD_FLAGS, doc_Sha256s_digest}, //
+    {"hexdigest", (PyCFunction)Sha256s_hexdigest, METH_NOARGS, doc_Sha256s_hexdigest},     //
+    {"reset", (PyCFunction)Sha256s_reset, METH_NOARGS, doc_Sha256s_reset},                 //
+    {"copy", (PyCFunction)Sha256s_copy, METH_NOARGS, doc_Sha256s_copy},                    //
     {NULL, NULL, 0, NULL},
 };
 

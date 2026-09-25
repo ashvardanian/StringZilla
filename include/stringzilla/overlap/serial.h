@@ -46,7 +46,7 @@ enum { sz_overlap_interleaved_chains_k = 4 };
 #pragma region Generic Public Helpers
 
 /** 256 raised to @p width, mod p: the multiplier that shifts a prefix past that many bytes. */
-SZ_HELPER_AUTO sz_f64_t sz_overlap_window_power(sz_size_t width) {
+STRINGZILLA_HELPER_AUTO sz_f64_t sz_overlap_window_power(sz_size_t width) {
     sz_u64_t const prime = sz_overlap_modulus_k;
     sz_u64_t result = 1, base = 256ull % prime, exponent = width;
     while (exponent) {
@@ -80,7 +80,7 @@ typedef struct sz_overlap_btree_t {
 
 /** Slots the sort pads @p count keys up to: the least power of two at or above @p count and
  *  at least 64. */
-SZ_API_COMPTIME sz_size_t sz_overlap_btree_sorted_capacity(sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_btree_sorted_capacity(sz_size_t count) {
     sz_size_t capacity = 64;
     while (capacity < count) capacity *= 2;
     return capacity;
@@ -88,14 +88,14 @@ SZ_API_COMPTIME sz_size_t sz_overlap_btree_sorted_capacity(sz_size_t count) {
 
 /** Leaves a tree of @p keys_count keys needs; never zero, so an empty tree still has
  *  one padding leaf. */
-SZ_HELPER_AUTO sz_size_t sz_overlap_btree_leaves_(sz_size_t keys_count) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_overlap_btree_leaves_(sz_size_t keys_count) {
     sz_size_t const leaves = (keys_count + sz_overlap_keys_per_node_k - 1) / sz_overlap_keys_per_node_k;
     return leaves ? leaves : 1;
 }
 
 /** @c u32 entries the arena must hold for @p keys_count keys written at its start: the sort's
  *  padded capacity or every level's nodes, whichever is larger. */
-SZ_API_COMPTIME sz_size_t sz_overlap_btree_entries(sz_size_t keys_count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_btree_entries(sz_size_t keys_count) {
     sz_size_t const sorted = sz_overlap_btree_sorted_capacity(keys_count);
     sz_size_t nodes = 0;
     for (sz_size_t level_nodes = sz_overlap_btree_leaves_(keys_count);;
@@ -108,7 +108,7 @@ SZ_API_COMPTIME sz_size_t sz_overlap_btree_entries(sz_size_t keys_count) {
 }
 
 /** Drops repeats from @p count ascending keys in place, answering how many distinct ones remain. */
-SZ_API_COMPTIME sz_size_t sz_overlap_btree_unique_(sz_u32_t *keys, sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_btree_unique_(sz_u32_t *keys, sz_size_t count) {
     sz_size_t distinct = count != 0;
     for (sz_size_t index = 1; index < count; ++index)
         if (keys[index] != keys[distinct - 1]) keys[distinct++] = keys[index];
@@ -123,7 +123,8 @@ SZ_API_COMPTIME sz_size_t sz_overlap_btree_unique_(sz_u32_t *keys, sz_size_t cou
  *  @return @c sz_success_k always; the level count is an invariant of sixteen keys per node,
  *      asserted, never reported.
  */
-SZ_API_COMPTIME sz_status_t sz_overlap_btree_prepare(sz_u32_t *nodes, sz_size_t keys_count, sz_overlap_btree_t *btree) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_btree_prepare(sz_u32_t *nodes, sz_size_t keys_count,
+                                                              sz_overlap_btree_t *btree) {
     sz_size_t const keys_per_node = sz_overlap_keys_per_node_k, branches_per_node = sz_overlap_branches_per_node_k;
     sz_u32_t const padding = (sz_u32_t)sz_overlap_padding_key_k ^ (sz_u32_t)sz_overlap_sign_flip_k;
     sz_size_t const leaves = sz_overlap_btree_leaves_(keys_count);
@@ -160,7 +161,8 @@ SZ_API_COMPTIME sz_status_t sz_overlap_btree_prepare(sz_u32_t *nodes, sz_size_t 
 
 /** @p matches over the longer side's window count, zero when both are empty; only the longer side
  *  keeps the share within [0, 1]. */
-SZ_HELPER_AUTO sz_f32_t sz_overlap_share_(sz_size_t matches, sz_size_t candidate_windows, sz_size_t query_windows) {
+STRINGZILLA_HELPER_AUTO sz_f32_t sz_overlap_share_(sz_size_t matches, sz_size_t candidate_windows,
+                                                   sz_size_t query_windows) {
     sz_size_t const longer = candidate_windows > query_windows ? candidate_windows : query_windows;
     return longer ? (sz_f32_t)((sz_f64_t)matches / (sz_f64_t)longer) : 0.0f;
 }
@@ -224,7 +226,7 @@ typedef struct sz_overlap_engine_t {
 } sz_overlap_engine_t;
 
 /** Materializes one query's tree: the levels and their bases are a closed form of its key count. */
-SZ_HELPER_AUTO sz_overlap_btree_t sz_overlap_engine_row_(sz_overlap_engine_t const *engine, sz_size_t index) {
+STRINGZILLA_HELPER_AUTO sz_overlap_btree_t sz_overlap_engine_row_(sz_overlap_engine_t const *engine, sz_size_t index) {
     sz_size_t const branches_per_node = sz_overlap_branches_per_node_k;
     sz_size_t const leaves = sz_overlap_btree_leaves_(engine->keys_counts[index]);
     sz_size_t levels = 1;
@@ -232,7 +234,7 @@ SZ_HELPER_AUTO sz_overlap_btree_t sz_overlap_engine_row_(sz_overlap_engine_t con
          level_nodes = (level_nodes + branches_per_node - 1) / branches_per_node)
         ++levels;
 
-    sz_overlap_btree_t btree = {SZ_NULL, 0, {0}};
+    sz_overlap_btree_t btree = {STRINGZILLA_NULL, 0, {0}};
     btree.nodes = engine->nodes + engine->nodes_offsets[index];
     btree.levels = levels;
     btree.level_bases[levels - 1] = 0;
@@ -247,7 +249,7 @@ SZ_HELPER_AUTO sz_overlap_btree_t sz_overlap_engine_row_(sz_overlap_engine_t con
 
 /** The tier's own record at the head of @p engine 's block, where
  *  @ref sz_overlap_engine_open_ reserved it. */
-SZ_API_COMPTIME void *sz_overlap_engine_head_(sz_overlap_engine_t const *engine) {
+STRINGZILLA_API_COMPTIME void *sz_overlap_engine_head_(sz_overlap_engine_t const *engine) {
     return (void *)(((sz_size_t)engine->memory + 63) & ~(sz_size_t)63);
 }
 
@@ -264,9 +266,11 @@ SZ_API_COMPTIME void *sz_overlap_engine_head_(sz_overlap_engine_t const *engine)
  *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for zero widths, or @c sz_bad_alloc_k
  *      when the block cannot be taken.
  */
-SZ_API_COMPTIME sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries, sz_size_t const *window_widths,
-                                                    sz_size_t window_widths_count, sz_size_t head_bytes,
-                                                    sz_memory_allocator_t const *alloc, sz_overlap_engine_t *engine) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries,
+                                                             sz_size_t const *window_widths,
+                                                             sz_size_t window_widths_count, sz_size_t head_bytes,
+                                                             sz_memory_allocator_t const *alloc,
+                                                             sz_overlap_engine_t *engine) {
     if (!window_widths_count) return sz_unexpected_dimensions_k;
     sz_size_t const count = queries->count;
     sz_size_t const head = (head_bytes + 63) & ~(sz_size_t)63;
@@ -319,19 +323,19 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries
     engine->capability = sz_caps_none_k;
     engine->alloc = *alloc;
     engine->memory = allocation, engine->memory_bytes = total_bytes;
-    engine->scratch = SZ_NULL, engine->scratch_bytes = 0;
+    engine->scratch = STRINGZILLA_NULL, engine->scratch_bytes = 0;
     return sz_success_k;
 }
 
 /** Bytes one round's @p chains interleaved chains and its window hashes need over
  *  its longest candidate. */
-SZ_API_COMPTIME sz_size_t sz_overlap_engine_round_bytes_(sz_size_t longest_candidate, sz_size_t chains) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_engine_round_bytes_(sz_size_t longest_candidate, sz_size_t chains) {
     return (longest_candidate + 1) * chains * sizeof(sz_f64_t) + (longest_candidate + 1) * sizeof(sz_u32_t);
 }
 
 /** Grows @p engine 's round block to @p bytes, keeping whatever it already holds when
  *  that is enough. */
-SZ_API_COMPTIME sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine, sz_size_t bytes) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine, sz_size_t bytes) {
     if (engine->scratch_bytes >= bytes) return sz_success_k;
     if (engine->scratch) engine->alloc.free(engine->scratch, engine->scratch_bytes, engine->alloc.handle);
     engine->scratch = engine->alloc.allocate(bytes, engine->alloc.handle);
@@ -340,9 +344,10 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine,
 }
 
 /** Refuses a stride under the axis it spans, so no row can be written into its neighbour's. */
-SZ_API_COMPTIME sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t const *engine, sz_size_t candidates_count,
-                                                       sz_size_t scores_query_stride,
-                                                       sz_size_t scores_candidate_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t const *engine,
+                                                                sz_size_t candidates_count,
+                                                                sz_size_t scores_query_stride,
+                                                                sz_size_t scores_candidate_stride) {
     if (scores_candidate_stride < engine->widths_count) return sz_unexpected_dimensions_k;
     if (scores_query_stride < candidates_count * scores_candidate_stride) return sz_unexpected_dimensions_k;
     return sz_success_k;
@@ -350,14 +355,14 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t const
 
 /** Returns both of @p engine 's blocks to the allocator they were built with, and
  *  leaves it empty. */
-SZ_API_COMPTIME void sz_overlap_engine_close_(sz_overlap_engine_t *engine) {
+STRINGZILLA_API_COMPTIME void sz_overlap_engine_close_(sz_overlap_engine_t *engine) {
     if (engine->scratch) engine->alloc.free(engine->scratch, engine->scratch_bytes, engine->alloc.handle);
     if (engine->memory) engine->alloc.free(engine->memory, engine->memory_bytes, engine->alloc.handle);
-    engine->nodes = SZ_NULL, engine->nodes_offsets = SZ_NULL, engine->keys_counts = SZ_NULL;
-    engine->widths = SZ_NULL, engine->powers = SZ_NULL, engine->lengths = SZ_NULL;
+    engine->nodes = STRINGZILLA_NULL, engine->nodes_offsets = STRINGZILLA_NULL, engine->keys_counts = STRINGZILLA_NULL;
+    engine->widths = STRINGZILLA_NULL, engine->powers = STRINGZILLA_NULL, engine->lengths = STRINGZILLA_NULL;
     engine->count = 0, engine->widths_count = 0, engine->capability = sz_caps_none_k;
-    engine->memory = SZ_NULL, engine->memory_bytes = 0;
-    engine->scratch = SZ_NULL, engine->scratch_bytes = 0;
+    engine->memory = STRINGZILLA_NULL, engine->memory_bytes = 0;
+    engine->scratch = STRINGZILLA_NULL, engine->scratch_bytes = 0;
 }
 
 #pragma endregion Engine
@@ -369,14 +374,15 @@ enum { sz_overlap_serial_f64x1_positions_per_step_k = 1 };
 
 /** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
  *  product fits one @c u64, and the remainder by a constant becomes a multiply-high and a shift. */
-SZ_HELPER_AUTO sz_f64_t sz_overlap_serial_multiply_add_(sz_f64_t multiplier, sz_f64_t multiplicand, sz_f64_t addend) {
+STRINGZILLA_HELPER_AUTO sz_f64_t sz_overlap_serial_multiply_add_(sz_f64_t multiplier, sz_f64_t multiplicand,
+                                                                 sz_f64_t addend) {
     sz_u64_t const product = (sz_u64_t)multiplier * (sz_u64_t)multiplicand + (sz_u64_t)addend;
     return (sz_f64_t)(product % (sz_u64_t)sz_overlap_modulus_k);
 }
 
 /** Advances the chain over one byte, writing @c P(k+1) and answering it for the next step. */
-SZ_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_serial(sz_f64_t prior, sz_cptr_t text,
-                                                                  sz_f64_t *prefix_hashes) {
+STRINGZILLA_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_serial(sz_f64_t prior, sz_cptr_t text,
+                                                                           sz_f64_t *prefix_hashes) {
     sz_f64_t const next = sz_overlap_serial_multiply_add_(prior, sz_overlap_powers_of_256_k[1],
                                                           (sz_f64_t)(sz_u8_t)text[0]);
     prefix_hashes[0] = next;
@@ -384,8 +390,9 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_serial(sz_f64_t prior
 }
 
 /** The last step over @p count positions, fewer than a full step's. */
-SZ_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_tail_serial(sz_f64_t prior, sz_cptr_t text, sz_size_t count,
-                                                                       sz_f64_t *prefix_hashes) {
+STRINGZILLA_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_tail_serial(sz_f64_t prior, sz_cptr_t text,
+                                                                                sz_size_t count,
+                                                                                sz_f64_t *prefix_hashes) {
     return count ? sz_overlap_f64x1_prefix_hash_step_serial(prior, text, prefix_hashes) : prior;
 }
 
@@ -394,9 +401,9 @@ SZ_API_COMPTIME sz_f64_t sz_overlap_f64x1_prefix_hash_step_tail_serial(sz_f64_t 
  *      under the modulus.
  *  @param[in] window_power @ref sz_overlap_window_power for this window's width.
  */
-SZ_HELPER_AUTO void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *prefix_hashes_at_start,
-                                                             sz_f64_t const *prefix_hashes_at_end,
-                                                             sz_f64_t window_power, sz_u32_t *window_hashes) {
+STRINGZILLA_HELPER_AUTO void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *prefix_hashes_at_start,
+                                                                      sz_f64_t const *prefix_hashes_at_end,
+                                                                      sz_f64_t window_power, sz_u32_t *window_hashes) {
     sz_f64_t const shifted = sz_overlap_serial_multiply_add_(prefix_hashes_at_start[0], window_power, 0.0);
     sz_f64_t residue = prefix_hashes_at_end[0] - shifted;
     if (residue < 0.0) residue += (sz_f64_t)sz_overlap_modulus_k;
@@ -404,17 +411,17 @@ SZ_HELPER_AUTO void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *pre
 }
 
 /** The last step over @p count positions, fewer than a full step's. */
-SZ_API_COMPTIME void sz_overlap_f64x1_window_hash_step_tail_serial(sz_f64_t const *prefix_hashes_at_start,
-                                                                   sz_f64_t const *prefix_hashes_at_end,
-                                                                   sz_f64_t window_power, sz_size_t count,
-                                                                   sz_u32_t *window_hashes) {
+STRINGZILLA_API_COMPTIME void sz_overlap_f64x1_window_hash_step_tail_serial(sz_f64_t const *prefix_hashes_at_start,
+                                                                            sz_f64_t const *prefix_hashes_at_end,
+                                                                            sz_f64_t window_power, sz_size_t count,
+                                                                            sz_u32_t *window_hashes) {
     if (count)
         sz_overlap_f64x1_window_hash_step_serial(prefix_hashes_at_start, prefix_hashes_at_end, window_power,
                                                  window_hashes);
 }
 
 /** Branchless compare-exchange: @p lower keeps the smaller key, unsigned. */
-SZ_API_COMPTIME void sz_overlap_serial_exchange_(sz_u32_t *lower, sz_u32_t *upper) {
+STRINGZILLA_API_COMPTIME void sz_overlap_serial_exchange_(sz_u32_t *lower, sz_u32_t *upper) {
     sz_u32_t const first = *lower, second = *upper;
     *lower = first < second ? first : second;
     *upper = first < second ? second : first;
@@ -422,7 +429,7 @@ SZ_API_COMPTIME void sz_overlap_serial_exchange_(sz_u32_t *lower, sz_u32_t *uppe
 
 /** Sorts @p count keys ascending in place, unsigned, and drops repeats, answering how many remain;
  *  the buffer holds @ref sz_overlap_btree_sorted_capacity entries. */
-SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_sort_serial(sz_u32_t *keys, sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_sort_serial(sz_u32_t *keys, sz_size_t count) {
     sz_size_t const capacity = sz_overlap_btree_sorted_capacity(count);
     for (sz_size_t position = count; position != capacity; ++position) keys[position] = sz_overlap_padding_key_k;
 
@@ -441,7 +448,7 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_sort_serial(sz_u32_t *keys, sz_
 
 /** One branch level: the child ordinal a flipped @p key descends into, the count of
  *  separators below it. */
-SZ_HELPER_AUTO sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, sz_u32_t key) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, sz_u32_t key) {
     sz_size_t child = 0;
     for (sz_size_t separator = 0; separator != sz_overlap_keys_per_node_k; ++separator)
         child += (sz_i32_t)node[separator] < (sz_i32_t)key;
@@ -449,15 +456,15 @@ SZ_HELPER_AUTO sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, sz
 }
 
 /** The leaf compare: one when the flipped @p key sits in this node, zero otherwise. */
-SZ_HELPER_AUTO sz_size_t sz_overlap_serial_leaf_step_(sz_u32_t const *node, sz_u32_t key) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_overlap_serial_leaf_step_(sz_u32_t const *node, sz_u32_t key) {
     sz_size_t found = 0;
     for (sz_size_t position = 0; position != sz_overlap_keys_per_node_k; ++position) found |= node[position] == key;
     return found;
 }
 
 /** Counts how many of @p count raw keys of one candidate the tree holds. */
-SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_probe_serial(sz_overlap_btree_t const *btree, sz_u32_t const *keys,
-                                                              sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_probe_serial(sz_overlap_btree_t const *btree,
+                                                                       sz_u32_t const *keys, sz_size_t count) {
     sz_size_t const keys_per_node = sz_overlap_keys_per_node_k, branches_per_node = sz_overlap_branches_per_node_k;
     sz_size_t matches = 0;
     for (sz_size_t index = 0; index != count; ++index) {
@@ -476,13 +483,15 @@ SZ_API_COMPTIME sz_size_t sz_overlap_u32x1_btree_probe_serial(sz_overlap_btree_t
 /**
  *  @brief Prepares every query of @p queries into one block, hashing and sorting on
  *      the serial tier.
- *  @param[in] alloc Where the forest's block comes from, or @c SZ_NULL for the
+ *  @param[in] alloc Where the forest's block comes from, or @c STRINGZILLA_NULL for the
  *      default host allocator.
  *  @sa sz_overlap_engine_init_cpu
  */
-SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_serial(sz_sequence_t const *queries, sz_size_t const *window_widths,
-                                                          sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
-                                                          sz_overlap_engine_t *engine) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_engine_init_serial(sz_sequence_t const *queries,
+                                                                   sz_size_t const *window_widths,
+                                                                   sz_size_t window_widths_count,
+                                                                   sz_memory_allocator_t *alloc,
+                                                                   sz_overlap_engine_t *engine) {
     sz_memory_allocator_t host;
     if (alloc) host = *alloc;
     else sz_memory_allocator_init_default(&host);
@@ -535,9 +544,10 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_serial(sz_sequence_t const *q
     return sz_success_k;
 }
 
-SZ_API_COMPTIME sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
-                                                     sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                     sz_size_t scores_candidate_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine,
+                                                              sz_sequence_t const *candidates, sz_f32_t *scores,
+                                                              sz_size_t scores_query_stride,
+                                                              sz_size_t scores_candidate_stride) {
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                               scores_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
@@ -564,7 +574,7 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine
         sz_cptr_t texts[sz_overlap_interleaved_chains_k];
         sz_size_t lengths[sz_overlap_interleaved_chains_k];
         sz_f64_t priors[sz_overlap_interleaved_chains_k];
-        sz_size_t shortest = SZ_SIZE_MAX;
+        sz_size_t shortest = STRINGZILLA_SIZE_MAX;
         for (sz_size_t chain = 0; chain != interleaved; ++chain) {
             texts[chain] = candidates->get_start(candidates->handle, first + chain);
             lengths[chain] = candidates->get_length(candidates->handle, first + chain);

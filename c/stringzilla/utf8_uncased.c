@@ -12,34 +12,34 @@
 
 #include "dispatch.h"
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps) {
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->utf8_uncased_search = sz_utf8_uncased_search_serial;
     impl->utf8_uncased_order = sz_utf8_uncased_order_serial;
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     if (caps & sz_cap_haswell_k) {
         impl->utf8_uncased_search = sz_utf8_uncased_search_haswell;
         impl->utf8_uncased_order = sz_utf8_uncased_order_haswell;
     }
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     if (caps & sz_cap_icelake_k) {
         impl->utf8_uncased_search = sz_utf8_uncased_search_icelake;
         impl->utf8_uncased_order = sz_utf8_uncased_order_icelake;
     }
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     if (caps & sz_cap_neon_k) {
         impl->utf8_uncased_search = sz_utf8_uncased_search_neon;
         impl->utf8_uncased_order = sz_utf8_uncased_order_neon;
     }
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     // Same chunk granularity as NEON at the minimal vector length with slower
     // predicate compares; the scalable front only wins on wider-than-NEON registers.
     if ((caps & sz_cap_sve2_k) && sz_sve_wider_than_neon_()) {
@@ -49,28 +49,28 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps)
     }
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     if (caps & sz_cap_v128_k) {
         impl->utf8_uncased_search = sz_utf8_uncased_search_v128;
         impl->utf8_uncased_order = sz_utf8_uncased_order_v128;
     }
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     if (caps & sz_cap_rvv_k) {
         impl->utf8_uncased_search = sz_utf8_uncased_search_rvv;
         impl->utf8_uncased_order = sz_utf8_uncased_order_rvv;
     }
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     if (caps & sz_cap_lasx_k) {
         impl->utf8_uncased_search = sz_utf8_uncased_search_lasx;
         impl->utf8_uncased_order = sz_utf8_uncased_order_lasx;
     }
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     if (caps & sz_cap_powervsx_k) {
         impl->utf8_uncased_search = sz_utf8_uncased_search_powervsx;
         impl->utf8_uncased_order = sz_utf8_uncased_order_powervsx;
@@ -78,15 +78,15 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps)
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_utf8_uncased_search(   //
-    sz_cptr_t haystack, sz_size_t haystack_length, //
-    sz_cptr_t needle, sz_size_t needle_length,     //
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_utf8_uncased_search( //
+    sz_cptr_t haystack, sz_size_t haystack_length,        //
+    sz_cptr_t needle, sz_size_t needle_length,            //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
     return sz_dispatch_cpu_table.utf8_uncased_search(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                  matched_length);
 }
 
-SZ_API_RUNTIME sz_ordering_t sz_utf8_uncased_order( //
+STRINGZILLA_API_RUNTIME sz_ordering_t sz_utf8_uncased_order( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     return sz_dispatch_cpu_table.utf8_uncased_order(a, a_length, b, b_length);
 }

@@ -59,7 +59,7 @@ typedef SSIZE_T ssize_t;
 #include <stringzilla/stringzilla.h>
 
 /** Fast-call with keywords, the calling convention every `Str_like_*` and `Strs_*` method uses. */
-#define SZ_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
+#define STRINGZILLA_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
 
 /* strs.c */
 

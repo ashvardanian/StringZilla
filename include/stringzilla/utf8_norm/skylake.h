@@ -28,8 +28,8 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
 #elif defined(__clang__)
@@ -46,8 +46,9 @@ typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t)(__m512i, __mmask64, sz_
 /** 64-entry lead lookup without AVX-512 VBMI: four per-128-lane @c vpshufb over the
  *  broadcast LUT quadrants, selected by the high two index bits, then `families & flag`
  *  picks out the requested form. */
-SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
-                                                                         sz_u8_t form_flag) {
+STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64,
+                                                                                  __mmask64 is_lead_m64,
+                                                                                  sz_u8_t form_flag) {
     __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
     __m512i low_nibble_u8x64 = _mm512_and_si512(index_u8x64, _mm512_set1_epi8(0x0F));
     // `srli_epi16` leaks the neighbouring byte's low bits into bits 4..7; index is in [0,63] so the high
@@ -70,8 +71,9 @@ SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i
 
 /** Shared AVX-512 scan skeleton: a 64-byte all-ASCII gate, lead-classify via @p classify, then the
  *  shared scalar verify on any block that survives the gate. Ice Lake reuses this verbatim. */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form,
-                                                         sz_utf8_norm_lead_classify_avx512_t classify) {
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length,
+                                                                  sz_normal_form_t form,
+                                                                  sz_utf8_norm_lead_classify_avx512_t classify) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -103,16 +105,18 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size
 
 /** Skylake scan primitive: the first byte beginning a non-inert codepoint for
  *  @p form, else NULL. */
-SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length,
+                                                                     sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_shuffle_skylake_);
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                               sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                                        sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_skylake_);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, sz_size_t length,
+                                                                     sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_skylake_);
 }
 
@@ -121,7 +125,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, sz
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #ifdef __cplusplus
 }

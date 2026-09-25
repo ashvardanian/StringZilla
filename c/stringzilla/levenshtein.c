@@ -10,35 +10,35 @@
 
 #include "dispatch.h"
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps) {
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
     impl->levenshtein_distances = sz_levenshtein_distances_serial;
     impl->levenshtein_distances_utf8 = sz_levenshtein_distances_serial;
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     if (caps & sz_cap_haswell_k) {
         impl->levenshtein_distances = sz_levenshtein_distances_haswell;
         impl->levenshtein_distances_utf8 = sz_levenshtein_distances_haswell;
     }
 #endif
 
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     if (caps & sz_cap_skylake_k) {
         impl->levenshtein_distances = sz_levenshtein_distances_skylake;
         impl->levenshtein_distances_utf8 = sz_levenshtein_distances_skylake;
     }
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     // Runes never reach the byte lanes, so the rune slot stays whatever the Skylake tier bound above.
     if (caps & sz_cap_icelake_k) { impl->levenshtein_distances = sz_levenshtein_distances_icelake; }
 #endif
 }
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_gpu_update_(void) {
-#if SZ_USE_CUDA
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_levenshtein_gpu_update_(void) {
+#if STRINGZILLA_TARGET_CUDA
     int devices = 0;
     if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) return;
     sz_dispatch_gpu_table.levenshtein_distances = sz_levenshtein_distances_cuda;
@@ -46,38 +46,39 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_gpu_update_(void) {
 #endif
 }
 
-SZ_API_RUNTIME sz_status_t sz_levenshtein_engine_init_cpu(sz_sequence_t const *queries,
-                                                          sz_levenshtein_symbol_t symbol,
-                                                          sz_memory_allocator_t *alloc,
-                                                          sz_levenshtein_engine_t *engine) {
+STRINGZILLA_API_RUNTIME sz_status_t sz_levenshtein_engine_init_cpu(sz_sequence_t const *queries,
+                                                                   sz_levenshtein_symbol_t symbol,
+                                                                   sz_memory_allocator_t *alloc,
+                                                                   sz_levenshtein_engine_t *engine) {
     return sz_levenshtein_engine_init_cpu_(queries, symbol, sz_capabilities(), alloc, engine);
 }
 
-#if SZ_USE_CUDA
-SZ_API_RUNTIME sz_status_t sz_levenshtein_engine_init_gpu(sz_sequence_t const *queries,
-                                                          sz_levenshtein_symbol_t symbol,
-                                                          sz_memory_allocator_t *alloc, void *stream,
-                                                          sz_levenshtein_engine_t *engine) {
+#if STRINGZILLA_TARGET_CUDA
+STRINGZILLA_API_RUNTIME sz_status_t sz_levenshtein_engine_init_gpu(sz_sequence_t const *queries,
+                                                                   sz_levenshtein_symbol_t symbol,
+                                                                   sz_memory_allocator_t *alloc, void *stream,
+                                                                   sz_levenshtein_engine_t *engine) {
     // The only caller that needs the device table is the only one that has already chosen a device.
     sz_dispatch_gpu_table_init();
     return sz_levenshtein_engine_init_cuda(queries, symbol, alloc, stream, engine);
 }
 #else
-SZ_API_RUNTIME sz_status_t sz_levenshtein_engine_init_gpu(sz_sequence_t const *queries,
-                                                          sz_levenshtein_symbol_t symbol,
-                                                          sz_memory_allocator_t *alloc, void *stream,
-                                                          sz_levenshtein_engine_t *engine) {
+STRINGZILLA_API_RUNTIME sz_status_t sz_levenshtein_engine_init_gpu(sz_sequence_t const *queries,
+                                                                   sz_levenshtein_symbol_t symbol,
+                                                                   sz_memory_allocator_t *alloc, void *stream,
+                                                                   sz_levenshtein_engine_t *engine) {
     sz_unused_(queries), sz_unused_(symbol), sz_unused_(alloc), sz_unused_(stream), sz_unused_(engine);
     return sz_device_code_mismatch_k;
 }
 #endif
 
-SZ_API_RUNTIME void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine) {
+STRINGZILLA_API_RUNTIME void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine) {
     sz_levenshtein_engine_free_(engine);
 }
 
-SZ_API_RUNTIME sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
-                                                    sz_size_t *distances, sz_size_t distances_stride) {
+STRINGZILLA_API_RUNTIME sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine,
+                                                             sz_sequence_t const *candidates, sz_size_t *distances,
+                                                             sz_size_t distances_stride) {
     if (engine->capability & sz_caps_cuda_k)
         return engine->symbol == sz_levenshtein_runes_k
                    ? sz_dispatch_gpu_table.levenshtein_distances_utf8(engine, candidates, distances, distances_stride)

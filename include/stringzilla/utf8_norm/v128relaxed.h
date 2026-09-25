@@ -24,20 +24,20 @@
 extern "C" {
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
 #pragma region relaxed_simd
 
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_v128relaxed(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                                   sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_v128relaxed(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                                            sz_ptr_t destination) {
     return sz_utf8_norm_v128(source, length, form, destination);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t source, sz_size_t length,
-                                                                sz_normal_form_t form) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t source, sz_size_t length,
+                                                                         sz_normal_form_t form) {
     return sz_utf8_find_denormalized_v128(source, length, form);
 }
 
@@ -46,7 +46,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t source
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // SZ_USE_V128RELAXED
+#endif // STRINGZILLA_TARGET_V128RELAXED
 
 #ifdef __cplusplus
 }

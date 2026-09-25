@@ -22,9 +22,9 @@ extern "C" {
  *  is added to every emitted offset and to `*bytes_consumed`, the resume offset, which is always a
  *  true delimiter boundary.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_(    //
-    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_( //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,         //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_bytes = (sz_u8_t const *)text;
@@ -63,9 +63,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_(    //
  *  Same contract as @ref sz_utf8_newlines_serial_ but for the Unicode White_Space set. There is no
  *  CRLF merging here - CR and LF are independent length-1 matches.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
-    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,            //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,          //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_bytes = (sz_u8_t const *)text;
@@ -113,16 +113,16 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
     return match_count;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_serial(      //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_serial( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     return sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial(   //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial( //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,        //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     return sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }
@@ -132,8 +132,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial(   //
 /** Largest byte prefix of a 64-lane decode window whose multi-byte leads are fully loaded: the
  *  first 2-/3-/4-byte start whose declared span runs past @p loaded defers to the next window.
  *  Shared u64 mask math for every windowed ISA front-end. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
-                                                            sz_u64_t four_byte_starts, sz_size_t loaded) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_starts,
+                                                                     sz_u64_t three_byte_starts,
+                                                                     sz_u64_t four_byte_starts, sz_size_t loaded) {
     sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
                              (three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
                              (four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
@@ -143,7 +144,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_st
 /** Emits already-decided delimiter starts from a vector tile's lane mask and returns how many it
  *  appended, as the portable ctz-drain twin of @ref sz_utf8_rune_drain_forward_serial_. Bit @c i of
  *  @p hits marks a verified match at `base + i`, its length read from the lead's high nibble. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
     sz_u8_t const *text, sz_size_t base, sz_u64_t hits, sz_size_t *match_offsets, sz_size_t *match_lengths,
     sz_size_t capacity) {
     static sz_u8_t const length_by_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
@@ -167,9 +168,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
  *  byte at a time and is never reported as a delimiter. @p base is added to every emitted offset
  *  and to `*bytes_consumed`, the resume offset, which is always a true codepoint boundary.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_delimiters_serial_(    //
-    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_delimiters_serial_( //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,         //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_cptr_t const start = text;
@@ -192,9 +193,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_delimiters_serial_(    //
     return match_count;
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_serial(    //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_serial( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     return sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }

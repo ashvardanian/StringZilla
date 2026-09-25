@@ -14,8 +14,8 @@ The fastest SIMD backend is picked per CPU — at compile time in header-only mo
 There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_memory_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
 An engine is prepared for one residency and one tier — `sz_levenshtein_engine_init_cpu` or `sz_levenshtein_engine_init_gpu`, and the same pairing for overlap and substrings — so choosing a device is choosing a constructor rather than setting a global.
 
-The headers compile as freestanding C 99 — set `SZ_AVOID_LIBC=1` to drop the libc dependency — and as C++20 or newer for the `sz::` layer.
-Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` forward to the per-ISA kernels under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, `levenshtein/cuda.cuh`, and so on — each guarded by an `SZ_USE_*` macro.
+The headers compile as freestanding C 99 — set `STRINGZILLA_WITH_LIBC=0` to drop the libc dependency — and as C++20 or newer for the `sz::` layer.
+Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` forward to the per-ISA kernels under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, `levenshtein/cuda.cuh`, and so on — each guarded by an `STRINGZILLA_TARGET_*` macro.
 
 ## Installation
 
@@ -79,7 +79,7 @@ target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
 `stringzilla_shared` compiles every backend and initializes the dispatch table once at load, so one artifact runs optimally on any CPU.
-On Linux a libc-free variant `stringzilla::bare` is built alongside it with `SZ_AVOID_LIBC=1`.
+On Linux a libc-free variant `stringzilla::bare` is built alongside it with `STRINGZILLA_WITH_LIBC=0`.
 
 ### CMake, Installed Package
 
@@ -105,21 +105,21 @@ cc main.c $(pkg-config --cflags --libs stringzilla) -o main
 The behavior of the core is controlled entirely by preprocessor macros, so you can tune it without touching the sources.
 The most important ones, mirrored from `stringzilla.h`:
 
-| Macro                     |  Default | Effect                                   |
-| :------------------------ | -------: | :--------------------------------------- |
-| `SZ_DYNAMIC_DISPATCH`     |      `0` | Compile-time vs. runtime backend choice  |
-| `SZ_DEBUG`                |      `0` | Debug assertions and logging             |
-| `SZ_AVOID_LIBC`           |      `0` | Freestanding build, no libc              |
-| `SZ_USE_MISALIGNED_LOADS` | platform | Unaligned word loads in SWAR fallbacks   |
-| `SZ_SWAR_THRESHOLD`       |     `24` | Length below which scalar loops are used |
-| `SZ_CACHE_LINE_WIDTH`     | platform | Cache-line width for heuristics          |
+| Macro                                |  Default | Effect                                   |
+| :----------------------------------- | -------: | :--------------------------------------- |
+| `STRINGZILLA_RUNTIME_DISPATCH`       |      `0` | Compile-time vs. runtime backend choice  |
+| `STRINGZILLA_DEBUG`                  |      `0` | Debug assertions and logging             |
+| `STRINGZILLA_WITH_LIBC`              |      `1` | `0` builds freestanding, without libc    |
+| `STRINGZILLA_ALLOW_MISALIGNED_LOADS` | platform | Unaligned word loads in SWAR fallbacks   |
+| `STRINGZILLA_SWAR_THRESHOLD`         |     `24` | Length below which scalar loops are used |
+| `STRINGZILLA_CACHE_LINE_BYTES`       | platform | Cache-line width for heuristics          |
 
-`SZ_DYNAMIC_DISPATCH` controls dispatch: with `0` the best backend is chosen at compile time and every public function is `static`/inline, while `1` compiles all backends and selects one at runtime through a dispatch table — this is how the shared library is built.
-`SZ_AVOID_LIBC` builds freestanding without the C standard library, which disables the default `malloc`-based allocator and the `offsetof` static checks.
-`SZ_USE_MISALIGNED_LOADS` allows unaligned word loads in the SWAR fallbacks where the platform permits.
+`STRINGZILLA_RUNTIME_DISPATCH` controls dispatch: with `0` the best backend is chosen at compile time and every public function is `static`/inline, while `1` compiles all backends and selects one at runtime through a dispatch table — this is how the shared library is built.
+`STRINGZILLA_WITH_LIBC=0` builds freestanding without the C standard library, which disables the default `malloc`-based allocator and the `offsetof` static checks.
+`STRINGZILLA_ALLOW_MISALIGNED_LOADS` allows unaligned word loads in the SWAR fallbacks where the platform permits.
 
 Per-ISA backends are toggled with their own macros; if left undefined they are auto-detected from the compiler's target flags:
-`SZ_USE_WESTMERE` for SSE4.2 + AES-NI, `SZ_USE_GOLDMONT` for SHA-NI, `SZ_USE_HASWELL` for AVX2, `SZ_USE_SKYLAKE` for AVX-512 F/BW/VL, `SZ_USE_ICELAKE` for AVX-512 VBMI + VAES, then `SZ_USE_NEON`, `SZ_USE_NEONAES`, `SZ_USE_NEONSHA`, `SZ_USE_SVE`, `SZ_USE_SVE2`, and `SZ_USE_SVE2AES` on ARM, `SZ_USE_V128` and `SZ_USE_V128RELAXED` for WebAssembly SIMD128, `SZ_USE_RVV` and `SZ_USE_RVVCRYPTO` for the RISC-V Vector extension, `SZ_USE_LASX` for LoongArch, and `SZ_USE_POWERVSX` for IBM Power.
+`STRINGZILLA_TARGET_WESTMERE` for SSE4.2 + AES-NI, `STRINGZILLA_TARGET_GOLDMONT` for SHA-NI, `STRINGZILLA_TARGET_HASWELL` for AVX2, `STRINGZILLA_TARGET_SKYLAKE` for AVX-512 F/BW/VL, `STRINGZILLA_TARGET_ICELAKE` for AVX-512 VBMI + VAES, then `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, and `STRINGZILLA_TARGET_SVE2AES` on ARM, `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` for WebAssembly SIMD128, `STRINGZILLA_TARGET_RVV` and `STRINGZILLA_TARGET_RVVCRYPTO` for the RISC-V Vector extension, `STRINGZILLA_TARGET_LASX` for LoongArch, and `STRINGZILLA_TARGET_POWERVSX` for IBM Power.
 
 The umbrella header also exposes the version triple as `STRINGZILLA_H_VERSION_MAJOR`/`_MINOR`/`_PATCH`, with matching `sz_version_major()`, `sz_version_minor()`, and `sz_version_patch()` accessors.
 
@@ -139,7 +139,7 @@ GCC 10 and older miss a conforming STL `insert` and fail to build the tests.
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
 NVCC with CUDA 12 builds the device backends of the engine families, reached through the `_init_gpu` constructors.
 
-StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1` with `-msimd128 -mrelaxed-simd`, which enables the `SZ_USE_V128` and `SZ_USE_V128RELAXED` kernels listed above.
+StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1` with `-msimd128 -mrelaxed-simd`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
 
 ## Types
 
@@ -620,7 +620,7 @@ int main(void) {
 
 ### Set Intersection
 
-`sz_sequence_intersect` computes the intersection of two __deduplicated__ binary string sequences using a hash table, writing matched positions from each side and leaving unmatched slots as `SZ_SIZE_MAX`:
+`sz_sequence_intersect` computes the intersection of two __deduplicated__ binary string sequences using a hash table, writing matched positions from each side and leaving unmatched slots as `STRINGZILLA_SIZE_MAX`:
 
 ```c
 sz_status_t sz_sequence_intersect(
@@ -730,7 +730,7 @@ sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b);
 sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const *b);
 ```
 
-Growth and mutation, where all but `sz_string_erase` may allocate and return `SZ_NULL_CHAR` on failure:
+Growth and mutation, where all but `sz_string_erase` may allocate and return `STRINGZILLA_NULL_CHAR` on failure:
 
 ```c
 sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator);
@@ -795,9 +795,9 @@ int main() {
 Every kernel exists in a serial form plus one or more per-ISA forms, named with a backend suffix (`_serial`, `_westmere`, `_haswell`, `_skylake`, `_icelake`, `_neon`, `_neonaes`, `_neonsha`, `_sve`, `_sve2`, `_sve2aes`, `_v128`, `_v128relaxed`, `_rvv`, `_lasx`, `_powervsx`).
 The public, suffix-free name such as `sz_find` or `sz_hash` resolves to the best available backend.
 
-- __Header-only mode, `SZ_DYNAMIC_DISPATCH=0`, the default.__ The dispatch is resolved at compile time: the umbrella header picks the most advanced backend enabled by your compiler flags, and the suffix-free functions inline straight to it.
+- __Header-only mode, `STRINGZILLA_RUNTIME_DISPATCH=0`, the default.__ The dispatch is resolved at compile time: the umbrella header picks the most advanced backend enabled by your compiler flags, and the suffix-free functions inline straight to it.
   No runtime indirection.
-- __Dynamic-dispatch mode, `SZ_DYNAMIC_DISPATCH=1`.__ All backends are compiled and a dispatch table is initialized once, then the suffix-free functions jump through it.
+- __Dynamic-dispatch mode, `STRINGZILLA_RUNTIME_DISPATCH=1`.__ All backends are compiled and a dispatch table is initialized once, then the suffix-free functions jump through it.
   This is how the prebuilt shared library is shipped, so a single binary runs optimally on any CPU.
   `sz_dynamic_dispatch()` returns non-zero in this mode.
 
@@ -814,11 +814,11 @@ int sz_dynamic_dispatch(void);
 
 The runtime probe inspects CPUID on x86, the AArch64 ID registers on ARM with a `SIGILL`-guarded `mrs` fallback to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
 Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_capabilities()` intersects it with the compile-time mask.
-WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time (`SZ_CAPABILITIES_RUNTIME_DETECTABLE_` reports whether the current platform can introspect).
+WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time.
 
 On Arm, having SVE in the capability mask doesn't mean SVE kernels always win: at the common 128-bit vector length the scalable kernels for length-sensitive operations — comparisons, memory transforms, substring search, UTF-8 token scanning — are often slower than their NEON twins, while crypto-heavy operations like hashing prefer SVE2 at any width.
 Dispatch therefore picks by register width: the load-time table measures it on the running CPU (`svcntb`), and compile-time dispatch consults `__ARM_FEATURE_SVE_BITS` when pinned via `-msve-vector-bits=N`, otherwise assuming the 128-bit case and keeping NEON.
-To force a specific backend regardless, use the `SZ_USE_SVE`/`SZ_USE_SVE2`/`SZ_USE_NEON` toggles.
+To force a specific backend regardless, use the `STRINGZILLA_TARGET_SVE`/`STRINGZILLA_TARGET_SVE2`/`STRINGZILLA_TARGET_NEON` toggles.
 
 The same machinery drives the build systems through the checked-in `probes/` programs: CMake and Cargo try-compile `probes/<arch>_<tier>.c` — tiny standalone programs reusing the real kernels' `target` pragmas, intrinsics, and platform guards — to learn which tiers the toolchain can __compile__, and execute `probes/run_capabilities.c` to learn which tiers the build machine can __run__.
 Runtime-dispatched libraries enable everything compilable, trusting the load-time table to mask the rest; compile-time builds bake the intersection of the two sets.
@@ -939,8 +939,6 @@ assert(str("hello").replace(1, 2, {'a', 'b'}) == "hablo");
 
 To avoid those issues, StringZilla provides an alternative consistent interface.
 It supports signed arguments, and doesn't have more than 3 arguments per function or
-The standard API and our alternative can be conditionally disabled with `SZ_SAFETY_OVER_COMPATIBILITY=1`.
-When it's enabled, the _~~subjectively~~_ risky overloads from the Standard will be disabled.
 
 ```cpp
 using str = sz::string_t;
@@ -1035,38 +1033,38 @@ sz::concatenate(text, "@", domain, ".", tld); // No allocations
 
 ## Compilation Settings and Debugging
 
-__`SZ_DEBUG`__:
+__`STRINGZILLA_DEBUG`__:
 
 > For maximal performance, the C library does not perform any bounds checking in Release builds.
 > In C++, bounds checking happens only in places where the STL `std::string` would do it.
-> If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
+> If you want to enable more aggressive bounds-checking, define `STRINGZILLA_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_GOLDMONT`, `SZ_USE_WESTMERE`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICELAKE`, `SZ_USE_NEON`, `SZ_USE_NEONAES`, `SZ_USE_NEONSHA`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2AES`, `SZ_USE_V128`, `SZ_USE_V128RELAXED`, `SZ_USE_RVV`, `SZ_USE_LASX`, `SZ_USE_POWERVSX`__:
+__`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TARGET_HASWELL`, `STRINGZILLA_TARGET_SKYLAKE`, `STRINGZILLA_TARGET_ICELAKE`, `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, `STRINGZILLA_TARGET_SVE2AES`, `STRINGZILLA_TARGET_V128`, `STRINGZILLA_TARGET_V128RELAXED`, `STRINGZILLA_TARGET_RVV`, `STRINGZILLA_TARGET_LASX`, `STRINGZILLA_TARGET_POWERVSX`__:
 
 > One can explicitly enable or disable individual SIMD families for compatibility or benchmarking purposes.
 > In header-only use the defaults are inferred from the compiler's predefined macros under your own `-march` flags.
 > The CMake and Cargo builds resolve them from the shared `probes/` sources instead — try-compiling each tier to learn what the toolchain can emit, and executing `probes/run_capabilities.c` to learn what the build machine can run — so runtime-dispatched libraries carry every compilable tier while compile-time builds bake the intersection.
-> The same names work as CMake cache options (`-D SZ_USE_SVE2=0`) and as Cargo environment variables (`SZ_USE_SVE2=0 cargo build`); an explicit `1` overrides the machine gate but never a failed compile probe.
+> The same names work as CMake cache options (`-D STRINGZILLA_TARGET_SVE2=0`) and as Cargo environment variables (`STRINGZILLA_TARGET_SVE2=0 cargo build`); an explicit `1` overrides the machine gate but never a failed compile probe.
 
-__`SZ_USE_CUDA`, `SZ_USE_KEPLER`, `SZ_USE_HOPPER`__:
+__`STRINGZILLA_TARGET_CUDA`, `STRINGZILLA_TARGET_KEPLER`, `STRINGZILLA_TARGET_HOPPER`__:
 
 > One can explicitly disable certain families of PTX instructions for compatibility purposes.
 > Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
 
-__`SZ_DYNAMIC_DISPATCH`__:
+__`STRINGZILLA_RUNTIME_DISPATCH`__:
 
 > By default, StringZilla is a header-only library.
 > But if you are running on different generations of devices, it makes sense to pre-compile the library for all supported generations at once, and dispatch at runtime.
 > This flag does just that and is used to produce the `stringzilla.so` shared library, as well as the Python bindings.
 
-__`SZ_USE_MISALIGNED_LOADS`__:
+__`STRINGZILLA_ALLOW_MISALIGNED_LOADS`__:
 
 > Default is platform-dependent: enabled on x86 (where unaligned accesses are fast), disabled on others by default.
 > When enabled, many byte-level operations use word-sized loads, which can significantly accelerate the serial (SWAR) backend.
 > Consider enabling it explicitly if you are targeting platforms that support fast unaligned loads.
 
-__`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
+__`STRINGZILLA_WITH_LIBC`__ and __`STRINGZILLA_OVERRIDE_LIBC`__:
 
 > When using the C header-only library one can disable the use of LibC.
 > This may affect the type resolution system on obscure hardware platforms. 
@@ -1077,11 +1075,10 @@ __`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 [ld-preload-trick]: https://ashvardanian.com/posts/ld-preload-libsee
 [redhat-memcpy-ub]: https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
 
-__`SZ_AVOID_STL`__ and __`SZ_SAFETY_OVER_COMPATIBILITY`__:
+__`STRINGZILLA_WITH_STL`__:
 
 > When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string_t` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
-> Moreover, if STL compatibility is a low priority, one can make the API safer by disabling the overloads, which are subjectively error prone.
 
 __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
 

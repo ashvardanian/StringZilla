@@ -109,22 +109,22 @@ endif ()
 
 # Detect target architecture from `CMAKE_SYSTEM_PROCESSOR`... safer for cross-compilation!
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64|amd64")
-    set(SZ_IS_64BIT_X86_ TRUE)
+    set(STRINGZILLA_ARCH_X86_64_ TRUE)
     message(STATUS "Platform: x86_64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
-    set(SZ_IS_64BIT_ARM_ TRUE)
+    set(STRINGZILLA_ARCH_ARM64_ TRUE)
     message(STATUS "Platform: ARM64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64|RISCV64")
-    set(SZ_IS_64BIT_RISCV_ TRUE)
+    set(STRINGZILLA_ARCH_RISCV64_ TRUE)
     message(STATUS "Platform: RISC-V 64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64|LOONGARCH64|loong64|LOONG64")
     # "loongarch64" is the GNU triple and `uname -m` spelling; "loong64" is the Debian/dpkg port name.
-    set(SZ_IS_64BIT_LOONGARCH_ TRUE)
+    set(STRINGZILLA_ARCH_LOONGARCH64_ TRUE)
     message(STATUS "Platform: LoongArch64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc64|PPC64|POWERPC64")
     # Matches both endiannesses ("ppc64le" contains "ppc64"); the kernels handle big-endian explicitly
-    # (`find/powervsx.h`) and `SZ_IS_BIG_ENDIAN_` is derived from `CMAKE_C_BYTE_ORDER` separately.
-    set(SZ_IS_64BIT_POWER_ TRUE)
+    # (`find/powervsx.h`) and `STRINGZILLA_ARCH_BIG_ENDIAN_` is derived from `CMAKE_C_BYTE_ORDER` separately.
+    set(STRINGZILLA_ARCH_PPC64_ TRUE)
     message(STATUS "Platform: PowerPC64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "wasm")
     # WebAssembly is 32-bit; its SIMD tier is the toolchain's `-msimd128` / `-mrelaxed-simd`, which `types.h`
@@ -134,17 +134,17 @@ else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
 endif ()
 
-# One compile probe per tier under `probes/`, `SZ_USE_<TIER>=0/1`: the verdicts reach the units that admit tiers at
+# One compile probe per tier under `probes/`, `STRINGZILLA_TARGET_<TIER>=0/1`: the verdicts reach the units that admit tiers at
 # runtime, never `stringzilla_header`, whose consumers derive each tier from their own flags in `types.h`.
-if (SZ_IS_64BIT_X86_)
+if (STRINGZILLA_ARCH_X86_64_)
     include(cmake/sz_x86_isa_probes.cmake)
-elseif (SZ_IS_64BIT_ARM_)
+elseif (STRINGZILLA_ARCH_ARM64_)
     include(cmake/sz_arm_isa_probes.cmake)
-elseif (SZ_IS_64BIT_RISCV_)
+elseif (STRINGZILLA_ARCH_RISCV64_)
     include(cmake/sz_riscv_isa_probes.cmake)
-elseif (SZ_IS_64BIT_LOONGARCH_)
+elseif (STRINGZILLA_ARCH_LOONGARCH64_)
     include(cmake/sz_loongarch_isa_probes.cmake)
-elseif (SZ_IS_64BIT_POWER_)
+elseif (STRINGZILLA_ARCH_PPC64_)
     include(cmake/sz_power_isa_probes.cmake)
 elseif (
     CMAKE_SYSTEM_NAME STREQUAL "WASI"
@@ -247,7 +247,7 @@ endif ()
 
 # Stamps the whole GPU switch family on one target. They are exclusive - a build carries NVIDIA kernels, AMD kernels,
 # or neither - and every translation unit linked into one library has to agree on all three, so no site picks a subset
-# and leans on the header's defaults for the rest. `SZ_USE_HOPPER` follows the architectures compiled rather than the
+# and leans on the header's defaults for the rest. `STRINGZILLA_TARGET_HOPPER` follows the architectures compiled rather than the
 # toolkit version, since a newer nvcc asked for sm_80 alone emits no DPX, and it takes the library-wide set because a
 # tier's narrower one would make the Kepler objects disagree with their siblings about which engines exist.
 function (set_gpu_definitions name backend)
@@ -266,7 +266,8 @@ function (set_gpu_definitions name backend)
         set(uses_rocm 1)
     endif ()
     target_compile_definitions(
-        ${name} PRIVATE "SZ_USE_CUDA=${uses_cuda}" "SZ_USE_HOPPER=${carries_hopper}" "SZ_USE_ROCM=${uses_rocm}"
+        ${name} PRIVATE "STRINGZILLA_TARGET_CUDA=${uses_cuda}" "STRINGZILLA_TARGET_HOPPER=${carries_hopper}"
+                        "STRINGZILLA_TARGET_ROCM=${uses_rocm}"
     )
 endfunction ()
 
@@ -381,7 +382,7 @@ set(STRINGZILLA_SHIM_SOURCES
 # Helper function used for the `stringzilla_shared`, `stringzilla_bare`, and `stringzilla_static` targets
 function (define_stringzilla_library target public_name library_type)
     add_library(${target} ${library_type} ${STRINGZILLA_SHIM_SOURCES})
-    target_compile_definitions(${target} PRIVATE "SZ_DYNAMIC_DISPATCH=1")
+    target_compile_definitions(${target} PRIVATE "STRINGZILLA_RUNTIME_DISPATCH=1")
 
     # `stringzilla_shared` is published as `stringzilla::shared`, in-tree and installed alike.
     add_library(${PROJECT_NAME}::${public_name} ALIAS ${target})
@@ -406,12 +407,12 @@ endfunction ()
 
 if (STRINGZILLA_BUILD_SHARED)
 
-    # The shim units default `SZ_OVERRIDE_LIBC` to `SZ_AVOID_LIBC`, so this library exports no `memcpy` of its
+    # The shim units default `STRINGZILLA_OVERRIDE_LIBC` to `!STRINGZILLA_WITH_LIBC`, so this library exports no `memcpy` of its
     # own and interposes nothing. That is what lets anything link it - the tests, a consumer's program -
     # without ELF redirecting `libstdc++`'s internal calls into a dispatch table that is not up yet.
     # `stringzilla_bare` is the artifact that replaces LibC, and it still does.
     define_stringzilla_library(stringzilla_shared shared SHARED)
-    target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
+    target_compile_definitions(stringzilla_shared PRIVATE "STRINGZILLA_WITH_LIBC=1")
     target_include_directories(
         stringzilla_shared PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -432,15 +433,15 @@ if (STRINGZILLA_BUILD_SHARED)
     # machines ! We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
     if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
         define_stringzilla_library(stringzilla_bare bare SHARED)
-        target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
-        target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
+        target_compile_definitions(stringzilla_bare PRIVATE "STRINGZILLA_WITH_LIBC=0")
+        target_compile_definitions(stringzilla_bare PRIVATE "STRINGZILLA_OVERRIDE_LIBC=1")
         target_include_directories(
             stringzilla_bare PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                                     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         )
 
         # For stringzilla_bare, enforce strict C99 standard conformance with `-pedantic`. This ensures the bare build
-        # remains strictly standards-compliant without POSIX extensions. Explore `SZ_HAS_POSIX_EXTENSIONS_` macro usage
+        # remains strictly standards-compliant without POSIX extensions. Explore `STRINGZILLA_HAS_POSIX_EXTENSIONS_` macro usage
         # for details.
         if (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
             target_compile_options(stringzilla_bare PRIVATE "-pedantic")
@@ -461,15 +462,15 @@ if (STRINGZILLA_BUILD_STATIC
     OR STRINGZILLA_BUILD_BENCHMARK
 )
     define_stringzilla_library(stringzilla_static static STATIC)
-    target_compile_definitions(stringzilla_static PRIVATE "SZ_AVOID_LIBC=0")
+    target_compile_definitions(stringzilla_static PRIVATE "STRINGZILLA_WITH_LIBC=1")
     target_include_directories(stringzilla_static PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 endif ()
 
 # The same dispatch core, compiled by nvcc so its CUDA arms exist. `set_source_files_properties` retargets the very
 # same `.c` files per target, so there is no second source list and no trampoline pair to keep in step - the shims
-# already carry their `#if SZ_USE_CUDA` arms and only ever lacked a target that defines it. `runtime.c` has to be in
+# already carry their `#if STRINGZILLA_TARGET_CUDA` arms and only ever lacked a target that defines it. `runtime.c` has to be in
 # here too: `sz_capabilities` ands a compile-time mask that carries `sz_cap_cuda_k` only when its own translation
-# unit saw `SZ_USE_CUDA`, so a CPU-compiled runtime would report no device however the other shims were built.
+# unit saw `STRINGZILLA_TARGET_CUDA`, so a CPU-compiled runtime would report no device however the other shims were built.
 function (define_stringzilla_cuda_library target public_name library_type gpu_archs)
     add_library(${target} ${library_type} ${STRINGZILLA_SHIM_SOURCES})
     set_source_files_properties(${STRINGZILLA_SHIM_SOURCES} TARGET_DIRECTORY ${target} PROPERTIES LANGUAGE CUDA)
@@ -493,7 +494,7 @@ function (define_stringzilla_cuda_library target public_name library_type gpu_ar
                          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
     target_include_directories(${target} SYSTEM PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-    target_compile_definitions(${target} PRIVATE "SZ_AVOID_LIBC=0" "SZ_DYNAMIC_DISPATCH=1")
+    target_compile_definitions(${target} PRIVATE "STRINGZILLA_WITH_LIBC=1" "STRINGZILLA_RUNTIME_DISPATCH=1")
     set_gpu_definitions(${target} cuda)
 
     # The device tiers reach the serial arithmetic through relaxed constexpr, so the scores are bit-identical.
@@ -544,7 +545,7 @@ if (STRINGZILLA_BUILD_TEST)
     # standards-matrix builds below parallelize and rebuild incrementally instead of recompiling one 5K-line file.
     # `define_launcher`'s `target_sources` accepts this list verbatim.
     set(STRINGZILLA_TEST_SOURCES
-        test/stringzilla.cpp
+        test/main.cpp
         test/hash.cpp
         test/cipher.cpp
         test/utf8_runes.cpp
@@ -568,8 +569,13 @@ if (STRINGZILLA_BUILD_TEST)
     if (STRINGZILLA_BUILD_CUDA)
         # The core library's own GPU backends: one launcher, one source per family beside its CPU test.
         define_gpu_launcher(
-            stringzilla_test_cu20 20 "${STRINGZILLA_TARGET_ARCH}" test/stringzilla.cu test/overlap.cu
-            test/levenshtein.cu test/substrings.cu
+            stringzilla_test_cu20
+            20
+            "${STRINGZILLA_TARGET_ARCH}"
+            test/main.cu
+            test/overlap.cu
+            test/levenshtein.cu
+            test/substrings.cu
         )
         target_link_libraries(stringzilla_test_cu20 PRIVATE stringzilla_cuda_static)
     endif ()

@@ -37,7 +37,7 @@ extern "C" {
  *  @note No zero-length sentences are emitted; @p length == 0 returns 0.
  *  @note Sentence segmentation is forward-only.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_sentences(                  //
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_sentences(         //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
@@ -47,36 +47,36 @@ SZ_API_RUNTIME sz_size_t sz_utf8_sentences(                  //
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_sentences */
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_serial(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                                   sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                   sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_serial(sz_cptr_t text, sz_size_t length,
+                                                            sz_size_t *sentence_starts, sz_size_t *sentence_lengths,
+                                                            sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_sentences */
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                                    sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                    sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(sz_cptr_t text, sz_size_t length,
+                                                             sz_size_t *sentence_starts, sz_size_t *sentence_lengths,
+                                                             sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_sentences */
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                                 sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                 sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_neon(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                          sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                          sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_sentences */
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                                    sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                    sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length,
+                                                             sz_size_t *sentence_starts, sz_size_t *sentence_lengths,
+                                                             sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_sentences */
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                                 sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                 sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                          sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                          sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -90,20 +90,20 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(sz_cptr_t text, sz_size_t lengt
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                           sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                           sz_size_t *bytes_consumed) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                    sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                    sz_size_t *bytes_consumed) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_sentences_icelake(text, length, sentence_starts, sentence_lengths, sentences_capacity,
                                      bytes_consumed);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_sentences_haswell(text, length, sentence_starts, sentence_lengths, sentences_capacity,
                                      bytes_consumed);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_sentences_sve2(text, length, sentence_starts, sentence_lengths, sentences_capacity, bytes_consumed);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_sentences_neon(text, length, sentence_starts, sentence_lengths, sentences_capacity, bytes_consumed);
 #else
     return sz_utf8_sentences_serial(text, length, sentence_starts, sentence_lengths, sentences_capacity,
@@ -111,7 +111,7 @@ SZ_API_RUNTIME sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma endregion
 

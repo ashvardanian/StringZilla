@@ -179,13 +179,7 @@ impl OverlapEngine {
         let engine = self as *mut Self;
         let output = scores.as_mut_ptr();
         let status = with_sequence(candidates, |sequence| unsafe {
-            sz_overlap_scores(
-                engine,
-                sequence,
-                output,
-                scores_query_stride,
-                scores_candidate_stride,
-            )
+            sz_overlap_scores(engine, sequence, output, scores_query_stride, scores_candidate_stride)
         });
         match status {
             Status::Success => Ok(()),

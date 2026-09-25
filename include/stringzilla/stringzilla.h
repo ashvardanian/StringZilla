@@ -35,38 +35,39 @@
  *
  *  Consider overriding the following macros to customize the library:
  *
- *  - `SZ_DEBUG=0` - whether to enable debug assertions and logging.
- *  - `SZ_AVOID_LIBC=0` - whether to avoid including the standard C library headers.
- *  - `SZ_DYNAMIC_DISPATCH=0` - whether to dispatch to the most advanced SIMD backend at runtime.
- *  - `SZ_USE_MISALIGNED_LOADS=0` - whether to use misaligned loads on platforms that support them.
+ *  - `STRINGZILLA_DEBUG=0` - whether to enable debug assertions and logging.
+ *  - `STRINGZILLA_WITH_LIBC=1` - whether to include the standard C library headers.
+ *  - `STRINGZILLA_RUNTIME_DISPATCH=0` - whether to pick the most advanced SIMD backend at runtime.
+ *  - `STRINGZILLA_ALLOW_MISALIGNED_LOADS=0` - whether to use misaligned loads where supported.
  *
  *  Performance tuning:
  *
- *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level loops.
- *  - `SZ_CACHE_LINE_WIDTH=?` - cache-line width, derived from the target, that affects some
- *    algorithms and the first heap buffer of a growing string.
+ *  - `STRINGZILLA_SWAR_THRESHOLD=24` - length from which SWAR replaces serial byte-level loops.
+ *  - `STRINGZILLA_CACHE_LINE_BYTES=?` - cache-line width, derived from the target, that affects
+ *    some algorithms and the first heap buffer of a growing string.
  *
  *  Different generations of CPUs and SIMD capabilities can be toggled with the following macros:
  *
- *  - `SZ_USE_WESTMERE=?` - whether to use SSE4.2 and AES-NI instructions on x86_64.
- *  - `SZ_USE_GOLDMONT=?` - whether to use SHA-NI instructions on x86_64.
- *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
- *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
- *  - `SZ_USE_ICELAKE=?` - whether to use AVX-512 VBMI and wider AES instructions on x86_64.
- *  - `SZ_USE_NEON=?` - whether to use NEON instructions on Arm.
- *  - `SZ_USE_NEONAES=?` - whether to use NEON AES instructions on Arm.
- *  - `SZ_USE_NEONSHA=?` - whether to use NEON SHA-2 instructions on Arm.
- *  - `SZ_USE_SVE=?` - whether to use SVE instructions on Arm.
- *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on Arm.
- *  - `SZ_USE_SVE2AES=?` - whether to use SVE2 AES instructions on Arm.
- *  - `SZ_USE_V128=?` - whether to use WebAssembly SIMD128 instructions.
- *  - `SZ_USE_V128RELAXED=?` - whether to use WebAssembly relaxed-SIMD instructions.
- *  - `SZ_USE_RVV=?` - whether to use RISC-V Vector (RVV 1.0) instructions.
- *  - `SZ_USE_LASX=?` - whether to use LoongArch LASX instructions.
- *  - `SZ_USE_POWERVSX=?` - whether to use IBM Power VSX instructions.
- *  - `SZ_USE_CUDA=?` - whether to use minimal CUDA capabilities on NVIDIA GPUs.
- *  - `SZ_USE_KEPLER=?` - whether to use Kepler-level instructions on NVIDIA GPUs.
- *  - `SZ_USE_HOPPER=?` - whether to use Hopper-level instructions on NVIDIA GPUs.
+ *  - `STRINGZILLA_TARGET_WESTMERE=?` - whether to use SSE4.2 and AES-NI instructions on x86_64.
+ *  - `STRINGZILLA_TARGET_GOLDMONT=?` - whether to use SHA-NI instructions on x86_64.
+ *  - `STRINGZILLA_TARGET_HASWELL=?` - whether to use AVX2 instructions on x86_64.
+ *  - `STRINGZILLA_TARGET_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
+ *  - `STRINGZILLA_TARGET_ICELAKE=?` - whether to use AVX-512 VBMI and wider AES instructions on
+ *    x86_64.
+ *  - `STRINGZILLA_TARGET_NEON=?` - whether to use NEON instructions on Arm.
+ *  - `STRINGZILLA_TARGET_NEONAES=?` - whether to use NEON AES instructions on Arm.
+ *  - `STRINGZILLA_TARGET_NEONSHA=?` - whether to use NEON SHA-2 instructions on Arm.
+ *  - `STRINGZILLA_TARGET_SVE=?` - whether to use SVE instructions on Arm.
+ *  - `STRINGZILLA_TARGET_SVE2=?` - whether to use SVE2 instructions on Arm.
+ *  - `STRINGZILLA_TARGET_SVE2AES=?` - whether to use SVE2 AES instructions on Arm.
+ *  - `STRINGZILLA_TARGET_V128=?` - whether to use WebAssembly SIMD128 instructions.
+ *  - `STRINGZILLA_TARGET_V128RELAXED=?` - whether to use WebAssembly relaxed-SIMD instructions.
+ *  - `STRINGZILLA_TARGET_RVV=?` - whether to use RISC-V Vector (RVV 1.0) instructions.
+ *  - `STRINGZILLA_TARGET_LASX=?` - whether to use LoongArch LASX instructions.
+ *  - `STRINGZILLA_TARGET_POWERVSX=?` - whether to use IBM Power VSX instructions.
+ *  - `STRINGZILLA_TARGET_CUDA=?` - whether to use minimal CUDA capabilities on NVIDIA GPUs.
+ *  - `STRINGZILLA_TARGET_KEPLER=?` - whether to use Kepler-level instructions on NVIDIA GPUs.
+ *  - `STRINGZILLA_TARGET_HOPPER=?` - whether to use Hopper-level instructions on NVIDIA GPUs.
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
@@ -102,37 +103,48 @@
 
 /* Inferring target OS: Windows, MacOS, or Linux */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__CYGWIN__)
-#define SZ_IS_WINDOWS_ 1
-#elif defined(__APPLE__) && defined(__MACH__)
-#define SZ_IS_APPLE_ 1
-#elif defined(__linux__)
-#define SZ_IS_LINUX_ 1
-#elif defined(__FreeBSD__)
-#define SZ_IS_FREEBSD_ 1
+#define STRINGZILLA_OS_WINDOWS_ 1
+#else
+#define STRINGZILLA_OS_WINDOWS_ 0
+#endif
+#if defined(__APPLE__) && defined(__MACH__)
+#define STRINGZILLA_OS_APPLE_ 1
+#else
+#define STRINGZILLA_OS_APPLE_ 0
+#endif
+#if defined(__linux__)
+#define STRINGZILLA_OS_LINUX_ 1
+#else
+#define STRINGZILLA_OS_LINUX_ 0
+#endif
+#if defined(__FreeBSD__)
+#define STRINGZILLA_OS_FREEBSD_ 1
+#else
+#define STRINGZILLA_OS_FREEBSD_ 0
 #endif
 
 /* On Apple Silicon, @c mrs is not allowed in user-space, so we need to use the @c sysctl API */
-#if defined(SZ_IS_APPLE_)
+#if STRINGZILLA_OS_APPLE_
 #include <sys/sysctl.h>
 #endif
 
 /* On 64-bit RISC-V we probe HWCAP via the auxiliary vector and vector sub-extensions via the
  * Linux @c riscv_hwprobe syscall; FreeBSD lacks it and uses @c elf_aux_info for base RVV only. */
-#if defined(__riscv) && (__riscv_xlen == 64) && !SZ_AVOID_LIBC
-#if defined(SZ_IS_LINUX_)
+#if defined(__riscv) && (__riscv_xlen == 64) && STRINGZILLA_WITH_LIBC
+#if STRINGZILLA_OS_LINUX_
 #include <sys/auxv.h>    // `getauxval`, `AT_HWCAP`
 #include <sys/syscall.h> // `SYS_riscv_hwprobe`
 #include <unistd.h>      // `syscall`
-#elif defined(SZ_IS_FREEBSD_)
+#elif STRINGZILLA_OS_FREEBSD_
 #include <sys/auxv.h> // `elf_aux_info`, `AT_HWCAP`
 #endif
 #endif
 
 /* On LoongArch and IBM POWER the SIMD extensions are likewise reported through the aux vector. */
-#if (defined(__loongarch__) || defined(__powerpc64__) || defined(__powerpc__)) && !SZ_AVOID_LIBC
-#if defined(SZ_IS_LINUX_)
+#if (defined(__loongarch__) || defined(__powerpc64__) || defined(__powerpc__)) && STRINGZILLA_WITH_LIBC
+#if STRINGZILLA_OS_LINUX_
 #include <sys/auxv.h> // `getauxval`, `AT_HWCAP`, `AT_HWCAP2`
-#elif defined(SZ_IS_FREEBSD_)
+#elif STRINGZILLA_OS_FREEBSD_
 #include <sys/auxv.h> // `elf_aux_info`, `AT_HWCAP`, `AT_HWCAP2`
 #endif
 #endif
@@ -142,19 +154,19 @@
  * safely testing @c mrs instruction availability. @c _POSIX_VERSION only exists after
  * `<unistd.h>` - without this include the check below is always false, the @c mrs path compiles
  * out, and Linux Arm detection silently degrades to NEON-only. */
-#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
+#if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
 #include <unistd.h>
 #endif
-#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC && defined(_POSIX_VERSION)
+#if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC && defined(_POSIX_VERSION)
 #include <setjmp.h>
 #include <signal.h>
-#define SZ_HAS_POSIX_EXTENSIONS_ 1
+#define STRINGZILLA_HAS_POSIX_EXTENSIONS_ 1
 #else
-#define SZ_HAS_POSIX_EXTENSIONS_ 0
+#define STRINGZILLA_HAS_POSIX_EXTENSIONS_ 0
 #endif
 
 /* On Windows Arm, we use IsProcessorFeaturePresent API for capability detection */
-#if defined(SZ_IS_WINDOWS_) && SZ_IS_64BIT_ARM_
+#if STRINGZILLA_OS_WINDOWS_ && STRINGZILLA_ARCH_ARM64_
 #define NOMINMAX
 #include <windows.h>
 #endif
@@ -167,13 +179,14 @@ extern "C" {
  *  @brief Internal helper function to convert SIMD capabilities to an array of string pointers.
  *
  *  @param[in] caps The capabilities bitfield.
- *  @param[out] strings Output array of string pointers, with over @c SZ_CAPABILITIES_COUNT slots.
+ *  @param[out] strings Output array of string pointers, with over
+ *      @c STRINGZILLA_CAPABILITIES_COUNT slots.
  *  @param[in] max_count Maximum number of strings to output.
  *  @return Number of capability strings written to the array.
  *  @sa sz_capabilities_to_string_implementation_, sz_capabilities
  */
-SZ_HELPER_AUTO sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t caps, char const **strings,
-                                                                    sz_size_t max_count) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t caps, char const **strings,
+                                                                             sz_size_t max_count) {
     // Mapping each flag to its string literal.
     struct {
         sz_capability_t flag;
@@ -219,7 +232,7 @@ SZ_HELPER_AUTO sz_size_t sz_capabilities_to_strings_implementation_(sz_capabilit
     return capability_count;
 }
 
-SZ_HELPER_AUTO sz_bool_t sz_equal_null_terminated_serial(char const *a, char const *b) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_equal_null_terminated_serial(char const *a, char const *b) {
     if (!a || !b) return sz_false_k;
     for (; *a && *b; a++, b++)
         if (*a != *b) return sz_false_k;
@@ -233,7 +246,7 @@ SZ_HELPER_AUTO sz_bool_t sz_equal_null_terminated_serial(char const *a, char con
  *  @param[in] name Capability name, e.g. "serial", "neon", "sve2aes".
  *  @return @c sz_caps_none_k if unknown name, or a valid capability flag.
  */
-SZ_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char const *name) {
+STRINGZILLA_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char const *name) {
 
     // CPU + execution model
     if (sz_equal_null_terminated_serial(name, "serial") == sz_true_k) return sz_cap_serial_k;
@@ -274,15 +287,15 @@ SZ_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char co
  *      @p capacity.
  *  @sa sz_capabilities_to_string, sz_capabilities
  */
-SZ_HELPER_AUTO sz_size_t sz_capabilities_to_string_implementation_(sz_capability_t caps, char *buffer,
-                                                                   sz_size_t capacity) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_capabilities_to_string_implementation_(sz_capability_t caps, char *buffer,
+                                                                            sz_size_t capacity) {
 
     if (capacity == 0) return 0;
     char *p = buffer;
     char *const end = buffer + capacity;
 
-    char const *cap_strings[SZ_CAPABILITIES_COUNT];
-    sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
+    char const *cap_strings[STRINGZILLA_CAPABILITIES_COUNT];
+    sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, STRINGZILLA_CAPABILITIES_COUNT);
 
     for (sz_size_t capability_index = 0; capability_index < cap_count; capability_index++) {
         if (capability_index > 0 && p < end - 1) *p++ = ',';
@@ -295,43 +308,43 @@ SZ_HELPER_AUTO sz_size_t sz_capabilities_to_string_implementation_(sz_capability
 }
 
 /*  The runtime detectors below report the full hardware capability set, independent of which
- *  `SZ_USE_*` tiers this build compiled in: @c sz_capabilities ANDs their result with the
- *  compile-time mask anyway, and the executable instructions involved are unconditionally safe -
- *  @c cpuid is baseline x86-64 with @c xgetbv behind the OSXSAVE check, and the Arm @c mrs reads
+ *  `STRINGZILLA_TARGET_*` tiers this build compiled in: @c sz_capabilities ANDs their result with
+ *  the compile-time mask anyway, and the executable instructions involved are unconditionally safe
+ *  - @c cpuid is baseline x86-64 with @c xgetbv behind the OSXSAVE check, and the Arm @c mrs reads
  *  sit behind a SIGILL-guarded probe with the @c ID_AA64ZFR0_EL1 encoding enabled by the
  *  `target("+sve")` pragma that already wraps the whole detector. Keeping detection unconditional
  *  lets build-system probes, like @c probes/run_capabilities.c, compile a serial-only translation
  *  unit and still learn what this machine runs, so the build can intersect it with what the
  *  toolchain compiles before any kernel is built. */
-SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
-    return (sz_capability_t)(                         //
-        (sz_cap_neon_k * SZ_USE_NEON) |               //
-        (sz_cap_neonaes_k * SZ_USE_NEONAES) |         //
-        (sz_cap_neonsha_k * SZ_USE_NEONSHA) |         //
-        (sz_cap_sve_k * SZ_USE_SVE) |                 //
-        (sz_cap_sve2_k * SZ_USE_SVE2) |               //
-        (sz_cap_sve2aes_k * SZ_USE_SVE2AES) |         //
-        (sz_cap_westmere_k * SZ_USE_WESTMERE) |       //
-        (sz_cap_goldmont_k * SZ_USE_GOLDMONT) |       //
-        (sz_cap_haswell_k * SZ_USE_HASWELL) |         //
-        (sz_cap_skylake_k * SZ_USE_SKYLAKE) |         //
-        (sz_cap_icelake_k * SZ_USE_ICELAKE) |         //
-        (sz_cap_v128_k * SZ_USE_V128) |               //
-        (sz_cap_v128relaxed_k * SZ_USE_V128RELAXED) | //
-        (sz_cap_rvv_k * SZ_USE_RVV) |                 //
-        (sz_cap_rvvcrypto_k * SZ_USE_RVVCRYPTO) |     //
-        (sz_cap_lasx_k * SZ_USE_LASX) |               //
-        (sz_cap_powervsx_k * SZ_USE_POWERVSX) |       //
-        (sz_cap_cuda_k * SZ_USE_CUDA) |               //
-        (sz_cap_kepler_k * SZ_USE_KEPLER) |           //
-        (sz_cap_hopper_k * SZ_USE_HOPPER) |           //
+STRINGZILLA_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
+    return (sz_capability_t)(                                     //
+        (sz_cap_neon_k * STRINGZILLA_TARGET_NEON) |               //
+        (sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) |         //
+        (sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA) |         //
+        (sz_cap_sve_k * STRINGZILLA_TARGET_SVE) |                 //
+        (sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2) |               //
+        (sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES) |         //
+        (sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE) |       //
+        (sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT) |       //
+        (sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL) |         //
+        (sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE) |         //
+        (sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE) |         //
+        (sz_cap_v128_k * STRINGZILLA_TARGET_V128) |               //
+        (sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED) | //
+        (sz_cap_rvv_k * STRINGZILLA_TARGET_RVV) |                 //
+        (sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) |     //
+        (sz_cap_lasx_k * STRINGZILLA_TARGET_LASX) |               //
+        (sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) |       //
+        (sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) |               //
+        (sz_cap_kepler_k * STRINGZILLA_TARGET_KEPLER) |           //
+        (sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) |           //
         (sz_cap_serial_k));
 }
 
 /*  Compiling the next section one may get: selected processor does not support system register
  *  name 'id_aa64zfr0_el1'. Suppressing assembler errors is very complicated, so when dealing with
  *  older Arm CPUs it's simpler to compile this function targeting newer ones. */
-#if SZ_IS_64BIT_ARM_
+#if STRINGZILLA_ARCH_ARM64_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -339,7 +352,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
 #pragma GCC target("+sve")
 #endif
 
-#if SZ_HAS_POSIX_EXTENSIONS_
+#if STRINGZILLA_HAS_POSIX_EXTENSIONS_
 
 /** SIGILL handler for @c mrs instruction testing on Linux Arm. */
 static sigjmp_buf sz_mrs_test_jump_buffer_;
@@ -354,10 +367,10 @@ static void sz_mrs_test_sigill_handler_(int sig) {
  *
  *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
-SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
+STRINGZILLA_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
     // for documentation on how we detect capabilities across different ARM platforms.
-#if defined(SZ_IS_APPLE_)
+#if STRINGZILLA_OS_APPLE_
 
     // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
     uint32_t supports_neon = 0;
@@ -374,7 +387,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
         (sz_cap_neonsha_k * (supports_neonsha)) | //
         (sz_cap_serial_k));
 
-#elif defined(SZ_IS_LINUX_)
+#elif STRINGZILLA_OS_LINUX_
 
     // Depending on the environment, reading system registers may cause SIGILL.
     // One option to avoid the crash is to use `getauxval(AT_HWCAP)` and `getauxval(AT_HWCAP2)`,
@@ -383,7 +396,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     // and probe one of the registers, reverting back to the old signal handler afterwards.
     //
     // This issue was originally observed in SimSIMD: https://github.com/ashvardanian/SimSIMD/issues/279
-#if SZ_HAS_POSIX_EXTENSIONS_
+#if STRINGZILLA_HAS_POSIX_EXTENSIONS_
     struct sigaction action_new, action_old;
     action_new.sa_handler = sz_mrs_test_sigill_handler_;
     sigemptyset(&action_new.sa_mask);
@@ -401,10 +414,10 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
 
     // Early exit if `mrs` doesn't work - return conservative NEON-only capabilities
     if (!mrs_works) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
-#else  // SZ_HAS_POSIX_EXTENSIONS_
+#else  // STRINGZILLA_HAS_POSIX_EXTENSIONS_
     // Without POSIX signal handlers, fall back to conservative NEON capabilities.
     return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
-#endif // SZ_HAS_POSIX_EXTENSIONS_
+#endif // STRINGZILLA_HAS_POSIX_EXTENSIONS_
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
@@ -459,7 +472,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
         (sz_cap_sve2aes_k * (supports_sve2aes)) | //
         (sz_cap_serial_k));
 
-#elif defined(SZ_IS_WINDOWS_)
+#elif STRINGZILLA_OS_WINDOWS_
 
     // On Windows ARM, use the `IsProcessorFeaturePresent` API for capability detection.
     // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-isprocessorfeaturepresent
@@ -486,11 +499,11 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
 #pragma GCC pop_options
 #endif
 
-#endif // SZ_IS_64BIT_ARM_
+#endif // STRINGZILLA_ARCH_ARM64_
 
-#if SZ_IS_64BIT_X86_
+#if STRINGZILLA_ARCH_X86_64_
 
-SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
+STRINGZILLA_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
 
     /// The states of 4 registers populated for a specific "cpuid" assembly call
     union four_registers_t {
@@ -566,7 +579,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
         (sz_cap_icelake_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) | //
         (sz_cap_serial_k));
 }
-#endif // SZ_IS_64BIT_X86_
+#endif // STRINGZILLA_ARCH_X86_64_
 
 #if defined(__riscv) && (__riscv_xlen == 64)
 
@@ -575,8 +588,8 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
  *
  *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
-SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
-#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
+STRINGZILLA_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
+#if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
 
     // The base "V" extension is reported through the auxiliary vector, but the individual
     // vector sub-extensions (vector crypto, bf16, …) are only exposed through the
@@ -609,7 +622,7 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
     }
     return caps;
 
-#elif defined(SZ_IS_FREEBSD_) && !SZ_AVOID_LIBC
+#elif STRINGZILLA_OS_FREEBSD_ && STRINGZILLA_WITH_LIBC
 
     // FreeBSD exposes HWCAP through `elf_aux_info`, but lacks the Linux `riscv_hwprobe`
     // syscall, so the vector crypto sub-extensions stay compile-time only here.
@@ -634,8 +647,8 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_riscv_(void) {
  *
  *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
-SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_loongarch_(void) {
-#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
+STRINGZILLA_HELPER_INLINE sz_capability_t sz_capabilities_implementation_loongarch_(void) {
+#if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
 
     // The SIMD extensions are reported through the auxiliary vector, matching `asm/hwcap.h`:
     //   HWCAP_LOONGARCH_LSX  == (1 << 4)  // 128-bit SIMD
@@ -658,15 +671,15 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_loongarch_(void)
  *
  *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  */
-SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
-#if (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && !SZ_AVOID_LIBC
+STRINGZILLA_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
+#if (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
 
     // The `powervsx` kernels target POWER9 (`-mcpu=power9 -mvsx`), so both facts are required,
     // matching the constants in `arch/powerpc/include/uapi/asm/cputable.h`:
     //   PPC_FEATURE_HAS_VSX     == 0x00000080 // in AT_HWCAP
     //   PPC_FEATURE2_ARCH_3_00  == 0x00800000 // in AT_HWCAP2, the POWER9 ISA level
     unsigned long hwcap = 0, hwcap2 = 0;
-#if defined(SZ_IS_LINUX_)
+#if STRINGZILLA_OS_LINUX_
     hwcap = getauxval(AT_HWCAP);
     hwcap2 = getauxval(AT_HWCAP2);
 #else
@@ -695,17 +708,18 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
  *  detectors here. WebAssembly stays 0 by nature: a module carrying unsupported SIMD opcodes fails
  *  validation at instantiation, so not even load-time masking is possible there.
  */
-#if SZ_IS_64BIT_X86_ || SZ_IS_64BIT_ARM_
-#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
-#elif defined(__riscv) && (__riscv_xlen == 64) && (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && !SZ_AVOID_LIBC
-#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
-#elif defined(__loongarch__) && defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
-#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
-#elif (defined(__powerpc64__) || defined(__powerpc__)) && (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && \
-    !SZ_AVOID_LIBC
-#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
+#if STRINGZILLA_ARCH_X86_64_ || STRINGZILLA_ARCH_ARM64_
+#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
+#elif defined(__riscv) && (__riscv_xlen == 64) && (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && \
+    STRINGZILLA_WITH_LIBC
+#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
+#elif defined(__loongarch__) && STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
+#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
+#elif (defined(__powerpc64__) || defined(__powerpc__)) && (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && \
+    STRINGZILLA_WITH_LIBC
+#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
 #else
-#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (0)
+#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (0)
 #endif
 
 /**
@@ -716,11 +730,12 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_power_(void) {
  *  generation reports every earlier tier with it - Blackwell runs the Hopper kernels unchanged, so
  *  it reports @c hopper too.
  *
- *  @c CUDART_VERSION rather than @c SZ_USE_CUDA gates the probe: a translation unit may declare the
- *  CUDA layer exists and still be compiled as plain C++, where these entry points are not declared.
+ *  @c CUDART_VERSION rather than @c STRINGZILLA_TARGET_CUDA gates the probe: a translation unit
+ *  may declare the CUDA layer exists and still be compiled as plain C++, where these entry points
+ *  are not declared.
  */
-#if SZ_USE_CUDA && defined(CUDART_VERSION)
-SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) {
+#if STRINGZILLA_TARGET_CUDA && defined(CUDART_VERSION)
+STRINGZILLA_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) {
     int devices_count = 0, highest_major = 0;
     if (cudaGetDeviceCount(&devices_count) != cudaSuccess) return sz_caps_none_k;
     for (int device = 0; device != devices_count; ++device) {
@@ -733,7 +748,7 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) {
     return (sz_capability_t)(sz_cap_cuda_k | sz_cap_kepler_k);
 }
 #else
-SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) { return sz_caps_none_k; }
+STRINGZILLA_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) { return sz_caps_none_k; }
 #endif
 
 /**
@@ -742,14 +757,14 @@ SZ_HELPER_INLINE sz_capability_t sz_capabilities_implementation_cuda_(void) { re
  *  @return A bitmask of the SIMD capabilities represented as a @c sz_capability_t enum value.
  *  @note Excludes parallel-processing capabilities, which are detected separately in StringZillas.
  */
-SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_cpu_(void) {
-#if !SZ_CAPABILITIES_RUNTIME_DETECTABLE_
+STRINGZILLA_API_COMPTIME sz_capability_t sz_capabilities_runtime_cpu_(void) {
+#if !STRINGZILLA_HAS_RUNTIME_DETECTION_
     // WebAssembly and OS-less exotic targets expose their SIMD support at compile time only,
     // so runtime capabilities mirror compile-time ones.
     return sz_capabilities_comptime_implementation_();
-#elif SZ_IS_64BIT_X86_
+#elif STRINGZILLA_ARCH_X86_64_
     return sz_capabilities_implementation_x86_();
-#elif SZ_IS_64BIT_ARM_
+#elif STRINGZILLA_ARCH_ARM64_
     return sz_capabilities_implementation_arm_();
 #elif defined(__riscv) && (__riscv_xlen == 64)
     return sz_capabilities_implementation_riscv_();
@@ -768,48 +783,52 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_cpu_(void) {
  *  @return A bitmask of the capabilities represented as a @c sz_capability_t enum value.
  *  @note Excludes parallel-processing capabilities, which are detected separately in StringZillas.
  */
-SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
+STRINGZILLA_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
     return (sz_capability_t)(sz_capabilities_runtime_cpu_() | sz_capabilities_implementation_cuda_());
 }
 
-#if SZ_DYNAMIC_DISPATCH
+#if STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME int sz_dynamic_dispatch(void);
-SZ_API_RUNTIME int sz_version_major(void);
-SZ_API_RUNTIME int sz_version_minor(void);
-SZ_API_RUNTIME int sz_version_patch(void);
-SZ_API_RUNTIME sz_capability_t sz_capabilities_comptime(void);
-SZ_API_RUNTIME sz_capability_t sz_capabilities_runtime(void);
-SZ_API_RUNTIME sz_capability_t sz_capabilities(void);
-SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
-SZ_API_RUNTIME void sz_dispatch_cpu_table_init(void);
-SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps);
+STRINGZILLA_API_RUNTIME int sz_dynamic_dispatch(void);
+STRINGZILLA_API_RUNTIME int sz_version_major(void);
+STRINGZILLA_API_RUNTIME int sz_version_minor(void);
+STRINGZILLA_API_RUNTIME int sz_version_patch(void);
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities_comptime(void);
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities_runtime(void);
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities(void);
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
+STRINGZILLA_API_RUNTIME void sz_dispatch_cpu_table_init(void);
+STRINGZILLA_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps);
 
 #else
 
-/*  These public entry points are @c SZ_API_RUNTIME so they export as external symbols when this
- *  header is compiled into the amalgamation TU with @c SZ_EXPORT, as a linkable library with
- *  compile-time dispatch; for plain header-only inclusion @c SZ_API_RUNTIME is `inline static`,
- *  same as the rest of the API. */
-SZ_API_RUNTIME int sz_dynamic_dispatch(void) { return 0; }
-SZ_API_RUNTIME int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-SZ_API_RUNTIME int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-SZ_API_RUNTIME int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
-SZ_API_RUNTIME sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
-SZ_API_RUNTIME sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
-SZ_API_RUNTIME sz_capability_t sz_capabilities(void) {
+/*  These public entry points are @c STRINGZILLA_API_RUNTIME so they export as external symbols when
+ *  this header is compiled into the amalgamation TU with @c STRINGZILLA_EXPORT_, as a linkable
+ *  library with compile-time dispatch; for plain header-only inclusion @c STRINGZILLA_API_RUNTIME
+ *  is `inline static`, same as the rest of the API. */
+STRINGZILLA_API_RUNTIME int sz_dynamic_dispatch(void) { return 0; }
+STRINGZILLA_API_RUNTIME int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+STRINGZILLA_API_RUNTIME int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+STRINGZILLA_API_RUNTIME int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities_comptime(void) {
+    return sz_capabilities_comptime_implementation_();
+}
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities_runtime(void) {
+    return sz_capabilities_runtime_implementation_();
+}
+STRINGZILLA_API_RUNTIME sz_capability_t sz_capabilities(void) {
     return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 }
-SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     // The one place that must own storage, because the signature returns a string it does not receive.
     static char names[256];
     sz_capabilities_to_string_implementation_(caps, names, sizeof(names));
     return names;
 }
-SZ_API_RUNTIME void sz_dispatch_cpu_table_init(void) {}
+STRINGZILLA_API_RUNTIME void sz_dispatch_cpu_table_init(void) {}
 
 /** No-op in a non-dynamic build, where every verb resolved at compile time. */
-SZ_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) { sz_unused_(caps); }
+STRINGZILLA_API_RUNTIME void sz_dispatch_cpu_table_update(sz_capability_t caps) { sz_unused_(caps); }
 
 #endif
 

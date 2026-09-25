@@ -52,8 +52,8 @@ typedef struct PyAPI {
 
 /** Builds a tuple of the capability names in @p caps, or @c NULL with a Python exception set. */
 static PyObject *capabilities_to_tuple(sz_capability_t caps) {
-    sz_cptr_t cap_strings[SZ_CAPABILITIES_COUNT];
-    sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
+    sz_cptr_t cap_strings[STRINGZILLA_CAPABILITIES_COUNT];
+    sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, STRINGZILLA_CAPABILITIES_COUNT);
     PyObject *caps_tuple = PyTuple_New(cap_count);
     if (!caps_tuple) return NULL;
     for (sz_size_t i = 0; i < cap_count; i++) {
@@ -262,81 +262,86 @@ int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t ite
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
-    {"contains", (PyCFunction)Str_like_contains, SZ_METHOD_FLAGS, doc_contains},
-    {"count", (PyCFunction)Str_like_count, SZ_METHOD_FLAGS, doc_count},
-    {"splitlines", (PyCFunction)Str_like_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
-    {"startswith", (PyCFunction)Str_like_startswith, SZ_METHOD_FLAGS, doc_startswith},
-    {"endswith", (PyCFunction)Str_like_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"decode", (PyCFunction)Str_like_decode, SZ_METHOD_FLAGS, doc_decode},
-    {"equal", (PyCFunction)Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
-    {"lstrip", (PyCFunction)Str_like_lstrip, SZ_METHOD_FLAGS, doc_lstrip},
-    {"rstrip", (PyCFunction)Str_like_rstrip, SZ_METHOD_FLAGS, doc_rstrip},
-    {"strip", (PyCFunction)Str_like_strip, SZ_METHOD_FLAGS, doc_strip},
+    {"contains", (PyCFunction)Str_like_contains, STRINGZILLA_METHOD_FLAGS, doc_contains},
+    {"count", (PyCFunction)Str_like_count, STRINGZILLA_METHOD_FLAGS, doc_count},
+    {"splitlines", (PyCFunction)Str_like_splitlines, STRINGZILLA_METHOD_FLAGS, doc_splitlines},
+    {"startswith", (PyCFunction)Str_like_startswith, STRINGZILLA_METHOD_FLAGS, doc_startswith},
+    {"endswith", (PyCFunction)Str_like_endswith, STRINGZILLA_METHOD_FLAGS, doc_endswith},
+    {"decode", (PyCFunction)Str_like_decode, STRINGZILLA_METHOD_FLAGS, doc_decode},
+    {"equal", (PyCFunction)Str_like_equal, STRINGZILLA_METHOD_FLAGS, doc_like_equal},
+    {"lstrip", (PyCFunction)Str_like_lstrip, STRINGZILLA_METHOD_FLAGS, doc_lstrip},
+    {"rstrip", (PyCFunction)Str_like_rstrip, STRINGZILLA_METHOD_FLAGS, doc_rstrip},
+    {"strip", (PyCFunction)Str_like_strip, STRINGZILLA_METHOD_FLAGS, doc_strip},
 
     // Bidirectional operations
-    {"find", (PyCFunction)Str_like_find, SZ_METHOD_FLAGS, doc_find},
-    {"index", (PyCFunction)Str_like_index, SZ_METHOD_FLAGS, doc_index},
-    {"partition", (PyCFunction)Str_like_partition, SZ_METHOD_FLAGS, doc_partition},
-    {"split", (PyCFunction)Str_like_split, SZ_METHOD_FLAGS, doc_split},
-    {"rfind", (PyCFunction)Str_like_rfind, SZ_METHOD_FLAGS, doc_rfind},
-    {"rindex", (PyCFunction)Str_like_rindex, SZ_METHOD_FLAGS, doc_rindex},
-    {"rpartition", (PyCFunction)Str_like_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
-    {"rsplit", (PyCFunction)Str_like_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
+    {"find", (PyCFunction)Str_like_find, STRINGZILLA_METHOD_FLAGS, doc_find},
+    {"index", (PyCFunction)Str_like_index, STRINGZILLA_METHOD_FLAGS, doc_index},
+    {"partition", (PyCFunction)Str_like_partition, STRINGZILLA_METHOD_FLAGS, doc_partition},
+    {"split", (PyCFunction)Str_like_split, STRINGZILLA_METHOD_FLAGS, doc_split},
+    {"rfind", (PyCFunction)Str_like_rfind, STRINGZILLA_METHOD_FLAGS, doc_rfind},
+    {"rindex", (PyCFunction)Str_like_rindex, STRINGZILLA_METHOD_FLAGS, doc_rindex},
+    {"rpartition", (PyCFunction)Str_like_rpartition, STRINGZILLA_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", (PyCFunction)Str_like_rsplit, STRINGZILLA_METHOD_FLAGS, doc_rsplit},
 
     // Character search extensions
-    {"find_first_of", (PyCFunction)Str_like_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
-    {"find_last_of", (PyCFunction)Str_like_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
-    {"find_first_not_of", (PyCFunction)Str_like_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
-    {"find_last_not_of", (PyCFunction)Str_like_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
-    {"count_byteset", (PyCFunction)Str_like_count_byteset, SZ_METHOD_FLAGS, doc_count_byteset},
-    {"split_byteset", (PyCFunction)Str_like_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
-    {"rsplit_byteset", (PyCFunction)Str_like_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
+    {"find_first_of", (PyCFunction)Str_like_find_first_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", (PyCFunction)Str_like_find_last_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", (PyCFunction)Str_like_find_first_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", (PyCFunction)Str_like_find_last_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_not_of},
+    {"count_byteset", (PyCFunction)Str_like_count_byteset, STRINGZILLA_METHOD_FLAGS, doc_count_byteset},
+    {"split_byteset", (PyCFunction)Str_like_split_byteset, STRINGZILLA_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", (PyCFunction)Str_like_rsplit_byteset, STRINGZILLA_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
-    {"split_iter", (PyCFunction)Str_like_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
-    {"rsplit_iter", (PyCFunction)Str_like_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
-    {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
+    {"split_iter", (PyCFunction)Str_like_split_iter, STRINGZILLA_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", (PyCFunction)Str_like_rsplit_iter, STRINGZILLA_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, STRINGZILLA_METHOD_FLAGS, doc_split_byteset_iter},
+    {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, STRINGZILLA_METHOD_FLAGS,
+     doc_rsplit_byteset_iter},
 
     // UTF-8 aware operations
-    {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
-    {"utf8_split_newlines", (PyCFunction)Str_like_utf8_split_newlines, SZ_METHOD_FLAGS, doc_utf8_split_newlines},
-    {"utf8_newlines", (PyCFunction)Str_like_utf8_newlines, SZ_METHOD_FLAGS, doc_utf8_newlines},
-    {"utf8_split_whitespaces", (PyCFunction)Str_like_utf8_split_whitespaces, SZ_METHOD_FLAGS,
+    {"utf8_count", (PyCFunction)Str_like_utf8_count, STRINGZILLA_METHOD_FLAGS, doc_utf8_count},
+    {"utf8_split_newlines", (PyCFunction)Str_like_utf8_split_newlines, STRINGZILLA_METHOD_FLAGS,
+     doc_utf8_split_newlines},
+    {"utf8_newlines", (PyCFunction)Str_like_utf8_newlines, STRINGZILLA_METHOD_FLAGS, doc_utf8_newlines},
+    {"utf8_split_whitespaces", (PyCFunction)Str_like_utf8_split_whitespaces, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_split_whitespaces},
-    {"utf8_whitespaces", (PyCFunction)Str_like_utf8_whitespaces, SZ_METHOD_FLAGS, doc_utf8_whitespaces},
-    {"utf8_split_delimiters", (PyCFunction)Str_like_utf8_split_delimiters, SZ_METHOD_FLAGS, doc_utf8_split_delimiters},
-    {"utf8_delimiters", (PyCFunction)Str_like_utf8_delimiters, SZ_METHOD_FLAGS, doc_utf8_delimiters},
-    {"utf8_wordbreaks", (PyCFunction)Str_like_utf8_wordbreaks, SZ_METHOD_FLAGS, doc_utf8_wordbreaks},
-    {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, SZ_METHOD_FLAGS, doc_utf8_codepoints},
-    {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
-    {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, SZ_METHOD_FLAGS, doc_utf8_sentences},
-    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, SZ_METHOD_FLAGS, doc_utf8_linebreaks},
-    {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
-    {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
-    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, SZ_METHOD_FLAGS,
+    {"utf8_whitespaces", (PyCFunction)Str_like_utf8_whitespaces, STRINGZILLA_METHOD_FLAGS, doc_utf8_whitespaces},
+    {"utf8_split_delimiters", (PyCFunction)Str_like_utf8_split_delimiters, STRINGZILLA_METHOD_FLAGS,
+     doc_utf8_split_delimiters},
+    {"utf8_delimiters", (PyCFunction)Str_like_utf8_delimiters, STRINGZILLA_METHOD_FLAGS, doc_utf8_delimiters},
+    {"utf8_wordbreaks", (PyCFunction)Str_like_utf8_wordbreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_wordbreaks},
+    {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, STRINGZILLA_METHOD_FLAGS, doc_utf8_codepoints},
+    {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, STRINGZILLA_METHOD_FLAGS, doc_utf8_graphemes},
+    {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, STRINGZILLA_METHOD_FLAGS, doc_utf8_sentences},
+    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_linebreaks},
+    {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_fold},
+    {"utf8_norm", (PyCFunction)Str_like_utf8_norm, STRINGZILLA_METHOD_FLAGS, doc_utf8_norm},
+    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_find_denormalized},
-    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, SZ_METHOD_FLAGS, doc_utf8_uncased_search},
-    {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, SZ_METHOD_FLAGS, doc_utf8_uncased_matches},
-    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
+    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, STRINGZILLA_METHOD_FLAGS,
+     doc_utf8_uncased_search},
+    {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, STRINGZILLA_METHOD_FLAGS,
+     doc_utf8_uncased_matches},
+    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
-    {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
-    {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
+    {"offset_within", (PyCFunction)Str_offset_within, STRINGZILLA_METHOD_FLAGS, doc_offset_within},
+    {"write_to", (PyCFunction)Str_write_to, STRINGZILLA_METHOD_FLAGS, doc_write_to},
 
     // In-place transforms
-    {"translate", (PyCFunction)Str_like_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"translate", (PyCFunction)Str_like_translate, STRINGZILLA_METHOD_FLAGS, doc_translate},
 
     // Global unary extensions
-    {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
-    {"hash_multiseed", (PyCFunction)Str_like_hash_multiseed, SZ_METHOD_FLAGS, doc_hash_multiseed},
-    {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
-    {"sha256", (PyCFunction)Str_like_sha256, SZ_METHOD_FLAGS, doc_like_sha256},
-    {"hmac_sha256", (PyCFunction)hmac_sha256, SZ_METHOD_FLAGS, doc_hmac_sha256},
-    {"fill_random", (PyCFunction)Str_like_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
+    {"hash", (PyCFunction)Str_like_hash, STRINGZILLA_METHOD_FLAGS, doc_like_hash},
+    {"hash_multiseed", (PyCFunction)Str_like_hash_multiseed, STRINGZILLA_METHOD_FLAGS, doc_hash_multiseed},
+    {"bytesum", (PyCFunction)Str_like_bytesum, STRINGZILLA_METHOD_FLAGS, doc_like_bytesum},
+    {"sha256", (PyCFunction)Str_like_sha256, STRINGZILLA_METHOD_FLAGS, doc_like_sha256},
+    {"hmac_sha256", (PyCFunction)hmac_sha256, STRINGZILLA_METHOD_FLAGS, doc_hmac_sha256},
+    {"fill_random", (PyCFunction)Str_like_fill_random, STRINGZILLA_METHOD_FLAGS, doc_fill_random},
 
     // Module-level functionality
-    {"random", (PyCFunction)module_random, SZ_METHOD_FLAGS, doc_random},
+    {"random", (PyCFunction)module_random, STRINGZILLA_METHOD_FLAGS, doc_random},
     {"reset_capabilities", (PyCFunction)module_reset_capabilities, METH_VARARGS, doc_reset_capabilities},
 
     {NULL, NULL, 0, NULL}};
@@ -416,7 +421,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // Publish the digest width on both hasher types, so callers can size an output matrix without
     // hardcoding it. A class attribute rather than a property, as it describes the algorithm.
     {
-        PyObject *digest_length = PyLong_FromSize_t(SZ_SHA256_DIGEST_LENGTH);
+        PyObject *digest_length = PyLong_FromSize_t(STRINGZILLA_SHA256_DIGEST_LENGTH);
         if (!digest_length) goto failed;
         int const published = PyDict_SetItemString(Sha256Type.tp_dict, "digest_length", digest_length) |
                               PyDict_SetItemString(Sha256sType.tp_dict, "digest_length", digest_length);

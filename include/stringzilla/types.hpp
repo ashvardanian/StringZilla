@@ -24,14 +24,14 @@
 #define STRINGZILLA_TYPES_HPP_
 
 #include "stringzilla/types.h"
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 #include "stringzilla/types.cuh" // `sz_cuda_device_t`, the three allocators
 #endif
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
  *  from and to @c std::string_view and `std::basic_string<any_allocator>`. */
-#ifndef SZ_AVOID_STL
-#define SZ_AVOID_STL (0) // true or false
+#ifndef STRINGZILLA_WITH_STL
+#define STRINGZILLA_WITH_STL (1) // true or false
 #endif
 
 /*  MSVC pins @c __cplusplus at 199711L unless `/Zc:__cplusplus` is passed, so read
@@ -41,19 +41,19 @@
 #endif
 
 #if defined(_MSC_VER)
-#define SZ_INLINE __forceinline
+#define STRINGZILLA_INLINE_ __forceinline
 #elif defined(__GNUC__) || defined(__clang__)
-#define SZ_INLINE inline __attribute__((always_inline))
+#define STRINGZILLA_INLINE_ inline __attribute__((always_inline))
 #else
-#define SZ_INLINE inline
+#define STRINGZILLA_INLINE_ inline
 #endif
 
 #if defined(_MSC_VER)
-#define SZ_NOINLINE __declspec(noinline)
+#define STRINGZILLA_NOINLINE_ __declspec(noinline)
 #elif defined(__GNUC__) || defined(__clang__)
-#define SZ_NOINLINE __attribute__((noinline))
+#define STRINGZILLA_NOINLINE_ __attribute__((noinline))
 #else
-#define SZ_NOINLINE
+#define STRINGZILLA_NOINLINE_
 #endif
 
 /** @c noipa disables interprocedural optimization across the function boundary - strictly stronger
@@ -63,12 +63,12 @@
  *  has no such miscompile and no @c noipa attribute, and NVCC rejects it on device code, so both
  *  fall back to @c noinline. */
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDACC__)
-#define SZ_NOIPA __attribute__((noipa))
+#define STRINGZILLA_NOIPA_ __attribute__((noipa))
 #else
-#define SZ_NOIPA SZ_NOINLINE
+#define STRINGZILLA_NOIPA_ STRINGZILLA_NOINLINE_
 #endif
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
 #include <limits>           // `std::numeric_limits`
@@ -81,17 +81,17 @@ namespace stringzilla {
 
 /**
  *  @brief Forces the compiler to materialize @p value rather than fold or elide it across an
- *      optimization boundary - the read-side companion to @c SZ_NOIPA.
+ *      optimization boundary - the read-side companion to @c STRINGZILLA_NOIPA_.
  *
  *  Mirrors Google Benchmark's @c DoNotOptimize; use it on a status/result just before
- *  returning it from a @c SZ_NOIPA public entry point so the value survives a same-TU
- *  caller's interprocedural rewrite.
+ *  returning it from a @c STRINGZILLA_NOIPA_ public entry point so the value survives a
+ *  same-TU caller's interprocedural rewrite.
  *
  *  @sa sz_keep_alive_ in `types.h`, the C-callable sibling that pins stores to a buffer rather than
  *      a value, for the C headers, which cannot instantiate a template.
  */
 template <typename value_type_>
-SZ_INLINE void sz_do_not_optimize(value_type_ &value) noexcept {
+STRINGZILLA_INLINE_ void sz_do_not_optimize(value_type_ &value) noexcept {
 #if defined(__clang__)
     asm volatile("" : "+r,m"(value) : : "memory");
 #elif defined(__GNUC__)
@@ -174,7 +174,7 @@ struct error_costs_unary_t {
     constexpr error_cost_magnitude_t magnitude() const noexcept { return 1; }
 };
 
-template <typename value_type_, sz_size_t extent_ = SZ_SIZE_MAX>
+template <typename value_type_, sz_size_t extent_ = STRINGZILLA_SIZE_MAX>
 struct span {
 
     using value_type = value_type_;              // ? For STL compatibility
@@ -216,18 +216,18 @@ struct span {
             reinterpret_cast<other_value_type_ *>(data_));
     }
 
-    constexpr span<value_type, SZ_SIZE_MAX> subspan(size_type offset, size_type count) const noexcept {
+    constexpr span<value_type, STRINGZILLA_SIZE_MAX> subspan(size_type offset, size_type count) const noexcept {
         sz_assert_(offset + count <= extent && "Subspan out of bounds");
-        return span<value_type, SZ_SIZE_MAX>(data_ + offset, count);
+        return span<value_type, STRINGZILLA_SIZE_MAX>(data_ + offset, count);
     }
 };
 
 template <typename value_type_>
-struct span<value_type_, SZ_SIZE_MAX> {
+struct span<value_type_, STRINGZILLA_SIZE_MAX> {
     using value_type = value_type_;                  // ? For STL compatibility
     using size_type = sz_size_t;                     // ? For STL compatibility
     using difference_type = sz_ssize_t;              // ? For STL compatibility
-    static constexpr sz_size_t extent = SZ_SIZE_MAX; // ? For STL compatibility
+    static constexpr sz_size_t extent = STRINGZILLA_SIZE_MAX; // ? For STL compatibility
 
     value_type *data_ {};
     size_type size_ {};
@@ -303,12 +303,12 @@ span<value_type_, extent_> to_span(span<value_type_, extent_> span) noexcept {
     return span;
 }
 
-template <std::size_t extent_ = SZ_SIZE_MAX, typename container_type_ = void>
+template <std::size_t extent_ = STRINGZILLA_SIZE_MAX, typename container_type_ = void>
 span<typename container_type_::value_type, extent_> to_span(container_type_ &container) noexcept {
     return {container.data(), container.size()};
 }
 
-template <std::size_t extent_ = SZ_SIZE_MAX, typename container_type_ = void>
+template <std::size_t extent_ = STRINGZILLA_SIZE_MAX, typename container_type_ = void>
 span<typename container_type_::value_type const, extent_> to_view(container_type_ const &container) noexcept {
     return {container.data(), container.size()};
 }
@@ -368,7 +368,7 @@ struct indexed_container_iterator {
     using reference = value_t; // ! As our view returns by value
     using pointer = void;      // ! Not providing direct pointer semantics
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
     using iterator_category = std::random_access_iterator_tag;
 #endif
 
@@ -671,7 +671,7 @@ struct arrow_strings_tape {
         return status_t::success_k;
     }
 
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
     template <typename string_convertible_type_>
     status_t try_assign(std::initializer_list<string_convertible_type_> inits) noexcept {
         return try_assign(inits.begin(), inits.end());
@@ -748,7 +748,7 @@ struct constant_iterator {
     using reference = value_type_ const &;
     using pointer = value_type_ const *;
     using difference_type = sz_ssize_t;
-#if !SZ_AVOID_STL
+#if STRINGZILLA_WITH_STL
     using iterator_category = std::random_access_iterator_tag;
 #endif
 
@@ -1317,7 +1317,7 @@ class safe_vector {
     operator span<value_type const>() const noexcept { return {data_, size_}; }
 };
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 #pragma region CUDA Allocators
 
 /**
@@ -1466,7 +1466,7 @@ struct pinned_alloc {
 };
 
 #pragma endregion CUDA Allocators
-#endif // SZ_USE_CUDA
+#endif // STRINGZILLA_TARGET_CUDA
 
 } // namespace stringzilla
 } // namespace ashvardanian

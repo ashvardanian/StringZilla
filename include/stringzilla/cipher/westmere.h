@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2,aes,pclmul"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -39,14 +39,15 @@ extern "C" {
  *
  *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it.
  */
-SZ_HELPER_INLINE __m128i sz_aes256_key_fold_westmere_(__m128i previous_u8x16, __m128i substituted_u8x16) {
+STRINGZILLA_HELPER_INLINE __m128i sz_aes256_key_fold_westmere_(__m128i previous_u8x16, __m128i substituted_u8x16) {
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
     return _mm_xor_si128(previous_u8x16, substituted_u8x16);
 }
 
-SZ_API_COMPTIME void sz_aes256_key_init_westmere(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_key_init_westmere(sz_aes256_key_t *key,
+                                                          sz_u8_t const secret[sz_at_least_(32)]) {
     __m128i *schedule_u8x16 = (__m128i *)&key->round_keys[0];
     __m128i even_round_key_u8x16 = _mm_lddqu_si128((__m128i const *)secret);
     __m128i odd_round_key_u8x16 = _mm_lddqu_si128((__m128i const *)(secret + 16));
@@ -107,7 +108,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_westmere(sz_aes256_key_t *key, sz_u8_t c
  *  @param[in] round_index Which of the fifteen round keys to read, zero through fourteen.
  *  @return The round key.
  */
-SZ_HELPER_INLINE __m128i sz_aes256_round_key_westmere_(sz_aes256_key_t const *key, sz_size_t round_index) {
+STRINGZILLA_HELPER_INLINE __m128i sz_aes256_round_key_westmere_(sz_aes256_key_t const *key, sz_size_t round_index) {
     return _mm_lddqu_si128((__m128i const *)&key->round_keys[round_index * 4]);
 }
 
@@ -117,7 +118,7 @@ SZ_HELPER_INLINE __m128i sz_aes256_round_key_westmere_(sz_aes256_key_t const *ke
  *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
-SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_westmere_(sz_aes256_key_t const *key, __m128i block_u8x16) {
+STRINGZILLA_HELPER_INLINE __m128i sz_aes256_block_encrypt_westmere_(sz_aes256_key_t const *key, __m128i block_u8x16) {
     block_u8x16 = _mm_xor_si128(block_u8x16, sz_aes256_round_key_westmere_(key, 0));
     block_u8x16 = _mm_aesenc_si128(block_u8x16, sz_aes256_round_key_westmere_(key, 1));
     block_u8x16 = _mm_aesenc_si128(block_u8x16, sz_aes256_round_key_westmere_(key, 2));
@@ -136,7 +137,7 @@ SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_westmere_(sz_aes256_key_t const
 }
 
 /** Applies one middle round to all four chains, so the four issue back to back. */
-SZ_HELPER_INLINE void sz_aes256_blocks_round_westmere_(sz_u512_vec_t *blocks_vec, __m128i round_key_u8x16) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_blocks_round_westmere_(sz_u512_vec_t *blocks_vec, __m128i round_key_u8x16) {
     blocks_vec->xmms[0] = _mm_aesenc_si128(blocks_vec->xmms[0], round_key_u8x16);
     blocks_vec->xmms[1] = _mm_aesenc_si128(blocks_vec->xmms[1], round_key_u8x16);
     blocks_vec->xmms[2] = _mm_aesenc_si128(blocks_vec->xmms[2], round_key_u8x16);
@@ -152,8 +153,8 @@ SZ_HELPER_INLINE void sz_aes256_blocks_round_westmere_(sz_u512_vec_t *blocks_vec
  *  One round instruction has several cycles of latency and issues every cycle, so a single chain of
  *  fourteen dependent rounds leaves most of that throughput idle.
  */
-SZ_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_t const *key,
-                                                                  sz_u512_vec_t blocks_vec) {
+STRINGZILLA_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_t const *key,
+                                                                           sz_u512_vec_t blocks_vec) {
     __m128i round_key_u8x16 = sz_aes256_round_key_westmere_(key, 0);
 
     blocks_vec.xmms[0] = _mm_xor_si128(blocks_vec.xmms[0], round_key_u8x16);
@@ -192,7 +193,7 @@ SZ_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_
  *  @param[in] nonce The twelve nonce bytes.
  *  @return The counter block for index zero.
  */
-SZ_HELPER_INLINE __m128i sz_aes256_counter_base_westmere_(sz_u8_t const *nonce) {
+STRINGZILLA_HELPER_INLINE __m128i sz_aes256_counter_base_westmere_(sz_u8_t const *nonce) {
     // Only twelve bytes are readable and SSE has no masked load, so this reads eight then four.
     __m128i const leading_u8x16 = _mm_loadl_epi64((__m128i const *)nonce);
     __m128i const trailing_u8x16 = _mm_loadu_si32(nonce + 8);
@@ -206,18 +207,18 @@ SZ_HELPER_INLINE __m128i sz_aes256_counter_base_westmere_(sz_u8_t const *nonce) 
  *  @param[in] block_index The block index.
  *  @return The counter block for that index.
  */
-SZ_HELPER_INLINE __m128i sz_aes256_counter_block_westmere_(__m128i counter_base_u8x16, sz_u32_t block_index) {
+STRINGZILLA_HELPER_INLINE __m128i sz_aes256_counter_block_westmere_(__m128i counter_base_u8x16, sz_u32_t block_index) {
     return _mm_insert_epi32(counter_base_u8x16, (int)sz_u32_bytes_reverse(block_index), 3);
 }
 
-SZ_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                                sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length,
-                                                sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key,
+                                                         sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
+                                                         sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     __m128i const counter_base_u8x16 = sz_aes256_counter_base_westmere_(nonce);
-    sz_u32_t block_index = (sz_u32_t)(byte_offset / SZ_AES_BLOCK_LENGTH);
-    sz_size_t within_block = (sz_size_t)(byte_offset % SZ_AES_BLOCK_LENGTH);
+    sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
+    sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0, lane_index;
 
     // A start that is not block aligned generates its first block whole and discards the leading bytes.
@@ -227,12 +228,12 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key, sz_u
         keystream_vec.xmm = sz_aes256_block_encrypt_westmere_(key, counter_u8x16);
         // Stays a byte loop: SSE has no masked store, and writing the register would touch bytes the
         // caller did not hand us. Ice Lake and SVE2 do this run with predication.
-        for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
+        for (; within_block != STRINGZILLA_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
         ++block_index;
     }
 
-    for (; produced + 4 * SZ_AES_BLOCK_LENGTH <= length; produced += 4 * SZ_AES_BLOCK_LENGTH) {
+    for (; produced + 4 * STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += 4 * STRINGZILLA_AES_BLOCK_LENGTH) {
         sz_u512_vec_t keystream_vec;
         keystream_vec.xmms[0] = sz_aes256_counter_block_westmere_(counter_base_u8x16, block_index + 0);
         keystream_vec.xmms[1] = sz_aes256_counter_block_westmere_(counter_base_u8x16, block_index + 1);
@@ -241,14 +242,14 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key, sz_u
         block_index += 4;
         keystream_vec = sz_aes256_blocks_encrypt_westmere_(key, keystream_vec);
         for (lane_index = 0; lane_index != 4; ++lane_index) {
-            sz_size_t const lane_offset = produced + lane_index * SZ_AES_BLOCK_LENGTH;
+            sz_size_t const lane_offset = produced + lane_index * STRINGZILLA_AES_BLOCK_LENGTH;
             __m128i const original_u8x16 = _mm_lddqu_si128((__m128i const *)(input_bytes + lane_offset));
             _mm_storeu_si128((__m128i *)(output_bytes + lane_offset),
                              _mm_xor_si128(original_u8x16, keystream_vec.xmms[lane_index]));
         }
     }
 
-    for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH, ++block_index) {
+    for (; produced + STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += STRINGZILLA_AES_BLOCK_LENGTH, ++block_index) {
         __m128i const counter_u8x16 = sz_aes256_counter_block_westmere_(counter_base_u8x16, block_index);
         __m128i const original_u8x16 = _mm_lddqu_si128((__m128i const *)(input_bytes + produced));
         __m128i const keystream_u8x16 = sz_aes256_block_encrypt_westmere_(key, counter_u8x16);
@@ -269,7 +270,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key, sz_u
 #pragma region Galois Hashing
 
 /** The byte order that moves a hash block between the tag's byte order and the multiplier's. */
-SZ_HELPER_INLINE sz_u8_t const *sz_ghash_byte_order_westmere_(void) {
+STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_ghash_byte_order_westmere_(void) {
     static sz_align_(64) sz_u8_t const order[16] = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
     return &order[0];
 }
@@ -282,7 +283,7 @@ SZ_HELPER_INLINE sz_u8_t const *sz_ghash_byte_order_westmere_(void) {
  *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient,
  *  which is the opposite of how a carry-less multiply reads its operands.
  */
-SZ_HELPER_INLINE __m128i sz_ghash_reflect_westmere_(__m128i block_u8x16) {
+STRINGZILLA_HELPER_INLINE __m128i sz_ghash_reflect_westmere_(__m128i block_u8x16) {
     return _mm_shuffle_epi8(block_u8x16, _mm_load_si128((__m128i const *)sz_ghash_byte_order_westmere_()));
 }
 
@@ -291,12 +292,12 @@ SZ_HELPER_INLINE __m128i sz_ghash_reflect_westmere_(__m128i block_u8x16) {
  *  @param[in] block The sixteen block bytes.
  *  @return The reflected block.
  */
-SZ_HELPER_INLINE __m128i sz_ghash_load_westmere_(sz_u8_t const *block) {
+STRINGZILLA_HELPER_INLINE __m128i sz_ghash_load_westmere_(sz_u8_t const *block) {
     return sz_ghash_reflect_westmere_(_mm_lddqu_si128((__m128i const *)block));
 }
 
 /** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
-SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_westmere_(sz_u8_t const *first, sz_u8_t const *second) {
+STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_westmere_(sz_u8_t const *first, sz_u8_t const *second) {
     __m128i const first_u8x16 = _mm_lddqu_si128((__m128i const *)first);
     __m128i const second_u8x16 = _mm_lddqu_si128((__m128i const *)second);
     int const matching = _mm_movemask_epi8(_mm_cmpeq_epi8(first_u8x16, second_u8x16));
@@ -309,7 +310,7 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_westmere_(sz_u8_t const *first, s
  *  A lane-identity compare rather than a byte loop, which GCC lowered to a LibC fill call and clang
  *  to branchy scalar stores, both then stalling on store forwarding.
  */
-SZ_HELPER_INLINE __m128i sz_ghash_load_padded_westmere_(sz_u8_t const *block, sz_size_t buffered) {
+STRINGZILLA_HELPER_INLINE __m128i sz_ghash_load_padded_westmere_(sz_u8_t const *block, sz_size_t buffered) {
     __m128i const lane_ids_u8x16 = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     __m128i const keep_u8x16 = _mm_cmpgt_epi8(_mm_set1_epi8((char)buffered), lane_ids_u8x16);
     __m128i const loaded_u8x16 = _mm_lddqu_si128((__m128i const *)block);
@@ -321,7 +322,7 @@ SZ_HELPER_INLINE __m128i sz_ghash_load_padded_westmere_(sz_u8_t const *block, sz
  *  @param[in] value_u8x16 The reflected block.
  *  @param[out] block Receives the sixteen bytes.
  */
-SZ_HELPER_INLINE void sz_ghash_store_westmere_(__m128i value_u8x16, sz_u8_t *block) {
+STRINGZILLA_HELPER_INLINE void sz_ghash_store_westmere_(__m128i value_u8x16, sz_u8_t *block) {
     _mm_storeu_si128((__m128i *)block, sz_ghash_reflect_westmere_(value_u8x16));
 }
 
@@ -337,8 +338,9 @@ SZ_HELPER_INLINE void sz_ghash_store_westmere_(__m128i value_u8x16, sz_u8_t *blo
  *  reduction: the field is linear, so the partial products of a whole group may be summed
  *  before folding once.
  */
-SZ_HELPER_INLINE void sz_ghash_accumulate_westmere_(__m128i multiplicand_u8x16, __m128i multiplier_u8x16,
-                                                    __m128i *low_u8x16, __m128i *middle_u8x16, __m128i *high_u8x16) {
+STRINGZILLA_HELPER_INLINE void sz_ghash_accumulate_westmere_(__m128i multiplicand_u8x16, __m128i multiplier_u8x16,
+                                                             __m128i *low_u8x16, __m128i *middle_u8x16,
+                                                             __m128i *high_u8x16) {
     *low_u8x16 = _mm_xor_si128(*low_u8x16, _mm_clmulepi64_si128(multiplicand_u8x16, multiplier_u8x16, 0x00));
     *middle_u8x16 = _mm_xor_si128(*middle_u8x16, _mm_clmulepi64_si128(multiplicand_u8x16, multiplier_u8x16, 0x10));
     *middle_u8x16 = _mm_xor_si128(*middle_u8x16, _mm_clmulepi64_si128(multiplicand_u8x16, multiplier_u8x16, 0x01));
@@ -354,8 +356,8 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_westmere_(__m128i multiplicand_u8x16, 
  *
  *  The cross products straddle the halves, so they are split and merged first.
  */
-SZ_HELPER_INLINE __m128i sz_ghash_reduce_westmere_(__m128i product_low_u8x16, __m128i product_middle_u8x16,
-                                                   __m128i product_high_u8x16) {
+STRINGZILLA_HELPER_INLINE __m128i sz_ghash_reduce_westmere_(__m128i product_low_u8x16, __m128i product_middle_u8x16,
+                                                            __m128i product_high_u8x16) {
     __m128i low_carries_u8x16, high_carries_u8x16, crossing_carry_u8x16, folded_u8x16, folded_spill_bits_u8x16,
         reduced_taps_u8x16;
 
@@ -388,7 +390,7 @@ SZ_HELPER_INLINE __m128i sz_ghash_reduce_westmere_(__m128i product_low_u8x16, __
  *  @param[in] subkey_u8x16 One of the reflected subkey powers.
  *  @return The reduced product, reflected.
  */
-SZ_HELPER_INLINE __m128i sz_ghash_multiply_westmere_(__m128i accumulator_u8x16, __m128i subkey_u8x16) {
+STRINGZILLA_HELPER_INLINE __m128i sz_ghash_multiply_westmere_(__m128i accumulator_u8x16, __m128i subkey_u8x16) {
     __m128i product_low_u8x16 = _mm_setzero_si128(), product_middle_u8x16 = _mm_setzero_si128(),
             product_high_u8x16 = _mm_setzero_si128();
     sz_ghash_accumulate_westmere_(accumulator_u8x16, subkey_u8x16, &product_low_u8x16, &product_middle_u8x16,
@@ -403,12 +405,13 @@ SZ_HELPER_INLINE __m128i sz_ghash_multiply_westmere_(__m128i accumulator_u8x16, 
  *  @param[in] subkey_u8x16 The reflected hash subkey.
  *  @return The updated running hash, reflected.
  */
-SZ_HELPER_INLINE __m128i sz_ghash_absorb_westmere_(__m128i accumulator_u8x16, __m128i block_u8x16,
-                                                   __m128i subkey_u8x16) {
+STRINGZILLA_HELPER_INLINE __m128i sz_ghash_absorb_westmere_(__m128i accumulator_u8x16, __m128i block_u8x16,
+                                                            __m128i subkey_u8x16) {
     return sz_ghash_multiply_westmere_(_mm_xor_si128(accumulator_u8x16, block_u8x16), subkey_u8x16);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_key_init_westmere(sz_aes256_gcm_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_westmere(sz_aes256_gcm_key_t *key,
+                                                              sz_u8_t const secret[sz_at_least_(32)]) {
     __m128i subkey_u8x16, power_u8x16;
     sz_size_t power_index;
 
@@ -418,7 +421,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_westmere(sz_aes256_gcm_key_t *key, s
     sz_ghash_store_westmere_(power_u8x16, &key->powers[0]);
     for (power_index = 1; power_index != 8; ++power_index) {
         power_u8x16 = sz_ghash_multiply_westmere_(power_u8x16, subkey_u8x16);
-        sz_ghash_store_westmere_(power_u8x16, &key->powers[power_index * SZ_AES_BLOCK_LENGTH]);
+        sz_ghash_store_westmere_(power_u8x16, &key->powers[power_index * STRINGZILLA_AES_BLOCK_LENGTH]);
     }
 }
 
@@ -428,12 +431,12 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_westmere(sz_aes256_gcm_key_t *key, s
  *  @param[in] powers The eight subkey powers in the tag's byte order, ascending.
  *  @return The reflected powers H⁴, H³, H², H¹.
  */
-SZ_HELPER_INLINE sz_u512_vec_t sz_ghash_descending_powers_westmere_(sz_u8_t const *powers) {
+STRINGZILLA_HELPER_INLINE sz_u512_vec_t sz_ghash_descending_powers_westmere_(sz_u8_t const *powers) {
     sz_u512_vec_t powers_vec;
-    powers_vec.xmms[0] = sz_ghash_load_westmere_(powers + 3 * SZ_AES_BLOCK_LENGTH);
-    powers_vec.xmms[1] = sz_ghash_load_westmere_(powers + 2 * SZ_AES_BLOCK_LENGTH);
-    powers_vec.xmms[2] = sz_ghash_load_westmere_(powers + 1 * SZ_AES_BLOCK_LENGTH);
-    powers_vec.xmms[3] = sz_ghash_load_westmere_(powers + 0 * SZ_AES_BLOCK_LENGTH);
+    powers_vec.xmms[0] = sz_ghash_load_westmere_(powers + 3 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_vec.xmms[1] = sz_ghash_load_westmere_(powers + 2 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_vec.xmms[2] = sz_ghash_load_westmere_(powers + 1 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_vec.xmms[3] = sz_ghash_load_westmere_(powers + 0 * STRINGZILLA_AES_BLOCK_LENGTH);
     return powers_vec;
 }
 
@@ -447,8 +450,8 @@ SZ_HELPER_INLINE sz_u512_vec_t sz_ghash_descending_powers_westmere_(sz_u8_t cons
  *  Four absorbed blocks expand to (Y ⊕ X₁) H⁴ ⊕ X₂ H³ ⊕ X₃ H² ⊕ X₄ H, which needs four
  *  multiplies either way but only one reduction instead of four.
  */
-SZ_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x16, sz_u512_vec_t blocks_vec,
-                                                        sz_u512_vec_t powers_vec) {
+STRINGZILLA_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x16, sz_u512_vec_t blocks_vec,
+                                                                 sz_u512_vec_t powers_vec) {
     __m128i product_low_u8x16 = _mm_setzero_si128(), product_middle_u8x16 = _mm_setzero_si128(),
             product_high_u8x16 = _mm_setzero_si128();
     sz_ghash_accumulate_westmere_(_mm_xor_si128(accumulator_u8x16, blocks_vec.xmms[0]), powers_vec.xmms[0],
@@ -472,7 +475,7 @@ SZ_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x1
  *  The size is known at compile time, so both bounds are constants and the fill unrolls into
  *  twenty-nine whole-register stores and an eight-byte tail.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_westmere_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_westmere_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
     __m128i const zeros_u8x16 = _mm_setzero_si128();
     sz_size_t byte_index = 0;
@@ -483,8 +486,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_westmere_(sz_aes256_gcm_state_t 
 }
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-SZ_HELPER_INLINE void sz_aes256_gcm_begin_westmere_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
-                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_westmere_(sz_aes256_gcm_state_t *state,
+                                                             sz_aes256_gcm_key_t const *key,
+                                                             sz_u8_t const nonce[sz_at_least_(12)]) {
     __m128i initial_u8x16;
 
     state->key = *key;
@@ -501,12 +505,12 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_westmere_(sz_aes256_gcm_state_t *state
     state->associated_length = 0;
     state->text_length = 0;
     state->buffered = 0;
-    state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
+    state->keystream_used = STRINGZILLA_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
 /** Absorbs associated data into the payload both directions share. */
-SZ_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                        sz_size_t length) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                                 sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     __m128i const subkey_u8x16 = sz_ghash_load_westmere_(state->key.powers);
     sz_u512_vec_t const powers_vec = sz_ghash_descending_powers_westmere_(state->key.powers);
@@ -519,28 +523,28 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t *s
 
     // Associated data is hashed but never encrypted, so a partial block is completed in place.
     if (state->buffered != 0) {
-        sz_size_t const available_bytes = SZ_AES_BLOCK_LENGTH - state->buffered;
+        sz_size_t const available_bytes = STRINGZILLA_AES_BLOCK_LENGTH - state->buffered;
         sz_size_t const taken_bytes = length < available_bytes ? length : available_bytes;
         for (byte_index = 0; byte_index != taken_bytes; ++byte_index)
             state->partial[state->buffered + byte_index] = input_bytes[byte_index];
         state->buffered = (sz_u8_t)(state->buffered + taken_bytes);
         consumed = taken_bytes;
-        if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+        if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
             accumulator_u8x16 = sz_ghash_absorb_westmere_(accumulator_u8x16, sz_ghash_load_westmere_(state->partial),
                                                           subkey_u8x16);
             state->buffered = 0;
         }
     }
 
-    for (; consumed + 4 * SZ_AES_BLOCK_LENGTH <= length; consumed += 4 * SZ_AES_BLOCK_LENGTH) {
+    for (; consumed + 4 * STRINGZILLA_AES_BLOCK_LENGTH <= length; consumed += 4 * STRINGZILLA_AES_BLOCK_LENGTH) {
         sz_u512_vec_t blocks_vec;
-        blocks_vec.xmms[0] = sz_ghash_load_westmere_(input_bytes + consumed + 0 * SZ_AES_BLOCK_LENGTH);
-        blocks_vec.xmms[1] = sz_ghash_load_westmere_(input_bytes + consumed + 1 * SZ_AES_BLOCK_LENGTH);
-        blocks_vec.xmms[2] = sz_ghash_load_westmere_(input_bytes + consumed + 2 * SZ_AES_BLOCK_LENGTH);
-        blocks_vec.xmms[3] = sz_ghash_load_westmere_(input_bytes + consumed + 3 * SZ_AES_BLOCK_LENGTH);
+        blocks_vec.xmms[0] = sz_ghash_load_westmere_(input_bytes + consumed + 0 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_vec.xmms[1] = sz_ghash_load_westmere_(input_bytes + consumed + 1 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_vec.xmms[2] = sz_ghash_load_westmere_(input_bytes + consumed + 2 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_vec.xmms[3] = sz_ghash_load_westmere_(input_bytes + consumed + 3 * STRINGZILLA_AES_BLOCK_LENGTH);
         accumulator_u8x16 = sz_ghash_absorb_four_westmere_(accumulator_u8x16, blocks_vec, powers_vec);
     }
-    for (; consumed + SZ_AES_BLOCK_LENGTH <= length; consumed += SZ_AES_BLOCK_LENGTH)
+    for (; consumed + STRINGZILLA_AES_BLOCK_LENGTH <= length; consumed += STRINGZILLA_AES_BLOCK_LENGTH)
         accumulator_u8x16 = sz_ghash_absorb_westmere_(accumulator_u8x16,
                                                       sz_ghash_load_westmere_(input_bytes + consumed), subkey_u8x16);
     for (; consumed != length; ++consumed) state->partial[state->buffered++] = input_bytes[consumed];
@@ -563,9 +567,10 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t *s
  *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
  *  this resumes both.
  */
-SZ_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
-                                                       sz_u8_t *output, sz_size_t count, __m128i accumulator_u8x16,
-                                                       __m128i subkey_u8x16, sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
+                                                                sz_u8_t *output, sz_size_t count,
+                                                                __m128i accumulator_u8x16, __m128i subkey_u8x16,
+                                                                sz_aes256_gcm_direction_t direction) {
     sz_size_t byte_index;
 
     // Scalar: SSE has no masked load or store, so a partial run cannot move without a
@@ -578,7 +583,7 @@ SZ_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *st
         state->partial[state->buffered] = ciphertext_byte;
         ++state->buffered;
         ++state->keystream_used;
-        if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+        if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
             accumulator_u8x16 = sz_ghash_absorb_westmere_(accumulator_u8x16, sz_ghash_load_westmere_(state->partial),
                                                           subkey_u8x16);
             state->buffered = 0;
@@ -599,8 +604,9 @@ SZ_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *st
  *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
  *  block, then whole blocks four at a time, then a trailing block that the next chunk will resume.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                        sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                                 sz_size_t length, sz_ptr_t output,
+                                                                 sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     __m128i const subkey_u8x16 = sz_ghash_load_westmere_(state->key.powers);
@@ -624,15 +630,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *s
     counter_vec.xmm = _mm_lddqu_si128((__m128i const *)state->counter);
     block_index = sz_u32_bytes_reverse(counter_vec.u32s[3]);
 
-    if (state->keystream_used != SZ_AES_BLOCK_LENGTH) {
-        sz_size_t const available_bytes = SZ_AES_BLOCK_LENGTH - state->keystream_used;
+    if (state->keystream_used != STRINGZILLA_AES_BLOCK_LENGTH) {
+        sz_size_t const available_bytes = STRINGZILLA_AES_BLOCK_LENGTH - state->keystream_used;
         sz_size_t const taken_bytes = length < available_bytes ? length : available_bytes;
         accumulator_u8x16 = sz_aes256_gcm_spend_westmere_(state, input_bytes, output_bytes, taken_bytes,
                                                           accumulator_u8x16, subkey_u8x16, direction);
         produced = taken_bytes;
     }
 
-    for (; produced + 4 * SZ_AES_BLOCK_LENGTH <= length; produced += 4 * SZ_AES_BLOCK_LENGTH) {
+    for (; produced + 4 * STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += 4 * STRINGZILLA_AES_BLOCK_LENGTH) {
         sz_u512_vec_t keystream_vec, ciphertext_vec;
         keystream_vec.xmms[0] = sz_aes256_counter_block_westmere_(counter_vec.xmm, block_index + 1);
         keystream_vec.xmms[1] = sz_aes256_counter_block_westmere_(counter_vec.xmm, block_index + 2);
@@ -641,7 +647,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *s
         block_index += 4;
         keystream_vec = sz_aes256_blocks_encrypt_westmere_(&state->key.block, keystream_vec);
         for (lane_index = 0; lane_index != 4; ++lane_index) {
-            sz_size_t const lane_offset = produced + lane_index * SZ_AES_BLOCK_LENGTH;
+            sz_size_t const lane_offset = produced + lane_index * STRINGZILLA_AES_BLOCK_LENGTH;
             __m128i const original_u8x16 = _mm_lddqu_si128((__m128i const *)(input_bytes + lane_offset));
             __m128i const transformed_u8x16 = _mm_xor_si128(original_u8x16, keystream_vec.xmms[lane_index]);
             __m128i const ciphertext_u8x16 = _mm_blendv_epi8(transformed_u8x16, original_u8x16, cipher_mask_u8x16);
@@ -651,7 +657,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *s
         accumulator_u8x16 = sz_ghash_absorb_four_westmere_(accumulator_u8x16, ciphertext_vec, powers_vec);
     }
 
-    for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH) {
+    for (; produced + STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += STRINGZILLA_AES_BLOCK_LENGTH) {
         __m128i const original_u8x16 = _mm_lddqu_si128((__m128i const *)(input_bytes + produced));
         __m128i counter_u8x16, keystream_u8x16, transformed_u8x16, ciphertext_u8x16;
         block_index += 1;
@@ -682,8 +688,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *s
 }
 
 /** Folds the pending block and the length block into the hash, then unmasks it into the tag. */
-SZ_HELPER_INLINE void sz_aes256_gcm_digest_westmere_(sz_aes256_gcm_state_t const *state,
-                                                     sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_westmere_(sz_aes256_gcm_state_t const *state,
+                                                              sz_u8_t tag[sz_at_least_(16)]) {
     __m128i const subkey_u8x16 = sz_ghash_load_westmere_(state->key.powers);
     __m128i accumulator_u8x16 = sz_ghash_load_westmere_(state->accumulator);
     sz_u128_vec_t lengths_vec;
@@ -703,46 +709,47 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_westmere_(sz_aes256_gcm_state_t const
                                                    _mm_lddqu_si128((__m128i const *)state->tag_mask)));
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_init_westmere(sz_aes256_gcm_encryptor_t *encryptor,
-                                                           sz_aes256_gcm_key_t const *key,
-                                                           sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_westmere(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                    sz_aes256_gcm_key_t const *key,
+                                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_westmere_(&encryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_associate_westmere(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                                sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_westmere(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                         sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_westmere_(&encryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_update_westmere(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                             sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_westmere(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                      sz_cptr_t text, sz_size_t length,
+                                                                      sz_ptr_t output) {
     sz_aes256_gcm_transform_westmere_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_digest_westmere(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                             sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_westmere(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                      sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_digest_westmere_(&encryptor->state, tag);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_init_westmere(sz_aes256_gcm_decryptor_t *decryptor,
-                                                           sz_aes256_gcm_key_t const *key,
-                                                           sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_westmere(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                    sz_aes256_gcm_key_t const *key,
+                                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_westmere_(&decryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_associate_westmere(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
-                                                                sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_westmere(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                         sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_westmere_(&decryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_westmere(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                        sz_cptr_t text, sz_size_t length,
-                                                                        sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_westmere(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                                 sz_cptr_t text, sz_size_t length,
+                                                                                 sz_ptr_t output) {
     sz_aes256_gcm_transform_westmere_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_westmere(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                    sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_westmere(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                             sz_u8_t const tag[sz_at_least_(16)]) {
     sz_u128_vec_t expected_vec;
     sz_aes256_gcm_digest_westmere_(&decryptor->state, expected_vec.u8s);
     return sz_aes256_tag_equal_westmere_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k
@@ -753,10 +760,11 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_westmere(sz_aes256_gc
 
 #pragma region One Shot Interface
 
-SZ_API_COMPTIME void sz_aes256_gcm_encrypt_westmere(sz_aes256_gcm_key_t const *key,
-                                                    sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                    sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
-                                                    sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_westmere(sz_aes256_gcm_key_t const *key,
+                                                             sz_u8_t const nonce[sz_at_least_(12)],
+                                                             sz_cptr_t associated, sz_size_t associated_length,
+                                                             sz_cptr_t text, sz_size_t length, sz_ptr_t output,
+                                                             sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_encryptor_t encryptor;
     sz_aes256_gcm_encryptor_init_westmere(&encryptor, key, nonce);
     if (associated_length) sz_aes256_gcm_encryptor_associate_westmere(&encryptor, associated, associated_length);
@@ -765,11 +773,11 @@ SZ_API_COMPTIME void sz_aes256_gcm_encrypt_westmere(sz_aes256_gcm_key_t const *k
     sz_aes256_gcm_state_scrub_westmere_(&encryptor.state);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_westmere(sz_aes256_gcm_key_t const *key,
-                                                           sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                           sz_size_t associated_length, sz_cptr_t text,
-                                                           sz_size_t length, sz_ptr_t output,
-                                                           sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_westmere(sz_aes256_gcm_key_t const *key,
+                                                                    sz_u8_t const nonce[sz_at_least_(12)],
+                                                                    sz_cptr_t associated, sz_size_t associated_length,
+                                                                    sz_cptr_t text, sz_size_t length, sz_ptr_t output,
+                                                                    sz_u8_t const tag[sz_at_least_(16)]) {
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
     sz_aes256_gcm_decryptor_init_westmere(&decryptor, key, nonce);
@@ -790,7 +798,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_westmere(sz_aes256_gcm_key_t c
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_WESTMERE
+#endif // STRINGZILLA_TARGET_WESTMERE
 
 #ifdef __cplusplus
 }

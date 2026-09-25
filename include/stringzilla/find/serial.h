@@ -34,8 +34,8 @@ extern "C" {
  *  @param[out] second Output offset of the second anomalous byte.
  *  @param[out] third Output offset of the third anomalous byte.
  */
-SZ_HELPER_AUTO void sz_locate_needle_anomalies_( //
-    sz_cptr_t start, sz_size_t length,           //
+STRINGZILLA_HELPER_AUTO void sz_locate_needle_anomalies_( //
+    sz_cptr_t start, sz_size_t length,                    //
     sz_size_t *first, sz_size_t *second, sz_size_t *third) {
 
     *first = 0;
@@ -98,7 +98,7 @@ SZ_HELPER_AUTO void sz_locate_needle_anomalies_( //
 }
 
 /** Number of byte values present in @p set - four branchless word popcounts. */
-SZ_HELPER_INLINE sz_size_t sz_byteset_population_serial_(sz_byteset_t const *set) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_byteset_population_serial_(sz_byteset_t const *set) {
     return (sz_size_t)(sz_u64_popcount(set->_u64s[0]) + sz_u64_popcount(set->_u64s[1]) +
                        sz_u64_popcount(set->_u64s[2]) + sz_u64_popcount(set->_u64s[3]));
 }
@@ -106,37 +106,38 @@ SZ_HELPER_INLINE sz_size_t sz_byteset_population_serial_(sz_byteset_t const *set
 /** Unpack the member byte values of @p set into @p members in ascending order; the caller has
  *  already sized the destination from @ref sz_byteset_population_serial_. Shared by the ISA
  *  back-ends whose small-set fast paths broadcast the members as a needle segment. */
-SZ_HELPER_INLINE void sz_byteset_members_serial_(sz_byteset_t const *set, sz_u8_t *members) {
+STRINGZILLA_HELPER_INLINE void sz_byteset_members_serial_(sz_byteset_t const *set, sz_u8_t *members) {
     sz_size_t filled = 0;
     for (sz_size_t word_index = 0; word_index != 4; ++word_index)
         for (sz_u64_t word_bits = set->_u64s[word_index]; word_bits; word_bits &= word_bits - 1)
             members[filled++] = (sz_u8_t)(word_index * 64 + sz_u64_ctz(word_bits));
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
         if (sz_byteset_contains(set, *text)) return text;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     sz_cptr_t const end = text;
     for (text += length; text != end;)
         if (sz_byteset_contains(set, *(text -= 1))) return text;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                       sz_cptr_t needle) {
 
-    if (!haystack_length) return SZ_NULL_CHAR;
+    if (!haystack_length) return STRINGZILLA_NULL_CHAR;
     // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
     // on platforms where `char` is signed (e.g. `-fsigned-char`). See issue #306.
     sz_u8_t const *haystack_cursor = (sz_u8_t const *)haystack;
     sz_u8_t const *const needle_u8 = (sz_u8_t const *)needle;
     sz_u8_t const *const haystack_end = haystack_cursor + haystack_length;
 
-#if !SZ_IS_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
-#if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)haystack_cursor & 7ull) && haystack_cursor < haystack_end; ++haystack_cursor)
         if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
 #endif
@@ -156,12 +157,13 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t hays
     // Handle the misaligned tail.
     for (; haystack_cursor < haystack_end; ++haystack_cursor)
         if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_cptr_t needle) {
 
-    if (!haystack_length) return SZ_NULL_CHAR;
+    if (!haystack_length) return STRINGZILLA_NULL_CHAR;
     // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
     // on platforms where `char` is signed (e.g. `-fsigned-char`). See issue #306.
     sz_u8_t const *const haystack_start = (sz_u8_t const *)haystack;
@@ -170,8 +172,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t hay
     // Reposition the cursor to the end, as we will be walking backwards.
     sz_u8_t const *haystack_cursor = haystack_start + haystack_length - 1;
 
-#if !SZ_IS_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
-#if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(haystack_cursor + 1) & 7ull) && haystack_cursor >= haystack_start; --haystack_cursor)
         if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
 #endif
@@ -189,14 +191,14 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t hay
 
     for (; haystack_cursor >= haystack_start; --haystack_cursor)
         if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
  *  @brief 2-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 2-byte group signifies a match.
  */
-SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+STRINGZILLA_HELPER_INLINE sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
     sz_u64_vec_t vec_vec;
     vec_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each 2-byte group is set.
@@ -207,22 +209,22 @@ SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a_vec, sz_u6
     return vec_vec;
 }
 
-SZ_HELPER_NOINLINE sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                            sz_cptr_t needle, sz_size_t needle_length) {
     sz_unused_(needle_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                    sz_size_t needle_length) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                             sz_cptr_t needle, sz_size_t needle_length) {
     sz_unused_(needle_length); //? We keep this argument only for `sz_rfind_t` signature compatibility.
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
 /** Find the first occurrence of a @b two-character needle in an arbitrary length haystack, using a
  *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-SZ_HELPER_NOINLINE sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                            sz_cptr_t needle, sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
     sz_assert_(haystack_length >= 2 && "The haystack is too short.");
@@ -230,14 +232,14 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t
     sz_cptr_t const haystack_end = haystack + haystack_length;
 
     // On big-endian systems, skip SWAR and use simple serial search
-#if SZ_IS_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_BIG_ENDIAN_
     for (; haystack + 2 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) == 2) return haystack;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 #endif
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-#if !SZ_USE_MISALIGNED_LOADS
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     for (; ((sz_size_t)haystack & 7ull) && haystack + 2 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) == 2) return haystack;
 #endif
@@ -262,14 +264,14 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t
 
     for (; haystack + 2 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) == 2) return haystack;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
  *  @brief 4-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 4-byte group signifies a match.
  */
-SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+STRINGZILLA_HELPER_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
     sz_u64_vec_t vec_vec;
     vec_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each 4-byte group is set.
@@ -282,8 +284,8 @@ SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a_vec, sz_u6
 
 /** Find the first occurrence of a @b four-character needle in an arbitrary length haystack, using a
  *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-SZ_HELPER_NOINLINE sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                            sz_cptr_t needle, sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     sz_assert_(haystack_length >= 4 && "The haystack is too short.");
@@ -291,17 +293,17 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t
     sz_cptr_t const haystack_end = haystack + haystack_length;
 
     // On big-endian systems, skip SWAR and use simple serial search
-#if SZ_IS_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_BIG_ENDIAN_
     for (; haystack + 4 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) +
                 (haystack[3] == needle[3]) ==
             4)
             return haystack;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 #endif
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-#if !SZ_USE_MISALIGNED_LOADS
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     for (; ((sz_size_t)haystack & 7ull) && haystack + 4 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) +
                 (haystack[3] == needle[3]) ==
@@ -345,14 +347,14 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t
                 (haystack[3] == needle[3]) ==
             4)
             return haystack;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
  *  @brief 3-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 3-byte group signifies a match.
  */
-SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+STRINGZILLA_HELPER_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
     sz_u64_vec_t vec_vec;
     vec_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each 4-byte group is set.
@@ -365,8 +367,8 @@ SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a_vec, sz_u6
 
 /** Find the first occurrence of a @b three-character needle in an arbitrary length haystack, using
  *  a hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-SZ_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                            sz_cptr_t needle, sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     sz_assert_(haystack_length >= 3 && "The haystack is too short.");
@@ -374,14 +376,14 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t
     sz_cptr_t const haystack_end = haystack + haystack_length;
 
     // On big-endian systems, skip SWAR and use simple serial search
-#if SZ_IS_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_BIG_ENDIAN_
     for (; haystack + 3 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) == 3) return haystack;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 #endif
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-#if !SZ_USE_MISALIGNED_LOADS
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     for (; ((sz_size_t)haystack & 7ull) && haystack + 3 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) == 3) return haystack;
 #endif
@@ -424,7 +426,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t
 
     for (; haystack + 3 <= haystack_end; ++haystack)
         if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) == 3) return haystack;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -436,10 +438,10 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t
  *  @param[in] haystack_length Length of the haystack in bytes.
  *  @param[in] needle The needle bytes.
  *  @param[in] needle_length Length of the needle in bytes (must be <= 256).
- *  @return Pointer to first match, or SZ_NULL_CHAR if none.
+ *  @return Pointer to first match, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                            //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length <= 256 && "The pattern is too long.");
     sz_assert_(haystack_length >= needle_length && "The haystack is too short.");
@@ -489,7 +491,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
             return (sz_cptr_t)haystack_u8 + byte_index;
         byte_index += bad_shift_table.jumps[haystack_u8[byte_index + needle_length - 1]];
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -501,10 +503,10 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
  *  @param[in] haystack_length Length of the haystack in bytes.
  *  @param[in] needle The needle bytes.
  *  @param[in] needle_length Length of the needle in bytes (must be <= 256).
- *  @return Pointer to last match, or SZ_NULL_CHAR if none.
+ *  @return Pointer to last match, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                    //
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                             //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length <= 256 && "The pattern is too long.");
     sz_assert_(haystack_length >= needle_length && "The haystack is too short.");
@@ -552,7 +554,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
             return (sz_cptr_t)haystack_u8 + byte_index;
         skip_index += bad_shift_table.jumps[haystack_u8[byte_index]];
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -566,20 +568,20 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
  *  @param[in] needle_length Length of the needle in bytes.
  *  @param[in] find_prefix Function used to search for the prefix.
  *  @param[in] prefix_length Length of the prefix to search for.
- *  @return Pointer to first match, or SZ_NULL_CHAR if none.
+ *  @return Pointer to first match, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_find_with_prefix_( //
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_find_with_prefix_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, sz_find_t find_prefix,
     sz_size_t prefix_length) {
 
     sz_size_t suffix_length = needle_length - prefix_length;
     while (1) {
         sz_cptr_t found = find_prefix(haystack, haystack_length, needle, prefix_length);
-        if (!found) return SZ_NULL_CHAR;
+        if (!found) return STRINGZILLA_NULL_CHAR;
 
         // Verify the remaining part of the needle
         sz_size_t remaining = haystack_length - (found - haystack);
-        if (remaining < needle_length) return SZ_NULL_CHAR;
+        if (remaining < needle_length) return STRINGZILLA_NULL_CHAR;
         if (sz_equal_serial(found + prefix_length, needle + prefix_length, suffix_length)) return found;
 
         // Adjust the position.
@@ -588,7 +590,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_find_with_prefix_( //
     }
 
     // Unreachable, but helps silence compiler warnings:
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -602,53 +604,53 @@ SZ_HELPER_AUTO sz_cptr_t sz_find_with_prefix_( //
  *  @param[in] needle_length Length of the needle in bytes.
  *  @param[in] find_suffix Function used to search for the suffix.
  *  @param[in] suffix_length Length of the suffix to search for.
- *  @return Pointer to last match start, or SZ_NULL_CHAR if none.
+ *  @return Pointer to last match start, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                               sz_size_t needle_length, sz_find_t find_suffix,
-                                               sz_size_t suffix_length) {
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                        sz_size_t needle_length, sz_find_t find_suffix,
+                                                        sz_size_t suffix_length) {
 
     sz_size_t prefix_length = needle_length - suffix_length;
     while (1) {
         sz_cptr_t found = find_suffix(haystack, haystack_length, needle + prefix_length, suffix_length);
-        if (!found) return SZ_NULL_CHAR;
+        if (!found) return STRINGZILLA_NULL_CHAR;
 
         // Verify the remaining part of the needle
         sz_size_t remaining = found - haystack;
-        if (remaining < prefix_length) return SZ_NULL_CHAR;
+        if (remaining < prefix_length) return STRINGZILLA_NULL_CHAR;
         if (sz_equal_serial(found - prefix_length, needle, prefix_length)) return found - prefix_length;
 
         // Adjust the position, upholding `haystack_length >= needle_length` for the next `find_suffix`.
-        if (remaining <= needle_length) return SZ_NULL_CHAR;
+        if (remaining <= needle_length) return STRINGZILLA_NULL_CHAR;
         haystack_length = remaining - 1;
     }
 
     // Unreachable, but helps silence compiler warnings:
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_HELPER_NOINLINE sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                         sz_cptr_t needle, sz_size_t needle_length) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                                  sz_cptr_t needle, sz_size_t needle_length) {
     return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length, (sz_find_t)sz_find_4byte_serial_, 4);
 }
 
-SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_over_256bytes_serial_( //
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_horspool_over_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
     return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length,
                                 sz_find_horspool_upto_256bytes_serial_, 256);
 }
 
-SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
     return sz_rfind_with_suffix_(haystack, haystack_length, needle, needle_length,
                                  sz_rfind_horspool_upto_256bytes_serial_, 256);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                         sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                  sz_size_t needle_length) {
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense - now optimized for both endianness!
@@ -672,12 +674,12 @@ SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_
         (needle_length > 8) + (needle_length > 256)](haystack, haystack_length, needle, needle_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                          sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length) {
 
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.

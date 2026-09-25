@@ -108,7 +108,7 @@ static PyObject *Aes256CtrKey_new(PyTypeObject *type, PyObject *args, PyObject *
     sz_unused_(kwds);
     Aes256CtrKey *self = (Aes256CtrKey *)type->tp_alloc(type, 0);
     if (!self) return NULL;
-    sz_u8_t const placeholder_secret[SZ_AES256_KEY_LENGTH] = {0};
+    sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
     sz_aes256_key_init(&self->key, placeholder_secret);
     return (PyObject *)self;
 }
@@ -117,7 +117,7 @@ static int Aes256CtrKey_init(Aes256CtrKey *self, PyObject *args, PyObject *kwarg
     PyObject *secret_obj = sz_py_export_secret_argument(args, kwargs, "Aes256CtrKey");
     if (!secret_obj) return -1;
     sz_cptr_t secret;
-    if (!sz_py_export_exact_bytes(secret_obj, SZ_AES256_KEY_LENGTH, "secret", &secret)) return -1;
+    if (!sz_py_export_exact_bytes(secret_obj, STRINGZILLA_AES256_KEY_LENGTH, "secret", &secret)) return -1;
     sz_aes256_key_init(&self->key, (sz_u8_t const *)secret);
     return 0;
 }
@@ -190,7 +190,7 @@ static PyObject *Aes256CtrKey_xor(PyObject *self_obj, PyObject *const *args, Py_
         return NULL;
     }
     sz_cptr_t nonce;
-    if (!sz_py_export_exact_bytes(nonce_obj, SZ_AES256_NONCE_LENGTH, "nonce", &nonce)) return NULL;
+    if (!sz_py_export_exact_bytes(nonce_obj, STRINGZILLA_AES256_NONCE_LENGTH, "nonce", &nonce)) return NULL;
 
     sz_u64_t byte_offset = 0;
     if (offset_obj) {
@@ -219,7 +219,7 @@ static PyObject *Aes256GcmKey_new(PyTypeObject *type, PyObject *args, PyObject *
     sz_unused_(kwds);
     Aes256GcmKey *self = (Aes256GcmKey *)type->tp_alloc(type, 0);
     if (!self) return NULL;
-    sz_u8_t const placeholder_secret[SZ_AES256_KEY_LENGTH] = {0};
+    sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
     sz_aes256_gcm_key_init(&self->key, placeholder_secret);
     return (PyObject *)self;
 }
@@ -228,7 +228,7 @@ static int Aes256GcmKey_init(Aes256GcmKey *self, PyObject *args, PyObject *kwarg
     PyObject *secret_obj = sz_py_export_secret_argument(args, kwargs, "Aes256GcmKey");
     if (!secret_obj) return -1;
     sz_cptr_t secret;
-    if (!sz_py_export_exact_bytes(secret_obj, SZ_AES256_KEY_LENGTH, "secret", &secret)) return -1;
+    if (!sz_py_export_exact_bytes(secret_obj, STRINGZILLA_AES256_KEY_LENGTH, "secret", &secret)) return -1;
     sz_aes256_gcm_key_init(&self->key, (sz_u8_t const *)secret);
     return 0;
 }
@@ -301,10 +301,10 @@ static PyObject *Aes256GcmKey_encrypt(PyObject *self_obj, PyObject *const *args,
         return NULL;
     }
     sz_cptr_t nonce;
-    if (!sz_py_export_exact_bytes(nonce_obj, SZ_AES256_NONCE_LENGTH, "nonce", &nonce)) return NULL;
+    if (!sz_py_export_exact_bytes(nonce_obj, STRINGZILLA_AES256_NONCE_LENGTH, "nonce", &nonce)) return NULL;
 
     sz_string_view_t associated;
-    associated.start = SZ_NULL, associated.length = 0;
+    associated.start = STRINGZILLA_NULL, associated.length = 0;
     if (associated_obj && associated_obj != Py_None &&
         !sz_py_export_string_like(associated_obj, &associated.start, &associated.length)) {
         wrap_current_exception("The associated argument must be string-like");
@@ -313,11 +313,11 @@ static PyObject *Aes256GcmKey_encrypt(PyObject *self_obj, PyObject *const *args,
 
     PyObject *output_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)text.length);
     if (!output_obj) return NULL;
-    sz_u8_t tag[SZ_AES256_TAG_LENGTH];
+    sz_u8_t tag[STRINGZILLA_AES256_TAG_LENGTH];
     sz_aes256_gcm_encrypt(&self->key, (sz_u8_t const *)nonce, associated.start, associated.length, text.start,
                           text.length, (sz_ptr_t)PyBytes_AS_STRING(output_obj), tag);
 
-    PyObject *tag_obj = PyBytes_FromStringAndSize((char const *)tag, SZ_AES256_TAG_LENGTH);
+    PyObject *tag_obj = PyBytes_FromStringAndSize((char const *)tag, STRINGZILLA_AES256_TAG_LENGTH);
     if (!tag_obj) {
         Py_DECREF(output_obj);
         return NULL;
@@ -410,11 +410,11 @@ static PyObject *Aes256GcmKey_decrypt(PyObject *self_obj, PyObject *const *args,
         return NULL;
     }
     sz_cptr_t nonce, tag;
-    if (!sz_py_export_exact_bytes(nonce_obj, SZ_AES256_NONCE_LENGTH, "nonce", &nonce)) return NULL;
-    if (!sz_py_export_exact_bytes(tag_obj, SZ_AES256_TAG_LENGTH, "tag", &tag)) return NULL;
+    if (!sz_py_export_exact_bytes(nonce_obj, STRINGZILLA_AES256_NONCE_LENGTH, "nonce", &nonce)) return NULL;
+    if (!sz_py_export_exact_bytes(tag_obj, STRINGZILLA_AES256_TAG_LENGTH, "tag", &tag)) return NULL;
 
     sz_string_view_t associated;
-    associated.start = SZ_NULL, associated.length = 0;
+    associated.start = STRINGZILLA_NULL, associated.length = 0;
     if (associated_obj && associated_obj != Py_None &&
         !sz_py_export_string_like(associated_obj, &associated.start, &associated.length)) {
         wrap_current_exception("The associated argument must be string-like");
@@ -479,7 +479,7 @@ static int sz_py_export_key_and_nonce_arguments(PyObject *args, PyObject *kwargs
         PyErr_SetString(PyExc_TypeError, "key must be an Aes256GcmKey object");
         return 0;
     }
-    if (!sz_py_export_exact_bytes(nonce_obj, SZ_AES256_NONCE_LENGTH, "nonce", nonce)) return 0;
+    if (!sz_py_export_exact_bytes(nonce_obj, STRINGZILLA_AES256_NONCE_LENGTH, "nonce", nonce)) return 0;
     *key = (Aes256GcmKey const *)key_obj;
     return 1;
 }
@@ -494,8 +494,8 @@ static PyObject *Aes256GcmEncryptor_new(PyTypeObject *type, PyObject *args, PyOb
     sz_unused_(kwds);
     Aes256GcmEncryptor *self = (Aes256GcmEncryptor *)type->tp_alloc(type, 0);
     if (!self) return NULL;
-    sz_u8_t const placeholder_secret[SZ_AES256_KEY_LENGTH] = {0};
-    sz_u8_t const placeholder_nonce[SZ_AES256_NONCE_LENGTH] = {0};
+    sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
+    sz_u8_t const placeholder_nonce[STRINGZILLA_AES256_NONCE_LENGTH] = {0};
     sz_aes256_gcm_key_t placeholder_key;
     sz_aes256_gcm_key_init(&placeholder_key, placeholder_secret);
     sz_aes256_gcm_encryptor_init(&self->encryptor, &placeholder_key, placeholder_nonce);
@@ -539,9 +539,9 @@ static PyObject *Aes256GcmEncryptor_encrypt(PyObject *self_obj, PyObject *arg) {
 static PyObject *Aes256GcmEncryptor_digest(PyObject *self_obj, PyObject *noargs) {
     sz_unused_(noargs);
     Aes256GcmEncryptor *self = (Aes256GcmEncryptor *)self_obj;
-    sz_u8_t tag[SZ_AES256_TAG_LENGTH];
+    sz_u8_t tag[STRINGZILLA_AES256_TAG_LENGTH];
     sz_aes256_gcm_encryptor_digest(&self->encryptor, tag);
-    return PyBytes_FromStringAndSize((char const *)tag, SZ_AES256_TAG_LENGTH);
+    return PyBytes_FromStringAndSize((char const *)tag, STRINGZILLA_AES256_TAG_LENGTH);
 }
 
 static void Aes256GcmDecryptor_dealloc(Aes256GcmDecryptor *self) {
@@ -554,8 +554,8 @@ static PyObject *Aes256GcmDecryptor_new(PyTypeObject *type, PyObject *args, PyOb
     sz_unused_(kwds);
     Aes256GcmDecryptor *self = (Aes256GcmDecryptor *)type->tp_alloc(type, 0);
     if (!self) return NULL;
-    sz_u8_t const placeholder_secret[SZ_AES256_KEY_LENGTH] = {0};
-    sz_u8_t const placeholder_nonce[SZ_AES256_NONCE_LENGTH] = {0};
+    sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
+    sz_u8_t const placeholder_nonce[STRINGZILLA_AES256_NONCE_LENGTH] = {0};
     sz_aes256_gcm_key_t placeholder_key;
     sz_aes256_gcm_key_init(&placeholder_key, placeholder_secret);
     sz_aes256_gcm_decryptor_init(&self->decryptor, &placeholder_key, placeholder_nonce);
@@ -600,7 +600,7 @@ static PyObject *Aes256GcmDecryptor_decrypt_unverified(PyObject *self_obj, PyObj
 static PyObject *Aes256GcmDecryptor_verify(PyObject *self_obj, PyObject *arg) {
     Aes256GcmDecryptor *self = (Aes256GcmDecryptor *)self_obj;
     sz_cptr_t tag;
-    if (!sz_py_export_exact_bytes(arg, SZ_AES256_TAG_LENGTH, "tag", &tag)) return NULL;
+    if (!sz_py_export_exact_bytes(arg, STRINGZILLA_AES256_TAG_LENGTH, "tag", &tag)) return NULL;
     if (sz_aes256_gcm_decryptor_verify(&self->decryptor, (sz_u8_t const *)tag) != sz_success_k) {
         PyErr_SetString(AuthenticationErrorType, "The tag does not authenticate this ciphertext");
         return NULL;
@@ -850,7 +850,7 @@ static char const doc_Aes256GcmDecryptor_verify[] =                             
     "  True";
 
 static PyMethodDef Aes256CtrKey_methods[] = {
-    {"xor", (PyCFunction)Aes256CtrKey_xor, SZ_METHOD_FLAGS, doc_Aes256CtrKey_xor}, //
+    {"xor", (PyCFunction)Aes256CtrKey_xor, STRINGZILLA_METHOD_FLAGS, doc_Aes256CtrKey_xor}, //
     {NULL, NULL, 0, NULL},
 };
 
@@ -867,8 +867,8 @@ PyTypeObject Aes256CtrKeyType = {
 };
 
 static PyMethodDef Aes256GcmKey_methods[] = {
-    {"encrypt", (PyCFunction)Aes256GcmKey_encrypt, SZ_METHOD_FLAGS, doc_Aes256GcmKey_encrypt}, //
-    {"decrypt", (PyCFunction)Aes256GcmKey_decrypt, SZ_METHOD_FLAGS, doc_Aes256GcmKey_decrypt}, //
+    {"encrypt", (PyCFunction)Aes256GcmKey_encrypt, STRINGZILLA_METHOD_FLAGS, doc_Aes256GcmKey_encrypt}, //
+    {"decrypt", (PyCFunction)Aes256GcmKey_decrypt, STRINGZILLA_METHOD_FLAGS, doc_Aes256GcmKey_decrypt}, //
     {NULL, NULL, 0, NULL},
 };
 

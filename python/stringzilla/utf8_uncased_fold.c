@@ -62,7 +62,7 @@ PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_s
     }
 
     // Validate UTF-8 input only if requested
-    if (validate && sz_utf8_find_malformed(str.start, str.length) != SZ_NULL_CHAR) {
+    if (validate && sz_utf8_find_malformed(str.start, str.length) != STRINGZILLA_NULL_CHAR) {
         PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }

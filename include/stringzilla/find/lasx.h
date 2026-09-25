@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /**
  *  @brief Produce an AVX2-style 32-bit movemask from a LASX 256-bit comparison result.
@@ -31,7 +31,7 @@ extern "C" {
  *  @param[in] sign_extended_u8x32 A 256-bit comparison result, 0xFF where matched, else 0x00.
  *  @return 32-bit movemask where bit @c i is set when byte @c i matched.
  */
-SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended_u8x32) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended_u8x32) {
     __m256i collected_u32x8 = __lasx_xvmskltz_b(sign_extended_u8x32);
     unsigned int low = __lasx_xvpickve2gr_wu(collected_u32x8, 0);
     unsigned int high = __lasx_xvpickve2gr_wu(collected_u32x8, 4);
@@ -46,11 +46,11 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended_u8x32
  *  @param[in] sign_extended_u8x16 A 128-bit comparison result, 0xFF where matched, else 0x00.
  *  @return Low 16 bits of the movemask.
  */
-SZ_HELPER_INLINE sz_u32_t sz_vmovemask_b_find_lsx_(__m128i sign_extended_u8x16) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_vmovemask_b_find_lsx_(__m128i sign_extended_u8x16) {
     return __lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended_u8x16), 0) & 0xFFFFu;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u256_vec_t haystack_vec, needle_vec, matches_vec;
     // `xvldrepl_b` broadcasts the needle byte straight from memory, fusing the load and the splat that
     // `xvreplgr2vr_b(needle[0])` would otherwise spend two instructions on.
@@ -89,7 +89,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haysta
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u256_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.lasx = __lasx_xvldrepl_b(needle, 0);
     // `xvfrstp` finds the first match; reverse search wants the last, which LASX has no single op
@@ -116,12 +116,12 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t hayst
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length) {
 
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_lasx(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -192,12 +192,12 @@ SZ_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_le
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                        sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_size_t needle_length) {
 
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_rfind_byte_lasx(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -271,7 +271,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_l
     return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // We replicate the strided even/odd bytes of the 32-byte filter into both 128-bit lanes so that the
     // same within-lane `__lasx_xvshuf_b` index works for either half, mirroring the Haswell approach.
@@ -367,7 +367,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length,
     return sz_find_byteset_serial(text, length, filter);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Mirror of `sz_find_byteset_lasx` scanning from the end: same transposed Mula nibble-bitset classifier
     // on the trailing 32-byte window, but the in-set bytes are collected into a movemask and the highest set
@@ -417,7 +417,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t text, sz_size_t length
     return sz_rfind_byteset_serial(text, length, filter);
 }
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

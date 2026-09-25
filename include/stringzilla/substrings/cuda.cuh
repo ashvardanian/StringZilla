@@ -40,7 +40,7 @@
 
 #include "stringzilla/substrings/serial.h"
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
 #ifdef __cplusplus
 extern "C" {
@@ -120,14 +120,14 @@ typedef struct sz_substrings_cuda_tally_t {
     sz_substrings_cuda_tally_layout_t layout;
 
     /** In shared memory: each hashed slot's needle index plus one, zero while free;
-     *  @c SZ_NULL when direct. */
+     *  @c STRINGZILLA_NULL when direct. */
     sz_u32_t *keys;
 
     /** In shared memory: each slot's occurrences, one slot per needle when direct. */
     sz_u32_t *counts;
 
     /** The block's own @b [needles] global row for needles no probe could seat,
-     *  @c SZ_NULL when direct. */
+     *  @c STRINGZILLA_NULL when direct. */
     sz_u32_t *overflow;
 
     /** In shared memory: nonzero once anything reached @c overflow, so scoring scans
@@ -140,7 +140,7 @@ typedef struct sz_substrings_cuda_tally_t {
 #pragma region Device Helpers
 
 /** Four tape bytes as one load; the address is peeled to its own alignment by the caller. */
-SZ_DEVICE_INLINE sz_u32_t sz_substrings_cuda_load_quad_(sz_u8_t const *pointer) {
+STRINGZILLA_DEVICE_INLINE sz_u32_t sz_substrings_cuda_load_quad_(sz_u8_t const *pointer) {
     sz_u32_t loaded;
     asm("ld.global.u32 %0, [%1];" : "=r"(loaded) : "l"(pointer));
     return loaded;
@@ -154,9 +154,9 @@ SZ_DEVICE_INLINE sz_u32_t sz_substrings_cuda_load_quad_(sz_u8_t const *pointer) 
  *  transition definition every backend shares. A single cold lane still makes the whole warp pay
  *  that lane's failure-chase depth, which is the cost this staging exists to shrink.
  */
-SZ_DEVICE_INLINE sz_u32_t sz_substrings_cuda_step_(sz_substrings_engine_t const *engine,
-                                                   sz_u32_t const *staged_rows, sz_u32_t staged_count, sz_u32_t state,
-                                                   sz_u8_t byte) {
+STRINGZILLA_DEVICE_INLINE sz_u32_t sz_substrings_cuda_step_(sz_substrings_engine_t const *engine,
+                                                            sz_u32_t const *staged_rows, sz_u32_t staged_count,
+                                                            sz_u32_t state, sz_u8_t byte) {
     if (state < staged_count)
         return staged_rows[(sz_size_t)state * engine->classes_count + engine->byte_to_class[byte]];
     return sz_substrings_step(engine, state, byte);
@@ -169,11 +169,11 @@ SZ_DEVICE_INLINE sz_u32_t sz_substrings_cuda_step_(sz_substrings_engine_t const 
  *  The hot tier's out-degree ordering makes its head the best prefix to stage, and every step
  *  reads the map.
  */
-SZ_DEVICE_INLINE void sz_substrings_cuda_stage_(sz_substrings_engine_t *engine, sz_u8_t *staged_classes,
-                                                sz_u32_t *staged_rows, sz_u32_t staged_count) {
+STRINGZILLA_DEVICE_INLINE void sz_substrings_cuda_stage_(sz_substrings_engine_t *engine, sz_u8_t *staged_classes,
+                                                         sz_u32_t *staged_rows, sz_u32_t staged_count) {
     sz_size_t const cells = (sz_size_t)staged_count * engine->classes_count;
     sz_size_t cell;
-    for (cell = threadIdx.x; cell < SZ_U8_MAX + 1; cell += blockDim.x)
+    for (cell = threadIdx.x; cell < STRINGZILLA_U8_MAX + 1; cell += blockDim.x)
         staged_classes[cell] = engine->byte_to_class[cell];
     for (cell = threadIdx.x; cell < cells; cell += blockDim.x) staged_rows[cell] = engine->hot_rows[cell];
     engine->byte_to_class = staged_classes;
@@ -188,7 +188,8 @@ SZ_DEVICE_INLINE void sz_substrings_cuda_stage_(sz_substrings_engine_t *engine, 
  *  lines rather than a dependency: a block scan is the only collective this tier needs, and pulling
  *  a template library into a C tier for it would cost the property the tier exists for.
  */
-SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_block_scan_(sz_size_t value, sz_size_t *shared, sz_size_t *total) {
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_substrings_cuda_block_scan_(sz_size_t value, sz_size_t *shared,
+                                                                   sz_size_t *total) {
     unsigned const lane = threadIdx.x;
     unsigned offset;
     sz_size_t inclusive;
@@ -208,14 +209,14 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_block_scan_(sz_size_t value, sz_si
 
 /** How many chunks of @p chunk_bytes a haystack of @p length bytes needs - at least one, so even an
  *  empty haystack still gets a thread and still lands its own boundary. */
-SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_chunks_for_(sz_size_t length, sz_size_t chunk_bytes) {
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_substrings_cuda_chunks_for_(sz_size_t length, sz_size_t chunk_bytes) {
     return length == 0 ? 1 : (length + chunk_bytes - 1) / chunk_bytes;
 }
 
 /** Which haystack owns global chunk @p chunk_index, from the exclusive prefix sum
  *  of per-haystack counts. */
-SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_haystack_of_(sz_size_t const *chunk_offsets, sz_size_t haystacks_count,
-                                                           sz_size_t chunk_index) {
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_substrings_cuda_haystack_of_(sz_size_t const *chunk_offsets,
+                                                                    sz_size_t haystacks_count, sz_size_t chunk_index) {
     sz_size_t low = 0, high = haystacks_count;
     while (low + 1 < high) {
         sz_size_t const middle = low + (high - low) / 2;
@@ -226,8 +227,8 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_haystack_of_(sz_size_t const *chun
 }
 
 /** Index of the last entry at or below @p value in an ascending array; zero when none is. */
-SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_last_not_above_(sz_size_t const *ascending, sz_size_t count,
-                                                              sz_size_t value) {
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_substrings_cuda_last_not_above_(sz_size_t const *ascending, sz_size_t count,
+                                                                       sz_size_t value) {
     sz_size_t low = 0, high = count;
     while (low + 1 < high) {
         sz_size_t const middle = low + (high - low) / 2;
@@ -238,7 +239,7 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_last_not_above_(sz_size_t const *a
 }
 
 /** Counts one occurrence of @p needle, seating it in a free slot on first sight. */
-SZ_DEVICE_INLINE void sz_substrings_cuda_tally_(sz_substrings_cuda_tally_t const *tally, sz_u32_t needle) {
+STRINGZILLA_DEVICE_INLINE void sz_substrings_cuda_tally_(sz_substrings_cuda_tally_t const *tally, sz_u32_t needle) {
     sz_u32_t const key = needle + 1;
     // Volatile, so a probe re-reads a slot a rival may have seated since.
     sz_u32_t const volatile *const seated_keys = tally->keys;
@@ -376,10 +377,11 @@ static __global__ void sz_substrings_cuda_chunk_counts_kernel_(sz_sequence_t hay
  *  The acceptance bit answers "does anything end here" without touching the counts array, which at
  *  scale costs nearly as much as the tape read itself.
  */
-SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_emit_(sz_substrings_engine_t const *engine, sz_u32_t state,
-                                                    sz_size_t walk_begin, sz_u32_t delta, sz_size_t haystack_index,
-                                                    sz_substrings_cuda_pass_t pass, sz_substrings_match_t *matches_out,
-                                                    sz_substrings_cuda_tally_t const *tally) {
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_substrings_cuda_emit_(sz_substrings_engine_t const *engine, sz_u32_t state,
+                                                             sz_size_t walk_begin, sz_u32_t delta,
+                                                             sz_size_t haystack_index, sz_substrings_cuda_pass_t pass,
+                                                             sz_substrings_match_t *matches_out,
+                                                             sz_substrings_cuda_tally_t const *tally) {
     sz_size_t output_offset, found = 0, index;
     sz_u32_t output_count;
     if (!sz_substrings_accepts(engine, state)) return 0;
@@ -413,7 +415,7 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_emit_(sz_substrings_engine_t const
  *  The warm-up primes the state from before the chunk and reports nothing, so once it ends the emit
  *  test is gone from the loop rather than being re-asked on every byte.
  */
-SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_cased_(
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_cased_(
     sz_substrings_engine_t const *engine, sz_u32_t const *staged_rows, sz_u32_t staged_count, sz_cptr_t haystack,
     sz_size_t length, sz_size_t chunk_begin, sz_size_t chunk_end, sz_size_t haystack_index,
     sz_substrings_cuda_pass_t pass, sz_substrings_match_t *matches_at_chunk, sz_substrings_cuda_tally_t const *tally) {
@@ -465,7 +467,7 @@ SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_cased_(
  *  state further. Match ends are reported at the source codepoint's end, which keeps chunk
  *  ownership comparable against the unsnapped chunk bounds the planner handed out.
  */
-SZ_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_uncased_(
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_substrings_cuda_walk_chunk_uncased_(
     sz_substrings_engine_t const *engine, sz_u32_t const *staged_rows, sz_u32_t staged_count, sz_cptr_t haystack,
     sz_size_t length, sz_size_t chunk_begin, sz_size_t chunk_end, sz_size_t haystack_index,
     sz_substrings_cuda_pass_t pass, sz_substrings_match_t *matches_at_chunk, sz_substrings_cuda_tally_t const *tally) {
@@ -539,7 +541,7 @@ static __global__ void sz_substrings_cuda_walk_kernel_(sz_substrings_engine_t en
                                                        sz_substrings_match_t *matches,
                                                        sz_substrings_cuda_pass_t pass) {
     extern __shared__ sz_u32_t sz_substrings_cuda_staged_[];
-    __shared__ sz_u8_t staged_classes[SZ_U8_MAX + 1];
+    __shared__ sz_u8_t staged_classes[STRINGZILLA_U8_MAX + 1];
     sz_size_t const chunk_count = chunk_offsets[haystacks.count];
     sz_size_t const chunk_bytes = *chunk_bytes_at;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
@@ -563,13 +565,13 @@ static __global__ void sz_substrings_cuda_walk_kernel_(sz_substrings_engine_t en
         // and the branch costs no divergence.
         if (chunk_begin >= chunk_end && length != 0) found = 0;
         else if (engine.case_sensitivity == sz_substrings_uncased_k)
-            found = sz_substrings_cuda_walk_chunk_uncased_(&engine, sz_substrings_cuda_staged_, staged_count,
-                                                           haystack, length, chunk_begin, chunk_end, haystack_index,
-                                                           pass, matches_at_chunk, SZ_NULL);
+            found = sz_substrings_cuda_walk_chunk_uncased_(&engine, sz_substrings_cuda_staged_, staged_count, haystack,
+                                                           length, chunk_begin, chunk_end, haystack_index, pass,
+                                                           matches_at_chunk, STRINGZILLA_NULL);
         else
             found = sz_substrings_cuda_walk_chunk_cased_(&engine, sz_substrings_cuda_staged_, staged_count, haystack,
                                                          length, chunk_begin, chunk_end, haystack_index, pass,
-                                                         matches_at_chunk, SZ_NULL);
+                                                         matches_at_chunk, STRINGZILLA_NULL);
         if (pass == sz_substrings_cuda_sizing_k) chunk_slots[chunk_index] = found;
     }
 }
@@ -580,16 +582,16 @@ static __global__ void sz_substrings_cuda_walk_kernel_(sz_substrings_engine_t en
 
 /** Fixed-point scale of a BM25 sum: integer addition commutes, so the score never depends
  *  on thread order. */
-#define SZ_SUBSTRINGS_CUDA_BM25_SCALE (4294967296.0)
+#define STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE (4294967296.0)
 
 /** Slots a block's tally takes: one per needle when the vocabulary fits, a
  *  hashed table otherwise. */
-SZ_HELPER_AUTO sz_size_t sz_substrings_cuda_tally_slots_for_(sz_size_t needles_count) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_substrings_cuda_tally_slots_for_(sz_size_t needles_count) {
     return needles_count <= sz_substrings_cuda_tally_slots_k ? needles_count : sz_substrings_cuda_tally_slots_k;
 }
 
 /** Words of the acceptance bitmap, one bit per double-array slot. */
-SZ_HELPER_AUTO sz_size_t sz_substrings_cuda_accepts_words_(sz_substrings_engine_t const *engine) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_substrings_cuda_accepts_words_(sz_substrings_engine_t const *engine) {
     return sz_size_divide_round_up(engine->slots_count, 32);
 }
 
@@ -612,7 +614,7 @@ static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t en
                                                        sz_size_t scores_stride, sz_u32_t staged_accepts_words,
                                                        sz_u32_t staged_count) {
     extern __shared__ sz_u32_t sz_substrings_cuda_scoring_[];
-    __shared__ sz_u8_t staged_classes[SZ_U8_MAX + 1];
+    __shared__ sz_u8_t staged_classes[STRINGZILLA_U8_MAX + 1];
     __shared__ sz_u32_t overflowed;
     __shared__ unsigned long long block_sum;
     sz_size_t const needles_count = engine.needles_count;
@@ -624,9 +626,9 @@ static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t en
     tally.layout = needles_count <= sz_substrings_cuda_tally_slots_k ? sz_substrings_cuda_tally_direct_k
                                                                      : sz_substrings_cuda_tally_hashed_k;
     tally.counts = sz_substrings_cuda_scoring_;
-    tally.keys = tally.layout == sz_substrings_cuda_tally_hashed_k ? tally.counts + table_slots : SZ_NULL;
+    tally.keys = tally.layout == sz_substrings_cuda_tally_hashed_k ? tally.counts + table_slots : STRINGZILLA_NULL;
     tally.overflowed = &overflowed;
-    tally.overflow = overflow_rows ? overflow_rows + (sz_size_t)blockIdx.x * needles_count : SZ_NULL;
+    tally.overflow = overflow_rows ? overflow_rows + (sz_size_t)blockIdx.x * needles_count : STRINGZILLA_NULL;
     staged_accepts = tally.counts + (tally.keys ? 2 : 1) * table_slots;
     staged_rows = staged_accepts + staged_accepts_words;
 
@@ -658,11 +660,11 @@ static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t en
             if (engine.case_sensitivity == sz_substrings_uncased_k)
                 sz_substrings_cuda_walk_chunk_uncased_(&engine, staged_rows, staged_count, haystack, length,
                                                        chunk_begin, chunk_end, haystack_index,
-                                                       sz_substrings_cuda_tallying_k, SZ_NULL, &tally);
+                                                       sz_substrings_cuda_tallying_k, STRINGZILLA_NULL, &tally);
             else
-                sz_substrings_cuda_walk_chunk_cased_(&engine, staged_rows, staged_count, haystack, length,
-                                                     chunk_begin, chunk_end, haystack_index,
-                                                     sz_substrings_cuda_tallying_k, SZ_NULL, &tally);
+                sz_substrings_cuda_walk_chunk_cased_(&engine, staged_rows, staged_count, haystack, length, chunk_begin,
+                                                     chunk_end, haystack_index, sz_substrings_cuda_tallying_k,
+                                                     STRINGZILLA_NULL, &tally);
         }
         __syncthreads();
 
@@ -672,7 +674,7 @@ static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t en
             if (!frequency) continue;
             needle = tally.keys ? (sz_size_t)tally.keys[slot] - 1 : slot;
             mine += __double2ll_rn(sz_substrings_bm25_term(&parameters, norm, needle_weights[needle], frequency) *
-                                   SZ_SUBSTRINGS_CUDA_BM25_SCALE);
+                                   STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
             tally.counts[slot] = 0;
             if (tally.keys) tally.keys[slot] = 0;
         }
@@ -681,15 +683,15 @@ static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t en
                 sz_u32_t const frequency = tally.overflow[needle];
                 if (!frequency) continue;
                 mine += __double2ll_rn(sz_substrings_bm25_term(&parameters, norm, needle_weights[needle], frequency) *
-                                       SZ_SUBSTRINGS_CUDA_BM25_SCALE);
+                                       STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
                 tally.overflow[needle] = 0;
             }
         // Two's complement makes the unsigned sum of signed terms the signed sum, bit for bit.
         if (mine) atomicAdd(&block_sum, (unsigned long long)mine);
         __syncthreads();
         if (threadIdx.x == 0) {
-            scores[haystack_index * scores_stride] =
-                (sz_f32_t)((sz_f64_t)(sz_i64_t)block_sum / SZ_SUBSTRINGS_CUDA_BM25_SCALE);
+            scores[haystack_index * scores_stride] = (sz_f32_t)((sz_f64_t)(sz_i64_t)block_sum /
+                                                                STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
             overflowed = 0;
         }
         __syncthreads();
@@ -703,8 +705,9 @@ static __global__ void sz_substrings_cuda_bm25_kernel_(sz_substrings_engine_t en
 /** Whether the boundary before @p index is real: nothing still to come starts before the
  *  maximum end already reached. Only matches ending within one match's length of it can, which
  *  bounds the look-ahead. */
-SZ_DEVICE_INLINE sz_bool_t sz_substrings_cuda_boundary_before_(sz_substrings_match_t const *matches, sz_size_t count,
-                                                               sz_size_t longest, sz_size_t index) {
+STRINGZILLA_DEVICE_INLINE sz_bool_t sz_substrings_cuda_boundary_before_(sz_substrings_match_t const *matches,
+                                                                        sz_size_t count, sz_size_t longest,
+                                                                        sz_size_t index) {
     sz_size_t reached, ahead;
     if (index == 0) return sz_true_k;
     if (matches[index - 1].haystack_index != matches[index].haystack_index) return sz_true_k;
@@ -939,9 +942,9 @@ static __global__ void sz_substrings_cuda_rewrite_offsets_kernel_(sz_sequence_t 
 }
 
 /** Copies one stretch, clipped to the tile, with @p lane striding the surviving bytes. */
-SZ_DEVICE_INLINE void sz_substrings_cuda_copy_clipped_(sz_ptr_t output, sz_size_t tile_begin, sz_size_t tile_end,
-                                                       sz_size_t output_offset, sz_cptr_t source, sz_size_t bytes,
-                                                       unsigned lane) {
+STRINGZILLA_DEVICE_INLINE void sz_substrings_cuda_copy_clipped_(sz_ptr_t output, sz_size_t tile_begin,
+                                                                sz_size_t tile_end, sz_size_t output_offset,
+                                                                sz_cptr_t source, sz_size_t bytes, unsigned lane) {
     sz_size_t const copy_begin = sz_max_of_two(output_offset, tile_begin);
     sz_size_t const copy_end = sz_min_of_two(output_offset + bytes, tile_end);
     sz_size_t position;
@@ -1036,14 +1039,14 @@ static __global__ void sz_substrings_cuda_tape_kernel_(sz_size_t const *rewritte
 #pragma region Host Plumbing
 
 /** The device the caller's stream belongs to, which is not always device zero. */
-SZ_API_COMPTIME int sz_substrings_cuda_device_(void) {
+STRINGZILLA_API_COMPTIME int sz_substrings_cuda_device_(void) {
     int device = 0;
     cudaGetDevice(&device);
     return device;
 }
 
 /** Multiprocessors on the current device, or one when the driver will not say. */
-SZ_API_COMPTIME sz_size_t sz_substrings_cuda_multiprocessors_(void) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_cuda_multiprocessors_(void) {
     int multiprocessors = 0;
     if (cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, sz_substrings_cuda_device_()) !=
         cudaSuccess)
@@ -1053,7 +1056,7 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_multiprocessors_(void) {
 
 /** Blocks of @p kernel this device holds resident per multiprocessor at @p shared_bytes
  *  of dynamic shared. */
-SZ_API_COMPTIME sz_size_t sz_substrings_cuda_resident_blocks_(void const *kernel, sz_size_t shared_bytes) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_cuda_resident_blocks_(void const *kernel, sz_size_t shared_bytes) {
     int blocks_per_multiprocessor = 0;
     if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(
             &blocks_per_multiprocessor, kernel, sz_substrings_cuda_threads_per_block_k, shared_bytes) != cudaSuccess)
@@ -1063,7 +1066,7 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_resident_blocks_(void const *kernel
 
 /** Threads the walk keeps resident across the whole device, which is what a chunk width
  *  is derived from. */
-SZ_API_COMPTIME sz_size_t sz_substrings_cuda_resident_threads_(void const *kernel, sz_size_t shared_bytes) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_cuda_resident_threads_(void const *kernel, sz_size_t shared_bytes) {
     return sz_substrings_cuda_multiprocessors_() * sz_substrings_cuda_resident_blocks_(kernel, shared_bytes) *
            sz_substrings_cuda_threads_per_block_k;
 }
@@ -1076,7 +1079,8 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_resident_threads_(void const *kerne
  *  blocks-per-multiprocessor guess, since a kernel's residency moves with its registers and its
  *  dynamic shared memory.
  */
-SZ_API_COMPTIME unsigned sz_substrings_cuda_grid_for_(void const *kernel, sz_size_t shared_bytes, sz_size_t items) {
+STRINGZILLA_API_COMPTIME unsigned sz_substrings_cuda_grid_for_(void const *kernel, sz_size_t shared_bytes,
+                                                               sz_size_t items) {
     sz_size_t blocks = (items + sz_substrings_cuda_threads_per_block_k - 1) / sz_substrings_cuda_threads_per_block_k;
     sz_size_t const covering = sz_substrings_cuda_multiprocessors_() *
                                sz_substrings_cuda_resident_blocks_(kernel, shared_bytes);
@@ -1085,7 +1089,7 @@ SZ_API_COMPTIME unsigned sz_substrings_cuda_grid_for_(void const *kernel, sz_siz
 }
 
 /** Grid for the flat helper kernels, none of which takes dynamic shared memory. */
-SZ_API_COMPTIME unsigned sz_substrings_cuda_grid_(sz_size_t items) {
+STRINGZILLA_API_COMPTIME unsigned sz_substrings_cuda_grid_(sz_size_t items) {
     sz_size_t blocks = (items + sz_substrings_cuda_threads_per_block_k - 1) / sz_substrings_cuda_threads_per_block_k;
     sz_size_t const covering = sz_substrings_cuda_multiprocessors_() * sz_substrings_cuda_blocks_per_multiprocessor_k;
     if (blocks == 0) blocks = 1;
@@ -1093,8 +1097,8 @@ SZ_API_COMPTIME unsigned sz_substrings_cuda_grid_(sz_size_t items) {
 }
 
 /** Launches @p kernel over @p blocks blocks of the tier's fixed block size, on @p stream. */
-SZ_API_COMPTIME sz_status_t sz_substrings_cuda_launch_(void const *kernel, unsigned blocks, void **arguments,
-                                                       sz_size_t shared_bytes, void *stream) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_cuda_launch_(void const *kernel, unsigned blocks, void **arguments,
+                                                                sz_size_t shared_bytes, void *stream) {
     dim3 grid, block;
     grid.x = blocks, grid.y = 1, grid.z = 1;
     block.x = sz_substrings_cuda_threads_per_block_k, block.y = 1, block.z = 1;
@@ -1104,13 +1108,13 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_launch_(void const *kernel, unsig
 }
 
 /** Tiles the tier's fixed block size covers @p count elements in. */
-SZ_API_COMPTIME sz_size_t sz_substrings_cuda_tiles_(sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_cuda_tiles_(sz_size_t count) {
     return (count + sz_substrings_cuda_threads_per_block_k - 1) / sz_substrings_cuda_threads_per_block_k;
 }
 
 /** Entries a scan over @p count elements needs for its tile totals, which no corpus
  *  size can outgrow. */
-SZ_API_COMPTIME sz_size_t sz_substrings_cuda_scan_scratch_(sz_size_t count) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_cuda_scan_scratch_(sz_size_t count) {
     return sz_min_of_two(sz_substrings_cuda_tiles_(count), (sz_size_t)sz_substrings_cuda_scan_tiles_max_k);
 }
 
@@ -1122,8 +1126,8 @@ SZ_API_COMPTIME sz_size_t sz_substrings_cuda_scan_scratch_(sz_size_t count) {
  *  Three launches - scan each tile, carry the tile totals across on one block, add each tile's base
  *  back - which is the shape a block scan composes into without a device-wide collective.
  */
-SZ_API_COMPTIME sz_status_t sz_substrings_cuda_scan_(sz_size_t *values, sz_size_t count, sz_size_t *tile_sums,
-                                                     void *stream) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_cuda_scan_(sz_size_t *values, sz_size_t count, sz_size_t *tile_sums,
+                                                              void *stream) {
     sz_size_t const tiles = sz_min_of_two(sz_substrings_cuda_tiles_(count),
                                           (sz_size_t)sz_substrings_cuda_scan_tiles_max_k);
     sz_size_t counted = count, tiles_counted = tiles;
@@ -1168,9 +1172,9 @@ typedef enum sz_substrings_cuda_staging_t {
  *  needs @c cudaFuncSetAttribute per kernel, and a launch asking for more than the default
  *  is rejected outright.
  */
-SZ_API_COMPTIME sz_u32_t sz_substrings_cuda_staged_rows_(sz_substrings_engine_t const *engine, void const *kernel,
-                                                         sz_size_t reserved_bytes,
-                                                         sz_substrings_cuda_staging_t staging) {
+STRINGZILLA_API_COMPTIME sz_u32_t sz_substrings_cuda_staged_rows_(sz_substrings_engine_t const *engine,
+                                                                  void const *kernel, sz_size_t reserved_bytes,
+                                                                  sz_substrings_cuda_staging_t staging) {
     sz_size_t const row_bytes = engine->classes_count * sizeof(sz_u32_t);
     sz_size_t const unstaged_blocks = sz_substrings_cuda_resident_blocks_(kernel, reserved_bytes);
     sz_size_t fitting, low, high;
@@ -1200,19 +1204,19 @@ SZ_API_COMPTIME sz_u32_t sz_substrings_cuda_staged_rows_(sz_substrings_engine_t 
 
 /** Bytes a chunk never falls below: four times the longest match, capping its warm-up at a
  *  quarter of it. */
-SZ_API_COMPTIME sz_size_t sz_substrings_cuda_chunk_floor_(sz_substrings_engine_t const *engine) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_cuda_chunk_floor_(sz_substrings_engine_t const *engine) {
     return sz_max_of_two(4 * (sz_size_t)engine->max_source_match_bytes, (sz_size_t)1);
 }
 
 /** Devices the runtime answers for, which is what decides whether the device table is
  *  filled at all. */
-SZ_API_COMPTIME int sz_substrings_cuda_devices_(void) {
+STRINGZILLA_API_COMPTIME int sz_substrings_cuda_devices_(void) {
     int devices = 0;
     return cudaGetDeviceCount(&devices) == cudaSuccess ? devices : 0;
 }
 
 /** Hot rows this tier's walk stages, which fixes both its shared memory and its residency. */
-SZ_API_COMPTIME sz_u32_t sz_substrings_cuda_walk_rows_(sz_substrings_engine_t const *engine) {
+STRINGZILLA_API_COMPTIME sz_u32_t sz_substrings_cuda_walk_rows_(sz_substrings_engine_t const *engine) {
     return sz_substrings_cuda_staged_rows_(engine, (void const *)sz_substrings_cuda_walk_kernel_, 0,
                                            sz_substrings_cuda_stage_whole_k);
 }
@@ -1224,7 +1228,7 @@ SZ_API_COMPTIME sz_u32_t sz_substrings_cuda_walk_rows_(sz_substrings_engine_t co
  *  count is an upper bound on the blocks any later round can run - the one property an arena
  *  sized once needs.
  */
-SZ_API_COMPTIME sz_size_t sz_substrings_cuda_bm25_rows_(sz_substrings_engine_t const *engine) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_cuda_bm25_rows_(sz_substrings_engine_t const *engine) {
     if (engine->needles_count <= (sz_u32_t)sz_substrings_cuda_tally_slots_k) return 0;
     return sz_substrings_cuda_multiprocessors_() *
            sz_substrings_cuda_resident_blocks_((void const *)sz_substrings_cuda_bm25_kernel_, 0);
@@ -1306,8 +1310,8 @@ typedef struct sz_substrings_cuda_arena_t {
 } sz_substrings_cuda_arena_t;
 
 /** Lays the device arena out for one round over @p haystacks_count texts. */
-SZ_API_COMPTIME sz_substrings_cuda_arena_t sz_substrings_cuda_arena_(sz_substrings_engine_t const *engine,
-                                                                     sz_size_t haystacks_count) {
+STRINGZILLA_API_COMPTIME sz_substrings_cuda_arena_t sz_substrings_cuda_arena_(sz_substrings_engine_t const *engine,
+                                                                              sz_size_t haystacks_count) {
     sz_size_t const boundaries = haystacks_count + 1;
     sz_size_t const matches = engine->matches_budget;
     sz_size_t const match_bytes = matches * sizeof(sz_substrings_match_t);
@@ -1363,10 +1367,10 @@ typedef struct sz_substrings_cuda_round_t {
     /** The matches a cover kept, which is @c emitted itself when no cover ran. */
     sz_substrings_match_t *reported;
 
-    /** The scanned keep flags, or @c SZ_NULL when every match is reported. */
+    /** The scanned keep flags, or @c STRINGZILLA_NULL when every match is reported. */
     sz_size_t *keep_offsets;
 
-    /** One rewrite drift per reported match, or @c SZ_NULL when no rewrite can run. */
+    /** One rewrite drift per reported match, or @c STRINGZILLA_NULL when no rewrite can run. */
     sz_size_t *gap_offsets;
 
     /** Entries of @c chunk_slots, so the scan's grand total is its last one. */
@@ -1375,8 +1379,9 @@ typedef struct sz_substrings_cuda_round_t {
 
 /** Binds one round's pointers onto the engine's arena, which a compute verb does
  *  before it launches. */
-SZ_API_COMPTIME void sz_substrings_cuda_round_bind_(sz_substrings_engine_t const *engine, sz_size_t haystacks_count,
-                                                    sz_substrings_cuda_round_t *round) {
+STRINGZILLA_API_COMPTIME void sz_substrings_cuda_round_bind_(sz_substrings_engine_t const *engine,
+                                                             sz_size_t haystacks_count,
+                                                             sz_substrings_cuda_round_t *round) {
     sz_substrings_cuda_arena_t const arena = sz_substrings_cuda_arena_(engine, haystacks_count);
     sz_bool_t const covering = (sz_bool_t)(engine->overlap_policy != sz_substrings_overlapping_k);
     sz_ptr_t const block = (sz_ptr_t)engine->scratch;
@@ -1388,26 +1393,26 @@ SZ_API_COMPTIME void sz_substrings_cuda_round_bind_(sz_substrings_engine_t const
     round->tile_sums = (sz_size_t *)(block + arena.tile_sums);
     round->emitted = (sz_substrings_match_t *)(block + arena.emitted);
     round->reported = (sz_substrings_match_t *)(block + arena.reported);
-    round->keep_offsets = covering ? (sz_size_t *)(block + arena.keep_offsets) : SZ_NULL;
-    round->gap_offsets = covering ? (sz_size_t *)(block + arena.gap_offsets) : SZ_NULL;
+    round->keep_offsets = covering ? (sz_size_t *)(block + arena.keep_offsets) : STRINGZILLA_NULL;
+    round->gap_offsets = covering ? (sz_size_t *)(block + arena.gap_offsets) : STRINGZILLA_NULL;
     round->slots_count = arena.slots_count;
 }
 
 /** The stream every round of this engine enqueues on, which lives in the
  *  arena's tier-private head. */
-SZ_API_COMPTIME void *sz_substrings_cuda_stream_(sz_substrings_engine_t const *engine) {
+STRINGZILLA_API_COMPTIME void *sz_substrings_cuda_stream_(sz_substrings_engine_t const *engine) {
     return ((sz_substrings_cuda_head_t *)engine->scratch)->stream;
 }
 
 /** Grows the engine's arena to hold one round over @p haystacks_count texts, and
  *  never shrinks it. */
-SZ_API_COMPTIME sz_status_t sz_substrings_cuda_arena_reserve_(sz_substrings_engine_t *engine,
-                                                              sz_size_t haystacks_count) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_cuda_arena_reserve_(sz_substrings_engine_t *engine,
+                                                                       sz_size_t haystacks_count) {
     sz_substrings_cuda_arena_t const arena = sz_substrings_cuda_arena_(engine, haystacks_count);
     sz_memory_allocator_t *const alloc = &engine->alloc;
     sz_substrings_cuda_head_t head;
     void *block;
-    head.stream = SZ_NULL;
+    head.stream = STRINGZILLA_NULL;
     if (engine->scratch && engine->scratch_bytes >= arena.total) return sz_success_k;
     if (engine->scratch) head = *(sz_substrings_cuda_head_t *)engine->scratch;
     block = alloc->allocate(arena.total, alloc->handle);
@@ -1425,9 +1430,9 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_arena_reserve_(sz_substrings_engi
 
 /** Zeroes everything a round reads before it writes: the report, the counters
  *  and the boundaries. */
-SZ_API_COMPTIME sz_status_t sz_substrings_cuda_arena_clear_(sz_substrings_engine_t const *engine,
-                                                            sz_size_t haystacks_count, sz_bool_t covering,
-                                                            void *stream) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_cuda_arena_clear_(sz_substrings_engine_t const *engine,
+                                                                     sz_size_t haystacks_count, sz_bool_t covering,
+                                                                     void *stream) {
     sz_substrings_cuda_arena_t const arena = sz_substrings_cuda_arena_(engine, haystacks_count);
     sz_ptr_t const block = (sz_ptr_t)engine->scratch;
     // The head of the arena only, so no round pays a memset proportional to a budget it did not spend.
@@ -1442,7 +1447,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_arena_clear_(sz_substrings_engine
 }
 
 /** Zeroes the terminator a scan reads as its own last element, so the total lands in it. */
-SZ_API_COMPTIME sz_status_t sz_substrings_cuda_clear_terminator_(sz_size_t *values, sz_size_t count, void *stream) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_cuda_clear_terminator_(sz_size_t *values, sz_size_t count,
+                                                                          void *stream) {
     return cudaMemsetAsync(values + count, 0, sizeof(sz_size_t), (cudaStream_t)stream) == cudaSuccess
                ? sz_success_k
                : sz_device_code_mismatch_k;
@@ -1458,13 +1464,14 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_clear_terminator_(sz_size_t *valu
  *
  *  @param[in] wanted Whether the caller reads the matches, since an overlapping count answers from
  *      the boundaries its sizing walk already scanned and never touches the match arena at all.
- *  @param[out] haystack_offsets Where the per-haystack boundaries land, or @c SZ_NULL to leave them
- *      in the arena; @ref sz_substrings_find points this straight at its own output.
+ *  @param[out] haystack_offsets Where the per-haystack boundaries land, or @c STRINGZILLA_NULL to
+ *      leave them in the arena; @ref sz_substrings_find points this straight at its own output.
  */
-SZ_API_COMPTIME sz_status_t sz_substrings_cuda_walk_(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                     sz_substrings_cuda_matches_t wanted,
-                                                     sz_size_t *haystack_offsets, sz_substrings_cuda_round_t *round,
-                                                     void *stream) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_cuda_walk_(sz_substrings_engine_t *engine,
+                                                              sz_sequence_t const *haystacks,
+                                                              sz_substrings_cuda_matches_t wanted,
+                                                              sz_size_t *haystack_offsets,
+                                                              sz_substrings_cuda_round_t *round, void *stream) {
     sz_u32_t staged_rows = sz_substrings_cuda_walk_rows_(engine);
     sz_size_t const staged_bytes = (sz_size_t)staged_rows * engine->classes_count * sizeof(sz_u32_t);
     sz_size_t boundaries = haystacks->count + 1;
@@ -1488,7 +1495,7 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_walk_(sz_substrings_engine_t *eng
     if (haystack_offsets) round->haystack_offsets = haystack_offsets;
     report = engine->report, launched_engine = *engine;
     emitted_at = round->chunk_slots + round->slots_count - 1;
-    kept_at = round->keep_offsets ? round->keep_offsets + matches_budget : SZ_NULL;
+    kept_at = round->keep_offsets ? round->keep_offsets + matches_budget : STRINGZILLA_NULL;
     status = sz_substrings_cuda_arena_clear_(engine, haystacks->count, covering, stream);
 
     // The corpus total and the width it implies, both device-side, which is what removes the first readback.
@@ -1574,8 +1581,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_cuda_walk_(sz_substrings_engine_t *eng
 }
 
 /** Whether every argument the device verbs read or write is one a kernel can address. */
-SZ_API_COMPTIME sz_bool_t sz_substrings_cuda_resident_(sz_substrings_engine_t const *engine,
-                                                       sz_sequence_t const *haystacks) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_substrings_cuda_resident_(sz_substrings_engine_t const *engine,
+                                                                sz_sequence_t const *haystacks) {
     // An array the kernel dereferences, rather than the owning handle it never touches, so a caller
     // holding a borrowed view of a resident engine is not refused for a null owner.
     if (!sz_memory_reaches_device(engine->base)) return sz_false_k;
@@ -1592,17 +1599,17 @@ SZ_API_COMPTIME sz_bool_t sz_substrings_cuda_resident_(sz_substrings_engine_t co
 /** Matches one round may emit when a caller names no budget, which is 32 MB of match arena. */
 enum { sz_substrings_cuda_matches_budget_default_k = 1u << 20 };
 
-SZ_API_COMPTIME sz_status_t sz_substrings_engine_init_cuda(sz_sequence_t const *needles,
-                                                           sz_substrings_case_sensitivity_t case_sensitivity,
-                                                           sz_substrings_overlap_policy_t overlap_policy,
-                                                           sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_memory_allocator_t *alloc,
-                                                           void *stream, sz_substrings_engine_t *engine) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_engine_init_cuda(sz_sequence_t const *needles,
+                                                                    sz_substrings_case_sensitivity_t case_sensitivity,
+                                                                    sz_substrings_overlap_policy_t overlap_policy,
+                                                                    sz_size_t hot_states, sz_size_t matches_budget,
+                                                                    sz_memory_allocator_t *alloc, void *stream,
+                                                                    sz_substrings_engine_t *engine) {
     sz_memory_allocator_t unified;
     sz_size_t staged_bytes;
     sz_status_t status;
     if (!alloc) {
-        sz_memory_allocator_init_unified(&unified, SZ_NULL);
+        sz_memory_allocator_init_unified(&unified, STRINGZILLA_NULL);
         alloc = &unified;
     }
     if (!matches_budget) matches_budget = (sz_size_t)sz_substrings_cuda_matches_budget_default_k;
@@ -1630,8 +1637,9 @@ SZ_API_COMPTIME sz_status_t sz_substrings_engine_init_cuda(sz_sequence_t const *
 
 #pragma region CUDA Backends
 
-SZ_API_COMPTIME sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                      sz_size_t *counts, sz_size_t counts_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine,
+                                                               sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                               sz_size_t counts_stride) {
     sz_substrings_cuda_round_t round;
     sz_size_t haystacks_count = haystacks->count;
     void *stream = sz_substrings_cuda_stream_(engine);
@@ -1642,8 +1650,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *en
     if (!sz_substrings_cuda_resident_(engine, haystacks)) return sz_device_memory_mismatch_k;
     if (!sz_memory_reaches_device(counts)) return sz_device_memory_mismatch_k;
 
-    status = sz_substrings_cuda_walk_(engine, haystacks, sz_substrings_cuda_matches_unneeded_k, SZ_NULL, &round,
-                                      stream);
+    status = sz_substrings_cuda_walk_(engine, haystacks, sz_substrings_cuda_matches_unneeded_k, STRINGZILLA_NULL,
+                                      &round, stream);
     if (status != sz_success_k) return status;
 
     arguments[0] = &round.haystack_offsets, arguments[1] = &counts, arguments[2] = &counts_stride;
@@ -1652,9 +1660,10 @@ SZ_API_COMPTIME sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *en
                                       sz_substrings_cuda_grid_(haystacks_count), arguments, 0, stream);
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_find_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                    sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                    sz_size_t *matches_offsets) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_find_cuda(sz_substrings_engine_t *engine,
+                                                             sz_sequence_t const *haystacks,
+                                                             sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                             sz_size_t *matches_offsets) {
     sz_substrings_cuda_round_t round;
     sz_substrings_report_t *report;
     void *stream = sz_substrings_cuda_stream_(engine);
@@ -1682,10 +1691,10 @@ SZ_API_COMPTIME sz_status_t sz_substrings_find_cuda(sz_substrings_engine_t *engi
                                       sz_substrings_cuda_grid_(matches_capacity), arguments, 0, stream);
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *engine,
-                                                       sz_sequence_t const *haystacks,
-                                                       sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                       sz_size_t tape_capacity, sz_size_t *offsets) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *engine,
+                                                                sz_sequence_t const *haystacks,
+                                                                sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                                sz_size_t tape_capacity, sz_size_t *offsets) {
     sz_substrings_cuda_round_t round;
     sz_substrings_report_t *report;
     sz_sequence_t launched_haystacks, launched_replacements;
@@ -1704,7 +1713,8 @@ SZ_API_COMPTIME sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *e
     if (!sz_memory_reaches_device(offsets)) return sz_device_memory_mismatch_k;
     if (tape_capacity && !sz_memory_reaches_device(tape)) return sz_device_memory_mismatch_k;
 
-    status = sz_substrings_cuda_walk_(engine, haystacks, sz_substrings_cuda_matches_needed_k, SZ_NULL, &round, stream);
+    status = sz_substrings_cuda_walk_(engine, haystacks, sz_substrings_cuda_matches_needed_k, STRINGZILLA_NULL, &round,
+                                      stream);
     if (status != sz_success_k) return status;
     // The offsets kernel retires when the matches did not fit, so the caller's array is zeroed rather than
     // left holding whatever it held before.
@@ -1738,12 +1748,9 @@ SZ_API_COMPTIME sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *e
     return status;
 }
 
-SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_t *engine,
-                                                           sz_sequence_t const *haystacks,
-                                                           sz_f32_t const *document_lengths,
-                                                           sz_substrings_bm25_t const *parameters,
-                                                           sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                           sz_size_t scores_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_cuda(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride) {
     void const *const kernel = (void const *)sz_substrings_cuda_bm25_kernel_;
     sz_substrings_cuda_arena_t const arena = sz_substrings_cuda_arena_(engine, haystacks->count);
     sz_size_t const needles_count = engine->needles_count;
@@ -1757,7 +1764,7 @@ SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_
     sz_substrings_engine_t engine_copy;
     sz_sequence_t haystacks_copy = *haystacks;
     sz_substrings_bm25_t parameters_copy;
-    sz_u32_t *overflow_rows = SZ_NULL;
+    sz_u32_t *overflow_rows = STRINGZILLA_NULL;
     sz_size_t reserved_bytes = table_bytes, shared_bytes, blocks;
     sz_u32_t staged_accepts_words = 0, staged_count;
     void *stream = sz_substrings_cuda_stream_(engine);
@@ -1812,5 +1819,5 @@ SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_
 #ifdef __cplusplus
 }
 #endif
-#endif // SZ_USE_CUDA
+#endif // STRINGZILLA_TARGET_CUDA
 #endif // STRINGZILLA_SUBSTRINGS_CUDA_CUH_

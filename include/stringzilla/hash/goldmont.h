@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_GOLDMONT
+#if STRINGZILLA_TARGET_GOLDMONT
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse3,ssse3,sse4.1,sha"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -30,8 +30,8 @@ extern "C" {
  *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
-SZ_HELPER_INLINE void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)],
-                                                        sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
+STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_goldmont_(
+    sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(STRINGZILLA_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Load and byte-swap the first 16 words (big-endian) using SSE
@@ -200,7 +200,7 @@ SZ_HELPER_INLINE void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_leas
     _mm_storeu_si128((__m128i *)&hash[4], state1_u32x4);
 }
 
-SZ_API_COMPTIME void sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr) {
+STRINGZILLA_API_COMPTIME void sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr) {
     // Vectorize the load/store of 8x u32s using 2x 128-bit SSE loads
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
     _mm_storeu_si128((__m128i *)&state_ptr->hash[0], _mm_lddqu_si128((__m128i const *)&initial_hash[0]));
@@ -208,12 +208,13 @@ SZ_API_COMPTIME void sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr)
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
-SZ_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_cptr_t data,
+                                                              sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
-    sz_size_t const current_block_index = state_ptr->block_length / SZ_SHA256_BLOCK_LENGTH;
-    sz_size_t const final_block_index = (state_ptr->block_length + length) / SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const current_block_index = state_ptr->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
+    sz_size_t const final_block_index = (state_ptr->block_length + length) / STRINGZILLA_SHA256_BLOCK_LENGTH;
     int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state_ptr->block_length + length) % SZ_SHA256_BLOCK_LENGTH == 0;
+    int const fills_the_block = (state_ptr->block_length + length) % STRINGZILLA_SHA256_BLOCK_LENGTH == 0;
 
     state_ptr->total_length += length;
 
@@ -224,8 +225,9 @@ SZ_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_pt
     }
 
     // Calculate head, body, and tail lengths
-    sz_size_t const head_length = (SZ_SHA256_BLOCK_LENGTH - state_ptr->block_length) % SZ_SHA256_BLOCK_LENGTH;
-    sz_size_t const tail_length = (state_ptr->block_length + length) % SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const head_length = (STRINGZILLA_SHA256_BLOCK_LENGTH - state_ptr->block_length) %
+                                  STRINGZILLA_SHA256_BLOCK_LENGTH;
+    sz_size_t const tail_length = (state_ptr->block_length + length) % STRINGZILLA_SHA256_BLOCK_LENGTH;
     sz_size_t const body_length = length - head_length - tail_length;
 
     // Copy hash to aligned local buffer
@@ -244,7 +246,7 @@ SZ_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_pt
 
     // Process body (complete aligned blocks)
     for (sz_size_t processed = 0; processed < body_length;
-         processed += SZ_SHA256_BLOCK_LENGTH, input += SZ_SHA256_BLOCK_LENGTH)
+         processed += STRINGZILLA_SHA256_BLOCK_LENGTH, input += STRINGZILLA_SHA256_BLOCK_LENGTH)
         sz_sha256_process_block_goldmont_(hash, input);
 
     // Process tail (remaining bytes into block buffer)
@@ -257,8 +259,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_pt
     _mm_storeu_si128((__m128i *)&state_ptr->hash[4], _mm_load_si128((__m128i const *)&hash[4]));
 }
 
-SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state_ptr,
-                                                     sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]) {
+STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_goldmont(
+    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -268,7 +270,7 @@ SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *st
     // If there's not enough room for the 64-bit length, pad this block and process it
     if (state.block_length > 56) {
         // Zero remaining bytes using 128-bit vectorized writes
-        sz_size_t remaining = SZ_SHA256_BLOCK_LENGTH - state.block_length;
+        sz_size_t remaining = STRINGZILLA_SHA256_BLOCK_LENGTH - state.block_length;
         sz_size_t xmm_bytes = (remaining / 16) * 16;
         for (sz_size_t byte_index = 0; byte_index < xmm_bytes; byte_index += 16)
             _mm_storeu_si128((__m128i *)&state.block[state.block_length + byte_index], _mm_setzero_si128());
@@ -315,17 +317,18 @@ SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *st
  *  but no AVX2 still reaches the hardware compressor for batched work instead of falling back to
  *  the serial one. */
 
-SZ_API_COMPTIME void sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states, sz_sequence_t const *texts) {
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states,
+                                                                   sz_sequence_t const *texts) {
     sz_size_t const lanes_count = texts->count;
     for (sz_size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
         sz_sha256_state_update_goldmont(&states[lane_index], texts->get_start(texts->handle, lane_index),
                                         texts->get_length(texts->handle, lane_index));
 }
 
-SZ_API_COMPTIME void sz_sha256_multistate_digest_goldmont(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                          sz_u8_t *digests) {
+STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_goldmont(sz_sha256_state_t const *states,
+                                                                   sz_size_t states_count, sz_u8_t *digests) {
     for (sz_size_t lane_index = 0; lane_index != states_count; ++lane_index)
-        sz_sha256_state_digest_goldmont(&states[lane_index], &digests[lane_index * SZ_SHA256_DIGEST_LENGTH]);
+        sz_sha256_state_digest_goldmont(&states[lane_index], &digests[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
 }
 
 #if defined(__clang__)
@@ -333,7 +336,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_digest_goldmont(sz_sha256_state_t cons
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_GOLDMONT
+#endif // STRINGZILLA_TARGET_GOLDMONT
 
 #ifdef __cplusplus
 }

@@ -88,7 +88,8 @@ static int parse_build_arguments_(PyObject *needles_obj, PyObject *case_sensitiv
     if (sz_py_export_strings(needles_obj, "needles", needles) != 0) return -1;
     if (parse_case_sensitivity_(case_sensitivity_obj, case_sensitivity) != 0) return -1;
     if (parse_overlap_policy_(overlap_policy_obj, overlap_policy) != 0) return -1;
-    if (parse_optional_size_(hot_states_obj, "hot_states", SZ_SUBSTRINGS_HOT_STATES_AUTO, hot_states) != 0) return -1;
+    if (parse_optional_size_(hot_states_obj, "hot_states", STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, hot_states) != 0)
+        return -1;
     if (parse_optional_size_(matches_budget_obj, "matches_budget", 0, matches_budget) != 0) return -1;
     return 0;
 }
@@ -165,7 +166,7 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
     sz_engine_lock_(self);
     sz_substrings_engine_free(&self->engine);
     sz_status_t const status = sz_substrings_engine_init_cpu(&needles, case_sensitivity, overlap_policy, hot_states,
-                                                             matches_budget, SZ_NULL, &self->engine);
+                                                             matches_budget, STRINGZILLA_NULL, &self->engine);
     sz_engine_unlock_(self);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "SubstringsEngine()");
@@ -264,7 +265,7 @@ static PyObject *SubstringsEngine_on_gpu(PyObject *type_obj, PyObject *const *ar
     SubstringsEngine *const self = (SubstringsEngine *)type->tp_alloc(type, 0);
     if (!self) return NULL;
     sz_status_t const status = sz_substrings_engine_init_gpu(&needles, case_sensitivity, overlap_policy, hot_states,
-                                                             matches_budget, SZ_NULL, stream, &self->engine);
+                                                             matches_budget, STRINGZILLA_NULL, stream, &self->engine);
     if (status != sz_success_k) {
         Py_DECREF(self);
         sz_py_raise_status(status, "SubstringsEngine.on_gpu()");
@@ -412,7 +413,7 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
     if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
 
     // One match is four pointer-width fields back to back, so the rows have to be packed as well as the columns.
-    sz_substrings_match_t *matches = SZ_NULL;
+    sz_substrings_match_t *matches = STRINGZILLA_NULL;
     sz_size_t matches_capacity = 0;
     Py_buffer matches_view;
     sz_bool_t have_matches = sz_false_k;
@@ -525,7 +526,7 @@ static PyObject *SubstringsEngine_replace(SubstringsEngine *self, PyObject *cons
     if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
     if (sz_py_export_strings(replacements_obj, "replacements", &replacements) != 0) return NULL;
 
-    sz_ptr_t tape = SZ_NULL;
+    sz_ptr_t tape = STRINGZILLA_NULL;
     sz_size_t tape_capacity = 0;
     Py_buffer tape_view;
     sz_bool_t have_tape = sz_false_k;
@@ -666,7 +667,7 @@ static PyObject *SubstringsEngine_bm25_scores(SubstringsEngine *self, PyObject *
                                   self->engine.needles_count, &weights_view) != 0)
         return NULL;
 
-    sz_f32_t const *lengths = SZ_NULL;
+    sz_f32_t const *lengths = STRINGZILLA_NULL;
     Py_buffer lengths_view;
     sz_bool_t have_lengths = sz_false_k;
     if (lengths_obj && lengths_obj != Py_None) {
@@ -757,11 +758,13 @@ static char const doc_SubstringsEngine[] =                                      
     "  3";
 
 static PyMethodDef SubstringsEngine_methods[] = {
-    {"on_gpu", (PyCFunction)SubstringsEngine_on_gpu, SZ_METHOD_FLAGS | METH_CLASS, doc_SubstringsEngine_on_gpu},
-    {"counts", (PyCFunction)SubstringsEngine_counts, SZ_METHOD_FLAGS, doc_SubstringsEngine_counts},
-    {"find", (PyCFunction)SubstringsEngine_find, SZ_METHOD_FLAGS, doc_SubstringsEngine_find},
-    {"replace", (PyCFunction)SubstringsEngine_replace, SZ_METHOD_FLAGS, doc_SubstringsEngine_replace},
-    {"bm25_scores", (PyCFunction)SubstringsEngine_bm25_scores, SZ_METHOD_FLAGS, doc_SubstringsEngine_bm25_scores},
+    {"on_gpu", (PyCFunction)SubstringsEngine_on_gpu, STRINGZILLA_METHOD_FLAGS | METH_CLASS,
+     doc_SubstringsEngine_on_gpu},
+    {"counts", (PyCFunction)SubstringsEngine_counts, STRINGZILLA_METHOD_FLAGS, doc_SubstringsEngine_counts},
+    {"find", (PyCFunction)SubstringsEngine_find, STRINGZILLA_METHOD_FLAGS, doc_SubstringsEngine_find},
+    {"replace", (PyCFunction)SubstringsEngine_replace, STRINGZILLA_METHOD_FLAGS, doc_SubstringsEngine_replace},
+    {"bm25_scores", (PyCFunction)SubstringsEngine_bm25_scores, STRINGZILLA_METHOD_FLAGS,
+     doc_SubstringsEngine_bm25_scores},
     {NULL, NULL, 0, NULL},
 };
 

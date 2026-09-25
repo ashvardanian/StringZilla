@@ -22,7 +22,7 @@ from typing import Callable, Iterable, List, Optional, Sequence, Union
 
 import pytest
 
-from test.sz_helpers import scale_iterations
+from test.helpers import scale_iterations
 
 # region Palettes & fixtures
 
@@ -354,7 +354,7 @@ def icu_normalizer(form: str) -> Callable[[str], str]:
 # region Rule-derived generators
 
 # Generators that turn the UCD break-property / combining-class / decomposition tables (extracted in
-# sz_helpers.py) into hard synthetic corner cases, rather than relying on a hand-picked palette.
+# helpers.py) into hard synthetic corner cases, rather than relying on a hand-picked palette.
 
 
 def class_adjacency_strings(

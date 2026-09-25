@@ -26,8 +26,8 @@ extern "C" {
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
  *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512,popcnt"))), \
                              apply_to = function)
 #elif defined(__clang__)
@@ -53,7 +53,7 @@ extern "C" {
  *  @param[out] first_pivot_offset Receives the index of the first element equal to the pivot.
  *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  */
-SZ_HELPER_INLINE void sz_sequence_argsort_skylake_3way_partition_(                  //
+STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_skylake_3way_partition_(         //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
     sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
@@ -149,9 +149,9 @@ SZ_HELPER_INLINE void sz_sequence_argsort_skylake_3way_partition_(              
  *  @param[in] start_in_sequence First index (inclusive) of the range to sort.
  *  @param[in] end_in_sequence One-past-the-last index of the range to sort.
  */
-SZ_API_COMPTIME void sz_sequence_argsort_skylake_quicksort_pgrams_( //
-    sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,     //
-    sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order, //
+STRINGZILLA_API_COMPTIME void sz_sequence_argsort_skylake_quicksort_pgrams_( //
+    sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,              //
+    sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order,          //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
 
     // On very small inputs, when we don't even have enough input for a single ZMM register,
@@ -183,8 +183,8 @@ SZ_API_COMPTIME void sz_sequence_argsort_skylake_quicksort_pgrams_( //
             last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-SZ_API_COMPTIME sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                                   sz_sorted_idx_t *order) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count,
+                                                            sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
@@ -227,7 +227,7 @@ SZ_API_COMPTIME sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-SZ_API_COMPTIME void sz_sequence_argsort_skylake_sort_byte_windows_(            //
+STRINGZILLA_API_COMPTIME void sz_sequence_argsort_skylake_sort_byte_windows_(   //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,       //
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, //
@@ -261,7 +261,7 @@ SZ_API_COMPTIME void sz_sequence_argsort_skylake_sort_byte_windows_(            
         // whole key was complemented, so we complement back before reading it.
         sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
         sz_cptr_t const length_str = (sz_cptr_t)&length_source;
-#if !SZ_IS_BIG_ENDIAN_
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[0]; //! The byte order was swapped
 #else
         sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[pgram_capacity]; //! No swaps on big-endian
@@ -281,9 +281,9 @@ SZ_API_COMPTIME void sz_sequence_argsort_skylake_sort_byte_windows_(            
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                        sz_sorted_idx_t *order, sz_size_t top_count,
-                                                        sz_bool_t reverse) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
+                                                                 sz_memory_allocator_t *alloc, sz_sorted_idx_t *order,
+                                                                 sz_size_t top_count, sz_bool_t reverse) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
     sz_size_t count = sequence->count;
@@ -323,7 +323,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *seq
 /** Uncased twin of @c sz_sequence_argsort_skylake_sort_byte_windows_: the folded code-point export
  *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
  *  the AVX-512 partition - which is where Skylake beats the fully-serial uncased path. */
-SZ_API_COMPTIME void sz_sequence_argsort_skylake_sort_casefold_windows_(
+STRINGZILLA_API_COMPTIME void sz_sequence_argsort_skylake_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
@@ -359,8 +359,8 @@ SZ_API_COMPTIME void sz_sequence_argsort_skylake_sort_casefold_windows_(
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_skylake( //
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_skylake( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,          //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     sz_size_t const count = sequence->count;
@@ -395,7 +395,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_skylake( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #ifdef __cplusplus
 }

@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-SZ_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_u8_t const *a_u8 = (sz_u8_t const *)a;
     sz_u8_t const *b_u8 = (sz_u8_t const *)b;
     while (length) {
@@ -39,7 +39,7 @@ SZ_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t lengt
     return sz_true_k;
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_u8_t const *a_u8 = (sz_u8_t const *)a;
     sz_u8_t const *b_u8 = (sz_u8_t const *)b;
     // Scan the common prefix in `e8m8` strips; `vmsne` + `vfirst` locate the first differing byte natively, and
@@ -64,7 +64,7 @@ SZ_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_c
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_RVV
+#endif // STRINGZILLA_TARGET_RVV
 
 #ifdef __cplusplus
 }

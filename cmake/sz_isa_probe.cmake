@@ -4,7 +4,7 @@
 # compilable and trust the load-time dispatch table; comptime-dispatched targets require a capability to
 # pass both probes. Per-architecture modules call `sz_instruction_set_probe_` per tier, newest first, then
 # `sz_build_instruction_set_definitions_`, which fills the cached `sz_compile_definitions_` and
-# `sz_run_definitions_` lists of `SZ_USE_<TIER>=0/1` that the targets take.
+# `sz_run_definitions_` lists of `STRINGZILLA_TARGET_<TIER>=0/1` that the targets take.
 
 include_guard(GLOBAL)
 
@@ -12,8 +12,8 @@ include_guard(GLOBAL)
 # build tree must re-ask every question, or the wrong kernels get enabled with no message. A fresh tree
 # holds nothing stale, and sweeping it would erase a preset `-D sz_target_<tier>_compiles` verdict.
 set(sz_probe_key_ "${CMAKE_C_COMPILER}|${CMAKE_C_FLAGS}|${CMAKE_TOOLCHAIN_FILE}")
-if (NOT "${SZ_PROBE_KEY}" STREQUAL "${sz_probe_key_}")
-    if (DEFINED SZ_PROBE_KEY)
+if (NOT "${STRINGZILLA_PROBE_KEY}" STREQUAL "${sz_probe_key_}")
+    if (DEFINED STRINGZILLA_PROBE_KEY)
         message(STATUS "Toolchain changed - re-running the ISA probes")
         get_cmake_property(sz_cache_entries_ CACHE_VARIABLES)
         list(FILTER sz_cache_entries_ INCLUDE REGEX "^sz_target_.*_(compiles|flags)$")
@@ -21,20 +21,20 @@ if (NOT "${SZ_PROBE_KEY}" STREQUAL "${sz_probe_key_}")
             unset(${sz_cache_entry_} CACHE)
         endforeach ()
     endif ()
-    unset(SZ_RUNTIME_DETECTABLE CACHE)
-    unset(SZ_MACHINE_CAPABILITIES CACHE)
-    set(SZ_PROBE_KEY
+    unset(STRINGZILLA_HAS_RUNTIME_DETECTION_ CACHE)
+    unset(STRINGZILLA_MACHINE_CAPABILITIES CACHE)
+    set(STRINGZILLA_PROBE_KEY
         "${sz_probe_key_}"
         CACHE INTERNAL "Toolchain the cached probe verdicts answer for"
     )
 endif ()
 set(sz_compile_definitions_
     ""
-    CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for runtime-dispatched units"
+    CACHE INTERNAL "STRINGZILLA_TARGET_<TIER>=0/1 verdicts for runtime-dispatched units"
 )
 set(sz_run_definitions_
     ""
-    CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for comptime-dispatched executables"
+    CACHE INTERNAL "STRINGZILLA_TARGET_<TIER>=0/1 verdicts for comptime-dispatched executables"
 )
 
 # Try-compile one capability's probe, caching the verdict as `sz_target_<tier>_compiles` and the flags it
@@ -90,28 +90,28 @@ function (sz_instruction_set_probe_ capability_)
     message(STATUS "Performing ISA probe ${capability_} - ${sz_probe_outcome_}")
 endfunction ()
 
-# Compile-probe `probes/runtime_detection.c` into the cached `SZ_RUNTIME_DETECTABLE`: whether the built
+# Compile-probe `probes/runtime_detection.c` into the cached `STRINGZILLA_HAS_RUNTIME_DETECTION_`: whether the built
 # library performs real runtime capability detection, the header-owned
-# `SZ_CAPABILITIES_RUNTIME_DETECTABLE_`. Without it, dispatch tables mirror the compile-time mask and
+# `STRINGZILLA_HAS_RUNTIME_DETECTION_`. Without it, dispatch tables mirror the compile-time mask and
 # capability selection must stay with the toolchain flags and `types.h` auto-detection.
 function (sz_runtime_detectable_)
-    if (DEFINED SZ_RUNTIME_DETECTABLE)
+    if (DEFINED STRINGZILLA_HAS_RUNTIME_DETECTION_)
         return()
     endif ()
     try_compile(
         sz_detectable_ ${CMAKE_BINARY_DIR}/sz_probes
         ${CMAKE_CURRENT_SOURCE_DIR}/probes/runtime_detection.c
-        COMPILE_DEFINITIONS "-DSZ_AVOID_LIBC=0"
+        COMPILE_DEFINITIONS "-DSTRINGZILLA_WITH_LIBC=1"
         CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CMAKE_CURRENT_SOURCE_DIR}/include" C_STANDARD 99
         OUTPUT_VARIABLE sz_probe_output_
     )
     if (sz_detectable_)
-        set(SZ_RUNTIME_DETECTABLE
+        set(STRINGZILLA_HAS_RUNTIME_DETECTION_
             1
             CACHE INTERNAL "Runtime capability detection exists for this target"
         )
     else ()
-        set(SZ_RUNTIME_DETECTABLE
+        set(STRINGZILLA_HAS_RUNTIME_DETECTION_
             0
             CACHE INTERNAL "Runtime capability detection exists for this target"
         )
@@ -120,15 +120,15 @@ function (sz_runtime_detectable_)
 endfunction ()
 
 # Compile and run `probes/run_capabilities.c`, caching the machine's comma-separated capability tokens in
-# `SZ_MACHINE_CAPABILITIES`, for example "serial,neon,neonaes". Left empty when the answer is
+# `STRINGZILLA_MACHINE_CAPABILITIES`, for example "serial,neon,neonaes". Left empty when the answer is
 # unknowable, like cross-compiling without an emulator or any probe failure; callers then fall back to
 # `types.h` auto-detection under the target's own `-march` flags.
 function (sz_machine_capabilities_)
-    if (DEFINED SZ_MACHINE_CAPABILITIES)
+    if (DEFINED STRINGZILLA_MACHINE_CAPABILITIES)
         return()
     endif ()
     if (CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
-        set(SZ_MACHINE_CAPABILITIES
+        set(STRINGZILLA_MACHINE_CAPABILITIES
             ""
             CACHE INTERNAL "Tier tokens the build machine can run"
         )
@@ -143,13 +143,13 @@ function (sz_machine_capabilities_)
     )
     if (sz_run_compiled_ AND sz_run_exit_ EQUAL 0)
         string(STRIP "${sz_run_output_}" sz_run_output_)
-        set(SZ_MACHINE_CAPABILITIES
+        set(STRINGZILLA_MACHINE_CAPABILITIES
             "${sz_run_output_}"
             CACHE INTERNAL "Tier tokens the build machine can run"
         )
-        message(STATUS "Machine capabilities: ${SZ_MACHINE_CAPABILITIES}")
+        message(STATUS "Machine capabilities: ${STRINGZILLA_MACHINE_CAPABILITIES}")
     else ()
-        set(SZ_MACHINE_CAPABILITIES
+        set(STRINGZILLA_MACHINE_CAPABILITIES
             ""
             CACHE INTERNAL "Tier tokens the build machine can run"
         )
@@ -157,21 +157,21 @@ function (sz_machine_capabilities_)
     endif ()
 endfunction ()
 
-# Fold the cached verdicts into `sz_compile_definitions_`, the `SZ_USE_<TIER>=0/1` list for
+# Fold the cached verdicts into `sz_compile_definitions_`, the `STRINGZILLA_TARGET_<TIER>=0/1` list for
 # runtime-dispatched units, and `sz_run_definitions_`, the same for comptime-dispatched executables that
 # must also run here. A list stays empty when its answer is unknowable, so `types.h` decides under the
-# unit's own flags; `-D SZ_USE_<TIER>=0/1` outranks both lists, except past a failed compile probe.
+# unit's own flags; `-D STRINGZILLA_TARGET_<TIER>=0/1` outranks both lists, except past a failed compile probe.
 function (sz_build_instruction_set_definitions_ architecture_name_ tier_names_)
     sz_runtime_detectable_()
-    set(compile_verdicts_known_ ${SZ_RUNTIME_DETECTABLE})
+    set(compile_verdicts_known_ ${STRINGZILLA_HAS_RUNTIME_DETECTION_})
     set(run_verdicts_known_ 0)
     set(machine_tiers_ "")
-    if (SZ_RUNTIME_DETECTABLE)
+    if (STRINGZILLA_HAS_RUNTIME_DETECTION_)
         sz_machine_capabilities_()
     endif ()
-    if (NOT "${SZ_MACHINE_CAPABILITIES}" STREQUAL "")
+    if (NOT "${STRINGZILLA_MACHINE_CAPABILITIES}" STREQUAL "")
         set(run_verdicts_known_ 1)
-        string(REPLACE "," ";" machine_tiers_ "${SZ_MACHINE_CAPABILITIES}")
+        string(REPLACE "," ";" machine_tiers_ "${STRINGZILLA_MACHINE_CAPABILITIES}")
     endif ()
     set(compile_definitions_ "")
     set(run_definitions_ "")
@@ -185,25 +185,25 @@ function (sz_build_instruction_set_definitions_ architecture_name_ tier_names_)
         )
             set(machine_runs_ 0)
         endif ()
-        if (DEFINED SZ_USE_${tier_})
-            message(STATUS "SZ_USE_${tier_} override in effect: ${SZ_USE_${tier_}}")
+        if (DEFINED STRINGZILLA_TARGET_${tier_})
+            message(STATUS "STRINGZILLA_TARGET_${tier_} override in effect: ${STRINGZILLA_TARGET_${tier_}}")
             set(toolchain_compiles_ 0)
             set(machine_runs_ 0)
         endif ()
-        if (DEFINED SZ_USE_${tier_} AND SZ_USE_${tier_})
+        if (DEFINED STRINGZILLA_TARGET_${tier_} AND STRINGZILLA_TARGET_${tier_})
             set(toolchain_compiles_ 1)
             set(machine_runs_ 1)
         endif ()
         if (toolchain_compiles_ AND NOT sz_target_${tier_lowercase_}_compiles)
-            message(WARNING "SZ_USE_${tier_}=1 requested, but its probe does not compile here; ignoring")
+            message(WARNING "STRINGZILLA_TARGET_${tier_}=1 requested, but its probe does not compile here; ignoring")
             set(toolchain_compiles_ 0)
             set(machine_runs_ 0)
         endif ()
-        if (compile_verdicts_known_ OR DEFINED SZ_USE_${tier_})
-            list(APPEND compile_definitions_ "SZ_USE_${tier_}=${toolchain_compiles_}")
+        if (compile_verdicts_known_ OR DEFINED STRINGZILLA_TARGET_${tier_})
+            list(APPEND compile_definitions_ "STRINGZILLA_TARGET_${tier_}=${toolchain_compiles_}")
         endif ()
-        if (run_verdicts_known_ OR DEFINED SZ_USE_${tier_})
-            list(APPEND run_definitions_ "SZ_USE_${tier_}=${machine_runs_}")
+        if (run_verdicts_known_ OR DEFINED STRINGZILLA_TARGET_${tier_})
+            list(APPEND run_definitions_ "STRINGZILLA_TARGET_${tier_}=${machine_runs_}")
         endif ()
     endforeach ()
     if (NOT "${compile_definitions_}" STREQUAL "")
@@ -216,10 +216,10 @@ function (sz_build_instruction_set_definitions_ architecture_name_ tier_names_)
     endif ()
     set(sz_compile_definitions_
         "${compile_definitions_}"
-        CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for runtime-dispatched units"
+        CACHE INTERNAL "STRINGZILLA_TARGET_<TIER>=0/1 verdicts for runtime-dispatched units"
     )
     set(sz_run_definitions_
         "${run_definitions_}"
-        CACHE INTERNAL "SZ_USE_<TIER>=0/1 verdicts for comptime-dispatched executables"
+        CACHE INTERNAL "STRINGZILLA_TARGET_<TIER>=0/1 verdicts for comptime-dispatched executables"
     )
 endfunction ()

@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -31,8 +31,8 @@ extern "C" {
  *  @ref sz_utf8_sentence_break_astral_class_neon_. Per-lane bytes: @p plane = (offset >> 16) &
  *  0xFF with only the low nibble meaningful, @p high = (offset >> 8) & 0xFF, @p low = offset &
  *  0xFF. Bit-exact with @c sz_rune_sentence_break_property over all astral planes. */
-SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
-                                                                     svuint8_t low_u8x) {
+STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
+                                                                              svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
@@ -75,7 +75,7 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t p
  *  overlong encodings, the astral cascade for planes 1..16, and class Other for planes over 16,
  *  such as `F5..F7` leads. The class on non-start lanes is irrelevant, as only start lanes compact.
  */
-SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(                 //
+STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(        //
     svuint8_t bytes_u8x, svuint8_t next1_u8x, svuint8_t next2_u8x, svuint8_t next3_u8x, //
     svbool_t two_b8x, svbool_t three_b8x, svbool_t four_b8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -131,8 +131,8 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(         
  *  bit-planes: each plane lowers to a u64 with the shared predicate bridge, and the fifteen
  *  class masks assemble from the planes with scalar mask algebra, 4 predicate compares per dense
  *  vector instead of 15. */
-SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_sve2_(sz_u8_t const *dense_classes,
-                                                                                   sz_size_t count) {
+STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_sve2_(
+    sz_u8_t const *dense_classes, sz_size_t count) {
     sz_size_t const vector_bytes = svcntb() < 64 ? svcntb() : 64;
     sz_u64_t planes[4] = {0, 0, 0, 0};
     for (sz_size_t base = 0; base < count; base += vector_bytes) {
@@ -173,7 +173,7 @@ SZ_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_sve
  *  @c svcompact_u32 and a truncating store per 32-bit quarter, so the only memory the window
  *  touches is that stream, the shared engine's own input format.
  */
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(            //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(   //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
@@ -367,7 +367,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(            //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE2
+#endif // STRINGZILLA_TARGET_SVE2
 
 #ifdef __cplusplus
 }

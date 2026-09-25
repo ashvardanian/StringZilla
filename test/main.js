@@ -1,5 +1,5 @@
 /**
- *  @file test/stringzilla.js
+ *  @file test/main.js
  *  @author Ash Vardanian
  *  @date September 23, 2023
  *  @brief Tests for the StringZilla JavaScript binding.

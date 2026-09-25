@@ -281,7 +281,7 @@ typedef struct sz_substrings_bm25_t {
 } sz_substrings_bm25_t;
 
 /** The @c hot_states value that sizes the hot tier itself, so zero stays a genuine all-cold ask. */
-#define SZ_SUBSTRINGS_HOT_STATES_AUTO (SZ_SIZE_MAX)
+#define STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO (STRINGZILLA_SIZE_MAX)
 
 /**
  *  @brief Compiles @p needles into an engine the matching verbs read, on the host.
@@ -291,12 +291,13 @@ typedef struct sz_substrings_bm25_t {
  *  @param[in] case_sensitivity Whether both sides are folded before they meet, or compared as is.
  *  @param[in] overlap_policy The cover every round runs, as the arena is sized for that one alone.
  *  @param[in] hot_states States to keep in the dense hot rows, or
- *      @ref SZ_SUBSTRINGS_HOT_STATES_AUTO to fill a fixed byte budget, which holds more states the
- *      fewer classes the vocabulary spells.
+ *      @ref STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO to fill a fixed byte budget, which holds more
+ *      states the fewer classes the vocabulary spells.
  *  @param[in] matches_budget Matches one round may emit, read by a device tier only; a host tier
  *      walks straight into the caller's output and ignores it. Zero asks for a tier-chosen default.
- *  @param[in] alloc Where both blocks come from, or @c SZ_NULL for the default host allocator.
- *      Stored by value, so @ref sz_substrings_engine_free needs none and cannot get the wrong one.
+ *  @param[in] alloc Where both blocks come from, or @c STRINGZILLA_NULL for the default host
+ *      allocator. Stored by value, so @ref sz_substrings_engine_free needs none and cannot get
+ *      the wrong one.
  *  @param[out] engine Left untouched unless the call succeeds.
  *  @return @c sz_success_k once the vocabulary compiled, @c sz_bad_alloc_k if memory allocation
  *      failed, @c sz_overflow_risk_k if the vocabulary exceeds a 32-bit state id,
@@ -304,34 +305,35 @@ typedef struct sz_substrings_bm25_t {
  *      @c sz_unexpected_dimensions_k if the vocabulary or one of its needles was empty.
  *  @sa sz_substrings_engine_free
  */
-SZ_API_RUNTIME sz_status_t sz_substrings_engine_init_cpu(sz_sequence_t const *needles,
-                                                         sz_substrings_case_sensitivity_t case_sensitivity,
-                                                         sz_substrings_overlap_policy_t overlap_policy,
-                                                         sz_size_t hot_states, sz_size_t matches_budget,
-                                                         sz_memory_allocator_t *alloc,
-                                                         sz_substrings_engine_t *engine);
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_engine_init_cpu(sz_sequence_t const *needles,
+                                                                  sz_substrings_case_sensitivity_t case_sensitivity,
+                                                                  sz_substrings_overlap_policy_t overlap_policy,
+                                                                  sz_size_t hot_states, sz_size_t matches_budget,
+                                                                  sz_memory_allocator_t *alloc,
+                                                                  sz_substrings_engine_t *engine);
 
 /**
  *  @brief Compiles @p needles into an engine on @p stream 's device, arena included.
  *
- *  @param[in] alloc Unified and bound to @p stream 's device, or @c SZ_NULL to derive one from it;
- *      the host builder writes the automaton in place, so a device-only block cannot serve here.
- *  @param[in] stream A @c cudaStream_t, or @c SZ_NULL for the default stream.
+ *  @param[in] alloc Unified and bound to @p stream 's device, or @c STRINGZILLA_NULL to derive
+ *      one from it; the host builder writes the automaton in place, so a device-only block
+ *      cannot serve here.
+ *  @param[in] stream A @c cudaStream_t, or @c STRINGZILLA_NULL for the default stream.
  *  @note Also returns @c sz_device_memory_mismatch_k when the block @p alloc handed back does not
  *      reach the device.
  *  @note May join @p stream; no compute verb ever does.
  *
  *  @copydetails sz_substrings_engine_init_cpu
  */
-SZ_API_RUNTIME sz_status_t sz_substrings_engine_init_gpu(sz_sequence_t const *needles,
-                                                         sz_substrings_case_sensitivity_t case_sensitivity,
-                                                         sz_substrings_overlap_policy_t overlap_policy,
-                                                         sz_size_t hot_states, sz_size_t matches_budget,
-                                                         sz_memory_allocator_t *alloc,
-                                                         void *stream, sz_substrings_engine_t *engine);
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_engine_init_gpu(sz_sequence_t const *needles,
+                                                                  sz_substrings_case_sensitivity_t case_sensitivity,
+                                                                  sz_substrings_overlap_policy_t overlap_policy,
+                                                                  sz_size_t hot_states, sz_size_t matches_budget,
+                                                                  sz_memory_allocator_t *alloc, void *stream,
+                                                                  sz_substrings_engine_t *engine);
 
 /** Returns both of the engine's blocks to the allocator that built them, emptying @p engine. */
-SZ_API_RUNTIME void sz_substrings_engine_free(sz_substrings_engine_t *engine);
+STRINGZILLA_API_RUNTIME void sz_substrings_engine_free(sz_substrings_engine_t *engine);
 
 /**
  *  @brief Counts the matches of every needle in every haystack, one count per haystack.
@@ -348,16 +350,16 @@ SZ_API_RUNTIME void sz_substrings_engine_free(sz_substrings_engine_t *engine);
  *  @note Reads the engine's capability to pick the table, then the slot of the tier init resolved.
  *  @sa sz_substrings_counts_serial
  */
-SZ_API_RUNTIME sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                sz_size_t *counts, sz_size_t counts_stride);
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                         sz_size_t *counts, sz_size_t counts_stride);
 
 /**
  *  @brief Reports every match of every needle in every haystack.
  *
  *  @param[in] engine A vocabulary compiled by @c _init_cpu or @c _init_gpu.
  *  @param[in] haystacks The texts to search; their bytes are read in place and never copied.
- *  @param[out] matches Room for @p matches_capacity matches, ascending by haystack; @c SZ_NULL
- *      together with a zero capacity makes the call a pure size query.
+ *  @param[out] matches Room for @p matches_capacity matches, ascending by haystack;
+ *      @c STRINGZILLA_NULL together with a zero capacity makes the call a pure size query.
  *  @param[in] matches_capacity Entries @p matches holds.
  *  @param[out] matches_offsets One boundary per haystack into @p matches plus one, the last being
  *      the total; filled whether or not the matches fit, which is what sizes the next call.
@@ -369,9 +371,9 @@ SZ_API_RUNTIME sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, 
  *  A capacity too small is not an error: the report's @c matches_emitted names the true total and
  *  @c shortfall names what did not fit, so a sizing call and a filling call need no walk between.
  */
-SZ_API_RUNTIME sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                              sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                              sz_size_t *matches_offsets);
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                       sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                       sz_size_t *matches_offsets);
 
 /**
  *  @brief Rewrites every haystack, substituting one replacement per needle, onto one output tape.
@@ -381,7 +383,8 @@ SZ_API_RUNTIME sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz
  *      bytes is not a function.
  *  @param[in] haystacks The texts to rewrite; their bytes are read in place and never copied.
  *  @param[in] replacements One replacement per needle, indexed by needle; an empty one deletes.
- *  @param[out] tape Room for @p tape_capacity bytes, or @c SZ_NULL with zero capacity to size only.
+ *  @param[out] tape Room for @p tape_capacity bytes, or @c STRINGZILLA_NULL with zero capacity
+ *      to size only.
  *  @param[in] tape_capacity Bytes @p tape holds.
  *  @param[out] offsets One rewritten boundary per haystack plus one, the last being the total;
  *      filled whether or not the tape held the result, which is what sizes the next call.
@@ -395,9 +398,10 @@ SZ_API_RUNTIME sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz
  *  and @c shortfall names what did not fit, while the contents of @p tape are then unspecified. A
  *  device tier returns @c sz_device_memory_mismatch_k for an argument no kernel can address.
  */
-SZ_API_RUNTIME sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                 sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                 sz_size_t tape_capacity, sz_size_t *offsets);
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine,
+                                                          sz_sequence_t const *haystacks,
+                                                          sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                          sz_size_t tape_capacity, sz_size_t *offsets);
 
 /**
  *  @brief Scores every haystack against the vocabulary as one BM25 query, one score per haystack.
@@ -411,7 +415,7 @@ SZ_API_RUNTIME sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine,
  *  @param[in] engine A vocabulary compiled by @c _init_cpu or @c _init_gpu.
  *  @param[in] haystacks The documents to score; their bytes are read in place and never copied.
  *  @param[in] document_lengths One length per haystack to normalize by, in the unit of
- *      @c average_document_length, or @c SZ_NULL to use each haystack's byte length.
+ *      @c average_document_length, or @c STRINGZILLA_NULL to use each haystack's byte length.
  *  @param[in] parameters BM25's continuous parameters.
  *  @param[in] needle_weights One weight per needle of the engine.
  *  @param[out] scores The per-haystack scores, haystack h at `scores[h * stride]`.
@@ -422,143 +426,133 @@ SZ_API_RUNTIME sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine,
  *      @c sz_device_memory_mismatch_k if a device tier got an argument no kernel can address.
  *  @sa sz_substrings_bm25_scores_serial
  *
- *  The arguments are invalid when @p needle_weights is @c SZ_NULL, @p scores_stride is zero, or
- *  @c length_normalization is positive while @c average_document_length is not.
+ *  The arguments are invalid when @p needle_weights is @c STRINGZILLA_NULL, @p scores_stride is
+ *  zero, or @c length_normalization is positive while @c average_document_length is not.
  */
-SZ_API_RUNTIME sz_status_t sz_substrings_bm25_scores(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                     sz_f32_t const *document_lengths,
-                                                     sz_substrings_bm25_t const *parameters,
-                                                     sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                     sz_size_t scores_stride);
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_bm25_scores(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride);
 
 /** @copydoc sz_substrings_counts */
-SZ_API_COMPTIME sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine,
-                                                        sz_sequence_t const *haystacks, sz_size_t *counts,
-                                                        sz_size_t counts_stride);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine,
+                                                                 sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                                 sz_size_t counts_stride);
 
 /** @copydoc sz_substrings_find */
-SZ_API_COMPTIME sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                      sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                      sz_size_t *matches_offsets);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *engine,
+                                                               sz_sequence_t const *haystacks,
+                                                               sz_substrings_match_t *matches,
+                                                               sz_size_t matches_capacity, sz_size_t *matches_offsets);
 
 /** @copydoc sz_substrings_replace */
-SZ_API_COMPTIME sz_status_t sz_substrings_replace_serial(sz_substrings_engine_t *engine,
-                                                         sz_sequence_t const *haystacks,
-                                                         sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                         sz_size_t tape_capacity, sz_size_t *offsets);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_replace_serial(sz_substrings_engine_t *engine,
+                                                                  sz_sequence_t const *haystacks,
+                                                                  sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                                  sz_size_t tape_capacity, sz_size_t *offsets);
 
 /** @copydoc sz_substrings_bm25_scores */
-SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_serial(sz_substrings_engine_t *engine,
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_serial(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride);
+
+#if STRINGZILLA_TARGET_HASWELL
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_counts_haswell(sz_substrings_engine_t *engine,
+                                                                  sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                                  sz_size_t counts_stride);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_find_haswell(sz_substrings_engine_t *engine,
+                                                                sz_sequence_t const *haystacks,
+                                                                sz_substrings_match_t *matches,
+                                                                sz_size_t matches_capacity, sz_size_t *matches_offsets);
+/** @copydoc sz_substrings_replace */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_replace_haswell(sz_substrings_engine_t *engine,
+                                                                   sz_sequence_t const *haystacks,
+                                                                   sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                                   sz_size_t tape_capacity, sz_size_t *offsets);
+/** @copydoc sz_substrings_bm25_scores */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_haswell(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride);
+#endif
+
+#if STRINGZILLA_TARGET_ICELAKE
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_counts_icelake(sz_substrings_engine_t *engine,
+                                                                  sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                                  sz_size_t counts_stride);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_find_icelake(sz_substrings_engine_t *engine,
+                                                                sz_sequence_t const *haystacks,
+                                                                sz_substrings_match_t *matches,
+                                                                sz_size_t matches_capacity, sz_size_t *matches_offsets);
+/** @copydoc sz_substrings_replace */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_replace_icelake(sz_substrings_engine_t *engine,
+                                                                   sz_sequence_t const *haystacks,
+                                                                   sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                                   sz_size_t tape_capacity, sz_size_t *offsets);
+/** @copydoc sz_substrings_bm25_scores */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_icelake(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride);
+#endif
+
+#if STRINGZILLA_TARGET_NEON
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *engine,
+                                                               sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                               sz_size_t counts_stride);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_find_neon(sz_substrings_engine_t *engine,
                                                              sz_sequence_t const *haystacks,
-                                                             sz_f32_t const *document_lengths,
-                                                             sz_substrings_bm25_t const *parameters,
-                                                             sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                             sz_size_t scores_stride);
-
-#if SZ_USE_HASWELL
-/** @copydoc sz_substrings_counts */
-SZ_API_COMPTIME sz_status_t sz_substrings_counts_haswell(sz_substrings_engine_t *engine,
-                                                         sz_sequence_t const *haystacks, sz_size_t *counts,
-                                                         sz_size_t counts_stride);
-/** @copydoc sz_substrings_find */
-SZ_API_COMPTIME sz_status_t sz_substrings_find_haswell(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                       sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                       sz_size_t *matches_offsets);
+                                                             sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                             sz_size_t *matches_offsets);
 /** @copydoc sz_substrings_replace */
-SZ_API_COMPTIME sz_status_t sz_substrings_replace_haswell(sz_substrings_engine_t *engine,
-                                                          sz_sequence_t const *haystacks,
-                                                          sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                          sz_size_t tape_capacity, sz_size_t *offsets);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_replace_neon(sz_substrings_engine_t *engine,
+                                                                sz_sequence_t const *haystacks,
+                                                                sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                                sz_size_t tape_capacity, sz_size_t *offsets);
 /** @copydoc sz_substrings_bm25_scores */
-SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_haswell(sz_substrings_engine_t *engine,
-                                                              sz_sequence_t const *haystacks,
-                                                              sz_f32_t const *document_lengths,
-                                                              sz_substrings_bm25_t const *parameters,
-                                                              sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                              sz_size_t scores_stride);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_neon(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride);
 #endif
 
-#if SZ_USE_ICELAKE
-/** @copydoc sz_substrings_counts */
-SZ_API_COMPTIME sz_status_t sz_substrings_counts_icelake(sz_substrings_engine_t *engine,
-                                                         sz_sequence_t const *haystacks, sz_size_t *counts,
-                                                         sz_size_t counts_stride);
-/** @copydoc sz_substrings_find */
-SZ_API_COMPTIME sz_status_t sz_substrings_find_icelake(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                       sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                       sz_size_t *matches_offsets);
-/** @copydoc sz_substrings_replace */
-SZ_API_COMPTIME sz_status_t sz_substrings_replace_icelake(sz_substrings_engine_t *engine,
-                                                          sz_sequence_t const *haystacks,
-                                                          sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                          sz_size_t tape_capacity, sz_size_t *offsets);
-/** @copydoc sz_substrings_bm25_scores */
-SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_icelake(sz_substrings_engine_t *engine,
-                                                              sz_sequence_t const *haystacks,
-                                                              sz_f32_t const *document_lengths,
-                                                              sz_substrings_bm25_t const *parameters,
-                                                              sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                              sz_size_t scores_stride);
-#endif
-
-#if SZ_USE_NEON
-/** @copydoc sz_substrings_counts */
-SZ_API_COMPTIME sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                      sz_size_t *counts, sz_size_t counts_stride);
-/** @copydoc sz_substrings_find */
-SZ_API_COMPTIME sz_status_t sz_substrings_find_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                    sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                    sz_size_t *matches_offsets);
-/** @copydoc sz_substrings_replace */
-SZ_API_COMPTIME sz_status_t sz_substrings_replace_neon(sz_substrings_engine_t *engine,
-                                                       sz_sequence_t const *haystacks,
-                                                       sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                       sz_size_t tape_capacity, sz_size_t *offsets);
-/** @copydoc sz_substrings_bm25_scores */
-SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_neon(sz_substrings_engine_t *engine,
-                                                           sz_sequence_t const *haystacks,
-                                                           sz_f32_t const *document_lengths,
-                                                           sz_substrings_bm25_t const *parameters,
-                                                           sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                           sz_size_t scores_stride);
-#endif
-
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
 /**
  *  @brief Compiles @p needles where a kernel can reach them, sizing the round's arena from budgets.
  *
  *  @copydetails sz_substrings_engine_init_gpu
  */
-SZ_API_COMPTIME sz_status_t sz_substrings_engine_init_cuda(sz_sequence_t const *needles,
-                                                           sz_substrings_case_sensitivity_t case_sensitivity,
-                                                           sz_substrings_overlap_policy_t overlap_policy,
-                                                           sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_memory_allocator_t *alloc,
-                                                           void *stream, sz_substrings_engine_t *engine);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_engine_init_cuda(sz_sequence_t const *needles,
+                                                                    sz_substrings_case_sensitivity_t case_sensitivity,
+                                                                    sz_substrings_overlap_policy_t overlap_policy,
+                                                                    sz_size_t hot_states, sz_size_t matches_budget,
+                                                                    sz_memory_allocator_t *alloc, void *stream,
+                                                                    sz_substrings_engine_t *engine);
 
 /** @copydoc sz_substrings_counts */
-SZ_API_COMPTIME sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                      sz_size_t *counts, sz_size_t counts_stride);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine,
+                                                               sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                               sz_size_t counts_stride);
 
 /** @copydoc sz_substrings_find */
-SZ_API_COMPTIME sz_status_t sz_substrings_find_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                    sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                    sz_size_t *matches_offsets);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_find_cuda(sz_substrings_engine_t *engine,
+                                                             sz_sequence_t const *haystacks,
+                                                             sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                             sz_size_t *matches_offsets);
 
 /** @copydoc sz_substrings_replace */
-SZ_API_COMPTIME sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *engine,
-                                                       sz_sequence_t const *haystacks,
-                                                       sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                       sz_size_t tape_capacity, sz_size_t *offsets);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *engine,
+                                                                sz_sequence_t const *haystacks,
+                                                                sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                                sz_size_t tape_capacity, sz_size_t *offsets);
 
 /** @copydoc sz_substrings_bm25_scores */
-SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_t *engine,
-                                                           sz_sequence_t const *haystacks,
-                                                           sz_f32_t const *document_lengths,
-                                                           sz_substrings_bm25_t const *parameters,
-                                                           sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                           sz_size_t scores_stride);
+STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_cuda(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride);
 
 #endif
 
@@ -570,22 +564,22 @@ SZ_API_COMPTIME sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_
 #include "stringzilla/substrings/neon.h"
 #include "stringzilla/substrings/cuda.cuh"
 
-/*  Pick the right implementation for the multi-pattern search algorithms.
- *  To override this behavior and precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
+/*  Pick the right implementation for the multi-pattern search algorithms. To override this behavior
+ *  and precompile all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_status_t sz_substrings_engine_init_cpu(sz_sequence_t const *needles,
-                                                         sz_substrings_case_sensitivity_t case_sensitivity,
-                                                         sz_substrings_overlap_policy_t overlap_policy,
-                                                         sz_size_t hot_states, sz_size_t matches_budget,
-                                                         sz_memory_allocator_t *alloc,
-                                                         sz_substrings_engine_t *engine) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_engine_init_cpu(sz_sequence_t const *needles,
+                                                                  sz_substrings_case_sensitivity_t case_sensitivity,
+                                                                  sz_substrings_overlap_policy_t overlap_policy,
+                                                                  sz_size_t hot_states, sz_size_t matches_budget,
+                                                                  sz_memory_allocator_t *alloc,
+                                                                  sz_substrings_engine_t *engine) {
+#if STRINGZILLA_TARGET_ICELAKE
     sz_capability_t const capability = sz_cap_icelake_k;
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     sz_capability_t const capability = sz_cap_haswell_k;
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     sz_capability_t const capability = sz_cap_neon_k;
 #else
     sz_capability_t const capability = sz_cap_serial_k;
@@ -594,89 +588,90 @@ SZ_API_RUNTIME sz_status_t sz_substrings_engine_init_cpu(sz_sequence_t const *ne
                                        capability, alloc, engine);
 }
 
-#if SZ_USE_CUDA
-SZ_API_RUNTIME sz_status_t sz_substrings_engine_init_gpu(sz_sequence_t const *needles,
-                                                         sz_substrings_case_sensitivity_t case_sensitivity,
-                                                         sz_substrings_overlap_policy_t overlap_policy,
-                                                         sz_size_t hot_states, sz_size_t matches_budget,
-                                                         sz_memory_allocator_t *alloc,
-                                                         void *stream, sz_substrings_engine_t *engine) {
+#if STRINGZILLA_TARGET_CUDA
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_engine_init_gpu(sz_sequence_t const *needles,
+                                                                  sz_substrings_case_sensitivity_t case_sensitivity,
+                                                                  sz_substrings_overlap_policy_t overlap_policy,
+                                                                  sz_size_t hot_states, sz_size_t matches_budget,
+                                                                  sz_memory_allocator_t *alloc, void *stream,
+                                                                  sz_substrings_engine_t *engine) {
     return sz_substrings_engine_init_cuda(needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
                                        alloc, stream, engine);
 }
 #endif
 
-SZ_API_RUNTIME void sz_substrings_engine_free(sz_substrings_engine_t *engine) { sz_substrings_engine_free_(engine); }
+STRINGZILLA_API_RUNTIME void sz_substrings_engine_free(sz_substrings_engine_t *engine) {
+    sz_substrings_engine_free_(engine);
+}
 
-SZ_API_RUNTIME sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                sz_size_t *counts, sz_size_t counts_stride) {
-#if SZ_USE_CUDA
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                         sz_size_t *counts, sz_size_t counts_stride) {
+#if STRINGZILLA_TARGET_CUDA
     if (engine->capability & sz_caps_cuda_k) return sz_substrings_counts_cuda(engine, haystacks, counts, counts_stride);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_substrings_counts_icelake(engine, haystacks, counts, counts_stride);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_substrings_counts_haswell(engine, haystacks, counts, counts_stride);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_substrings_counts_neon(engine, haystacks, counts, counts_stride);
 #else
     return sz_substrings_counts_serial(engine, haystacks, counts, counts_stride);
 #endif
 }
 
-SZ_API_RUNTIME sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                              sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                              sz_size_t *matches_offsets) {
-#if SZ_USE_CUDA
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                       sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                       sz_size_t *matches_offsets) {
+#if STRINGZILLA_TARGET_CUDA
     if (engine->capability & sz_caps_cuda_k)
         return sz_substrings_find_cuda(engine, haystacks, matches, matches_capacity, matches_offsets);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_substrings_find_icelake(engine, haystacks, matches, matches_capacity, matches_offsets);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_substrings_find_haswell(engine, haystacks, matches, matches_capacity, matches_offsets);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_substrings_find_neon(engine, haystacks, matches, matches_capacity, matches_offsets);
 #else
     return sz_substrings_find_serial(engine, haystacks, matches, matches_capacity, matches_offsets);
 #endif
 }
 
-SZ_API_RUNTIME sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                 sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                 sz_size_t tape_capacity, sz_size_t *offsets) {
-#if SZ_USE_CUDA
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine,
+                                                          sz_sequence_t const *haystacks,
+                                                          sz_sequence_t const *replacements, sz_ptr_t tape,
+                                                          sz_size_t tape_capacity, sz_size_t *offsets) {
+#if STRINGZILLA_TARGET_CUDA
     if (engine->capability & sz_caps_cuda_k)
         return sz_substrings_replace_cuda(engine, haystacks, replacements, tape, tape_capacity, offsets);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_substrings_replace_icelake(engine, haystacks, replacements, tape, tape_capacity, offsets);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_substrings_replace_haswell(engine, haystacks, replacements, tape, tape_capacity, offsets);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_substrings_replace_neon(engine, haystacks, replacements, tape, tape_capacity, offsets);
 #else
     return sz_substrings_replace_serial(engine, haystacks, replacements, tape, tape_capacity, offsets);
 #endif
 }
 
-SZ_API_RUNTIME sz_status_t sz_substrings_bm25_scores(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                     sz_f32_t const *document_lengths,
-                                                     sz_substrings_bm25_t const *parameters,
-                                                     sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                     sz_size_t scores_stride) {
-#if SZ_USE_CUDA
+STRINGZILLA_API_RUNTIME sz_status_t sz_substrings_bm25_scores(
+    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride) {
+#if STRINGZILLA_TARGET_CUDA
     if (engine->capability & sz_caps_cuda_k)
         return sz_substrings_bm25_scores_cuda(engine, haystacks, document_lengths, parameters, needle_weights, scores,
                                               scores_stride);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_substrings_bm25_scores_icelake(engine, haystacks, document_lengths, parameters, needle_weights, scores,
                                              scores_stride);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_substrings_bm25_scores_haswell(engine, haystacks, document_lengths, parameters, needle_weights, scores,
                                              scores_stride);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_substrings_bm25_scores_neon(engine, haystacks, document_lengths, parameters, needle_weights, scores,
                                           scores_stride);
 #else
@@ -685,7 +680,7 @@ SZ_API_RUNTIME sz_status_t sz_substrings_bm25_scores(sz_substrings_engine_t *eng
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 #pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus

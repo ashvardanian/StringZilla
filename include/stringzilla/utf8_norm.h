@@ -44,8 +44,8 @@ extern "C" {
  *  @return Number of bytes written to @p destination.
  *  @warning No bounds checking is performed on @p destination.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_norm(  //
-    sz_cptr_t source, sz_size_t length, //
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_norm( //
+    sz_cptr_t source, sz_size_t length,         //
     sz_normal_form_t form, sz_ptr_t destination);
 
 /**
@@ -57,127 +57,127 @@ SZ_API_RUNTIME sz_size_t sz_utf8_norm(  //
  *  @param[in] source UTF-8 string to test.
  *  @param[in] length Number of bytes in @p source.
  *  @param[in] form One of @c sz_normal_form_nfd_k, @c _nfc_k, @c _nfkd_k, @c _nfkc_k.
- *  @return @c SZ_NULL_CHAR if @p source is already in @p form, else a pointer to the first byte
- *      of a codepoint breaking the form: the first non-Yes QC or canonical-order violation.
+ *  @return @c STRINGZILLA_NULL_CHAR if @p source is already in @p form, else a pointer to the first
+ *      byte of a codepoint breaking the form: the first non-Yes QC or canonical-order violation.
  */
-SZ_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized( //
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_serial( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_serial( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_serial( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_serial( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_skylake( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_skylake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_skylake( //
-    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
-#endif
-
-#if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_icelake( //
-    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
-
-/** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_icelake( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_skylake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_haswell( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_icelake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_haswell( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_icelake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_neon( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_haswell( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_neon( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_haswell( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_sve( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_neon( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_neon( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_sve2( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_sve( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve2( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_rvv( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_sve2( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_rvv( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve2( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_v128( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_rvv( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_rvv( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_v128relaxed( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_v128( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128relaxed( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_V128RELAXED
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_lasx( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_v128relaxed( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_lasx( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128relaxed( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_LASX
 /** @copydoc sz_utf8_norm */
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_powervsx( //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_lasx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_find_denormalized */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx( //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_lasx( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if STRINGZILLA_TARGET_POWERVSX
+/** @copydoc sz_utf8_norm */
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_powervsx( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_find_denormalized */
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -202,65 +202,66 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx( //
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_size_t sz_utf8_norm(sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_norm(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                               sz_ptr_t destination) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_norm_icelake(source, length, form, destination);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_utf8_norm_skylake(source, length, form, destination);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_norm_haswell(source, length, form, destination);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_norm_sve2(source, length, form, destination);
-#elif SZ_USE_SVE
+#elif STRINGZILLA_TARGET_SVE
     return sz_utf8_norm_sve(source, length, form, destination);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_norm_neon(source, length, form, destination);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_norm_rvv(source, length, form, destination);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_norm_lasx(source, length, form, destination);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_norm_powervsx(source, length, form, destination);
-#elif SZ_USE_V128RELAXED
+#elif STRINGZILLA_TARGET_V128RELAXED
     return sz_utf8_norm_v128relaxed(source, length, form, destination);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_utf8_norm_v128(source, length, form, destination);
 #else
     return sz_utf8_norm_serial(source, length, form, destination);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_utf8_find_denormalized(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_find_denormalized_icelake(source, length, form);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_utf8_find_denormalized_skylake(source, length, form);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_find_denormalized_haswell(source, length, form);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_find_denormalized_sve2(source, length, form);
-#elif SZ_USE_SVE
+#elif STRINGZILLA_TARGET_SVE
     return sz_utf8_find_denormalized_sve(source, length, form);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_find_denormalized_neon(source, length, form);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_find_denormalized_rvv(source, length, form);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_find_denormalized_lasx(source, length, form);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_find_denormalized_powervsx(source, length, form);
-#elif SZ_USE_V128RELAXED
+#elif STRINGZILLA_TARGET_V128RELAXED
     return sz_utf8_find_denormalized_v128relaxed(source, length, form);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_utf8_find_denormalized_v128(source, length, form);
 #else
     return sz_utf8_find_denormalized_serial(source, length, form);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma endregion
 

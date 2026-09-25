@@ -21,8 +21,8 @@ extern "C" {
  *  Includes extensions: F, CD, ER, PF, VL, DQ, BW.
  *
  *  This is the "starting level" for the advanced algorithms using K-mask registers on x86. */
-#if SZ_USE_SKYLAKE
-#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#if STRINGZILLA_TARGET_SKYLAKE
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,lzcnt,evex512"))), \
                              apply_to = function)
 #elif defined(__clang__)
@@ -33,7 +33,8 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "lzcnt")
 #endif
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_cptr_t needle) {
     __mmask64 matches_mask_m64;
     sz_u512_vec_t haystack_vec, needle_vec;
     needle_vec.zmm = _mm512_set1_epi8(needle[0]);
@@ -53,15 +54,15 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t hay
         if (matches_mask_m64) return haystack + (int)_tzcnt_u64(matches_mask_m64);
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                          sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length) {
 
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_skylake(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -159,10 +160,11 @@ SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack
             matches_m64 &= matches_m64 - 1;
         }
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle) {
     __mmask64 matches_mask_m64;
     sz_u512_vec_t haystack_vec, needle_vec;
     needle_vec.zmm = _mm512_set1_epi8(needle[0]);
@@ -182,15 +184,15 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t ha
         if (matches_mask_m64) return haystack + 64 - (int)_lzcnt_u64(matches_mask_m64) - 1;
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                           sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length) {
 
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_rfind_byte_skylake(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -250,7 +252,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystac
         }
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 #if defined(__clang__)
@@ -258,7 +260,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystac
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #ifdef __cplusplus
 }

@@ -39,7 +39,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -54,8 +54,8 @@ extern "C" {
 /** Word_Break class byte for the ASCII lanes (cp < 0x80) via the 128-entry property table, one
  *  masked @c vluxei8 gather (index `byte & 0x7F` is always in-bounds); masked-off lanes keep
  *  @p inactive_u8m4. The window byte equals the codepoint on ASCII lanes. */
-SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_ascii_class_rvv_(vuint8m4_t raw_u8m4, vbool2_t active_b2,
-                                                                vuint8m4_t inactive_u8m4) {
+STRINGZILLA_HELPER_INLINE vuint8m4_t sz_utf8_word_break_ascii_class_rvv_(vuint8m4_t raw_u8m4, vbool2_t active_b2,
+                                                                         vuint8m4_t inactive_u8m4) {
     vuint8m4_t const indices_u8m4 = __riscv_vand_vx_u8m4(raw_u8m4, 0x7F, 64);
     return __riscv_vluxei8_v_u8m4_mu(active_b2, inactive_u8m4, &sz_utf8_word_break_property_ascii_[0], indices_u8m4,
                                      64);
@@ -68,7 +68,7 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_ascii_class_rvv_(vuint8m4_t raw_u
  *  stage 4, where @c leaf_group is clamped for the address and the result zeroed on out-of-range
  *  groups, matching the NEON blend loop. Bit-exact with @c sz_rune_word_break_property over the
  *  Supplementary Planes. */
-SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
+STRINGZILLA_HELPER_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
     vuint8m4_t plane_off_u8m4, vuint8m4_t high_u8m4, vuint8m4_t low_u8m4) {
     vuint8m4_t const n4_u8m4 = __riscv_vand_vx_u8m4(plane_off_u8m4, 0x0F, 64);
     vuint8m4_t const n3_u8m4 = __riscv_vsrl_vx_u8m4(high_u8m4, 4, 64);
@@ -122,8 +122,8 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
  *  safety comes from table totality, never from the mask — so only the rare 4-gather astral
  *  cascade keeps a branch.
  */
-SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_classify_window_rvv_(vuint8m4_t const raw_u8m4,
-                                                                    sz_utf8_rune_window_rvv_t const *window) {
+STRINGZILLA_HELPER_INLINE vuint8m4_t sz_utf8_word_break_classify_window_rvv_(vuint8m4_t const raw_u8m4,
+                                                                             sz_utf8_rune_window_rvv_t const *window) {
     // In-register lead classes and the `loaded` clamp, mirroring the struct fields `decode_window` lowered for the
     // engine but kept as masks so no `sz_u64_t` is raised back to a `vbool2_t` here.
     vbool2_t const within_loaded_b2 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vid_v_u8m4(64), (sz_u8_t)window->loaded, 64);
@@ -175,30 +175,30 @@ SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_classify_window_rvv_(vuint8m4_t c
 #pragma region Mask algebra extractor
 
 /** A 64-bit "class byte == @p value" lane mask over the classified window (vmseq → mask bits). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_rvv_(vuint8m4_t classes_u8m4, sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_rvv_(vuint8m4_t classes_u8m4, sz_u8_t value) {
     return sz_utf8_rune_mask_to_bits_rvv_(__riscv_vmseq_vx_u8m4_b2(classes_u8m4, value, 64));
 }
 
 /** A 64-bit "raw window byte == @p value" lane mask. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_rvv_(vuint8m4_t raw_u8m4, sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_rvv_(vuint8m4_t raw_u8m4, sz_u8_t value) {
     return sz_utf8_rune_mask_to_bits_rvv_(__riscv_vmseq_vx_u8m4_b2(raw_u8m4, value, 64));
 }
 
 /** A 64-bit "raw window byte >= @p bound" (unsigned) lane mask. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_rvv_(vuint8m4_t raw_u8m4, sz_u8_t bound) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_rvv_(vuint8m4_t raw_u8m4, sz_u8_t bound) {
     return sz_utf8_rune_mask_to_bits_rvv_(__riscv_vmsgeu_vx_u8m4_b2(raw_u8m4, bound, 64));
 }
 
 /** Assemble the per-lane BMP codepoint `(high << 8) | low` at @c e16m8 for the 16-bit range
  *  scans. */
-SZ_HELPER_INLINE vuint16m8_t sz_utf8_word_break_codepoint16_rvv_(vuint8m4_t high_u8m4, vuint8m4_t low_u8m4) {
+STRINGZILLA_HELPER_INLINE vuint16m8_t sz_utf8_word_break_codepoint16_rvv_(vuint8m4_t high_u8m4, vuint8m4_t low_u8m4) {
     return __riscv_vwaddu_wv_u16m8(__riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(high_u8m4, 64), 8, 64), low_u8m4, 64);
 }
 
 /** A 64-bit "codepoint16 in any sorted `[lo, hi]` range" lane mask, the RVV twin of
  *  @ref sz_utf8_word_break_range16_mask_neon_ over native 16-bit lanes (WSegSpace /
  *  Extended_Pictographic). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
     vuint16m8_t values_u16m8, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
     vbool2_t hit_b2 = __riscv_vmclr_m_b2(64);
     for (int range = 0; range < count; ++range) {
@@ -216,7 +216,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
 /** Resolve one window into the maximal-subpart partition — the RVV twin of
  *  @ref sz_utf8_word_break_partition_neon_: compute the per-ISA @c sz_u64_t masks and delegate to
  *  the portable @ref sz_utf8_word_break_partition_from_masks_. */
-SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv_( //
+STRINGZILLA_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv_( //
     vuint8m4_t const raw_u8m4, sz_utf8_rune_window_rvv_t const *window, sz_u64_t valid, int at_end_of_text) {
     sz_u64_t const real_continuation = window->continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD -> 2, 0xE -> 3, 0xF -> 4. The strict
@@ -255,7 +255,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_rvv
  *  Applies the truncated-edge U+FFFD reclassify to the class lanes, materializes every per-class
  *  lane mask + the raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range
  *  scan), and the per-lane class byte array. */
-SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_( //
+STRINGZILLA_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_( //
     vuint8m4_t const raw_u8m4, sz_utf8_rune_window_rvv_t const *window, vuint8m4_t classes_u8m4,
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
@@ -360,9 +360,9 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv_(
  *  driver, mirroring @ref sz_utf8_wordbreaks_neon over the RVV
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
  *  every other windowed backend. */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(    //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_size_t *word_starts, sz_size_t *word_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv( //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *word_starts, sz_size_t *word_lengths,       //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {
@@ -492,7 +492,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(    //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_RVV
+#endif // STRINGZILLA_TARGET_RVV
 
 #ifdef __cplusplus
 }

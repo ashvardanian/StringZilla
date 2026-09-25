@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /**
  *  @brief Packs each byte's sign bit into a 32-bit mask, matching AVX2's @c _mm256_movemask_epi8.
@@ -39,7 +39,7 @@ extern "C" {
  *  See `utf8_runes/lasx.h`: @c __lasx_xvmskltz_b packs each byte's sign bit into a per-128-bit-lane
  *  16-bit mask, word 0 for the low lane and word 4 for the high lane, recombined here.
  */
-SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended_u8x32) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended_u8x32) {
     __m256i collected_u32x8 = __lasx_xvmskltz_b(sign_extended_u8x32);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected_u32x8, 0);
     sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(collected_u32x8, 4);
@@ -58,9 +58,9 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended_
  *  the index onto [0, 32) over tables 32..47 and 48..63. @c __lasx_xvbitsel_v then picks the high
  *  select wherever bit five of the index is set, i.e. for indices of 32 and above.
  */
-SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u8x32, __m256i table_low_0_u8x32,
-                                                        __m256i table_low_1_u8x32, __m256i table_high_0_u8x32,
-                                                        __m256i table_high_1_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u8x32, __m256i table_low_0_u8x32,
+                                                                 __m256i table_low_1_u8x32, __m256i table_high_0_u8x32,
+                                                                 __m256i table_high_1_u8x32) {
     __m256i families_low_u8x32 = __lasx_xvshuf_b(table_low_1_u8x32, table_low_0_u8x32, index_u8x32);
     __m256i families_high_u8x32 = __lasx_xvshuf_b(table_high_1_u8x32, table_high_0_u8x32, index_u8x32);
     // Bit five (value 0x20) of the index is set exactly for index >= 32: select the high half there.
@@ -78,7 +78,8 @@ SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u8x32, __m
  *
  *  @return The first such byte, or NULL.
  */
-SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size_t length,
+                                                                  sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -133,16 +134,17 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_norm_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                            sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                                     sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_lasx_);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_lasx(sz_cptr_t source, sz_size_t length,
+                                                                  sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_lasx_);
 }
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

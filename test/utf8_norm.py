@@ -16,7 +16,7 @@ Run:
     uv pip install numpy pyarrow pytest pytest-repeat PyICU
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/utf8_norm.py -q
-    SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/utf8_norm.py -q
+    STRINGZILLA_SEED=42 STRINGZILLA_SCALE=10 uv run --no-project python -m pytest test/utf8_norm.py -q
 
 File: test/utf8_norm.py
 Author: Ash Vardanian
@@ -30,7 +30,7 @@ import pytest
 
 import stringzilla as sz
 
-from test.sz_helpers import (
+from test.helpers import (
     vector_width_bracketing_strings,
     SEED_VALUES,
     scale_iterations,

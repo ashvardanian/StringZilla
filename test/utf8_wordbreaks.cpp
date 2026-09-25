@@ -11,10 +11,10 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 #include <cstddef> // `std::size_t`
 
@@ -22,9 +22,9 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include <fmt/format.h>
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `harness.hpp`)
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
+using namespace sz::test;
 
 #pragma region Unit
 
@@ -86,28 +86,28 @@ static void check_utf8_wordbreaks_classification_() {
  *  equivalence drivers below all iterate this one ladder so their ISA coverage never drifts. */
 static utf8_segment_backend_t const utf8_wordbreaks_backends[] = {
     {"dispatched", sz_utf8_wordbreaks},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_utf8_wordbreaks_haswell},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_utf8_wordbreaks_icelake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_utf8_wordbreaks_neon},
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     {"sve2", sz_utf8_wordbreaks_sve2},
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     {"v128", sz_utf8_wordbreaks_v128},
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     {"rvv", sz_utf8_wordbreaks_rvv},
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     {"powervsx", sz_utf8_wordbreaks_powervsx},
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     {"lasx", sz_utf8_wordbreaks_lasx},
 #endif
 };
@@ -175,8 +175,6 @@ static void check_utf8_wordbreaks_deferred_mid_() {
 
 /** Known-answer word-break vectors via dispatched, serial, each ISA, and the C++ range. */
 void test_utf8_wordbreaks_unit() {
-    fmt::println("  - testing UTF-8 word-break known-answer vectors...");
-
     check_utf8_wordbreaks_classification_();
     check_utf8_wordbreaks_deferred_mid_();
 
@@ -353,8 +351,6 @@ static utf8_segment_corpora_t utf8_wordbreaks_corpora_() {
 
 /** Rule-coverage gate: every WB rule motif runs and agrees serial-vs-ISA at window phases. */
 void test_utf8_wordbreaks_rules() {
-    fmt::println("  - testing UTF-8 word rule-coverage matrix...");
-
     // One motif per UAX-29 Word_Break rule, tagged with the direction it demonstrates; rules with both senses also
     // carry an opposite-direction motif (the gate compares serial-vs-ISA on every motif).
     utf8_rule_case_t const rule_cases[] = {
@@ -405,12 +401,10 @@ void test_utf8_wordbreaks_rules() {
 #pragma region Safety
 
 /** Malformed-input safety of the UTF-8 word kernels (serial / dispatched / icelake). */
-void test_utf8_wordbreaks_safety() {
-    fmt::println("  - testing malformed-input safety of UTF-8 word kernels...");
+void test_utf8_wordbreaks_safety(test_context_t &context) {
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_wordbreaks_serial}};
-    check_utf8_segment_safety_("word", span_over(serial_only));
-    check_utf8_segment_safety_("word", span_over(utf8_wordbreaks_backends));
-    fmt::println("    word safety passed!");
+    check_utf8_segment_safety_(context, "word", span_over(serial_only));
+    check_utf8_segment_safety_(context, "word", span_over(utf8_wordbreaks_backends));
 }
 
 #pragma endregion Safety
@@ -418,10 +412,10 @@ void test_utf8_wordbreaks_safety() {
 #pragma region Drivers
 
 /** Serial-vs-ISA word differential over the hardened high-density, long-range and seam corpora. */
-void test_utf8_wordbreaks_all() {
+void test_utf8_wordbreaks_all(test_context_t &context) {
     // The iteration count is this family's share of the suite budget, sized against its siblings.
-    check_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
-                                    utf8_wordbreaks_corpora_(), scale_iterations(20));
+    check_utf8_segment_equivalence_(context, sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
+                                    utf8_wordbreaks_corpora_(), context.iterations(20));
 
     // The streaming segmenter against the per-position WB1-WB16 transcription, which nothing else calls.
     for (sz::string_view_t const motif : span_over(utf8_wordbreaks_motifs))

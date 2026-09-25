@@ -5,7 +5,7 @@ This module provides functions to download and cache Unicode data files
 (UCD XML, CaseFolding.txt, DerivedNormalizationProps.txt) for use in
 tests and exploration notebooks.
 
-File: test/sz_helpers.py
+File: test/helpers.py
 Author: Ash Vardanian
 Date: June 18, 2023
 """
@@ -1304,47 +1304,43 @@ def representatives_by_class(
 # region General test scaffolding
 
 # General fixtures and seeded-RNG helpers shared by every per-family test module, the Python analog
-# of the C++ `test/stringzilla.hpp` harness. Kept here so a split test file imports one place for
-# both the Unicode data loaders above and the seeding / random-string utilities below. The NumPy /
+# of the C++ `test/harness.hpp` harness. Kept here so a split test file imports one place for both
+# the Unicode data loaders above and the seeding / random-string utilities below. The NumPy /
 # PyArrow availability flags and their defensive imports live in the top import block.
 
 _random_seed_for_run = int.from_bytes(os.urandom(4), "little")
-"""A random seed generated once at import time for this test run, logged by the
-`log_test_environment` fixture. `SystemRandom` gives true randomness independent of the seeded RNG
-state."""
+"""A random seed generated once at import time, joining `SEED_VALUES` only under
+`STRINGZILLA_SEED=random` and printed in the pytest report header."""
 
 SEED_VALUES = [
     42,  # Classic test seed
     0,  # Edge case: zero seed
     1,  # Minimal positive seed
     314159,  # Pi digits
-    _random_seed_for_run,  # Random seed for this run (logged at startup)
 ]
 """Reproducible test seeds for consistent CI runs."""
 
-_env_seed = os.environ.get("SZ_TESTS_SEED")
-"""Overrides SEED_VALUES when set, for reproducible CI fuzzing."""
-if _env_seed:
+_env_seed = os.environ.get("STRINGZILLA_SEED")
+"""Appends `_random_seed_for_run` when `random`, or replaces SEED_VALUES with one integer seed."""
+if _env_seed == "random":
+    SEED_VALUES.append(_random_seed_for_run)
+elif _env_seed:
     try:
-        _parsed_seed = int(_env_seed)
-        SEED_VALUES = [_parsed_seed]
-        print(f"SZ_TESTS_SEED={_parsed_seed} (from environment, overriding default seeds)")
+        SEED_VALUES = [int(_env_seed)]
     except ValueError:
-        pass  # Keep default SEED_VALUES if parsing fails
+        raise SystemExit(f'STRINGZILLA_SEED="{_env_seed}" does not parse') from None
 
 
-# Stress-depth knob shared with the C++ suite: SZ_TESTS_MULTIPLIER scales every fuzz baseline,
+# Stress-depth knob shared with the C++ suite: STRINGZILLA_SCALE scales every fuzz baseline,
 # defaulting to 1.0 so the runtime is unchanged unless a smoke or CI run overrides it.
 def _read_iterations_multiplier() -> float:
-    raw = os.environ.get("SZ_TESTS_MULTIPLIER")
-    if raw:
-        try:
-            value = float(raw)
-            if value > 0.0:
-                return value
-        except ValueError:
-            pass
-    return 1.0
+    raw = os.environ.get("STRINGZILLA_SCALE")
+    if not raw:
+        return 1.0
+    try:
+        return float(raw)
+    except ValueError:
+        raise SystemExit(f'STRINGZILLA_SCALE="{raw}" does not parse') from None
 
 
 ITERATIONS_MULTIPLIER = _read_iterations_multiplier()

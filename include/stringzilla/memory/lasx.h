@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /**
  *  @brief Broadcast a 16-byte slice of the 256-entry lookup table into both 128-bit lanes of a YMM.
@@ -25,14 +25,14 @@ extern "C" {
  *  @param[in] offset Byte offset into @p lut at which to start the 16-byte slice.
  *  @return A 256-bit LASX register with the 16-byte slice duplicated into both 128-bit lanes.
  */
-SZ_HELPER_INLINE __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
+STRINGZILLA_HELPER_INLINE __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
     sz_u8_t lut_pairs[32];
     for (sz_size_t lane_index = 0; lane_index < 16; ++lane_index)
         lut_pairs[lane_index] = lut_pairs[lane_index + 16] = (sz_u8_t)lut[offset + lane_index];
     return __lasx_xvld(lut_pairs, 0);
 }
 
-SZ_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     if (length <= 32) { sz_fill_serial(target, length, value); }
     else {
         __m256i value_u8x32 = __lasx_xvreplgr2vr_b((char)value);
@@ -46,7 +46,7 @@ SZ_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t val
     }
 }
 
-SZ_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (length < 8) {
         while (length--) *(target++) = *(source++);
     }
@@ -88,7 +88,7 @@ SZ_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t l
     }
 }
 
-SZ_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (length < 8) {
         if (target < source)
             while (length--) *(target++) = *(source++);
@@ -130,8 +130,8 @@ SZ_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t l
     }
 }
 
-SZ_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                    char const lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                             char const lut[sz_at_least_(256)]) {
 
     // The setup cost only pays off for larger inputs.
     if (length <= 128) {
@@ -248,7 +248,7 @@ SZ_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t
     if (length) sz_lookup_serial(target, length, source, lut);
 }
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

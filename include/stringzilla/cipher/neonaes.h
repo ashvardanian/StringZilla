@@ -37,7 +37,7 @@ extern "C" {
  *  @c sz_aes256_gcm_key_t were derived for, and it matches the round instruction's throughput:
  *  @c AESE and @c AESMC fuse into a single operation of about three cycles' latency on every core
  *  that has them, so a chain shorter than eight leaves the pipe half idle. */
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -52,7 +52,7 @@ extern "C" {
  *  @param[in] round_key_u8x16 The round key.
  *  @return Its fourth word in every lane.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_key_broadcast_neonaes_(uint8x16_t round_key_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_key_broadcast_neonaes_(uint8x16_t round_key_u8x16) {
     return vreinterpretq_u8_u32(vdupq_laneq_u32(vreinterpretq_u32_u8(round_key_u8x16), 3));
 }
 
@@ -64,7 +64,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_broadcast_neonaes_(uint8x16_t round_ke
  *  A broadcast register repeats with a period of four bytes, so rotating the word inside each lane
  *  and rotating the whole register by one byte are the same permutation.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotate_neonaes_(uint8x16_t broadcast_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_key_rotate_neonaes_(uint8x16_t broadcast_u8x16) {
     return vextq_u8(broadcast_u8x16, broadcast_u8x16, 1);
 }
 
@@ -76,7 +76,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotate_neonaes_(uint8x16_t broadcast_u
  *  Against a zero round key @c AESE is exactly `ShiftRows(SubBytes(state))`, and the row shift
  *  permutes bytes between columns only.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_key_substitute_neonaes_(uint8x16_t broadcast_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_key_substitute_neonaes_(uint8x16_t broadcast_u8x16) {
     return vaeseq_u8(broadcast_u8x16, vdupq_n_u8(0));
 }
 
@@ -87,7 +87,8 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_substitute_neonaes_(uint8x16_t broadca
  *  @param[in] round_constant The round constant for this step.
  *  @return The derived word, broadcast across every lane.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotated_word_neonaes_(uint8x16_t round_key_u8x16, sz_u32_t round_constant) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_key_rotated_word_neonaes_(uint8x16_t round_key_u8x16,
+                                                                         sz_u32_t round_constant) {
     uint8x16_t const rotated_u8x16 = sz_aes256_key_rotate_neonaes_(sz_aes256_key_broadcast_neonaes_(round_key_u8x16));
     return veorq_u8(sz_aes256_key_substitute_neonaes_(rotated_u8x16),
                     vreinterpretq_u8_u32(vdupq_n_u32(round_constant)));
@@ -98,7 +99,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_rotated_word_neonaes_(uint8x16_t round
  *  @param[in] round_key_u8x16 The round key whose last word feeds the next one.
  *  @return The derived word, broadcast across every lane.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_key_plain_word_neonaes_(uint8x16_t round_key_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_key_plain_word_neonaes_(uint8x16_t round_key_u8x16) {
     return sz_aes256_key_substitute_neonaes_(sz_aes256_key_broadcast_neonaes_(round_key_u8x16));
 }
 
@@ -111,7 +112,8 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_plain_word_neonaes_(uint8x16_t round_k
  *
  *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_key_fold_neonaes_(uint8x16_t previous_u8x16, uint8x16_t substituted_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_key_fold_neonaes_(uint8x16_t previous_u8x16,
+                                                                 uint8x16_t substituted_u8x16) {
     uint8x16_t const zeros_u8x16 = vdupq_n_u8(0);
     previous_u8x16 = veorq_u8(previous_u8x16, vextq_u8(zeros_u8x16, previous_u8x16, 12));
     previous_u8x16 = veorq_u8(previous_u8x16, vextq_u8(zeros_u8x16, previous_u8x16, 12));
@@ -119,7 +121,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_key_fold_neonaes_(uint8x16_t previous_u8x1
     return veorq_u8(previous_u8x16, substituted_u8x16);
 }
 
-SZ_API_COMPTIME void sz_aes256_key_init_neonaes(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_key_init_neonaes(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
     sz_u8_t *schedule = (sz_u8_t *)&key->round_keys[0];
     uint8x16_t even_round_key_u8x16 = vld1q_u8(secret);
     uint8x16_t odd_round_key_u8x16 = vld1q_u8(secret + 16);
@@ -127,47 +129,47 @@ SZ_API_COMPTIME void sz_aes256_key_init_neonaes(sz_aes256_key_t *key, sz_u8_t co
     // An AES-256 schedule alternates two steps: a rotated substitution against a round constant and a
     // plain substitution. Seven of the first and six of the second follow the two round keys the secret
     // supplies, which is fifteen round keys in all.
-    vst1q_u8(schedule + 0 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
-    vst1q_u8(schedule + 1 * SZ_AES_BLOCK_LENGTH, odd_round_key_u8x16);
+    vst1q_u8(schedule + 0 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 1 * STRINGZILLA_AES_BLOCK_LENGTH, odd_round_key_u8x16);
     even_round_key_u8x16 = sz_aes256_key_fold_neonaes_(even_round_key_u8x16,
                                                        sz_aes256_key_rotated_word_neonaes_(odd_round_key_u8x16, 0x01u));
-    vst1q_u8(schedule + 2 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 2 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
     odd_round_key_u8x16 = sz_aes256_key_fold_neonaes_(odd_round_key_u8x16,
                                                       sz_aes256_key_plain_word_neonaes_(even_round_key_u8x16));
-    vst1q_u8(schedule + 3 * SZ_AES_BLOCK_LENGTH, odd_round_key_u8x16);
+    vst1q_u8(schedule + 3 * STRINGZILLA_AES_BLOCK_LENGTH, odd_round_key_u8x16);
     even_round_key_u8x16 = sz_aes256_key_fold_neonaes_(even_round_key_u8x16,
                                                        sz_aes256_key_rotated_word_neonaes_(odd_round_key_u8x16, 0x02u));
-    vst1q_u8(schedule + 4 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 4 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
     odd_round_key_u8x16 = sz_aes256_key_fold_neonaes_(odd_round_key_u8x16,
                                                       sz_aes256_key_plain_word_neonaes_(even_round_key_u8x16));
-    vst1q_u8(schedule + 5 * SZ_AES_BLOCK_LENGTH, odd_round_key_u8x16);
+    vst1q_u8(schedule + 5 * STRINGZILLA_AES_BLOCK_LENGTH, odd_round_key_u8x16);
     even_round_key_u8x16 = sz_aes256_key_fold_neonaes_(even_round_key_u8x16,
                                                        sz_aes256_key_rotated_word_neonaes_(odd_round_key_u8x16, 0x04u));
-    vst1q_u8(schedule + 6 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 6 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
     odd_round_key_u8x16 = sz_aes256_key_fold_neonaes_(odd_round_key_u8x16,
                                                       sz_aes256_key_plain_word_neonaes_(even_round_key_u8x16));
-    vst1q_u8(schedule + 7 * SZ_AES_BLOCK_LENGTH, odd_round_key_u8x16);
+    vst1q_u8(schedule + 7 * STRINGZILLA_AES_BLOCK_LENGTH, odd_round_key_u8x16);
     even_round_key_u8x16 = sz_aes256_key_fold_neonaes_(even_round_key_u8x16,
                                                        sz_aes256_key_rotated_word_neonaes_(odd_round_key_u8x16, 0x08u));
-    vst1q_u8(schedule + 8 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 8 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
     odd_round_key_u8x16 = sz_aes256_key_fold_neonaes_(odd_round_key_u8x16,
                                                       sz_aes256_key_plain_word_neonaes_(even_round_key_u8x16));
-    vst1q_u8(schedule + 9 * SZ_AES_BLOCK_LENGTH, odd_round_key_u8x16);
+    vst1q_u8(schedule + 9 * STRINGZILLA_AES_BLOCK_LENGTH, odd_round_key_u8x16);
     even_round_key_u8x16 = sz_aes256_key_fold_neonaes_(even_round_key_u8x16,
                                                        sz_aes256_key_rotated_word_neonaes_(odd_round_key_u8x16, 0x10u));
-    vst1q_u8(schedule + 10 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 10 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
     odd_round_key_u8x16 = sz_aes256_key_fold_neonaes_(odd_round_key_u8x16,
                                                       sz_aes256_key_plain_word_neonaes_(even_round_key_u8x16));
-    vst1q_u8(schedule + 11 * SZ_AES_BLOCK_LENGTH, odd_round_key_u8x16);
+    vst1q_u8(schedule + 11 * STRINGZILLA_AES_BLOCK_LENGTH, odd_round_key_u8x16);
     even_round_key_u8x16 = sz_aes256_key_fold_neonaes_(even_round_key_u8x16,
                                                        sz_aes256_key_rotated_word_neonaes_(odd_round_key_u8x16, 0x20u));
-    vst1q_u8(schedule + 12 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 12 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
     odd_round_key_u8x16 = sz_aes256_key_fold_neonaes_(odd_round_key_u8x16,
                                                       sz_aes256_key_plain_word_neonaes_(even_round_key_u8x16));
-    vst1q_u8(schedule + 13 * SZ_AES_BLOCK_LENGTH, odd_round_key_u8x16);
+    vst1q_u8(schedule + 13 * STRINGZILLA_AES_BLOCK_LENGTH, odd_round_key_u8x16);
     even_round_key_u8x16 = sz_aes256_key_fold_neonaes_(even_round_key_u8x16,
                                                        sz_aes256_key_rotated_word_neonaes_(odd_round_key_u8x16, 0x40u));
-    vst1q_u8(schedule + 14 * SZ_AES_BLOCK_LENGTH, even_round_key_u8x16);
+    vst1q_u8(schedule + 14 * STRINGZILLA_AES_BLOCK_LENGTH, even_round_key_u8x16);
 }
 
 #pragma endregion Key Schedule
@@ -180,7 +182,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_neonaes(sz_aes256_key_t *key, sz_u8_t co
  *  @param[in] round_index Which of the fifteen round keys to read, zero through fourteen.
  *  @return The round key.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_round_key_neonaes_(sz_aes256_key_t const *key, sz_size_t round_index) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_round_key_neonaes_(sz_aes256_key_t const *key, sz_size_t round_index) {
     return vld1q_u8((sz_u8_t const *)&key->round_keys[round_index * 4]);
 }
 
@@ -190,7 +192,8 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_round_key_neonaes_(sz_aes256_key_t const *
  *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_block_encrypt_neonaes_(sz_aes256_key_t const *key, uint8x16_t block_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_block_encrypt_neonaes_(sz_aes256_key_t const *key,
+                                                                      uint8x16_t block_u8x16) {
     block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 0)));
     block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 1)));
     block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 2)));
@@ -209,7 +212,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_block_encrypt_neonaes_(sz_aes256_key_t con
 }
 
 /** Applies one fused round to all eight chains, so the eight issue back to back. */
-SZ_HELPER_INLINE void sz_aes256_blocks_round_neonaes_(uint8x16_t *blocks_u8x16, uint8x16_t round_key_u8x16) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_blocks_round_neonaes_(uint8x16_t *blocks_u8x16, uint8x16_t round_key_u8x16) {
     blocks_u8x16[0] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[0], round_key_u8x16));
     blocks_u8x16[1] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[1], round_key_u8x16));
     blocks_u8x16[2] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[2], round_key_u8x16));
@@ -228,7 +231,7 @@ SZ_HELPER_INLINE void sz_aes256_blocks_round_neonaes_(uint8x16_t *blocks_u8x16, 
  *  The fused round instruction has several cycles of latency and issues every cycle, so a single
  *  chain of fourteen dependent rounds leaves most of that throughput idle.
  */
-SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *key, uint8x16_t *blocks_u8x16) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *key, uint8x16_t *blocks_u8x16) {
     uint8x16_t round_key_u8x16;
 
     // The thirteen fused rounds are written out rather than looped, because a loop leaves the
@@ -277,7 +280,7 @@ SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *k
  *  @param[in] nonce The twelve nonce bytes.
  *  @return The counter block for index zero.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_counter_base_neonaes_(sz_u8_t const *nonce) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_counter_base_neonaes_(sz_u8_t const *nonce) {
     // Only twelve bytes are readable and NEON has no masked load, so this reads eight then four.
     uint8x16_t const leading_u8x16 = vcombine_u8(vld1_u8(nonce), vdup_n_u8(0));
     return vreinterpretq_u8_u32(
@@ -290,18 +293,18 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_counter_base_neonaes_(sz_u8_t const *nonce
  *  @param[in] block_index The block index.
  *  @return The counter block for that index.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_counter_block_neonaes_(uint8x16_t base_u8x16, sz_u32_t block_index) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_counter_block_neonaes_(uint8x16_t base_u8x16, sz_u32_t block_index) {
     return vreinterpretq_u8_u32(vsetq_lane_u32(sz_u32_bytes_reverse(block_index), vreinterpretq_u32_u8(base_u8x16), 3));
 }
 
-SZ_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                               sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length,
-                                               sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *key,
+                                                        sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
+                                                        sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     uint8x16_t const counter_base_u8x16 = sz_aes256_counter_base_neonaes_(nonce);
-    sz_u32_t block_index = (sz_u32_t)(byte_offset / SZ_AES_BLOCK_LENGTH);
-    sz_size_t within_block = (sz_size_t)(byte_offset % SZ_AES_BLOCK_LENGTH);
+    sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
+    sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0, lane_index;
 
     // A start that is not block aligned generates its first block whole and discards the leading bytes.
@@ -311,12 +314,12 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *key, sz_u8
         keystream_vec.u8x16 = sz_aes256_block_encrypt_neonaes_(key, counter_u8x16);
         // Stays a byte loop: NEON has no masked store, and writing the register would touch bytes the
         // caller did not hand us. Ice Lake and SVE2 do this run with predication.
-        for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
+        for (; within_block != STRINGZILLA_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
         ++block_index;
     }
 
-    for (; produced + 8 * SZ_AES_BLOCK_LENGTH <= length; produced += 8 * SZ_AES_BLOCK_LENGTH) {
+    for (; produced + 8 * STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += 8 * STRINGZILLA_AES_BLOCK_LENGTH) {
         uint8x16_t keystream_u8x16[8];
         keystream_u8x16[0] = sz_aes256_counter_block_neonaes_(counter_base_u8x16, block_index + 0);
         keystream_u8x16[1] = sz_aes256_counter_block_neonaes_(counter_base_u8x16, block_index + 1);
@@ -329,13 +332,13 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *key, sz_u8
         block_index += 8;
         sz_aes256_blocks_encrypt_neonaes_(key, keystream_u8x16);
         for (lane_index = 0; lane_index != 8; ++lane_index) {
-            sz_size_t const lane_offset = produced + lane_index * SZ_AES_BLOCK_LENGTH;
+            sz_size_t const lane_offset = produced + lane_index * STRINGZILLA_AES_BLOCK_LENGTH;
             uint8x16_t const original_u8x16 = vld1q_u8(input_bytes + lane_offset);
             vst1q_u8(output_bytes + lane_offset, veorq_u8(original_u8x16, keystream_u8x16[lane_index]));
         }
     }
 
-    for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH, ++block_index) {
+    for (; produced + STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += STRINGZILLA_AES_BLOCK_LENGTH, ++block_index) {
         uint8x16_t const counter_u8x16 = sz_aes256_counter_block_neonaes_(counter_base_u8x16, block_index);
         uint8x16_t const original_u8x16 = vld1q_u8(input_bytes + produced);
         uint8x16_t const keystream_u8x16 = sz_aes256_block_encrypt_neonaes_(key, counter_u8x16);
@@ -363,7 +366,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *key, sz_u8
  *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient,
  *  which is the opposite of how a carry-less multiply reads its operands.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_reflect_neonaes_(uint8x16_t block_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_reflect_neonaes_(uint8x16_t block_u8x16) {
     uint8x16_t const halves_u8x16 = vrev64q_u8(block_u8x16);
     return vextq_u8(halves_u8x16, halves_u8x16, 8);
 }
@@ -373,7 +376,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_reflect_neonaes_(uint8x16_t block_u8x16) {
  *  @param[in] block The sixteen block bytes.
  *  @return The reflected block.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_load_neonaes_(sz_u8_t const *block) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_load_neonaes_(sz_u8_t const *block) {
     return sz_ghash_reflect_neonaes_(vld1q_u8(block));
 }
 
@@ -383,7 +386,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_load_neonaes_(sz_u8_t const *block) {
  *  A lane-identity compare rather than a byte loop, which the compilers lowered to branchy scalar
  *  stores and a store-forwarding stall.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_load_padded_neonaes_(sz_u8_t const *block, sz_size_t buffered) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_load_padded_neonaes_(sz_u8_t const *block, sz_size_t buffered) {
     uint8x16_t const lane_ids_u8x16 = vcombine_u8(vcreate_u8(0x0706050403020100ull), //
                                                   vcreate_u8(0x0F0E0D0C0B0A0908ull));
     uint8x16_t const keep_u8x16 = vcltq_u8(lane_ids_u8x16, vdupq_n_u8((sz_u8_t)buffered));
@@ -391,7 +394,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_load_padded_neonaes_(sz_u8_t const *block, 
 }
 
 /** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
-SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_neonaes_(sz_u8_t const *first, sz_u8_t const *second) {
+STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_neonaes_(sz_u8_t const *first, sz_u8_t const *second) {
     uint8x16_t const matching_u8x16 = vceqq_u8(vld1q_u8(first), vld1q_u8(second));
     return vminvq_u8(matching_u8x16) == 0xFF ? sz_true_k : sz_false_k;
 }
@@ -401,7 +404,7 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_neonaes_(sz_u8_t const *first, sz
  *  @param[in] value_u8x16 The reflected block.
  *  @param[out] block Receives the sixteen bytes.
  */
-SZ_HELPER_INLINE void sz_ghash_store_neonaes_(uint8x16_t value_u8x16, sz_u8_t *block) {
+STRINGZILLA_HELPER_INLINE void sz_ghash_store_neonaes_(uint8x16_t value_u8x16, sz_u8_t *block) {
     vst1q_u8(block, sz_ghash_reflect_neonaes_(value_u8x16));
 }
 
@@ -415,8 +418,8 @@ SZ_HELPER_INLINE void sz_ghash_store_neonaes_(uint8x16_t value_u8x16, sz_u8_t *b
  *  dialects accept: MSVC lowers @c vmull_p64 straight onto @c neon_pmull_64, which takes @c __n64
  *  lanes, while the ACLE prototype on GCC and Clang takes @c poly64_t scalars.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_product_halves_neonaes_(poly64x1_t multiplicand_p64x1,
-                                                             poly64x1_t multiplier_p64x1) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_product_halves_neonaes_(poly64x1_t multiplicand_p64x1,
+                                                                      poly64x1_t multiplier_p64x1) {
 #if defined(_MSC_VER) && !defined(__clang__)
     return vreinterpretq_u8_p128(vmull_p64(multiplicand_p64x1, multiplier_p64x1));
 #else
@@ -430,7 +433,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_halves_neonaes_(poly64x1_t multipli
  *  @param[in] multiplier_u8x16 The other reflected operand.
  *  @return Their 128-bit product.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_product_low_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_product_low_neonaes_(uint8x16_t multiplicand_u8x16,
+                                                                   uint8x16_t multiplier_u8x16) {
     return sz_ghash_product_halves_neonaes_(vget_low_p64(vreinterpretq_p64_u8(multiplicand_u8x16)),
                                             vget_low_p64(vreinterpretq_p64_u8(multiplier_u8x16)));
 }
@@ -441,7 +445,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_low_neonaes_(uint8x16_t multiplican
  *  @param[in] multiplier_u8x16 The other reflected operand.
  *  @return Their 128-bit product.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_product_high_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_product_high_neonaes_(uint8x16_t multiplicand_u8x16,
+                                                                    uint8x16_t multiplier_u8x16) {
     return vreinterpretq_u8_p128(
         vmull_high_p64(vreinterpretq_p64_u8(multiplicand_u8x16), vreinterpretq_p64_u8(multiplier_u8x16)));
 }
@@ -452,7 +457,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_high_neonaes_(uint8x16_t multiplica
  *  @param[in] high_u8x16 The operand contributing its high half.
  *  @return Their 128-bit product.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_product_cross_neonaes_(uint8x16_t low_u8x16, uint8x16_t high_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_product_cross_neonaes_(uint8x16_t low_u8x16, uint8x16_t high_u8x16) {
     return sz_ghash_product_halves_neonaes_(vget_low_p64(vreinterpretq_p64_u8(low_u8x16)),
                                             vget_high_p64(vreinterpretq_p64_u8(high_u8x16)));
 }
@@ -466,7 +471,7 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_cross_neonaes_(uint8x16_t low_u8x16
  *  64-bit constant below, which is what lets the reduction run as two multiplies rather than a
  *  chain of shifts: the same instruction that produced the product also closes it.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_product_polynomial_neonaes_(uint8x16_t value_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_product_polynomial_neonaes_(uint8x16_t value_u8x16) {
     poly64x1_t const polynomial_p64x1 = vcreate_p64(0xC200000000000000ull);
     return sz_ghash_product_halves_neonaes_(vget_low_p64(vreinterpretq_p64_u8(value_u8x16)), polynomial_p64x1);
 }
@@ -483,9 +488,9 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_polynomial_neonaes_(uint8x16_t valu
  *  reduction: the field is linear, so the partial products of a whole group may be summed
  *  before folding once.
  */
-SZ_HELPER_INLINE void sz_ghash_accumulate_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16,
-                                                   uint8x16_t *low_u8x16, uint8x16_t *middle_u8x16,
-                                                   uint8x16_t *high_u8x16) {
+STRINGZILLA_HELPER_INLINE void sz_ghash_accumulate_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16,
+                                                            uint8x16_t *low_u8x16, uint8x16_t *middle_u8x16,
+                                                            uint8x16_t *high_u8x16) {
     *low_u8x16 = veorq_u8(*low_u8x16, sz_ghash_product_low_neonaes_(multiplicand_u8x16, multiplier_u8x16));
     *middle_u8x16 = veorq_u8(*middle_u8x16, sz_ghash_product_cross_neonaes_(multiplicand_u8x16, multiplier_u8x16));
     *middle_u8x16 = veorq_u8(*middle_u8x16, sz_ghash_product_cross_neonaes_(multiplier_u8x16, multiplicand_u8x16));
@@ -501,8 +506,9 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_neonaes_(uint8x16_t multiplicand_u8x16
  *
  *  The cross products straddle the halves, so they are split and merged first.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_reduce_neonaes_(uint8x16_t product_low_u8x16, uint8x16_t product_middle_u8x16,
-                                                     uint8x16_t product_high_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_reduce_neonaes_(uint8x16_t product_low_u8x16,
+                                                              uint8x16_t product_middle_u8x16,
+                                                              uint8x16_t product_high_u8x16) {
     uint8x16_t const zeros_u8x16 = vdupq_n_u8(0);
     uint8x16_t low_half_u8x16 = veorq_u8(product_low_u8x16, vextq_u8(zeros_u8x16, product_middle_u8x16, 8));
     uint8x16_t high_half_u8x16 = veorq_u8(product_high_u8x16, vextq_u8(product_middle_u8x16, zeros_u8x16, 8));
@@ -529,7 +535,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_reduce_neonaes_(uint8x16_t product_low_u8x1
  *  @param[in] multiplier_u8x16 The other reflected operand.
  *  @return The reduced product, reflected.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_multiply_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_multiply_neonaes_(uint8x16_t multiplicand_u8x16,
+                                                                uint8x16_t multiplier_u8x16) {
     uint8x16_t product_low_u8x16 = vdupq_n_u8(0), product_middle_u8x16 = vdupq_n_u8(0),
                product_high_u8x16 = vdupq_n_u8(0);
     sz_ghash_accumulate_neonaes_(multiplicand_u8x16, multiplier_u8x16, &product_low_u8x16, &product_middle_u8x16,
@@ -544,12 +551,13 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_multiply_neonaes_(uint8x16_t multiplicand_u
  *  @param[in] subkey_u8x16 The reflected hash subkey.
  *  @return The updated running hash, reflected.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_absorb_neonaes_(uint8x16_t accumulator_u8x16, uint8x16_t block_u8x16,
-                                                     uint8x16_t subkey_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_absorb_neonaes_(uint8x16_t accumulator_u8x16, uint8x16_t block_u8x16,
+                                                              uint8x16_t subkey_u8x16) {
     return sz_ghash_multiply_neonaes_(veorq_u8(accumulator_u8x16, block_u8x16), subkey_u8x16);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_key_init_neonaes(sz_aes256_gcm_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_neonaes(sz_aes256_gcm_key_t *key,
+                                                             sz_u8_t const secret[sz_at_least_(32)]) {
     uint8x16_t subkey_u8x16, power_u8x16;
     sz_size_t power_index;
 
@@ -559,7 +567,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_neonaes(sz_aes256_gcm_key_t *key, sz
     sz_ghash_store_neonaes_(power_u8x16, &key->powers[0]);
     for (power_index = 1; power_index != 8; ++power_index) {
         power_u8x16 = sz_ghash_multiply_neonaes_(power_u8x16, subkey_u8x16);
-        sz_ghash_store_neonaes_(power_u8x16, &key->powers[power_index * SZ_AES_BLOCK_LENGTH]);
+        sz_ghash_store_neonaes_(power_u8x16, &key->powers[power_index * STRINGZILLA_AES_BLOCK_LENGTH]);
     }
 }
 
@@ -568,15 +576,15 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_neonaes(sz_aes256_gcm_key_t *key, sz
  *  @param[in] powers The eight subkey powers in the tag's byte order, ascending.
  *  @param[out] powers_u8x16 Receives the reflected powers H⁸ down to H¹.
  */
-SZ_HELPER_INLINE void sz_ghash_descending_powers_neonaes_(sz_u8_t const *powers, uint8x16_t *powers_u8x16) {
-    powers_u8x16[0] = sz_ghash_load_neonaes_(powers + 7 * SZ_AES_BLOCK_LENGTH);
-    powers_u8x16[1] = sz_ghash_load_neonaes_(powers + 6 * SZ_AES_BLOCK_LENGTH);
-    powers_u8x16[2] = sz_ghash_load_neonaes_(powers + 5 * SZ_AES_BLOCK_LENGTH);
-    powers_u8x16[3] = sz_ghash_load_neonaes_(powers + 4 * SZ_AES_BLOCK_LENGTH);
-    powers_u8x16[4] = sz_ghash_load_neonaes_(powers + 3 * SZ_AES_BLOCK_LENGTH);
-    powers_u8x16[5] = sz_ghash_load_neonaes_(powers + 2 * SZ_AES_BLOCK_LENGTH);
-    powers_u8x16[6] = sz_ghash_load_neonaes_(powers + 1 * SZ_AES_BLOCK_LENGTH);
-    powers_u8x16[7] = sz_ghash_load_neonaes_(powers + 0 * SZ_AES_BLOCK_LENGTH);
+STRINGZILLA_HELPER_INLINE void sz_ghash_descending_powers_neonaes_(sz_u8_t const *powers, uint8x16_t *powers_u8x16) {
+    powers_u8x16[0] = sz_ghash_load_neonaes_(powers + 7 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_u8x16[1] = sz_ghash_load_neonaes_(powers + 6 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_u8x16[2] = sz_ghash_load_neonaes_(powers + 5 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_u8x16[3] = sz_ghash_load_neonaes_(powers + 4 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_u8x16[4] = sz_ghash_load_neonaes_(powers + 3 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_u8x16[5] = sz_ghash_load_neonaes_(powers + 2 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_u8x16[6] = sz_ghash_load_neonaes_(powers + 1 * STRINGZILLA_AES_BLOCK_LENGTH);
+    powers_u8x16[7] = sz_ghash_load_neonaes_(powers + 0 * STRINGZILLA_AES_BLOCK_LENGTH);
 }
 
 /**
@@ -589,8 +597,9 @@ SZ_HELPER_INLINE void sz_ghash_descending_powers_neonaes_(sz_u8_t const *powers,
  *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of
  *  one multiply per block.
  */
-SZ_HELPER_INLINE uint8x16_t sz_ghash_absorb_eight_neonaes_(uint8x16_t accumulator_u8x16, uint8x16_t const *blocks_u8x16,
-                                                           uint8x16_t const *powers_u8x16) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_ghash_absorb_eight_neonaes_(uint8x16_t accumulator_u8x16,
+                                                                    uint8x16_t const *blocks_u8x16,
+                                                                    uint8x16_t const *powers_u8x16) {
     uint8x16_t product_low_u8x16 = vdupq_n_u8(0), product_middle_u8x16 = vdupq_n_u8(0),
                product_high_u8x16 = vdupq_n_u8(0);
     sz_ghash_accumulate_neonaes_(veorq_u8(accumulator_u8x16, blocks_u8x16[0]), powers_u8x16[0], &product_low_u8x16,
@@ -622,19 +631,20 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_absorb_eight_neonaes_(uint8x16_t accumulato
  *  The size is known at compile time, so this is a straight-line run of whole-register stores
  *  rather than a length-driven loop.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_neonaes_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_neonaes_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
     uint8x16_t const zeros_u8x16 = vdupq_n_u8(0);
     sz_size_t vector_index;
-    for (vector_index = 0; vector_index != sizeof(*state) / SZ_AES_BLOCK_LENGTH; ++vector_index)
-        vst1q_u8(bytes + vector_index * SZ_AES_BLOCK_LENGTH, zeros_u8x16);
+    for (vector_index = 0; vector_index != sizeof(*state) / STRINGZILLA_AES_BLOCK_LENGTH; ++vector_index)
+        vst1q_u8(bytes + vector_index * STRINGZILLA_AES_BLOCK_LENGTH, zeros_u8x16);
     vst1_u8(bytes + sizeof(*state) - 8, vdup_n_u8(0));
     sz_keep_alive_(state);
 }
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-SZ_HELPER_INLINE void sz_aes256_gcm_begin_neonaes_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
-                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_neonaes_(sz_aes256_gcm_state_t *state,
+                                                            sz_aes256_gcm_key_t const *key,
+                                                            sz_u8_t const nonce[sz_at_least_(12)]) {
     uint8x16_t initial_u8x16;
 
     state->key = *key;
@@ -651,11 +661,12 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_neonaes_(sz_aes256_gcm_state_t *state,
     state->associated_length = 0;
     state->text_length = 0;
     state->buffered = 0;
-    state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
+    state->keystream_used = STRINGZILLA_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
 /** Absorbs associated data into the payload both directions share. */
-SZ_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                                sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
     uint8x16_t powers_u8x16[8];
@@ -669,32 +680,32 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *st
 
     // Associated data is hashed but never encrypted, so a partial block is completed in place.
     if (state->buffered != 0) {
-        sz_size_t const available_bytes = SZ_AES_BLOCK_LENGTH - state->buffered;
+        sz_size_t const available_bytes = STRINGZILLA_AES_BLOCK_LENGTH - state->buffered;
         sz_size_t const taken_bytes = length < available_bytes ? length : available_bytes;
         for (byte_index = 0; byte_index != taken_bytes; ++byte_index)
             state->partial[state->buffered + byte_index] = input_bytes[byte_index];
         state->buffered = (sz_u8_t)(state->buffered + taken_bytes);
         consumed = taken_bytes;
-        if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+        if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
             accumulator_u8x16 = sz_ghash_absorb_neonaes_(accumulator_u8x16, sz_ghash_load_neonaes_(state->partial),
                                                          subkey_u8x16);
             state->buffered = 0;
         }
     }
 
-    for (; consumed + 8 * SZ_AES_BLOCK_LENGTH <= length; consumed += 8 * SZ_AES_BLOCK_LENGTH) {
+    for (; consumed + 8 * STRINGZILLA_AES_BLOCK_LENGTH <= length; consumed += 8 * STRINGZILLA_AES_BLOCK_LENGTH) {
         uint8x16_t blocks_u8x16[8];
-        blocks_u8x16[0] = sz_ghash_load_neonaes_(input_bytes + consumed + 0 * SZ_AES_BLOCK_LENGTH);
-        blocks_u8x16[1] = sz_ghash_load_neonaes_(input_bytes + consumed + 1 * SZ_AES_BLOCK_LENGTH);
-        blocks_u8x16[2] = sz_ghash_load_neonaes_(input_bytes + consumed + 2 * SZ_AES_BLOCK_LENGTH);
-        blocks_u8x16[3] = sz_ghash_load_neonaes_(input_bytes + consumed + 3 * SZ_AES_BLOCK_LENGTH);
-        blocks_u8x16[4] = sz_ghash_load_neonaes_(input_bytes + consumed + 4 * SZ_AES_BLOCK_LENGTH);
-        blocks_u8x16[5] = sz_ghash_load_neonaes_(input_bytes + consumed + 5 * SZ_AES_BLOCK_LENGTH);
-        blocks_u8x16[6] = sz_ghash_load_neonaes_(input_bytes + consumed + 6 * SZ_AES_BLOCK_LENGTH);
-        blocks_u8x16[7] = sz_ghash_load_neonaes_(input_bytes + consumed + 7 * SZ_AES_BLOCK_LENGTH);
+        blocks_u8x16[0] = sz_ghash_load_neonaes_(input_bytes + consumed + 0 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_u8x16[1] = sz_ghash_load_neonaes_(input_bytes + consumed + 1 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_u8x16[2] = sz_ghash_load_neonaes_(input_bytes + consumed + 2 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_u8x16[3] = sz_ghash_load_neonaes_(input_bytes + consumed + 3 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_u8x16[4] = sz_ghash_load_neonaes_(input_bytes + consumed + 4 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_u8x16[5] = sz_ghash_load_neonaes_(input_bytes + consumed + 5 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_u8x16[6] = sz_ghash_load_neonaes_(input_bytes + consumed + 6 * STRINGZILLA_AES_BLOCK_LENGTH);
+        blocks_u8x16[7] = sz_ghash_load_neonaes_(input_bytes + consumed + 7 * STRINGZILLA_AES_BLOCK_LENGTH);
         accumulator_u8x16 = sz_ghash_absorb_eight_neonaes_(accumulator_u8x16, blocks_u8x16, powers_u8x16);
     }
-    for (; consumed + SZ_AES_BLOCK_LENGTH <= length; consumed += SZ_AES_BLOCK_LENGTH)
+    for (; consumed + STRINGZILLA_AES_BLOCK_LENGTH <= length; consumed += STRINGZILLA_AES_BLOCK_LENGTH)
         accumulator_u8x16 = sz_ghash_absorb_neonaes_(accumulator_u8x16, sz_ghash_load_neonaes_(input_bytes + consumed),
                                                      subkey_u8x16);
     for (; consumed != length; ++consumed) state->partial[state->buffered++] = input_bytes[consumed];
@@ -717,9 +728,10 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *st
  *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
  *  this resumes both.
  */
-SZ_HELPER_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
-                                                         sz_u8_t *output, sz_size_t count, uint8x16_t accumulator_u8x16,
-                                                         uint8x16_t subkey_u8x16, sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_HELPER_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
+                                                                  sz_u8_t *output, sz_size_t count,
+                                                                  uint8x16_t accumulator_u8x16, uint8x16_t subkey_u8x16,
+                                                                  sz_aes256_gcm_direction_t direction) {
     sz_size_t byte_index;
 
     // Scalar: NEON has no masked load or store, so a partial run cannot move without a
@@ -732,7 +744,7 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t *
         state->partial[state->buffered] = ciphertext_byte;
         ++state->buffered;
         ++state->keystream_used;
-        if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+        if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
             accumulator_u8x16 = sz_ghash_absorb_neonaes_(accumulator_u8x16, sz_ghash_load_neonaes_(state->partial),
                                                          subkey_u8x16);
             state->buffered = 0;
@@ -754,8 +766,9 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t *
  *  block, then whole blocks eight at a time, then any remaining whole blocks, then a trailing block
  *  the next chunk resumes.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                       sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                                sz_size_t length, sz_ptr_t output,
+                                                                sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
@@ -779,15 +792,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
     counter_vec.u8x16 = vld1q_u8(state->counter);
     block_index = sz_u32_bytes_reverse(counter_vec.u32s[3]);
 
-    if (state->keystream_used != SZ_AES_BLOCK_LENGTH) {
-        sz_size_t const available_bytes = SZ_AES_BLOCK_LENGTH - state->keystream_used;
+    if (state->keystream_used != STRINGZILLA_AES_BLOCK_LENGTH) {
+        sz_size_t const available_bytes = STRINGZILLA_AES_BLOCK_LENGTH - state->keystream_used;
         sz_size_t const taken_bytes = length < available_bytes ? length : available_bytes;
         accumulator_u8x16 = sz_aes256_gcm_spend_neonaes_(state, input_bytes, output_bytes, taken_bytes,
                                                          accumulator_u8x16, subkey_u8x16, direction);
         produced = taken_bytes;
     }
 
-    for (; produced + 8 * SZ_AES_BLOCK_LENGTH <= length; produced += 8 * SZ_AES_BLOCK_LENGTH) {
+    for (; produced + 8 * STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += 8 * STRINGZILLA_AES_BLOCK_LENGTH) {
         uint8x16_t keystream_u8x16[8], ciphertext_u8x16[8];
         keystream_u8x16[0] = sz_aes256_counter_block_neonaes_(counter_vec.u8x16, block_index + 1);
         keystream_u8x16[1] = sz_aes256_counter_block_neonaes_(counter_vec.u8x16, block_index + 2);
@@ -800,7 +813,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
         block_index += 8;
         sz_aes256_blocks_encrypt_neonaes_(&state->key.block, keystream_u8x16);
         for (lane_index = 0; lane_index != 8; ++lane_index) {
-            sz_size_t const lane_offset = produced + lane_index * SZ_AES_BLOCK_LENGTH;
+            sz_size_t const lane_offset = produced + lane_index * STRINGZILLA_AES_BLOCK_LENGTH;
             uint8x16_t const original_u8x16 = vld1q_u8(input_bytes + lane_offset);
             uint8x16_t const transformed_u8x16 = veorq_u8(original_u8x16, keystream_u8x16[lane_index]);
             uint8x16_t const ciphered_u8x16 = direction == sz_aes256_gcm_decrypting_k ? original_u8x16
@@ -811,7 +824,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
         accumulator_u8x16 = sz_ghash_absorb_eight_neonaes_(accumulator_u8x16, ciphertext_u8x16, powers_u8x16);
     }
 
-    for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH) {
+    for (; produced + STRINGZILLA_AES_BLOCK_LENGTH <= length; produced += STRINGZILLA_AES_BLOCK_LENGTH) {
         uint8x16_t const original_u8x16 = vld1q_u8(input_bytes + produced);
         uint8x16_t counter_u8x16, keystream_u8x16, transformed_u8x16, ciphered_u8x16;
         block_index += 1;
@@ -848,7 +861,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
  *  The pending block and the length block are absorbed in registers rather than into the state, so
  *  a caller may take an intermediate tag and keep streaming.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_digest_neonaes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_neonaes_(sz_aes256_gcm_state_t const *state,
+                                                             sz_u8_t tag[sz_at_least_(16)]) {
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
     uint8x16_t accumulator_u8x16 = sz_ghash_load_neonaes_(state->accumulator);
     sz_u128_vec_t lengths_vec;
@@ -867,46 +881,47 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_neonaes_(sz_aes256_gcm_state_t const 
     vst1q_u8(tag, veorq_u8(sz_ghash_reflect_neonaes_(accumulator_u8x16), vld1q_u8(state->tag_mask)));
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_init_neonaes(sz_aes256_gcm_encryptor_t *encryptor,
-                                                          sz_aes256_gcm_key_t const *key,
-                                                          sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_neonaes(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                   sz_aes256_gcm_key_t const *key,
+                                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_neonaes_(&encryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_associate_neonaes(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                               sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_neonaes(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                        sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_neonaes_(&encryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_update_neonaes(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                            sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_neonaes(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                     sz_cptr_t text, sz_size_t length,
+                                                                     sz_ptr_t output) {
     sz_aes256_gcm_transform_neonaes_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_digest_neonaes(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                            sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_neonaes(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                     sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_digest_neonaes_(&encryptor->state, tag);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_init_neonaes(sz_aes256_gcm_decryptor_t *decryptor,
-                                                          sz_aes256_gcm_key_t const *key,
-                                                          sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_neonaes(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                   sz_aes256_gcm_key_t const *key,
+                                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_neonaes_(&decryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_associate_neonaes(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
-                                                               sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_neonaes(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                        sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_neonaes_(&decryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_neonaes(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                       sz_cptr_t text, sz_size_t length,
-                                                                       sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_neonaes(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                                sz_cptr_t text, sz_size_t length,
+                                                                                sz_ptr_t output) {
     sz_aes256_gcm_transform_neonaes_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_neonaes(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                   sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_neonaes(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                            sz_u8_t const tag[sz_at_least_(16)]) {
     sz_u128_vec_t expected_vec;
     sz_aes256_gcm_digest_neonaes_(&decryptor->state, expected_vec.u8s);
     return sz_aes256_tag_equal_neonaes_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
@@ -916,10 +931,11 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_neonaes(sz_aes256_gcm
 
 #pragma region One Shot Interface
 
-SZ_API_COMPTIME void sz_aes256_gcm_encrypt_neonaes(sz_aes256_gcm_key_t const *key,
-                                                   sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                   sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
-                                                   sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_neonaes(sz_aes256_gcm_key_t const *key,
+                                                            sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                            sz_size_t associated_length, sz_cptr_t text,
+                                                            sz_size_t length, sz_ptr_t output,
+                                                            sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_encryptor_t encryptor;
     sz_aes256_gcm_encryptor_init_neonaes(&encryptor, key, nonce);
     if (associated_length) sz_aes256_gcm_encryptor_associate_neonaes(&encryptor, associated, associated_length);
@@ -928,10 +944,11 @@ SZ_API_COMPTIME void sz_aes256_gcm_encrypt_neonaes(sz_aes256_gcm_key_t const *ke
     sz_aes256_gcm_state_scrub_neonaes_(&encryptor.state);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_neonaes(sz_aes256_gcm_key_t const *key,
-                                                          sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                          sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
-                                                          sz_ptr_t output, sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_neonaes(sz_aes256_gcm_key_t const *key,
+                                                                   sz_u8_t const nonce[sz_at_least_(12)],
+                                                                   sz_cptr_t associated, sz_size_t associated_length,
+                                                                   sz_cptr_t text, sz_size_t length, sz_ptr_t output,
+                                                                   sz_u8_t const tag[sz_at_least_(16)]) {
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
     sz_aes256_gcm_decryptor_init_neonaes(&decryptor, key, nonce);
@@ -952,7 +969,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_neonaes(sz_aes256_gcm_key_t co
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_NEONAES
+#endif // STRINGZILLA_TARGET_NEONAES
 
 #ifdef __cplusplus
 }

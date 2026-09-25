@@ -64,12 +64,12 @@ typedef enum sz_aes256_gcm_direction_t {
  *
  *  FIPS 197 writes a key-schedule word as the byte quadruple @b (a0,a1,a2,a3).
  */
-SZ_HELPER_INLINE sz_u32_t sz_aes256_word_pack_serial_(sz_u8_t const *bytes) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_aes256_word_pack_serial_(sz_u8_t const *bytes) {
     return (sz_u32_t)bytes[0] | ((sz_u32_t)bytes[1] << 8) | ((sz_u32_t)bytes[2] << 16) | ((sz_u32_t)bytes[3] << 24);
 }
 
 /** Substitutes every byte of a schedule word through the substitution box. */
-SZ_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_serial_(sz_u32_t word) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_serial_(sz_u32_t word) {
     sz_u8_t const *sbox = sz_aes_sbox_();
     return (sz_u32_t)sbox[word & 0xFFu] |                 //
            ((sz_u32_t)sbox[(word >> 8) & 0xFFu] << 8) |   //
@@ -78,14 +78,14 @@ SZ_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_serial_(sz_u32_t word) {
 }
 
 /** Rotates a schedule word so @b (a0,a1,a2,a3) becomes @b (a1,a2,a3,a0). */
-SZ_HELPER_INLINE sz_u32_t sz_aes256_word_rotate_serial_(sz_u32_t word) { return (word >> 8) | (word << 24); }
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_aes256_word_rotate_serial_(sz_u32_t word) { return (word >> 8) | (word << 24); }
 
-SZ_API_COMPTIME void sz_aes256_key_init_serial(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_key_init_serial(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
     static sz_u8_t const round_constants[7] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40};
     sz_size_t word_index = 0;
     for (; word_index != 8; ++word_index)
         key->round_keys[word_index] = sz_aes256_word_pack_serial_(secret + word_index * 4);
-    for (; word_index != SZ_AES256_ROUND_KEYS; ++word_index) {
+    for (; word_index != STRINGZILLA_AES256_ROUND_KEYS; ++word_index) {
         sz_u32_t carried_word = key->round_keys[word_index - 1];
         if ((word_index & 7) == 0) {
             carried_word = sz_aes256_word_substitute_serial_(sz_aes256_word_rotate_serial_(carried_word));
@@ -105,7 +105,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_serial(sz_aes256_key_t *key, sz_u8_t con
  *  @param[in] block The 16 input bytes.
  *  @param[out] shifted Receives the substituted and row-shifted bytes.
  */
-SZ_HELPER_INLINE void sz_aes256_substitute_and_shift_serial_(sz_u8_t const *block, sz_u8_t *shifted) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_substitute_and_shift_serial_(sz_u8_t const *block, sz_u8_t *shifted) {
     sz_u8_t const *sbox = sz_aes_sbox_();
     static sz_u8_t const source_of[16] = {0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11};
     for (sz_size_t byte_index = 0; byte_index != 16; ++byte_index)
@@ -118,10 +118,10 @@ SZ_HELPER_INLINE void sz_aes256_substitute_and_shift_serial_(sz_u8_t const *bloc
  *
  *  Negating a zero-or-one replicates it, which is how a byte selects a value without a branch.
  */
-SZ_HELPER_INLINE sz_u8_t sz_u8_top_bit_smear_(sz_u8_t value) { return (sz_u8_t)(0u - (sz_u8_t)(value >> 7)); }
+STRINGZILLA_HELPER_INLINE sz_u8_t sz_u8_top_bit_smear_(sz_u8_t value) { return (sz_u8_t)(0u - (sz_u8_t)(value >> 7)); }
 
 /** Doubles a byte in GF(2⁸) under the AES reduction polynomial. */
-SZ_HELPER_INLINE sz_u8_t sz_aes256_gf_double_serial_(sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u8_t sz_aes256_gf_double_serial_(sz_u8_t value) {
     return (sz_u8_t)((sz_u8_t)(value << 1) ^ (sz_u8_t)(0x1Bu & sz_u8_top_bit_smear_(value)));
 }
 
@@ -131,8 +131,8 @@ SZ_HELPER_INLINE sz_u8_t sz_aes256_gf_double_serial_(sz_u8_t value) {
  *  @param[in] block The 16 plaintext bytes.
  *  @param[out] output Receives the 16 ciphertext bytes; may alias @p block.
  */
-SZ_HELPER_INLINE void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key, sz_u8_t const *block,
-                                                      sz_u8_t *output) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key, sz_u8_t const *block,
+                                                               sz_u8_t *output) {
     sz_u8_t state[16], shifted[16];
     sz_size_t round_index, byte_index, column_index;
 
@@ -172,7 +172,8 @@ SZ_HELPER_INLINE void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key
 #pragma region Counter Mode
 
 /** Builds the counter block for a given block index: the nonce then a big-endian 32-bit counter. */
-SZ_HELPER_INLINE void sz_aes256_counter_block_serial_(sz_u8_t const *nonce, sz_u32_t block_index, sz_u8_t *block) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_counter_block_serial_(sz_u8_t const *nonce, sz_u32_t block_index,
+                                                               sz_u8_t *block) {
     for (sz_size_t byte_index = 0; byte_index != 12; ++byte_index) block[byte_index] = nonce[byte_index];
     block[12] = (sz_u8_t)(block_index >> 24);
     block[13] = (sz_u8_t)(block_index >> 16);
@@ -180,21 +181,22 @@ SZ_HELPER_INLINE void sz_aes256_counter_block_serial_(sz_u8_t const *nonce, sz_u
     block[15] = (sz_u8_t)(block_index >> 0);
 }
 
-SZ_API_COMPTIME void sz_aes256_ctr_xor_serial(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                              sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_serial(sz_aes256_key_t const *key,
+                                                       sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
+                                                       sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     sz_u8_t counter[16], keystream[16];
     sz_size_t produced = 0;
 
     // The first block may start part way in, so its leading bytes are generated and discarded.
-    sz_u32_t block_index = (sz_u32_t)(byte_offset / SZ_AES_BLOCK_LENGTH);
-    sz_size_t within_block = (sz_size_t)(byte_offset % SZ_AES_BLOCK_LENGTH);
+    sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
+    sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
 
     while (produced != length) {
         sz_aes256_counter_block_serial_(nonce, block_index, counter);
         sz_aes256_block_encrypt_serial_(key, counter, keystream);
-        for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
+        for (; within_block != STRINGZILLA_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream[within_block]);
         within_block = 0;
         ++block_index;
@@ -212,7 +214,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_serial(sz_aes256_key_t const *key, sz_u8_
  *
  *  Deliberately branch free and table free.
  */
-SZ_HELPER_AUTO void sz_ghash_multiply_serial_(sz_u8_t *accumulator, sz_u8_t const *subkey) {
+STRINGZILLA_HELPER_AUTO void sz_ghash_multiply_serial_(sz_u8_t *accumulator, sz_u8_t const *subkey) {
     sz_u8_t product[16], operand[16];
     sz_size_t byte_index, bit_index;
 
@@ -235,12 +237,14 @@ SZ_HELPER_AUTO void sz_ghash_multiply_serial_(sz_u8_t *accumulator, sz_u8_t cons
 }
 
 /** Absorbs one whole block into the running hash. */
-SZ_HELPER_AUTO void sz_ghash_absorb_serial_(sz_u8_t *accumulator, sz_u8_t const *block, sz_u8_t const *subkey) {
+STRINGZILLA_HELPER_AUTO void sz_ghash_absorb_serial_(sz_u8_t *accumulator, sz_u8_t const *block,
+                                                     sz_u8_t const *subkey) {
     for (sz_size_t byte_index = 0; byte_index != 16; ++byte_index) accumulator[byte_index] ^= block[byte_index];
     sz_ghash_multiply_serial_(accumulator, subkey);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_key_init_serial(sz_aes256_gcm_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_serial(sz_aes256_gcm_key_t *key,
+                                                            sz_u8_t const secret[sz_at_least_(32)]) {
     sz_u8_t zeros[16], subkey[16];
     sz_size_t byte_index, power_index;
 
@@ -268,10 +272,10 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_serial(sz_aes256_gcm_key_t *key, sz_
  *  Accumulates every difference instead of returning at the first one, so an attacker cannot
  *  recover a forged tag byte by byte from how long the comparison ran.
  */
-SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_u8_t const *second) {
+STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_u8_t const *second) {
     sz_u8_t difference = 0;
     sz_size_t byte_index;
-    for (byte_index = 0; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
+    for (byte_index = 0; byte_index != STRINGZILLA_AES_BLOCK_LENGTH; ++byte_index)
         difference |= (sz_u8_t)(first[byte_index] ^ second[byte_index]);
     return difference == 0 ? sz_true_k : sz_false_k;
 }
@@ -285,10 +289,10 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_
  *
  *  Every backend closes its hash with this block, so it lives here rather than eight times over.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_lengths_serial_(sz_u128_vec_t *lengths_vec, sz_u64_t associated_length,
-                                                    sz_u64_t text_length) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_lengths_serial_(sz_u128_vec_t *lengths_vec, sz_u64_t associated_length,
+                                                             sz_u64_t text_length) {
     sz_u64_t const associated_bits = associated_length * 8, text_bits = text_length * 8;
-#if SZ_IS_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_BIG_ENDIAN_
     lengths_vec->u64s[0] = associated_bits;
     lengths_vec->u64s[1] = text_bits;
 #else
@@ -304,7 +308,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_lengths_serial_(sz_u128_vec_t *lengths_vec, 
  *  @c volatile forbids vectorization, so that form would cost 472 single-byte stores on
  *  every one-shot call.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_serial_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_serial_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
     sz_size_t byte_index;
     for (byte_index = 0; byte_index != sizeof(*state); ++byte_index) bytes[byte_index] = 0;
@@ -312,8 +316,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_serial_(sz_aes256_gcm_state_t *s
 }
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-SZ_HELPER_INLINE void sz_aes256_gcm_begin_serial_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
-                                                  sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_serial_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
+                                                           sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_size_t byte_index;
     sz_u8_t initial[16];
 
@@ -330,30 +334,31 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_serial_(sz_aes256_gcm_state_t *state, 
     state->associated_length = 0;
     state->text_length = 0;
     state->buffered = 0;
-    state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
+    state->keystream_used = STRINGZILLA_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
 /** Advances the big-endian counter occupying the last four bytes of the counter block. */
-SZ_HELPER_INLINE void sz_aes256_counter_advance_serial_(sz_u8_t *counter) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_counter_advance_serial_(sz_u8_t *counter) {
     for (sz_size_t byte_index = 16; byte_index-- != 12;)
         if (++counter[byte_index] != 0) break;
 }
 
 /** Absorbs associated data into the payload both directions share. */
-SZ_HELPER_INLINE void sz_aes256_gcm_associate_serial_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_serial_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                               sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_size_t consumed = 0;
 
     // Associated data is hashed but never encrypted, so a partial block is completed in place.
     while (consumed != length) {
-        sz_size_t const wanted_bytes = SZ_AES_BLOCK_LENGTH - state->buffered;
+        sz_size_t const wanted_bytes = STRINGZILLA_AES_BLOCK_LENGTH - state->buffered;
         sz_size_t const taken_bytes = length - consumed < wanted_bytes ? length - consumed : wanted_bytes;
         for (sz_size_t byte_index = 0; byte_index != taken_bytes; ++byte_index)
             state->partial[state->buffered + byte_index] = input_bytes[consumed + byte_index];
         state->buffered = (sz_u8_t)(state->buffered + taken_bytes);
         consumed += taken_bytes;
         state->associated_length += taken_bytes;
-        if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+        if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
             sz_ghash_absorb_serial_(state->accumulator, state->partial, state->key.powers);
             state->buffered = 0;
         }
@@ -361,18 +366,18 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_serial_(sz_aes256_gcm_state_t *sta
 }
 
 /** Absorbs whatever @c partial holds, zero padded to a full block, and empties it. */
-SZ_HELPER_AUTO void sz_aes256_gcm_flush_partial_serial_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_HELPER_AUTO void sz_aes256_gcm_flush_partial_serial_(sz_aes256_gcm_state_t *state) {
     if (state->buffered == 0) return;
-    for (sz_size_t byte_index = state->buffered; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
+    for (sz_size_t byte_index = state->buffered; byte_index != STRINGZILLA_AES_BLOCK_LENGTH; ++byte_index)
         state->partial[byte_index] = 0;
     sz_ghash_absorb_serial_(state->accumulator, state->partial, state->key.powers);
     state->buffered = 0;
 }
 
 /** Appends one ciphertext byte to the hash block, absorbing whenever it fills. */
-SZ_HELPER_INLINE void sz_aes256_gcm_hash_byte_serial_(sz_aes256_gcm_state_t *state, sz_u8_t byte) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_hash_byte_serial_(sz_aes256_gcm_state_t *state, sz_u8_t byte) {
     state->partial[state->buffered++] = byte;
-    if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+    if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
         sz_ghash_absorb_serial_(state->accumulator, state->partial, state->key.powers);
         state->buffered = 0;
     }
@@ -388,8 +393,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_hash_byte_serial_(sz_aes256_gcm_state_t *sta
  *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may
  *  restart at a chunk boundary.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                      sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                               sz_size_t length, sz_ptr_t output,
+                                                               sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     sz_size_t produced = 0;
@@ -398,7 +404,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *sta
     if (state->text_length == 0 && length != 0) sz_aes256_gcm_flush_partial_serial_(state);
 
     while (produced != length) {
-        if (state->keystream_used == SZ_AES_BLOCK_LENGTH) {
+        if (state->keystream_used == STRINGZILLA_AES_BLOCK_LENGTH) {
             sz_aes256_counter_advance_serial_(state->counter);
             sz_aes256_block_encrypt_serial_(&state->key.block, state->counter, state->keystream);
             state->keystream_used = 0;
@@ -417,7 +423,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *sta
 }
 
 /** Pads whatever is still pending, folds in the length block, and masks out the tag. */
-SZ_HELPER_INLINE void sz_aes256_gcm_digest_serial_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_serial_(sz_aes256_gcm_state_t const *state,
+                                                            sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_state_t finishing = *state;
     sz_u128_vec_t lengths_vec;
     sz_size_t byte_index;
@@ -433,47 +440,47 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_serial_(sz_aes256_gcm_state_t const *
         tag[byte_index] = (sz_u8_t)(finishing.accumulator[byte_index] ^ finishing.tag_mask[byte_index]);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_init_serial(sz_aes256_gcm_encryptor_t *encryptor,
-                                                         sz_aes256_gcm_key_t const *key,
-                                                         sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_serial(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                  sz_aes256_gcm_key_t const *key,
+                                                                  sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_serial_(&encryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_associate_serial(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                              sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_serial(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                       sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_serial_(&encryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_update_serial(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                           sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_serial(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                    sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
     sz_aes256_gcm_transform_serial_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_digest_serial(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                           sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_serial(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                    sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_digest_serial_(&encryptor->state, tag);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_init_serial(sz_aes256_gcm_decryptor_t *decryptor,
-                                                         sz_aes256_gcm_key_t const *key,
-                                                         sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_serial(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                  sz_aes256_gcm_key_t const *key,
+                                                                  sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_serial_(&decryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_associate_serial(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
-                                                              sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_serial(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                       sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_serial_(&decryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_serial(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                      sz_cptr_t text, sz_size_t length,
-                                                                      sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_serial(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                               sz_cptr_t text, sz_size_t length,
+                                                                               sz_ptr_t output) {
     sz_aes256_gcm_transform_serial_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_serial(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                  sz_u8_t const tag[sz_at_least_(16)]) {
-    sz_u8_t expected[SZ_AES_BLOCK_LENGTH];
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_serial(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                           sz_u8_t const tag[sz_at_least_(16)]) {
+    sz_u8_t expected[STRINGZILLA_AES_BLOCK_LENGTH];
     sz_aes256_gcm_digest_serial_(&decryptor->state, expected);
     return sz_aes256_tag_equal_serial_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
@@ -482,9 +489,11 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_serial(sz_aes256_gcm_
 
 #pragma region One Shot Interface
 
-SZ_API_COMPTIME void sz_aes256_gcm_encrypt_serial(sz_aes256_gcm_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                                  sz_cptr_t associated, sz_size_t associated_length, sz_cptr_t text,
-                                                  sz_size_t length, sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_serial(sz_aes256_gcm_key_t const *key,
+                                                           sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                           sz_size_t associated_length, sz_cptr_t text,
+                                                           sz_size_t length, sz_ptr_t output,
+                                                           sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_encryptor_t encryptor;
     sz_aes256_gcm_encryptor_init_serial(&encryptor, key, nonce);
     if (associated_length) sz_aes256_gcm_encryptor_associate_serial(&encryptor, associated, associated_length);
@@ -493,10 +502,11 @@ SZ_API_COMPTIME void sz_aes256_gcm_encrypt_serial(sz_aes256_gcm_key_t const *key
     sz_aes256_gcm_state_scrub_serial_(&encryptor.state);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_serial(sz_aes256_gcm_key_t const *key,
-                                                         sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                         sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
-                                                         sz_ptr_t output, sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_serial(sz_aes256_gcm_key_t const *key,
+                                                                  sz_u8_t const nonce[sz_at_least_(12)],
+                                                                  sz_cptr_t associated, sz_size_t associated_length,
+                                                                  sz_cptr_t text, sz_size_t length, sz_ptr_t output,
+                                                                  sz_u8_t const tag[sz_at_least_(16)]) {
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
     sz_aes256_gcm_decryptor_init_serial(&decryptor, key, nonce);

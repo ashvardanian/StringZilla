@@ -36,7 +36,7 @@
 
 #include "stringzilla/overlap/serial.h"
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,7 +92,8 @@ typedef struct sz_overlap_cuda_geometry_t {
 } sz_overlap_cuda_geometry_t;
 
 /** Whether the prepared query holds one raw @p window_hash, walking the tree a level at a time. */
-SZ_DEVICE_INLINE sz_size_t sz_overlap_cuda_btree_probe_(sz_overlap_btree_t const *btree, sz_u32_t window_hash) {
+STRINGZILLA_DEVICE_INLINE sz_size_t sz_overlap_cuda_btree_probe_(sz_overlap_btree_t const *btree,
+                                                                 sz_u32_t window_hash) {
     sz_u32_t const key = window_hash ^ (sz_u32_t)sz_overlap_sign_flip_k;
     sz_size_t node = 0;
     for (sz_size_t level = 0; level + 1 != btree->levels; ++level) {
@@ -116,10 +117,11 @@ SZ_DEVICE_INLINE sz_size_t sz_overlap_cuda_btree_probe_(sz_overlap_btree_t const
  *  sequence is some other layout entirely - a tape, a column, an index into someone else's arena -
  *  needs no conversion.
  */
-SZ_DEVICE_INLINE void sz_overlap_cuda_sweep_(sz_overlap_engine_t const *engine, sz_overlap_btree_t const *btree,
-                                             sz_size_t query, sz_sequence_t const *candidates, sz_size_t candidate,
-                                             sz_f32_t *scores, sz_size_t scores_query_stride,
-                                             sz_size_t scores_candidate_stride) {
+STRINGZILLA_DEVICE_INLINE void sz_overlap_cuda_sweep_(sz_overlap_engine_t const *engine,
+                                                      sz_overlap_btree_t const *btree, sz_size_t query,
+                                                      sz_sequence_t const *candidates, sz_size_t candidate,
+                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                      sz_size_t scores_candidate_stride) {
     sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
     sz_size_t const length = candidates->get_length(candidates->handle, candidate);
     sz_size_t const query_length = engine->lengths[query];
@@ -199,8 +201,8 @@ static __global__ void sz_overlap_cuda_scores_kernel_(sz_overlap_engine_t engine
  *
  *  @param[in] queries Read on the @b host, so its accessors must be host-callable, unlike
  *      a round's candidates.
- *  @param[in] alloc Unified and device-reachable, or @c SZ_NULL to have a unified one derived
- *      from the context.
+ *  @param[in] alloc Unified and device-reachable, or @c STRINGZILLA_NULL to have a unified one
+ *      derived from the context.
  *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the current
  *      device's default one.
  *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for a bad count or width of windows, or
@@ -210,16 +212,18 @@ static __global__ void sz_overlap_cuda_scores_kernel_(sz_overlap_engine_t engine
  *  A window count is bad when zero or above @ref sz_overlap_cuda_widths_max_k, and a width when it
  *  is past @ref sz_overlap_cuda_widest_window_k, the per-thread ring's compile-time bound.
  */
-SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_cuda(sz_sequence_t const *queries, sz_size_t const *window_widths,
-                                                        sz_size_t window_widths_count, sz_memory_allocator_t *alloc,
-                                                        void *stream, sz_overlap_engine_t *engine) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_engine_init_cuda(sz_sequence_t const *queries,
+                                                                 sz_size_t const *window_widths,
+                                                                 sz_size_t window_widths_count,
+                                                                 sz_memory_allocator_t *alloc, void *stream,
+                                                                 sz_overlap_engine_t *engine) {
     if (!window_widths_count || window_widths_count > sz_overlap_cuda_widths_max_k) return sz_unexpected_dimensions_k;
     for (sz_size_t index = 0; index != window_widths_count; ++index)
         if (window_widths[index] > sz_overlap_cuda_widest_window_k) return sz_unexpected_dimensions_k;
 
     sz_memory_allocator_t unified;
     if (alloc) unified = *alloc;
-    else sz_memory_allocator_init_unified(&unified, SZ_NULL);
+    else sz_memory_allocator_init_unified(&unified, STRINGZILLA_NULL);
     sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count,
                                                        sizeof(sz_overlap_cuda_geometry_t), &unified, engine);
     if (opened != sz_success_k) return opened;
@@ -322,9 +326,10 @@ SZ_API_COMPTIME sz_status_t sz_overlap_engine_init_cuda(sz_sequence_t const *que
  *  Only the handle can be checked from this side, so host accessors reach the device as an invalid
  *  address rather than a status.
  */
-SZ_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
-                                                   sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                   sz_size_t scores_candidate_stride) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine,
+                                                            sz_sequence_t const *candidates, sz_f32_t *scores,
+                                                            sz_size_t scores_query_stride,
+                                                            sz_size_t scores_candidate_stride) {
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                               scores_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
@@ -346,11 +351,11 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, 
     // The engine travels by value with its host-only members cleared: an allocator's function pointers would ride
     // into constant memory on every launch and no kernel can call them.
     sz_overlap_engine_t launched_engine = *engine;
-    launched_engine.alloc.allocate = SZ_NULL;
-    launched_engine.alloc.free = SZ_NULL;
-    launched_engine.alloc.handle = SZ_NULL;
-    launched_engine.memory = SZ_NULL, launched_engine.memory_bytes = 0;
-    launched_engine.scratch = SZ_NULL, launched_engine.scratch_bytes = 0;
+    launched_engine.alloc.allocate = STRINGZILLA_NULL;
+    launched_engine.alloc.free = STRINGZILLA_NULL;
+    launched_engine.alloc.handle = STRINGZILLA_NULL;
+    launched_engine.memory = STRINGZILLA_NULL, launched_engine.memory_bytes = 0;
+    launched_engine.scratch = STRINGZILLA_NULL, launched_engine.scratch_bytes = 0;
     sz_sequence_t launched_candidates = *candidates;
 
     dim3 grid, block;
@@ -370,5 +375,5 @@ SZ_API_COMPTIME sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, 
 #ifdef __cplusplus
 }
 #endif
-#endif // SZ_USE_CUDA
+#endif // STRINGZILLA_TARGET_CUDA
 #endif // STRINGZILLA_OVERLAP_CUDA_CUH_

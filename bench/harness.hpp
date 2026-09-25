@@ -1,5 +1,5 @@
 /**
- *  @file bench/shared.hpp
+ *  @file bench/harness.hpp
  *  @author Ash Vardanian
  *  @date January 4, 2024
  *  @brief Helper structures and functions for C++ benchmarks.
@@ -37,6 +37,7 @@
 #include <clocale> // `std::setlocale`
 #include <cmath>   // `std::ceil`, `std::log`, `std::pow`
 #include <cstdio>  // `std::fopen`, `std::fclose`, `std::FILE`
+#include <cstdlib> // `std::abort`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>
@@ -68,17 +69,15 @@
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/stringzilla.hpp"
 
-#include "stringzilla.hpp" // `read_file`
+#include "../test/harness.hpp" // `read_file`
 
 namespace sz = ashvardanian::stringzilla;
 namespace stdc = std::chrono;
 
-namespace ashvardanian {
-namespace stringzilla {
-namespace bench {
+namespace ashvardanian::stringzilla::bench {
 
 /** The benchmarks run on the test harness: @c unified_vector, @c arrow_strings_tape_t, @c read_file
- *  and the random helpers live in `test/stringzilla.hpp`, which every benchmark target carries. */
+ *  and the random helpers live in `test/harness.hpp`, which every benchmark target carries. */
 using namespace ashvardanian::stringzilla::test;
 
 using accurate_clock_t = stdc::high_resolution_clock;
@@ -113,8 +112,6 @@ struct callable_no_op_t {
     call_result_t operator()(std::size_t) const { return {}; }
 };
 
-using profiled_function_t = std::function<call_result_t(std::size_t)>;
-
 /** Cross-platform function to get the number of CPU cycles elapsed @b only on the current core.
  *  Used as a more efficient alternative to @c std::chrono::high_resolution_clock. */
 inline std::uint64_t cpu_cycle_counter() {
@@ -133,9 +130,9 @@ inline std::uint64_t cpu_cycle_counter() {
     unsigned int low, high;
     __asm__ volatile("rdtsc" : "=a"(low), "=d"(high));
     return (static_cast<std::uint64_t>(high) << 32) | low;
-#elif defined(__aarch64__) || SZ_IS_64BIT_ARM_
+#elif defined(__aarch64__) || STRINGZILLA_ARCH_ARM64_
     // On ARM64, read the virtual count register `CNTVCT_EL0` which provides cycle count.
-    // (`SZ_IS_64BIT_ARM_` is a 0/1 value macro — testing `defined()` of it would be true everywhere,
+    // (`STRINGZILLA_ARCH_ARM64_` is a 0/1 value macro — testing `defined()` of it would be true everywhere,
     // wrongly selecting this branch on non-ARM targets such as wasm32.)
     std::uint64_t counter;
     asm volatile("mrs %0, cntvct_el0" : "=r"(counter));
@@ -235,7 +232,7 @@ struct engine_timing_t {
  *  call returns @c success_k, and sharing one `[[gnu::noinline]]` frame reproduces that code path.
  */
 template <typename invocable_type_>
-SZ_NOINLINE engine_timing_t invoke_engine_(invocable_type_ &&invocable) noexcept {
+STRINGZILLA_NOINLINE_ engine_timing_t invoke_engine_(invocable_type_ &&invocable) noexcept {
     using status_t = std::invoke_result_t<invocable_type_>;
     status_t engine_result = invocable();
     do_not_optimize(engine_result);
@@ -283,7 +280,7 @@ inline std::size_t parse_size(std::string const &text) {
  *  multilingual corpus. Memory-bound benches ignore it and read the whole file. */
 static constexpr std::size_t compute_bound_slice_bytes_k = 64ull * 1024ull * 1024ull;
 
-#if !SZ_USE_CUDA
+#if !STRINGZILLA_TARGET_CUDA
 using dataset_t = std::string;
 using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
@@ -388,14 +385,17 @@ struct environment_t {
     /** Regular expression to filter the backends. */
     std::string filter;
 
+    /** The @c filter compiled once, so @c allow never rebuilds it per benchmark. */
+    std::regex filter_pattern;
+
     /** Whether to stress-test the backends. */
     bool stress = true;
 
     /** Upper time bound on a duration of the stress-test for a single callable. */
-    std::size_t stress_seconds = SZ_DEBUG ? 1 : 10;
+    std::size_t stress_seconds = STRINGZILLA_DEBUG ? 1 : 10;
 
     /** Upper time bound on a duration of a single callable. */
-    std::size_t benchmark_seconds = SZ_DEBUG ? 1 : 10;
+    std::size_t benchmark_seconds = STRINGZILLA_DEBUG ? 1 : 10;
 
     /** Seed for the random number generator. */
     std::uint64_t seed = 0;
@@ -421,8 +421,8 @@ struct environment_t {
     /** This machine's cache geometry, which cache-resident benchmark shapes are sized from. */
     sz::cpu_specs_t specs;
 
-    bool allow(std::string const &benchmark_name) const {
-        return filter.empty() || std::regex_search(benchmark_name, std::regex(filter));
+    bool allow(std::string_view benchmark_name) const {
+        return filter.empty() || std::regex_search(benchmark_name.begin(), benchmark_name.end(), filter_pattern);
     }
 
     std::string_view operator[](std::size_t i) const {
@@ -434,6 +434,19 @@ struct environment_t {
 /** Whether @c build_environment stress-tests the backends absent @c STRINGWARS_STRESS. */
 enum class stress_default_t : bool { quick_k, stress_k };
 
+/** The run's @b STRINGWARS_SEED: 0 when unset, which keeps the tokens in order. */
+inline std::size_t bench_seed() noexcept {
+    std::size_t const seed = env_variable("STRINGWARS_SEED", std::size_t {0});
+    if (seed == 0 && *env_variable("STRINGWARS_SEED", "")) {
+        fmt::println(stderr, "STRINGWARS_SEED must be a positive integer");
+        std::abort();
+    }
+    return seed;
+}
+
+/** Prints the run's seed below the lines of @c log_environment, like @c print_test_environment. */
+inline void print_bench_environment() noexcept { fmt::println("- Seed: {}", bench_seed()); }
+
 /**
  *  @brief Prepares the environment for benchmarking based on environment variables and default
  *      settings. Different workloads may use different default datasets and tokenization modes, but
@@ -444,7 +457,7 @@ enum class stress_default_t : bool { quick_k, stress_k };
  *
  *  @param[in] default_dataset Default dataset file path, if @b STRINGWARS_DATASET is not set.
  *  @param[in] default_tokens Tokenization mode, if @b STRINGWARS_TOKENS is not set.
- *  @param[in] default_duration Time limit per benchmark, if @b STRINGWARS_DURATION is not set.
+ *  @param[in] default_duration Time limit per benchmark, if @b STRINGWARS_MAX_SECONDS is not set.
  *
  *  @param[in] default_stress Whether to stress-test backends, if @b STRINGWARS_STRESS is not set.
  *  @param[in] default_stress_dir Stress-test log directory, if @b STRINGWARS_STRESS_DIR is unset.
@@ -452,108 +465,68 @@ enum class stress_default_t : bool { quick_k, stress_k };
  *  @param[in] default_stress_duration Stress-test time, if @b STRINGWARS_STRESS_DURATION is unset.
  *
  *  @param[in] default_filter Regex to filter the backends, if @b STRINGWARS_FILTER is not set.
- *  @param[in] default_seed Seed for reproducibility, if @b STRINGWARS_SEED is not set.
  */
 inline environment_t build_environment(                                        //
     int argc, char const *argv[],                                              //< Ignored
     std::string default_dataset, environment_t::tokenization_t default_tokens, //< Mandatory
     std::size_t default_dataset_limit_bytes = 0,                               //< Optional, 0 = whole file
-    std::size_t default_duration = SZ_DEBUG ? 1 : 10,                          //< Optional
+    std::size_t default_duration = STRINGZILLA_DEBUG ? 1 : 10,                 //< Optional
     stress_default_t default_stress = stress_default_t::stress_k,              //
     std::string default_stress_dir = ".tmp",                                   //
     std::size_t default_stress_limit = 1,                                      //
-    std::size_t default_stress_duration = SZ_DEBUG ? 1 : 10,                   //
-    std::string default_filter = "",                                           //
-    std::size_t default_seed = 0                                               //
+    std::size_t default_stress_duration = STRINGZILLA_DEBUG ? 1 : 10,          //
+    std::string default_filter = ""                                            //
     ) noexcept(false) {
 
     sz_unused_(argc && argv); // Unused in this context
     environment_t env;
     env.dataset_limit_bytes = default_dataset_limit_bytes;
 
-    // Use `STRINGWARS_DATASET` if set, otherwise `default_dataset`
-    if (char const *env_var = std::getenv("STRINGWARS_DATASET")) { env.path = env_var; }
-    else { env.path = default_dataset; }
+    env.path = env_variable("STRINGWARS_DATASET", default_dataset.c_str());
+    env.filter = env_variable("STRINGWARS_FILTER", default_filter.c_str());
+    if (!env.filter.empty()) env.filter_pattern = std::regex(env.filter);
 
-    // Use `STRINGWARS_FILTER` if set, otherwise `default_filter`
-    if (char const *env_var = std::getenv("STRINGWARS_FILTER")) { env.filter = env_var; }
-    else { env.filter = default_filter; }
+    env.benchmark_seconds = env_variable("STRINGWARS_MAX_SECONDS", default_duration);
+    if (env.benchmark_seconds == 0) throw std::invalid_argument("The time limit must be greater than 0.");
+    env.seed = bench_seed();
 
-    // Use `STRINGWARS_DURATION` if set, otherwise `default_duration`
-    if (char const *env_var = std::getenv("STRINGWARS_DURATION")) {
-        env.benchmark_seconds = std::stoul(env_var);
-        if (env.benchmark_seconds == 0) throw std::invalid_argument("The time limit must be greater than 0.");
+    char const *const tokenization = env_variable("STRINGWARS_TOKENS", "");
+    if (!*tokenization) env.tokenization = default_tokens;
+    else if (std::strcmp(tokenization, "file") == 0) env.tokenization = environment_t::file_k;
+    else if (std::strcmp(tokenization, "lines") == 0) env.tokenization = environment_t::lines_k;
+    else if (std::strcmp(tokenization, "words") == 0) env.tokenization = environment_t::words_k;
+    else {
+        // Anything else names an N-gram length, which `env_variable` parses strictly.
+        env.tokenization = static_cast<environment_t::tokenization_t>(
+            env_variable("STRINGWARS_TOKENS", std::size_t {0}));
+        if (env.tokenization == 0)
+            throw std::invalid_argument(
+                "The tokenization mode must be 'file', 'lines', 'words', or a positive integer.");
     }
-    else { env.benchmark_seconds = default_duration; }
 
-    // Use `STRINGWARS_SEED` if set, otherwise `default_seed`
-    if (char const *env_var = std::getenv("STRINGWARS_SEED")) {
-        env.seed = std::stoul(env_var);
-        if (env.seed == 0) throw std::invalid_argument("The seed must be a positive integer.");
-    }
-    else { env.seed = default_seed; }
+    env.stress = env_variable("STRINGWARS_STRESS", default_stress == stress_default_t::stress_k);
+    env.stress_seconds = env_variable("STRINGWARS_STRESS_DURATION", default_stress_duration);
+    if (env.stress_seconds == 0) throw std::invalid_argument("The stress-testing time limit must be greater than 0.");
+    env.stress_dir = env_variable("STRINGWARS_STRESS_DIR", default_stress_dir.c_str());
+    env.stress_limit = env_variable("STRINGWARS_STRESS_LIMIT", default_stress_limit);
+    if (env.stress_limit == 0) throw std::invalid_argument("The stress-testing limit must be greater than 0.");
 
-    // Use `STRINGWARS_TOKENS` if set, otherwise `default_tokens`
-    if (char const *env_var = std::getenv("STRINGWARS_TOKENS")) {
-        std::string token_arg(env_var);
-        if (token_arg == "file") { env.tokenization = environment_t::file_k; }
-        else if (token_arg == "lines") { env.tokenization = environment_t::lines_k; }
-        else if (token_arg == "words") { env.tokenization = environment_t::words_k; }
-        else {
-            // If it's not one of the known strings, assume it's an unsigned integer (for N-grams).
-            env.tokenization = static_cast<environment_t::tokenization_t>(std::stoul(token_arg));
-            if (env.tokenization == 0)
-                throw std::invalid_argument(
-                    "The tokenization mode must be 'file', 'lines', 'words', or a positive integer.");
-        }
-    }
-    else { env.tokenization = default_tokens; }
-
-    // Extract the stress-testing settings
-    if (char const *env_var = std::getenv("STRINGWARS_STRESS")) {
-        bool is_zero = std::strcmp(env_var, "0") == 0 || std::strcmp(env_var, "false") == 0;
-        bool is_one = std::strcmp(env_var, "1") == 0 || std::strcmp(env_var, "true") == 0;
-        env.stress = is_one;
-        if (!is_zero && !is_one) throw std::invalid_argument("The stress-testing flag must be '0' or '1'.");
-    }
-    else { env.stress = default_stress == stress_default_t::stress_k; }
-    if (char const *env_var = std::getenv("STRINGWARS_STRESS_DURATION")) {
-        env.stress_seconds = std::stoul(env_var);
-        if (env.stress_seconds == 0)
-            throw std::invalid_argument("The stress-testing time limit must be greater than 0.");
-    }
-    else { env.stress_seconds = default_stress_duration; }
-    if (char const *env_var = std::getenv("STRINGWARS_STRESS_DIR")) { env.stress_dir = env_var; }
-    else { env.stress_dir = default_stress_dir; }
-    if (char const *env_var = std::getenv("STRINGWARS_STRESS_LIMIT")) {
-        env.stress_limit = std::stoul(env_var);
-        if (env.stress_limit == 0) throw std::invalid_argument("The stress-testing limit must be greater than 0.");
-    }
-    else { env.stress_limit = default_stress_limit; }
-
-    // Use `STRINGWARS_UNIQUE` to deduplicate tokens.
     // @sa `STRINGWARS_UNIQUE=1` sorts the tokenized set and drops duplicates before benchmarking.
-    if (char const *env_var = std::getenv("STRINGWARS_UNIQUE")) {
-        bool is_one = std::strcmp(env_var, "1") == 0 || std::strcmp(env_var, "true") == 0;
-        env.unique = is_one;
-    }
+    env.unique = env_variable("STRINGWARS_UNIQUE", false);
 
     // Use `STRINGWARS_DATASET_LIMIT` to bound the dataset read, so the file tail is never touched.
-    if (char const *env_var = std::getenv("STRINGWARS_DATASET_LIMIT")) {
-        env.dataset_limit_bytes = parse_size(env_var);
-    }
+    if (char const *const limit = env_variable("STRINGWARS_DATASET_LIMIT", ""); *limit)
+        env.dataset_limit_bytes = parse_size(limit);
 
     // Use `STRINGWARS_BATCH` to override the per-benchmark batch sizes with a comma-separated list,
     // e.g. `STRINGWARS_BATCH=1024` to run a single batch and skip the slow/largest default sweep entries.
     // @sa `STRINGWARS_BATCH=1024,4096` replaces the default batch-size sweep with exactly these sizes.
-    if (char const *env_var = std::getenv("STRINGWARS_BATCH")) {
-        std::string const batch_argument = env_var;
-        for (std::size_t start = 0; start < batch_argument.size();) {
-            std::size_t const comma = batch_argument.find(',', start);
-            std::size_t const end = comma == std::string::npos ? batch_argument.size() : comma;
-            if (end > start) env.batch_sizes_override.push_back(std::stoull(batch_argument.substr(start, end - start)));
-            start = end + 1;
-        }
+    std::string const batch_argument = env_variable("STRINGWARS_BATCH", "");
+    for (std::size_t start = 0; start < batch_argument.size();) {
+        std::size_t const comma = batch_argument.find(',', start);
+        std::size_t const end = comma == std::string::npos ? batch_argument.size() : comma;
+        if (end > start) env.batch_sizes_override.push_back(std::stoull(batch_argument.substr(start, end - start)));
+        start = end + 1;
     }
 
     env.dataset = read_file(env.path, env.dataset_limit_bytes); // A non-zero limit stops the read early
@@ -579,11 +552,9 @@ inline environment_t build_environment(                                        /
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
-    char const *seed_message = " (will avoid shuffling)";
     if (env.seed != 0) {
         std::mt19937_64 generator(static_cast<unsigned long>(env.seed));
         std::shuffle(env.tokens.begin(), env.tokens.end(), generator);
-        seed_message = " (will shuffle tokens)";
     }
 
     auto const mean_token_length = std::accumulate(env.tokens.begin(), env.tokens.end(), (std::size_t)0u,
@@ -600,24 +571,22 @@ inline environment_t build_environment(                                        /
     if (unsigned const cores = std::thread::hardware_concurrency()) env.specs.cores_per_socket = cores;
 
     fmt::print(R"(Environment built with the following settings:
- - Dataset path: {path}
- - Time limit: {benchmark_seconds} seconds per benchmark ({stress_seconds} per stress-test)
- - Algorithm filter: {filter}
- - Tokenization mode: {tokenization}
- - Seed: {seed}{seed_message}
- - Stress-testing: {stress}
- - Unique tokens: {unique}
- - Loaded dataset size: {dataset_bytes} bytes
- - Dataset limit: {dataset_limit}
- - Number of tokens: {tokens}
- - Mean token length: {mean_token_length:.2f} bytes
- - Caches: {l1_bytes} B first-level (assumed), {l3_bytes} B confined to a compute domain
+- Dataset path: {path}
+- Time limit: {benchmark_seconds} seconds per benchmark ({stress_seconds} per stress-test)
+- Algorithm filter: {filter}
+- Tokenization mode: {tokenization}
+- Stress-testing: {stress}
+- Unique tokens: {unique}
+- Loaded dataset size: {dataset_bytes} bytes
+- Dataset limit: {dataset_limit}
+- Number of tokens: {tokens}
+- Mean token length: {mean_token_length:.2f} bytes
+- Caches: {l1_bytes} B first-level (assumed), {l3_bytes} B confined to a compute domain
 )",
                fmt::arg("path", env.path), fmt::arg("benchmark_seconds", env.benchmark_seconds),
                fmt::arg("stress_seconds", env.stress_seconds),
                fmt::arg("filter", env.filter.empty() ? std::string("none") : env.filter),
-               fmt::arg("tokenization", env.tokenization), fmt::arg("seed", static_cast<std::size_t>(env.seed)),
-               fmt::arg("seed_message", seed_message), fmt::arg("stress", env.stress ? "yes" : "no"),
+               fmt::arg("tokenization", env.tokenization), fmt::arg("stress", env.stress ? "yes" : "no"),
                fmt::arg("unique", env.unique ? "yes" : "no"), fmt::arg("dataset_bytes", env.dataset.size()),
                fmt::arg("dataset_limit", env.dataset_limit_bytes ? fmt::format("{} bytes", env.dataset_limit_bytes)
                                                                  : std::string("whole file")),
@@ -643,7 +612,7 @@ inline std::size_t candidates_per_call(environment_t const &env) {
     return std::max<std::size_t>(1, env.specs.l1_bytes / median_token_bytes(env));
 }
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
 /** Candidates one device call scores: the first @c STRINGWARS_BATCH entry if set, else one per
  *  resident thread of the bound device. */
@@ -660,14 +629,14 @@ inline std::size_t resident_candidates_per_call(environment_t const &env) {
 /** Uses C-style file IO to save information about the most recent stress test failure. Files are
  *  written to @c STRINGWARS_STRESS_DIR as `failed_<time>_<name>.txt`. */
 inline void log_failure(                                              //
-    environment_t const &env, std::string const &name,                //
+    environment_t const &env, std::string_view name,                  //
     std::size_t expected_check_value, std::size_t actual_check_value, //
     std::optional<std::size_t> token_index) noexcept(false) {
 
     std::string timestamp = std::to_string(std::time(nullptr));
     // Benchmark names embed shape labels like `...:q4xc4:allpairs`; `:` and `/` are invalid in path
     // components on common filesystems, so map every non-portable character to `_` before composing the path.
-    std::string safe_name = name;
+    std::string safe_name {name};
     for (char &c : safe_name)
         if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '.' || c == '_')) c = '_';
     std::string file_name = "failed_" + timestamp + "_" + safe_name + "_" + ".txt";
@@ -677,11 +646,8 @@ inline void log_failure(                                              //
 
     fmt::println(file, "Dataset path: {}\nTokenization mode: {}\nSeed: {}", env.path, env.tokenization,
                  static_cast<std::size_t>(env.seed));
-    if (token_index) {
-        token_view_t const token = env[*token_index];
-        fmt::println(file, "Token index: {}\nToken Hex: {:02X}", *token_index,
-                     test::hex_bytes({token.data(), token.size()}));
-    }
+    if (token_index)
+        fmt::println(file, "Token index: {}\nToken Hex: {:02X}", *token_index, test::hex_bytes(env[*token_index]));
     fmt::println(file, "Expected: {}\nActual: {}", expected_check_value, actual_check_value);
     std::fclose(file);
 }
@@ -799,7 +765,7 @@ struct bench_result_t {
     template <typename... baselines_types_>
     bench_result_t const &log(baselines_types_ const &...bases) const {
         if (skipped) return *this;
-        fmt::println("\nBenchmarking {}:", fmt::styled(fmt::format("`{}`", name), fmt::emphasis::bold));
+        fmt::println("\nBenchmarking `{}`:", fmt::styled(name, fmt::emphasis::bold));
 
         // Print the number of errors, if any
         if (errors) fmt::println("> Errors: {} in {} calls", errors, stress_calls);
@@ -871,9 +837,9 @@ struct bench_result_t {
             char const *relative_unit = (relative_throughput > 2) ? "x" : "%";
             if (relative_throughput < 0.5) relative_throughput = 1 / relative_throughput, relative_unit = "x";
             if (std::strcmp(relative_unit, "%") == 0) relative_throughput = (relative_throughput - 1) * 100;
-            std::string const relative = fmt::format("{} {:.1f} {}", relative_sign, std::abs(relative_throughput),
-                                                     relative_unit);
-            fmt::println("> {} against `{}`", fmt::styled(relative, relative_color), base.name);
+            fmt::println("> {} {:.1f} {} against `{}`", fmt::styled(relative_sign, relative_color),
+                         fmt::styled(std::abs(relative_throughput), relative_color),
+                         fmt::styled(relative_unit, relative_color), base.name);
         };
 
         // Expand over all provided baselines.
@@ -901,7 +867,7 @@ template <                                                        //
     >
 bench_result_t bench_nullary(  //
     environment_t const &env,  //
-    std::string const &name,   //
+    std::string_view name,     //
     baseline_type_ &&baseline, //
     callable_type_ &&callable, //
     preprocessing_type_ &&preprocessing = preprocessing_type_ {},
@@ -931,8 +897,7 @@ bench_result_t bench_nullary(  //
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;
             if (result.errors > env.stress_limit) {
-                fmt::println("Too many errors in {} after {:.3f} seconds. Stopping the test.", name.c_str(),
-                             stress.seconds());
+                fmt::println("Too many errors in {} after {:.3f} seconds. Stopping the test.", name, stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, {});
@@ -982,7 +947,7 @@ template <                                                        //
     >
 bench_result_t bench_unary(    //
     environment_t const &env,  //
-    std::string const &name,   //
+    std::string_view name,     //
     baseline_type_ &&baseline, //
     callable_type_ &&callable, //
     preprocessing_type_ &&preprocessing = preprocessing_type_ {},
@@ -1012,8 +977,7 @@ bench_result_t bench_unary(    //
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;
             if (result.errors > env.stress_limit) {
-                fmt::println("Too many errors in {} after {:.3f} seconds. Stopping the test.", name.c_str(),
-                             stress.seconds());
+                fmt::println("Too many errors in {} after {:.3f} seconds. Stopping the test.", name, stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, token_index);
@@ -1092,7 +1056,7 @@ bench_result_t bench_unary(    //
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
-bench_result_t bench_nullary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
+bench_result_t bench_nullary(environment_t const &env, std::string_view name, callable_type_ &&callable) {
     return bench_nullary(env, name, callable_no_op_t {}, callable);
 }
 
@@ -1105,7 +1069,7 @@ bench_result_t bench_nullary(environment_t const &env, std::string const &name, 
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
-bench_result_t bench_unary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
+bench_result_t bench_unary(environment_t const &env, std::string_view name, callable_type_ &&callable) {
     return bench_unary(env, name, callable_no_op_t {}, callable);
 }
 
@@ -1125,6 +1089,4 @@ struct arrays_equality {
     }
 };
 
-} // namespace bench
-} // namespace stringzilla
-} // namespace ashvardanian
+} // namespace ashvardanian::stringzilla::bench

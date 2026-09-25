@@ -24,7 +24,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -39,7 +39,8 @@ extern "C" {
  *  @c flat_bmp_ is fetched by @c vpgatherdd. The leaf carries the descriptor directly, folding
  *  in the serial @c id_to_desc permute. Bit-exact with @c sz_rune_grapheme_break_property over
  *  the whole BMP, Hangul included, with no separate formula. */
-SZ_HELPER_INLINE __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_u8x32,
+                                                                      __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_grapheme_break_bmp_page_lut_, sz_utf8_grapheme_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
@@ -48,8 +49,8 @@ SZ_HELPER_INLINE __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_
  *  5-nibble cascade, the AVX2 twin of the Ice Lake astral trie. Per-lane bytes: @p plane = (offset
  *  >> 16) & 0xFF with only the low nibble meaningful, @p high = (offset >> 8) & 0xFF,
  *  @p low = offset & 0xFF. Gather-free and bit-exact. */
-SZ_HELPER_INLINE __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
-                                                                __m256i low_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
+                                                                         __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const n4_u8x32 = _mm256_and_si256(plane_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
@@ -87,7 +88,7 @@ SZ_HELPER_INLINE __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_u8
 
 /** Per-half unsigned `value >= bound` mask, as AVX2 lacks an unsigned byte compare:
  *  `max_epu8(value, bound) == value`. */
-SZ_HELPER_INLINE __m256i sz_grapheme_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_grapheme_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
@@ -95,9 +96,9 @@ SZ_HELPER_INLINE __m256i sz_grapheme_cmpge_epu8_haswell_(__m256i value_u8x32, __
  *  @p high_byte and @p low_byte halves. With cp = (high << 8) | low, the inclusive 16-bit range
  *  test passes a high byte strictly between the bounds unconditionally, and on the boundary high
  *  bytes checks the low byte against its bound. Two halves, branchless. */
-SZ_HELPER_INLINE sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
-                                                           __m256i high_hi_u8x32, __m256i low_hi_u8x32, sz_u16_t lo,
-                                                           sz_u16_t hi) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
+                                                                    __m256i high_hi_u8x32, __m256i low_hi_u8x32,
+                                                                    sz_u16_t lo, sz_u16_t hi) {
     sz_u8_t const lo_h = (sz_u8_t)(lo >> 8), lo_l = (sz_u8_t)(lo & 0xFF);
     sz_u8_t const hi_h = (sz_u8_t)(hi >> 8), hi_l = (sz_u8_t)(hi & 0xFF);
     __m256i const lo_h_v_u8x32 = _mm256_set1_epi8((char)lo_h), lo_l_v_u8x32 = _mm256_set1_epi8((char)lo_l);
@@ -131,8 +132,8 @@ SZ_HELPER_INLINE sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x32
  *  ranges, the AVX2 twin of @c sz_grapheme_cjk_other_icelake_:
  *  `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the interior Extend and enclosed exceptions. Such
  *  lanes need no cold cascade, as their descriptor is 0. */
-SZ_HELPER_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
-                                                         __m256i high_hi_u8x32, __m256i low_hi_u8x32) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
+                                                                  __m256i high_hi_u8x32, __m256i low_hi_u8x32) {
     sz_u64_t const run_a = sz_grapheme_cp_in_range_haswell_(high_lo_u8x32, low_lo_u8x32, high_hi_u8x32, low_hi_u8x32,
                                                             0x3000, 0xA66E);
     sz_u64_t const run_b = sz_grapheme_cp_in_range_haswell_(high_lo_u8x32, low_lo_u8x32, high_hi_u8x32, low_hi_u8x32,
@@ -153,8 +154,8 @@ SZ_HELPER_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, 
 /** Computes `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the AVX2 twin
  *  of the Ice Lake `_mm512_permutexvar_epi8(lane_identity+3)`, the idiom of the
  *  substrate forward neighbours. */
-SZ_HELPER_INLINE void sz_grapheme_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
-                                                 __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
+STRINGZILLA_HELPER_INLINE void sz_grapheme_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
+                                                          __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
     __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
     *next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, window_lo_u8x32, 3);
     __m256i const high_successor_u8x32 = _mm256_permute2x128_si256(window_hi_u8x32, window_lo_u8x32, 0x21);
@@ -185,7 +186,7 @@ typedef struct sz_grapheme_classified_haswell_t {
  *  per-lane descriptor halves with the trimmed codepoint-start geometry. Mirrors the Ice Lake
  *  decode and classify path, a value-based blind reconstruction so malformed input agrees
  *  byte-for-byte, without @c vpermb or @c vpgather. */
-SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell_( //
+STRINGZILLA_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell_( //
     sz_u8_t const *text, sz_size_t length, sz_size_t base) {
 
     sz_utf8_rune_window_haswell_t const decoded = sz_utf8_rune_decode_window_haswell_(text + base, length - base);
@@ -415,7 +416,7 @@ SZ_HELPER_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_ha
  *  @c vpcmpeqb halves into @c mask_combine, then compacted to the codepoint-dense domain by a
  *  single @c _pext_u64 over the start lanes, the analogue without @c vpcompressb of the Ice Lake
  *  per-class `& valid` after the dense compress. No scalar loop and no rule control flow. */
-SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_haswell_(
+STRINGZILLA_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_haswell_(
     sz_grapheme_classified_haswell_t classified, sz_u64_t valid) {
     sz_u64_t const starts = classified.start_lanes;
     __m256i const desc_lo_u8x32 = classified.descriptors_low_u8x32, desc_hi_u8x32 = classified.descriptors_high_u8x32;
@@ -461,9 +462,9 @@ SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_haswell_(
 
 #pragma region Grapheme forward driver
 
-SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_haswell(       //
-    sz_cptr_t text, sz_size_t length,                      //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_haswell( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,    //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t clusters = 0;
@@ -513,7 +514,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_haswell(       //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_HASWELL
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #ifdef __cplusplus
 }

@@ -15,8 +15,8 @@
 extern "C" {
 #endif
 
-SZ_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                      char const lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                               char const lut[sz_at_least_(256)]) {
     sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
     sz_u8_t const *source_u8 = (sz_u8_t const *)source;
     sz_u8_t *target_u8 = (sz_u8_t *)target;
@@ -24,15 +24,15 @@ SZ_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr
     for (; source_u8 != source_end; ++source_u8, ++target_u8) *target_u8 = lut_u8[*source_u8];
 }
 
-#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
+#if defined(_MSC_VER) && defined(STRINGZILLA_OVERRIDE_LIBC) && STRINGZILLA_OVERRIDE_LIBC
 #pragma optimize("", off)
 #endif
-SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_ptr_t end = target + length;
     // Dealing with short strings, a single sequential pass would be faster.
     // If the size is larger than 2 words, then at least 1 of them will be aligned.
     // But just one aligned word may not be worth SWAR.
-    if (length < SZ_SWAR_THRESHOLD)
+    if (length < STRINGZILLA_SWAR_THRESHOLD)
         while (target != end) *(target++) = value;
 
     // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
@@ -43,18 +43,18 @@ SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t v
         while (target != end) *(target++) = value;
     }
 }
-#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
+#if defined(_MSC_VER) && defined(STRINGZILLA_OVERRIDE_LIBC) && STRINGZILLA_OVERRIDE_LIBC
 #pragma optimize("", on)
 #endif
 
-SZ_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_MISALIGNED_LOADS
+STRINGZILLA_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if STRINGZILLA_ALLOW_MISALIGNED_LOADS
     while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)source, target += 8, source += 8, length -= 8;
 #endif
     while (length--) *(target++) = *(source++);
 }
 
-SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // Implementing `memmove` is trickier, than `memcpy`, as the ranges may overlap.
     // Existing implementations often have two passes, in normal and reversed order,
     // depending on the relation of `target` and `source` addresses.
@@ -65,7 +65,7 @@ SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t
     // Or if we know that they don't intersect! In that case the traversal order is irrelevant,
     // but older CPUs may predict and fetch forward-passes better.
     if (target < source || target >= source + length) {
-#if SZ_USE_MISALIGNED_LOADS
+#if STRINGZILLA_ALLOW_MISALIGNED_LOADS
         while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)(source), target += 8, source += 8, length -= 8;
 #endif
         while (length--) *(target++) = *(source++);
@@ -73,7 +73,7 @@ SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t
     else {
         // Jump to the end and walk backwards.
         target += length, source += length;
-#if SZ_USE_MISALIGNED_LOADS
+#if STRINGZILLA_ALLOW_MISALIGNED_LOADS
         while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t const *)(source -= 8), length -= 8;
 #endif
         while (length--) *(--target) = *(--source);

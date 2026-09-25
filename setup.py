@@ -34,8 +34,8 @@ def _memory_available_and_total_gb():
 def _max_compile_workers() -> int:
     """Concurrency cap for compiling translation units, bounded by cores and by memory alike. Core count
     alone is the wrong bound on a small many-core box: a compiler killed by the out-of-memory killer takes
-    the whole build down with no diagnostic. `SZ_MAX_COMPILE_WORKERS` overrides both bounds."""
-    requested = os.environ.get("SZ_MAX_COMPILE_WORKERS", "")
+    the whole build down with no diagnostic. `STRINGZILLA_MAX_COMPILE_WORKERS` overrides both bounds."""
+    requested = os.environ.get("STRINGZILLA_MAX_COMPILE_WORKERS", "")
     if requested.isdigit() and int(requested) > 0:
         return int(requested)
     workers = min(os.cpu_count() or 1, 8)
@@ -208,14 +208,14 @@ def get_compiler() -> str:
 
 
 def is_64bit_x86() -> bool:
-    override = os.environ.get("SZ_IS_64BIT_X86_") if "SZ_IS_64BIT_X86_" in os.environ else None
+    override = os.environ.get("STRINGZILLA_ARCH_X86_64_") if "STRINGZILLA_ARCH_X86_64_" in os.environ else None
     if override is not None:
         if override == "0":
             return False
         elif override == "1":
             return True
         else:
-            raise ValueError("Invalid value for SZ_IS_64BIT_X86_: must be '0' or '1'")
+            raise ValueError("Invalid value for STRINGZILLA_ARCH_X86_64_: must be '0' or '1'")
 
     # Accept common 64-bit x86 identifiers and ensure the Python ABI is 64-bit.
     arch = platform.machine().lower()
@@ -223,14 +223,14 @@ def is_64bit_x86() -> bool:
 
 
 def is_64bit_arm() -> bool:
-    override = os.environ.get("SZ_IS_64BIT_ARM_") if "SZ_IS_64BIT_ARM_" in os.environ else None
+    override = os.environ.get("STRINGZILLA_ARCH_ARM64_") if "STRINGZILLA_ARCH_ARM64_" in os.environ else None
     if override is not None:
         if override == "0":
             return False
         elif override == "1":
             return True
         else:
-            raise ValueError("Invalid value for SZ_IS_64BIT_ARM_: must be '0' or '1'")
+            raise ValueError("Invalid value for STRINGZILLA_ARCH_ARM64_: must be '0' or '1'")
 
     # Accept common 64-bit ARM identifiers and ensure the Python ABI is 64-bit.
     arch = platform.machine().lower()
@@ -261,20 +261,20 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     # GCC is our primary compiler, so when packaging the library, even if the current machine
     # doesn't support AVX-512 or SVE, still precompile those.
     macros_args = [
-        ("SZ_IS_BIG_ENDIAN_", "1" if is_big_endian() else "0"),
-        ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
-        ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_WESTMERE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE2AES", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_ARCH_BIG_ENDIAN_", "1" if is_big_endian() else "0"),
+        ("STRINGZILLA_ARCH_X86_64_", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_ARCH_ARM64_", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_WESTMERE", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_GOLDMONT", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_HASWELL", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_SKYLAKE", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_ICELAKE", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_NEON", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_NEONSHA", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_SVE", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_SVE2", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_SVE2AES", "1" if is_64bit_arm() else "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -314,18 +314,18 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     # - x86_64: enable Westmere (SSE4.2), Goldmont (SHA-NI), and Haswell (AVX2) only
     # - arm64: enable NEON only
     macros_args = [
-        ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
-        ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_WESTMERE", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
-        ("SZ_USE_GOLDMONT", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
-        ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
-        ("SZ_USE_SKYLAKE", "0"),
-        ("SZ_USE_ICELAKE", "0"),
-        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE", "0"),
-        ("SZ_USE_SVE2", "0"),
+        ("STRINGZILLA_ARCH_X86_64_", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_ARCH_ARM64_", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_WESTMERE", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_GOLDMONT", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_SKYLAKE", "0"),
+        ("STRINGZILLA_TARGET_ICELAKE", "0"),
+        ("STRINGZILLA_TARGET_NEON", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_NEONSHA", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_SVE", "0"),
+        ("STRINGZILLA_TARGET_SVE2", "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -345,19 +345,19 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
 
     # When packaging the library, even if the current machine doesn't support AVX-512 or SVE, still precompile those.
     macros_args = [
-        ("SZ_IS_BIG_ENDIAN_", "1" if is_big_endian() else "0"),
-        ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
-        ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_WESTMERE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE", "0"),
-        ("SZ_USE_SVE2", "0"),
+        ("STRINGZILLA_ARCH_BIG_ENDIAN_", "1" if is_big_endian() else "0"),
+        ("STRINGZILLA_ARCH_X86_64_", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_ARCH_ARM64_", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_WESTMERE", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_GOLDMONT", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_HASWELL", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_SKYLAKE", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_ICELAKE", "1" if is_64bit_x86() else "0"),
+        ("STRINGZILLA_TARGET_NEON", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_NEONSHA", "1" if is_64bit_arm() else "0"),
+        ("STRINGZILLA_TARGET_SVE", "0"),
+        ("STRINGZILLA_TARGET_SVE2", "0"),
     ]
 
     # MSVC requires architecture-specific macros for `winnt.h` to work correctly
@@ -441,7 +441,7 @@ ext_modules = [
         include_dirs=["include", "c/stringzilla"],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
-        define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
+        define_macros=[("STRINGZILLA_RUNTIME_DISPATCH", "1")] + macros_args,
     ),
 ]
 

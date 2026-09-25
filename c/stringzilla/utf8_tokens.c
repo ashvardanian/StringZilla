@@ -8,7 +8,7 @@
 
 #include "dispatch.h"
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) {
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_cpu_table;
     sz_unused_(caps);
 
@@ -16,7 +16,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
     impl->utf8_whitespaces = sz_utf8_whitespaces_serial;
     impl->utf8_delimiters = sz_utf8_delimiters_serial;
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     if (caps & sz_cap_haswell_k) {
         impl->utf8_newlines = sz_utf8_newlines_haswell;
         impl->utf8_whitespaces = sz_utf8_whitespaces_haswell;
@@ -24,7 +24,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
     }
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     if (caps & sz_cap_icelake_k) {
         impl->utf8_newlines = sz_utf8_newlines_icelake;
         impl->utf8_whitespaces = sz_utf8_whitespaces_icelake;
@@ -32,7 +32,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
     }
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     if (caps & sz_cap_neon_k) {
         impl->utf8_newlines = sz_utf8_newlines_neon;
         impl->utf8_whitespaces = sz_utf8_whitespaces_neon;
@@ -40,7 +40,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
     }
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     if (caps & sz_cap_sve2_k) {
         // The windowed delimiter scan beats NEON at every vector length; whitespaces and newlines only win
         // with wider-than-NEON registers - the load-view NEON whitespace scan leads the mixed corpus at the
@@ -53,28 +53,28 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
     }
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     if (caps & sz_cap_v128_k) {
         impl->utf8_newlines = sz_utf8_newlines_v128;
         impl->utf8_whitespaces = sz_utf8_whitespaces_v128;
     }
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     if (caps & sz_cap_rvv_k) {
         impl->utf8_newlines = sz_utf8_newlines_rvv;
         impl->utf8_whitespaces = sz_utf8_whitespaces_rvv;
     }
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     if (caps & sz_cap_lasx_k) {
         impl->utf8_newlines = sz_utf8_newlines_lasx;
         impl->utf8_whitespaces = sz_utf8_whitespaces_lasx;
     }
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     if (caps & sz_cap_powervsx_k) {
         impl->utf8_newlines = sz_utf8_newlines_powervsx;
         impl->utf8_whitespaces = sz_utf8_whitespaces_powervsx;
@@ -82,23 +82,23 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
 #endif
 }
 
-SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                          sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                          sz_size_t *bytes_consumed) {
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                   sz_size_t *bytes_consumed) {
     return sz_dispatch_cpu_table.utf8_newlines(text, length, match_offsets, match_lengths, matches_capacity,
                                            bytes_consumed);
 }
 
-SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                             sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                             sz_size_t *bytes_consumed) {
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                      sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                      sz_size_t *bytes_consumed) {
     return sz_dispatch_cpu_table.utf8_whitespaces(text, length, match_offsets, match_lengths, matches_capacity,
                                               bytes_consumed);
 }
 
-SZ_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                            sz_size_t *bytes_consumed) {
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                     sz_size_t *bytes_consumed) {
     return sz_dispatch_cpu_table.utf8_delimiters(text, length, match_offsets, match_lengths, matches_capacity,
                                              bytes_consumed);
 }

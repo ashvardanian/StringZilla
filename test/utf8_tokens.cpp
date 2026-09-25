@@ -15,18 +15,18 @@
 /*  ! Overload the following with caution. Those parameters must never be explicitly set during
  *  releases, but they come handy during development to validate ISA-specific implementations.
  *
- *  #define SZ_USE_WESTMERE 0
- *  #define SZ_USE_HASWELL 0
- *  #define SZ_USE_GOLDMONT 0
- *  #define SZ_USE_SKYLAKE 0
- *  #define SZ_USE_ICELAKE 0
- *  #define SZ_USE_NEON 0
- *  #define SZ_USE_SVE 0
- *  #define SZ_USE_SVE2 0 */
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+ *  #define STRINGZILLA_TARGET_WESTMERE 0
+ *  #define STRINGZILLA_TARGET_HASWELL 0
+ *  #define STRINGZILLA_TARGET_GOLDMONT 0
+ *  #define STRINGZILLA_TARGET_SKYLAKE 0
+ *  #define STRINGZILLA_TARGET_ICELAKE 0
+ *  #define STRINGZILLA_TARGET_NEON 0
+ *  #define STRINGZILLA_TARGET_SVE 0
+ *  #define STRINGZILLA_TARGET_SVE2 0 */
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Make sure to include the StringZilla headers before anything else, to intercept missing
  *  `#include` directives and other issues. */
@@ -37,8 +37,7 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio>  // `stderr`
-#include <cstdlib> // `std::getenv`, `std::strtoul`
+#include <cstdio> // `stderr`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm> // `std::transform`
@@ -196,8 +195,6 @@ static std::string exact_byte_length_(char const *pattern, std::size_t pattern_l
  *  @c utf8_tokens checks assert against literal expected segment lists, not another backend.
  */
 void test_utf8_tokens_unit() {
-    fmt::println("  - testing UTF-8 newline/whitespace known-answer vectors...");
-
     // The mixed-script anchor: "aß中" is `a` (1 byte) + `ß` U+00DF (2 bytes) + `中` U+4E2D (3 bytes),
     // so 6 bytes encode exactly 3 codepoints {0x61, 0xDF, 0x4E2D}.
     char const mixed[] = "a\xC3\x9F\xE4\xB8\xAD"; // "aß中"
@@ -228,42 +225,42 @@ void test_utf8_tokens_unit() {
     check_utf8_unit_(sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial, // serial
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     check_utf8_unit_(sz_utf8_count_haswell, sz_utf8_newlines_haswell, sz_utf8_whitespaces_haswell, // haswell
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     check_utf8_unit_(sz_utf8_count_icelake, sz_utf8_newlines_icelake, sz_utf8_whitespaces_icelake, // icelake
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     check_utf8_unit_(sz_utf8_count_neon, sz_utf8_newlines_neon, sz_utf8_whitespaces_neon, // neon
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     check_utf8_unit_(sz_utf8_count_sve2, sz_utf8_newlines_sve2, sz_utf8_whitespaces_sve2, // sve2
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     check_utf8_unit_(sz_utf8_count_v128, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128, // v128
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     check_utf8_unit_(sz_utf8_count_rvv, sz_utf8_newlines_rvv, sz_utf8_whitespaces_rvv, // rvv
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     check_utf8_unit_(sz_utf8_count_powervsx, sz_utf8_newlines_powervsx, sz_utf8_whitespaces_powervsx, // powervsx
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     check_utf8_unit_(sz_utf8_count_lasx, sz_utf8_newlines_lasx, sz_utf8_whitespaces_lasx, // lasx
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
@@ -366,8 +363,6 @@ void test_utf8_tokens_unit() {
  *  Arabic/Indic words is caught here.
  */
 void test_utf8_tokens_scripts_unit() {
-    fmt::println("  - testing UTF-8 whitespace codepoints across Unicode scripts...");
-
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
         auto words = [](sz::string_view_t t) {
@@ -516,7 +511,7 @@ struct utf8_tokens_backend_t {
  *  @param[in] min_iterations Number of random strings to generate and check.
  */
 template <typename reference_, typename candidate_>
-void check_utf8_tokens_equivalence_(reference_ reference, candidate_ candidate, //
+void check_utf8_tokens_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, //
                                     std::size_t min_text_length, std::size_t min_iterations) {
 
     // Adapt the bundle methods to the plain boundary-finder signature `drain_matches_`/`reconstruct_segments_` expect.
@@ -616,7 +611,6 @@ void check_utf8_tokens_equivalence_(reference_ reference, candidate_ candidate, 
         "\xE2\x81\x9F", "\xE3\x80\x80",                                                      // 3-byte
     };
 
-    auto &generator = global_random_generator();
     std::size_t const utf8_content_count = span_over(utf8_content).size();
     std::size_t const special_delimiter_count = span_over(special_chars).size();
     std::size_t const total_strings_to_sample = utf8_content_count + special_delimiter_count;
@@ -695,9 +689,7 @@ void check_utf8_tokens_equivalence_(reference_ reference, candidate_ candidate, 
  *  adversarial shapes, all 256 single bytes, all 65,536 byte pairs, and random garbage at every
  *  sub-cache-line alignment), asserting they survive, stay in bounds, and never report a
  *  @c bytes_consumed past the input. */
-void test_utf8_tokens_safety() {
-    fmt::println("  - testing malformed-input safety of UTF-8 newline/whitespace kernels...");
-
+void test_utf8_tokens_safety(test_context_t &context) {
     static constexpr std::size_t max_input_length = utf8_unit_capacity_k;
 
     // Drive every newline/whitespace boundary finder shipped on this target over one malformed input.
@@ -712,7 +704,7 @@ void test_utf8_tokens_safety() {
                 if (boundary_offsets[index] + boundary_lengths[index] <= input_length) continue;
                 fmt::println(stderr, "{} emitted out-of-bounds boundary (offset={} len={}, input={})", finder_name,
                              (std::size_t)boundary_offsets[index], (std::size_t)boundary_lengths[index], input_length);
-                print_utf8_test_bytes_("input", input, input_length);
+                print_utf8_test_bytes_("input", {input, input_length});
                 verify(false && "Boundary finder emitted a span outside the input");
             }
         };
@@ -722,43 +714,41 @@ void test_utf8_tokens_safety() {
         check_boundaries_(sz_utf8_whitespaces_serial, "serial whitespace finder");
         check_boundaries_(sz_utf8_newlines, "dispatched newline finder");
         check_boundaries_(sz_utf8_whitespaces, "dispatched whitespace finder");
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
         check_boundaries_(sz_utf8_newlines_haswell, "haswell newline finder");
         check_boundaries_(sz_utf8_whitespaces_haswell, "haswell whitespace finder");
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
         check_boundaries_(sz_utf8_newlines_icelake, "icelake newline finder");
         check_boundaries_(sz_utf8_whitespaces_icelake, "icelake whitespace finder");
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
         check_boundaries_(sz_utf8_newlines_neon, "neon newline finder");
         check_boundaries_(sz_utf8_whitespaces_neon, "neon whitespace finder");
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
         check_boundaries_(sz_utf8_newlines_sve2, "sve2 newline finder");
         check_boundaries_(sz_utf8_whitespaces_sve2, "sve2 whitespace finder");
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
         check_boundaries_(sz_utf8_newlines_v128, "v128 newline finder");
         check_boundaries_(sz_utf8_whitespaces_v128, "v128 whitespace finder");
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
         check_boundaries_(sz_utf8_newlines_rvv, "rvv newline finder");
         check_boundaries_(sz_utf8_whitespaces_rvv, "rvv whitespace finder");
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
         check_boundaries_(sz_utf8_newlines_lasx, "lasx newline finder");
         check_boundaries_(sz_utf8_whitespaces_lasx, "lasx whitespace finder");
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
         check_boundaries_(sz_utf8_newlines_powervsx, "powervsx newline finder");
         check_boundaries_(sz_utf8_whitespaces_powervsx, "powervsx whitespace finder");
 #endif
     };
 
-    for_each_adversarial_utf8_input_(global_random_generator(), scale_iterations(10000), check);
-
-    fmt::println("    malformed-input safety passed!");
+    for_each_adversarial_utf8_input_(context, context.iterations(10000), check);
 }
 
 #pragma endregion Safety
@@ -771,43 +761,43 @@ void test_utf8_tokens_safety() {
  *  kernel is different. */
 static utf8_tokens_backend_t const utf8_tokens_backends[] = {
     {"dispatched", sz_utf8_count, sz_utf8_newlines, sz_utf8_whitespaces},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_utf8_count_haswell, sz_utf8_newlines_haswell, sz_utf8_whitespaces_haswell},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_utf8_count_icelake, sz_utf8_newlines_icelake, sz_utf8_whitespaces_icelake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_utf8_count_neon, sz_utf8_newlines_neon, sz_utf8_whitespaces_neon},
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     {"sve2", sz_utf8_count_sve2, sz_utf8_newlines_sve2, sz_utf8_whitespaces_sve2},
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     {"v128", sz_utf8_count_v128, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128},
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     {"v128relaxed", sz_utf8_count_v128relaxed, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128},
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     {"rvv", sz_utf8_count_rvv, sz_utf8_newlines_rvv, sz_utf8_whitespaces_rvv},
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     {"lasx", sz_utf8_count_lasx, sz_utf8_newlines_lasx, sz_utf8_whitespaces_lasx},
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     {"powervsx", sz_utf8_count_powervsx, sz_utf8_newlines_powervsx, sz_utf8_whitespaces_powervsx},
 #endif
 };
 
 /** Runs the count/newline/whitespace differential on each compiled backend, dispatched first. */
-void test_utf8_tokens_all() {
+void test_utf8_tokens_all(test_context_t &context) {
     utf8_tokens_backend_t const serial {"serial", sz_utf8_count_serial, sz_utf8_newlines_serial,
                                         sz_utf8_whitespaces_serial};
     // Each iteration drains a 4 KB input through six capacities down to 1, re-entering the kernel once per match.
     // The input count is this family's share of the suite budget, sized against its siblings.
     for (utf8_tokens_backend_t const &backend : utf8_tokens_backends)
-        check_utf8_tokens_equivalence_(serial, backend, 4000, scale_iterations(250));
+        check_utf8_tokens_equivalence_(context.generator, serial, backend, 4000, context.iterations(250));
 }
 
 #pragma endregion Drivers
@@ -821,16 +811,16 @@ void test_utf8_tokens_all() {
  *  back to serial. */
 static utf8_segment_backend_t const utf8_delimiters_backends[] = {
     {"dispatched", sz_utf8_delimiters},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_utf8_delimiters_haswell},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_utf8_delimiters_icelake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_utf8_delimiters_neon},
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     {"sve2", sz_utf8_delimiters_sve2},
 #endif
 };
@@ -841,8 +831,6 @@ static utf8_segment_backend_t const utf8_delimiters_backends[] = {
 
 /** Known-answer unit tests for the UTF-8 delimiter segmenter on simple, hand-verifiable inputs. */
 void test_utf8_delimiters_unit() {
-    fmt::println("  - testing UTF-8 delimiter known-answer vectors...");
-
     struct {
         char const *text;
         sz_size_t length, expected_offset, expected_length, expected_count;
@@ -945,9 +933,8 @@ void test_utf8_delimiters_unit() {
 /** Cross-checks the serial UTF-8 delimiter segmenter against a candidate SIMD backend on random,
  *  well-formed inputs: the full (offset, length) match list must agree, both in one shot and when a
  *  tiny capacity drains the candidate through its @c bytes_consumed resume path. */
-static void check_utf8_delimiters_equivalence_(sz_utf8_segmenter_t finder_serial, sz_utf8_segmenter_t finder_candidate,
-                                               sz_size_t inputs) {
-    auto &generator = global_random_generator();
+static void check_utf8_delimiters_equivalence_(std::mt19937 &generator, sz_utf8_segmenter_t finder_serial,
+                                               sz_utf8_segmenter_t finder_candidate, sz_size_t inputs) {
     std::vector<sz_size_t> serial_offsets, serial_lengths, candidate_offsets, candidate_lengths, resumed_offsets,
         resumed_lengths;
 
@@ -1012,8 +999,7 @@ static void check_utf8_delimiters_equivalence_(sz_utf8_segmenter_t finder_serial
 #pragma region Safety
 
 /** Feeds malformed UTF-8 through one backend, asserting in-bounds, ascending, valid output. */
-static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
-                                          std::size_t random_inputs = scale_iterations(2500)) {
+static void check_utf8_delimiters_safety_(test_context_t &context, sz_utf8_segmenter_t finder) {
     std::vector<sz_size_t> offsets, lengths;
 
     // Malformed bytes meet a capacity too small to hold the batch, so the resume path - not just the one-shot
@@ -1032,7 +1018,7 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
         }
     };
 
-    for_each_adversarial_utf8_input_(global_random_generator(), random_inputs, check);
+    for_each_adversarial_utf8_input_(context, context.iterations(2500), check);
 }
 
 #pragma endregion Safety
@@ -1040,19 +1026,17 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
 #pragma region Drivers
 
 /** Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
-void test_utf8_delimiters_safety() {
-    fmt::println("  - testing malformed-input safety of UTF-8 delimiter kernels...");
-    check_utf8_delimiters_safety_(sz_utf8_delimiters_serial);
+void test_utf8_delimiters_safety(test_context_t &context) {
+    check_utf8_delimiters_safety_(context, sz_utf8_delimiters_serial);
     for (utf8_segment_backend_t const &backend : utf8_delimiters_backends)
-        check_utf8_delimiters_safety_(backend.finder);
-    fmt::println("    malformed-input safety passed!");
+        check_utf8_delimiters_safety_(context, backend.finder);
 }
 
 /** Drive the serial-vs-SIMD UTF-8 delimiter differential across every backend compiled here. */
-void test_utf8_delimiters_all() {
-    sz_size_t const inputs = (sz_size_t)scale_iterations(700);
+void test_utf8_delimiters_all(test_context_t &context) {
+    sz_size_t const inputs = (sz_size_t)context.iterations(700);
     for (utf8_segment_backend_t const &backend : utf8_delimiters_backends)
-        check_utf8_delimiters_equivalence_(sz_utf8_delimiters_serial, backend.finder, inputs);
+        check_utf8_delimiters_equivalence_(context.generator, sz_utf8_delimiters_serial, backend.finder, inputs);
 }
 
 #pragma endregion Drivers

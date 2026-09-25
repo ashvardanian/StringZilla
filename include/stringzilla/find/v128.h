@@ -20,7 +20,7 @@ extern "C" {
 /*  WebAssembly SIMD128 has a true movemask via @c wasm_i8x16_bitmask, producing one bit per byte
  *  from the most significant bit of each lane. Combined with @c sz_u32_ctz and @c sz_u32_clz we get
  *  the SSE/Westmere-style search. The fixed register width is 16 bytes, like Arm NEON. */
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -29,11 +29,11 @@ extern "C" {
  *  @brief Return a pointer to the first matching byte in a 16-byte block, or NULL if none.
  *  @param[in] match_u8x16 A 16-byte comparison result (0xFF where matched, 0x00 otherwise).
  *  @param[in] block_start Pointer to the first byte of the block.
- *  @return Pointer to the first match, or SZ_NULL_CHAR if none.
+ *  @return Pointer to the first match, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_INLINE sz_cptr_t sz_locate_first_v128_(v128_t match_u8x16, sz_cptr_t block_start) {
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_locate_first_v128_(v128_t match_u8x16, sz_cptr_t block_start) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_u8x16);
-    if (!matches) return SZ_NULL_CHAR;
+    if (!matches) return STRINGZILLA_NULL_CHAR;
     return block_start + sz_u32_ctz(matches);
 }
 
@@ -41,16 +41,16 @@ SZ_HELPER_INLINE sz_cptr_t sz_locate_first_v128_(v128_t match_u8x16, sz_cptr_t b
  *  @brief Return a pointer to the last matching byte in a 16-byte block, or NULL if none.
  *  @param[in] match_u8x16 A 16-byte comparison result (0xFF where matched, 0x00 otherwise).
  *  @param[in] block_start Pointer to the first byte of the block.
- *  @return Pointer to the last match, or SZ_NULL_CHAR if none.
+ *  @return Pointer to the last match, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_INLINE sz_cptr_t sz_locate_last_v128_(v128_t match_u8x16, sz_cptr_t block_start) {
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_locate_last_v128_(v128_t match_u8x16, sz_cptr_t block_start) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_u8x16);
-    if (!matches) return SZ_NULL_CHAR;
+    if (!matches) return STRINGZILLA_NULL_CHAR;
     // `matches` occupies the low 16 bits, so `31 - clz` is the index of its highest set bit.
     return block_start + (31 - sz_u32_clz(matches));
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     v128_t needle_u8x16 = wasm_i8x16_splat(*(sz_i8_t const *)needle);
 
     // Scan 64 bytes per iteration: OR four equality masks and gate with a single `any_true`, only
@@ -81,7 +81,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haysta
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     v128_t needle_u8x16 = wasm_i8x16_splat(*(sz_i8_t const *)needle);
 
     // Scan the trailing 64 bytes per iteration; on a hit, locate the last match by walking the four
@@ -122,8 +122,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t hayst
  *  @param[in] set_bottom_u8x16 Bottom half of the byteset (byte indices 16..31).
  *  @return 0xFF per lane where the byte belongs to the set, 0x00 otherwise.
  */
-SZ_HELPER_INLINE v128_t sz_find_byteset_match_v128_(v128_t haystack_u8x16, v128_t set_top_u8x16,
-                                                    v128_t set_bottom_u8x16) {
+STRINGZILLA_HELPER_INLINE v128_t sz_find_byteset_match_v128_(v128_t haystack_u8x16, v128_t set_top_u8x16,
+                                                             v128_t set_bottom_u8x16) {
     // Serial equivalent per byte `c`: `(set->_u8s[c >> 3] & (1u << (c & 7u))) != 0`.
     v128_t byte_index_u8x16 = wasm_u8x16_shr(haystack_u8x16, 3); // c >> 3, in [0, 31]
     // The bit mask `1 << (c & 7)` is produced via a swizzle into a tiny power-of-two table.
@@ -139,7 +139,8 @@ SZ_HELPER_INLINE v128_t sz_find_byteset_match_v128_(v128_t haystack_u8x16, v128_
     return wasm_i8x16_ne(wasm_v128_and(matches_u8x16, byte_mask_u8x16), wasm_i8x16_splat(0));
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_byteset_t const *set) {
     v128_t set_top_u8x16 = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_u8x16 = wasm_v128_load(&set->_u8s[16]);
 
@@ -173,8 +174,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t hay
     return sz_find_byteset_serial(haystack, haystack_length, set);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                sz_byteset_t const *set) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_byteset_t const *set) {
     v128_t set_top_u8x16 = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_u8x16 = wasm_v128_load(&set->_u8s[16]);
 
@@ -222,7 +223,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t ha
  *  @param[in] needle_last_u8x16 Broadcasted last-anomaly needle byte.
  *  @return 0xFF per lane where all three needle bytes match.
  */
-SZ_HELPER_INLINE v128_t sz_find_substr_match_v128_(                                                //
+STRINGZILLA_HELPER_INLINE v128_t sz_find_substr_match_v128_(                                       //
     sz_cptr_t haystack_start, sz_size_t offset_first, sz_size_t offset_mid, sz_size_t offset_last, //
     v128_t needle_first_u8x16, v128_t needle_mid_u8x16, v128_t needle_last_u8x16) {
     return wasm_v128_and(                                                                     //
@@ -239,9 +240,9 @@ SZ_HELPER_INLINE v128_t sz_find_substr_match_v128_(                             
  *  @param[in] window_start Base pointer for this 16-byte window.
  *  @param[in] needle The full needle to verify against.
  *  @param[in] needle_length Length of @c needle in bytes.
- *  @return Pointer to the first verified match, or SZ_NULL_CHAR if none.
+ *  @return Pointer to the first verified match, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_first_v128_( //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_locate_substr_first_v128_( //
     v128_t match_u8x16, sz_cptr_t window_start, sz_cptr_t needle, sz_size_t needle_length) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_u8x16);
     while (matches) {
@@ -250,7 +251,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_first_v128_( //
             return window_start + candidate_offset;
         matches &= matches - 1; // clear the lowest set bit
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -259,9 +260,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_first_v128_( //
  *  @param[in] window_start Base pointer for this 16-byte window.
  *  @param[in] needle The full needle to verify against.
  *  @param[in] needle_length Length of @c needle in bytes.
- *  @return Pointer to the last verified match, or SZ_NULL_CHAR if none.
+ *  @return Pointer to the last verified match, or STRINGZILLA_NULL_CHAR if none.
  */
-SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_last_v128_( //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_locate_substr_last_v128_( //
     v128_t match_u8x16, sz_cptr_t window_start, sz_cptr_t needle, sz_size_t needle_length) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_u8x16);
     while (matches) {
@@ -270,15 +271,15 @@ SZ_HELPER_INLINE sz_cptr_t sz_locate_substr_last_v128_( //
             return window_start + candidate_offset;
         matches &= ~((sz_u32_t)1 << candidate_offset); // clear the highest set bit
     }
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length) {
 
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_v128(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -326,12 +327,12 @@ SZ_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_le
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                        sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_size_t needle_length) {
 
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_rfind_byte_v128(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -386,7 +387,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_l
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // SZ_USE_V128
+#endif // STRINGZILLA_TARGET_V128
 
 #ifdef __cplusplus
 }

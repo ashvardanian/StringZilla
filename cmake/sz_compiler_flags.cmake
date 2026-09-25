@@ -1,6 +1,6 @@
 # cmake/sz_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla target: warnings,
-# optimization, standards, architecture baselines, and the per-capability `SZ_USE_*` stamps. Included after the option
-# block: the helpers read `STRINGZILLA_USE_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the `SZ_IS_64BIT_*` platform
+# optimization, standards, architecture baselines, and the per-capability `STRINGZILLA_TARGET_*` stamps. Included after the option
+# block: the helpers read `STRINGZILLA_USE_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the `STRINGZILLA_ARCH_*_` platform
 # facts at call time.
 
 # Maximum warnings level & warnings as error. MSVC uses numeric values: > 4068 for "unknown pragmas",
@@ -214,7 +214,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             if (compiler_id STREQUAL "NVIDIA")
                 # For NVCC, pass architecture flag to host compiler
                 if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-                    if (SZ_IS_64BIT_ARM_)
+                    if (STRINGZILLA_ARCH_ARM64_)
                         target_compile_options(${target} PRIVATE "-Xcompiler=/arch:armv8.0")
                     else ()
                         target_compile_options(${target} PRIVATE "-Xcompiler=/arch:AVX2")
@@ -229,7 +229,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                 endif ()
             else ()
                 # MSVC does not have a direct equivalent to -march=native
-                if (SZ_IS_64BIT_ARM_)
+                if (STRINGZILLA_ARCH_ARM64_)
                     target_compile_options(${target} PRIVATE "/arch:armv8.0")
                 else ()
                     target_compile_options(${target} PRIVATE "/arch:AVX2")
@@ -251,17 +251,17 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         endif ()
     endif ()
 
-    # Define SZ_IS_BIG_ENDIAN_ macro based on system byte order
+    # Define STRINGZILLA_ARCH_BIG_ENDIAN_ macro based on system byte order
     if (CMAKE_C_BYTE_ORDER STREQUAL "BIG_ENDIAN")
-        set(SZ_IS_BIG_ENDIAN_ 1)
+        set(STRINGZILLA_ARCH_BIG_ENDIAN_ 1)
     else ()
-        set(SZ_IS_BIG_ENDIAN_ 0)
+        set(STRINGZILLA_ARCH_BIG_ENDIAN_ 0)
     endif ()
 
-    target_compile_definitions(${target} PRIVATE "SZ_IS_BIG_ENDIAN_=${SZ_IS_BIG_ENDIAN_}")
+    target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_BIG_ENDIAN_=${STRINGZILLA_ARCH_BIG_ENDIAN_}")
 
     # Sanitizer options for Debug mode
-    target_compile_definitions(${target} PRIVATE "$<IF:$<CONFIG:Debug>,SZ_DEBUG=1,SZ_DEBUG=0>")
+    target_compile_definitions(${target} PRIVATE "$<IF:$<CONFIG:Debug>,STRINGZILLA_DEBUG=1,STRINGZILLA_DEBUG=0>")
     if (STRINGZILLA_USE_SANITIZERS AND NOT target_type STREQUAL "SHARED_LIBRARY")
         if (compiler_id MATCHES "MSVC")
             target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/fsanitize=address;/fsanitize=leak>")
@@ -281,15 +281,15 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 endfunction ()
 
-# Stamps the architecture id and the `SZ_USE_*` verdicts onto a target: `COMPILE` for runtime-dispatched libraries,
+# Stamps the architecture id and the `STRINGZILLA_TARGET_*` verdicts onto a target: `COMPILE` for runtime-dispatched libraries,
 # `RUN` for comptime-dispatched executables whose picked tier must also run on this machine.
 function (set_architecture_simd_definitions target mode)
-    if (SZ_IS_64BIT_X86_)
-        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=1" "SZ_IS_64BIT_ARM_=0")
-    elseif (SZ_IS_64BIT_ARM_)
-        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=1")
+    if (STRINGZILLA_ARCH_X86_64_)
+        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X86_64_=1" "STRINGZILLA_ARCH_ARM64_=0")
+    elseif (STRINGZILLA_ARCH_ARM64_)
+        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X86_64_=0" "STRINGZILLA_ARCH_ARM64_=1")
     else ()
-        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=0")
+        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X86_64_=0" "STRINGZILLA_ARCH_ARM64_=0")
     endif ()
     if (mode STREQUAL "COMPILE")
         target_compile_definitions(${target} PRIVATE ${sz_compile_definitions_})
@@ -305,13 +305,13 @@ endfunction ()
 # the baseline only has to be old enough for every capability's intrinsics headers to parse. Cross-compiled targets (RISC-V,
 # LoongArch, POWER) get their arch from the toolchain file's `CMAKE_<LANG>_FLAGS_INIT`, so they pass an empty arch.
 function (set_baseline_architecture_flags target compiler_id)
-    if (SZ_IS_64BIT_X86_)
+    if (STRINGZILLA_ARCH_X86_64_)
         if (MSVC)
             set_compiler_flags(${target} "" "SSE2" "${compiler_id}")
         else ()
             set_compiler_flags(${target} "" "ivybridge" "${compiler_id}")
         endif ()
-    elseif (SZ_IS_64BIT_ARM_)
+    elseif (STRINGZILLA_ARCH_ARM64_)
         if (MSVC)
             set_compiler_flags(${target} "" "armv8.0" "${compiler_id}")
         else ()

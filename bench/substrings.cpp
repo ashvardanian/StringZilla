@@ -29,7 +29,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Cross-check the backends against each other.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
@@ -47,8 +47,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 #include "substrings.cuh"  // `substrings_dictionary_t`, `substrings_counts_from_sz`
 
 using namespace ashvardanian::stringzilla::bench;
@@ -66,8 +65,8 @@ struct substrings_build_from_sz {
         sz_substrings_engine_t engine;
         sz_memory_allocator_init_default(&allocator);
         if (sz_substrings_engine_init_cpu(&dictionary.needle_sequence, dictionary.sensitivity,
-                                          sz_substrings_overlapping_k, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &allocator,
-                                          &engine) != sz_success_k)
+                                          sz_substrings_overlapping_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0,
+                                          &allocator, &engine) != sz_success_k)
             throw std::runtime_error("The vocabulary would not compile.");
         check_value_t const mixed = (check_value_t)engine.state_count * 31u + engine.max_outputs_per_state;
         sz_substrings_engine_free(&engine);
@@ -86,17 +85,17 @@ static void bench_substrings_counts(environment_t const &env, substrings_engine_
                                     substrings_corpus_t const &corpus, std::string const &suffix) {
     auto validator = substrings_counts_from_sz<sz_substrings_counts_serial> {engine, corpus, corpus.haystacks};
     [[maybe_unused]] bench_result_t base = bench_unary(env, "sz_substrings_counts_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_substrings_counts_haswell" + suffix, validator,
                 substrings_counts_from_sz<sz_substrings_counts_haswell> {engine, corpus, corpus.haystacks})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_substrings_counts_icelake" + suffix, validator,
                 substrings_counts_from_sz<sz_substrings_counts_icelake> {engine, corpus, corpus.haystacks})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_substrings_counts_neon" + suffix, validator,
                 substrings_counts_from_sz<sz_substrings_counts_neon> {engine, corpus, corpus.haystacks})
         .log(base);
@@ -108,17 +107,17 @@ static void bench_substrings_find(environment_t const &env, substrings_engine_t 
                                   substrings_corpus_t const &corpus, std::string const &suffix) {
     auto validator = substrings_find_from_sz<sz_substrings_find_serial> {engine, corpus, corpus.haystacks};
     [[maybe_unused]] bench_result_t base = bench_unary(env, "sz_substrings_find_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_substrings_find_haswell" + suffix, validator,
                 substrings_find_from_sz<sz_substrings_find_haswell> {engine, corpus, corpus.haystacks})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_substrings_find_icelake" + suffix, validator,
                 substrings_find_from_sz<sz_substrings_find_icelake> {engine, corpus, corpus.haystacks})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_substrings_find_neon" + suffix, validator,
                 substrings_find_from_sz<sz_substrings_find_neon> {engine, corpus, corpus.haystacks})
         .log(base);
@@ -132,19 +131,19 @@ static void bench_substrings_replace(environment_t const &env, substrings_engine
     auto validator = substrings_replace_from_sz<sz_substrings_replace_serial> {engine, corpus, corpus.haystacks,
                                                                                dictionary.replacements};
     [[maybe_unused]] bench_result_t base = bench_unary(env, "sz_substrings_replace_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_substrings_replace_haswell" + suffix, validator,
                 substrings_replace_from_sz<sz_substrings_replace_haswell> {engine, corpus, corpus.haystacks,
                                                                            dictionary.replacements})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_substrings_replace_icelake" + suffix, validator,
                 substrings_replace_from_sz<sz_substrings_replace_icelake> {engine, corpus, corpus.haystacks,
                                                                            dictionary.replacements})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_substrings_replace_neon" + suffix, validator,
                 substrings_replace_from_sz<sz_substrings_replace_neon> {engine, corpus, corpus.haystacks,
                                                                         dictionary.replacements})
@@ -158,17 +157,17 @@ static void bench_substrings_bm25(environment_t const &env, substrings_engine_t 
     auto validator = substrings_bm25_from_sz<sz_substrings_bm25_scores_serial> {engine, corpus, corpus.haystacks};
     [[maybe_unused]] bench_result_t base =
         bench_unary(env, "sz_substrings_bm25_scores_serial" + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_substrings_bm25_scores_haswell" + suffix, validator,
                 substrings_bm25_from_sz<sz_substrings_bm25_scores_haswell> {engine, corpus, corpus.haystacks})
         .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary(env, "sz_substrings_bm25_scores_icelake" + suffix, validator,
                 substrings_bm25_from_sz<sz_substrings_bm25_scores_icelake> {engine, corpus, corpus.haystacks})
         .log(base);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_substrings_bm25_scores_neon" + suffix, validator,
                 substrings_bm25_from_sz<sz_substrings_bm25_scores_neon> {engine, corpus, corpus.haystacks})
         .log(base);
@@ -213,8 +212,8 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     // The arms throw on a failed status, so one bad call ends the run with its message rather than a crash.
     try {

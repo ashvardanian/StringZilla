@@ -656,7 +656,7 @@ jobs:
           # iteration budget needs over six hours per variant and the jobs die at the runner
           # timeout without ever reaching the later test families. A scaled-down budget still
           # sweeps every backend and vector length within the job limits.
-          SZ_TESTS_MULTIPLIER: "0.05"
+          STRINGZILLA_SCALE: "0.05"
         run: |
           set -euo pipefail
           chmod +x tests/*
@@ -720,7 +720,7 @@ jobs:
           cmake -B build_wasi \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32.cmake \
             -DWASI_SDK_PREFIX=${WASI_SDK_PATH} \
-            -DSZ_USE_V128RELAXED=${{ matrix.use_v128relaxed }} \
+            -DSTRINGZILLA_TARGET_V128RELAXED=${{ matrix.use_v128relaxed }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DSTRINGZILLA_BUILD_TEST=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=0 \
@@ -729,11 +729,11 @@ jobs:
           cmake --build build_wasi --target stringzilla_test_cpp20
       - name: Test C++ UTF-8 suites under Wasmtime
         env:
-          SZ_TESTS_FILTER: utf8
-          SZ_TESTS_MULTIPLIER: "0.05"
+          STRINGZILLA_FILTER: utf8
+          STRINGZILLA_SCALE: "0.05"
         run: |
           wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} -W exceptions=y \
-            --dir . --env SZ_TESTS_FILTER --env SZ_TESTS_MULTIPLIER \
+            --dir . --env STRINGZILLA_FILTER --env STRINGZILLA_SCALE \
             build_wasi/stringzilla_test_cpp20
 
   test_macos:
@@ -1189,5 +1189,5 @@ jobs:
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
-          # SZ_IS_QEMU_ disables tricky SIMD; SZ_TESTS_MULTIPLIER matches `test_cross_qemu`.
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TESTS_MULTIPLIER=0.05
+          # STRINGZILLA_IN_QEMU disables tricky SIMD; STRINGZILLA_SCALE matches `test_cross_qemu`.
+          CIBW_ENVIRONMENT_LINUX: STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05

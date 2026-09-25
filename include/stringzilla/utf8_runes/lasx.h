@@ -14,11 +14,11 @@
 extern "C" {
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /** Recombine the two per-128-bit-lane 16-bit @c __lasx_xvmskltz_b sign-bit masks into one 32-bit
  *  mask, matching AVX2's @c _mm256_movemask_epi8 (word 0 = low lane, word 4 = high lane). */
-SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended_u8x32) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended_u8x32) {
     __m256i comparison_result_u8x32 = __lasx_xvmskltz_b(sign_extended_u8x32);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(comparison_result_u8x32, 0);
     sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(comparison_result_u8x32, 4);
@@ -28,7 +28,7 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended_u8x32
 /** Per-lane logical right shift by 4 bits, keeping only the low nibble of every byte lane. The
  *  single shift amount the classifier needs is spelled out (LASX `xvsrli.h` requires an immediate;
  *  it shifts 16-bit lanes, so we mask back to byte width afterwards). */
-SZ_HELPER_INLINE __m256i sz_utf8_high_nibble_lasx_(__m256i value_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_high_nibble_lasx_(__m256i value_u8x32) {
     return __lasx_xvand_v(__lasx_xvsrli_h(value_u8x32, 4), __lasx_xvreplgr2vr_b((char)0x0F));
 }
 
@@ -36,7 +36,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_high_nibble_lasx_(__m256i value_u8x32) {
  *  zero-filling the top. Built from an in-lane `xvbsrl.v` (per-128-bit down-shift) stitched
  *  with the cross-lane high half via `xvpermi.q` so byte 16 receives original byte 17 across
  *  the 128-bit seam. */
-SZ_HELPER_INLINE __m256i sz_utf8_next1_lasx_(__m256i window_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_next1_lasx_(__m256i window_u8x32) {
     __m256i const high_half_duplicated_u8x32 = __lasx_xvpermi_q(window_u8x32, window_u8x32,
                                                                 0x31); // both halves := original high
     __m256i const shift_within_lane_u8x32 = __lasx_xvbsrl_v(window_u8x32,
@@ -52,7 +52,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_next1_lasx_(__m256i window_u8x32) {
  *  low bytes (value = bit index 0..7), in `.rodata` (no per-call rebuild). The caller reads only
  *  the leading `popcount(m)` lanes; the 0x80 fill marks the unused tail. 16 bytes per row so one
  *  @c xvld brings a row into a 128-bit `xvshuf.b` source lane. */
-SZ_HELPER_INLINE sz_u8_t const *sz_utf8_pack8_lut_lasx_(void) {
+STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_utf8_pack8_lut_lasx_(void) {
     // 256 rows x 16 bytes of `.rodata`: row `m` lists the set-bit positions of the 8-bit mask `m`; only the leading
     // `popcount(m)` lanes are read, the 0x80 fill is an unused-tail marker.
     static sz_u8_t const table[256][16] = {
@@ -322,7 +322,7 @@ SZ_HELPER_INLINE sz_u8_t const *sz_utf8_pack8_lut_lasx_(void) {
  *  positions to the low bytes of the lane. The four packed groups are stitched in order by their
  *  @c popcount offset (the group base + local index gives the absolute byte offset). @return the
  *  popcount of @p mask. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out) {
     sz_u8_t const *lut = sz_utf8_pack8_lut_lasx_();
     // Lane-local byte identity {0..15, 0..15}: each 128-bit lane shuffles its own 0..15 identity by the LUT row, so
     // the packed values are the within-half bit positions; we add the half base to recover absolute offsets.
@@ -360,7 +360,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *ou
  *
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_lasx_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_lasx_( //
     __m256i window_u8x32, sz_u32_t emit_starts, sz_u32_t ill_formed, __m256i consumed_length_u8x32, int has_three,
     int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
@@ -493,9 +493,9 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_lasx_( //
  *  @c sz_utf8_decode_once_icelake_; the step declines (`*runes_unpacked == 0`, cursor unchanged)
  *  only when the first lead's declared sequence crosses the window edge (a boundary truncation),
  *  which the public entry finalizes without a serial re-decode. */
-SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_lasx_( //
-    sz_cptr_t text, sz_size_t length,                 //
-    sz_rune_t *runes, sz_size_t runes_capacity,       //
+STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_lasx_( //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_rune_t *runes, sz_size_t runes_capacity,                //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 32 ? length : 32;
@@ -739,9 +739,9 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_lasx_( //
     return text + consumed;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx(  //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_rune_t *runes, sz_size_t runes_capacity,         //
     sz_size_t *runes_unpacked) {
 
     sz_cptr_t cursor = text;
@@ -778,7 +778,8 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx(  //
 #pragma region Multistep Newline and Whitespace Iteration
 
 /** Store the low @p group (1..4) of four 64-bit lanes of @p values_u64x4 to @p destination. */
-SZ_HELPER_INLINE void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz_size_t group, sz_size_t *destination) {
+STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz_size_t group,
+                                                                 sz_size_t *destination) {
     if (group == 4) { __lasx_xvst(values_u64x4, destination, 0); }
     else {
         __lasx_xvstelm_d(values_u64x4, destination, 0, 0);
@@ -787,7 +788,7 @@ SZ_HELPER_INLINE void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz
     }
 }
 
-SZ_API_COMPTIME sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
     __m256i continuation_mask_u8x32 = __lasx_xvreplgr2vr_b((char)0xC0);
     __m256i continuation_pattern_u8x32 = __lasx_xvreplgr2vr_b((char)0x80);
     __m256i const one_byte_u8x32 = __lasx_xvreplgr2vr_b(1);
@@ -835,7 +836,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
 
 /** Same block logic as @c sz_utf8_count_lasx, but locating the Nth start byte. LASX has no @c PDEP,
  *  so the start-byte bitmask is fed to @c sz_u32_nth_set_bit to land on the Nth set bit. */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     __m256i continuation_mask_u8x32 = __lasx_xvreplgr2vr_b((char)0xC0);
     __m256i continuation_pattern_u8x32 = __lasx_xvreplgr2vr_b((char)0x80);
     __m256i const one_byte_u8x32 = __lasx_xvreplgr2vr_b(1);
@@ -926,7 +927,7 @@ typedef struct sz_utf8_rune_window_lasx_t {
     __lasx_xvand_v(__lasx_xvsrli_h((value), (shift)), __lasx_xvreplgr2vr_b((char)(keep)))
 
 /** Combine two per-half @c sz_xvmovemask_b_utf8_lasx_ results into one 64-bit lane mask. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_lasx_(__m256i low_half_u8x32, __m256i high_half_u8x32) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_lasx_(__m256i low_half_u8x32, __m256i high_half_u8x32) {
     sz_u64_t const low_bits = (sz_u32_t)sz_xvmovemask_b_utf8_lasx_(low_half_u8x32);
     sz_u64_t const high_bits = (sz_u32_t)sz_xvmovemask_b_utf8_lasx_(high_half_u8x32);
     return low_bits | (high_bits << 32);
@@ -936,7 +937,7 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_lasx_(__m256i low_half_u8x32, __m
  *  to drive `xvbitsel.v` in place of AVX2's @c blendv_epi8. Broadcasts the four mask bytes, routes
  *  each output lane's byte with `xvshuf.b`, isolates the per-lane bit, then compares equal
  *  (in-register, no scalar). */
-SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_lasx_(sz_u32_t bits) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_lasx_(sz_u32_t bits) {
     static sz_u8_t const byte_router[32] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
                                             2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3};
     static sz_u8_t const bit_select[32] = {1, 2, 4, 8, 16, 32, 64, (sz_u8_t)128, 1, 2, 4, 8, 16, 32, 64, (sz_u8_t)128,
@@ -951,8 +952,8 @@ SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_lasx_(sz_u32_t bits) {
 /** Masked 64-byte load into two halves; bytes [loaded, 64) read as zero (the LASX stand-in for
  *  @c _mm512_maskz_loadu_epi8). A stack staging union covers the partial tail so we never read past
  *  `text + loaded`. */
-SZ_HELPER_INLINE void sz_utf8_load_window_lasx_(sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32,
-                                                __m256i *out_high_u8x32) {
+STRINGZILLA_HELPER_INLINE void sz_utf8_load_window_lasx_(sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32,
+                                                         __m256i *out_high_u8x32) {
     if (loaded >= 64) {
         *out_low_u8x32 = __lasx_xvld(text + 0, 0);
         *out_high_u8x32 = __lasx_xvld(text + 32, 0);
@@ -973,7 +974,7 @@ SZ_HELPER_INLINE void sz_utf8_load_window_lasx_(sz_u8_t const *text, sz_size_t l
  *  @p window_high_u8x32 is @p window_low_u8x32, byte 64 aliasing byte 0), then an in-lane @c xvbsrl
  *  and @c xvbsll byte-shift pair stitches across the lane boundary - the two-halves generalization
  *  of @ref sz_utf8_next1_lasx_ to distances 2 and 3 plus the 256-bit half seam. */
-SZ_HELPER_INLINE void sz_utf8_forward_neighbours_lasx_( //
+STRINGZILLA_HELPER_INLINE void sz_utf8_forward_neighbours_lasx_( //
     __m256i window_low_u8x32, __m256i window_high_u8x32, __m256i *next_byte_1_low_u8x32,
     __m256i *next_byte_1_high_u8x32, __m256i *next_byte_2_low_u8x32, __m256i *next_byte_2_high_u8x32,
     __m256i *next_byte_3_low_u8x32, __m256i *next_byte_3_high_u8x32) {
@@ -1000,7 +1001,8 @@ SZ_HELPER_INLINE void sz_utf8_forward_neighbours_lasx_( //
 
 /** Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves - the LASX twin
  *  of @ref sz_utf8_rune_decode_window_, bit-identical on every lane. */
-SZ_HELPER_INLINE sz_utf8_rune_window_lasx_t sz_utf8_rune_decode_window_lasx_(sz_u8_t const *text, sz_size_t available) {
+STRINGZILLA_HELPER_INLINE sz_utf8_rune_window_lasx_t sz_utf8_rune_decode_window_lasx_(sz_u8_t const *text,
+                                                                                      sz_size_t available) {
     sz_utf8_rune_window_lasx_t result;
     result.loaded = available < 64 ? available : 64;
 
@@ -1093,7 +1095,7 @@ SZ_HELPER_INLINE sz_utf8_rune_window_lasx_t sz_utf8_rune_decode_window_lasx_(sz_
 /** 256-entry byte LUT addressed by a per-lane byte index in `[0,256)`:
  *  `result[lane] = table[index[lane]]` via a bounded scalar L1 walk (LASX has no gather). The LASX
  *  stand-in for the substrate @c lut256 leaf. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_scalar_lasx_(sz_u8_t const *table, __m256i index_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_lut256_scalar_lasx_(sz_u8_t const *table, __m256i index_u8x32) {
     sz_u256_vec_t index_vec, result_vec;
     index_vec.lasx = index_u8x32;
     for (int lane = 0; lane < 32; ++lane) result_vec.u8s[lane] = table[index_vec.u8s[lane]];
@@ -1106,7 +1108,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_scalar_lasx_(sz_u8_t const *table, 
  *  `xvpermi.q(row, row, 0x00)` and shuffled by @p within (a nibble, so `xvshuf.b` never crosses the
  *  seam), then blended in for the lanes whose @p selector picks that row - the LASX twin of the
  *  AVX2 cascade stage. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_lasx_( //
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_lasx_( //
     sz_u8_t const *table, int tile_count, __m256i selector_u8x32, __m256i within_u8x32) {
     __m256i result_u8x32 = __lasx_xvreplgr2vr_b(0);
     for (int tile = 0; tile < tile_count; ++tile) {
@@ -1123,7 +1125,7 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_cascade_stage_lasx_( //
  *  page, then `flat[page * 256 + low]` per lane. LASX has no gather, so the leaf read is a bounded
  *  scalar L1 walk over the fused 16-bit index `(page << 8) | low` (the NEON strategy). Lanes whose
  *  page index reaches @p page_count return zero. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_lasx_( //
+STRINGZILLA_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_lasx_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, __m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     sz_u256_vec_t high_vec, low_vec, result_vec;
     high_vec.lasx = high_bytes_u8x32;
@@ -1137,13 +1139,13 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_flat_lookup_lasx_( //
 
 /** Popcount of a 64-bit lane mask via `xvpcnt.d` on a seeded lane (no scalar
  *  @c popcount builtin). */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_popcount64_lasx_(sz_u64_t value) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_popcount64_lasx_(sz_u64_t value) {
     __m256i const seeded_u64x4 = __lasx_xvinsgr2vr_d(__lasx_xvreplgr2vr_d(0), (long long)value, 0);
     return (sz_size_t)__lasx_xvpickve2gr_du(__lasx_xvpcnt_d(seeded_u64x4), 0);
 }
 
 /** Popcount of an 8-bit value via a nibble table (no scalar @c popcount builtin). */
-SZ_HELPER_INLINE int sz_utf8_rune_byte_popcount_lasx_(sz_u32_t byte) {
+STRINGZILLA_HELPER_INLINE int sz_utf8_rune_byte_popcount_lasx_(sz_u32_t byte) {
     static sz_u8_t const nibble_popcount[16] = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4};
     return (int)nibble_popcount[byte & 0x0F] + (int)nibble_popcount[(byte >> 4) & 0x0F];
 }
@@ -1154,7 +1156,7 @@ SZ_HELPER_INLINE int sz_utf8_rune_byte_popcount_lasx_(sz_u32_t byte) {
  *      (eight 8-bit groups), not a scalar @c ctz walk.
  *  @return the popcount of @p mask.
  */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_pack_boundaries_lasx_(sz_u64_t mask, sz_u8_t *out) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_pack_boundaries_lasx_(sz_u64_t mask, sz_u8_t *out) {
     sz_u8_t const *lut = sz_utf8_pack8_lut_lasx_();
     static sz_u8_t const identity_bytes[32] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
                                                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
@@ -1180,7 +1182,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_pack_boundaries_lasx_(sz_u64_t mask, sz_
  *  left-packed once (pack8 LUT), then streamed in waves of four u64 positions (`xvperm.w` shift and
  *  lane-0 carry seat via `xvinsgr2vr.d`, lengths via `xvsub.d`), with a scalar tail for the final
  *  partial wave. Count is `xvpcnt.d`, never a scalar @c popcount. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_lasx_( //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_lasx_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = sz_utf8_rune_popcount64_lasx_(boundary);
@@ -1232,7 +1234,7 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_rune_drain_forward_lasx_( //
 
 #pragma endregion Word boundaries windowed substrate
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

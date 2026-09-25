@@ -20,7 +20,6 @@
 
 #include <cmath>   // `std::fabs`
 #include <cstddef> // `std::size_t`
-#include <cstring> // `std::strlen`
 
 #include <algorithm> // `std::sort`
 #include <string>    // `std::string`
@@ -29,7 +28,7 @@
 #include <stringzilla/stringzilla.h> // Primary C API
 #include <stringzilla/substrings.h>  // `sz_substrings_*`
 
-#include "stringzilla.hpp" // `random_string`, `scale_iterations`, `unified_vector`, `verify`
+#include "harness.hpp" // `random_string`, `test_context_t`, `unified_vector`, `verify`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -92,7 +91,7 @@ struct substrings_cuda_vocabulary_t {
         std::size_t written = 0;
         for (sz_string_view_t &view : views) view.start = arena.data() + written, written += view.length;
         sz_sequence_from_string_views(views.data(), views.size(), &needles);
-        sz_memory_allocator_init_unified(&unified, SZ_NULL);
+        sz_memory_allocator_init_unified(&unified, STRINGZILLA_NULL);
     }
     substrings_cuda_vocabulary_t(substrings_cuda_vocabulary_t const &) = delete;
     substrings_cuda_vocabulary_t &operator=(substrings_cuda_vocabulary_t const &) = delete;
@@ -117,10 +116,12 @@ struct substrings_cuda_engines_t {
 
     substrings_cuda_engines_t(substrings_cuda_vocabulary_t &vocabulary, sz_substrings_case_sensitivity_t sensitivity,
                               sz_substrings_overlap_policy_t policy) {
-        verify(sz_substrings_engine_init_cpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0,
-                                             &heap.allocator, &host) == sz_success_k);
-        verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sensitivity, policy, SZ_SUBSTRINGS_HOT_STATES_AUTO, 0,
-                                             &vocabulary.unified, nullptr, &device) == sz_success_k);
+        verify(sz_substrings_engine_init_cpu(&vocabulary.needles, sensitivity, policy,
+                                             STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &heap.allocator,
+                                             &host) == sz_success_k);
+        verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sensitivity, policy,
+                                             STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &vocabulary.unified, nullptr,
+                                             &device) == sz_success_k);
         verify(sz_memory_reaches_device(device.memory) && "A device engine's block is one a kernel addresses");
         verify(!sz_memory_reaches_device(host.memory) && "A host engine's block is not");
     }
@@ -357,22 +358,22 @@ void test_substrings_unit() {
 }
 
 /** Random corpora wide enough that the planner cuts several chunks per haystack. */
-void test_substrings_all() {
+void test_substrings_all(test_context_t &context) {
+    std::mt19937 &generator = context.generator;
     char const *const alphabets[] = {"ab", "abcdefgh", "abcdefghijklmnopqrstuvwxyz"};
-    std::size_t const rounds = scale_iterations(8);
+    std::size_t const rounds = context.iterations(8);
 
     for (std::size_t round = 0; round != rounds; ++round) {
         char const *const alphabet = alphabets[round % 3];
-        std::size_t const cardinality = std::strlen(alphabet);
         std::vector<std::string> needles, haystacks;
         for (std::size_t index = 0; index != 1 + (round * 7) % 24; ++index)
-            needles.push_back(random_string(1 + (index * 3 + round) % 7, alphabet, cardinality));
+            needles.push_back(random_string(generator, 1 + (index * 3 + round) % 7, alphabet));
         std::sort(needles.begin(), needles.end());
         needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
         // Long enough that the planner cuts several chunks out of one haystack, which is the regime the
         // warm-up exists for; a corpus of short haystacks never crosses a chunk boundary at all.
         for (std::size_t index = 0; index != 1 + (round * 5) % 9; ++index)
-            haystacks.push_back(random_string(4096 + index * 977, alphabet, cardinality));
+            haystacks.push_back(random_string(generator, 4096 + index * 977, alphabet));
         check_policies_(haystacks, needles, sz_substrings_cased_k, sz_substrings_cover_approximate_k);
     }
 
@@ -380,14 +381,14 @@ void test_substrings_all() {
     {
         std::vector<std::string> needles, haystacks;
         for (std::size_t index = 0; index != 6000; ++index)
-            needles.push_back(random_string(2 + index % 4, "abcdefghijklmnopqrstuvwxyz", 26));
+            needles.push_back(random_string(generator, 2 + index % 4, "abcdefghijklmnopqrstuvwxyz"));
         std::sort(needles.begin(), needles.end());
         needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
         for (std::size_t index = 0; index != 64; ++index)
-            haystacks.push_back(random_string(256 + index * 97, "abcdefghijklmnopqrstuvwxyz", 26));
+            haystacks.push_back(random_string(generator, 256 + index * 97, "abcdefghijklmnopqrstuvwxyz"));
         // Short documents past a residency wave, so the grid holds many blocks, each with its own overflow row.
         for (std::size_t index = 0; index != 4096; ++index)
-            haystacks.push_back(random_string(16 + index % 97, "abcdefghijklmnopqrstuvwxyz", 26));
+            haystacks.push_back(random_string(generator, 16 + index % 97, "abcdefghijklmnopqrstuvwxyz"));
         substrings_cuda_corpus_t corpus(haystacks);
         substrings_cuda_vocabulary_t vocabulary(needles);
         verify(vocabulary.views.size() > 4096);
@@ -397,11 +398,12 @@ void test_substrings_all() {
     // Nucleotides, where the whole hot tier is five columns wide and fits a block's shared memory.
     {
         std::vector<std::string> needles, haystacks;
-        for (std::size_t index = 0; index != 300; ++index) needles.push_back(random_string(4 + index % 13, "ACGT", 4));
+        for (std::size_t index = 0; index != 300; ++index)
+            needles.push_back(random_string(generator, 4 + index % 13, "ACGT"));
         std::sort(needles.begin(), needles.end());
         needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
         for (std::size_t index = 0; index != 6; ++index) {
-            std::string haystack = random_string(20000 + index * 4099, "ACGT", 4);
+            std::string haystack = random_string(generator, 20000 + index * 4099, "ACGT");
             for (std::size_t offset = 61; offset < haystack.size(); offset += 997) haystack[offset] = 'N';
             haystacks.push_back(haystack);
         }
@@ -411,13 +413,13 @@ void test_substrings_all() {
     // One haystack far wider than a chunk, so the boundary case is hit many times over in a single walk.
     {
         std::vector<std::string> const needles {"the", "there", "here", "her", "he"};
-        std::vector<std::string> haystacks {random_string(1 << 20, "the ", 4)};
+        std::vector<std::string> haystacks {random_string(generator, 1 << 20, "the ")};
         check_policies_(haystacks, needles, sz_substrings_cased_k, sz_substrings_cover_approximate_k);
     }
 }
 
 /** What the device verbs refuse, and what the report says when an output cannot hold the answer. */
-void test_substrings_safety() {
+void test_substrings_safety(test_context_t &) {
     std::vector<std::string> const needles {"ab", "cd"};
     std::vector<std::string> const haystacks {"abcdabcd"};
     substrings_cuda_corpus_t corpus(haystacks);
@@ -433,10 +435,10 @@ void test_substrings_safety() {
 
     // An output stride of zero cannot address one entry per haystack, whatever the haystack count.
     {
-        unified_vector<sz_size_t> counts(haystacks.size(), SZ_SIZE_MAX);
+        unified_vector<sz_size_t> counts(haystacks.size(), STRINGZILLA_SIZE_MAX);
         verify(sz_substrings_counts_cuda(&engines.device, &corpus.device_haystacks, counts.data(), 0) ==
                sz_unexpected_dimensions_k);
-        verify(counts[0] == SZ_SIZE_MAX);
+        verify(counts[0] == STRINGZILLA_SIZE_MAX);
     }
 
     // The counts a device walk answers with, which the same corpus answers on the host.
@@ -473,9 +475,9 @@ void test_substrings_safety() {
     // keep whatever they held and the report alone says the round did not fit.
     {
         sz_substrings_engine_t tiny {};
-        unified_vector<sz_size_t> offsets(haystacks.size() + 1, SZ_SIZE_MAX);
+        unified_vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX);
         verify(sz_substrings_engine_init_gpu(&vocabulary.needles, sz_substrings_cased_k, sz_substrings_leftmost_first_k,
-                                             SZ_SUBSTRINGS_HOT_STATES_AUTO, 1, &vocabulary.unified, nullptr,
+                                             STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 1, &vocabulary.unified, nullptr,
                                              &tiny) == sz_success_k);
         verify(sz_substrings_find_cuda(&tiny, &corpus.device_haystacks, nullptr, 0, offsets.data()) == sz_success_k);
         join_();

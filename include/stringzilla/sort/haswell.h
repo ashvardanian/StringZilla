@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -62,7 +62,7 @@ extern "C" {
 #define sz_sort_haswell_partition_slack_ (3 * sz_sort_haswell_region_gap_)
 
 /** Collapses a 64-bit-lane compare result (each lane 0 or ~0) into a 4-bit lane mask. */
-SZ_HELPER_INLINE sz_u32_t sz_sort_haswell_lane_mask4_(__m256i const compared_u64x4) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_sort_haswell_lane_mask4_(__m256i const compared_u64x4) {
     return (sz_u32_t)_mm256_movemask_pd(_mm256_castsi256_pd(compared_u64x4));
 }
 
@@ -72,8 +72,8 @@ SZ_HELPER_INLINE sz_u32_t sz_sort_haswell_lane_mask4_(__m256i const compared_u64
  *  surviving count, so the unwritten tail is overwritten by the next call or lands in the region
  *  slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent "store
  *  only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
-SZ_HELPER_INLINE sz_size_t sz_sort_haswell_compact4_(    //
-    __m256i const keys_u64x4, __m256i const order_u64x4, //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_sort_haswell_compact4_( //
+    __m256i const keys_u64x4, __m256i const order_u64x4,       //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
 
     // Left-pack table for `vpermd`: row `[m]` holds the 8 dword indices that gather the `m`-selected u64 lanes
@@ -124,8 +124,8 @@ typedef struct sz_sort_haswell_block_masks_t {
  *  against the sign-biased @p pivot_biased_u64x4, returning the smaller/equal/greater lane
  *  masks for both 4-lane halves; the equal mask is the complement of (smaller | greater), so
  *  only four compares run. */
-SZ_HELPER_INLINE sz_sort_haswell_block_masks_t sz_sort_haswell_classify_block_( //
-    __m256i const keys_lower_u64x4, __m256i const keys_upper_u64x4,             //
+STRINGZILLA_HELPER_INLINE sz_sort_haswell_block_masks_t sz_sort_haswell_classify_block_( //
+    __m256i const keys_lower_u64x4, __m256i const keys_upper_u64x4,                      //
     __m256i const pivot_biased_u64x4, __m256i const sign_u64x4) {
 
     __m256i const lower_biased_u64x4 = _mm256_xor_si256(keys_lower_u64x4, sign_u64x4);
@@ -143,7 +143,7 @@ SZ_HELPER_INLINE sz_sort_haswell_block_masks_t sz_sort_haswell_classify_block_( 
 /** Left-packs both 4-lane halves of one 8-lane block into @p cursor under @p mask_lower /
  *  @p mask_upper, advancing the cursor by the surviving-lane counts (the lower half first,
  *  preserving lane order). */
-SZ_HELPER_INLINE void sz_sort_haswell_compact_block_into_(           //
+STRINGZILLA_HELPER_INLINE void sz_sort_haswell_compact_block_into_(  //
     sz_sort_haswell_region_cursor_t *const cursor,                   //
     __m256i const keys_lower_u64x4, __m256i const order_lower_u64x4, //
     __m256i const keys_upper_u64x4, __m256i const order_upper_u64x4, //
@@ -165,7 +165,7 @@ SZ_HELPER_INLINE void sz_sort_haswell_compact_block_into_(           //
  *  block-major pass left-packs all three comparison kinds together, so each block is loaded once
  *  and the equal mask is derived for free.
  */
-SZ_HELPER_INLINE void sz_sequence_argsort_haswell_3way_partition_(                  //
+STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_haswell_3way_partition_(         //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
     sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
@@ -258,7 +258,7 @@ SZ_HELPER_INLINE void sz_sequence_argsort_haswell_3way_partition_(              
     *last_pivot_offset = start_in_sequence + count_smaller + count_equal - 1;
 }
 
-SZ_API_COMPTIME void sz_sequence_argsort_haswell_quicksort_pgrams_(
+STRINGZILLA_API_COMPTIME void sz_sequence_argsort_haswell_quicksort_pgrams_(
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order, sz_pgram_t *temporary_pgrams,
     sz_sorted_idx_t *temporary_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t const top_count) {
@@ -281,8 +281,8 @@ SZ_API_COMPTIME void sz_sequence_argsort_haswell_quicksort_pgrams_(
                                                       last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-SZ_API_COMPTIME sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                                   sz_sorted_idx_t *order) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t count,
+                                                            sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
 
     sz_memory_allocator_t global_alloc;
@@ -304,7 +304,7 @@ SZ_API_COMPTIME sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t
     return sz_success_k;
 }
 
-SZ_API_COMPTIME void sz_sequence_argsort_haswell_sort_byte_windows_(
+STRINGZILLA_API_COMPTIME void sz_sequence_argsort_haswell_sort_byte_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
@@ -341,9 +341,9 @@ SZ_API_COMPTIME void sz_sequence_argsort_haswell_sort_byte_windows_(
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                        sz_sorted_idx_t *order, sz_size_t top_count,
-                                                        sz_bool_t reverse) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence,
+                                                                 sz_memory_allocator_t *alloc, sz_sorted_idx_t *order,
+                                                                 sz_size_t top_count, sz_bool_t reverse) {
     sz_size_t count = sequence->count;
     for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
         order[sequence_index] = sequence_index;
@@ -381,7 +381,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *seq
 /** Uncased twin of @c sz_sequence_argsort_haswell_sort_byte_windows_: the folded code-point export
  *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
  *  the AVX2 partition - which is where Haswell beats the fully-serial uncased path. */
-SZ_API_COMPTIME void sz_sequence_argsort_haswell_sort_casefold_windows_(
+STRINGZILLA_API_COMPTIME void sz_sequence_argsort_haswell_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
@@ -417,8 +417,8 @@ SZ_API_COMPTIME void sz_sequence_argsort_haswell_sort_casefold_windows_(
     }
 }
 
-SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_haswell( //
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
+STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_haswell( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,          //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     sz_size_t const count = sequence->count;
@@ -455,7 +455,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_haswell( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_HASWELL
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #ifdef __cplusplus
 }

@@ -42,7 +42,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test the GPU backend against the serial baseline.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
@@ -65,8 +65,7 @@
 
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_*`
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -261,8 +260,9 @@ struct levenshtein_cuda_batch_t {
         : views(levenshtein_cuda_queries(env, query_bytes)) {
         sz_sequence_from_string_views(views.data(), views.size(), &queries);
         sz_status_t const prepared = on_device == sz_true_k
-                                         ? sz_levenshtein_engine_init_gpu(&queries, symbol, SZ_NULL, SZ_NULL, &engine)
-                                         : sz_levenshtein_engine_init_cpu(&queries, symbol, SZ_NULL, &engine);
+                                         ? sz_levenshtein_engine_init_gpu(&queries, symbol, STRINGZILLA_NULL,
+                                                                          STRINGZILLA_NULL, &engine)
+                                         : sz_levenshtein_engine_init_cpu(&queries, symbol, STRINGZILLA_NULL, &engine);
         if (prepared != sz_success_k) throw std::runtime_error("The engine could not be prepared.");
     }
     ~levenshtein_cuda_batch_t() { sz_levenshtein_engine_free(&engine); }
@@ -367,13 +367,13 @@ static void bench_levenshtein_cross_product(environment_t const &env, levenshtei
     auto validator = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {
         env, corpus, query_bytes, levenshtein_cuda_order_t::shuffled_k};
     bench_result_t base = bench_unary(env, std::string("sz_levenshtein_distances_serial") + suffix, validator).log();
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     base = bench_unary(env, std::string("sz_levenshtein_distances_haswell") + suffix, validator,
                        levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {
                            env, corpus, query_bytes, levenshtein_cuda_order_t::shuffled_k})
                .log(base);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     base = bench_unary(env, std::string("sz_levenshtein_distances_icelake") + suffix, validator,
                        levenshtein_distances_from_sz<sz_levenshtein_distances_icelake> {
                            env, corpus, query_bytes, levenshtein_cuda_order_t::shuffled_k})
@@ -412,8 +412,9 @@ static void bench_levenshtein_cross_product(environment_t const &env, levenshtei
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers();
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
+    if (!log_cuda_device()) return 0;
 
     try {
         fmt::println("Building up the environment...");

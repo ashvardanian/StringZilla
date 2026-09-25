@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +25,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-SZ_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
     uint64x2_t sum_u64x2 = vdupq_n_u64(0);
 
     // Process 16 bytes (128 bits) at a time
@@ -48,7 +48,7 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_NEON
+#endif // STRINGZILLA_TARGET_NEON
 
 #ifdef __cplusplus
 }

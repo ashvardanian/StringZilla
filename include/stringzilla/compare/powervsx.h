@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,8 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-SZ_HELPER_INLINE sz_bool_t sz_equal_powervsx_vec16_(__vector unsigned char a_u8x16, __vector unsigned char b_u8x16) {
+STRINGZILLA_HELPER_INLINE sz_bool_t sz_equal_powervsx_vec16_(__vector unsigned char a_u8x16,
+                                                             __vector unsigned char b_u8x16) {
     // On Power10 `vec_first_mismatch_index` reports the first differing lane (16 if none) in a
     // single instruction, replacing the `vec_all_eq` compare + branch reduction. The Power9
     // fallback keeps the byte-for-byte identical `vec_all_eq` semantics.
@@ -35,7 +36,7 @@ SZ_HELPER_INLINE sz_bool_t sz_equal_powervsx_vec16_(__vector unsigned char a_u8x
 #endif
 }
 
-SZ_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
@@ -89,7 +90,8 @@ SZ_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t 
     }
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                         sz_size_t b_length) {
     //! Lexicographic ordering is endian-sensitive and not worth vectorizing — see the
     //! "Operations Not Worth Optimizing" note in the Contributions Guide, mirroring NEON.
     return sz_order_serial(a, a_length, b, b_length);
@@ -100,7 +102,7 @@ SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length,
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_POWERVSX
+#endif // STRINGZILLA_TARGET_POWERVSX
 
 #ifdef __cplusplus
 }

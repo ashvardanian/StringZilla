@@ -18,12 +18,12 @@
 extern "C" {
 #endif
 
-/*  @c SZ_USE_RVVCRYPTO turns on for @c Zvkned and @c Zvknhb, the pair @c sz_hash needs, and says
- *  nothing about @c Zvkg. A target carrying AES but not the Galois hash therefore reaches this
- *  file, and every hash step below is written against one pair of helpers that resolve to
+/*  @c STRINGZILLA_TARGET_RVVCRYPTO turns on for @c Zvkned and @c Zvknhb, the pair @c sz_hash needs,
+ *  and says nothing about @c Zvkg. A target carrying AES but not the Galois hash therefore reaches
+ *  this file, and every hash step below is written against one pair of helpers that resolve to
  *  `vghsh.vv` and `vgmul.vv` where the extension is present and to the constant-time serial
  *  reduction where it is not. The AES side is vectorized either way. */
-#if SZ_USE_RVVCRYPTO
+#if STRINGZILLA_TARGET_RVVCRYPTO
 
 #include <riscv_vector.h>
 
@@ -45,8 +45,8 @@ extern "C" {
  *  array whose alignment the caller chooses, and an element-width load may fault on an
  *  implementation without the misaligned-access extension.
  */
-SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_rvvcrypto_(sz_u8_t const *bytes) {
-    return __riscv_vreinterpret_v_u8m1_u32m1(__riscv_vle8_v_u8m1(bytes, SZ_AES_BLOCK_LENGTH));
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_aes256_block_load_rvvcrypto_(sz_u8_t const *bytes) {
+    return __riscv_vreinterpret_v_u8m1_u32m1(__riscv_vle8_v_u8m1(bytes, STRINGZILLA_AES_BLOCK_LENGTH));
 }
 
 /**
@@ -54,8 +54,8 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_rvvcrypto_(sz_u8_t const *byte
  *  @param[out] bytes Receives the 16 bytes, at any alignment.
  *  @param[in] block_u32m1 The block to store.
  */
-SZ_HELPER_INLINE void sz_aes256_block_store_rvvcrypto_(sz_u8_t *bytes, vuint32m1_t block_u32m1) {
-    __riscv_vse8_v_u8m1(bytes, __riscv_vreinterpret_v_u32m1_u8m1(block_u32m1), SZ_AES_BLOCK_LENGTH);
+STRINGZILLA_HELPER_INLINE void sz_aes256_block_store_rvvcrypto_(sz_u8_t *bytes, vuint32m1_t block_u32m1) {
+    __riscv_vse8_v_u8m1(bytes, __riscv_vreinterpret_v_u32m1_u8m1(block_u32m1), STRINGZILLA_AES_BLOCK_LENGTH);
 }
 
 /**
@@ -67,8 +67,9 @@ SZ_HELPER_INLINE void sz_aes256_block_store_rvvcrypto_(sz_u8_t *bytes, vuint32m1
  *
  *  A slide keeps the value in registers.
  */
-SZ_HELPER_INLINE vuint32m1_t sz_aes256_group_extract_rvvcrypto_(vuint32m4_t blocks_u32m4, sz_size_t block_ordinal,
-                                                                sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_aes256_group_extract_rvvcrypto_(vuint32m4_t blocks_u32m4,
+                                                                         sz_size_t block_ordinal,
+                                                                         sz_size_t vector_length) {
     vuint32m4_t const slid_u32m4 = __riscv_vslidedown_vx_u32m4(blocks_u32m4, block_ordinal * 4, vector_length);
     return __riscv_vget_v_u32m4_u32m1(slid_u32m4, 0);
 }
@@ -82,7 +83,7 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_group_extract_rvvcrypto_(vuint32m4_t bloc
  *  The destination is a sixteen-byte buffer that a later load reads back, not a register, so this
  *  is a length-limited load paired with a length-limited store.
  */
-SZ_HELPER_INLINE void sz_aes256_counter_nonce_store_rvvcrypto_(sz_u8_t *counter_block, sz_u8_t const *nonce) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_counter_nonce_store_rvvcrypto_(sz_u8_t *counter_block, sz_u8_t const *nonce) {
     __riscv_vse8_v_u8m1(counter_block, __riscv_vle8_v_u8m1(nonce, 12), 12);
 }
 
@@ -95,15 +96,16 @@ SZ_HELPER_INLINE void sz_aes256_counter_nonce_store_rvvcrypto_(sz_u8_t *counter_
  *  A length-limited load reads the live bytes and a merge supplies zeroes above them, so the
  *  padding is implicit and neither a staging buffer nor a byte loop is needed.
  */
-SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_padded_rvvcrypto_(sz_u8_t const *partial, sz_size_t buffered) {
-    vuint8m1_t const zeros_u8m1 = __riscv_vmv_v_x_u8m1(0, SZ_AES_BLOCK_LENGTH);
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_aes256_block_load_padded_rvvcrypto_(sz_u8_t const *partial,
+                                                                             sz_size_t buffered) {
+    vuint8m1_t const zeros_u8m1 = __riscv_vmv_v_x_u8m1(0, STRINGZILLA_AES_BLOCK_LENGTH);
     vuint8m1_t const loaded_u8m1 = __riscv_vle8_v_u8m1_tu(zeros_u8m1, partial, buffered);
     return __riscv_vreinterpret_v_u8m1_u32m1(loaded_u8m1);
 }
 
 /** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
-SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_rvvcrypto_(sz_u8_t const *first, sz_u8_t const *second) {
-    sz_size_t const vector_length = SZ_AES_BLOCK_LENGTH;
+STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_rvvcrypto_(sz_u8_t const *first, sz_u8_t const *second) {
+    sz_size_t const vector_length = STRINGZILLA_AES_BLOCK_LENGTH;
     vuint8m1_t const first_u8m1 = __riscv_vle8_v_u8m1(first, vector_length);
     vuint8m1_t const second_u8m1 = __riscv_vle8_v_u8m1(second, vector_length);
     vbool8_t const differing_b8 = __riscv_vmsne_vv_u8m1_b8(first_u8m1, second_u8m1, vector_length);
@@ -116,7 +118,7 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_rvvcrypto_(sz_u8_t const *first, 
  *  @param[in] vector_length Active lanes, always a multiple of four.
  *  @return Lane @c i holds `(i mod 4) * 4`, the byte offset of its word within a single block.
  */
-SZ_HELPER_INLINE vuint32m4_t sz_aes256_broadcast_offsets_rvvcrypto_(sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint32m4_t sz_aes256_broadcast_offsets_rvvcrypto_(sz_size_t vector_length) {
     vuint32m4_t const lane_index_u32m4 = __riscv_vid_v_u32m4(vector_length);
     return __riscv_vsll_vx_u32m4(__riscv_vand_vx_u32m4(lane_index_u32m4, 3, vector_length), 2, vector_length);
 }
@@ -125,7 +127,8 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_broadcast_offsets_rvvcrypto_(sz_size_t ve
 
 #pragma region Key Schedule
 
-SZ_API_COMPTIME void sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key,
+                                                           sz_u8_t const secret[sz_at_least_(32)]) {
     sz_size_t const vector_length = 4;
     vuint32m1_t const round_0_u32m1 = sz_aes256_block_load_rvvcrypto_(secret);
     vuint32m1_t const round_1_u32m1 = sz_aes256_block_load_rvvcrypto_(secret + 16);
@@ -173,15 +176,16 @@ SZ_API_COMPTIME void sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t 
 #pragma region Block Encryption
 
 /** Applies one middle round to a single block, reading its round key from the schedule. */
-SZ_HELPER_INLINE vuint32m1_t sz_aes256_round_rvvcrypto_(vuint32m1_t block_u32m1, sz_u32_t const *round_key,
-                                                        sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_aes256_round_rvvcrypto_(vuint32m1_t block_u32m1, sz_u32_t const *round_key,
+                                                                 sz_size_t vector_length) {
     return __riscv_vaesem_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(round_key, vector_length), vector_length);
 }
 
 /** Applies one middle round to every element group, broadcasting its round key across them. */
-SZ_HELPER_INLINE vuint32m4_t sz_aes256_round_wide_rvvcrypto_(vuint32m4_t blocks_u32m4, sz_u32_t const *round_key,
-                                                             vuint32m4_t broadcast_offsets_u32m4,
-                                                             sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint32m4_t sz_aes256_round_wide_rvvcrypto_(vuint32m4_t blocks_u32m4,
+                                                                      sz_u32_t const *round_key,
+                                                                      vuint32m4_t broadcast_offsets_u32m4,
+                                                                      sz_size_t vector_length) {
     return __riscv_vaesem_vv_u32m4(
         blocks_u32m4, __riscv_vluxei32_v_u32m4(round_key, broadcast_offsets_u32m4, vector_length), vector_length);
 }
@@ -192,7 +196,8 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_round_wide_rvvcrypto_(vuint32m4_t blocks_
  *  @param[in] block_u32m1 The 16 plaintext bytes.
  *  @return The 16 ciphertext bytes.
  */
-SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t const *key, vuint32m1_t block_u32m1) {
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t const *key,
+                                                                         vuint32m1_t block_u32m1) {
     sz_size_t const vector_length = 4;
     block_u32m1 = __riscv_vxor_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(key->round_keys + 0, vector_length),
                                         vector_length);
@@ -223,9 +228,10 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t 
  *  @param[in] vector_length Active lanes, four per block.
  *  @return One ciphertext block per element group.
  */
-SZ_HELPER_INLINE vuint32m4_t sz_aes256_blocks_encrypt_rvvcrypto_(sz_aes256_key_t const *key, vuint32m4_t blocks_u32m4,
-                                                                 vuint32m4_t broadcast_offsets_u32m4,
-                                                                 sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint32m4_t sz_aes256_blocks_encrypt_rvvcrypto_(sz_aes256_key_t const *key,
+                                                                          vuint32m4_t blocks_u32m4,
+                                                                          vuint32m4_t broadcast_offsets_u32m4,
+                                                                          sz_size_t vector_length) {
     blocks_u32m4 = __riscv_vxor_vv_u32m4(
         blocks_u32m4, __riscv_vluxei32_v_u32m4(key->round_keys, broadcast_offsets_u32m4, vector_length), vector_length);
     // Written out rather than looped, for the same reason as the single-block path above.
@@ -265,12 +271,12 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_blocks_encrypt_rvvcrypto_(sz_aes256_key_t
 #pragma region Counter Blocks
 
 /** Reads the big-endian 32-bit block index occupying the last four bytes of a counter block. */
-SZ_HELPER_INLINE sz_u32_t sz_aes256_counter_index_load_rvvcrypto_(sz_u8_t const *block) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_aes256_counter_index_load_rvvcrypto_(sz_u8_t const *block) {
     return ((sz_u32_t)block[12] << 24) | ((sz_u32_t)block[13] << 16) | ((sz_u32_t)block[14] << 8) | (sz_u32_t)block[15];
 }
 
 /** Writes the big-endian 32-bit block index into the last four bytes of a counter block. */
-SZ_HELPER_INLINE void sz_aes256_counter_index_store_rvvcrypto_(sz_u8_t *block, sz_u32_t block_index) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_counter_index_store_rvvcrypto_(sz_u8_t *block, sz_u32_t block_index) {
     block[12] = (sz_u8_t)(block_index >> 24);
     block[13] = (sz_u8_t)(block_index >> 16);
     block[14] = (sz_u8_t)(block_index >> 8);
@@ -278,7 +284,8 @@ SZ_HELPER_INLINE void sz_aes256_counter_index_store_rvvcrypto_(sz_u8_t *block, s
 }
 
 /** Reverses the four bytes of every lane, turning a native counter into its big-endian image. */
-SZ_HELPER_INLINE vuint32m4_t sz_u32m4_bytes_reverse_rvvcrypto_(vuint32m4_t value_u32m4, sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint32m4_t sz_u32m4_bytes_reverse_rvvcrypto_(vuint32m4_t value_u32m4,
+                                                                        sz_size_t vector_length) {
     vuint32m4_t const highest_u32m4 = __riscv_vsll_vx_u32m4(value_u32m4, 24, vector_length);
     vuint32m4_t const higher_u32m4 = __riscv_vand_vx_u32m4(__riscv_vsll_vx_u32m4(value_u32m4, 8, vector_length),
                                                            0x00FF0000u, vector_length);
@@ -301,9 +308,10 @@ SZ_HELPER_INLINE vuint32m4_t sz_u32m4_bytes_reverse_rvvcrypto_(vuint32m4_t value
  *  The nonce is identical in every group, so one indexed load replicates it, and only the fourth
  *  lane of each group differs.
  */
-SZ_HELPER_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const *counter_block, sz_u32_t first_index,
-                                                                 vuint32m4_t broadcast_offsets_u32m4,
-                                                                 sz_size_t vector_length) {
+STRINGZILLA_HELPER_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const *counter_block,
+                                                                          sz_u32_t first_index,
+                                                                          vuint32m4_t broadcast_offsets_u32m4,
+                                                                          sz_size_t vector_length) {
     sz_u128_vec_t staged_block_vec;
     vuint32m4_t lane_index_u32m4, block_ordinal_u32m4, index_u32m4, blocks_u32m4;
     vbool8_t index_lane_b8;
@@ -334,8 +342,8 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const *
  *  operands are the sixteen hash bytes in memory order and no shuffle stands between a load
  *  and the multiply.
  */
-SZ_HELPER_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t block_u32m1,
-                                                        vuint32m1_t subkey_u32m1) {
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t block_u32m1,
+                                                                 vuint32m1_t subkey_u32m1) {
 #if defined(__riscv_zvkg)
     return __riscv_vghsh_vv_u32m1(accumulator_u32m1, subkey_u32m1, block_u32m1, 4);
 #else
@@ -354,7 +362,8 @@ SZ_HELPER_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_
  *  @param[in] subkey_u32m1 The hash subkey @c H.
  *  @return The product.
  */
-SZ_HELPER_INLINE vuint32m1_t sz_ghash_multiply_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t subkey_u32m1) {
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_ghash_multiply_rvvcrypto_(vuint32m1_t accumulator_u32m1,
+                                                                   vuint32m1_t subkey_u32m1) {
 #if defined(__riscv_zvkg)
     return __riscv_vgmul_vv_u32m1(accumulator_u32m1, subkey_u32m1, 4);
 #else
@@ -366,8 +375,8 @@ SZ_HELPER_INLINE vuint32m1_t sz_ghash_multiply_rvvcrypto_(vuint32m1_t accumulato
 #endif
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,
-                                                      sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,
+                                                               sz_u8_t const secret[sz_at_least_(32)]) {
     sz_size_t const vector_length = 4;
     sz_size_t power_index;
     vuint32m1_t subkey_u32m1, power_u32m1;
@@ -379,7 +388,7 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,
     power_u32m1 = subkey_u32m1;
     for (power_index = 1; power_index != 8; ++power_index) {
         power_u32m1 = sz_ghash_multiply_rvvcrypto_(power_u32m1, subkey_u32m1);
-        sz_aes256_block_store_rvvcrypto_(key->powers + power_index * SZ_AES_BLOCK_LENGTH, power_u32m1);
+        sz_aes256_block_store_rvvcrypto_(key->powers + power_index * STRINGZILLA_AES_BLOCK_LENGTH, power_u32m1);
     }
 }
 
@@ -387,17 +396,17 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,
 
 #pragma region Counter Mode
 
-SZ_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
-                                                 sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length,
-                                                 sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
+                                                          sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     sz_size_t const maximum_vector_length = __riscv_vsetvlmax_e32m4();
     sz_size_t const maximum_blocks_per_pass = maximum_vector_length / 4;
     vuint32m4_t const broadcast_offsets_u32m4 = sz_aes256_broadcast_offsets_rvvcrypto_(maximum_vector_length);
     sz_u128_vec_t counter_block_vec, keystream_block_vec;
-    sz_u32_t block_index = (sz_u32_t)(byte_offset / SZ_AES_BLOCK_LENGTH);
-    sz_size_t within_block = (sz_size_t)(byte_offset % SZ_AES_BLOCK_LENGTH);
+    sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
+    sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
 
     sz_aes256_counter_nonce_store_rvvcrypto_(counter_block_vec.u8s, nonce);
@@ -405,13 +414,13 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key, sz_
 
     while (produced != length) {
         sz_size_t const remaining = length - produced;
-        if (within_block == 0 && remaining >= SZ_AES_BLOCK_LENGTH) {
-            sz_size_t blocks = remaining / SZ_AES_BLOCK_LENGTH;
+        if (within_block == 0 && remaining >= STRINGZILLA_AES_BLOCK_LENGTH) {
+            sz_size_t blocks = remaining / STRINGZILLA_AES_BLOCK_LENGTH;
             sz_size_t vector_length, byte_count;
             vuint32m4_t counters_u32m4, keystream_u32m4, text_u32m4;
             if (blocks > maximum_blocks_per_pass) blocks = maximum_blocks_per_pass;
             vector_length = blocks * 4;
-            byte_count = blocks * SZ_AES_BLOCK_LENGTH;
+            byte_count = blocks * STRINGZILLA_AES_BLOCK_LENGTH;
 
             counters_u32m4 = sz_aes256_counters_build_rvvcrypto_(counter_block_vec.u8s, block_index,
                                                                  broadcast_offsets_u32m4, vector_length);
@@ -431,7 +440,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key, sz_
             sz_aes256_block_store_rvvcrypto_(
                 keystream_block_vec.u8s,
                 sz_aes256_block_encrypt_rvvcrypto_(key, sz_aes256_block_load_rvvcrypto_(counter_block_vec.u8s)));
-            for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
+            for (; within_block != STRINGZILLA_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
                 output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_block_vec.u8s[within_block]);
             within_block = 0;
             ++block_index;
@@ -451,7 +460,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key, sz_
  *  take and the last one narrows itself, which reaches the end of a 472-byte state without a scalar
  *  epilogue and without ever writing past it.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_rvvcrypto_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_rvvcrypto_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *bytes = (sz_u8_t *)state;
     sz_size_t remaining = sizeof(*state);
     while (remaining != 0) {
@@ -464,9 +473,11 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_rvvcrypto_(sz_aes256_gcm_state_t
 }
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-SZ_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
-                                                     sz_u8_t const nonce[sz_at_least_(12)]) {
-    vuint32m1_t const zeros_u32m1 = __riscv_vreinterpret_v_u8m1_u32m1(__riscv_vmv_v_x_u8m1(0, SZ_AES_BLOCK_LENGTH));
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *state,
+                                                              sz_aes256_gcm_key_t const *key,
+                                                              sz_u8_t const nonce[sz_at_least_(12)]) {
+    vuint32m1_t const zeros_u32m1 = __riscv_vreinterpret_v_u8m1_u32m1(
+        __riscv_vmv_v_x_u8m1(0, STRINGZILLA_AES_BLOCK_LENGTH));
 
     state->key = *key;
     // Three sixteen-byte fields cleared as three vector stores rather than forty-eight scalar ones.
@@ -485,12 +496,12 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *stat
     state->associated_length = 0;
     state->text_length = 0;
     state->buffered = 0;
-    state->keystream_used = SZ_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
+    state->keystream_used = STRINGZILLA_AES_BLOCK_LENGTH; // ? Forces the first message byte to derive a fresh block
 }
 
 /** Absorbs associated data into the payload both directions share. */
-SZ_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                         sz_size_t length) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                                  sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
@@ -499,21 +510,21 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *
     // Associated data is hashed but never encrypted, so a whole block hashes straight out of the
     // caller's buffer and only a partial one is completed in `partial`.
     while (consumed != length) {
-        if (state->buffered == 0 && length - consumed >= SZ_AES_BLOCK_LENGTH) {
+        if (state->buffered == 0 && length - consumed >= STRINGZILLA_AES_BLOCK_LENGTH) {
             accumulator_u32m1 = sz_ghash_absorb_rvvcrypto_(
                 accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(input_bytes + consumed), subkey_u32m1);
-            consumed += SZ_AES_BLOCK_LENGTH;
-            state->associated_length += SZ_AES_BLOCK_LENGTH;
+            consumed += STRINGZILLA_AES_BLOCK_LENGTH;
+            state->associated_length += STRINGZILLA_AES_BLOCK_LENGTH;
         }
         else {
-            sz_size_t const wanted_bytes = SZ_AES_BLOCK_LENGTH - state->buffered;
+            sz_size_t const wanted_bytes = STRINGZILLA_AES_BLOCK_LENGTH - state->buffered;
             sz_size_t const taken_bytes = length - consumed < wanted_bytes ? length - consumed : wanted_bytes;
             for (sz_size_t byte_index = 0; byte_index != taken_bytes; ++byte_index)
                 state->partial[state->buffered + byte_index] = input_bytes[consumed + byte_index];
             state->buffered = (sz_u8_t)(state->buffered + taken_bytes);
             consumed += taken_bytes;
             state->associated_length += taken_bytes;
-            if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+            if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
                 accumulator_u32m1 = sz_ghash_absorb_rvvcrypto_(
                     accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(state->partial), subkey_u32m1);
                 state->buffered = 0;
@@ -531,9 +542,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *
  *  @param[in] subkey_u32m1 The hash subkey @c H.
  *  @return The updated hash, unchanged when nothing was pending.
  */
-SZ_HELPER_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
-                                                                    vuint32m1_t accumulator_u32m1,
-                                                                    vuint32m1_t subkey_u32m1) {
+STRINGZILLA_HELPER_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
+                                                                             vuint32m1_t accumulator_u32m1,
+                                                                             vuint32m1_t subkey_u32m1) {
     vuint32m1_t padded_u32m1;
     if (state->buffered == 0) return accumulator_u32m1;
     padded_u32m1 = sz_aes256_block_load_padded_rvvcrypto_(state->partial, (sz_size_t)state->buffered);
@@ -553,8 +564,9 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gc
  *  restart at a chunk boundary, so the wide path opens only where both are already on a block edge
  *  and closes the moment fewer than sixteen bytes remain.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                         sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                                  sz_size_t length, sz_ptr_t output,
+                                                                  sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     sz_size_t const maximum_vector_length = __riscv_vsetvlmax_e32m4();
@@ -570,14 +582,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
 
     while (produced != length) {
         sz_size_t const remaining = length - produced;
-        if (state->keystream_used == SZ_AES_BLOCK_LENGTH && state->buffered == 0 && remaining >= SZ_AES_BLOCK_LENGTH) {
+        if (state->keystream_used == STRINGZILLA_AES_BLOCK_LENGTH && state->buffered == 0 &&
+            remaining >= STRINGZILLA_AES_BLOCK_LENGTH) {
             sz_u32_t const counter_index = sz_aes256_counter_index_load_rvvcrypto_(state->counter);
-            sz_size_t blocks = remaining / SZ_AES_BLOCK_LENGTH;
+            sz_size_t blocks = remaining / STRINGZILLA_AES_BLOCK_LENGTH;
             sz_size_t vector_length, byte_count, block_ordinal;
             vuint32m4_t counters_u32m4, keystream_u32m4, text_u32m4, result_u32m4, ciphertext_u32m4;
             if (blocks > maximum_blocks_per_pass) blocks = maximum_blocks_per_pass;
             vector_length = blocks * 4;
-            byte_count = blocks * SZ_AES_BLOCK_LENGTH;
+            byte_count = blocks * STRINGZILLA_AES_BLOCK_LENGTH;
 
             counters_u32m4 = sz_aes256_counters_build_rvvcrypto_(state->counter, counter_index + 1u,
                                                                  broadcast_offsets_u32m4, vector_length);
@@ -602,7 +615,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
             produced += byte_count;
         }
         else {
-            if (state->keystream_used == SZ_AES_BLOCK_LENGTH) {
+            if (state->keystream_used == STRINGZILLA_AES_BLOCK_LENGTH) {
                 sz_u32_t const counter_index = sz_aes256_counter_index_load_rvvcrypto_(state->counter);
                 sz_aes256_counter_index_store_rvvcrypto_(state->counter, counter_index + 1u);
                 sz_aes256_block_store_rvvcrypto_(
@@ -613,7 +626,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
             {
                 // Both offsets advance together, so one run covers the keystream and the pending block
                 // alike. A length-limited load and store carry it without a byte at a time.
-                sz_size_t const block_left = SZ_AES_BLOCK_LENGTH - state->buffered;
+                sz_size_t const block_left = STRINGZILLA_AES_BLOCK_LENGTH - state->buffered;
                 sz_size_t const remaining = length - produced;
                 sz_size_t const run = remaining < block_left ? remaining : block_left;
 
@@ -631,7 +644,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
                 state->keystream_used = (sz_u8_t)(state->keystream_used + run);
                 state->text_length += run;
                 produced += run;
-                if (state->buffered == SZ_AES_BLOCK_LENGTH) {
+                if (state->buffered == STRINGZILLA_AES_BLOCK_LENGTH) {
                     accumulator_u32m1 = sz_ghash_absorb_rvvcrypto_(
                         accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(state->partial), subkey_u32m1);
                     state->buffered = 0;
@@ -648,8 +661,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
  *  @param[in] state The finished state, left untouched.
  *  @param[out] tag Receives the 16 authentication bytes.
  */
-SZ_HELPER_INLINE void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state,
-                                                      sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state,
+                                                               sz_u8_t tag[sz_at_least_(16)]) {
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
     sz_u128_vec_t staged_block_vec;
@@ -669,47 +682,48 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t cons
     sz_aes256_block_store_rvvcrypto_(tag, accumulator_u32m1);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_init_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor,
-                                                            sz_aes256_gcm_key_t const *key,
-                                                            sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                     sz_aes256_gcm_key_t const *key,
+                                                                     sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_rvvcrypto_(&encryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_associate_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                                 sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                          sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_rvvcrypto_(&encryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_update_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
-                                                              sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                       sz_cptr_t text, sz_size_t length,
+                                                                       sz_ptr_t output) {
     sz_aes256_gcm_transform_rvvcrypto_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_encryptor_digest_rvvcrypto(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                              sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_rvvcrypto(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                       sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_digest_rvvcrypto_(&encryptor->state, tag);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_init_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
-                                                            sz_aes256_gcm_key_t const *key,
-                                                            sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                     sz_aes256_gcm_key_t const *key,
+                                                                     sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_aes256_gcm_begin_rvvcrypto_(&decryptor->state, key, nonce);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_associate_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
-                                                                 sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                          sz_cptr_t text, sz_size_t length) {
     sz_aes256_gcm_associate_rvvcrypto_(&decryptor->state, text, length);
 }
 
-SZ_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                         sz_cptr_t text, sz_size_t length,
-                                                                         sz_ptr_t output) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                                  sz_cptr_t text, sz_size_t length,
+                                                                                  sz_ptr_t output) {
     sz_aes256_gcm_transform_rvvcrypto_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_rvvcrypto(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                     sz_u8_t const tag[sz_at_least_(16)]) {
-    sz_u8_t expected[SZ_AES_BLOCK_LENGTH];
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_rvvcrypto(
+    sz_aes256_gcm_decryptor_t const *decryptor, sz_u8_t const tag[sz_at_least_(16)]) {
+    sz_u8_t expected[STRINGZILLA_AES_BLOCK_LENGTH];
     sz_aes256_gcm_digest_rvvcrypto_(&decryptor->state, expected);
     return sz_aes256_tag_equal_rvvcrypto_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
 }
@@ -718,10 +732,11 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_rvvcrypto(sz_aes256_g
 
 #pragma region One Shot Interface
 
-SZ_API_COMPTIME void sz_aes256_gcm_encrypt_rvvcrypto(sz_aes256_gcm_key_t const *key,
-                                                     sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                     sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
-                                                     sz_ptr_t output, sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_rvvcrypto(sz_aes256_gcm_key_t const *key,
+                                                              sz_u8_t const nonce[sz_at_least_(12)],
+                                                              sz_cptr_t associated, sz_size_t associated_length,
+                                                              sz_cptr_t text, sz_size_t length, sz_ptr_t output,
+                                                              sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_encryptor_t encryptor;
     sz_aes256_gcm_encryptor_init_rvvcrypto(&encryptor, key, nonce);
     if (associated_length) sz_aes256_gcm_encryptor_associate_rvvcrypto(&encryptor, associated, associated_length);
@@ -730,11 +745,11 @@ SZ_API_COMPTIME void sz_aes256_gcm_encrypt_rvvcrypto(sz_aes256_gcm_key_t const *
     sz_aes256_gcm_state_scrub_rvvcrypto_(&encryptor.state);
 }
 
-SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t const *key,
-                                                            sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                            sz_size_t associated_length, sz_cptr_t text,
-                                                            sz_size_t length, sz_ptr_t output,
-                                                            sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t const *key,
+                                                                     sz_u8_t const nonce[sz_at_least_(12)],
+                                                                     sz_cptr_t associated, sz_size_t associated_length,
+                                                                     sz_cptr_t text, sz_size_t length, sz_ptr_t output,
+                                                                     sz_u8_t const tag[sz_at_least_(16)]) {
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
     sz_aes256_gcm_decryptor_init_rvvcrypto(&decryptor, key, nonce);
@@ -755,7 +770,7 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t 
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_RVVCRYPTO
+#endif // STRINGZILLA_TARGET_RVVCRYPTO
 
 #ifdef __cplusplus
 }

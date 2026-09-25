@@ -17,25 +17,25 @@ extern "C" {
 
 /*  This ISA has no dedicated uncased UTF-8 kernels yet; it delegates to the serial
  *  scaffolding so the per-backend symbol set stays uniform across all targets. */
-#if SZ_USE_LASX
-SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_lasx( //
-    sz_cptr_t haystack, sz_size_t haystack_length,     //
-    sz_cptr_t needle, sz_size_t needle_length,         //
+#if STRINGZILLA_TARGET_LASX
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_lasx( //
+    sz_cptr_t haystack, sz_size_t haystack_length,              //
+    sz_cptr_t needle, sz_size_t needle_length,                  //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
                                          matched_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_lasx(sz_cptr_t str, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_lasx(sz_cptr_t str, sz_size_t length) {
     return sz_utf8_find_cased_serial(str, length);
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                         sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                                  sz_size_t b_length) {
     return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
 }
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

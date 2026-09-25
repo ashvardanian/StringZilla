@@ -13,7 +13,7 @@ Run:
     uv pip install numpy pyarrow pytest pytest-repeat
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/string.py -q
-    SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/string.py -q
+    STRINGZILLA_SEED=42 STRINGZILLA_SCALE=10 uv run --no-project python -m pytest test/string.py -q
 
 File: test/string.py
 Author: Ash Vardanian
@@ -32,7 +32,7 @@ import pytest
 import stringzilla as sz
 from stringzilla import Str, Strs
 
-from test.sz_helpers import (
+from test.helpers import (
     SEED_VALUES,
     DEGENERATE_HAYSTACKS,
     scale_iterations,

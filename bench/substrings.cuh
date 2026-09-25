@@ -15,11 +15,9 @@
 
 #include <stringzilla/substrings.h> // `sz_substrings_*`
 
-#include "shared.hpp"
+#include "harness.hpp"
 
-namespace ashvardanian {
-namespace stringzilla {
-namespace bench {
+namespace ashvardanian::stringzilla::bench {
 
 #pragma region Vocabulary
 
@@ -220,17 +218,17 @@ inline sz_status_t substrings_init_host(substrings_dictionary_t const &dictionar
     sz_memory_allocator_t host;
     sz_memory_allocator_init_default(&host);
     return sz_substrings_engine_init_cpu(&dictionary.needle_sequence, dictionary.sensitivity, policy,
-                                         SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &host, &engine);
+                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &host, &engine);
 }
 
-#if SZ_USE_CUDA
+#if STRINGZILLA_TARGET_CUDA
 
 /** Compiles @p dictionary where a kernel reads it, through the dictionary's unified allocator. */
 inline sz_status_t substrings_init_device(substrings_dictionary_t const &dictionary,
                                           sz_substrings_overlap_policy_t policy, sz_substrings_engine_t &engine) {
     sz_memory_allocator_t allocator = dictionary.allocator;
     return sz_substrings_engine_init_gpu(&dictionary.needle_sequence, dictionary.sensitivity, policy,
-                                         SZ_SUBSTRINGS_HOT_STATES_AUTO, 0, &allocator, nullptr, &engine);
+                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &allocator, nullptr, &engine);
 }
 
 /** Joins the default stream if a device engine could have enqueued on it; host engines never do. */
@@ -454,6 +452,4 @@ struct substrings_bm25_from_sz {
 
 #pragma endregion Arms
 
-} // namespace bench
-} // namespace stringzilla
-} // namespace ashvardanian
+} // namespace ashvardanian::stringzilla::bench

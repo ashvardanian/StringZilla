@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -30,8 +30,8 @@ extern "C" {
  *  5-nibble cascade, the SVE2 twin of @ref sz_grapheme_astral_descriptor_neon_. Per-lane bytes:
  *  @p plane = (offset >> 16) & 0xFF with only the low nibble meaningful, @p high = (offset >> 8)
  *  & 0xFF, @p low = offset & 0xFF. Bit-exact. */
-SZ_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
-                                                               svuint8_t low_u8x) {
+STRINGZILLA_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
+                                                                        svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
@@ -66,8 +66,8 @@ SZ_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u
 
 /** Predicate of lanes whose BMP codepoint `(high << 8) | low` lies in the inclusive range from
  *  @p lo to @p hi, the SVE2 twin of @ref sz_grapheme_cp_in_range_neon_ confined to one chunk. */
-SZ_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t lo,
-                                                        sz_u16_t hi) {
+STRINGZILLA_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t lo,
+                                                                 sz_u16_t hi) {
     svbool_t const all_b8x = svptrue_b8();
     sz_u8_t const lo_high = (sz_u8_t)(lo >> 8), lo_low = (sz_u8_t)(lo & 0xFF);
     sz_u8_t const hi_high = (sz_u8_t)(hi >> 8), hi_low = (sz_u8_t)(hi & 0xFF);
@@ -85,7 +85,7 @@ SZ_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svui
 /** Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK and Kana arithmetic
  *  ranges, the SVE2 twin of @ref sz_grapheme_cjk_other_neon_. Such lanes need no cold cascade,
  *  as their descriptor is 0. */
-SZ_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
+STRINGZILLA_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const run_a_b8x = sz_grapheme_cp_in_range_sve2_(high_u8x, low_u8x, 0x3000, 0xA66E);
     svbool_t const run_b_b8x = sz_grapheme_cp_in_range_sve2_(high_u8x, low_u8x, 0xD7FC, 0xFB1D);
@@ -122,7 +122,7 @@ SZ_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint
  *  claimed by a lead's declared length, retrying unclamped otherwise: classify work stays
  *  proportional to what the caller can consume.
  */
-SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2(          //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2( //
     sz_cptr_t text, sz_size_t length,                      //
     sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
@@ -335,7 +335,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2(          //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE2
+#endif // STRINGZILLA_TARGET_SVE2
 
 #ifdef __cplusplus
 }

@@ -10,10 +10,10 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Make sure to include the StringZilla headers before anything else, to intercept missing
  *  `#include` directives and other issues. */
@@ -24,7 +24,7 @@
 #include <string>  // `std::string`
 #include <vector>  // `std::vector`
 
-#include "stringzilla.hpp" // `verify`, `randomize_string`, `scale_iterations`
+#include "harness.hpp" // `verify`, `randomize_string`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -114,7 +114,7 @@ struct known_ctr_t {
 static known_ctr_t const known_ctr_vectors_[] = {
     {"603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", //
      "f0f1f2f3f4f5f6f7f8f9fafb",                                         //
-     (sz_u64_t)0xFCFDFEFFull * SZ_AES_BLOCK_LENGTH,                      //
+     (sz_u64_t)0xFCFDFEFFull * STRINGZILLA_AES_BLOCK_LENGTH,             //
      "6bc1bee22e409f96e93d7e117393172a"                                  //
      "ae2d8a571e03ac9c9eb76fac45af8e51"                                  //
      "30c81c46a35ce411e5fbc1191a0a52ef"                                  //
@@ -157,28 +157,28 @@ struct gcm_backend_t {
 static ctr_backend_t const ctr_backends[] = {
     {"dispatched", sz_aes256_key_init, sz_aes256_ctr_xor},
     {"serial", sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial},
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     {"westmere", sz_aes256_key_init_westmere, sz_aes256_ctr_xor_westmere},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_aes256_key_init_icelake, sz_aes256_ctr_xor_icelake},
 #endif
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
     {"neonaes", sz_aes256_key_init_neonaes, sz_aes256_ctr_xor_neonaes},
 #endif
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_SVE2AES
     {"sve2aes", sz_aes256_key_init_sve2aes, sz_aes256_ctr_xor_sve2aes},
 #endif
-#if SZ_USE_RVVCRYPTO
+#if STRINGZILLA_TARGET_RVVCRYPTO
     {"rvvcrypto", sz_aes256_key_init_rvvcrypto, sz_aes256_ctr_xor_rvvcrypto},
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     {"powervsx", sz_aes256_key_init_powervsx, sz_aes256_ctr_xor_powervsx},
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     {"v128", sz_aes256_key_init_v128, sz_aes256_ctr_xor_v128},
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     {"v128relaxed", sz_aes256_key_init_v128relaxed, sz_aes256_ctr_xor_v128relaxed},
 #endif
 };
@@ -194,55 +194,55 @@ static gcm_backend_t const gcm_backends[] = {
      sz_aes256_gcm_encryptor_update_serial, sz_aes256_gcm_encryptor_digest_serial, sz_aes256_gcm_decryptor_init_serial,
      sz_aes256_gcm_decryptor_associate_serial, sz_aes256_gcm_decryptor_update_unverified_serial,
      sz_aes256_gcm_decryptor_verify_serial},
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     {"westmere", sz_aes256_gcm_key_init_westmere, sz_aes256_gcm_encrypt_westmere, sz_aes256_gcm_decrypt_westmere,
      sz_aes256_gcm_encryptor_init_westmere, sz_aes256_gcm_encryptor_associate_westmere,
      sz_aes256_gcm_encryptor_update_westmere, sz_aes256_gcm_encryptor_digest_westmere,
      sz_aes256_gcm_decryptor_init_westmere, sz_aes256_gcm_decryptor_associate_westmere,
      sz_aes256_gcm_decryptor_update_unverified_westmere, sz_aes256_gcm_decryptor_verify_westmere},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encrypt_icelake, sz_aes256_gcm_decrypt_icelake,
      sz_aes256_gcm_encryptor_init_icelake, sz_aes256_gcm_encryptor_associate_icelake,
      sz_aes256_gcm_encryptor_update_icelake, sz_aes256_gcm_encryptor_digest_icelake,
      sz_aes256_gcm_decryptor_init_icelake, sz_aes256_gcm_decryptor_associate_icelake,
      sz_aes256_gcm_decryptor_update_unverified_icelake, sz_aes256_gcm_decryptor_verify_icelake},
 #endif
-#if SZ_USE_NEONAES
+#if STRINGZILLA_TARGET_NEONAES
     {"neonaes", sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encrypt_neonaes, sz_aes256_gcm_decrypt_neonaes,
      sz_aes256_gcm_encryptor_init_neonaes, sz_aes256_gcm_encryptor_associate_neonaes,
      sz_aes256_gcm_encryptor_update_neonaes, sz_aes256_gcm_encryptor_digest_neonaes,
      sz_aes256_gcm_decryptor_init_neonaes, sz_aes256_gcm_decryptor_associate_neonaes,
      sz_aes256_gcm_decryptor_update_unverified_neonaes, sz_aes256_gcm_decryptor_verify_neonaes},
 #endif
-#if SZ_USE_SVE2AES
+#if STRINGZILLA_TARGET_SVE2AES
     {"sve2aes", sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encrypt_sve2aes, sz_aes256_gcm_decrypt_sve2aes,
      sz_aes256_gcm_encryptor_init_sve2aes, sz_aes256_gcm_encryptor_associate_sve2aes,
      sz_aes256_gcm_encryptor_update_sve2aes, sz_aes256_gcm_encryptor_digest_sve2aes,
      sz_aes256_gcm_decryptor_init_sve2aes, sz_aes256_gcm_decryptor_associate_sve2aes,
      sz_aes256_gcm_decryptor_update_unverified_sve2aes, sz_aes256_gcm_decryptor_verify_sve2aes},
 #endif
-#if SZ_USE_RVVCRYPTO
+#if STRINGZILLA_TARGET_RVVCRYPTO
     {"rvvcrypto", sz_aes256_gcm_key_init_rvvcrypto, sz_aes256_gcm_encrypt_rvvcrypto, sz_aes256_gcm_decrypt_rvvcrypto,
      sz_aes256_gcm_encryptor_init_rvvcrypto, sz_aes256_gcm_encryptor_associate_rvvcrypto,
      sz_aes256_gcm_encryptor_update_rvvcrypto, sz_aes256_gcm_encryptor_digest_rvvcrypto,
      sz_aes256_gcm_decryptor_init_rvvcrypto, sz_aes256_gcm_decryptor_associate_rvvcrypto,
      sz_aes256_gcm_decryptor_update_unverified_rvvcrypto, sz_aes256_gcm_decryptor_verify_rvvcrypto},
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     {"powervsx", sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encrypt_powervsx, sz_aes256_gcm_decrypt_powervsx,
      sz_aes256_gcm_encryptor_init_powervsx, sz_aes256_gcm_encryptor_associate_powervsx,
      sz_aes256_gcm_encryptor_update_powervsx, sz_aes256_gcm_encryptor_digest_powervsx,
      sz_aes256_gcm_decryptor_init_powervsx, sz_aes256_gcm_decryptor_associate_powervsx,
      sz_aes256_gcm_decryptor_update_unverified_powervsx, sz_aes256_gcm_decryptor_verify_powervsx},
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     {"v128", sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encrypt_v128, sz_aes256_gcm_decrypt_v128,
      sz_aes256_gcm_encryptor_init_v128, sz_aes256_gcm_encryptor_associate_v128, sz_aes256_gcm_encryptor_update_v128,
      sz_aes256_gcm_encryptor_digest_v128, sz_aes256_gcm_decryptor_init_v128, sz_aes256_gcm_decryptor_associate_v128,
      sz_aes256_gcm_decryptor_update_unverified_v128, sz_aes256_gcm_decryptor_verify_v128},
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     {"v128relaxed", sz_aes256_gcm_key_init_v128relaxed, sz_aes256_gcm_encrypt_v128relaxed,
      sz_aes256_gcm_decrypt_v128relaxed, sz_aes256_gcm_encryptor_init_v128relaxed,
      sz_aes256_gcm_encryptor_associate_v128relaxed, sz_aes256_gcm_encryptor_update_v128relaxed,
@@ -344,7 +344,8 @@ void test_cipher_unit() {
  *  Seeking is the whole reason counter mode is exposed separately, so every offset is compared
  *  against the same bytes taken from a from-zero encryption, not just the reference backend.
  */
-void check_ctr_equivalence_(ctr_backend_t const &reference, ctr_backend_t const &candidate, sz_size_t inputs) {
+void check_ctr_equivalence_(std::mt19937 &generator, ctr_backend_t const &reference, ctr_backend_t const &candidate,
+                            sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 7 + 1);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index * 5 + 2);
@@ -358,7 +359,7 @@ void check_ctr_equivalence_(ctr_backend_t const &reference, ctr_backend_t const 
     std::string text, from_reference, from_candidate;
     for (sz_size_t length = 0; length <= inputs; ++length) {
         text.resize(length), from_reference.resize(length), from_candidate.resize(length);
-        if (length) randomize_string(&text[0], length);
+        randomize_string(generator, text);
         reference.xor_bytes(&reference_key, nonce, 0, text.data(), length, &from_reference[0]);
         candidate.xor_bytes(&candidate_key, nonce, 0, text.data(), length, &from_candidate[0]);
         if (from_reference != from_candidate) fail_backend_(candidate.name, "counter mode disagreed with serial");
@@ -367,7 +368,7 @@ void check_ctr_equivalence_(ctr_backend_t const &reference, ctr_backend_t const 
     // Every offset must land on the same keystream the whole-stream encryption used.
     std::size_t const span = 1024;
     std::string whole(span, '\0'), sliced;
-    randomize_string(&whole[0], span);
+    randomize_string(generator, whole);
     std::string whole_out(span, '\0');
     reference.xor_bytes(&reference_key, nonce, 0, whole.data(), span, &whole_out[0]);
     for (std::size_t offset = 0; offset <= 200; ++offset) {
@@ -394,7 +395,8 @@ void check_ctr_equivalence_(ctr_backend_t const &reference, ctr_backend_t const 
  *  reference: passing one pointer for both sides reaches the bytes and the tag two pointers would,
  *  and a rejected tag still clears the buffer it was handed.
  */
-void check_gcm_equivalence_(gcm_backend_t const &reference, gcm_backend_t const &candidate, sz_size_t inputs) {
+void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const &reference, gcm_backend_t const &candidate,
+                            sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12], reference_tag[16], candidate_tag[16];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 3 + 5);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index + 9);
@@ -410,10 +412,10 @@ void check_gcm_equivalence_(gcm_backend_t const &reference, gcm_backend_t const 
 
     for (sz_size_t length = 0; length <= inputs; ++length) {
         text.resize(length), from_reference.resize(length), from_candidate.resize(length);
-        if (length) randomize_string(&text[0], length);
+        randomize_string(generator, text);
         std::size_t const associated_length = associated_lengths[length % associated_lengths.size()];
         associated.resize(associated_length);
-        if (associated_length) randomize_string(&associated[0], associated_length);
+        randomize_string(generator, associated);
 
         reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)associated_length, text.data(), length,
                           &from_reference[0], reference_tag);
@@ -460,9 +462,9 @@ void check_gcm_equivalence_(gcm_backend_t const &reference, gcm_backend_t const 
     // tail all straddle it, and the associated data is chunked on its own rhythm rather than the text's.
     std::size_t const streamed_length = 512, streamed_associated_length = 37;
     text.resize(streamed_length);
-    randomize_string(&text[0], streamed_length);
+    randomize_string(generator, text);
     associated.resize(streamed_associated_length);
-    randomize_string(&associated[0], streamed_associated_length);
+    randomize_string(generator, associated);
     from_reference.assign(streamed_length, '\0');
     reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)streamed_associated_length, text.data(),
                       streamed_length, &from_reference[0], reference_tag);
@@ -540,7 +542,7 @@ void check_gcm_equivalence_(gcm_backend_t const &reference, gcm_backend_t const 
  *  and both must leave the bytes on either side of the buffer untouched. Whether the bytes they
  *  write are the right ones is the unit tier's question, not this one's.
  */
-void test_cipher_safety() {
+void test_cipher_safety(test_context_t &context) {
     sz_u8_t secret[32], nonce[12], tag[16];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 11 + 3);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index * 2 + 1);
@@ -550,42 +552,48 @@ void test_cipher_safety() {
     sz_aes256_key_init(&counter_key, secret);
     sz_aes256_gcm_key_init(&authenticated_key, secret);
 
-    sz_size_t const longest = (sz_size_t)scale_iterations(200);
+    sz_size_t const longest = (sz_size_t)context.iterations(200);
     for (sz_size_t length = 0; length <= longest; ++length) {
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
-            randomize_string(pointer, usable);
+            randomize_string(context.generator, {pointer, usable});
             sz_aes256_ctr_xor(&counter_key, nonce, 0, pointer, (sz_size_t)usable, pointer);
         });
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
-            randomize_string(pointer, usable);
-            sz_aes256_gcm_encrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, tag);
+            randomize_string(context.generator, {pointer, usable});
+            sz_aes256_gcm_encrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
+                                  tag);
         });
         // Opening in place has to stay inside the buffer on both outcomes, and the rejected
         // path writes the most: it clears every byte it was given.
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
-            randomize_string(pointer, usable);
-            sz_aes256_gcm_encrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, tag);
-            sz_aes256_gcm_decrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, tag);
+            randomize_string(context.generator, {pointer, usable});
+            sz_aes256_gcm_encrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
+                                  tag);
+            sz_aes256_gcm_decrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
+                                  tag);
             sz_u8_t forged[16];
             std::memcpy(forged, tag, 16);
             forged[0] ^= 0x01;
-            sz_aes256_gcm_decrypt(&authenticated_key, nonce, SZ_NULL, 0, pointer, (sz_size_t)usable, pointer, forged);
+            sz_aes256_gcm_decrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
+                                  forged);
         });
     }
 }
 
 /** Drives the serial-versus-SIMD differential across every cipher backend compiled here. */
-void test_cipher_all() {
+void test_cipher_all(test_context_t &context) {
 
     // Each length sweeps a fresh buffer, so the work grows with the square of the count.
-    sz_size_t const cipher_inputs = (sz_size_t)scale_iterations_quadratic(160);
+    sz_size_t const cipher_inputs = (sz_size_t)context.iterations_quadratic(160);
 
     // Serial is the reference for everything, itself included: running it against itself catches a streaming
     // path that disagrees with its own one-shot kernel.
     ctr_backend_t const &ctr_reference = backend_named_(ctr_backends, "serial");
     gcm_backend_t const &gcm_reference = backend_named_(gcm_backends, "serial");
-    for (ctr_backend_t const &candidate : ctr_backends) check_ctr_equivalence_(ctr_reference, candidate, cipher_inputs);
-    for (gcm_backend_t const &candidate : gcm_backends) check_gcm_equivalence_(gcm_reference, candidate, cipher_inputs);
+    for (ctr_backend_t const &candidate : ctr_backends)
+        check_ctr_equivalence_(context.generator, ctr_reference, candidate, cipher_inputs);
+    for (gcm_backend_t const &candidate : gcm_backends)
+        check_gcm_equivalence_(context.generator, gcm_reference, candidate, cipher_inputs);
 }
 
 #pragma endregion Drivers

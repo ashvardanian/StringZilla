@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     svuint8_t value_u8x = svdup_u8(value);
     sz_size_t vector_length = svcntb(); // Vector length in bytes (scalable)
 
@@ -54,7 +54,7 @@ SZ_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t valu
     }
 }
 
-SZ_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_size_t vector_length = svcntb(); // Vector length in bytes
 
     // When the buffer is small, there isn't much to innovate.
@@ -90,7 +90,7 @@ SZ_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t le
     }
 }
 
-SZ_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_size_t vector_length = svcntb(); // Vector length in bytes
 
     // When the buffer is small, there isn't much to innovate.
@@ -154,8 +154,8 @@ SZ_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t le
     }
 }
 
-SZ_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                   char const lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                            char const lut[sz_at_least_(256)]) {
 
     if (length <= 128) {
         sz_lookup_serial(target, length, source, lut);
@@ -235,7 +235,7 @@ SZ_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t 
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SVE
+#endif // STRINGZILLA_TARGET_SVE
 
 #ifdef __cplusplus
 }

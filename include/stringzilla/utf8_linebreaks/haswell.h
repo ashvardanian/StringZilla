@@ -32,7 +32,7 @@ extern "C" {
  *  @c vpgatherdd issues on the load ports and leaves the shuffle port to the decode.
  *  Gathers pay off on multi-KB tables in general, as less_slow.cpp v0.3.0 "Gather and
  *  Scatter" shows: https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0 */
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -53,14 +53,14 @@ extern "C" {
  *  fetched by four @c vpgatherdd. The leaf byte indexes @c sz_utf8_line_break_flat_palette_, not
  *  the 62-entry cascade palette. Covers the whole BMP.
  */
-SZ_HELPER_INLINE __m256i sz_line_break_bmp_index_haswell_(__m256i high_u8x32, __m256i low_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_line_break_bmp_index_haswell_(__m256i high_u8x32, __m256i low_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_, high_u8x32,
                                              low_u8x32);
 }
 
 /** All-ones lane mask where the single bit @p bit is set in @p bytes_u8x32; @p bit must have
  *  exactly one bit set. */
-SZ_HELPER_INLINE __m256i sz_line_break_bit_mask_haswell_(__m256i bytes_u8x32, sz_u8_t bit) {
+STRINGZILLA_HELPER_INLINE __m256i sz_line_break_bit_mask_haswell_(__m256i bytes_u8x32, sz_u8_t bit) {
     __m256i const bit_u8x32 = _mm256_set1_epi8((char)bit);
     return _mm256_cmpeq_epi8(_mm256_and_si256(bytes_u8x32, bit_u8x32), bit_u8x32);
 }
@@ -75,9 +75,9 @@ SZ_HELPER_INLINE __m256i sz_line_break_bit_mask_haswell_(__m256i bytes_u8x32, sz
  *  Every index originates in the flat leaf, so it is always below 56 and the scale-2 gather stays
  *  inside the 64-word padded palette.
  */
-SZ_HELPER_INLINE void sz_line_break_flat_palette_descriptors_haswell_(__m256i palette_indices_u8x32,
-                                                                      __m256i *descriptor_low_bytes_u8x32,
-                                                                      __m256i *descriptor_high_bytes_u8x32) {
+STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_descriptors_haswell_(__m256i palette_indices_u8x32,
+                                                                               __m256i *descriptor_low_bytes_u8x32,
+                                                                               __m256i *descriptor_high_bytes_u8x32) {
     __m128i const indices_low_u8x16 = _mm256_castsi256_si128(palette_indices_u8x32);
     __m128i const indices_high_u8x16 = _mm256_extracti128_si256(palette_indices_u8x32, 1);
     __m128i const index_quarters_u8x16[4] = {indices_low_u8x16, _mm_srli_si128(indices_low_u8x16, 8),
@@ -108,9 +108,10 @@ SZ_HELPER_INLINE void sz_line_break_flat_palette_descriptors_haswell_(__m256i pa
  *  aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); the RI and ZWJ side bits come from the raw class,
  *  the mark side bit from the resolved class.
  */
-SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_haswell_(__m256i palette_indices_u8x32,
-                                                                 __m256i *classes_out_u8x32, __m256i *side_out_u8x32,
-                                                                 __m256i *dotted_select_out_u8x32) {
+STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_unpack_haswell_(__m256i palette_indices_u8x32,
+                                                                          __m256i *classes_out_u8x32,
+                                                                          __m256i *side_out_u8x32,
+                                                                          __m256i *dotted_select_out_u8x32) {
     __m256i descriptor_low_bytes_u8x32, descriptor_high_bytes_u8x32;
     sz_line_break_flat_palette_descriptors_haswell_(palette_indices_u8x32, &descriptor_low_bytes_u8x32,
                                                     &descriptor_high_bytes_u8x32);
@@ -168,8 +169,8 @@ SZ_HELPER_INLINE void sz_line_break_flat_palette_unpack_haswell_(__m256i palette
  *  bytes: @p plane_u8x32 holds (offset >> 16) & 0xFF with only the low nibble meaningful,
  *  @p high_u8x32 holds (offset >> 8) & 0xFF, and @p low_u8x32 holds offset & 0xFF.
  */
-SZ_HELPER_INLINE __m256i sz_line_break_classify_astral_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
-                                                                __m256i low_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_line_break_classify_astral_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
+                                                                         __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const n4_u8x32 = _mm256_and_si256(plane_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
@@ -205,7 +206,7 @@ SZ_HELPER_INLINE __m256i sz_line_break_classify_astral_haswell_(__m256i plane_u8
 
 /** Per-half unsigned @p value_u8x32 ≥ @p bound_u8x32 mask, since AVX2 has no unsigned compare:
  *  `max_epu8(value, bound) == value`. */
-SZ_HELPER_INLINE __m256i sz_line_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_line_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
@@ -216,15 +217,15 @@ SZ_HELPER_INLINE __m256i sz_line_break_cmpge_epu8_haswell_(__m256i value_u8x32, 
  *  the ≥ negation via `min_epu8(value, bound - 1) == value` is fragile at a zero bound; instead
  *  AND-NOT the ≥ mask against ones, which keeps it branch- and bias-free.
  */
-SZ_HELPER_INLINE __m256i sz_line_break_cmplt_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+STRINGZILLA_HELPER_INLINE __m256i sz_line_break_cmplt_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_andnot_si256(sz_line_break_cmpge_epu8_haswell_(value_u8x32, bound_u8x32),
                                _mm256_set1_epi8((char)0xFF));
 }
 
 /** A 64-bit "(byte & @p mask) == @p pattern" lane mask over both window halves, via @c vpand
  *  and @c vpcmpeqb. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_match_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
-                                                            sz_u8_t mask, sz_u8_t pattern) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_match_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                     sz_u8_t mask, sz_u8_t pattern) {
     __m256i const mask_byte_u8x32 = _mm256_set1_epi8((char)mask), pattern_byte_u8x32 = _mm256_set1_epi8((char)pattern);
     return sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(_mm256_and_si256(low_half_u8x32, mask_byte_u8x32), pattern_byte_u8x32),
@@ -232,24 +233,24 @@ SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_match_haswell_(__m256i low_half_u8x
 }
 
 /** A 64-bit "byte == @p value" lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_equal_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
-                                                            sz_u8_t value) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_equal_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                     sz_u8_t value) {
     __m256i const value_byte_u8x32 = _mm256_set1_epi8((char)value);
     return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(low_half_u8x32, value_byte_u8x32),
                                          _mm256_cmpeq_epi8(high_half_u8x32, value_byte_u8x32));
 }
 
 /** A 64-bit unsigned "byte ≥ @p bound" lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_ge_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
-                                                         sz_u8_t bound) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_ge_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                  sz_u8_t bound) {
     __m256i const bound_u8x32 = _mm256_set1_epi8((char)bound);
     return sz_utf8_mask_combine_haswell_(sz_line_break_cmpge_epu8_haswell_(low_half_u8x32, bound_u8x32),
                                          sz_line_break_cmpge_epu8_haswell_(high_half_u8x32, bound_u8x32));
 }
 
 /** A 64-bit unsigned "byte < @p bound" lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_lt_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
-                                                         sz_u8_t bound) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_lt_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                  sz_u8_t bound) {
     __m256i const bound_u8x32 = _mm256_set1_epi8((char)bound);
     return sz_utf8_mask_combine_haswell_(sz_line_break_cmplt_epu8_haswell_(low_half_u8x32, bound_u8x32),
                                          sz_line_break_cmplt_epu8_haswell_(high_half_u8x32, bound_u8x32));
@@ -257,8 +258,8 @@ SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_lt_haswell_(__m256i low_half_u8x32,
 
 /** The class or side byte held at byte-lane @p lane, extracted in-register without a
  *  scalar window store. */
-SZ_HELPER_INLINE sz_u8_t sz_line_break_byte_at_haswell_(__m256i lanes_lo_u8x32, __m256i lanes_hi_u8x32,
-                                                        sz_size_t lane) {
+STRINGZILLA_HELPER_INLINE sz_u8_t sz_line_break_byte_at_haswell_(__m256i lanes_lo_u8x32, __m256i lanes_hi_u8x32,
+                                                                 sz_size_t lane) {
     __m256i const source_u8x32 = lane < 32 ? lanes_lo_u8x32 : lanes_hi_u8x32;
     sz_size_t const within = lane < 32 ? lane : lane - 32;
     sz_u8_t bytes[32];
@@ -302,8 +303,8 @@ typedef struct sz_line_break_classified_haswell_t {
  *  the AVX2 twin of icelake's `_mm512_permutexvar_epi8(lane_identity+3)`. Same idiom as the
  *  substrate @c forward_neighbours_haswell_: @c permute2x128 brings the successor 128-bit block in,
  *  then @c alignr shifts by 3. */
-SZ_HELPER_INLINE void sz_line_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
-                                                   __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
+STRINGZILLA_HELPER_INLINE void sz_line_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
+                                                            __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
     __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
     *next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, window_lo_u8x32, 3);
     __m256i const high_successor_u8x32 = _mm256_permute2x128_si256(window_hi_u8x32, window_lo_u8x32, 0x21);
@@ -314,8 +315,8 @@ SZ_HELPER_INLINE void sz_line_break_next3_haswell_(__m256i window_lo_u8x32, __m2
  *  precomputed 62-entry palette tables. @c lut256_haswell_ reads each 64-entry table by
  *  @p index_u8x32, which is below 64, so only the low four rows are selected; bit-identical to the
  *  icelake @c vpermb palette permute. */
-SZ_HELPER_INLINE void sz_line_break_palette_unpack_haswell_(__m256i index_u8x32, __m256i *classes_u8x32,
-                                                            __m256i *side_u8x32, __m256i *dotted_u8x32) {
+STRINGZILLA_HELPER_INLINE void sz_line_break_palette_unpack_haswell_(__m256i index_u8x32, __m256i *classes_u8x32,
+                                                                     __m256i *side_u8x32, __m256i *dotted_u8x32) {
     *classes_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_class_, index_u8x32);
     *side_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_side_, index_u8x32);
     *dotted_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_dotted_, index_u8x32);
@@ -329,7 +330,7 @@ SZ_HELPER_INLINE void sz_line_break_palette_unpack_haswell_(__m256i index_u8x32,
  *  continuation, an overlong, a surrogate, or an out-of-range lead each become one single-byte
  *  U+FFFD unit of class AL.
  */
-SZ_HELPER_INLINE sz_line_break_classified_haswell_t sz_line_break_classify_window_haswell_(
+STRINGZILLA_HELPER_INLINE sz_line_break_classified_haswell_t sz_line_break_classify_window_haswell_(
     sz_utf8_rune_window_haswell_t window) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(window.loaded);
     sz_u64_t const continuation = window.continuation & loaded_mask;
@@ -516,13 +517,14 @@ SZ_HELPER_INLINE sz_line_break_classified_haswell_t sz_line_break_classify_windo
 
 /** Build a 64-bit "lane class == @p cls" mask over both class halves, two @c vpcmpeqb then
  *  a mask combine. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_class_mask_haswell_(__m256i classes_lo_u8x32, __m256i classes_hi_u8x32,
-                                                            sz_u8_t cls) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_class_mask_haswell_(__m256i classes_lo_u8x32, __m256i classes_hi_u8x32,
+                                                                     sz_u8_t cls) {
     return sz_line_break_byte_equal_haswell_(classes_lo_u8x32, classes_hi_u8x32, cls);
 }
 
 /** Build a 64-bit "lane (side & @p bit) ≠ 0" mask over both side halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_side_mask_haswell_(__m256i side_lo_u8x32, __m256i side_hi_u8x32, sz_u8_t bit) {
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_side_mask_haswell_(__m256i side_lo_u8x32, __m256i side_hi_u8x32,
+                                                                    sz_u8_t bit) {
     __m256i const bit_u8x32 = _mm256_set1_epi8((char)bit);
     __m256i const masked_lo_u8x32 = _mm256_and_si256(side_lo_u8x32, bit_u8x32),
                   masked_hi_u8x32 = _mm256_and_si256(side_hi_u8x32, bit_u8x32);
@@ -555,7 +557,7 @@ typedef struct sz_line_break_byte_frame_haswell_t {
     sz_u64_t lone_mark;
 } sz_line_break_byte_frame_haswell_t;
 
-SZ_HELPER_INLINE sz_line_break_byte_frame_haswell_t sz_line_break_byte_frame_haswell_(
+STRINGZILLA_HELPER_INLINE sz_line_break_byte_frame_haswell_t sz_line_break_byte_frame_haswell_(
     sz_line_break_classified_haswell_t classified) {
     sz_u64_t const starts = classified.starts, non_start = classified.non_start;
     __m256i const classes_lo_u8x32 = classified.classes_low_u8x32, classes_hi_u8x32 = classified.classes_high_u8x32;
@@ -599,9 +601,8 @@ SZ_HELPER_INLINE sz_line_break_byte_frame_haswell_t sz_line_break_byte_frame_has
  *  reclassify, the raw ZWJ and five side-bit masks, and the per-lane class and side bytes, two
  *  @c vpstoreu halves each.
  */
-SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_haswell_(sz_line_break_classified_haswell_t classified,
-                                                                          sz_u8_t *effective_class_byte_out,
-                                                                          sz_u8_t *side_byte_out) {
+STRINGZILLA_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_haswell_(
+    sz_line_break_classified_haswell_t classified, sz_u8_t *effective_class_byte_out, sz_u8_t *side_byte_out) {
     sz_line_break_byte_frame_haswell_t const byte_frame = sz_line_break_byte_frame_haswell_(classified);
     __m256i const classes_lo_u8x32 = byte_frame.classes_low_u8x32, classes_hi_u8x32 = byte_frame.classes_high_u8x32;
     //  LB10 reclassify carries the side bits with it: zero the side byte on lone-mark lanes (serial zeros the
@@ -646,7 +647,7 @@ SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_haswell_(sz_lin
 
 /** Byte-level UAX-14 rule engine, Haswell entry: extract the portable frame in-register, then
  *  delegate every LB1-LB31 decision to the portable @ref sz_line_break_decide_window_. */
-SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_haswell_(
+STRINGZILLA_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_haswell_(
     sz_line_break_classified_haswell_t classified, sz_line_break_carry_t carry, sz_line_break_carry_t *carry_out,
     sz_size_t complete_limit, sz_bool_t more_text) {
     sz_u8_t effective_class_byte[64], side_byte[64];
@@ -661,8 +662,8 @@ SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_haswell_(
 
 /** Largest byte prefix of the window whose codepoints are all fully loaded, never below 1: the AVX2
  *  twin of @ref sz_line_break_complete_limit_ over the Haswell window struct. */
-SZ_HELPER_INLINE sz_size_t sz_line_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
-                                                                 sz_bool_t more_text) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_line_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
+                                                                          sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
@@ -681,9 +682,9 @@ SZ_HELPER_INLINE sz_size_t sz_line_break_complete_limit_haswell_(sz_utf8_rune_wi
 /** Byte-level zero-scalar forward UAX-14 kernel for Haswell AVX2: the overlap-free advancing
  *  driver, mirroring @ref sz_utf8_linebreaks_icelake_bytes_ over the AVX2 window, classify
  *  and drain leaves. */
-SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell_bytes_( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *starts, sz_size_t *lengths,                   //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell_bytes_( //
+    sz_cptr_t text, sz_size_t length,                                 //
+    sz_size_t *starts, sz_size_t *lengths,                            //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || capacity == 0) {
@@ -727,9 +728,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell_bytes_( //
 
 /** Forward UAX-14 line-break-opportunity kernel for Haswell AVX2. Bit-exact with
  *  @c sz_utf8_linebreaks_serial and @c sz_utf8_linebreaks_icelake. */
-SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell( //
-    sz_cptr_t text, sz_size_t length,                 //
-    sz_size_t *starts, sz_size_t *lengths,            //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell( //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_size_t *starts, sz_size_t *lengths,                     //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
     return sz_utf8_linebreaks_haswell_bytes_(text, length, starts, lengths, capacity, bytes_consumed);
 }
@@ -742,7 +743,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_HASWELL
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #ifdef __cplusplus
 }

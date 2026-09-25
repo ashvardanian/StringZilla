@@ -1482,7 +1482,7 @@ static sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_
     *did_fit = 1;
 
     // Validate UTF-8 first
-    if (sz_utf8_find_malformed(cstr, cstr_length) != SZ_NULL_CHAR) {
+    if (sz_utf8_find_malformed(cstr, cstr_length) != STRINGZILLA_NULL_CHAR) {
         *did_fit = -1; // Signal UTF-8 error
         return buffer_ptr;
     }
@@ -1606,7 +1606,7 @@ static PyObject *Strs_repr(Strs *self) {
 
         // Check if the string contains valid UTF-8
         int did_fit;
-        repr_buffer_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR
+        repr_buffer_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == STRINGZILLA_NULL_CHAR
                               ? export_escaped_unquoted_to_utf8_buffer(
                                     cstr_start, cstr_length, repr_buffer_ptr,
                                     repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length, &did_fit)
@@ -1648,7 +1648,7 @@ static PyObject *Strs_str(Strs *self) {
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
         // Check if string is valid UTF-8 to determine format
-        if (sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR) {
+        if (sz_utf8_find_malformed(cstr_start, cstr_length) == STRINGZILLA_NULL_CHAR) {
             // Valid UTF-8: format as '...' with escaped quotes
             total_bytes += 2;           // Opening and closing quotes
             total_bytes += cstr_length; // Base string length
@@ -1693,7 +1693,7 @@ static PyObject *Strs_str(Strs *self) {
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
         int did_fit;
         // Check if the string contains valid UTF-8 and export appropriately
-        result_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR
+        result_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == STRINGZILLA_NULL_CHAR
                          ? export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr,
                                                                   total_bytes - (result_ptr - result_buffer), &did_fit)
                          : export_escaped_unquoted_to_binary_buffer(cstr_start, cstr_length, result_ptr,
@@ -2439,12 +2439,12 @@ static char const doc_Strs_sample[] =                                           
     "  2";
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, doc_Strs_shuffled},    //
-    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, doc_sorted},               //
-    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, doc_argsort},            //
-    {"sample", Strs_sample, SZ_METHOD_FLAGS, doc_Strs_sample},          //
-    {"intersect", Strs_intersect, SZ_METHOD_FLAGS, doc_Strs_intersect}, //
-    {NULL, NULL, 0, NULL}                                               // Sentinel
+    {"shuffled", Strs_shuffled, STRINGZILLA_METHOD_FLAGS, doc_Strs_shuffled},    //
+    {"sorted", Strs_sorted, STRINGZILLA_METHOD_FLAGS, doc_sorted},               //
+    {"argsort", Strs_argsort, STRINGZILLA_METHOD_FLAGS, doc_argsort},            //
+    {"sample", Strs_sample, STRINGZILLA_METHOD_FLAGS, doc_Strs_sample},          //
+    {"intersect", Strs_intersect, STRINGZILLA_METHOD_FLAGS, doc_Strs_intersect}, //
+    {NULL, NULL, 0, NULL}                                                        // Sentinel
 };
 
 static char const doc_Strs[] =                                                                   //

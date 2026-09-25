@@ -22,7 +22,7 @@ extern "C" {
  *
  *  `bmi,lzcnt` are added only so GCC accepts @c _tzcnt_u32 and @c _lzcnt_u32; without those flags
  *  both compile down to the legacy @c bsf and @c bsr, which keeps the tier honest. */
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2,bmi,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -30,7 +30,8 @@ extern "C" {
 #pragma GCC target("sse4.2", "bmi", "lzcnt")
 #endif
 
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle) {
     int matches_mask;
     sz_u128_vec_t haystack_vec, needle_vec;
     needle_vec.xmm = _mm_set1_epi8(needle[0]);
@@ -45,7 +46,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t ha
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                          sz_cptr_t needle) {
     int matches_mask;
     sz_u128_vec_t haystack_vec, needle_vec;
     needle_vec.xmm = _mm_set1_epi8(needle[0]);
@@ -60,12 +62,12 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t h
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                           sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length) {
 
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_westmere(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
@@ -99,11 +101,11 @@ SZ_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystac
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length) {
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
     // if (needle_length == 1) return sz_rfind_byte_westmere(haystack, haystack_length, needle);
     //
     // Pick the parts of the needle that are worth comparing.
@@ -144,7 +146,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haysta
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_WESTMERE
+#endif // STRINGZILLA_TARGET_WESTMERE
 
 #ifdef __cplusplus
 }

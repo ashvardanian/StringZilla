@@ -10,24 +10,24 @@
  *  `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`, `utf8_sentences.c`,
  *  `utf8_linebreaks.c`, `utf8_uncased_fold.c`, and `utf8_uncased.c`. Each TU includes only its own
  *  domain header, fills its slice of the shared @c sz_dispatch_cpu_table via
- *  `sz_dispatch_<domain>_update_`, and defines the @c SZ_API_RUNTIME public wrappers that call
- *  through the table. The thin `runtime.c` owns the table definition and initializes it once.
+ *  `sz_dispatch_<domain>_update_`, and defines the @c STRINGZILLA_API_RUNTIME public wrappers that
+ *  call through the table. The thin `runtime.c` owns the table definition and initializes it once.
  */
-#ifndef SZ_DISPATCH_H_
-#define SZ_DISPATCH_H_
+#ifndef STRINGZILLA_DISPATCH_H_
+#define STRINGZILLA_DISPATCH_H_
 
-#if !SZ_DYNAMIC_DISPATCH
-#error "The dispatch shims are compiled with `SZ_DYNAMIC_DISPATCH=1`, which the build passes."
+#if !STRINGZILLA_RUNTIME_DISPATCH
+#error "The dispatch shims are compiled with `STRINGZILLA_RUNTIME_DISPATCH=1`, which the build passes."
 #endif
 
-#include <stringzilla/types.h> // Function-pointer typedefs, `sz_capability_t`, `SZ_USE_*`
+#include <stringzilla/types.h> // Function-pointer typedefs, `sz_capability_t`, `STRINGZILLA_TARGET_*`
 
 /** The dispatch table and per-domain updaters are shared across translation units, but must stay
  *  internal to the shared object to preserve the exported ABI. */
 #if defined(_MSC_VER)
-#define SZ_DISPATCH_INTERNAL
+#define STRINGZILLA_DISPATCH_INTERNAL
 #else
-#define SZ_DISPATCH_INTERNAL __attribute__((visibility("hidden")))
+#define STRINGZILLA_DISPATCH_INTERNAL __attribute__((visibility("hidden")))
 #endif
 
 typedef struct sz_implementations_t {
@@ -116,7 +116,7 @@ typedef struct sz_implementations_t {
  *  picked by the engine's own capability rather than by the machine's - so an engine built for the
  *  host scores on the host even where a device is present.
  */
-extern SZ_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_cpu_table;
+extern STRINGZILLA_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_cpu_table;
 
 /**
  *  @brief The cross-product engines a device can run, defined in `stringzilla.c`.
@@ -134,36 +134,36 @@ typedef struct sz_implementations_gpu_t {
     sz_substrings_bm25_scores_t substrings_bm25_scores;
 } sz_implementations_gpu_t;
 
-extern SZ_DISPATCH_INTERNAL sz_implementations_gpu_t sz_dispatch_gpu_table;
+extern STRINGZILLA_DISPATCH_INTERNAL sz_implementations_gpu_t sz_dispatch_gpu_table;
 
 /*  Each updater fills only its own fields, defaulting to the serial backend and then
  *  overriding for the most capable enabled SIMD generation matching @p caps. */
-SZ_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_memory_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_substrings_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_wordbreaks_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_sentences_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_linebreaks_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_memory_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_levenshtein_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_overlap_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_substrings_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_wordbreaks_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_sentences_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_linebreaks_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps);
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_levenshtein_gpu_update_(void);
-SZ_DISPATCH_INTERNAL void sz_dispatch_overlap_gpu_update_(void);
-SZ_DISPATCH_INTERNAL void sz_dispatch_substrings_gpu_update_(void);
-SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_levenshtein_gpu_update_(void);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_overlap_gpu_update_(void);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_substrings_gpu_update_(void);
+STRINGZILLA_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void);
 
-#if SZ_IS_64BIT_ARM_ && (SZ_USE_SVE || SZ_USE_SVE2) && !defined(_MSC_VER)
+#if STRINGZILLA_ARCH_ARM64_ && (STRINGZILLA_TARGET_SVE || STRINGZILLA_TARGET_SVE2) && !defined(_MSC_VER)
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -174,7 +174,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void);
 /**
  *  @brief Whether the running CPU's SVE registers are wider than NEON's 128 bits - the point where
  *      the scalable kernels start outrunning NEON in the length-sensitive families. The runtime
- *      counterpart of the compile-time @c SZ_SVE_WIDER_THAN_NEON_ in `types.h`.
+ *      counterpart of the compile-time @c STRINGZILLA_SVE_WIDER_THAN_NEON_ in `types.h`.
  *
  *  The Arm tie-break policy, per Graviton 5 measurements: a scalable kernel dispatches
  *  unconditionally only when it wins at the minimal 128-bit length on the mixed multilingual corpus
@@ -183,12 +183,14 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_gpu_table_init(void);
  *  line breaks) stay behind this gate; and families whose scalar walk beats every 128-bit front
  *  (graphemes) install no Arm SIMD at all until the width flips the economics.
  */
-SZ_MAYBE_UNUSED SZ_C_INLINE sz_bool_t sz_sve_wider_than_neon_(void) { return svcntb() > 16 ? sz_true_k : sz_false_k; }
+STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_ sz_bool_t sz_sve_wider_than_neon_(void) {
+    return svcntb() > 16 ? sz_true_k : sz_false_k;
+}
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_IS_64BIT_ARM_ && (SZ_USE_SVE || SZ_USE_SVE2) && !defined(_MSC_VER)
+#endif // STRINGZILLA_ARCH_ARM64_ && (STRINGZILLA_TARGET_SVE || STRINGZILLA_TARGET_SVE2) && !defined(_MSC_VER)
 
-#endif // SZ_DISPATCH_H_
+#endif // STRINGZILLA_DISPATCH_H_

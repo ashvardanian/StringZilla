@@ -47,7 +47,7 @@ extern "C" {
  *  @sa sz_utf8_find_cased_serial
  *  @sa sz_unicode_fold_codepoint_
  */
-SZ_HELPER_AUTO sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
 
     // Check if this rune participates in case folding
     sz_rune_t folded_runes[3];
@@ -127,7 +127,7 @@ SZ_HELPER_AUTO sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
     return sz_true_k;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_serial(sz_cptr_t str, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_serial(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *text_cursor = (sz_u8_t const *)str;
     sz_u8_t const *text_end = text_cursor + length;
 
@@ -154,11 +154,11 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_serial(sz_cptr_t str, sz_size_t len
         text_cursor += rune_length;
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                           sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                                    sz_size_t b_length) {
     sz_utf8_folded_iter_t a_iterator, b_iterator;
     sz_utf8_folded_iter_init_(&a_iterator, a, a_length);
     sz_utf8_folded_iter_init_(&b_iterator, b, b_length);
@@ -180,7 +180,7 @@ SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_
 
 /** Pops the lowest candidate position from @p matches, returning its bit index: the scalar walk
  *  shared by every ISA probe filter, so vector kernels never materialize their own bit scans. */
-SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_pop_candidate_(sz_u64_t *matches) {
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_pop_candidate_(sz_u64_t *matches) {
     sz_size_t const position = (sz_size_t)sz_u64_ctz(*matches);
     *matches &= *matches - 1;
     return position;
@@ -247,9 +247,9 @@ static sz_u8_t const sz_utf8_uncased_greek_ce_promotes_lut_[64] = {
  *  @param[in] haystack_end End of haystack head region, where the safe window was found.
  *  @param[out] match_length Haystack bytes consumed by this match.
  */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz_cptr_t needle_end,
-                                                      sz_cptr_t haystack_start, sz_cptr_t haystack_end,
-                                                      sz_size_t *match_length) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz_cptr_t needle_end,
+                                                               sz_cptr_t haystack_start, sz_cptr_t haystack_end,
+                                                               sz_size_t *match_length) {
 
     // If needle head is empty, no haystack bytes needed
     if (needle_end <= needle_start) {
@@ -289,9 +289,9 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz
  *  @param[in] haystack_end End of haystack, the upper bound for the forward scan.
  *  @param[out] match_length Haystack bytes consumed by this match.
  */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz_cptr_t needle_end,
-                                                      sz_cptr_t haystack_start, sz_cptr_t haystack_end,
-                                                      sz_size_t *match_length) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz_cptr_t needle_end,
+                                                               sz_cptr_t haystack_start, sz_cptr_t haystack_end,
+                                                               sz_size_t *match_length) {
 
     sz_size_t needle_length = (sz_size_t)(needle_end - needle_start);
 
@@ -337,9 +337,9 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz
  *  @param[in] needle_head_bytes Start of matched safe window in needle in bytes.
  *  @param[in] needle_tail_bytes Number of bytes in the needle remaining after the matched part.
  *  @param[out] match_length Total length of the verified match in haystack bytes.
- *  @return Match start pointer, or @c SZ_NULL_CHAR if validation fails.
+ *  @return Match start pointer, or @c STRINGZILLA_NULL_CHAR if validation fails.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_match_(                   //
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_match_(          //
     sz_cptr_t haystack, sz_size_t haystack_length,                        //
     sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_size_t haystack_matched_offset, sz_size_t haystack_matched_length, //
@@ -356,7 +356,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_match_(                   //
                 needle, needle + needle_head_bytes,           // needle head region
                 haystack, haystack + haystack_matched_offset, // haystack head region
                 &head_match_length))
-            return SZ_NULL_CHAR;
+            return STRINGZILLA_NULL_CHAR;
 
     // Verify tail using forward iterators
     sz_size_t tail_match_length = 0;
@@ -366,7 +366,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_match_(                   //
                 needle + needle_length - needle_tail_bytes, needle_end, // needle tail region
                 haystack_tail_start, haystack_end,                      // haystack tail region
                 &tail_match_length))
-            return SZ_NULL_CHAR;
+            return STRINGZILLA_NULL_CHAR;
 
     *match_length = head_match_length + haystack_matched_length + tail_match_length;
     return haystack + haystack_matched_offset - head_match_length;
@@ -384,10 +384,10 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_match_(                   //
  *  @param[in] haystack_length Length of the haystack in bytes.
  *  @param[in] needle_folded The single folded rune to search for.
  *  @param[out] match_length Length of the matched rune in haystack bytes on success.
- *  @return Pointer to the first matching rune, or @c SZ_NULL_CHAR if not found.
+ *  @return Pointer to the first matching rune, or @c STRINGZILLA_NULL_CHAR if not found.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_1folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_1folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
     sz_rune_t needle_folded, sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -426,7 +426,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_1folded_serial_( //
     }
 
     *match_length = 0;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -439,9 +439,9 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_1folded_serial_( //
  *
  *  @param[in] haystack_folded_runes The codepoint's folded image; @p anchor_index selects the rune
  *      to anchor on.
- *  @return Match start, or @c SZ_NULL_CHAR when this anchor carries no match.
+ *  @return Match start, or @c STRINGZILLA_NULL_CHAR when this anchor carries no match.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                   //
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(          //
     sz_cptr_t haystack, sz_size_t haystack_length,                                 //
     sz_cptr_t needle, sz_size_t needle_length,                                     //
     sz_cptr_t danger_cursor, sz_size_t haystack_rune_length,                       //
@@ -473,7 +473,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                
     // This codepoint's own runes before the anchor, newest first.
     for (sz_size_t before = anchor_index; before-- > 0;) {
         if (!sz_utf8_folded_reverse_iter_prev_(&needle_riter, &needle_riter_rune)) break;
-        if (needle_riter_rune != haystack_folded_runes[before]) return SZ_NULL_CHAR;
+        if (needle_riter_rune != haystack_folded_runes[before]) return STRINGZILLA_NULL_CHAR;
     }
 
     for (;;) {
@@ -482,8 +482,8 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                
             haystack_match_start = haystack_riter.ptr;
             break;
         }
-        if (!sz_utf8_folded_reverse_iter_prev_(&haystack_riter, &haystack_riter_rune)) return SZ_NULL_CHAR;
-        if (needle_riter_rune != haystack_riter_rune) return SZ_NULL_CHAR;
+        if (!sz_utf8_folded_reverse_iter_prev_(&haystack_riter, &haystack_riter_rune)) return STRINGZILLA_NULL_CHAR;
+        if (needle_riter_rune != haystack_riter_rune) return STRINGZILLA_NULL_CHAR;
     }
 
     // Walk the needle tail forwards from the safe window's start.
@@ -504,7 +504,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                
     // This codepoint's own runes after the anchor, oldest first.
     for (sz_size_t after = anchor_index + 1; after < haystack_folded_runes_count; ++after) {
         if (!sz_utf8_folded_iter_next_(&needle_iter, &needle_iter_rune)) break;
-        if (needle_iter_rune != haystack_folded_runes[after]) return SZ_NULL_CHAR;
+        if (needle_iter_rune != haystack_folded_runes[after]) return STRINGZILLA_NULL_CHAR;
     }
 
     for (;;) {
@@ -513,11 +513,11 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                
             haystack_match_end = haystack_iter.ptr;
             break;
         }
-        if (!sz_utf8_folded_iter_next_(&haystack_iter, &haystack_iter_rune)) return SZ_NULL_CHAR;
-        if (needle_iter_rune != haystack_iter_rune) return SZ_NULL_CHAR;
+        if (!sz_utf8_folded_iter_next_(&haystack_iter, &haystack_iter_rune)) return STRINGZILLA_NULL_CHAR;
+        if (needle_iter_rune != haystack_iter_rune) return STRINGZILLA_NULL_CHAR;
     }
 
-    if (haystack_match_start == 0 || haystack_match_end == 0) return SZ_NULL_CHAR;
+    if (haystack_match_start == 0 || haystack_match_end == 0) return STRINGZILLA_NULL_CHAR;
     *match_length = (sz_size_t)(haystack_match_end - haystack_match_start);
     return haystack_match_start;
 }
@@ -541,14 +541,14 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_verify_at_folded_rune_(                
  *  @param[in] needle_first_safe_folded_rune The first rune of the safe window, folded.
  *  @param[in] needle_first_safe_folded_rune_offset Offset of the safe window within the needle.
  *  @param[out] match_length Haystack bytes consumed by the match.
- *  @return Pointer to match start, or @c SZ_NULL_CHAR if not found in this region.
+ *  @return Pointer to match start, or @c STRINGZILLA_NULL_CHAR if not found in this region.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
-    sz_cptr_t danger_cursor, sz_size_t danger_length,            //
-    sz_rune_t needle_first_safe_folded_rune,                     //
-    sz_size_t needle_first_safe_folded_rune_offset,              //
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+    sz_cptr_t needle, sz_size_t needle_length,                            //
+    sz_cptr_t danger_cursor, sz_size_t danger_length,                     //
+    sz_rune_t needle_first_safe_folded_rune,                              //
+    sz_size_t needle_first_safe_folded_rune_offset,                       //
     sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -600,7 +600,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
         danger_cursor += haystack_rune_length;
     }
 
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -616,10 +616,10 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
  *  @param[in] first_needle_folded First folded rune of the 2-rune needle.
  *  @param[in] second_needle_folded Second folded rune of the 2-rune needle.
  *  @param[out] match_length Length of the matched region in haystack bytes on success.
- *  @return Pointer to the first match, or @c SZ_NULL_CHAR if not found.
+ *  @return Pointer to the first match, or @c STRINGZILLA_NULL_CHAR if not found.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_2folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_2folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
     sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -686,7 +686,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_2folded_serial_( //
     }
 
     *match_length = 0;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 /**
@@ -703,10 +703,10 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_2folded_serial_( //
  *  @param[in] second_needle_folded Second folded rune of the 3-rune needle.
  *  @param[in] third_needle_folded Third folded rune of the 3-rune needle.
  *  @param[out] match_length Length of the matched region in haystack bytes on success.
- *  @return Pointer to the first match, or @c SZ_NULL_CHAR if not found.
+ *  @return Pointer to the first match, or @c STRINGZILLA_NULL_CHAR if not found.
  */
-SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_3folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
+STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_3folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
     sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_rune_t third_needle_folded,
     sz_size_t *match_length) {
 
@@ -794,12 +794,12 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_3folded_serial_( //
     }
 
     *match_length = 0;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                //
+    sz_cptr_t needle, sz_size_t needle_length,                    //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
 
     sz_unused_(needle_metadata); // Only used by SIMD kernels for debugging
@@ -809,14 +809,14 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
         return haystack;
     }
 
-    if (sz_utf8_find_cased_serial(needle, needle_length) == SZ_NULL_CHAR) {
+    if (sz_utf8_find_cased_serial(needle, needle_length) == STRINGZILLA_NULL_CHAR) {
         sz_cptr_t result = sz_find_serial(haystack, haystack_length, needle, needle_length);
         if (result) {
             *match_length = needle_length;
             return result;
         }
         *match_length = 0;
-        return SZ_NULL_CHAR;
+        return STRINGZILLA_NULL_CHAR;
     }
 
     // For short needles (up to 12 bytes which can fold to at most ~6 runes), try hash-free search.
@@ -866,7 +866,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     }
     if (!needle_prefix_count) {
         *match_length = 0;
-        return SZ_NULL_CHAR;
+        return STRINGZILLA_NULL_CHAR;
     }
 
     sz_u64_t hash_multiplier = 1;
@@ -905,7 +905,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     }
     if (window_count < needle_prefix_count) {
         *match_length = 0;
-        return SZ_NULL_CHAR;
+        return STRINGZILLA_NULL_CHAR;
     }
     sz_cptr_t window_end = haystack_iter.ptr;
 
@@ -987,15 +987,16 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     }
 
     *match_length = 0;
-    return SZ_NULL_CHAR;
+    return STRINGZILLA_NULL_CHAR;
 }
 
 #pragma endregion Substring Search
 
-/*  The character safety classifier and needle-metadata builder are ISA-agnostic: they only depend
- *  on the serial Unicode core (rune parsing and folding). The SIMD kernels (Ice Lake, etc.) consume
- *  the metadata it produces, so it lives here in the serial scaffolding rather than behind any
- *  `SZ_USE_*` gate, keeping it reachable for every backend including pure serial builds. */
+/*  The character safety classifier and needle-metadata builder are ISA-agnostic: they only
+ *  depend on the serial Unicode core (rune parsing and folding). The SIMD kernels (Ice Lake,
+ *  etc.) consume the metadata it produces, so it lives here in the serial scaffolding rather
+ *  than behind any `STRINGZILLA_TARGET_*` gate, keeping it reachable for every backend including
+ *  pure serial builds. */
 #pragma region Character Safety Profiles
 
 /**
@@ -1024,10 +1025,10 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
  *  @param[out] safety_profiles Safety flags for each script path.
  *  @return The primary fast path preferred for this rune.
  */
-SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety_profile_( //
-    sz_rune_t rune, sz_size_t rune_bytes,                                                  //
-    sz_rune_t prev_rune, sz_rune_t next_rune,                                              //
-    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                                    //
+STRINGZILLA_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety_profile_( //
+    sz_rune_t rune, sz_size_t rune_bytes,                                                           //
+    sz_rune_t prev_rune, sz_rune_t next_rune,                                                       //
+    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                                             //
     unsigned int *safety_profiles) {
 
     unsigned safety = 0;
@@ -1449,7 +1450,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety
  *  @param[in] length Length of byte sequence.
  *  @return Count of distinct byte values (0-256).
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_size_t length) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_size_t length) {
     if (length <= 1) return length;
     sz_u64_t seen[4] = {0, 0, 0, 0}; // 256-bit bitmap
     sz_size_t distinct = 0;
@@ -1527,8 +1528,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_
  *  @param[in] needle_length Length in bytes.
  *  @param[out] refined Output metadata structure to populate.
  */
-SZ_HELPER_AUTO void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
-                                                     sz_utf8_uncased_needle_metadata_t *refined) {
+STRINGZILLA_HELPER_AUTO void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
+                                                              sz_utf8_uncased_needle_metadata_t *refined) {
 
     // Per-script window state during iteration
     typedef struct {
@@ -1569,7 +1570,7 @@ SZ_HELPER_AUTO void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t
     // A needle containing any byte that does not begin a well-formed codepoint cannot be window-analyzed by the
     // unchecked decode below; route it to the serial kernel, which handles malformed bytes losslessly (each is
     // folded to itself and resyncs by one byte), keeping SIMD and serial results identical.
-    if (sz_utf8_find_malformed(needle, needle_length) != SZ_NULL_CHAR) {
+    if (sz_utf8_find_malformed(needle, needle_length) != STRINGZILLA_NULL_CHAR) {
         refined->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
         refined->offset_in_unfolded = 0;
         refined->length_in_unfolded = 0;

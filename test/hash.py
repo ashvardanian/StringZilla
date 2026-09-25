@@ -12,7 +12,7 @@ Run:
     uv pip install numpy pyarrow pytest pytest-repeat
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/hash.py -q
-    SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/hash.py -q
+    STRINGZILLA_SEED=42 STRINGZILLA_SCALE=10 uv run --no-project python -m pytest test/hash.py -q
 
 File: test/hash.py
 Author: Ash Vardanian
@@ -35,7 +35,7 @@ try:
 except:  # noqa: E722
     pass
 
-from test.sz_helpers import (
+from test.helpers import (
     SEED_VALUES,
     seed_random_generators,
     get_random_string,

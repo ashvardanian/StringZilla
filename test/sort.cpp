@@ -15,18 +15,18 @@
 /*  Overload the following with caution. Those parameters must never be explicitly set during
  *  releases, but they come handy during development, to validate different ISA-specific backends:
  *
- *      #define SZ_USE_WESTMERE 0
- *      #define SZ_USE_HASWELL 0
- *      #define SZ_USE_GOLDMONT 0
- *      #define SZ_USE_SKYLAKE 0
- *      #define SZ_USE_ICELAKE 0
- *      #define SZ_USE_NEON 0
- *      #define SZ_USE_SVE 0
- *      #define SZ_USE_SVE2 0 */
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+ *      #define STRINGZILLA_TARGET_WESTMERE 0
+ *      #define STRINGZILLA_TARGET_HASWELL 0
+ *      #define STRINGZILLA_TARGET_GOLDMONT 0
+ *      #define STRINGZILLA_TARGET_SKYLAKE 0
+ *      #define STRINGZILLA_TARGET_ICELAKE 0
+ *      #define STRINGZILLA_TARGET_NEON 0
+ *      #define STRINGZILLA_TARGET_SVE 0
+ *      #define STRINGZILLA_TARGET_SVE2 0 */
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Include the StringZilla headers before anything else, to intercept missing @c #include
  *  directives and other issues. */
@@ -57,7 +57,7 @@
 
 #include <fmt/format.h>
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "harness.hpp" // `random_string`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -132,8 +132,6 @@ void test_sort_unit() {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
 
-    fmt::println("  - testing sequence sort & intersect known-answer vectors...");
-
     // Byte arg-sort: {"banana","apple","cherry"} sorts lexicographically to {"apple","banana","cherry"},
     // so the permutation is {1, 0, 2}. Check the dispatched API and every natively-compiled kernel.
     {
@@ -143,19 +141,19 @@ void test_sort_unit() {
 
         check_sort_unit_(sz_sequence_argsort, &sequence, expected);
         check_sort_unit_(sz_sequence_argsort_serial, &sequence, expected);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
         check_sort_unit_(sz_sequence_argsort_haswell, &sequence, expected);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
         check_sort_unit_(sz_sequence_argsort_skylake, &sequence, expected);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
         check_sort_unit_(sz_sequence_argsort_sve, &sequence, expected);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
         check_sort_unit_(sz_sequence_argsort_neon, &sequence, expected);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
         check_sort_unit_(sz_sequence_argsort_rvv, &sequence, expected);
 #endif
 
@@ -170,19 +168,19 @@ void test_sort_unit() {
 
         check_sort_unit_(sz_sequence_argsort_uncased, &sequence, expected);
         check_sort_unit_(sz_sequence_argsort_uncased_serial, &sequence, expected);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
         check_sort_unit_(sz_sequence_argsort_uncased_haswell, &sequence, expected);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
         check_sort_unit_(sz_sequence_argsort_uncased_skylake, &sequence, expected);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
         check_sort_unit_(sz_sequence_argsort_uncased_sve, &sequence, expected);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
         check_sort_unit_(sz_sequence_argsort_uncased_neon, &sequence, expected);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
         check_sort_unit_(sz_sequence_argsort_uncased_rvv, &sequence, expected);
 #endif
 
@@ -202,10 +200,10 @@ void test_sort_unit() {
 
         check_intersect_unit_(sz_sequence_intersect, &first_sequence, &second_sequence, expected_pairs);
         check_intersect_unit_(sz_sequence_intersect_serial, &first_sequence, &second_sequence, expected_pairs);
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
         check_intersect_unit_(sz_sequence_intersect_icelake, &first_sequence, &second_sequence, expected_pairs);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
         check_intersect_unit_(sz_sequence_intersect_sve, &first_sequence, &second_sequence, expected_pairs);
 #endif
 
@@ -309,10 +307,10 @@ void test_intersect_unit() {
             check_intersect_unit_(sz_sequence_intersect, first_sequence, second_sequence, expected_pairs);
             // Manual propagation to each natively-compiled backend kernel.
             check_intersect_unit_(sz_sequence_intersect_serial, first_sequence, second_sequence, expected_pairs);
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
             check_intersect_unit_(sz_sequence_intersect_icelake, first_sequence, second_sequence, expected_pairs);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
             check_intersect_unit_(sz_sequence_intersect_sve, first_sequence, second_sequence, expected_pairs);
 #endif
         };
@@ -351,9 +349,7 @@ void test_intersect_unit() {
  *  @c _unit tier has to cost the same at every multiplier, and these sweeps are exactly the part
  *  that does not.
  */
-void test_intersect_equivalence() {
-    fmt::println("  - testing intersection sizes against random string sets...");
-
+void test_intersect_equivalence(test_context_t &context) {
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
 
@@ -366,13 +362,13 @@ void test_intersect_equivalence() {
         {15, 15, 1000},
         {5, 30, 2000},
     };
-    auto &generator = global_random_generator();
+    std::mt19937 &generator = context.generator;
     for (auto experiment : experiments) {
         std::unordered_set<std::string> random_strings;
         while (random_strings.size() < experiment.count_strings)
             random_strings.insert(sz::test::random_string(
-                experiment.min_length + generator() % (experiment.max_length - experiment.min_length + 1), //
-                "ab", 2));
+                generator, experiment.min_length + generator() % (experiment.max_length - experiment.min_length + 1),
+                "ab"));
 
         strs_t all_strings(random_strings.begin(), random_strings.end());
         strs_t first_half(all_strings.begin(), all_strings.begin() + all_strings.size() / 2);
@@ -394,16 +390,15 @@ void test_intersect_equivalence() {
  *  @c _unit tier has to cost the same at every multiplier, and these sweeps are exactly the part
  *  that does not.
  */
-void test_sort_reference_equivalence() {
-    fmt::println("  - testing sorting against a std::stable_sort reference...");
-
+void test_sort_reference_equivalence(test_context_t &context) {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
 
     // Sizes scale with the multiplier, as this tier's contract requires. The largest crosses 100k strings
     // to exercise the large-input partitioning path.
     std::size_t const dataset_sizes[] = {10u, 100u, 1000u, 10000u, 100000u};
-    std::size_t const experiment_count = scale_iterations(10);
+    std::mt19937 &generator = context.generator;
+    std::size_t const experiment_count = context.iterations(10);
 
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {
@@ -411,10 +406,10 @@ void test_sort_reference_equivalence() {
             strs_t dataset;
             dataset.reserve(dataset_size);
             for (std::size_t i = 0; i < dataset_size; ++i)
-                dataset.push_back(sz::test::random_string(string_length, "ab", 2));
+                dataset.push_back(sz::test::random_string(generator, string_length, "ab"));
 
             for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
-                std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+                std::shuffle(dataset.begin(), dataset.end(), generator);
                 auto order = sz::argsort(dataset);
                 for (std::size_t i = 1; i < dataset.size(); ++i)
                     verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
@@ -426,10 +421,11 @@ void test_sort_reference_equivalence() {
     for (std::size_t dataset_size : dataset_sizes) {
         strs_t dataset;
         dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::test::random_string(i % 6, "ab", 2));
+        for (std::size_t i = 0; i < dataset_size; ++i)
+            dataset.push_back(sz::test::random_string(generator, i % 6, "ab"));
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
-            std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+            std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset);
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
@@ -443,10 +439,10 @@ void test_sort_reference_equivalence() {
         dataset.reserve(dataset_size);
         constexpr std::size_t min_length = 6;
         for (std::size_t i = 0; i < dataset_size; ++i)
-            dataset.push_back(sz::test::random_string(min_length + i % 32, "ab", 2));
+            dataset.push_back(sz::test::random_string(generator, min_length + i % 32, "ab"));
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
-            std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+            std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset);
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
@@ -458,10 +454,11 @@ void test_sort_reference_equivalence() {
     for (std::size_t dataset_size : dataset_sizes) {
         strs_t dataset;
         dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::test::random_string(i % 32, "ab\0", 3));
+        for (std::size_t i = 0; i < dataset_size; ++i)
+            dataset.push_back(sz::test::random_string(generator, i % 32, std::string_view("ab\0", 3)));
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
-            std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+            std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset);
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
@@ -491,8 +488,8 @@ void test_sort_reference_equivalence() {
                                     "straße", "STRASSE", "Straße", "Привет", "привет", "ПРИВЕТ", "",   "a",  "A"};
         for (std::size_t repeat = 0; repeat < 200; ++repeat)
             for (char const *word : seed_words) mixed.push_back(word);
-        for (std::size_t i = 0; i < 4000; ++i) mixed.push_back(sz::test::random_string(i % 6, "abc", 3));
-        std::shuffle(mixed.begin(), mixed.end(), global_random_generator());
+        for (std::size_t i = 0; i < 4000; ++i) mixed.push_back(sz::test::random_string(generator, i % 6, "abc"));
+        std::shuffle(mixed.begin(), mixed.end(), generator);
     }
     std::size_t const mixed_count = mixed.size();
     auto is_permutation = [&](order_t const &order) {
@@ -556,18 +553,18 @@ struct sort_backend_t {
 
 /**
  *  @brief Demands a candidate sort backend produce results identical to the reference backend.
- *  @param[in] inputs Baseline repetition count, routed through @c scale_iterations, not a size.
+ *  @param[in] inputs Baseline repetition count, scaled by the context's @c iterations, not a size.
  *
  *  Both the byte and uncased arg-sorts are @b stable, so for any input the permutation is unique -
  *  the candidate and reference @c order arrays must match exactly across the ascending, descending,
  *  and top-K modes.
  */
 template <typename reference_, typename candidate_>
-void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
-    std::size_t const repetition_count = scale_iterations(inputs);
+void check_sort_equivalence_(test_context_t &context, reference_ reference, candidate_ candidate, sz_size_t inputs) {
+    std::size_t const repetition_count = context.iterations(inputs);
 
     using strs_t = std::vector<std::string>;
-    auto &generator = global_random_generator();
+    std::mt19937 &generator = context.generator;
     handle_checked_heap_t heap;
 
     // Each repetition draws fresh random datasets and covers one top-K mode, so a larger `inputs` widens the
@@ -581,10 +578,12 @@ void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size
             // rather than the insertion-sort fallback keeps running.
             std::size_t const count = std::max<std::size_t>(33, full_count);
             strs_t fixed_dups; // Short strings over a tiny alphabet => many exact duplicates (fills the equal region).
-            for (std::size_t i = 0; i < count; ++i) fixed_dups.push_back(sz::test::random_string(i % 5, "ab", 2));
+            for (std::size_t i = 0; i < count; ++i)
+                fixed_dups.push_back(sz::test::random_string(generator, i % 5, "ab"));
             datasets.push_back(fixed_dups);
             strs_t varied; // Longer, common-prefix strings => deep pgram recursion.
-            for (std::size_t i = 0; i < count; ++i) varied.push_back(sz::test::random_string(6 + i % 40, "abc", 3));
+            for (std::size_t i = 0; i < count; ++i)
+                varied.push_back(sz::test::random_string(generator, 6 + i % 40, "abc"));
             datasets.push_back(varied);
         }
         { // Deterministic mixed-case / multi-script set so the uncased path sees real folds.
@@ -642,8 +641,6 @@ void check_sort_equivalence_(reference_ reference, candidate_ candidate, sz_size
  *  report a tie, since any ordering of it looks sorted and only the permutation property fails.
  */
 void test_sort_safety() {
-    fmt::println("  - testing degenerate sequences of the sorting kernels...");
-
     using strs_t = std::vector<std::string>;
 
     // Every compiled kernel is asked directly: going through `sz::argsort` would only ever reach whichever
@@ -688,23 +685,21 @@ void test_sort_safety() {
     sweep("serial", sz_sequence_argsort_serial);
     sweep("dispatched uncased", sz_sequence_argsort_uncased);
     sweep("serial uncased", sz_sequence_argsort_uncased_serial);
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     sweep("haswell", sz_sequence_argsort_haswell);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     sweep("skylake", sz_sequence_argsort_skylake);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     sweep("sve", sz_sequence_argsort_sve);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     sweep("neon", sz_sequence_argsort_neon);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     sweep("rvv", sz_sequence_argsort_rvv);
 #endif
-
-    fmt::println("    degenerate-sequence safety passed!");
 }
 
 #pragma endregion Safety
@@ -715,29 +710,30 @@ void test_sort_safety() {
  *  keeps the table non-empty on a baseline build. */
 static sort_backend_t const sequence_sort_backends[] = {
     {"dispatched", sz_sequence_argsort, sz_sequence_argsort_uncased},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_sequence_argsort_haswell, sz_sequence_argsort_uncased_haswell},
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     {"skylake", sz_sequence_argsort_skylake, sz_sequence_argsort_uncased_skylake},
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     {"sve", sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon},
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     {"rvv", sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv},
 #endif
 };
 
 /** Runs @c check_sort_equivalence_ of serial against every compiled backend, dispatched first. */
-void test_sort_all() {
+void test_sort_all(test_context_t &context) {
     sort_backend_t const serial {"serial", sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial};
-    // Four repetitions at multiplier 1.0, one per top-K mode; `SZ_TESTS_MULTIPLIER` dials both ways from here.
+    // Four repetitions at scale 1.0, one per top-K mode; `STRINGZILLA_SCALE` dials it either way.
     constexpr sz_size_t repetitions = 4;
-    for (sort_backend_t const &backend : sequence_sort_backends) check_sort_equivalence_(serial, backend, repetitions);
+    for (sort_backend_t const &backend : sequence_sort_backends)
+        check_sort_equivalence_(context, serial, backend, repetitions);
 }
 
 #pragma endregion Drivers

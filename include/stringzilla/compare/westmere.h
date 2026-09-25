@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,13 +24,14 @@ extern "C" {
 #pragma GCC target("sse4.2")
 #endif
 
-SZ_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                         sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
         while (a != a_end && *a == *b) a++, b++;
@@ -80,7 +81,7 @@ SZ_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t 
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_WESTMERE
+#endif // STRINGZILLA_TARGET_WESTMERE
 
 #ifdef __cplusplus
 }

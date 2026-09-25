@@ -93,7 +93,8 @@ static int OverlapEngine_init(OverlapEngine *self, PyObject *args, PyObject *kwa
 
     sz_engine_lock_(self);
     sz_overlap_engine_free(&self->engine);
-    sz_status_t const status = sz_overlap_engine_init_cpu(&queries, widths, widths_count, SZ_NULL, &self->engine);
+    sz_status_t const status = sz_overlap_engine_init_cpu(&queries, widths, widths_count, STRINGZILLA_NULL,
+                                                          &self->engine);
     sz_engine_unlock_(self);
     free(widths);
     if (status != sz_success_k) {
@@ -168,7 +169,7 @@ static PyObject *OverlapEngine_on_gpu(PyObject *type_obj, PyObject *const *args,
         free(widths);
         return NULL;
     }
-    sz_status_t const status = sz_overlap_engine_init_gpu(&queries, widths, widths_count, SZ_NULL, stream,
+    sz_status_t const status = sz_overlap_engine_init_gpu(&queries, widths, widths_count, STRINGZILLA_NULL, stream,
                                                           &self->engine);
     free(widths);
     if (status != sz_success_k) {
@@ -279,8 +280,8 @@ static char const doc_OverlapEngine[] =                                         
     "  True";
 
 static PyMethodDef OverlapEngine_methods[] = {
-    {"on_gpu", (PyCFunction)OverlapEngine_on_gpu, SZ_METHOD_FLAGS | METH_CLASS, doc_OverlapEngine_on_gpu},
-    {"scores", (PyCFunction)OverlapEngine_scores, SZ_METHOD_FLAGS, doc_OverlapEngine_scores},
+    {"on_gpu", (PyCFunction)OverlapEngine_on_gpu, STRINGZILLA_METHOD_FLAGS | METH_CLASS, doc_OverlapEngine_on_gpu},
+    {"scores", (PyCFunction)OverlapEngine_scores, STRINGZILLA_METHOD_FLAGS, doc_OverlapEngine_scores},
     {NULL, NULL, 0, NULL},
 };
 

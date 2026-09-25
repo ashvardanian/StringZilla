@@ -35,9 +35,9 @@ extern "C" {
  *
  *  @note No zero-length words are emitted; @p length == 0 returns 0.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_wordbreaks(         //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_size_t *word_starts, sz_size_t *word_lengths, //
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_wordbreaks( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_size_t *word_starts, sz_size_t *word_lengths,  //
     sz_size_t words_capacity, sz_size_t *bytes_consumed);
 
 /**
@@ -51,7 +51,7 @@ SZ_API_RUNTIME sz_size_t sz_utf8_wordbreaks(         //
  *
  *  @see Unicode Text Segmentation: https://www.unicode.org/reports/tr29/
  */
-SZ_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
+STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
 
 /**
  *  @brief Check if a codepoint is a "word character" (has word-forming property).
@@ -62,7 +62,7 @@ SZ_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
  *  @param[in] rune The Unicode codepoint to check.
  *  @return @c sz_true_k if the codepoint is a word character, @c sz_false_k otherwise.
  */
-SZ_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
 
 /**
  *  @brief Suggested batch size for streaming boundaries through the @c sz_utf8_find_* kernels.
@@ -91,71 +91,72 @@ enum { sz_iterators_default_steps_k = 64 };
  *  @note Position 0 and position == length are always boundaries (SOT/EOT).
  *  @note This is an internal helper used by the iterators; not part of stable ABI.
  */
-SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length,
+                                                                   sz_size_t position);
 
 #pragma endregion
 
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                    sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                    sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                             sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                             sz_size_t *bytes_consumed);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                     sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                              sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                              sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                     sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                              sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                              sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                 sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                 sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                          sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                          sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_wordbreaks */
-SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                      sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                               sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                               sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -173,33 +174,33 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t 
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_size_t sz_utf8_wordbreaks(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                            sz_size_t *word_lengths, sz_size_t words_capacity,
-                                            sz_size_t *bytes_consumed) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_wordbreaks(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                     sz_size_t *bytes_consumed) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_wordbreaks_icelake(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_wordbreaks_haswell(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_wordbreaks_sve2(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_wordbreaks_neon(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_utf8_wordbreaks_v128(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_wordbreaks_rvv(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_wordbreaks_lasx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_wordbreaks_powervsx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #else
     return sz_utf8_wordbreaks_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma endregion
 

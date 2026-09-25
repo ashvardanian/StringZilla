@@ -18,7 +18,7 @@ extern "C" {
 #pragma region UAX 29 Sentence Boundaries
 
 /** Returns the UAX-29 Sentence_Break property, 0-14, for a codepoint. */
-SZ_API_COMPTIME sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
+STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_sentence_break_big_oletter_count_k; ++range)
         if (rune >= sz_utf8_sentence_break_big_oletter_lo_[range] &&
             rune <= sz_utf8_sentence_break_big_oletter_hi_[range])
@@ -46,25 +46,25 @@ SZ_API_COMPTIME sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
 }
 
 /** True for a Sentence_Break ParaSep: Sep, CR, or LF. */
-SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_parasep_(sz_u8_t property) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_sentence_break_is_parasep_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sep_k || property == sz_sentence_break_cr_k ||
                        property == sz_sentence_break_lf_k);
 }
 
 /** True for a Sentence_Break SATerm: STerm or ATerm. */
-SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_sterm_k || property == sz_sentence_break_aterm_k);
 }
 
 /** True for an SB5-transparent character: Extend or Format. */
-SZ_HELPER_AUTO sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_extend_k || property == sz_sentence_break_format_k);
 }
 
 /** SB8 stop set excluding Lower: OLetter, Upper, ParaSep, or SATerm, a significant class that
  *  ends the ATerm neutral run and confirms the deferred SB11 break, while a Lower in the run
  *  suppresses it instead. */
-SZ_HELPER_AUTO sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_oletter_k || property == sz_sentence_break_upper_k ||
                        sz_sentence_break_is_parasep_(property) || sz_sentence_break_is_saterm_(property));
 }
@@ -76,7 +76,7 @@ SZ_HELPER_AUTO sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
  *  Mirrors the SIMD @c sz_utf8_rune_decode_window_ codepoint-start convention so the serial and Ice
  *  Lake backends segment malformed input identically, as UAX-29 leaves ill-formed bytes undefined.
  */
-SZ_HELPER_AUTO sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_size_t next = position + 1;
     while (next < length && ((sz_u8_t)text[next] & 0xC0) == 0x80) ++next;
     return next;
@@ -91,7 +91,7 @@ SZ_HELPER_AUTO sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t
  *  continuation, overlong, or surrogate validation; missing trailing bytes read as zero. Valid
  *  UTF-8 decodes identically to the checked path; only ill-formed input differs, by design.
  */
-SZ_HELPER_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
+STRINGZILLA_HELPER_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
     int const lead_length = ((lead & 0xE0u) == 0xC0u)   ? 2
                             : ((lead & 0xF0u) == 0xE0u) ? 3
@@ -149,7 +149,7 @@ typedef struct sz_sentence_serial_state_t {
 /** Advances @p state by the @p current codepoint property, updating the significant chain
  *  and the `SATerm Close* Sp*` terminator context; Extend and Format are transparent and
  *  leave both unchanged. */
-SZ_HELPER_AUTO void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
+STRINGZILLA_HELPER_AUTO void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
     if (!sz_sentence_break_is_transparent_(current)) {
         state->before_significant = state->previous_significant;
         state->previous_significant = current;
@@ -184,8 +184,8 @@ typedef enum sz_sentence_decision_t {
 /** Boundary decision, SB3..SB998, between @p state's previous codepoint and the @p after
  *  codepoint, in O(1) with no forward re-scan: SB8's Lower-lookahead is deferred as @c pending
  *  and resolved forward by the driver. */
-SZ_HELPER_AUTO sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t const *state,
-                                                                   sz_u8_t after) {
+STRINGZILLA_HELPER_AUTO sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t const *state,
+                                                                            sz_u8_t after) {
     sz_u8_t const before = state->previous_property;
     if (before == sz_sentence_break_cr_k && after == sz_sentence_break_lf_k)
         return sz_sentence_decision_no_break_k;                                     // SB3
@@ -222,9 +222,9 @@ SZ_HELPER_AUTO sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sentence_s
 /** Appends the sentence ending at @p boundary to the output arrays and re-anchors the running
  *  start. Returns @c sz_false_k when the capacity is exhausted: the caller stops and reports
  *  the emitted prefix. */
-SZ_HELPER_AUTO sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t *sentence_starts,
-                                                  sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                  sz_size_t *sentences, sz_size_t *sentence_start) {
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t *sentence_starts,
+                                                           sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                           sz_size_t *sentences, sz_size_t *sentence_start) {
     if (*sentences == sentences_capacity) return sz_false_k;
     sentence_starts[*sentences] = *sentence_start;
     sentence_lengths[*sentences] = boundary - *sentence_start;
@@ -236,7 +236,7 @@ SZ_HELPER_AUTO sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t 
 /** Plural UAX-29 sentence segmentation: one forward sweep emits every sentence into parallel
  *  @p sentence_starts and @p sentence_lengths, carrying the SB run-state so each codepoint is
  *  decoded once, O(n) with no backward re-walks. */
-SZ_API_COMPTIME sz_size_t sz_utf8_sentences_serial(          //
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_serial( //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
@@ -385,8 +385,8 @@ typedef struct sz_utf8_sentence_break_frame_t {
 
 /** Builds @ref sz_utf8_sentence_break_frame_t from the dense class byte stream in
  *  one forward pass. */
-SZ_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_from_dense_(sz_u8_t const *dense_classes,
-                                                                                       sz_u64_t valid) {
+STRINGZILLA_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_from_dense_(
+    sz_u8_t const *dense_classes, sz_u64_t valid) {
     sz_utf8_sentence_break_frame_t frame;
     for (int cls = 0; cls < 15; ++cls) frame.by_class[cls] = 0;
     sz_u64_t remaining = valid;
@@ -421,7 +421,7 @@ SZ_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_from_
  *  ISA-specific work, decode, classify, dense compaction, and byte-lane scatter, lives in the
  *  backend extractor; this engine is shared by serial, Ice Lake, and Haswell verbatim.
  */
-SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_block_( //
+STRINGZILLA_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_block_( //
     sz_utf8_sentence_break_frame_t const *frame, sz_u8_t const *dense_classes, sz_size_t count,
     sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
 
@@ -598,7 +598,7 @@ SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_blo
  *  plain u64 lane masks: the mask-domain twin of the per-ISA @c complete_limit helpers,
  *  shared by backends that carry their window state as scalars. Never below 1 when the
  *  window is non-empty. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
+STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
     sz_size_t loaded, sz_u64_t start_bytes, sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
     sz_u64_t four_byte_starts, sz_u8_t byte_after, sz_bool_t more_text) {
     if (!more_text || !start_bytes) return loaded;
@@ -625,7 +625,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
  *  @return Number of segments produced; sets @p advance_lane_out to the byte lane of start
  *      @p dense_limit, or @p loaded when every start resolved.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_emit_dense_serial_(                                     //
+STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_sentence_break_emit_dense_serial_(                            //
     sz_u64_t start_lanes, sz_u64_t dense_breaks, sz_size_t dense_limit, sz_size_t base, int skip_lane0, //
     sz_size_t loaded, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *segment_start_io, sz_size_t *advance_lane_out) {
@@ -655,7 +655,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_emit_dense_serial_(             
 /** Convenience entry for backends without vector class compares: builds the dense frame in one
  *  pass, then runs @ref sz_utf8_sentence_break_decide_block_. The vector backends build the
  *  frame with @c vpcmpeqb instead. */
-SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_( //
+STRINGZILLA_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_( //
     sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t const frame = sz_utf8_sentence_break_frame_from_dense_(dense_classes, valid);

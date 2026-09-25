@@ -36,7 +36,7 @@
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
  *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
@@ -68,8 +68,7 @@
 
 #include <fmt/format.h>
 
-#include "shared.hpp"
-#include "stringzilla.hpp" // `log_environment`
+#include "harness.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
@@ -211,7 +210,7 @@ void bench_substring_search(environment_t const &env) {
             .log();
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_find_skylake", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_skylake>>(env))
         .log(base);
@@ -219,7 +218,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_skylake>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_find_haswell", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_haswell>>(env))
         .log(base);
@@ -227,7 +226,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_haswell>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     bench_unary(env, "sz_find_westmere", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_westmere>>(env))
         .log(base);
@@ -235,7 +234,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_westmere>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_find_sve", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_sve>>(env))
         .log(base);
@@ -243,7 +242,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_sve>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_find_neon", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_neon>>(env))
         .log(base);
@@ -251,7 +250,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_neon>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_find_v128", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_v128>>(env))
         .log(base);
@@ -259,7 +258,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_v128>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(env, "sz_find_v128relaxed", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_v128relaxed>>(env))
         .log(base);
@@ -267,7 +266,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_v128relaxed>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_find_rvv", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_rvv>>(env))
         .log(base);
@@ -275,7 +274,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_rvv>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_find_lasx", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_lasx>>(env))
         .log(base);
@@ -283,7 +282,7 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_lasx>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_find_powervsx", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_powervsx>>(env))
         .log(base);
@@ -434,7 +433,7 @@ void bench_byte_search(environment_t const &env) {
             .log();
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     bench_unary(env, "sz_find_byte_skylake", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_skylake>>(env))
         .log(base);
@@ -442,7 +441,7 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_skylake>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary(env, "sz_find_byte_haswell", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_haswell>>(env))
         .log(base);
@@ -450,7 +449,7 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_haswell>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     bench_unary(env, "sz_find_byte_westmere", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_westmere>>(env))
         .log(base);
@@ -459,7 +458,7 @@ void bench_byte_search(environment_t const &env) {
         callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_westmere>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_find_byte_neon", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_neon>>(env))
         .log(base);
@@ -467,7 +466,7 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_neon>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
     bench_unary(env, "sz_find_byte_sve", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_sve>>(env))
         .log(base);
@@ -475,7 +474,7 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_sve>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary(env, "sz_find_byte_v128", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_v128>>(env))
         .log(base);
@@ -483,7 +482,7 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_v128>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary(
         env, "sz_find_byte_v128relaxed", base_call,
         callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_v128relaxed>>(env))
@@ -493,7 +492,7 @@ void bench_byte_search(environment_t const &env) {
         callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_v128relaxed>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary(env, "sz_find_byte_rvv", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_rvv>>(env))
         .log(base);
@@ -501,7 +500,7 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_rvv>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary(env, "sz_find_byte_lasx", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_lasx>>(env))
         .log(base);
@@ -509,7 +508,7 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<sz_rfind_byte_lasx>>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary(env, "sz_find_byte_powervsx", base_call,
                 callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<sz_find_byte_powervsx>>(env))
         .log(base);
@@ -640,7 +639,7 @@ void bench_byteset_search(environment_t const &env) {
             .log();
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     bench_unary( //
         env, "sz_find_byteset_haswell", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_haswell>,
@@ -652,7 +651,7 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     bench_unary( //
         env, "sz_find_byteset_icelake", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_icelake>,
@@ -664,7 +663,7 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     bench_unary(env, "sz_find_byteset_neon", base_call,
                 callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_neon>,
                                             sz::byteset_t>(env))
@@ -674,7 +673,7 @@ void bench_byteset_search(environment_t const &env) {
                                             sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     bench_unary(env, "sz_find_byteset_sve2", base_call,
                 callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_sve2>,
                                             sz::byteset_t>(env))
@@ -684,7 +683,7 @@ void bench_byteset_search(environment_t const &env) {
                                             sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     bench_unary( //
         env, "sz_find_byteset_v128", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_v128>,
@@ -696,7 +695,7 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
     bench_unary( //
         env, "sz_find_byteset_v128relaxed", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_v128relaxed>,
@@ -708,7 +707,7 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     bench_unary( //
         env, "sz_find_byteset_rvv", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_rvv>,
@@ -720,7 +719,7 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     bench_unary( //
         env, "sz_find_byteset_lasx", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_lasx>,
@@ -732,7 +731,7 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset_t>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     bench_unary( //
         env, "sz_find_byteset_powervsx", base_call,
         callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_powervsx>,
@@ -765,8 +764,8 @@ void bench_byteset_search(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    fmt::println("Welcome to StringZilla!");
-    if (auto code = log_environment(); code != 0) return code;
+    log_environment();
+    print_bench_environment();
 
     fmt::println("Building up the environment...");
     environment_t env = build_environment( //

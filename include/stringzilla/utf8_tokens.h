@@ -51,9 +51,9 @@ extern "C" {
  *  @param[out] bytes_consumed Byte offset to resume scanning from.
  *  @return Number of delimiters written to the output arrays.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                          sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                          sz_size_t *bytes_consumed);
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                   sz_size_t *bytes_consumed);
 
 /**
  *  @brief Enumerates every UTF-8 whitespace delimiter in a string.
@@ -116,9 +116,9 @@ SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_s
  *  @param[out] bytes_consumed Byte offset to resume scanning from.
  *  @return Number of delimiters written to the output arrays.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                             sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                             sz_size_t *bytes_consumed);
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                      sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                      sz_size_t *bytes_consumed);
 
 /**
  *  @brief Enumerates every UTF-8 delimiter codepoint (punctuation, symbol, separator, whitespace).
@@ -139,129 +139,129 @@ SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, s
  *  @param[out] bytes_consumed Byte offset to resume scanning from.
  *  @return Number of delimiters written to the output arrays.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                            sz_size_t *bytes_consumed);
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                     sz_size_t *bytes_consumed);
 
 #pragma endregion
 
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                           sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                           sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                     sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial(sz_cptr_t text, sz_size_t length,
+                                                              sz_size_t *match_offsets, sz_size_t *match_lengths,
+                                                              sz_size_t matches_capacity, sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_delimiters */
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                    sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                    sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                             sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                             sz_size_t *bytes_consumed);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                   sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                            sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                      sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                      sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(sz_cptr_t text, sz_size_t length,
+                                                               sz_size_t *match_offsets, sz_size_t *match_lengths,
+                                                               sz_size_t matches_capacity, sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_delimiters */
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                     sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(sz_cptr_t text, sz_size_t length,
+                                                              sz_size_t *match_offsets, sz_size_t *match_lengths,
+                                                              sz_size_t matches_capacity, sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                   sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                            sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                      sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                      sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(sz_cptr_t text, sz_size_t length,
+                                                               sz_size_t *match_offsets, sz_size_t *match_lengths,
+                                                               sz_size_t matches_capacity, sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_delimiters */
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                     sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(sz_cptr_t text, sz_size_t length,
+                                                              sz_size_t *match_offsets, sz_size_t *match_lengths,
+                                                              sz_size_t matches_capacity, sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                         sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                         sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                   sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                            sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_delimiters */
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                           sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                         sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                         sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                   sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                            sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_delimiters */
-SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                           sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_v128(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_v128(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                         sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                         sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                   sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                            sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                               sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                               sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                        sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                        sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                  sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                           sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                         sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                         sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                   sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                            sz_size_t *bytes_consumed);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_newlines */
-SZ_API_COMPTIME sz_size_t sz_utf8_newlines_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                    sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                    sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                             sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                             sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_whitespaces */
-SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                                       sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                                       sz_size_t *bytes_consumed);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx(sz_cptr_t text, sz_size_t length,
+                                                                sz_size_t *match_offsets, sz_size_t *match_lengths,
+                                                                sz_size_t matches_capacity, sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -279,73 +279,73 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx(sz_cptr_t text, sz_size_t
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                          sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                          sz_size_t *bytes_consumed) {
-#if SZ_USE_V128
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                   sz_size_t *bytes_consumed) {
+#if STRINGZILLA_TARGET_V128
     return sz_utf8_newlines_v128(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_newlines_rvv(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_newlines_lasx(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_newlines_powervsx(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_newlines_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_newlines_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE2 && STRINGZILLA_SVE_WIDER_THAN_NEON_
     return sz_utf8_newlines_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_newlines_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #else
     return sz_utf8_newlines_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #endif
 }
 
-SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                             sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                             sz_size_t *bytes_consumed) {
-#if SZ_USE_V128
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                      sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                      sz_size_t *bytes_consumed) {
+#if STRINGZILLA_TARGET_V128
     return sz_utf8_whitespaces_v128(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_whitespaces_rvv(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_whitespaces_lasx(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_whitespaces_powervsx(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_whitespaces_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_whitespaces_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE2 && STRINGZILLA_SVE_WIDER_THAN_NEON_
     return sz_utf8_whitespaces_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_whitespaces_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #else
     return sz_utf8_whitespaces_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #endif
 }
 
-SZ_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                            sz_size_t *bytes_consumed) {
-#if SZ_USE_ICELAKE
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                     sz_size_t *bytes_consumed) {
+#if STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_delimiters_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_delimiters_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_delimiters_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_delimiters_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #else
     return sz_utf8_delimiters_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma endregion
 

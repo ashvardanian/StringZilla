@@ -21,8 +21,8 @@ extern "C" {
  *  word 4 for the high one. Recombining them yields the same 32-bit mask @c _mm256_movemask_epi8
  *  of AVX2 would produce, so the byte order matches and @c ctz and @c clz index bytes
  *  identically to the Haswell backend. */
-#if SZ_USE_LASX
-SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
+#if STRINGZILLA_TARGET_LASX
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
     __m256i collected_u8x32 = __lasx_xvmskltz_b(sign_extended);
     unsigned int low = __lasx_xvpickve2gr_wu(collected_u8x32, 0);
     unsigned int high = __lasx_xvpickve2gr_wu(collected_u8x32, 4);
@@ -33,17 +33,17 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
  *  element 0, so a single GPR extraction yields the SSE-style 16-bit @c _mm_movemask_epi8 value.
  *  LSX is the natural fit for sub-32-byte inputs, where a 256-bit LASX register would be half-empty
  *  and a serial byte loop wastes the wide datapath the Loongson cores expose. */
-SZ_HELPER_INLINE sz_u32_t sz_vmovemask_b_compare_lsx_(__m128i sign_extended) {
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_vmovemask_b_compare_lsx_(__m128i sign_extended) {
     return (unsigned int)__lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended), 0) & 0xFFFFu;
 }
 
-SZ_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
@@ -96,7 +96,7 @@ SZ_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t leng
     }
 }
 
-#endif // SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_LASX
 
 #ifdef __cplusplus
 }

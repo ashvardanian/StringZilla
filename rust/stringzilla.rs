@@ -396,10 +396,7 @@ pub(crate) struct _SzMemoryAllocator {
 ///
 /// The accessors read the caller's slices in place, so a sequence borrows rather than copies and
 /// must never outlive the call the C side makes through it.
-pub(crate) fn with_sequence<Element, Return>(
-    items: &[Element],
-    call: impl FnOnce(&_SzSequence) -> Return,
-) -> Return
+pub(crate) fn with_sequence<Element, Return>(items: &[Element], call: impl FnOnce(&_SzSequence) -> Return) -> Return
 where
     Element: AsRef<[u8]>,
 {

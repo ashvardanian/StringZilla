@@ -41,7 +41,7 @@ extern "C" {
  *  @see x86_64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
  *  @see AArch64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
  */
-SZ_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /**
  *  @brief Locates the last byte equal to the one at @p needle in @p haystack, like @c memrchr.
@@ -55,102 +55,113 @@ SZ_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_len
  *
  *  @see x86_64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
  */
-SZ_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_cptr_t needle);
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                          sz_cptr_t needle);
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle);
 #endif
 
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                            sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                             sz_cptr_t needle);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 
 /** @copydoc sz_find_byte */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle);
 
 /** @copydoc sz_rfind_byte */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                          sz_cptr_t needle);
 #endif
 
 /**
@@ -163,8 +174,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t h
  *  @param[in] needle_length Number of bytes in the needle.
  *  @return Address of the first match.
  */
-SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                 sz_size_t needle_length);
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length);
 
 /**
  *  @brief Locates the last matching substring.
@@ -175,125 +186,125 @@ SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, 
  *  @param[in] needle_length Number of bytes in the needle.
  *  @return Address of the last match.
  */
-SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                  sz_size_t needle_length);
-
-/** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                         sz_size_t needle_length);
-
-/** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                          sz_size_t needle_length);
-
-#if SZ_USE_WESTMERE
-
-/** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                            sz_size_t needle_length);
 
-/** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length);
-#endif
+/** @copydoc sz_find */
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                  sz_size_t needle_length);
 
-#if SZ_USE_HASWELL
+/** @copydoc sz_rfind */
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length);
+
+#if STRINGZILLA_TARGET_WESTMERE
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                          sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                           sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length);
 #endif
 
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                          sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                           sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_SKYLAKE
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                        sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length);
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                      sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_size_t needle_length);
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                              sz_size_t needle_length);
-
-/** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                sz_size_t needle_length);
-#endif
-
-#if SZ_USE_V128
-
-/** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                        sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                      sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                       sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                        sz_size_t needle_length);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                        sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_size_t needle_length);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_RVV
 
 /** @copydoc sz_find */
-SZ_API_COMPTIME sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                           sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length);
 
 /** @copydoc sz_rfind */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length);
+#endif
+
+#if STRINGZILLA_TARGET_LASX
+
+/** @copydoc sz_find */
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length);
+
+/** @copydoc sz_rfind */
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_size_t needle_length);
+#endif
+
+#if STRINGZILLA_TARGET_POWERVSX
+
+/** @copydoc sz_find */
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length);
+
+/** @copydoc sz_rfind */
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length);
 #endif
 
 /**
@@ -313,7 +324,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haysta
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
  */
-SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /**
  *  @brief Finds the last character present from the @p set, present in @p text.
@@ -332,93 +343,101 @@ SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_by
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
  */
-SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t length,
+                                                           sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t length,
+                                                            sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t length,
+                                                           sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t length,
+                                                            sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length,
+                                                               sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length,
+                                                                sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 
 /** @copydoc sz_find_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t length,
+                                                            sz_byteset_t const *set);
 
 /** @copydoc sz_rfind_byteset */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t length,
+                                                             sz_byteset_t const *set);
 #endif
 
 /*  @c sz_utf8_delimiters (UTF-8 punctuation/symbol/separator/whitespace enumeration) lives in
@@ -437,8 +456,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_
  *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the first matching byte, or NULL if not found.
  */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -454,8 +473,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haysta
  *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the first non-matching byte, or NULL if not found.
  */
-SZ_API_COMPTIME sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle, sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -472,8 +491,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t ha
  *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the last matching byte, or NULL if not found.
  */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                             sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                      sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -489,8 +508,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t hayst
  *  @param[in] needle_length Number of bytes in the needle.
  *  @return Pointer to the last non-matching byte, or NULL if not found.
  */
-SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                 sz_size_t needle_length) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                          sz_cptr_t needle, sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -515,160 +534,160 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t h
 #include "stringzilla/find/powervsx.h"
 
 /*  Pick the right implementation for the string search algorithms. To override this behavior and
- *  precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
+ *  precompile all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma region Core Functionality
 
-SZ_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_find_byte_v128relaxed(haystack, haystack_length, needle);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_find_byte_v128(haystack, haystack_length, needle);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_find_byte_rvv(haystack, haystack_length, needle);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_find_byte_lasx(haystack, haystack_length, needle);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_find_byte_powervsx(haystack, haystack_length, needle);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_find_byte_skylake(haystack, haystack_length, needle);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_find_byte_haswell(haystack, haystack_length, needle);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     return sz_find_byte_westmere(haystack, haystack_length, needle);
-#elif SZ_USE_SVE // ? actually faster than NEON on most machines
+#elif STRINGZILLA_TARGET_SVE // ? actually faster than NEON on most machines
     return sz_find_byte_sve(haystack, haystack_length, needle);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_find_byte_neon(haystack, haystack_length, needle);
 #else
     return sz_find_byte_serial(haystack, haystack_length, needle);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_rfind_byte_v128relaxed(haystack, haystack_length, needle);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_rfind_byte_v128(haystack, haystack_length, needle);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_rfind_byte_rvv(haystack, haystack_length, needle);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_rfind_byte_lasx(haystack, haystack_length, needle);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_rfind_byte_powervsx(haystack, haystack_length, needle);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_rfind_byte_skylake(haystack, haystack_length, needle);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_rfind_byte_haswell(haystack, haystack_length, needle);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     return sz_rfind_byte_westmere(haystack, haystack_length, needle);
-#elif SZ_USE_SVE // ? actually faster than NEON on most machines
+#elif STRINGZILLA_TARGET_SVE // ? actually faster than NEON on most machines
     return sz_rfind_byte_sve(haystack, haystack_length, needle);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_rfind_byte_neon(haystack, haystack_length, needle);
 #else
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                 sz_size_t needle_length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_find_v128relaxed(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_find_v128(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_find_rvv(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_find_lasx(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_find_powervsx(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_find_skylake(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_find_haswell(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     return sz_find_westmere(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
     return sz_find_sve(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_find_neon(haystack, haystack_length, needle, needle_length);
 #else
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                  sz_size_t needle_length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_rfind_v128relaxed(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_rfind_v128(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_rfind_rvv(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_rfind_lasx(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_rfind_powervsx(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_rfind_skylake(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_rfind_haswell(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_WESTMERE
+#elif STRINGZILLA_TARGET_WESTMERE
     return sz_rfind_westmere(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_SVE // ? actually faster than NEON on most machines
+#elif STRINGZILLA_TARGET_SVE // ? actually faster than NEON on most machines
     return sz_rfind_sve(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_rfind_neon(haystack, haystack_length, needle, needle_length);
 #else
     return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_find_byteset_v128relaxed(text, length, set);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_find_byteset_v128(text, length, set);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_find_byteset_rvv(text, length, set);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_find_byteset_lasx(text, length, set);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_find_byteset_powervsx(text, length, set);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_find_byteset_icelake(text, length, set);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_find_byteset_haswell(text, length, set);
-#elif SZ_USE_SVE2 // ? `MATCH` covers a whole small set per instruction
+#elif STRINGZILLA_TARGET_SVE2 // ? `MATCH` covers a whole small set per instruction
     return sz_find_byteset_sve2(text, length, set);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_find_byteset_neon(text, length, set);
 #else
     return sz_find_byteset_serial(text, length, set);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_rfind_byteset_v128relaxed(text, length, set);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_rfind_byteset_v128(text, length, set);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_rfind_byteset_rvv(text, length, set);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_rfind_byteset_lasx(text, length, set);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_rfind_byteset_powervsx(text, length, set);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_rfind_byteset_icelake(text, length, set);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_rfind_byteset_haswell(text, length, set);
-#elif SZ_USE_SVE2 // ? `MATCH` covers a whole small set per instruction
+#elif STRINGZILLA_TARGET_SVE2 // ? `MATCH` covers a whole small set per instruction
     return sz_rfind_byteset_sve2(text, length, set);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_rfind_byteset_neon(text, length, set);
 #else
     return sz_rfind_byteset_serial(text, length, set);
@@ -676,7 +695,7 @@ SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_b
 }
 
 #pragma endregion
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 #pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus

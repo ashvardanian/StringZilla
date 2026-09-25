@@ -29,32 +29,33 @@
 #define STRINGZILLA_TYPES_H_
 
 /*  Debugging and testing. */
-#if !defined(SZ_DEBUG)
+#if !defined(STRINGZILLA_DEBUG)
 #if defined(DEBUG) || defined(_DEBUG) // This means "Not using DEBUG information".
-#define SZ_DEBUG (1)
+#define STRINGZILLA_DEBUG (1)
 #else
-#define SZ_DEBUG (0)
+#define STRINGZILLA_DEBUG (0)
 #endif
 #endif
 
 /**
- *  @brief When set to 1, the library will include the following LibC headers: <stddef.h> and
- *      <stdint.h>. In debug builds, with SZ_DEBUG=1, it will also include <stdio.h> and <stdlib.h>.
+ *  @brief When set to 1, the library will include the following LibC headers: <stddef.h>
+ *      and <stdint.h>. In debug builds, with STRINGZILLA_DEBUG=1, it will also include
+ *      <stdio.h> and <stdlib.h>.
  *
  *  You may want to disable this compiling for use in the kernel, or in embedded systems. You may
  *  also avoid them, if you are very sensitive to compilation time and avoid pre-compiled headers.
  *
  *  @see Compile Health: https://artificial-mind.net/projects/compile-health/
  */
-#if !defined(SZ_AVOID_LIBC)
-#define SZ_AVOID_LIBC (0) // true or false
+#if !defined(STRINGZILLA_WITH_LIBC)
+#define STRINGZILLA_WITH_LIBC (1) // true or false
 #endif
 
 /** Removes compile-time dispatching, and replaces it with runtime dispatching. So @c sz_find will
  *  invoke the most advanced backend supported by the CPU that runs the program, rather than the one
  *  supported by the CPU used to compile the library or the downstream application. */
-#if !defined(SZ_DYNAMIC_DISPATCH)
-#define SZ_DYNAMIC_DISPATCH (0) // true or false
+#if !defined(STRINGZILLA_RUNTIME_DISPATCH)
+#define STRINGZILLA_RUNTIME_DISPATCH (0) // true or false
 #endif
 
 /**
@@ -64,11 +65,11 @@
  *  Most platforms support it, but there is no industry standard way to check for those. This value
  *  will mostly affect the performance of the serial (SWAR) backend.
  */
-#if !defined(SZ_USE_MISALIGNED_LOADS)
+#if !defined(STRINGZILLA_ALLOW_MISALIGNED_LOADS)
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#define SZ_USE_MISALIGNED_LOADS (1) // true or false
+#define STRINGZILLA_ALLOW_MISALIGNED_LOADS (1) // true or false
 #else
-#define SZ_USE_MISALIGNED_LOADS (0) // true or false
+#define STRINGZILLA_ALLOW_MISALIGNED_LOADS (0) // true or false
 #endif
 #endif
 
@@ -76,65 +77,61 @@
  *  @brief Analogous to @c size_t and @c std::size_t, unsigned integer, identical to pointer size.
  *      64-bit on most platforms where pointers are 64-bit, 32-bit where pointers are 32-bit.
  *
- *  @note Do not use `defined(SZ_IS_64BIT_X86_)` or `defined(SZ_IS_64BIT_ARM_)` here — those
+ *  @note Do not use @c STRINGZILLA_ARCH_X86_64_ or @c STRINGZILLA_ARCH_ARM64_ here — those
  *      indicate the CPU family, not pointer width. Rely on compiler/OS macros only.
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64) || defined(__aarch64__) || \
     defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
-#define SZ_IS_64BIT_ (1)
+#define STRINGZILLA_ARCH_64BIT_ (1)
 #else
-#define SZ_IS_64BIT_ (0)
+#define STRINGZILLA_ARCH_64BIT_ (0)
 #endif
 
 /**
  *  @brief On Big-Endian machines StringZilla will work in compatibility mode. This disables SWAR
  *      hacks to minimize code duplication, assuming all popular modern platforms are Little-Endian.
  *
- *  This variable is hard to infer from macros reliably. It's best to set it manually. For that
- *  CMake provides @c TestBigEndian and `CMAKE_<LANG>_BYTE_ORDER` (from 3.20 onwards). In Python one
- *  can check `sys.byteorder == 'big'` in the `setup.py` script and pass the appropriate macro.
- *
  *  Modern compilers typically define @c __BYTE_ORDER__ and @c __ORDER_BIG_ENDIAN__. Fall back to
  *  legacy macros and known arch tags when unavailable.
  *
  *  @see Detecting endianness: https://stackoverflow.com/a/27054190
  */
-#if !defined(SZ_IS_BIG_ENDIAN_)
+#if !defined(STRINGZILLA_ARCH_BIG_ENDIAN_)
 #if (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)) ||                                         \
     (defined(__BYTE_ORDER) && (__BYTE_ORDER == __BIG_ENDIAN)) || defined(__BIG_ENDIAN__) || defined(_BIG_ENDIAN) ||  \
     defined(__ARMEB__) || defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || \
     defined(__MIBSEB__) || defined(__s390x__) || defined(__s390__)
-#define SZ_IS_BIG_ENDIAN_ (1) //< It's a big-endian target architecture
+#define STRINGZILLA_ARCH_BIG_ENDIAN_ (1) //< It's a big-endian target architecture
 #else
-#define SZ_IS_BIG_ENDIAN_ (0) //< It's a little-endian target architecture
+#define STRINGZILLA_ARCH_BIG_ENDIAN_ (0) //< It's a little-endian target architecture
 #endif
 #endif
 
 /** Infer the target architecture, unless it's overridden by the build system. At this point we only
  *  provide optimized backends for x86_64 and AArch64. */
-#if !defined(SZ_IS_64BIT_X86_)
+#if !defined(STRINGZILLA_ARCH_X86_64_)
 #if defined(__x86_64__) || defined(_M_X64)
-#define SZ_IS_64BIT_X86_ (1)
+#define STRINGZILLA_ARCH_X86_64_ (1)
 #else
-#define SZ_IS_64BIT_X86_ (0)
+#define STRINGZILLA_ARCH_X86_64_ (0)
 #endif
 #endif
-#if !defined(SZ_IS_64BIT_ARM_)
+#if !defined(STRINGZILLA_ARCH_ARM64_)
 #if defined(__aarch64__) || defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
-#define SZ_IS_64BIT_ARM_ (1)
+#define STRINGZILLA_ARCH_ARM64_ (1)
 #else
-#define SZ_IS_64BIT_ARM_ (0)
+#define STRINGZILLA_ARCH_ARM64_ (0)
 #endif
 #endif
 
 /** Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops. On
  *  very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
  *  Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes. */
-#if !defined(SZ_SWAR_THRESHOLD)
-#if SZ_DEBUG
-#define SZ_SWAR_THRESHOLD (8u) // 8 bytes in debug builds
+#if !defined(STRINGZILLA_SWAR_THRESHOLD)
+#if STRINGZILLA_DEBUG
+#define STRINGZILLA_SWAR_THRESHOLD (8u) // 8 bytes in debug builds
 #else
-#define SZ_SWAR_THRESHOLD (24u) // 24 bytes in release builds
+#define STRINGZILLA_SWAR_THRESHOLD (24u) // 24 bytes in release builds
 #endif
 #endif
 
@@ -142,36 +139,36 @@
  *  @brief Function annotations on two axes, role and, for internal helpers, inlining policy:
  *
  *  @verbatim
- *  SZ_API_COMPTIME     public API, ISA tier resolved at compile time, header-inline
- *  SZ_API_RUNTIME      public API dispatched at runtime, the only role with cross-TU linkage
- *  SZ_HELPER_AUTO      internal helper, compiler decides inlining, expands like SZ_API_COMPTIME
- *  SZ_HELPER_INLINE    internal helper forced inline, structural: devirtualizing driver loops
- *  SZ_HELPER_NOINLINE  internal helper forced out-of-line
+ *  STRINGZILLA_API_COMPTIME     public API, ISA tier resolved at compile time, header-inline
+ *  STRINGZILLA_API_RUNTIME      public API dispatched at runtime, the only role with cross-TU linkage
+ *  STRINGZILLA_HELPER_AUTO      internal helper, compiler decides inlining, expands like STRINGZILLA_API_COMPTIME
+ *  STRINGZILLA_HELPER_INLINE    internal helper forced inline, structural: devirtualizing driver loops
+ *  STRINGZILLA_HELPER_NOINLINE  internal helper forced out-of-line
  *  @endverbatim
  *
  *  The last one omits @c inline deliberately, as GCC ignores @c noinline on an @c inline function.
  */
 #if defined(__cplusplus)
-#define SZ_C_INLINE inline
+#define STRINGZILLA_C_INLINE_ inline
 #else
-#define SZ_C_INLINE inline static
+#define STRINGZILLA_C_INLINE_ inline static
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
-#define SZ_MAYBE_UNUSED __attribute__((unused))
+#define STRINGZILLA_MAYBE_UNUSED_ __attribute__((unused))
 #else
-#define SZ_MAYBE_UNUSED
+#define STRINGZILLA_MAYBE_UNUSED_
 #endif
 
 #if defined(_MSC_VER)
-#define SZ_HELPER_INLINE __forceinline static
-#define SZ_HELPER_NOINLINE __declspec(noinline) static
+#define STRINGZILLA_HELPER_INLINE __forceinline static
+#define STRINGZILLA_HELPER_NOINLINE __declspec(noinline) static
 #else
-#define SZ_HELPER_INLINE __attribute__((always_inline)) SZ_C_INLINE
-#define SZ_HELPER_NOINLINE static __attribute__((noinline))
+#define STRINGZILLA_HELPER_INLINE __attribute__((always_inline)) STRINGZILLA_C_INLINE_
+#define STRINGZILLA_HELPER_NOINLINE static __attribute__((noinline))
 #endif
 
-#define SZ_API_COMPTIME SZ_MAYBE_UNUSED SZ_C_INLINE
+#define STRINGZILLA_API_COMPTIME STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_
 
 /**
  *  @brief A portable scalar helper, inline in whichever translation unit uses it, and @c constexpr
@@ -181,11 +178,11 @@
  *  kernel call it at all - `--expt-relaxed-constexpr` reaches a host @c constexpr function from
  *  device code, so this layer never has to name an execution space of its own.
  *
- *  A helper reaching an intrinsic can never be constant-evaluated, and a @c constexpr function
- *  with no constant-evaluated path is ill-formed: Clang and MSVC reject the definition, GCC 12
- *  too, and only GCC 13+ softens it to @c -Winvalid-constexpr. Every such helper - the whole of
- *  each ISA backend, plus the few portable ones wrapping a builtin or a type-punned load -
- *  carries @c SZ_HELPER_INLINE instead, which is why no translation unit needs a @c -Wno- flag to
+ *  A helper reaching an intrinsic can never be constant-evaluated, and a @c constexpr function with
+ *  no constant-evaluated path is ill-formed: Clang and MSVC reject the definition, GCC 12 too, and
+ *  only GCC 13+ softens it to @c -Winvalid-constexpr. Every such helper - the whole of each ISA
+ *  backend, plus the few portable ones wrapping a builtin or a type-punned load - carries
+ *  @c STRINGZILLA_HELPER_INLINE instead, which is why no translation unit needs a @c -Wno- flag to
  *  compile this header.
  *
  *  The qualifier waits for C++20 because these helpers declare their locals before filling them,
@@ -199,29 +196,33 @@
  *  hosts neither, so nothing is lost by dropping it.
  */
 #if defined(__cplusplus) && __cplusplus >= 202002L && !(defined(_MSC_VER) && !defined(__clang__))
-#define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE constexpr
+#define STRINGZILLA_HELPER_AUTO STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_ constexpr
 #else
-#define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE
+#define STRINGZILLA_HELPER_AUTO STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_
 #endif
 
-/** Exported symbol under dynamic dispatch or @c SZ_EXPORT (emitted from one amalgamation TU,
- *  links like a normal C library — the Rust binding without @c dynamic-dispatch); otherwise
- *  a header-inline tier. */
-#if SZ_DYNAMIC_DISPATCH || (defined(SZ_EXPORT) && SZ_EXPORT)
+#if !defined(STRINGZILLA_EXPORT_)
+#define STRINGZILLA_EXPORT_ (0)
+#endif
+
+/** Exported symbol under dynamic dispatch or @c STRINGZILLA_EXPORT_ (emitted from one
+ *  amalgamation TU, links like a normal C library — the Rust binding without
+ *  @c dynamic-dispatch); otherwise a header-inline tier. */
+#if STRINGZILLA_RUNTIME_DISPATCH || STRINGZILLA_EXPORT_
 #if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_API_RUNTIME __declspec(dllexport)
+#define STRINGZILLA_API_RUNTIME __declspec(dllexport)
 #else
-#define SZ_API_RUNTIME extern __attribute__((visibility("default")))
+#define STRINGZILLA_API_RUNTIME extern __attribute__((visibility("default")))
 #endif // _WIN32 || __CYGWIN__
 #else
-#define SZ_API_RUNTIME SZ_C_INLINE
-#endif // SZ_DYNAMIC_DISPATCH || SZ_EXPORT
+#define STRINGZILLA_API_RUNTIME STRINGZILLA_C_INLINE_
+#endif // STRINGZILLA_RUNTIME_DISPATCH || STRINGZILLA_EXPORT_
 
 /** CUDA device-side inlining policy. It is only meaningful under @c nvcc, since the functions it
  *  marks exist only on the device. */
 #if defined(__CUDACC__)
-#define SZ_DEVICE_INLINE __device__ __forceinline__
-#define SZ_DEVICE_NOINLINE __device__ __noinline__
+#define STRINGZILLA_DEVICE_INLINE __device__ __forceinline__
+#define STRINGZILLA_DEVICE_NOINLINE __device__ __noinline__
 #endif
 
 /**
@@ -232,9 +233,9 @@
  *  overhead (~10 cycles per call). This macro opts out of stack protection for such functions.
  */
 #if defined(__GNUC__) || defined(__clang__)
-#define SZ_NO_STACK_PROTECTOR __attribute__((no_stack_protector))
+#define STRINGZILLA_NO_STACK_PROTECTOR_ __attribute__((no_stack_protector))
 #else
-#define SZ_NO_STACK_PROTECTOR
+#define STRINGZILLA_NO_STACK_PROTECTOR_
 #endif
 
 /** Alignment macro for N-byte alignment. */
@@ -251,9 +252,9 @@
  *  well-defined. Without it GCC at @c -O3 assumes the views never alias and may reorder
  *  them, corrupting results. */
 #if defined(__GNUC__) || defined(__clang__)
-#define SZ_MAY_ALIAS __attribute__((__may_alias__))
+#define STRINGZILLA_MAY_ALIAS_ __attribute__((__may_alias__))
 #else
-#define SZ_MAY_ALIAS
+#define STRINGZILLA_MAY_ALIAS_
 #endif
 
 /**
@@ -297,16 +298,16 @@
 #endif
 
 /** Largest value that fits into 8 bits. */
-#define SZ_U8_MAX (255u)
+#define STRINGZILLA_U8_MAX (255u)
 
 /** Largest value that fits into 16 bits. */
-#define SZ_U16_MAX (65535u)
+#define STRINGZILLA_U16_MAX (65535u)
 
 /** Largest prime number that fits into 16 bits. */
-#define SZ_U16_MAX_PRIME (65521u)
+#define STRINGZILLA_U16_MAX_PRIME (65521u)
 
 /** Largest prime number that fits into 31 bits. */
-#define SZ_U32_MAX_PRIME (2147483647u)
+#define STRINGZILLA_U32_MAX_PRIME (2147483647u)
 
 /**
  *  @brief Largest prime number that fits into 64 bits.
@@ -319,24 +320,24 @@
  *
  *  @see Largest 64-bit prime: https://mersenneforum.org/showthread.php?t=3471
  */
-#define SZ_U64_MAX_PRIME (18446744073709551557ull)
+#define STRINGZILLA_U64_MAX_PRIME (18446744073709551557ull)
 
 /** Opt into glibc's "misc" extensions, @c _DEFAULT_SOURCE implying @c __USE_MISC, before the first
  *  LibC header is pulled in. A strict @c -std=cNN otherwise hides declarations like `syscall()`,
  *  which the RISC-V @c riscv_hwprobe capability probe in `stringzilla.h` relies on. As the first
  *  StringZilla header every translation unit includes, this is the one place that covers every
  *  build system, be it CMake, Cargo, or setuptools. */
-#if defined(__linux__) && !SZ_AVOID_LIBC && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
+#if defined(__linux__) && STRINGZILLA_WITH_LIBC && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
 #define _DEFAULT_SOURCE 1
 #endif
 
-#if !SZ_AVOID_LIBC
+#if STRINGZILLA_WITH_LIBC
 #include <stddef.h> // `size_t`
 #include <stdint.h> // `uint8_t`
 #endif
 
 /*  The headers needed for the @c sz_assert_failure_ function. */
-#if SZ_DEBUG && !SZ_AVOID_LIBC
+#if STRINGZILLA_DEBUG && STRINGZILLA_WITH_LIBC
 #include <stdio.h>  // `fprintf`, `stderr`
 #include <stdlib.h> // `abort`
 #endif
@@ -352,110 +353,111 @@
 #endif
 
 /*  Compile-time hardware features detection. All of those can be controlled by the user. */
-#if !defined(SZ_USE_WESTMERE)
-#if SZ_IS_64BIT_X86_ && defined(__SSE4_2__) && defined(__AES__)
-#define SZ_USE_WESTMERE (1)
-#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX__)
-#define SZ_USE_WESTMERE (1) // ! MSVC doesn't expose `__SSE4_2__`, `__AES__` macros
+#if !defined(STRINGZILLA_TARGET_WESTMERE)
+#if STRINGZILLA_ARCH_X86_64_ && defined(__SSE4_2__) && defined(__AES__)
+#define STRINGZILLA_TARGET_WESTMERE (1)
+#elif STRINGZILLA_ARCH_X86_64_ && defined(_MSC_VER) && defined(__AVX__)
+#define STRINGZILLA_TARGET_WESTMERE (1) // ! MSVC doesn't expose `__SSE4_2__`, `__AES__` macros
 #else
-#define SZ_USE_WESTMERE (0)
+#define STRINGZILLA_TARGET_WESTMERE (0)
 #endif
 #endif
 
-#if !defined(SZ_USE_HASWELL)
-#if SZ_IS_64BIT_X86_ && defined(__AVX2__)
-#define SZ_USE_HASWELL (1)
+#if !defined(STRINGZILLA_TARGET_HASWELL)
+#if STRINGZILLA_ARCH_X86_64_ && defined(__AVX2__)
+#define STRINGZILLA_TARGET_HASWELL (1)
 #else
-#define SZ_USE_HASWELL (0)
+#define STRINGZILLA_TARGET_HASWELL (0)
 #endif
 #endif
 
-#if !defined(SZ_USE_GOLDMONT)
-#if SZ_IS_64BIT_X86_ && defined(__SHA__)
-#define SZ_USE_GOLDMONT (1)
-#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX2__)
-#define SZ_USE_GOLDMONT (1) // ! MSVC doesn't expose `__SHA__` macros
+#if !defined(STRINGZILLA_TARGET_GOLDMONT)
+#if STRINGZILLA_ARCH_X86_64_ && defined(__SHA__)
+#define STRINGZILLA_TARGET_GOLDMONT (1)
+#elif STRINGZILLA_ARCH_X86_64_ && defined(_MSC_VER) && defined(__AVX2__)
+#define STRINGZILLA_TARGET_GOLDMONT (1) // ! MSVC doesn't expose `__SHA__` macros
 #else
-#define SZ_USE_GOLDMONT (0)
+#define STRINGZILLA_TARGET_GOLDMONT (0)
 #endif
 #endif
 
-#if !defined(SZ_USE_SKYLAKE)
-#if SZ_IS_64BIT_X86_ && defined(__AVX512F__)
-#define SZ_USE_SKYLAKE (1)
+#if !defined(STRINGZILLA_TARGET_SKYLAKE)
+#if STRINGZILLA_ARCH_X86_64_ && defined(__AVX512F__)
+#define STRINGZILLA_TARGET_SKYLAKE (1)
 #else
-#define SZ_USE_SKYLAKE (0)
+#define STRINGZILLA_TARGET_SKYLAKE (0)
 #endif
 #endif
 
-#if !defined(SZ_USE_ICELAKE)
-#if SZ_IS_64BIT_X86_ && defined(__AVX512BW__) && defined(__VAES__)
-#define SZ_USE_ICELAKE (1)
-#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX512BW__)
-#define SZ_USE_ICELAKE (1) // ! MSVC doesn't expose `__VAES__` macros
+#if !defined(STRINGZILLA_TARGET_ICELAKE)
+#if STRINGZILLA_ARCH_X86_64_ && defined(__AVX512BW__) && defined(__VAES__)
+#define STRINGZILLA_TARGET_ICELAKE (1)
+#elif STRINGZILLA_ARCH_X86_64_ && defined(_MSC_VER) && defined(__AVX512BW__)
+#define STRINGZILLA_TARGET_ICELAKE (1) // ! MSVC doesn't expose `__VAES__` macros
 #else
-#define SZ_USE_ICELAKE (0)
+#define STRINGZILLA_TARGET_ICELAKE (0)
 #endif
 #endif
 
 /*  NEON support is optional in Armv7/AArch32, but mandatory from 8.0 onwards. The
- *  `!SZ_IS_BIG_ENDIAN_` guard keeps the SIMD stack off exotic @c aarch64_be targets: the shared
- *  byte-lane bridges, like `sz_utf8_rune_pred_to_u64_*` and @c sz_utf8_vreinterpretq_u8_u4_neon_,
- *  assume little-endian lane ↔ byte order and would mis-execute on big-endian. */
-#if !defined(SZ_USE_NEON)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_NEON) && !SZ_IS_BIG_ENDIAN_
-#define SZ_USE_NEON (1)
-#elif SZ_IS_64BIT_ARM_ && defined(_MSC_VER) && defined(_M_ARM64)
-#define SZ_USE_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros; MSVC AArch64 is always little-endian
+ *  `!STRINGZILLA_ARCH_BIG_ENDIAN_` guard keeps the SIMD stack off exotic @c aarch64_be targets: the
+ *  shared byte-lane bridges, like `sz_utf8_rune_pred_to_u64_*` and
+ *  @c sz_utf8_vreinterpretq_u8_u4_neon_, assume little-endian lane ↔ byte order and would
+ *  mis-execute on big-endian. */
+#if !defined(STRINGZILLA_TARGET_NEON)
+#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_NEON) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#define STRINGZILLA_TARGET_NEON (1)
+#elif STRINGZILLA_ARCH_ARM64_ && defined(_MSC_VER) && defined(_M_ARM64)
+#define STRINGZILLA_TARGET_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros; MSVC AArch64 is always little-endian
 #else
-#define SZ_USE_NEON (0)
+#define STRINGZILLA_TARGET_NEON (0)
 #endif
 #endif
 
 /*  SVE is optional since Armv8.2-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(SZ_USE_SVE)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE) && !SZ_IS_BIG_ENDIAN_
-#define SZ_USE_SVE (1)
+#if !defined(STRINGZILLA_TARGET_SVE)
+#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#define STRINGZILLA_TARGET_SVE (1)
 #else
-#define SZ_USE_SVE (0)
+#define STRINGZILLA_TARGET_SVE (0)
 #endif
 #endif
 
 /*  SVE2 is optional since Armv9.0-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(SZ_USE_SVE2)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2) && !SZ_IS_BIG_ENDIAN_
-#define SZ_USE_SVE2 (1)
+#if !defined(STRINGZILLA_TARGET_SVE2)
+#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE2) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#define STRINGZILLA_TARGET_SVE2 (1)
 #else
-#define SZ_USE_SVE2 (0)
+#define STRINGZILLA_TARGET_SVE2 (0)
 #endif
 #endif
 
 /*  AES is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(SZ_USE_NEONAES)
-#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
-#define SZ_USE_NEONAES (1)
+#if !defined(STRINGZILLA_TARGET_NEONAES)
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
+#define STRINGZILLA_TARGET_NEONAES (1)
 #else
-#define SZ_USE_NEONAES (0)
+#define STRINGZILLA_TARGET_NEONAES (0)
 #endif
 #endif
 
 /*  SHA2 is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(SZ_USE_NEONSHA)
-#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
-#define SZ_USE_NEONSHA (1)
+#if !defined(STRINGZILLA_TARGET_NEONSHA)
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
+#define STRINGZILLA_TARGET_NEONSHA (1)
 #else
-#define SZ_USE_NEONSHA (0)
+#define STRINGZILLA_TARGET_NEONSHA (0)
 #endif
 #endif
 
 /*  SVE2 AES is optional since Armv9.0-A, but never became mandatory, and MSVC cannot probe for it.
  *  GCC spells the feature macro @c __ARM_FEATURE_SVE2AES; Clang spells it
  *  @c __ARM_FEATURE_SVE2_AES. Accept both. */
-#if !defined(SZ_USE_SVE2AES)
-#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES))
-#define SZ_USE_SVE2AES (1)
+#if !defined(STRINGZILLA_TARGET_SVE2AES)
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES))
+#define STRINGZILLA_TARGET_SVE2AES (1)
 #else
-#define SZ_USE_SVE2AES (0)
+#define STRINGZILLA_TARGET_SVE2AES (0)
 #endif
 #endif
 
@@ -467,9 +469,9 @@
  *  Runtime dispatch measures the actual width with @c sz_sve_wider_than_neon_ instead of trusting
  *  this compile-time assumption. */
 #if defined(__ARM_FEATURE_SVE_BITS) && (__ARM_FEATURE_SVE_BITS > 128)
-#define SZ_SVE_WIDER_THAN_NEON_ (1)
+#define STRINGZILLA_SVE_WIDER_THAN_NEON_ (1)
 #else
-#define SZ_SVE_WIDER_THAN_NEON_ (0)
+#define STRINGZILLA_SVE_WIDER_THAN_NEON_ (0)
 #endif
 
 /** LLVM 18 through 22 carry @c evex512 as a separate target feature, split out of AVX-512 for the
@@ -481,44 +483,44 @@
  *  stay freestanding for Cargo. */
 #if defined(__clang__) && __clang_major__ < 23 && \
     (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
-#define SZ_CLANG_HAS_EVEX512_ (1)
+#define STRINGZILLA_HAS_CLANG_EVEX512_ (1)
 #else
-#define SZ_CLANG_HAS_EVEX512_ (0)
+#define STRINGZILLA_HAS_CLANG_EVEX512_ (0)
 #endif
 
 /*  Whether a CUDA layer exists at all is a build-wide switch both build systems stamp
  *  explicitly; this fallback only serves header-only use. It keys on @c __CUDACC__ rather than
  *  @c __NVCC__ so that Clang's CUDA mode - which defines the former and not the latter - is
  *  recognized as a CUDA compilation too. */
-#if !defined(SZ_USE_CUDA)
+#if !defined(STRINGZILLA_TARGET_CUDA)
 #if defined(__CUDACC__)
-#define SZ_USE_CUDA (1)
+#define STRINGZILLA_TARGET_CUDA (1)
 #else
-#define SZ_USE_CUDA (0)
+#define STRINGZILLA_TARGET_CUDA (0)
 #endif
 #endif
 
 /*  Whether a ROCm layer exists at all is a build-wide switch every build system stamps explicitly,
- *  beside @c SZ_USE_CUDA and never with it; this fallback only serves header-only use. @c __HIP__
- *  alone would also catch HIP targeting NVIDIA, so the CUDA switch decides that case - and
- *  @c __HIP_PLATFORM_AMD__ cannot, being defined by `hip_common.h` rather than by the compiler,
+ *  beside @c STRINGZILLA_TARGET_CUDA and never with it; this fallback only serves header-only use.
+ *  @c __HIP__ alone would also catch HIP targeting NVIDIA, so the CUDA switch decides that case -
+ *  and @c __HIP_PLATFORM_AMD__ cannot, being defined by `hip_common.h` rather than by the compiler,
  *  long after this header is read. */
-#if !defined(SZ_USE_ROCM)
-#if defined(__HIP__) && !SZ_USE_CUDA
-#define SZ_USE_ROCM (1)
+#if !defined(STRINGZILLA_TARGET_ROCM)
+#if defined(__HIP__) && !STRINGZILLA_TARGET_CUDA
+#define STRINGZILLA_TARGET_ROCM (1)
 #else
-#define SZ_USE_ROCM (0)
+#define STRINGZILLA_TARGET_ROCM (0)
 #endif
 #endif
 
 /*  The Kepler tier is reached through @c __shfl_sync, @c __ballot_sync and @c __popc. Every
  *  architecture a current toolkit can target has them - CUDA 13 dropped everything below SM75 - so
  *  a CUDA compilation brings the tier with it. */
-#if !defined(SZ_USE_KEPLER)
-#if SZ_USE_CUDA
-#define SZ_USE_KEPLER (1)
+#if !defined(STRINGZILLA_TARGET_KEPLER)
+#if STRINGZILLA_TARGET_CUDA
+#define STRINGZILLA_TARGET_KEPLER (1)
 #else
-#define SZ_USE_KEPLER (0)
+#define STRINGZILLA_TARGET_KEPLER (0)
 #endif
 #endif
 
@@ -528,20 +530,20 @@
  *  explicitly; the device pass knows its own target, and the host pass cannot scan
  *  @c __CUDA_ARCH_LIST__ in the preprocessor, so an unstamped host pass under-reports rather than
  *  claiming code it may not have emitted. */
-#if !defined(SZ_USE_HOPPER)
-#if SZ_USE_CUDA && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
-#define SZ_USE_HOPPER (1)
+#if !defined(STRINGZILLA_TARGET_HOPPER)
+#if STRINGZILLA_TARGET_CUDA && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+#define STRINGZILLA_TARGET_HOPPER (1)
 #else
-#define SZ_USE_HOPPER (0)
+#define STRINGZILLA_TARGET_HOPPER (0)
 #endif
 #endif
 
 /*  WebAssembly SIMD128 — opt-in at compile time via @c -msimd128; there is no runtime probe. */
-#if !defined(SZ_USE_V128)
+#if !defined(STRINGZILLA_TARGET_V128)
 #if defined(__wasm__) && defined(__wasm_simd128__)
-#define SZ_USE_V128 (1)
+#define STRINGZILLA_TARGET_V128 (1)
 #else
-#define SZ_USE_V128 (0)
+#define STRINGZILLA_TARGET_V128 (0)
 #endif
 #endif
 
@@ -549,114 +551,116 @@
  *  adding relaxed swizzle, fused multiply-add, lane-select, and integer dot-products. Some
  *  runtimes lower a few relaxed ops sub-optimally, but the level is exposed so native engines
  *  can use them. */
-#if !defined(SZ_USE_V128RELAXED)
+#if !defined(STRINGZILLA_TARGET_V128RELAXED)
 #if defined(__wasm__) && defined(__wasm_relaxed_simd__)
-#define SZ_USE_V128RELAXED (1)
+#define STRINGZILLA_TARGET_V128RELAXED (1)
 #else
-#define SZ_USE_V128RELAXED (0)
+#define STRINGZILLA_TARGET_V128RELAXED (0)
 #endif
 #endif
 
 /*  RISC-V Vector extension (RVV 1.0) — `-march=rv64gcv`. Length-agnostic registers. */
-#if !defined(SZ_USE_RVV)
+#if !defined(STRINGZILLA_TARGET_RVV)
 #if defined(__riscv) && (__riscv_xlen == 64) && defined(__riscv_vector)
-#define SZ_USE_RVV (1)
+#define STRINGZILLA_TARGET_RVV (1)
 #else
-#define SZ_USE_RVV (0)
+#define STRINGZILLA_TARGET_RVV (0)
 #endif
 #endif
 
 /*  RISC-V Vector Crypto (Zvk: Zvkned AES + Zvknhb SHA) — `-march=rv64gcv_zvkned_zvknhb`. */
-#if !defined(SZ_USE_RVVCRYPTO)
-#if SZ_USE_RVV && defined(__riscv_zvkned) && defined(__riscv_zvknhb)
-#define SZ_USE_RVVCRYPTO (1)
+#if !defined(STRINGZILLA_TARGET_RVVCRYPTO)
+#if STRINGZILLA_TARGET_RVV && defined(__riscv_zvkned) && defined(__riscv_zvknhb)
+#define STRINGZILLA_TARGET_RVVCRYPTO (1)
 #else
-#define SZ_USE_RVVCRYPTO (0)
+#define STRINGZILLA_TARGET_RVVCRYPTO (0)
 #endif
 #endif
 
 /*  LoongArch Advanced SIMD eXtension (LASX, 256-bit) — `-mlasx`. */
-#if !defined(SZ_USE_LASX)
+#if !defined(STRINGZILLA_TARGET_LASX)
 #if defined(__loongarch__) && defined(__loongarch_asx)
-#define SZ_USE_LASX (1)
+#define STRINGZILLA_TARGET_LASX (1)
 #else
-#define SZ_USE_LASX (0)
+#define STRINGZILLA_TARGET_LASX (0)
 #endif
 #endif
 
 /*  IBM Power Vector-Scalar eXtension (VSX, Power8+) — `-mvsx`. */
-#if !defined(SZ_USE_POWERVSX)
+#if !defined(STRINGZILLA_TARGET_POWERVSX)
 #if (defined(__powerpc__) || defined(__powerpc64__)) && defined(__VSX__)
-#define SZ_USE_POWERVSX (1)
+#define STRINGZILLA_TARGET_POWERVSX (1)
 #else
-#define SZ_USE_POWERVSX (0)
+#define STRINGZILLA_TARGET_POWERVSX (0)
 #endif
 #endif
 
 /*  SIMD micro-architecture tiers are cumulative supersets - there is no CPU with AVX-512 VBMI but
  *  not AVX2, nor SVE without NEON - and higher-tier kernels call into lower-tier helpers (the Ice
  *  Lake hash reuses the Westmere routines, the Ice Lake intersect kernel uses the 128/256-bit
- *  register unions). Enabling a tier therefore requires its whole substrate. Close the set downward
- *  so an isolated `-D SZ_USE_ICELAKE=1`, or a hand-edited development override, can never name a
- *  tier without the ones it is built on. This is the single source of truth for the nesting;
- *  everything downstream may assume a lower tier is on whenever a higher one is. Goldmont (SHA) and
- *  the NEON/SVE crypto extensions are orthogonal feature flags, not part of the nesting. */
-#if SZ_USE_ICELAKE && !SZ_USE_SKYLAKE
-#undef SZ_USE_SKYLAKE
-#define SZ_USE_SKYLAKE (1)
+ *  register unions). Enabling a tier therefore requires its whole substrate. Close the set
+ *  downward so an isolated `-D STRINGZILLA_TARGET_ICELAKE=1`, or a hand-edited development
+ *  override, can never name a tier without the ones it is built on. This is the single source of
+ *  truth for the nesting; everything downstream may assume a lower tier is on whenever a higher
+ *  one is. Goldmont (SHA) and the NEON/SVE crypto extensions are orthogonal feature flags, not
+ *  part of the nesting. */
+#if STRINGZILLA_TARGET_ICELAKE && !STRINGZILLA_TARGET_SKYLAKE
+#undef STRINGZILLA_TARGET_SKYLAKE
+#define STRINGZILLA_TARGET_SKYLAKE (1)
 #endif
-#if SZ_USE_SKYLAKE && !SZ_USE_HASWELL
-#undef SZ_USE_HASWELL
-#define SZ_USE_HASWELL (1)
+#if STRINGZILLA_TARGET_SKYLAKE && !STRINGZILLA_TARGET_HASWELL
+#undef STRINGZILLA_TARGET_HASWELL
+#define STRINGZILLA_TARGET_HASWELL (1)
 #endif
-#if SZ_USE_HASWELL && !SZ_USE_WESTMERE
-#undef SZ_USE_WESTMERE
-#define SZ_USE_WESTMERE (1)
+#if STRINGZILLA_TARGET_HASWELL && !STRINGZILLA_TARGET_WESTMERE
+#undef STRINGZILLA_TARGET_WESTMERE
+#define STRINGZILLA_TARGET_WESTMERE (1)
 #endif
-#if SZ_USE_SVE2 && !SZ_USE_SVE
-#undef SZ_USE_SVE
-#define SZ_USE_SVE (1)
+#if STRINGZILLA_TARGET_SVE2 && !STRINGZILLA_TARGET_SVE
+#undef STRINGZILLA_TARGET_SVE
+#define STRINGZILLA_TARGET_SVE (1)
 #endif
-#if SZ_USE_SVE && !SZ_USE_NEON
-#undef SZ_USE_NEON
-#define SZ_USE_NEON (1)
+#if STRINGZILLA_TARGET_SVE && !STRINGZILLA_TARGET_NEON
+#undef STRINGZILLA_TARGET_NEON
+#define STRINGZILLA_TARGET_NEON (1)
 #endif
 /*  WebAssembly relaxed-SIMD is a tier above baseline SIMD128 (it requires @c simd128). Close the
- *  set downward so backends that ship only a @c _v128 kernel can dispatch on `#if SZ_USE_V128`
- *  alone and still be reached when the build enabled relaxed-SIMD. */
-#if SZ_USE_V128RELAXED && !SZ_USE_V128
-#undef SZ_USE_V128
-#define SZ_USE_V128 (1)
+ *  set downward so backends that ship only a @c _v128 kernel can dispatch on
+ *  `#if STRINGZILLA_TARGET_V128` alone and still be reached when the build enabled relaxed-SIMD. */
+#if STRINGZILLA_TARGET_V128RELAXED && !STRINGZILLA_TARGET_V128
+#undef STRINGZILLA_TARGET_V128
+#define STRINGZILLA_TARGET_V128 (1)
 #endif
 
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers. */
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 #include <wasm_simd128.h>
-#endif // SZ_USE_V128
-#if SZ_USE_RVV
+#endif // STRINGZILLA_TARGET_V128
+#if STRINGZILLA_TARGET_RVV
 #include <riscv_vector.h>
-#endif // SZ_USE_RVV
-#if SZ_USE_LASX
+#endif // STRINGZILLA_TARGET_RVV
+#if STRINGZILLA_TARGET_LASX
 #include <lasxintrin.h> // 256-bit `__lasx_*` intrinsics and the `__m256i` register type
 #include <lsxintrin.h>  // 128-bit `__lsx_*` intrinsics and the `__m128i` register type, for sub-32-byte inputs
-#endif                  // SZ_USE_LASX
-#if SZ_USE_POWERVSX
+#endif                  // STRINGZILLA_TARGET_LASX
+#if STRINGZILLA_TARGET_POWERVSX
 #include <altivec.h>
-#endif // SZ_USE_POWERVSX
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#endif // STRINGZILLA_TARGET_POWERVSX
+#if STRINGZILLA_TARGET_WESTMERE || STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_SKYLAKE || \
+    STRINGZILLA_TARGET_ICELAKE
 #include <immintrin.h>
-#endif // SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
-#if SZ_USE_NEON
+#endif // STRINGZILLA_TARGET_WESTMERE || STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_SKYLAKE || STRINGZILLA_TARGET_ICELAKE
+#if STRINGZILLA_TARGET_NEON
 #if !defined(_MSC_VER)
 #include <arm_acle.h>
 #endif
 #include <arm_neon.h>
-#endif // SZ_USE_NEON
-#if SZ_USE_SVE || SZ_USE_SVE2
+#endif // STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_TARGET_SVE || STRINGZILLA_TARGET_SVE2
 #if !defined(_MSC_VER)
 #include <arm_sve.h>
 #endif
-#endif // SZ_USE_SVE || SZ_USE_SVE2
+#endif // STRINGZILLA_TARGET_SVE || STRINGZILLA_TARGET_SVE2
 
 #ifdef __cplusplus
 extern "C" {
@@ -666,7 +670,7 @@ typedef float sz_f32_t;  // 32-bit floating-point number
 typedef double sz_f64_t; // 64-bit floating-point number
 
 /*  Let's infer the integer types or pull them from LibC, if that is allowed by the user. */
-#if !SZ_AVOID_LIBC
+#if STRINGZILLA_WITH_LIBC
 typedef int8_t sz_i8_t;       // Always 8 bits
 typedef uint8_t sz_u8_t;      // Always 8 bits
 typedef int16_t sz_i16_t;     // Always 16 bits
@@ -678,7 +682,7 @@ typedef int64_t sz_i64_t;     // Always 64 bits
 typedef size_t sz_size_t;     // Pointer-sized unsigned integer, 32 or 64 bits
 typedef ptrdiff_t sz_ssize_t; // Signed version of `sz_size_t`, 32 or 64 bits
 
-#else // if SZ_AVOID_LIBC:
+#else // if !STRINGZILLA_WITH_LIBC:
 
 /**
  *  @brief Even when LibC is not available, compiler macros let us infer the size of integer types.
@@ -746,14 +750,14 @@ typedef unsigned long long sz_u64_t;
  *
  *  @see Abstract Data Models: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
  */
-#if SZ_IS_64BIT_
+#if STRINGZILLA_ARCH_64BIT_
 typedef sz_u64_t sz_size_t;  // ? Preferred over the `__SIZE_TYPE__` and `__UINTMAX_TYPE__` macros
 typedef sz_i64_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__INTMAX_TYPE__` macros
 #else
 typedef sz_u32_t sz_size_t;  // ? Preferred over the `__SIZE_TYPE__` and `__UINTMAX_TYPE__` macros
 typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__INTMAX_TYPE__` macros
-#endif // SZ_IS_64BIT_
-#endif // SZ_AVOID_LIBC
+#endif // STRINGZILLA_ARCH_64BIT_
+#endif // STRINGZILLA_WITH_LIBC
 
 /** Compile-time assert akin to C++ @c static_assert. Uses the native assertion where available
  *  (C++11 @c static_assert, C11 @c _Static_assert); the older-C typedef fallback must sit at file
@@ -997,7 +1001,7 @@ typedef enum sz_capability_t {
  *  @brief Maximum number of individual capability flags that can be represented.
  *  @sa sz_capabilities_to_strings_implementation_, internal, but a valid example.
  */
-#define SZ_CAPABILITIES_COUNT 22
+#define STRINGZILLA_CAPABILITIES_COUNT 22
 
 /**
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, from 1 to 4.
@@ -1040,7 +1044,7 @@ typedef sz_u32_t sz_rune_t;
 /** The Unicode @b replacement character U+FFFD, emitted once per maximal ill-formed UTF-8 run. */
 enum { sz_rune_replacement_k = 0xFFFD };
 
-SZ_API_COMPTIME sz_rune_t sz_rune_perfect_hash(sz_rune_t rune) {
+STRINGZILLA_API_COMPTIME sz_rune_t sz_rune_perfect_hash(sz_rune_t rune) {
     // TODO: A perfect hashing scheme can be constructed to map a 32-bit rune into an 18-bit representation,
     // TODO: that can fit all of the unique values in the Unicode 16 standard.
     return rune;
@@ -1085,22 +1089,26 @@ typedef union sz_byteset_t {
 } sz_byteset_t;
 
 /** Initializes a bit-set to an empty collection, meaning - all characters are banned. */
-SZ_API_COMPTIME void sz_byteset_init(sz_byteset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
+STRINGZILLA_API_COMPTIME void sz_byteset_init(sz_byteset_t *s) {
+    s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0;
+}
 
 /** Initializes a bit-set to all ASCII characters. */
-SZ_API_COMPTIME void sz_byteset_init_ascii(sz_byteset_t *s) {
+STRINGZILLA_API_COMPTIME void sz_byteset_init_ascii(sz_byteset_t *s) {
     s->_u64s[0] = s->_u64s[1] = 0xFFFFFFFFFFFFFFFFull;
     s->_u64s[2] = s->_u64s[3] = 0;
 }
 
 /** Adds a character to the set and accepts @b unsigned integers. */
-SZ_API_COMPTIME void sz_byteset_add_u8(sz_byteset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
+STRINGZILLA_API_COMPTIME void sz_byteset_add_u8(sz_byteset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
 /** Adds a character to the set. Consider @b sz_byteset_add_u8. */
-SZ_API_COMPTIME void sz_byteset_add(sz_byteset_t *s, char c) { sz_byteset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
+STRINGZILLA_API_COMPTIME void sz_byteset_add(sz_byteset_t *s, char c) {
+    sz_byteset_add_u8(s, *(sz_u8_t *)(&c));
+} // bitcast
 
 /** Checks if the set contains a given character and accepts @b unsigned integers. */
-SZ_API_COMPTIME sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
     // Checking the bit can be done in different ways:
     // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
     // - (s->_u32s[c >> 5] & (1u << (c & 31u))) != 0
@@ -1110,12 +1118,12 @@ SZ_API_COMPTIME sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t 
 }
 
 /** Checks if the set contains a given character. Consider @b sz_byteset_contains_u8. */
-SZ_API_COMPTIME sz_bool_t sz_byteset_contains(sz_byteset_t const *s, char c) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_byteset_contains(sz_byteset_t const *s, char c) {
     return sz_byteset_contains_u8(s, *(sz_u8_t *)(&c)); // bitcast
 }
 
 /** Inverts the contents of the set, so allowed characters get disallowed, and vice versa. */
-SZ_API_COMPTIME void sz_byteset_invert(sz_byteset_t *s) {
+STRINGZILLA_API_COMPTIME void sz_byteset_invert(sz_byteset_t *s) {
     s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
         s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
 }
@@ -1141,11 +1149,12 @@ typedef struct sz_memory_allocator_t {
 /**
  *  @brief Initializes a memory allocator to use the system default @c malloc and @c free.
  *  @param[out] allocator Memory allocator to initialize.
- *  @warning The function is not available if the library was compiled with @c SZ_AVOID_LIBC.
+ *  @warning The function is not available if the library was compiled with
+ *      @c STRINGZILLA_WITH_LIBC=0.
  *  @note Unlike the C standard library, `malloc(0)` is guaranteed to return a non-null pointer.
  *  @see malloc: https://en.cppreference.com/w/c/memory/malloc
  */
-SZ_API_COMPTIME void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator);
+STRINGZILLA_API_COMPTIME void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator);
 
 /**
  *  @brief Initializes a memory allocator that serves every request from a static-capacity buffer,
@@ -1158,7 +1167,8 @@ SZ_API_COMPTIME void sz_memory_allocator_init_default(sz_memory_allocator_t *all
  *  The @p buffer itself will be prepended with the capacity and the consumed size. Those values
  *  shouldn't be modified.
  */
-SZ_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length);
+STRINGZILLA_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer,
+                                                             sz_size_t length);
 
 /**
  *  @brief Checks if two memory allocators are equivalent.
@@ -1166,7 +1176,8 @@ SZ_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc
  *  @param[in] b Second memory allocator.
  *  @return True if the allocators are the same, false otherwise.
  */
-SZ_API_COMPTIME sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a,
+                                                             sz_memory_allocator_t const *b);
 
 #pragma endregion
 
@@ -1435,13 +1446,13 @@ typedef union sz_u64_vec_t {
 
 /** Helper structure to simplify work with @b 128-bit registers. It can help view the contents as
  *  8-bit, 16-bit, 32-bit, or 64-bit integers, as well as 1x XMM register. */
-typedef union SZ_MAY_ALIAS sz_u128_vec_t {
-#if SZ_USE_WESTMERE
+typedef union STRINGZILLA_MAY_ALIAS_ sz_u128_vec_t {
+#if STRINGZILLA_TARGET_WESTMERE
     __m128i xmm;
     __m128d xmm_pd;
     __m128 xmm_ps;
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     uint8x16_t u8x16;
     uint16x8_t u16x8;
     uint32x4_t u32x4;
@@ -1449,13 +1460,13 @@ typedef union SZ_MAY_ALIAS sz_u128_vec_t {
     float64x2_t f64x2;
     float32x4_t f32x4;
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     __m128i lsx;
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     v128_t v128;
 #endif
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
     __vector unsigned char vsx_u8;
     __vector unsigned short vsx_u16;
     __vector unsigned int vsx_u32;
@@ -1475,25 +1486,25 @@ typedef union SZ_MAY_ALIAS sz_u128_vec_t {
 
 /** Helper structure to simplify work with @b 256-bit registers. It can help view the contents as
  *  8-bit, 16-bit, 32-bit, or 64-bit integers, as well as 2x XMM registers or 1x YMM register. */
-typedef union SZ_MAY_ALIAS sz_u256_vec_t {
-#if SZ_USE_HASWELL
+typedef union STRINGZILLA_MAY_ALIAS_ sz_u256_vec_t {
+#if STRINGZILLA_TARGET_HASWELL
     __m256i ymm;
     __m256d ymm_pd;
     __m256 ymm_ps;
 #endif
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     __m128i xmms[2];
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     uint8x16_t u8x16s[2];
     uint16x8_t u16x8s[2];
     uint32x4_t u32x4s[2];
     uint64x2_t u64x2s[2];
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     __m256i lasx;
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     v128_t v128s[2];
 #endif
     sz_f64_t f64s[4];
@@ -1511,19 +1522,19 @@ typedef union SZ_MAY_ALIAS sz_u256_vec_t {
 /** Helper structure to simplify work with @b 512-bit registers. It can help view the contents as
  *  8-bit, 16-bit, 32-bit, or 64-bit integers, as well as 4x XMM registers or 2x YMM registers or
  *  1x ZMM register. */
-typedef union SZ_MAY_ALIAS sz_u512_vec_t {
-#if SZ_USE_SKYLAKE
+typedef union STRINGZILLA_MAY_ALIAS_ sz_u512_vec_t {
+#if STRINGZILLA_TARGET_SKYLAKE
     __m512i zmm;
     __m512d zmm_pd;
     __m512 zmm_ps;
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     __m256i ymms[2];
 #endif
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
     __m128i xmms[4];
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     uint8x16_t u8x16s[4];
     uint16x8_t u16x8s[4];
     uint32x4_t u32x4s[4];
@@ -1574,8 +1585,8 @@ typedef struct sz_sequence_t {
  *  @param[in] count Number of strings in the array.
  *  @param[out] sequence Sequence structure to initialize.
  */
-SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
-                                                              sz_sequence_t *sequence);
+STRINGZILLA_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
+                                                                       sz_sequence_t *sequence);
 
 /**
  *  @brief Initiates the sequence structure from an array of pointer-length pairs, like
@@ -1584,8 +1595,8 @@ SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, 
  *  @param[in] count Number of views in the array.
  *  @param[out] sequence Sequence structure to initialize.
  */
-SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
-                                                   sz_sequence_t *sequence);
+STRINGZILLA_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                            sz_sequence_t *sequence);
 
 #pragma endregion
 
@@ -1612,43 +1623,43 @@ SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views
 #define sz_bitcast_(type, value) (*((type *)&(value)))
 #endif
 
-/** Defines @c SZ_NULL, analogous to @c NULL. The default often comes from locale.h, stddef.h,
- *  stdio.h, stdlib.h, string.h, time.h, or wchar.h. */
+/** Defines @c STRINGZILLA_NULL, analogous to @c NULL. The default often comes from locale.h,
+ *  stddef.h, stdio.h, stdlib.h, string.h, time.h, or wchar.h. */
 #if defined(__cplusplus)
-#define SZ_NULL nullptr
-#define SZ_NULL_CHAR nullptr
+#define STRINGZILLA_NULL nullptr
+#define STRINGZILLA_NULL_CHAR nullptr
 #else
-#define SZ_NULL ((void *)0)
-#define SZ_NULL_CHAR ((char *)0)
+#define STRINGZILLA_NULL ((void *)0)
+#define STRINGZILLA_NULL_CHAR ((char *)0)
 #endif
 
 /** The one cache-line width the library assumes, in bytes: the stride of equality checks and
  *  relative-order heuristics, and the smallest heap buffer a growing string asks for. Derived from
  *  the target; define it from outside to override. */
-#if !defined(SZ_CACHE_LINE_WIDTH)
+#if !defined(STRINGZILLA_CACHE_LINE_BYTES)
 #if defined(__s390x__)
-#define SZ_CACHE_LINE_WIDTH (256) // bytes
+#define STRINGZILLA_CACHE_LINE_BYTES (256) // bytes
 #elif defined(__APPLE__) && defined(__aarch64__)
-#define SZ_CACHE_LINE_WIDTH (128) // bytes - Apple's cores carry a whole 128-byte line
+#define STRINGZILLA_CACHE_LINE_BYTES (128) // bytes - Apple's cores carry a whole 128-byte line
 #else
-#define SZ_CACHE_LINE_WIDTH (64) // bytes
+#define STRINGZILLA_CACHE_LINE_BYTES (64) // bytes
 #endif
 #endif
 
-#define SZ_SIZE_MAX ((sz_size_t)(-1))
-#define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
-#define SZ_SSIZE_MIN ((sz_ssize_t)(-SZ_SSIZE_MAX - 1))
+#define STRINGZILLA_SIZE_MAX ((sz_size_t)(-1))
+#define STRINGZILLA_SSIZE_MAX ((sz_ssize_t)(STRINGZILLA_SIZE_MAX >> 1))
+#define STRINGZILLA_SSIZE_MIN ((sz_ssize_t)(-STRINGZILLA_SSIZE_MAX - 1))
 
-SZ_HELPER_AUTO sz_size_t sz_size_max_(void) { return SZ_SIZE_MAX; }
-SZ_HELPER_AUTO sz_ssize_t sz_ssize_max_(void) { return SZ_SSIZE_MAX; }
+STRINGZILLA_HELPER_AUTO sz_size_t sz_size_max_(void) { return STRINGZILLA_SIZE_MAX; }
+STRINGZILLA_HELPER_AUTO sz_ssize_t sz_ssize_max_(void) { return STRINGZILLA_SSIZE_MAX; }
 
 /**
- *  @brief Similar to @c assert, the @c sz_assert_ checks library invariants in @c SZ_DEBUG builds,
- *      aborting on failure; in release it type-checks the condition without evaluating it.
+ *  @brief Similar to @c assert, the @c sz_assert_ checks library invariants in @c STRINGZILLA_DEBUG
+ *      builds, aborting on failure; in release it type-checks the condition without evaluating it.
  *  @note If you want to catch it, put a breakpoint at @c abort.
  */
-#if SZ_DEBUG && defined(__CUDA_ARCH__) // ? CUDA code for GPUs
-SZ_DEVICE_NOINLINE void sz_assert_cuda_failure_(char const *condition, char const *file, int line) {
+#if STRINGZILLA_DEBUG && defined(__CUDA_ARCH__) // ? CUDA code for GPUs
+STRINGZILLA_DEVICE_NOINLINE void sz_assert_cuda_failure_(char const *condition, char const *file, int line) {
     printf("Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     __trap();
 }
@@ -1656,8 +1667,8 @@ SZ_DEVICE_NOINLINE void sz_assert_cuda_failure_(char const *condition, char cons
     do {                                                                               \
         if (!(condition)) { sz_assert_cuda_failure_(#condition, __FILE__, __LINE__); } \
     } while (0)
-#elif SZ_DEBUG && !SZ_AVOID_LIBC // ? CPU code with LibC, PIC included
-SZ_API_COMPTIME void sz_assert_failure_(char const *condition, char const *file, int line) {
+#elif STRINGZILLA_DEBUG && STRINGZILLA_WITH_LIBC // ? CPU code with LibC, PIC included
+STRINGZILLA_API_COMPTIME void sz_assert_failure_(char const *condition, char const *file, int line) {
     fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     abort();
 }
@@ -1665,12 +1676,12 @@ SZ_API_COMPTIME void sz_assert_failure_(char const *condition, char const *file,
     do {                                                                          \
         if (!(condition)) { sz_assert_failure_(#condition, __FILE__, __LINE__); } \
     } while (0)
-#elif SZ_DEBUG && defined(_MSC_VER) && !defined(__clang__) // ? No LibC, and MSVC has no `__builtin_trap`
+#elif STRINGZILLA_DEBUG && defined(_MSC_VER) && !defined(__clang__) // ? No LibC, and MSVC has no `__builtin_trap`
 #define sz_assert_(condition)             \
     do {                                  \
         if (!(condition)) __debugbreak(); \
     } while (0)
-#elif SZ_DEBUG // ? No LibC: nothing to print with, so trap in place
+#elif STRINGZILLA_DEBUG // ? No LibC: nothing to print with, so trap in place
 #define sz_assert_(condition)               \
     do {                                    \
         if (!(condition)) __builtin_trap(); \
@@ -1694,71 +1705,71 @@ SZ_API_COMPTIME void sz_assert_failure_(char const *condition, char const *file,
  *  @see Bit-scan with De Bruijn: https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
  */
 #if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
-SZ_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) {
+STRINGZILLA_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
-SZ_HELPER_AUTO int sz_u64_clz(sz_u64_t x) {
+STRINGZILLA_HELPER_AUTO int sz_u64_clz(sz_u64_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x8000000000000000ull) == 0) { n++, x <<= 1; }
     return n;
 }
-SZ_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) {
+STRINGZILLA_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) {
     x = x - ((x >> 1) & 0x5555555555555555ull);
     x = (x & 0x3333333333333333ull) + ((x >> 2) & 0x3333333333333333ull);
     return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full) * 0x0101010101010101ull) >> 56;
 }
-SZ_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) {
+STRINGZILLA_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
-SZ_HELPER_AUTO int sz_u32_clz(sz_u32_t x) {
+STRINGZILLA_HELPER_AUTO int sz_u32_clz(sz_u32_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x80000000u) == 0) { n++, x <<= 1; }
     return n;
 }
-SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) {
+STRINGZILLA_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) {
     x = x - ((x >> 1) & 0x55555555);
     x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
     return (((x + (x >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
 }
 #else
-SZ_HELPER_INLINE int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
-SZ_HELPER_INLINE int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
-SZ_HELPER_INLINE int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
-SZ_HELPER_INLINE int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
-SZ_HELPER_INLINE int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
-SZ_HELPER_INLINE int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
+STRINGZILLA_HELPER_INLINE int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
+STRINGZILLA_HELPER_INLINE int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
+STRINGZILLA_HELPER_INLINE int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
+STRINGZILLA_HELPER_INLINE int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
+STRINGZILLA_HELPER_INLINE int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
+STRINGZILLA_HELPER_INLINE int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
 #endif
 /*  Force the byteswap functions to be intrinsics, because when @c /Oi- is given, these will turn
- *  into CRT function calls, which breaks when @c SZ_AVOID_LIBC is given. */
+ *  into CRT function calls, which breaks when @c STRINGZILLA_WITH_LIBC is 0. */
 #pragma intrinsic(_byteswap_uint64)
-SZ_HELPER_INLINE sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
+STRINGZILLA_HELPER_INLINE sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 #pragma intrinsic(_byteswap_ulong)
-SZ_HELPER_INLINE sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
+STRINGZILLA_HELPER_INLINE sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
-SZ_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
-SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
-SZ_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
-SZ_HELPER_AUTO int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
-SZ_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
-SZ_HELPER_AUTO int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
-SZ_HELPER_AUTO sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
-SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
+STRINGZILLA_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
+STRINGZILLA_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
+STRINGZILLA_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
+STRINGZILLA_HELPER_AUTO int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
+STRINGZILLA_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
+STRINGZILLA_HELPER_AUTO int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
+STRINGZILLA_HELPER_AUTO sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
+STRINGZILLA_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
 /*  Arm NEON kernel files call these directly instead of @c sz_u32_ctz, @c sz_u32_clz, and
  *  @c sz_u32_popcount: unlike those, they are explicitly ISA-named and never fall back to a
  *  portable loop, so a missing case here is a compile error, not a silent downgrade. Real MSVC, not
- *  clang-cl, compiles NEON code on Windows-on-Arm, where @c SZ_USE_NEON is unconditionally 1, and
- *  has no `__builtin_*` or ACLE support, so the MSVC branch is required, not optional;
- *  `_CountTrailingZeros[64]` needs VS2022 17.7+, which matches this repo's CI floor, the
+ *  clang-cl, compiles NEON code on Windows-on-Arm, where @c STRINGZILLA_TARGET_NEON is
+ *  unconditionally 1, and has no `__builtin_*` or ACLE support, so the MSVC branch is required, not
+ *  optional; `_CountTrailingZeros[64]` needs VS2022 17.7+, which matches this repo's CI floor, the
  *  @c windows-11-arm runner. */
 #if defined(_MSC_VER) && !defined(__clang__)
 #define sz_u32_ctz_neon_(x) ((int)_CountTrailingZeros(x))
@@ -1783,7 +1794,7 @@ SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bs
  *  @c vpbroadcastd where an AVX-512 `{1toN}` embedded broadcast would have been free. No use
  *  outside x86, which has no equivalent operand to protect.
  */
-SZ_HELPER_INLINE void const *sz_x86_hide_pointer_origin_(void const *pointer) {
+STRINGZILLA_HELPER_INLINE void const *sz_x86_hide_pointer_origin_(void const *pointer) {
 #if defined(__GNUC__)
     __asm__("" : "+r"(pointer));
 #endif
@@ -1793,7 +1804,7 @@ SZ_HELPER_INLINE void const *sz_x86_hide_pointer_origin_(void const *pointer) {
 /** Reverse the 64 bits of @p value, so bit i moves to bit 63 - i: swap adjacent bits, then
  *  bit-pairs within nibbles, then nibbles within bytes, then the bytes. Lets an ascending-only
  *  byte-compress, like @c vpcompressb, pack lanes in descending order. */
-SZ_HELPER_AUTO sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
+STRINGZILLA_HELPER_AUTO sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
     value = ((value & 0x5555555555555555ull) << 1) | ((value >> 1) & 0x5555555555555555ull);
     value = ((value & 0x3333333333333333ull) << 2) | ((value >> 2) & 0x3333333333333333ull);
     value = ((value & 0x0F0F0F0F0F0F0F0Full) << 4) | ((value >> 4) & 0x0F0F0F0F0F0F0F0Full);
@@ -1803,11 +1814,11 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
 /** Bit index of the n-th (0-based) set bit of @p bits; clears the @p n lowest set bits, then
  *  @c ctz. @p bits must hold more than @p n set bits. One tested home for the per-ISA SIMD
  *  "n-th lane" locate. */
-SZ_HELPER_AUTO int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
+STRINGZILLA_HELPER_AUTO int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
     while (n--) bits &= bits - 1;
     return sz_u64_ctz(bits);
 }
-SZ_HELPER_AUTO int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
+STRINGZILLA_HELPER_AUTO int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
     while (n--) bits &= bits - 1;
     return sz_u32_ctz(bits);
 }
@@ -1815,11 +1826,11 @@ SZ_HELPER_AUTO int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
 /** Branchless `value | (bit if condition)`: OR @p bit into @p value when @p condition holds, with
  *  no branch - a mask-select rather than a CMOV, so there is no flag dependency. For threading a
  *  per-window carry signal into a lane mask. */
-SZ_HELPER_AUTO sz_u64_t sz_u64_or_if_(sz_u64_t value, sz_u64_t bit, int condition) {
+STRINGZILLA_HELPER_AUTO sz_u64_t sz_u64_or_if_(sz_u64_t value, sz_u64_t bit, int condition) {
     return value | (bit & ((sz_u64_t)0 - (sz_u64_t)(condition != 0)));
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
+STRINGZILLA_HELPER_AUTO sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 
 /**
  *  @brief Select bits from either @p a or @p b depending on the value of @p mask bits.
@@ -1828,7 +1839,7 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | 
  *
  *  @see Bit Twiddling Hacks by Sean Eron Anderson: https://graphics.stanford.edu/~seander/bithacks.html#ConditionalSetOrClearBitsWithoutBranching
  */
-SZ_HELPER_AUTO sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { return a ^ ((a ^ b) & mask); }
+STRINGZILLA_HELPER_AUTO sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { return a ^ ((a ^ b) & mask); }
 
 /**
  *  @brief Efficiently computing the minimum and maximum of two or three values can be tricky.
@@ -1877,34 +1888,42 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { re
     } while (0)
 
 /** Branchless minimum function for two signed 32-bit integers. */
-SZ_HELPER_AUTO sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
+STRINGZILLA_HELPER_AUTO sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
 
 /** Branchless maximum function for two signed 32-bit integers. */
-SZ_HELPER_AUTO sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
+STRINGZILLA_HELPER_AUTO sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
 
 /*  In AVX-512 we actively use masked operations and the "K mask registers". Producing a mask for
  *  the first N elements of a sequence can be done using the `1 << N - 1` idiom. It, however,
  *  induces undefined behavior if N is 64 or 32 on 64-bit or 32-bit systems respectively.
  *  Alternatively, the BZHI instruction can be used to clear the bits above N. */
-#if SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_SKYLAKE || STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("bmi", "bmi2")
 #endif
-SZ_HELPER_INLINE __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n); }
-SZ_HELPER_INLINE __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n); }
-SZ_HELPER_INLINE __mmask32 sz_u32_mask_until_(sz_size_t n) {
+STRINGZILLA_HELPER_INLINE __mmask8 sz_u8_mask_until_(sz_size_t n) {
+    return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n);
+}
+STRINGZILLA_HELPER_INLINE __mmask16 sz_u16_mask_until_(sz_size_t n) {
+    return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n);
+}
+STRINGZILLA_HELPER_INLINE __mmask32 sz_u32_mask_until_(sz_size_t n) {
     return (__mmask32)_bzhi_u64(0xFFFFFFFFu, (unsigned char)n);
 }
-SZ_HELPER_INLINE __mmask64 sz_u64_mask_until_(sz_size_t n) {
+STRINGZILLA_HELPER_INLINE __mmask64 sz_u64_mask_until_(sz_size_t n) {
     return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, (unsigned char)n);
 }
-SZ_HELPER_AUTO __mmask8 sz_u8_clamp_mask_until_(sz_size_t n) { return n < 8 ? sz_u8_mask_until_(n) : 0xFFu; }
-SZ_HELPER_AUTO __mmask16 sz_u16_clamp_mask_until_(sz_size_t n) { return n < 16 ? sz_u16_mask_until_(n) : 0xFFFFu; }
-SZ_HELPER_AUTO __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) { return n < 32 ? sz_u32_mask_until_(n) : 0xFFFFFFFFu; }
-SZ_HELPER_AUTO __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
+STRINGZILLA_HELPER_AUTO __mmask8 sz_u8_clamp_mask_until_(sz_size_t n) { return n < 8 ? sz_u8_mask_until_(n) : 0xFFu; }
+STRINGZILLA_HELPER_AUTO __mmask16 sz_u16_clamp_mask_until_(sz_size_t n) {
+    return n < 16 ? sz_u16_mask_until_(n) : 0xFFFFu;
+}
+STRINGZILLA_HELPER_AUTO __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) {
+    return n < 32 ? sz_u32_mask_until_(n) : 0xFFFFFFFFu;
+}
+STRINGZILLA_HELPER_AUTO __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
     return n < 64 ? sz_u64_mask_until_(n) : 0xFFFFFFFFFFFFFFFFull;
 }
 #if defined(__clang__)
@@ -1912,13 +1931,13 @@ SZ_HELPER_AUTO __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#endif // STRINGZILLA_TARGET_SKYLAKE || STRINGZILLA_TARGET_ICELAKE
 
 /**
  *  @brief Byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each byte signifies a match.
  */
-SZ_HELPER_AUTO sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+STRINGZILLA_HELPER_AUTO sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
     sz_u64_vec_t result_vec;
     result_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each byte is set.
@@ -1934,7 +1953,7 @@ SZ_HELPER_AUTO sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a_vec, sz_u64_v
  *  indices count from the end, @p end is clamped into the string, and a window with @p start
  *  past @p end, out of range or inverted, is "empty" - exactly when `str.find("")` and
  *  `str.rfind("")` return -1. */
-SZ_HELPER_AUTO sz_bool_t sz_ssize_clamp_interval_checked( //
+STRINGZILLA_HELPER_AUTO sz_bool_t sz_ssize_clamp_interval_checked( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
     sz_ssize_t const signed_length = (sz_ssize_t)length;
     if (start < 0) start += signed_length;
@@ -1953,7 +1972,7 @@ SZ_HELPER_AUTO sz_bool_t sz_ssize_clamp_interval_checked( //
  *  @brief Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
  *  @note Thin wrapper over @ref sz_ssize_clamp_interval_checked for callers ignoring validity.
  */
-SZ_HELPER_AUTO void sz_ssize_clamp_interval( //
+STRINGZILLA_HELPER_AUTO void sz_ssize_clamp_interval( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
     sz_ssize_clamp_interval_checked(length, start, end, normalized_offset, normalized_length);
 }
@@ -1962,7 +1981,7 @@ SZ_HELPER_AUTO void sz_ssize_clamp_interval( //
  *  @brief Compute the logarithm base 2 of a positive integer, rounding down.
  *  @pre Input must be a positive number, as the logarithm of zero is undefined.
  */
-SZ_HELPER_AUTO sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
     sz_assert_(x > 0 && "Non-positive numbers have no defined logarithm");
     int leading_zeros = sz_u64_clz(x);
     return (sz_size_t)(63 - leading_zeros);
@@ -1970,7 +1989,9 @@ SZ_HELPER_AUTO sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
 
 /** Computes the ceiling of @p x divided by @p divisor - the number of chunks of that size needed to
  *  cover @p x. Assumes a non-zero @p divisor and no overflow on `x + divisor`. */
-SZ_HELPER_AUTO sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) { return (x + divisor - 1) / divisor; }
+STRINGZILLA_HELPER_AUTO sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) {
+    return (x + divisor - 1) / divisor;
+}
 
 /**
  *  @brief Compute the smallest power of two greater than or equal to @p x.
@@ -1978,11 +1999,11 @@ SZ_HELPER_AUTO sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor)
  *      bit_ceil(1) = 1.
  *  @see Rounding up to a power of two: https://stackoverflow.com/a/10143264
  */
-SZ_HELPER_AUTO sz_size_t sz_size_bit_ceil(sz_size_t x) {
+STRINGZILLA_HELPER_AUTO sz_size_t sz_size_bit_ceil(sz_size_t x) {
 #if defined(__LZCNT__) || defined(__BMI__)
     // Edge cases: 0 and 1 return themselves, avoids undefined clz(0).
     if (x <= 1) return x;
-#if SZ_IS_64BIT_
+#if STRINGZILLA_ARCH_64BIT_
     return (sz_size_t)1 << (64 - sz_u64_clz(x - 1));
 #else
     return (sz_size_t)1 << (32 - sz_u32_clz((sz_u32_t)(x - 1)));
@@ -1995,7 +2016,7 @@ SZ_HELPER_AUTO sz_size_t sz_size_bit_ceil(sz_size_t x) {
     x |= x >> 4;
     x |= x >> 8;
     x |= x >> 16;
-#if SZ_IS_64BIT_
+#if STRINGZILLA_ARCH_64BIT_
     x |= x >> 32;
 #endif
     x++;
@@ -2012,7 +2033,7 @@ SZ_HELPER_AUTO sz_size_t sz_size_bit_ceil(sz_size_t x) {
  *  @see Flipping, Mirroring and Rotating: https://www.chessprogramming.org/Flipping_Mirroring_and_Rotating
  *  @see Transposing a bit matrix: https://lukas-prokop.at/articles/2021-07-23-transpose
  */
-SZ_HELPER_AUTO sz_u64_t sz_u64_transpose(sz_u64_t x) {
+STRINGZILLA_HELPER_AUTO sz_u64_t sz_u64_transpose(sz_u64_t x) {
     sz_u64_t t;
     t = x ^ (x << 36);
     x ^= 0xf0f0f0f00f0f0f0full & (t ^ (x >> 36));
@@ -2024,8 +2045,8 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_transpose(sz_u64_t x) {
 }
 
 /** Load a 16-bit unsigned integer from a potentially unaligned pointer, slow on some platforms. */
-SZ_HELPER_INLINE sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
-#if !SZ_USE_MISALIGNED_LOADS
+STRINGZILLA_HELPER_INLINE sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     sz_u16_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
     result_vec.u8s[1] = ptr[1];
@@ -2043,8 +2064,8 @@ SZ_HELPER_INLINE sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 }
 
 /** Load a 32-bit unsigned integer from a potentially unaligned pointer, slow on some platforms. */
-SZ_HELPER_INLINE sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
-#if !SZ_USE_MISALIGNED_LOADS
+STRINGZILLA_HELPER_INLINE sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     sz_u32_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
     result_vec.u8s[1] = ptr[1];
@@ -2064,8 +2085,8 @@ SZ_HELPER_INLINE sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 }
 
 /** Load a 64-bit unsigned integer from a potentially unaligned pointer, slow on some platforms. */
-SZ_HELPER_INLINE sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
-#if !SZ_USE_MISALIGNED_LOADS
+STRINGZILLA_HELPER_INLINE sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     sz_u64_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
     result_vec.u8s[1] = ptr[1];
@@ -2089,8 +2110,8 @@ SZ_HELPER_INLINE sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 }
 
 /** Store a 16-bit unsigned integer to a potentially unaligned pointer, slow on some platforms. */
-SZ_HELPER_INLINE void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
-#if !SZ_USE_MISALIGNED_LOADS
+STRINGZILLA_HELPER_INLINE void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     sz_u16_vec_t vec;
     vec.u16 = value;
     ptr[0] = vec.u8s[0];
@@ -2108,8 +2129,8 @@ SZ_HELPER_INLINE void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
 }
 
 /** Store a 32-bit unsigned integer to a potentially unaligned pointer, slow on some platforms. */
-SZ_HELPER_INLINE void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
-#if !SZ_USE_MISALIGNED_LOADS
+STRINGZILLA_HELPER_INLINE void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     sz_u32_vec_t vec;
     vec.u32 = value;
     ptr[0] = vec.u8s[0];
@@ -2129,8 +2150,8 @@ SZ_HELPER_INLINE void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
 }
 
 /** Store a 64-bit unsigned integer to a potentially unaligned pointer, slow on some platforms. */
-SZ_HELPER_INLINE void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
-#if !SZ_USE_MISALIGNED_LOADS
+STRINGZILLA_HELPER_INLINE void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
+#if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
     sz_u64_vec_t vec;
     vec.u64 = value;
     ptr[0] = vec.u8s[0];
@@ -2163,20 +2184,20 @@ enum { sz_memory_alignment_k = 64 };
  *  own buffer is: pass one aligned to 64 and every block is, and a malloc'd buffer still carries
  *  its own guarantee.
  */
-SZ_HELPER_AUTO sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
+STRINGZILLA_HELPER_AUTO sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
 
     sz_size_t const capacity = *(sz_size_t *)handle;
     sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
     sz_size_t const aligned_capacity =
         (consumed_capacity + sz_memory_alignment_k - 1) & ~(sz_size_t)(sz_memory_alignment_k - 1);
-    if (aligned_capacity + length > capacity) return SZ_NULL_CHAR;
+    if (aligned_capacity + length > capacity) return STRINGZILLA_NULL_CHAR;
     // Increase the consumed capacity.
     *((sz_size_t *)handle + 1) = aligned_capacity + length;
     return (sz_ptr_t)handle + aligned_capacity;
 }
 
 /** Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
-SZ_HELPER_AUTO void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle) {
+STRINGZILLA_HELPER_AUTO void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle) {
     sz_unused_(start && length && handle);
 }
 
@@ -2187,34 +2208,35 @@ SZ_HELPER_AUTO void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void
 
 #pragma region Serial Implementation
 
-#if !SZ_AVOID_LIBC
+#if STRINGZILLA_WITH_LIBC
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 
-SZ_API_COMPTIME void *sz_memory_allocate_default_(sz_size_t length, void *handle) {
+STRINGZILLA_API_COMPTIME void *sz_memory_allocate_default_(sz_size_t length, void *handle) {
     sz_unused_(handle);
-    if (length == 0) return SZ_NULL;
+    if (length == 0) return STRINGZILLA_NULL;
     return malloc(length);
 }
-SZ_API_COMPTIME void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle) {
+STRINGZILLA_API_COMPTIME void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle) {
     sz_unused_(handle && length);
     free(start);
 }
 
 #endif
 
-SZ_API_COMPTIME void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator) {
-#if !SZ_AVOID_LIBC
+STRINGZILLA_API_COMPTIME void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator) {
+#if STRINGZILLA_WITH_LIBC
     allocator->allocate = (sz_memory_allocate_t)sz_memory_allocate_default_;
     allocator->free = (sz_memory_free_t)sz_memory_free_default_;
 #else
-    allocator->allocate = (sz_memory_allocate_t)SZ_NULL;
-    allocator->free = (sz_memory_free_t)SZ_NULL;
+    allocator->allocate = (sz_memory_allocate_t)STRINGZILLA_NULL;
+    allocator->free = (sz_memory_free_t)STRINGZILLA_NULL;
 #endif
-    allocator->handle = SZ_NULL;
+    allocator->handle = STRINGZILLA_NULL;
 }
 
-SZ_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer,
+                                                             sz_size_t length) {
     // The logic here is simple - put the buffer capacity in the first slots of the buffer.
     // The second slot is used to store the current consumed capacity.
     // The rest of the buffer is used for the actual data.
@@ -2226,45 +2248,48 @@ SZ_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc
     pointer[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
-SZ_API_COMPTIME sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b) {
+STRINGZILLA_API_COMPTIME sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a,
+                                                             sz_memory_allocator_t const *b) {
     if (!a || !b) return sz_false_k;
 
     // Two allocators are considered equal if they have the same function pointers and handle
     return (a->allocate == b->allocate) && (a->free == b->free) && (a->handle == b->handle) ? sz_true_k : sz_false_k;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_sequence_from_null_terminated_strings_get_start_(void const *handle, sz_size_t i) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_sequence_from_null_terminated_strings_get_start_(void const *handle,
+                                                                                       sz_size_t i) {
     sz_cptr_t const *start = (sz_cptr_t const *)handle;
     return start[i];
 }
 
-SZ_API_COMPTIME sz_size_t sz_sequence_from_null_terminated_strings_get_length_(void const *handle, sz_size_t i) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_sequence_from_null_terminated_strings_get_length_(void const *handle,
+                                                                                        sz_size_t i) {
     sz_cptr_t const *start = (sz_cptr_t const *)handle;
     sz_size_t length = 0;
     for (sz_cptr_t ptr = start[i]; *ptr; ptr++) length++;
     return length;
 }
 
-SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
-                                                              sz_sequence_t *sequence) {
+STRINGZILLA_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
+                                                                       sz_sequence_t *sequence) {
     sequence->handle = start;
     sequence->count = count;
     sequence->get_start = sz_sequence_from_null_terminated_strings_get_start_;
     sequence->get_length = sz_sequence_from_null_terminated_strings_get_length_;
 }
 
-SZ_API_COMPTIME sz_cptr_t sz_sequence_from_string_views_get_start_(void const *handle, sz_size_t i) {
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_sequence_from_string_views_get_start_(void const *handle, sz_size_t i) {
     sz_string_view_t const *views = (sz_string_view_t const *)handle;
     return views[i].start;
 }
 
-SZ_API_COMPTIME sz_size_t sz_sequence_from_string_views_get_length_(void const *handle, sz_size_t i) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_sequence_from_string_views_get_length_(void const *handle, sz_size_t i) {
     sz_string_view_t const *views = (sz_string_view_t const *)handle;
     return views[i].length;
 }
 
-SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
-                                                   sz_sequence_t *sequence) {
+STRINGZILLA_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                            sz_sequence_t *sequence) {
     sequence->handle = views;
     sequence->count = count;
     sequence->get_start = sz_sequence_from_string_views_get_start_;

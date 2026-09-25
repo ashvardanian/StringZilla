@@ -11,10 +11,10 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 #include <cstddef> // `std::size_t`
 
@@ -22,9 +22,9 @@
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include <fmt/format.h>
+#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `harness.hpp`)
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `stringzilla.hpp`)
+using namespace sz::test;
 
 #pragma region Unit
 
@@ -43,24 +43,22 @@ static utf8_unit_case_t const utf8_linebreaks_unit_cases[] = {
  *  drivers all iterate this one ladder so their ISA coverage stays in lockstep. */
 static utf8_segment_backend_t const utf8_linebreaks_backends[] = {
     {"dispatched", sz_utf8_linebreaks},
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     {"haswell", sz_utf8_linebreaks_haswell},
 #endif
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     {"icelake", sz_utf8_linebreaks_icelake},
 #endif
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
     {"neon", sz_utf8_linebreaks_neon},
 #endif
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
     {"sve2", sz_utf8_linebreaks_sve2},
 #endif
 };
 
 /** Known-answer line-break vectors via dispatched, serial, each ISA, and the C++ range. */
 void test_utf8_linebreaks_unit() {
-    fmt::println("  - testing UTF-8 line-break known-answer vectors...");
-
     check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends)
         check_utf8_segment_unit_("linewrap", backend.finder, span_over(utf8_linebreaks_unit_cases));
@@ -196,8 +194,6 @@ static utf8_segment_corpora_t utf8_linebreaks_corpora_() {
 
 /** Rule-coverage gate: every LB rule motif runs and agrees serial-vs-ISA at window phases. */
 void test_utf8_linebreaks_rules() {
-    fmt::println("  - testing UTF-8 line-break rule-coverage matrix...");
-
     // One motif per UAX-14 Line_Break rule, tagged with the direction it demonstrates; rules with both senses also
     // carry an opposite-direction motif (the gate compares serial-vs-ISA on every motif).
     utf8_rule_case_t const rule_cases[] = {
@@ -260,12 +256,10 @@ void test_utf8_linebreaks_rules() {
 #pragma region Safety
 
 /** Malformed-input safety of the UTF-8 line kernels (serial / dispatched / icelake). */
-void test_utf8_linebreaks_safety() {
-    fmt::println("  - testing malformed-input safety of UTF-8 line kernels...");
+void test_utf8_linebreaks_safety(test_context_t &context) {
     utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_linebreaks_serial}};
-    check_utf8_segment_safety_("linewrap", span_over(serial_only));
-    check_utf8_segment_safety_("linewrap", span_over(utf8_linebreaks_backends));
-    fmt::println("    linewrap safety passed!");
+    check_utf8_segment_safety_(context, "linewrap", span_over(serial_only));
+    check_utf8_segment_safety_(context, "linewrap", span_over(utf8_linebreaks_backends));
 }
 
 #pragma endregion Safety
@@ -273,10 +267,10 @@ void test_utf8_linebreaks_safety() {
 #pragma region Drivers
 
 /** Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
-void test_utf8_linebreaks_all() {
+void test_utf8_linebreaks_all(test_context_t &context) {
     utf8_segment_corpora_t const corpora = utf8_linebreaks_corpora_();
-    check_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
-                                    scale_iterations(25)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(context, sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
+                                    context.iterations(25)); // This family's share of the suite budget
 }
 
 #pragma endregion Drivers

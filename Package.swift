@@ -49,9 +49,9 @@ let package = Package(
             // CMake, Rust, and Python builds.
             publicHeadersPath: "include",
             cSettings: [
-                .define("SZ_DYNAMIC_DISPATCH", to: "1"),
-                .define("SZ_AVOID_LIBC", to: "0"),
-                .define("SZ_DEBUG", to: "0"),
+                .define("STRINGZILLA_RUNTIME_DISPATCH", to: "1"),
+                .define("STRINGZILLA_WITH_LIBC", to: "1"),
+                .define("STRINGZILLA_DEBUG", to: "0"),
                 .unsafeFlags(["-Wall"]),
             ]
         ),

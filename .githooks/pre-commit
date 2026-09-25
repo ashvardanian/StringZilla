@@ -1853,8 +1853,10 @@ check_abbreviations_spelled_out() {
 # restitches unpinned fragments into a staircase.
 check_split_string_literal_pinned() {
     local unpinned
-    unpinned=$(printf '%s\n' "$staged_added_text" | awk '
-        previous ~ /"[[:space:]]*$/ && previous !~ /\/\/[[:space:]]*$/ && $0 ~ /^\+[[:space:]]*"/ { print NR ": " previous }
+    unpinned=$(printf '%s\n' "$staged_file_text" | added_list="$staged_added_line_numbers_list" awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        (FNR in added) && ((FNR - 1) in added) && previous ~ /"[[:space:]]*$/ && previous !~ /\/\/[[:space:]]*$/ &&
+            $0 ~ /^[[:space:]]*"/ { print FNR - 1 ": " previous }
         { previous = $0 }' || true)
     [ -z "$unpinned" ] || reject_with_reason "$unpinned" \
         "$staged_path splits a string literal without a trailing \`//\` pin;" \
@@ -1953,11 +1955,17 @@ check_rust_macros_absent() {
         "$staged_path adds a \`macro_rules!\`;" "            write each impl out explicitly instead:"
 }
 
-# Rejects list mutation and self-referencing `set`, because a variable is written once.
+# Rejects list mutation and self-referencing `set`, because a variable is written once. A `foreach` may
+# still append to the list it builds, since CMake has no way to map a list in one `set`.
 check_cmake_variable_written_once() {
     local mutated
-    mutated=$(printf '%s\n' "$staged_added_text" | sed -E 's,#.*$,,' |
-        grep -nE '^\+[[:space:]]*(list[[:space:]]*\([[:space:]]*(APPEND|PREPEND|INSERT|REMOVE_ITEM|REMOVE_AT|REMOVE_DUPLICATES|TRANSFORM|FILTER)[[:space:]]|set[[:space:]]*\([[:space:]]*([A-Za-z0-9_]+)[[:space:]].*\$\{\3\})' || true)
+    mutated=$(printf '%s\n' "$staged_file_text" | sed -E 's,#.*$,,' |
+        added_list="$staged_added_line_numbers_list" awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        /^[[:space:]]*foreach[[:space:]]*\(/ { ++loops }
+        /^[[:space:]]*endforeach[[:space:]]*\(/ { --loops }
+        (FNR in added) && !(loops > 0 && /^[[:space:]]*list[[:space:]]*\([[:space:]]*APPEND[[:space:]]/) { print FNR ":" $0 }' |
+        grep -E '^[0-9]+:[[:space:]]*(list[[:space:]]*\([[:space:]]*(APPEND|PREPEND|INSERT|REMOVE_ITEM|REMOVE_AT|REMOVE_DUPLICATES|TRANSFORM|FILTER)[[:space:]]|set[[:space:]]*\([[:space:]]*([A-Za-z0-9_]+)[[:space:]].*\$\{\3\})' || true)
     [ -z "$mutated" ] || reject_with_reason "$mutated" \
         "$staged_path mutates a variable after defining it;" \
         "            define it once, and select per-configuration items with generator expressions:"
@@ -2563,13 +2571,13 @@ check_cuda_headers_stay_c() {
 # and MSVC rejects the mismatched pair as C2375.
 check_binding_exports_absent() {
     local exported
-    exported=$(added_code_text | grep -E '^\+[[:space:]]*(SZ_API_RUNTIME|SZ_PUBLIC|SZ_DYNAMIC)[[:space:]]' || true)
+    exported=$(added_code_text | grep -E '^\+[[:space:]]*STRINGZILLA_API_RUNTIME[[:space:]]' || true)
     [ -z "$exported" ] || reject_with_reason "$exported" \
         "$staged_path exports a binding-internal definition; drop the macro, the module exports only its init:"
 }
 
 # Rejects `assert` and `sz_assert_` in test/, because the Release configs CI tests with compile both out;
-# `verify`, `let_verify`, `scope_verify` and `throws_verify` from test/stringzilla.hpp never are.
+# `verify`, `let_verify`, `scope_verify` and `throws_verify` from test/harness.hpp never are.
 check_test_oracle_never_compiled_out() {
     local asserts
     asserts=$(added_code_text | grep -E '(^|[^A-Za-z0-9_])(assert|sz_assert_)[[:space:]]*\(' || true)
@@ -2577,7 +2585,7 @@ check_test_oracle_never_compiled_out() {
         "$staged_path asserts in a test, which Release builds compile out; use verify or its kin:"
 }
 
-# Rejects `verify(saw_...)` over a randomized sweep, because a low SZ_TESTS_MULTIPLIER turns the coverage
+# Rejects `verify(saw_...)` over a randomized sweep, because a low STRINGZILLA_SCALE turns the coverage
 # claim into a coin flip; walk the pool deterministically, or pin an exact claim with `// sz-nolint: coverage`.
 check_coverage_verify_pinned() {
     local coverage
@@ -2585,6 +2593,18 @@ check_coverage_verify_pinned() {
         grep -v 'sz-nolint: coverage' || true)
     [ -z "$coverage" ] || reject_with_reason "$coverage" \
         "$staged_path asserts coverage over a randomized sweep; walk the pool, or pin it with // sz-nolint: coverage:"
+}
+
+# Rejects a print to stdout in a test body: the harness owns stdout, and a test only reports failures to
+# stderr, so a passing run reads the same in every sibling.
+check_test_bodies_quiet() {
+    local prints
+    prints=$(printf '%s\n' "$staged_added_text" | blank_c_comments_preserving_columns |
+        grep -nE '\b(print_line|fmt::println|fmt::print|printf|puts)[[:space:]]*\(|\bstd::cout\b|\bfprintf[[:space:]]*\([[:space:]]*stdout\b' |
+        grep -vE '\([[:space:]]*stderr\b' || true)
+    [ -z "$prints" ] || reject_with_reason "$prints" \
+        "$staged_path prints to stdout from a test body; report failures to stderr and leave progress" \
+        "            to the harness:"
 }
 
 # Rejects raw CUDA memory calls in test/ and bench/, because `unified_vector`, `device_vector`,
@@ -2596,7 +2616,7 @@ check_cuda_memory_through_scaffolding() {
         grep -vE 'cudaFree[[:space:]]*\([[:space:]]*(0|NULL|nullptr)[[:space:]]*\)' || true)
     [ -z "$raw" ] || reject_with_reason "$raw" \
         "$staged_path manages CUDA memory by hand; use unified_vector, device_vector, pinned_vector or" \
-        "            unified_memory_allocator() from test/stringzilla.hpp:"
+        "            unified_memory_allocator() from test/harness.hpp:"
 }
 
 # Rejects a releasing destructor in test/ and bench/, because such a struct stays copyable, and the
@@ -2609,35 +2629,35 @@ check_test_destructors_own_nothing() {
         "$staged_path releases memory in a destructor; hold the storage in a container with its own copy control:"
 }
 
-# Rejects a redefinition of the shared C++ scaffolding outside test/stringzilla.hpp, because every test and
+# Rejects a redefinition of the shared C++ scaffolding outside test/harness.hpp, because every test and
 # bench opens its namespace, so a file-scope alias turns ambiguous.
 check_cpp_scaffolding_in_one_header() {
     local redefined
     redefined=$(added_code_text |
         grep -E 'using[[:space:]]+(unified|pinned|device)_vector[[:space:]]*=|using[[:space:]]+arrow_strings_tape_t[[:space:]]*=|(unified|pinned|device)_alloc<[^>]*>[[:space:]]*\{[[:space:]]*\}[[:space:]]*\.[[:space:]]*(allocate|deallocate)' || true)
     [ -z "$redefined" ] || reject_with_reason "$redefined" \
-        "$staged_path redefines scaffolding test/stringzilla.hpp owns; extend that header instead:"
+        "$staged_path redefines scaffolding test/harness.hpp owns; extend that header instead:"
 }
 
 # Rejects a redefinition of the shared Python test scaffolding, because corpora, seeds, the iteration
-# multiplier and the backend sweep live once, in test/sz_helpers.py, test/utf8_helpers.py and test/conftest.py.
+# multiplier and the backend sweep live once, in test/helpers.py, test/utf8_helpers.py and test/conftest.py.
 check_python_scaffolding_in_helpers() {
     local redefined
     redefined=$(printf '%s\n' "$staged_added_text" |
         grep -E '^\+(def (vector_width_bracketing_strings|malformed_utf8_corpus|boundary_strings|differential_bodies|get_random_string|is_equal_strings|seed_random_generators|scale_iterations|unaligned_views|run_across_backends|assert_backends_agree|run_across_engines|assert_engines_agree|device_scope_and_capabilities|generate_string_batches|capability_sweep|forced_capabilities)\(|(SEED_VALUES|ITERATIONS_MULTIPLIER)[[:space:]]*=)' || true)
     [ -z "$redefined" ] || reject_with_reason "$redefined" \
-        "$staged_path redefines shared test scaffolding; import it from test/sz_helpers.py:"
+        "$staged_path redefines shared test scaffolding; import it from test/helpers.py:"
 }
 
-# Rejects a seeded test over a literal list, because SEED_VALUES carries the per-run seed and SZ_TESTS_SEED.
+# Rejects a seeded test over a literal list, because SEED_VALUES carries the per-run seed and STRINGZILLA_SEED.
 check_seed_values_parametrized() {
     local literal
     literal=$(printf '%s\n' "$staged_added_text" | grep -E 'parametrize\(.*"seed_value".*,[[:space:]]*\[' || true)
     [ -z "$literal" ] || reject_with_reason "$literal" \
-        "$staged_path parametrizes seed_value over a literal list; use test.sz_helpers.SEED_VALUES:"
+        "$staged_path parametrizes seed_value over a literal list; use test.helpers.SEED_VALUES:"
 }
 
-# Rejects a fuzz loop with a fixed count, because every random draw scales with SZ_TESTS_MULTIPLIER.
+# Rejects a fuzz loop with a fixed count, because every random draw scales with STRINGZILLA_SCALE.
 check_fuzz_loops_scaled() {
     local frozen
     frozen=$(printf '%s\n' "$staged_added_text" | grep -E 'for _ in range\([0-9]' || true)
@@ -2645,14 +2665,38 @@ check_fuzz_loops_scaled() {
         "$staged_path freezes a fuzz-loop count; write for _ in range(scale_iterations(N)):"
 }
 
+# Rejects the retired `SZ_` prefix on an all-caps name, because every macro, CMake variable and environment
+# variable spells out the full `STRINGZILLA_`; lowercase `sz_` symbols keep theirs.
+check_retired_prefix_absent() {
+    local retired
+    retired=$(printf '%s\n' "$staged_added_text" | grep -E '(^|[^A-Za-z0-9_]|-D)SZ_[A-Z0-9]' || true)
+    [ -z "$retired" ] || reject_with_reason "$retired" \
+        "$staged_path spells the retired SZ_ prefix; write the full STRINGZILLA_:"
+}
+
+# Rejects a positive `defined(...)` or `#ifdef` of an architecture, OS or toolchain fact, because each is
+# always defined as 0 or 1 and `defined` is true on every platform; `!defined` and `#ifndef` guards pass.
+check_facts_tested_by_value() {
+    local tested
+    tested=$(added_code_text |
+        grep -E '(^|[^!A-Za-z0-9_])defined[[:space:]]*\(?[[:space:]]*STRINGZILLA_(ARCH|OS|HAS)_|#[[:space:]]*ifdef[[:space:]]+STRINGZILLA_(ARCH|OS|HAS)_' || true)
+    [ -z "$tested" ] || reject_with_reason "$tested" \
+        "$staged_path tests an always-defined STRINGZILLA_ARCH_, _OS_ or _HAS_ fact with defined; use #if:"
+}
+
 # Routes one staged file through the checks only StringZilla has.
 run_project_checks() {
+    case "$staged_path" in
+    CHANGELOG*) ;;
+    *) check_retired_prefix_absent ;;
+    esac
     case "$staged_path" in
     *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh)
         check_iterator_address_not_laundered
         check_pointer_not_cast_through_integer
         check_call_result_not_indexed
         check_iostreams_absent
+        check_facts_tested_by_value
         ;;
     esac
     case "$staged_path" in
@@ -2685,16 +2729,20 @@ run_project_checks() {
         ;;
     esac
     case "$staged_path" in
+    test/harness.hpp | test/main.cpp | test/main.cu) ;;
+    test/*.cpp | test/*.hpp | test/*.cu) check_test_bodies_quiet ;;
+    esac
+    case "$staged_path" in
     test/*.cu | test/*.cuh | bench/*.cu | bench/*.cuh) check_cuda_memory_through_scaffolding ;;
     esac
     case "$staged_path" in
     test/*.cpp | test/*.hpp | test/*.cu | test/*.cuh | bench/*.cpp | bench/*.hpp | bench/*.cu | bench/*.cuh)
         check_test_destructors_own_nothing
-        [ "$staged_path" = test/stringzilla.hpp ] || check_cpp_scaffolding_in_one_header
+        [ "$staged_path" = test/harness.hpp ] || check_cpp_scaffolding_in_one_header
         ;;
     esac
     case "$staged_path" in
-    test/sz_helpers.py | test/utf8_helpers.py | test/conftest.py) ;;
+    test/helpers.py | test/utf8_helpers.py | test/conftest.py) ;;
     test/*.py) check_python_scaffolding_in_helpers ;;
     esac
     case "$staged_path" in

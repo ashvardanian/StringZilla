@@ -18,7 +18,7 @@ Run:
     uv pip install pycryptodome  # Optional, unlocks the third-party differential
     uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -m pytest test/cipher.py -q
-    SZ_TESTS_SEED=42 SZ_TESTS_MULTIPLIER=10 uv run --no-project python -m pytest test/cipher.py -q
+    STRINGZILLA_SEED=42 STRINGZILLA_SCALE=10 uv run --no-project python -m pytest test/cipher.py -q
 
 File: test/cipher.py
 Author: Ash Vardanian
@@ -29,7 +29,7 @@ import pytest
 
 import stringzilla as sz
 
-from test.sz_helpers import (
+from test.helpers import (
     SEED_VALUES,
     VECTOR_WIDTH_LENGTHS,
     assert_backends_agree,

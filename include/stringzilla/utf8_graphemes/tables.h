@@ -662,7 +662,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_leaf_[2624] = {
 #pragma endregion Grapheme_Break tables
 
 #pragma region Haswell AVX2 nibble cascade descriptor tables
-#if SZ_USE_HASWELL || SZ_USE_NEON
+#if STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
 
 /**
  *  @brief SIMD descriptor tables mapping a codepoint to its packed Grapheme_Cluster_Break
@@ -896,11 +896,11 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage4_groups_[2816] 
     0,  0,  0,
 };
 
-#endif // SZ_USE_HASWELL || SZ_USE_NEON
+#endif // STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
 #pragma endregion Haswell AVX2 nibble cascade descriptor tables
 
 #pragma region Flat BMP classifier tables
-#if SZ_USE_HASWELL || SZ_USE_NEON
+#if STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
 // clang-format off
 
 /**
@@ -1804,7 +1804,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_flat_bmp_[13888] = {
 };
 
 // clang-format on
-#endif // SZ_USE_HASWELL || SZ_USE_NEON
+#endif // STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
 #pragma endregion Flat BMP classifier tables
 
 #ifdef __cplusplus

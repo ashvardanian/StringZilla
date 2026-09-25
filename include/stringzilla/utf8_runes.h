@@ -31,7 +31,7 @@ extern "C" {
  *  @param[in] length Number of bytes in the string.
  *  @return Number of UTF-8 characters in the string.
  */
-SZ_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Skip forward to the Nth UTF-8 character.
@@ -57,7 +57,7 @@ SZ_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
  *  @param[in] n Number of UTF-8 characters to skip, 0-indexed, so `n = 0` returns @p text.
  *  @return Pointer to the Nth character, or NULL if the string has fewer than @p n characters.
  */
-SZ_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n);
 
 /**
  *  @brief Unpack a UTF-8 string into UTF-32 codepoints.
@@ -96,9 +96,9 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_
  *  @param[out] runes_unpacked Number of runes unpacked.
  *  @return Pointer to the byte after the last unpacked byte in @p text (the resume cursor).
  */
-SZ_API_RUNTIME sz_cptr_t sz_utf8_decode(        //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_utf8_decode( //
+    sz_cptr_t text, sz_size_t length,             //
+    sz_rune_t *runes, sz_size_t runes_capacity,   //
     sz_size_t *runes_unpacked);
 
 #pragma endregion
@@ -106,107 +106,107 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_decode(        //
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_serial( //
-    sz_cptr_t text, sz_size_t length,            //
-    sz_rune_t *runes, sz_size_t runes_capacity,  //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_serial( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_rune_t *runes, sz_size_t runes_capacity,           //
     sz_size_t *runes_unpacked);
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
-    sz_cptr_t text, sz_size_t length,             //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
+    sz_cptr_t text, sz_size_t length,                      //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_icelake( //
-    sz_cptr_t text, sz_size_t length,             //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_icelake( //
+    sz_cptr_t text, sz_size_t length,                      //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_neon( //
-    sz_cptr_t text, sz_size_t length,          //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_neon( //
+    sz_cptr_t text, sz_size_t length,                   //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
-#if SZ_USE_SVE2
+#if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2( //
-    sz_cptr_t text, sz_size_t length,          //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2( //
+    sz_cptr_t text, sz_size_t length,                   //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_v128( //
-    sz_cptr_t text, sz_size_t length,          //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_v128( //
+    sz_cptr_t text, sz_size_t length,                   //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv( //
-    sz_cptr_t text, sz_size_t length,         //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv( //
+    sz_cptr_t text, sz_size_t length,                  //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx( //
-    sz_cptr_t text, sz_size_t length,          //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx( //
+    sz_cptr_t text, sz_size_t length,                   //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_count */
-SZ_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n);
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
-    sz_cptr_t text, sz_size_t length,              //
+STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
+    sz_cptr_t text, sz_size_t length,                       //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
@@ -226,80 +226,80 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_utf8_count_v128relaxed(text, length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_utf8_count_v128(text, length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_count_rvv(text, length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_count_lasx(text, length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_count_powervsx(text, length);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_count_icelake(text, length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_count_haswell(text, length);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_count_sve2(text, length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_count_neon(text, length);
 #else
     return sz_utf8_count_serial(text, length);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_utf8_seek_v128relaxed(text, length, n);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_utf8_seek_v128(text, length, n);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_seek_rvv(text, length, n);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_seek_lasx(text, length, n);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_seek_powervsx(text, length, n);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_seek_icelake(text, length, n);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_seek_haswell(text, length, n);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_seek_sve2(text, length, n);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_seek_neon(text, length, n);
 #else
     return sz_utf8_seek_serial(text, length, n);
 #endif
 }
 
-SZ_API_RUNTIME sz_cptr_t sz_utf8_decode(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
-                                        sz_size_t *runes_unpacked) {
-#if SZ_USE_V128
+STRINGZILLA_API_RUNTIME sz_cptr_t sz_utf8_decode(sz_cptr_t text, sz_size_t length, sz_rune_t *runes,
+                                                 sz_size_t runes_capacity, sz_size_t *runes_unpacked) {
+#if STRINGZILLA_TARGET_V128
     return sz_utf8_decode_v128(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_utf8_decode_rvv(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_utf8_decode_lasx(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_utf8_decode_powervsx(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_ICELAKE
+#elif STRINGZILLA_TARGET_ICELAKE
     return sz_utf8_decode_icelake(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_utf8_decode_haswell(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_SVE2
+#elif STRINGZILLA_TARGET_SVE2
     return sz_utf8_decode_sve2(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_utf8_decode_neon(text, length, runes, runes_capacity, runes_unpacked);
 #else
     return sz_utf8_decode_serial(text, length, runes, runes_capacity, runes_unpacked);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 
 #pragma endregion
 

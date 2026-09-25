@@ -46,12 +46,13 @@ extern "C" {
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_equal_serial, sz_equal_westmere, sz_equal_haswell, sz_equal_skylake,
  *      sz_equal_neon, sz_equal_sve, sz_equal_v128, sz_equal_v128relaxed, sz_equal_rvv,
  *      sz_equal_lasx, sz_equal_powervsx
  */
-SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /**
  *  @brief Compares two strings lexicographically, like @c memcmp in LibC.
@@ -80,107 +81,114 @@ SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on @c SZ_DYNAMIC_DISPATCH.
+ *  @note Selects the fastest backend at compile- or run-time based on
+ *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_order_serial, sz_order_westmere, sz_order_haswell, sz_order_skylake,
  *      sz_order_neon, sz_order_sve, sz_order_v128, sz_order_v128relaxed, sz_order_rvv,
  *      sz_order_lasx, sz_order_powervsx
  */
-SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                       sz_size_t b_length);
 
-#if SZ_USE_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                         sz_size_t b_length);
 #endif
 
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                        sz_size_t b_length);
 #endif
 
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                        sz_size_t b_length);
 #endif
 
-#if SZ_USE_NEON
+#if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
-#if SZ_USE_SVE
+#if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
-#if SZ_USE_V128RELAXED
+#if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                            sz_size_t b_length);
 #endif
 
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 
 /** @copydoc sz_equal */
-SZ_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /** @copydoc sz_order */
-SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                         sz_size_t b_length);
 #endif
 
 #pragma endregion Core API
@@ -198,59 +206,59 @@ SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length,
 #include "stringzilla/compare/powervsx.h"
 
 /*  Pick the right implementation for the comparison kernels. To override this behavior and
- *  precompile all backends - set @c SZ_DYNAMIC_DISPATCH to 1. */
+ *  precompile all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
+#if !STRINGZILLA_RUNTIME_DISPATCH
 
-SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_equal_v128relaxed(a, b, length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_equal_v128(a, b, length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_equal_rvv(a, b, length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_equal_lasx(a, b, length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_equal_powervsx(a, b, length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_equal_skylake(a, b, length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_equal_haswell(a, b, length);
-#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
     return sz_equal_sve(a, b, length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_equal_neon(a, b, length);
 #else
     return sz_equal_serial(a, b, length);
 #endif
 }
 
-SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-#if SZ_USE_V128RELAXED
+STRINGZILLA_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+#if STRINGZILLA_TARGET_V128RELAXED
     return sz_order_v128relaxed(a, a_length, b, b_length);
-#elif SZ_USE_V128
+#elif STRINGZILLA_TARGET_V128
     return sz_order_v128(a, a_length, b, b_length);
-#elif SZ_USE_RVV
+#elif STRINGZILLA_TARGET_RVV
     return sz_order_rvv(a, a_length, b, b_length);
-#elif SZ_USE_LASX
+#elif STRINGZILLA_TARGET_LASX
     return sz_order_lasx(a, a_length, b, b_length);
-#elif SZ_USE_POWERVSX
+#elif STRINGZILLA_TARGET_POWERVSX
     return sz_order_powervsx(a, a_length, b, b_length);
-#elif SZ_USE_SKYLAKE
+#elif STRINGZILLA_TARGET_SKYLAKE
     return sz_order_skylake(a, a_length, b, b_length);
-#elif SZ_USE_HASWELL
+#elif STRINGZILLA_TARGET_HASWELL
     return sz_order_haswell(a, a_length, b, b_length);
-#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
+#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
     return sz_order_sve(a, a_length, b, b_length);
-#elif SZ_USE_NEON
+#elif STRINGZILLA_TARGET_NEON
     return sz_order_neon(a, a_length, b, b_length);
 #else
     return sz_order_serial(a, a_length, b, b_length);
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
+#endif // !STRINGZILLA_RUNTIME_DISPATCH
 #pragma endregion Compile Time Dispatching
 
 #ifdef __cplusplus

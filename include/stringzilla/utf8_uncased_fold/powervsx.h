@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -23,8 +23,8 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx(sz_cptr_t source, sz_size_t source_length,
-                                                        sz_ptr_t destination) {
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx(sz_cptr_t source, sz_size_t source_length,
+                                                                 sz_ptr_t destination) {
     return sz_utf8_uncased_fold_serial(source, source_length, destination);
 }
 
@@ -33,7 +33,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx(sz_cptr_t source, sz_siz
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_POWERVSX
+#endif // STRINGZILLA_TARGET_POWERVSX
 
 #ifdef __cplusplus
 }

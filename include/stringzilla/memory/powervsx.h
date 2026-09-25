@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if SZ_USE_POWERVSX
+#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,13 +24,13 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-SZ_API_COMPTIME void sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     for (; length >= 16; target += 16, source += 16, length -= 16)
         vec_xst(vec_xl(0, (unsigned char const *)source), 0, (unsigned char *)target);
     if (length) sz_copy_serial(target, source, length);
 }
 
-SZ_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target < source || target >= source + length) {
         // Non-overlapping (or target before source) — copy forward.
         sz_copy_powervsx(target, source, length);
@@ -49,14 +49,14 @@ SZ_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size
     }
 }
 
-SZ_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     __vector unsigned char fill_u8x16 = vec_splats(value);
     for (; length >= 16; target += 16, length -= 16) vec_xst(fill_u8x16, 0, (unsigned char *)target);
     if (length) sz_fill_serial(target, length, value);
 }
 
-SZ_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                        char const lut[sz_at_least_(256)]) {
+STRINGZILLA_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                                 char const lut[sz_at_least_(256)]) {
     // Small inputs aren't worth the SIMD setup cost — defer to the serial path.
     if (length <= 128) {
         sz_lookup_serial(target, length, source, lut);
@@ -120,7 +120,7 @@ SZ_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cp
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_POWERVSX
+#endif // STRINGZILLA_TARGET_POWERVSX
 
 #ifdef __cplusplus
 }

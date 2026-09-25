@@ -15,18 +15,18 @@
 /*  Overload the following with caution. Those parameters must never be explicitly set during
  *  releases, but they come handy during development, to validate different ISA-specific backends:
  *
- *      #define SZ_USE_WESTMERE 0
- *      #define SZ_USE_HASWELL 0
- *      #define SZ_USE_GOLDMONT 0
- *      #define SZ_USE_SKYLAKE 0
- *      #define SZ_USE_ICELAKE 0
- *      #define SZ_USE_NEON 0
- *      #define SZ_USE_SVE 0
- *      #define SZ_USE_SVE2 0 */
-#if defined(SZ_DEBUG)
-#undef SZ_DEBUG
+ *      #define STRINGZILLA_TARGET_WESTMERE 0
+ *      #define STRINGZILLA_TARGET_HASWELL 0
+ *      #define STRINGZILLA_TARGET_GOLDMONT 0
+ *      #define STRINGZILLA_TARGET_SKYLAKE 0
+ *      #define STRINGZILLA_TARGET_ICELAKE 0
+ *      #define STRINGZILLA_TARGET_NEON 0
+ *      #define STRINGZILLA_TARGET_SVE 0
+ *      #define STRINGZILLA_TARGET_SVE2 0 */
+#if defined(STRINGZILLA_DEBUG)
+#undef STRINGZILLA_DEBUG
 #endif
-#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
+#define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Include the StringZilla headers before anything else, to intercept missing @c #include
  *  directives and other issues. */
@@ -45,9 +45,7 @@
 #include <string_view> // `std::string_view` baseline
 #include <vector>      // `std::vector`
 
-#include <fmt/format.h>
-
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "harness.hpp" // `randomize_string`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
@@ -59,12 +57,12 @@ using namespace std::literals; // for ""sv
 #pragma region Helpers
 
 /** Parses a 64-character lowercase-hex SHA256 digest into 32 bytes. */
-static void sha256_digest_from_hex_(char const *hex, sz_u8_t (&digest)[SZ_SHA256_DIGEST_LENGTH]) {
+static void sha256_digest_from_hex_(char const *hex, sz_u8_t (&digest)[STRINGZILLA_SHA256_DIGEST_LENGTH]) {
     auto nibble = [](char character) -> sz_u8_t {
         if (character >= '0' && character <= '9') return (sz_u8_t)(character - '0');
         return (sz_u8_t)(character - 'a' + 10);
     };
-    for (std::size_t byte_index = 0; byte_index != SZ_SHA256_DIGEST_LENGTH; ++byte_index)
+    for (std::size_t byte_index = 0; byte_index != STRINGZILLA_SHA256_DIGEST_LENGTH; ++byte_index)
         digest[byte_index] = (sz_u8_t)((nibble(hex[byte_index * 2]) << 4) | nibble(hex[byte_index * 2 + 1]));
 }
 
@@ -73,12 +71,12 @@ static void check_sha256_unit_(                                   //
     sz_sha256_state_init_t init, sz_sha256_state_update_t update, //
     sz_sha256_state_digest_t digest, std::string const &message, char const *expected_hex) {
     sz_sha256_state_t state;
-    sz_u8_t produced[SZ_SHA256_DIGEST_LENGTH], expected[SZ_SHA256_DIGEST_LENGTH];
+    sz_u8_t produced[STRINGZILLA_SHA256_DIGEST_LENGTH], expected[STRINGZILLA_SHA256_DIGEST_LENGTH];
     sha256_digest_from_hex_(expected_hex, expected);
     init(&state);
     update(&state, message.data(), (sz_size_t)message.size());
     digest(&state, produced);
-    verify(std::memcmp(produced, expected, SZ_SHA256_DIGEST_LENGTH) == 0);
+    verify(std::memcmp(produced, expected, STRINGZILLA_SHA256_DIGEST_LENGTH) == 0);
 }
 
 /** A message paired with the digest it must produce, for known-answer testing. */
@@ -92,9 +90,9 @@ static void check_sha256_multistate_unit_(                                      
     sz_sha256_multistate_update_t update, sz_sha256_multistate_digest_t digest, //
     known_sha256_t const *vectors, std::size_t vectors_count) {
     std::vector<sz_sha256_state_t> states(vectors_count);
-    std::vector<sz_u8_t> produced(vectors_count * SZ_SHA256_DIGEST_LENGTH);
+    std::vector<sz_u8_t> produced(vectors_count * STRINGZILLA_SHA256_DIGEST_LENGTH);
     std::vector<sz_string_view_t> messages(vectors_count);
-    sz_u8_t expected[SZ_SHA256_DIGEST_LENGTH];
+    sz_u8_t expected[STRINGZILLA_SHA256_DIGEST_LENGTH];
     for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
         sz_sha256_state_init(&states[lane_index]);
         messages[lane_index].start = vectors[lane_index].message;
@@ -106,7 +104,8 @@ static void check_sha256_multistate_unit_(                                      
     digest(states.data(), (sz_size_t)vectors_count, produced.data());
     for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
         sha256_digest_from_hex_(vectors[lane_index].digest_hex, expected);
-        verify(std::memcmp(&produced[lane_index * SZ_SHA256_DIGEST_LENGTH], expected, SZ_SHA256_DIGEST_LENGTH) == 0 &&
+        verify(std::memcmp(&produced[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH], expected,
+                           STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
                "Multi-state digest disagreed with the known-answer digest for this lane");
     }
 }
@@ -125,8 +124,6 @@ static void check_sha256_multistate_unit_(                                      
  *  ground truth of known answers.
  */
 void test_hash_unit() {
-    fmt::println("  - testing hashing known-answer vectors...");
-
     // SHA256: the three canonical FIPS 180-4 vectors (empty, "abc", and the 56-byte two-block message).
     known_sha256_t const sha256_vectors[] = {
         {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},    //
@@ -141,7 +138,7 @@ void test_hash_unit() {
         // Manual propagation to each natively-compiled backend kernel.
         check_sha256_unit_(sz_sha256_state_init_serial, sz_sha256_state_update_serial, //
                            sz_sha256_state_digest_serial, vector.message, vector.digest_hex);
-#if SZ_USE_GOLDMONT
+#if STRINGZILLA_TARGET_GOLDMONT
         check_sha256_unit_(sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont, //
                            sz_sha256_state_digest_goldmont, vector.message, vector.digest_hex);
 #endif
@@ -175,7 +172,7 @@ void test_hash_unit() {
     let_verify(auto bytesum_abc = sz_bytesum("abc", 3), bytesum_abc == 0x126u);
     // Manual propagation to the serial kernel.
     verify(sz_bytesum_serial("abc", 3) == 0x126u);
-#if SZ_USE_ICELAKE
+#if STRINGZILLA_TARGET_ICELAKE
     verify(sz_bytesum_icelake("abc", 3) == 0x126u);
 #endif
 
@@ -271,7 +268,7 @@ struct bytesum_from_sz_ {
  *  only one oversized input reaches. @c inputs arrives already scaled by the caller.
  */
 template <typename reference_, typename candidate_>
-void check_bytesum_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_bytesum_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     // A sum of bytes is order-independent, so a run of one repeated byte must total `length * byte` on
     // any backend. This invariant holds without consulting the reference at all.
@@ -287,7 +284,7 @@ void check_bytesum_equivalence_(reference_ reference, candidate_ candidate, sz_s
     std::vector<std::size_t> const lengths = {1, 11, 23, 31, 32, 33, 63, 64, 65, 127, 128, 129, 1000};
     for (auto length : lengths)
         for_each_cacheline_offset_(length, [&](sz_ptr_t pointer, [[maybe_unused]] std::size_t offset) {
-            randomize_string(pointer, length);
+            randomize_string(generator, {pointer, length});
             verify(reference(pointer, static_cast<sz_size_t>(length)) ==
                        candidate(pointer, static_cast<sz_size_t>(length)) &&
                    "Byte sum backend disagreed with the reference at this length and cache-line offset");
@@ -297,7 +294,7 @@ void check_bytesum_equivalence_(reference_ reference, candidate_ candidate, sz_s
     std::string text;
     for (sz_size_t length = 0; length != inputs; ++length) {
         text.resize(length);
-        randomize_string(&text[0], length);
+        randomize_string(generator, text);
         verify(reference(text.data(), length) == candidate(text.data(), length) &&
                "Byte sum backend disagreed with the reference at this fuzzed length");
     }
@@ -305,7 +302,7 @@ void check_bytesum_equivalence_(reference_ reference, candidate_ candidate, sz_s
     // One oversized input, since the Skylake and Ice Lake kernels take a different branch past a megabyte.
     // The trailing bytes keep the buffer off a page boundary so the head and tail still have work to do.
     std::string huge(1024ull * 1024ull + 129ull, '\0');
-    randomize_string(&huge[0], huge.size());
+    randomize_string(generator, huge);
     verify(reference(huge.data(), (sz_size_t)huge.size()) == candidate(huge.data(), (sz_size_t)huge.size()) &&
            "Byte sum backend disagreed with the reference on the oversized, past-a-megabyte input");
 }
@@ -317,7 +314,7 @@ void check_bytesum_equivalence_(reference_ reference, candidate_ candidate, sz_s
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
  */
 template <typename reference_, typename candidate_>
-void check_hash_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_hash_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     auto test_on_seed = [&](std::string const &text, sz_u64_t seed) {
         // Compute the entire hash at once, expecting the same output
@@ -342,7 +339,7 @@ void check_hash_equivalence_(reference_ reference, candidate_ candidate, sz_size
 
         // Try breaking those strings into arbitrary chunks, expecting the same output in the streaming mode.
         // The length of each chunk and the number of chunks will be determined with a coin toss.
-        iterate_in_random_slices(text, [&](std::string slice) {
+        iterate_in_random_slices(generator, text, [&](std::string slice) {
             reference.update(&state_base, slice.data(), slice.size());
             candidate.update(&state_simd, slice.data(), slice.size());
             verify(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
@@ -374,7 +371,7 @@ void check_hash_equivalence_(reference_ reference, candidate_ candidate, sz_size
     // offset so serial-vs-ISA agreement is checked across all alignments the SIMD kernels may hit.
     for (sz_size_t length = 0; length != inputs; ++length) {
         for_each_cacheline_offset_(length, [&](sz_ptr_t pointer, [[maybe_unused]] std::size_t offset) {
-            randomize_string(pointer, length);
+            randomize_string(generator, {pointer, length});
             std::string text(pointer, length);
             for (auto seed : seeds) test_on_seed(text, seed);
         });
@@ -390,7 +387,7 @@ void check_hash_equivalence_(reference_ reference, candidate_ candidate, sz_size
  *  the per-seed reduction rather than a sibling backend.
  */
 template <typename candidate_>
-void check_hash_multiseed_equivalence_(candidate_ candidate, sz_size_t inputs) {
+void check_hash_multiseed_equivalence_(std::mt19937 &generator, candidate_ candidate, sz_size_t inputs) {
     // Enough seeds to exercise full 4-wide groups plus every 1..3-seed tail remainder.
     std::vector<sz_u64_t> seeds = {0u,
                                    1u,
@@ -426,7 +423,7 @@ void check_hash_multiseed_equivalence_(candidate_ candidate, sz_size_t inputs) {
     // and into a few kilobytes so the shared-input load over multiple blocks is exercised too.
     for (std::size_t length = 0; length != inputs; ++length) {
         std::string text(length, '\0');
-        randomize_string(&text[0], length);
+        randomize_string(generator, text);
         check(text);
     }
 }
@@ -470,15 +467,16 @@ void check_random_equivalence_(reference_ reference, candidate_ candidate, sz_si
  *  one-shot and incremental. The known-answer FIPS 180-4 vectors live in @c test_hash_unit.
  *  @c inputs is the maximum length fuzzed, inclusive. */
 template <typename reference_, typename candidate_>
-void check_sha256_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_sha256_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
     // Test random inputs of various lengths
     for (sz_size_t length = 0; length <= inputs; ++length) {
         std::string random_text(length, '\0');
-        randomize_string(&random_text[0], length);
+        randomize_string(generator, random_text);
 
         sz_sha256_state_t state_base, state_simd;
-        sz_u8_t digest_base_result[SZ_SHA256_DIGEST_LENGTH], digest_simd_result[SZ_SHA256_DIGEST_LENGTH];
+        sz_u8_t digest_base_result[STRINGZILLA_SHA256_DIGEST_LENGTH],
+            digest_simd_result[STRINGZILLA_SHA256_DIGEST_LENGTH];
 
         // One-shot hashing
         reference.init(&state_base);
@@ -487,19 +485,19 @@ void check_sha256_equivalence_(reference_ reference, candidate_ candidate, sz_si
         candidate.update(&state_simd, random_text.data(), length);
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        verify(std::memcmp(digest_base_result, digest_simd_result, SZ_SHA256_DIGEST_LENGTH) == 0 &&
+        verify(std::memcmp(digest_base_result, digest_simd_result, STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
                "SHA256 backend disagreed with the reference on the one-shot digest at this length");
 
         // Incremental hashing with random chunks
         reference.init(&state_base);
         candidate.init(&state_simd);
-        iterate_in_random_slices(random_text, [&](std::string slice) {
+        iterate_in_random_slices(generator, random_text, [&](std::string slice) {
             reference.update(&state_base, slice.data(), slice.size());
             candidate.update(&state_simd, slice.data(), slice.size());
         });
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        verify(std::memcmp(digest_base_result, digest_simd_result, SZ_SHA256_DIGEST_LENGTH) == 0 &&
+        verify(std::memcmp(digest_base_result, digest_simd_result, STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
                "SHA256 backend disagreed with the reference on the incrementally streamed digest");
     }
 }
@@ -522,20 +520,21 @@ void check_sha256_equivalence_(reference_ reference, candidate_ candidate, sz_si
  *  cursor on its last full block.
  */
 template <typename reference_, typename candidate_>
-void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+void check_sha256_multistate_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate,
+                                          sz_size_t inputs) {
 
     for (sz_size_t lanes_count = 0; lanes_count <= inputs; ++lanes_count) {
         std::vector<std::string> messages;
         fuzzy_config_t config;
         config.batch_size = (std::size_t)lanes_count;
         config.min_string_length = 0;
-        config.max_string_length = (std::size_t)inputs * SZ_SHA256_BLOCK_LENGTH / 8;
-        randomize_strings(config, messages);
+        config.max_string_length = (std::size_t)inputs * STRINGZILLA_SHA256_BLOCK_LENGTH / 8;
+        randomize_strings(generator, config, messages);
 
         std::vector<sz_sha256_state_t> reference_states(lanes_count ? lanes_count : 1);
         std::vector<sz_sha256_state_t> candidate_states(lanes_count ? lanes_count : 1);
-        std::vector<sz_u8_t> reference_digests((lanes_count + 1) * SZ_SHA256_DIGEST_LENGTH, 0xA5);
-        std::vector<sz_u8_t> candidate_digests((lanes_count + 1) * SZ_SHA256_DIGEST_LENGTH, 0xA5);
+        std::vector<sz_u8_t> reference_digests((lanes_count + 1) * STRINGZILLA_SHA256_DIGEST_LENGTH, 0xA5);
+        std::vector<sz_u8_t> candidate_digests((lanes_count + 1) * STRINGZILLA_SHA256_DIGEST_LENGTH, 0xA5);
         for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index)
             sz_sha256_state_init(&reference_states[lane_index]), sz_sha256_state_init(&candidate_states[lane_index]);
 
@@ -545,8 +544,8 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
         candidate.update(candidate_states.data(), &texts);
         reference.digest(reference_states.data(), lanes_count, reference_digests.data());
         candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
-        verify(std::memcmp(reference_digests.data(), candidate_digests.data(), lanes_count * SZ_SHA256_DIGEST_LENGTH) ==
-                   0 &&
+        verify(std::memcmp(reference_digests.data(), candidate_digests.data(),
+                           lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
                "Multi-state backend disagreed with the reference on the one-shot batch digest");
 
         // Incremental: the same messages, cut into random per-lane slices across several calls
@@ -562,7 +561,7 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
             for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index) {
                 std::size_t const left = messages[lane_index].size() - offsets[lane_index];
                 std::uniform_int_distribution<std::size_t> slice_length_distribution(0, left);
-                std::size_t const take = slice_length_distribution(global_random_generator());
+                std::size_t const take = slice_length_distribution(generator);
                 slices[lane_index].start = messages[lane_index].data() + offsets[lane_index];
                 slices[lane_index].length = (sz_size_t)take;
                 offsets[lane_index] += take;
@@ -575,13 +574,13 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
         }
         reference.digest(reference_states.data(), lanes_count, reference_digests.data());
         candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
-        verify(std::memcmp(reference_digests.data(), candidate_digests.data(), lanes_count * SZ_SHA256_DIGEST_LENGTH) ==
-                   0 &&
+        verify(std::memcmp(reference_digests.data(), candidate_digests.data(),
+                           lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
                "Multi-state backend disagreed with the reference on the incrementally sliced batch digest");
 
-        for (std::size_t guard_index = 0; guard_index != SZ_SHA256_DIGEST_LENGTH;
+        for (std::size_t guard_index = 0; guard_index != STRINGZILLA_SHA256_DIGEST_LENGTH;
              ++guard_index) // No overwrite past the last lane
-            verify(candidate_digests[lanes_count * SZ_SHA256_DIGEST_LENGTH + guard_index] == 0xA5);
+            verify(candidate_digests[lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH + guard_index] == 0xA5);
 
         // Buffered head: each lane parks a different partial block, then the next call completes some of
         // them and not others. Random slicing reaches this only by luck, but it is the one path where lanes
@@ -590,7 +589,7 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
             sz_sha256_state_init(&reference_states[lane_index]), sz_sha256_state_init(&candidate_states[lane_index]);
         for (std::size_t pass_index = 0; pass_index != 2; ++pass_index) {
             for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index) {
-                std::size_t const parked = 1 + lane_index % (SZ_SHA256_BLOCK_LENGTH - 1);
+                std::size_t const parked = 1 + lane_index % (STRINGZILLA_SHA256_BLOCK_LENGTH - 1);
                 std::size_t const first = parked < messages[lane_index].size() ? parked : messages[lane_index].size();
                 std::size_t const offset = pass_index == 0 ? 0 : first;
                 std::size_t const length = pass_index == 0 ? first : messages[lane_index].size() - first;
@@ -604,8 +603,8 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
         }
         reference.digest(reference_states.data(), lanes_count, reference_digests.data());
         candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
-        verify(std::memcmp(reference_digests.data(), candidate_digests.data(), lanes_count * SZ_SHA256_DIGEST_LENGTH) ==
-                   0 &&
+        verify(std::memcmp(reference_digests.data(), candidate_digests.data(),
+                           lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
                "Multi-state backend disagreed with the reference on the buffered-head batch digest");
     }
 }
@@ -623,8 +622,6 @@ void check_sha256_multistate_equivalence_(reference_ reference, candidate_ candi
  *  of those, since a digest that overruns by one byte produces a perfectly plausible value.
  */
 void test_hash_safety() {
-    fmt::println("  - testing degenerate lengths and alignments of the hashing kernels...");
-
     // The empty input is hashable, and its digest is stable across calls.
     verify(sz_hash("", 0, 0) == sz_hash("", 0, 0));
     verify(sz_hash_serial("", 0, 0) == sz_hash_serial("", 0, 0));
@@ -642,7 +639,7 @@ void test_hash_safety() {
     }
 
     // SHA256 into a canary-guarded destination, so a digest that writes one byte too many is caught.
-    with_guarded_buffer_(SZ_SHA256_DIGEST_LENGTH, [&](sz_ptr_t destination, std::size_t) {
+    with_guarded_buffer_(STRINGZILLA_SHA256_DIGEST_LENGTH, [&](sz_ptr_t destination, std::size_t) {
         sz_sha256_state_t state;
         sz_sha256_state_init(&state);
         sz_sha256_state_update(&state, message, message_length);
@@ -661,8 +658,6 @@ void test_hash_safety() {
                    "Dispatched byte sum disagreed with the serial kernel at this length and alignment");
         });
     }
-
-    fmt::println("    degenerate-input safety passed!");
 }
 
 #pragma endregion Safety
@@ -671,7 +666,7 @@ void test_hash_safety() {
 
 /** Drives the serial-vs-SIMD hashing, random-fill, and SHA256 differential tests across every
  *  hashing backend compiled on this target. Hashing has no Haswell tier. */
-void test_hash_all() {
+void test_hash_all(test_context_t &context) {
 
     using hash_serial_t = hash_from_sz_<sz_hash_serial, sz_hash_state_init_serial, //
                                         sz_hash_state_update_serial, sz_hash_state_digest_serial>;
@@ -679,14 +674,14 @@ void test_hash_all() {
 
     // Number of random-length inputs to fuzz per differential test. Each sweeps lengths `0..N` and hashes a buffer
     // of that length, so the work is quadratic in the count and the baseline is scaled accordingly.
-    sz_size_t const hash_inputs = (sz_size_t)scale_iterations_quadratic(200);
-    sz_size_t const random_inputs = (sz_size_t)scale_iterations_quadratic(200);
-    sz_size_t const sha256_inputs = (sz_size_t)scale_iterations_quadratic(256);
+    sz_size_t const hash_inputs = (sz_size_t)context.iterations_quadratic(200);
+    sz_size_t const random_inputs = (sz_size_t)context.iterations_quadratic(200);
+    sz_size_t const sha256_inputs = (sz_size_t)context.iterations_quadratic(256);
 
     // The dispatched path, unguarded. Every sibling family leads its table with a `dispatched` row so a
     // baseline build still measures something; hash has no table, so this call is what plays that part -
     // without it a target with no SIMD tier runs the two assertions above and nothing else.
-    check_hash_equivalence_(hash_serial,
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash, sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {}, fill_random_from_sz_<sz_fill_random> {},
@@ -696,125 +691,130 @@ void test_hash_all() {
     // the AES-based hash does not - so they need a differential sweep of their own.
     using bytesum_serial_t = bytesum_from_sz_<sz_bytesum_serial>;
     bytesum_serial_t const bytesum_serial;
-    sz_size_t const bytesum_inputs = (sz_size_t)scale_iterations_quadratic(200);
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum> {}, bytesum_inputs);
+    sz_size_t const bytesum_inputs = (sz_size_t)context.iterations_quadratic(200);
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum> {}, bytesum_inputs);
 
-#if SZ_USE_HASWELL
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_haswell> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_HASWELL
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_haswell> {},
+                               bytesum_inputs);
 #endif
-#if SZ_USE_SKYLAKE
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_skylake> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_SKYLAKE
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_skylake> {},
+                               bytesum_inputs);
 #endif
-#if SZ_USE_ICELAKE
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_icelake> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_ICELAKE
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_icelake> {},
+                               bytesum_inputs);
 #endif
-#if SZ_USE_NEON
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_neon> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_NEON
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_neon> {}, bytesum_inputs);
 #endif
-#if SZ_USE_SVE
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_sve> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_SVE
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_sve> {}, bytesum_inputs);
 #endif
-#if SZ_USE_SVE2
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_sve2> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_SVE2
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_sve2> {}, bytesum_inputs);
 #endif
-#if SZ_USE_V128
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_v128> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_V128
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_v128> {}, bytesum_inputs);
 #endif
-#if SZ_USE_V128RELAXED
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_v128relaxed> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_V128RELAXED
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_v128relaxed> {},
+                               bytesum_inputs);
 #endif
-#if SZ_USE_RVV
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_rvv> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_RVV
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_rvv> {}, bytesum_inputs);
 #endif
-#if SZ_USE_LASX
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_lasx> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_LASX
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_lasx> {}, bytesum_inputs);
 #endif
-#if SZ_USE_POWERVSX
-    check_bytesum_equivalence_(bytesum_serial, bytesum_from_sz_<sz_bytesum_powervsx> {}, bytesum_inputs);
+#if STRINGZILLA_TARGET_POWERVSX
+    check_bytesum_equivalence_(context.generator, bytesum_serial, bytesum_from_sz_<sz_bytesum_powervsx> {},
+                               bytesum_inputs);
 #endif
 
-#if SZ_USE_WESTMERE
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_WESTMERE
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_westmere, sz_hash_state_init_westmere, //
                                           sz_hash_state_update_westmere, sz_hash_state_digest_westmere> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_westmere> {}, random_inputs);
 #endif
-#if SZ_USE_SKYLAKE
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_SKYLAKE
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_skylake, sz_hash_state_init_skylake, //
                                           sz_hash_state_update_skylake, sz_hash_state_digest_skylake> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_skylake> {}, random_inputs);
 #endif
-#if SZ_USE_ICELAKE
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_ICELAKE
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_icelake, sz_hash_state_init_icelake, //
                                           sz_hash_state_update_icelake, sz_hash_state_digest_icelake> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_icelake> {}, random_inputs);
 #endif
-#if SZ_USE_NEONAES
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_NEONAES
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_neonaes, sz_hash_state_init_neonaes, //
                                           sz_hash_state_update_neonaes, sz_hash_state_digest_neonaes> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_neonaes> {}, random_inputs);
 #endif
-#if SZ_USE_SVE2AES
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_SVE2AES
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_sve2aes, sz_hash_state_init_sve2aes, //
                                           sz_hash_state_update_sve2aes, sz_hash_state_digest_sve2aes> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_sve2aes> {}, random_inputs);
 #endif
-#if SZ_USE_V128
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_V128
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_v128, sz_hash_state_init_v128, //
                                           sz_hash_state_update_v128, sz_hash_state_digest_v128> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_v128> {}, random_inputs);
 #endif
-#if SZ_USE_V128RELAXED
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_V128RELAXED
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_v128relaxed, sz_hash_state_init_v128relaxed, //
                                           sz_hash_state_update_v128relaxed, sz_hash_state_digest_v128relaxed> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_v128relaxed> {}, random_inputs);
 #endif
-#if SZ_USE_RVV
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_RVV
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_rvv, sz_hash_state_init_rvv, //
                                           sz_hash_state_update_rvv, sz_hash_state_digest_rvv> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_rvv> {}, random_inputs);
 #endif
-#if SZ_USE_RVVCRYPTO
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_RVVCRYPTO
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_rvvcrypto, sz_hash_state_init_rvvcrypto, //
                                           sz_hash_state_update_rvvcrypto, sz_hash_state_digest_rvvcrypto> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_rvvcrypto> {}, random_inputs);
 #endif
-#if SZ_USE_LASX
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_LASX
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_lasx, sz_hash_state_init_lasx, //
                                           sz_hash_state_update_lasx, sz_hash_state_digest_lasx> {},
                             hash_inputs);
     check_random_equivalence_(fill_random_from_sz_<sz_fill_random_serial> {},
                               fill_random_from_sz_<sz_fill_random_lasx> {}, random_inputs);
 #endif
-#if SZ_USE_POWERVSX
-    check_hash_equivalence_(hash_serial,
+#if STRINGZILLA_TARGET_POWERVSX
+    check_hash_equivalence_(context.generator, hash_serial,
                             hash_from_sz_<sz_hash_powervsx, sz_hash_state_init_powervsx, //
                                           sz_hash_state_update_powervsx, sz_hash_state_digest_powervsx> {},
                             hash_inputs);
@@ -826,48 +826,48 @@ void test_hash_all() {
     using sha256_serial_t =
         sha256_from_sz_<sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial>;
     sha256_serial_t const sha256_serial;
-    check_sha256_equivalence_(sha256_serial,
+    check_sha256_equivalence_(context.generator, sha256_serial,
                               sha256_from_sz_<sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest> {},
                               sha256_inputs);
 
-#if SZ_USE_GOLDMONT
-    check_sha256_equivalence_(sha256_serial,
+#if STRINGZILLA_TARGET_GOLDMONT
+    check_sha256_equivalence_(context.generator, sha256_serial,
                               sha256_from_sz_<sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont,
                                               sz_sha256_state_digest_goldmont> {},
                               sha256_inputs);
 #endif
-#if SZ_USE_NEONSHA
-    check_sha256_equivalence_(sha256_serial,
+#if STRINGZILLA_TARGET_NEONSHA
+    check_sha256_equivalence_(context.generator, sha256_serial,
                               sha256_from_sz_<sz_sha256_state_init_neonsha, sz_sha256_state_update_neonsha,
                                               sz_sha256_state_digest_neonsha> {},
                               sha256_inputs);
 #endif
-#if SZ_USE_V128
+#if STRINGZILLA_TARGET_V128
     check_sha256_equivalence_(
-        sha256_serial,
+        context.generator, sha256_serial,
         sha256_from_sz_<sz_sha256_state_init_v128, sz_sha256_state_update_v128, sz_sha256_state_digest_v128> {},
         sha256_inputs);
 #endif
-#if SZ_USE_RVV
+#if STRINGZILLA_TARGET_RVV
     check_sha256_equivalence_(
-        sha256_serial,
+        context.generator, sha256_serial,
         sha256_from_sz_<sz_sha256_state_init_rvv, sz_sha256_state_update_rvv, sz_sha256_state_digest_rvv> {},
         sha256_inputs);
 #endif
-#if SZ_USE_RVVCRYPTO
-    check_sha256_equivalence_(sha256_serial,
+#if STRINGZILLA_TARGET_RVVCRYPTO
+    check_sha256_equivalence_(context.generator, sha256_serial,
                               sha256_from_sz_<sz_sha256_state_init_rvvcrypto, sz_sha256_state_update_rvvcrypto,
                                               sz_sha256_state_digest_rvvcrypto> {},
                               sha256_inputs);
 #endif
-#if SZ_USE_LASX
+#if STRINGZILLA_TARGET_LASX
     check_sha256_equivalence_(
-        sha256_serial,
+        context.generator, sha256_serial,
         sha256_from_sz_<sz_sha256_state_init_lasx, sz_sha256_state_update_lasx, sz_sha256_state_digest_lasx> {},
         sha256_inputs);
 #endif
-#if SZ_USE_POWERVSX
-    check_sha256_equivalence_(sha256_serial,
+#if STRINGZILLA_TARGET_POWERVSX
+    check_sha256_equivalence_(context.generator, sha256_serial,
                               sha256_from_sz_<sz_sha256_state_init_powervsx, sz_sha256_state_update_powervsx,
                                               sz_sha256_state_digest_powervsx> {},
                               sha256_inputs);
@@ -875,60 +875,65 @@ void test_hash_all() {
 
     // The multi-state kernels sweep every lane count up to the bound, and each batch carries one message per
     // lane, so the work is quadratic in the bound just like the single-message sweep above.
-    sz_size_t const multistate_inputs = (sz_size_t)scale_iterations_quadratic(64);
+    sz_size_t const multistate_inputs = (sz_size_t)context.iterations_quadratic(64);
     using multistate_serial_t =
         sha256_multistate_from_sz_<sz_sha256_multistate_update_serial, sz_sha256_multistate_digest_serial>;
     multistate_serial_t const multistate_serial;
     check_sha256_multistate_equivalence_(
-        multistate_serial, sha256_multistate_from_sz_<sz_sha256_multistate_update, sz_sha256_multistate_digest> {},
-        multistate_inputs);
+        context.generator, multistate_serial,
+        sha256_multistate_from_sz_<sz_sha256_multistate_update, sz_sha256_multistate_digest> {}, multistate_inputs);
 
-#if SZ_USE_GOLDMONT
+#if STRINGZILLA_TARGET_GOLDMONT
     check_sha256_multistate_equivalence_(
-        multistate_serial,
+        context.generator, multistate_serial,
         sha256_multistate_from_sz_<sz_sha256_multistate_update_goldmont, sz_sha256_multistate_digest_goldmont> {},
         multistate_inputs);
 #endif
-#if SZ_USE_HASWELL
+#if STRINGZILLA_TARGET_HASWELL
     check_sha256_multistate_equivalence_(
-        multistate_serial,
+        context.generator, multistate_serial,
         sha256_multistate_from_sz_<sz_sha256_multistate_update_haswell, sz_sha256_multistate_digest_haswell> {},
         multistate_inputs);
 #endif
-#if SZ_USE_SKYLAKE
+#if STRINGZILLA_TARGET_SKYLAKE
     check_sha256_multistate_equivalence_(
-        multistate_serial,
+        context.generator, multistate_serial,
         sha256_multistate_from_sz_<sz_sha256_multistate_update_skylake, sz_sha256_multistate_digest_skylake> {},
         multistate_inputs);
 #endif
 }
 
 /** Drives @c check_hash_multiseed_equivalence_ across every hashing backend compiled here. */
-void test_hash_multiseed_all() {
+void test_hash_multiseed_all(test_context_t &context) {
     // Cover the <= 64 byte ladder, the 64-byte boundary, and into the wide path. Every length is hashed by
     // every seeded kernel on every backend, so this count is the family's whole budget.
-    sz_size_t const lengths = (sz_size_t)scale_iterations_quadratic(512);
+    sz_size_t const lengths = (sz_size_t)context.iterations_quadratic(512);
 
-    check_hash_multiseed_equivalence_(hash_multiseed_from_sz_<sz_hash_multiseed, sz_hash> {}, lengths);
+    check_hash_multiseed_equivalence_(context.generator, hash_multiseed_from_sz_<sz_hash_multiseed, sz_hash> {},
+                                      lengths);
 
     // And every backend that ships a specialized multi-seed kernel must match its own single-shot.
-    check_hash_multiseed_equivalence_(hash_multiseed_from_sz_<sz_hash_multiseed_serial, sz_hash_serial> {}, lengths);
-#if SZ_USE_WESTMERE
-    check_hash_multiseed_equivalence_(hash_multiseed_from_sz_<sz_hash_multiseed_westmere, sz_hash_westmere> {},
-                                      lengths);
+    check_hash_multiseed_equivalence_(context.generator,
+                                      hash_multiseed_from_sz_<sz_hash_multiseed_serial, sz_hash_serial> {}, lengths);
+#if STRINGZILLA_TARGET_WESTMERE
+    check_hash_multiseed_equivalence_(
+        context.generator, hash_multiseed_from_sz_<sz_hash_multiseed_westmere, sz_hash_westmere> {}, lengths);
 #endif
-#if SZ_USE_ICELAKE
-    check_hash_multiseed_equivalence_(hash_multiseed_from_sz_<sz_hash_multiseed_icelake, sz_hash_icelake> {}, lengths);
+#if STRINGZILLA_TARGET_ICELAKE
+    check_hash_multiseed_equivalence_(context.generator,
+                                      hash_multiseed_from_sz_<sz_hash_multiseed_icelake, sz_hash_icelake> {}, lengths);
 #endif
-#if SZ_USE_NEONAES
-    check_hash_multiseed_equivalence_(hash_multiseed_from_sz_<sz_hash_multiseed_neonaes, sz_hash_neonaes> {}, lengths);
+#if STRINGZILLA_TARGET_NEONAES
+    check_hash_multiseed_equivalence_(context.generator,
+                                      hash_multiseed_from_sz_<sz_hash_multiseed_neonaes, sz_hash_neonaes> {}, lengths);
 #endif
-#if SZ_USE_V128
-    check_hash_multiseed_equivalence_(hash_multiseed_from_sz_<sz_hash_multiseed_v128, sz_hash_v128> {}, lengths);
+#if STRINGZILLA_TARGET_V128
+    check_hash_multiseed_equivalence_(context.generator,
+                                      hash_multiseed_from_sz_<sz_hash_multiseed_v128, sz_hash_v128> {}, lengths);
 #endif
-#if SZ_USE_V128RELAXED
-    check_hash_multiseed_equivalence_(hash_multiseed_from_sz_<sz_hash_multiseed_v128relaxed, sz_hash_v128relaxed> {},
-                                      lengths);
+#if STRINGZILLA_TARGET_V128RELAXED
+    check_hash_multiseed_equivalence_(
+        context.generator, hash_multiseed_from_sz_<sz_hash_multiseed_v128relaxed, sz_hash_v128relaxed> {}, lengths);
 #endif
 }
 
