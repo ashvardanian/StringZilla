@@ -194,6 +194,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_neon( //
     count += sz_utf8_newlines_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
                                       match_offsets + count, match_lengths + count, matches_capacity - count,
                                       bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
+                                         match_offsets, match_lengths, 0, sz_false_k));
     return count;
 }
 
@@ -297,6 +299,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon( //
     count += sz_utf8_whitespaces_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
                                          match_offsets + count, match_lengths + count, matches_capacity - count,
                                          bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
+                                         match_offsets, match_lengths, 0, sz_false_k));
     return count;
 }
 
@@ -483,9 +487,9 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_
 
 #pragma region Forward driver
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_neon( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiters_neon_( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
 
@@ -573,6 +577,18 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_neon( //
 
     if (bytes_consumed) *bytes_consumed = base;
     return count;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_neon( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const matches_count = sz_utf8_delimiters_neon_(text, length, match_offsets, match_lengths,
+                                                             matches_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return matches_count;
 }
 
 #pragma endregion Forward driver

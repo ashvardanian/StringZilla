@@ -306,6 +306,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_neonaes(sz_aes256_key_t const *k
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0, lane_index;
+    sz_assert_no_overlap_(output, length, text, length);
 
     // A start that is not block aligned generates its first block whole and discards the leading bytes.
     if (within_block != 0 && length != 0) {
@@ -672,6 +673,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_st
     uint8x16_t powers_u8x16[8];
     uint8x16_t accumulator_u8x16;
     sz_size_t consumed = 0, byte_index;
+    sz_assert_(state->text_length == 0 && "Associated data must precede the message");
 
     if (length == 0) return;
     sz_ghash_descending_powers_neonaes_(state->key.powers, powers_u8x16);
@@ -777,6 +779,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_st
     uint8x16_t accumulator_u8x16;
     sz_u32_t block_index;
     sz_size_t produced = 0, lane_index;
+    sz_assert_no_overlap_(output, length, text, length);
 
     if (length == 0) return;
     sz_ghash_descending_powers_neonaes_(state->key.powers, powers_u8x16);

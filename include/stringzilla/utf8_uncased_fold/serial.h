@@ -1514,7 +1514,10 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source,
             destination_ptr += sz_rune_encode(folded_runes[rune_index], destination_ptr);
     }
 
-    return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
+    sz_size_t const folded_length = (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
+    sz_assert_(folded_length <= source_length * 3 && "Folding grows one byte into three at most");
+    sz_assert_no_overlap_(destination, folded_length, source, source_length);
+    return folded_length;
 }
 
 #pragma region Folded Iterators

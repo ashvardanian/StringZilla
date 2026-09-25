@@ -379,6 +379,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     //  A start that is not block aligned generates its first block whole and discards the leading bytes.
     if (within_block != 0 && length != 0) {
@@ -702,6 +703,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_s
     __vector unsigned char powers_u8x16[8];
     __vector unsigned char accumulator_u8x16;
     sz_size_t consumed = 0, byte_index;
+    sz_assert_(state->text_length == 0 && "Associated data must precede the message");
 
     if (length == 0) return;
     sz_ghash_descending_powers_powervsx_(state->key.powers, powers_u8x16);
@@ -869,6 +871,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_s
     __vector unsigned char counter_base_u8x16, accumulator_u8x16;
     sz_u32_t block_index;
     sz_size_t produced = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     if (length == 0) return;
     sz_ghash_descending_powers_powervsx_(state->key.powers, powers_u8x16);

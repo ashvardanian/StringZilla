@@ -915,6 +915,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source
     // vector loop; the final sub-32-byte tail is delegated to the serial kernel wholesale, which
     // also keeps the incomplete-trailing-sequence behavior bit-identical to the baseline.
     sz_ptr_t const target_start = target;
+    sz_cptr_t const source_start = source;
+    sz_size_t const source_full_length = source_length;
 
     while (source_length >= 32) {
         // Prefetch ahead to hide memory latency on large datasets that overflow the caches
@@ -950,7 +952,10 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source
     // The sub-32-byte tail goes through the serial kernel, inheriting its handling of
     // incomplete or invalid trailing sequences byte-for-byte
     target += sz_utf8_uncased_fold_serial(source, source_length, target);
-    return (sz_size_t)(target - target_start);
+    sz_size_t const folded_length = (sz_size_t)(target - target_start);
+    sz_assert_(folded_length <= source_full_length * 3 && "Folding grows one byte into three at most");
+    sz_assert_no_overlap_(target_start, folded_length, source_start, source_full_length);
+    return folded_length;
 }
 
 #if defined(__clang__)

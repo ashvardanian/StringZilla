@@ -236,9 +236,9 @@ STRINGZILLA_HELPER_AUTO sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, s
 /** Plural UAX-29 sentence segmentation: one forward sweep emits every sentence into parallel
  *  @p sentence_starts and @p sentence_lengths, carrying the SB run-state so each codepoint is
  *  decoded once, O(n) with no backward re-walks. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_serial( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_serial_( //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,   //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t sentences = 0;
@@ -308,6 +308,18 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_serial( //
     }
     if (bytes_consumed) *bytes_consumed = length;
     return sentences;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_serial( //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
+    sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const segments_count = sz_utf8_sentences_serial_(text, length, sentence_starts, sentence_lengths,
+                                                               sentences_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, segments_count,
+                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
+                                         0, sz_true_k));
+    return segments_count;
 }
 
 #pragma endregion UAX 29 Sentence Boundaries

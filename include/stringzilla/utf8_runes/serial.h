@@ -283,6 +283,8 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_serial( //
     }
 
     *runes_unpacked = runes_written;
+    sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(text_cursor - text),
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
     return text_cursor;
 }
 

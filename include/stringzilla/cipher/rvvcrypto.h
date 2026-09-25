@@ -408,6 +408,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const 
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     sz_aes256_counter_nonce_store_rvvcrypto_(counter_block_vec.u8s, nonce);
     sz_aes256_counter_index_store_rvvcrypto_(counter_block_vec.u8s, block_index);
@@ -506,6 +507,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
     sz_size_t consumed = 0;
+    sz_assert_(state->text_length == 0 && "Associated data must precede the message");
 
     // Associated data is hashed but never encrypted, so a whole block hashes straight out of the
     // caller's buffer and only a partial one is completed in `partial`.
@@ -575,6 +577,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
     sz_size_t produced = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     // Associated data ends the moment the first message byte arrives, and its tail needs padding.
     if (state->text_length == 0 && length != 0)

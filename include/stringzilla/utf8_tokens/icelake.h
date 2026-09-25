@@ -108,6 +108,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_icelake( //
     // If the loop stopped on the LF of an already-emitted CRLF, resume past it (the CR carried the length-2 match).
     if (position != 0 && position < length && text_u8[position - 1] == '\r' && text_u8[position] == '\n') ++position;
     if (bytes_consumed) *bytes_consumed = position;
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
+                                         match_offsets, match_lengths, 0, sz_false_k));
     return count;
 }
 
@@ -197,6 +199,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake( //
     }
 
     if (bytes_consumed) *bytes_consumed = position;
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
+                                         match_offsets, match_lengths, 0, sz_false_k));
     return count;
 }
 
@@ -395,9 +399,9 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_valid_starts_icelake_( //
 
 #pragma region Forward driver
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake( //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,        //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiters_icelake_( //
+    sz_cptr_t text, sz_size_t length,                            //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,          //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
     __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
@@ -467,6 +471,18 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake( //
 
     if (bytes_consumed) *bytes_consumed = base;
     return count;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake( //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,        //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const matches_count = sz_utf8_delimiters_icelake_(text, length, match_offsets, match_lengths,
+                                                                matches_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return matches_count;
 }
 
 #pragma endregion Forward driver

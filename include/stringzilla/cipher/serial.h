@@ -192,6 +192,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_serial(sz_aes256_key_t const *ke
     // The first block may start part way in, so its leading bytes are generated and discarded.
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
+    sz_assert_no_overlap_(output, length, text, length);
 
     while (produced != length) {
         sz_aes256_counter_block_serial_(nonce, block_index, counter);
@@ -348,6 +349,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_serial_(sz_aes256_gcm_sta
                                                                sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_size_t consumed = 0;
+    sz_assert_(state->text_length == 0 && "Associated data must precede the message");
 
     // Associated data is hashed but never encrypted, so a partial block is completed in place.
     while (consumed != length) {
@@ -399,6 +401,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_sta
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     sz_size_t produced = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     // Associated data ends the moment the first message byte arrives, and its tail needs padding.
     if (state->text_length == 0 && length != 0) sz_aes256_gcm_flush_partial_serial_(state);

@@ -318,6 +318,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_icelake(sz_aes256_key_t const *k
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     if (length == 0) return;
 
@@ -578,6 +579,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_st
     __m512i powers_high_u8x64, powers_low_u8x64;
     __m128i accumulator_u8x16, subkey_u8x16;
     sz_size_t consumed = 0, byte_index;
+    sz_assert_(state->text_length == 0 && "Associated data must precede the message");
 
     if (length == 0) return;
     sz_ghash_powers_icelake_(&state->key, &powers_high_u8x64, &powers_low_u8x64);
@@ -822,6 +824,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_icelake_(sz_aes256_gcm_st
     __m512i powers_high_u8x64, powers_low_u8x64;
     __m128i accumulator_u8x16, subkey_u8x16;
     sz_size_t produced, head_bytes;
+    sz_assert_no_overlap_(output, length, text, length);
 
     //  Associated data ends the moment the first message byte arrives, and its tail needs padding.
     if (state->text_length == 0 && length != 0) sz_aes256_gcm_flush_partial_icelake_(state);

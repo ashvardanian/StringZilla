@@ -176,9 +176,9 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_plane_class_sve2_(sz_u64_t cons
  *  class bit-planes and side masks the frame needs; fifteen-plus per-class masks then assemble from
  *  six bit-planes with scalar mask algebra instead of one compare per class.
  */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *starts, sz_size_t *lengths,                  //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *starts, sz_size_t *lengths,                    //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || capacity == 0) {
@@ -479,6 +479,16 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2( //
     if (produced < capacity) starts[produced] = line_start, lengths[produced] = length - line_start, ++produced;
     if (bytes_consumed) *bytes_consumed = length;
     return produced;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *starts, sz_size_t *lengths,                  //
+    sz_size_t capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const segments_count = sz_utf8_linebreaks_sve2_(text, length, starts, lengths, capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, capacity, segments_count, bytes_consumed ? *bytes_consumed : length,
+                                         starts, lengths, 0, sz_true_k));
+    return segments_count;
 }
 
 #pragma endregion UAX 14 Line Boundaries forward kernel

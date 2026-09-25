@@ -502,9 +502,9 @@ STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_
  *  Byte-identical to driving @c sz_utf8_is_word_boundary_serial per position. On a full buffer
  *  `*bytes_consumed` is the start of the first word that did not fit, always a true TR29 boundary,
  *  so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *word_starts, sz_size_t *word_lengths,          //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
+    sz_cptr_t text, sz_size_t length,                           //
+    sz_size_t *word_starts, sz_size_t *word_lengths,            //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;
@@ -560,6 +560,18 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
     ++words;
     if (bytes_consumed) *bytes_consumed = length;
     return words;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *word_starts, sz_size_t *word_lengths,          //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const segments_count = sz_utf8_wordbreaks_serial_(text, length, word_starts, word_lengths, words_capacity,
+                                                                bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, segments_count,
+                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
+                                         sz_true_k));
+    return segments_count;
 }
 
 #pragma region Portable Word_Break Codepoint Partition

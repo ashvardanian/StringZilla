@@ -57,6 +57,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length
 
 STRINGZILLA_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                                  char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
     // Small inputs aren't worth the SIMD setup cost — defer to the serial path.
     if (length <= 128) {
         sz_lookup_serial(target, length, source, lut);

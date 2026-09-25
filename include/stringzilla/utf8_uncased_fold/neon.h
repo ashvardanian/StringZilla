@@ -809,6 +809,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, s
     // remaining headroom is ≥ 192 bytes - full 16-byte stores with partial advance are safe
     // anywhere inside the superchunk path, and no masked stores are needed.
     sz_ptr_t const target_start = target;
+    sz_cptr_t const source_start = source;
+    sz_size_t const source_full_length = source_length;
 
     uint8x16x4_t const lead_families_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_fold_lead_families_lut_);
 
@@ -932,7 +934,10 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, s
     // Serial epilogue: handles the sub-register tail and any trailing incomplete sequence
     // exactly like the scalar reference, keeping the two backends byte-for-byte identical.
     if (source_length) target += sz_utf8_uncased_fold_serial(source, source_length, target);
-    return (sz_size_t)(target - target_start);
+    sz_size_t const folded_length = (sz_size_t)(target - target_start);
+    sz_assert_(folded_length <= source_full_length * 3 && "Folding grows one byte into three at most");
+    sz_assert_no_overlap_(target_start, folded_length, source_start, source_full_length);
+    return folded_length;
 }
 
 #if defined(__clang__)

@@ -613,7 +613,10 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_si
         out += sink.written;
         ptr = tail;
     }
-    return (sz_size_t)(out - (sz_u8_t *)destination);
+    sz_size_t const normalized_length = (sz_size_t)(out - (sz_u8_t *)destination);
+    sz_assert_(normalized_length <= source_length * 18 && "Normalizing grows one byte into eighteen at most");
+    sz_assert_no_overlap_(destination, normalized_length, source, source_length);
+    return normalized_length;
 }
 
 /**

@@ -68,6 +68,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length,
 }
 
 STRINGZILLA_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_assert_no_overlap_(target, length, source, length);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
     //
@@ -225,6 +226,7 @@ STRINGZILLA_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source,
 
 STRINGZILLA_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                                 char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.

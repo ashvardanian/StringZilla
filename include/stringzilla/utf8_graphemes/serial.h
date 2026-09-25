@@ -326,9 +326,9 @@ STRINGZILLA_HELPER_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_st
  *  parallel @p cluster_starts and @p cluster_lengths, carrying the GB9c, GB11, and GB12-13
  *  runs in a register state, O(n) with no backward re-walks. Byte-identical to the
  *  per-position @c sz_utf8_is_grapheme_boundary_serial. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_serial( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,   //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_graphemes_serial_( //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,     //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t clusters = 0;
@@ -378,6 +378,18 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_serial( //
     ++clusters;
     if (bytes_consumed) *bytes_consumed = length;
     return clusters;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_serial( //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,   //
+    sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const segments_count = sz_utf8_graphemes_serial_(text, length, cluster_starts, cluster_lengths,
+                                                               clusters_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, segments_count,
+                                         bytes_consumed ? *bytes_consumed : length, cluster_starts, cluster_lengths, 0,
+                                         sz_true_k));
+    return segments_count;
 }
 
 #pragma endregion UAX 29 Grapheme Cluster Boundaries

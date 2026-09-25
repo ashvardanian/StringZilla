@@ -270,9 +270,9 @@ STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break
 
 #pragma region Sentence_Break forward driver
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_icelake( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,  //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_icelake_( //
+    sz_cptr_t text, sz_size_t length,                           //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,    //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t sentences = 0;
@@ -460,6 +460,18 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_icelake( //
     ++sentences;
     if (bytes_consumed) *bytes_consumed = length;
     return sentences;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_icelake( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,  //
+    sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const segments_count = sz_utf8_sentences_icelake_(text, length, sentence_starts, sentence_lengths,
+                                                                sentences_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, segments_count,
+                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
+                                         0, sz_true_k));
+    return segments_count;
 }
 
 #pragma endregion Sentence_Break forward driver

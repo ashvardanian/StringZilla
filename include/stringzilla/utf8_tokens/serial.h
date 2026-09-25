@@ -117,14 +117,24 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_serial( //
     sz_cptr_t text, sz_size_t length,                       //
     sz_size_t *match_offsets, sz_size_t *match_lengths,     //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    return sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+    sz_size_t const matches_count = sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths,
+                                                             matches_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return matches_count;
 }
 
 STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial( //
     sz_cptr_t text, sz_size_t length,                          //
     sz_size_t *match_offsets, sz_size_t *match_lengths,        //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    return sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+    sz_size_t const matches_count = sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths,
+                                                                matches_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return matches_count;
 }
 
 #pragma region Serial
@@ -197,7 +207,12 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_serial( //
     sz_cptr_t text, sz_size_t length,                         //
     sz_size_t *match_offsets, sz_size_t *match_lengths,       //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    return sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+    sz_size_t const matches_count = sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths,
+                                                               matches_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return matches_count;
 }
 
 #pragma endregion Serial

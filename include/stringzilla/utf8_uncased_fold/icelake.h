@@ -309,6 +309,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source
     //
     sz_u512_vec_t source_vec;
     sz_ptr_t target_start = target;
+    sz_cptr_t const source_start = source;
+    sz_size_t const source_full_length = source_length;
 
     // Pre-compute constants used in multiple places
     __m512i const indices_u8x64 = _mm512_set_epi8(                      //
@@ -1597,7 +1599,10 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source
         }
     }
 
-    return (sz_size_t)(target - target_start);
+    sz_size_t const folded_length = (sz_size_t)(target - target_start);
+    sz_assert_(folded_length <= source_full_length * 3 && "Folding grows one byte into three at most");
+    sz_assert_no_overlap_(target_start, folded_length, source_start, source_full_length);
+    return folded_length;
 }
 
 /*  Undefine local helper macros to avoid namespace pollution */

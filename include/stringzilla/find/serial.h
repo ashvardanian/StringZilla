@@ -443,7 +443,8 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, 
 STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                            //
     sz_cptr_t needle, sz_size_t needle_length) {
-    sz_assert_(needle_length <= 256 && "The pattern is too long.");
+    sz_assert_(needle_length >= 2 && needle_length <= 256 &&
+               "A 1-byte needle never advances, and a longer than 256-byte one overflows the shifts");
     sz_assert_(haystack_length >= needle_length && "The haystack is too short.");
     // Several popular string matching algorithms are using a bad-character shift table.
     // Boyer Moore: https://www-igm.univ-mlv.fr/~lecroq/string/node14.html
@@ -508,7 +509,8 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
 STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                             //
     sz_cptr_t needle, sz_size_t needle_length) {
-    sz_assert_(needle_length <= 256 && "The pattern is too long.");
+    sz_assert_(needle_length >= 2 && needle_length <= 256 &&
+               "A 1-byte needle never advances, and a longer than 256-byte one overflows the shifts");
     sz_assert_(haystack_length >= needle_length && "The haystack is too short.");
     union {
         sz_u8_t jumps[256];

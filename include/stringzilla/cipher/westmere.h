@@ -220,6 +220,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0, lane_index;
+    sz_assert_no_overlap_(output, length, text, length);
 
     // A start that is not block aligned generates its first block whole and discards the leading bytes.
     if (within_block != 0 && length != 0) {
@@ -516,6 +517,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_s
     sz_u512_vec_t const powers_vec = sz_ghash_descending_powers_westmere_(state->key.powers);
     __m128i accumulator_u8x16;
     sz_size_t consumed = 0, byte_index;
+    sz_assert_(state->text_length == 0 && "Associated data must precede the message");
 
     if (length == 0) return;
     accumulator_u8x16 = sz_ghash_load_westmere_(state->accumulator);
@@ -616,6 +618,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_s
     __m128i accumulator_u8x16;
     sz_u32_t block_index;
     sz_size_t produced = 0, lane_index;
+    sz_assert_no_overlap_(output, length, text, length);
 
     if (length == 0) return;
     accumulator_u8x16 = sz_ghash_load_westmere_(state->accumulator);

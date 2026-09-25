@@ -285,6 +285,8 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_icelake(sz_levensh
                                                                       sz_sequence_t const *candidates,
                                                                       sz_size_t *distances,
                                                                       sz_size_t distances_stride) {
+    sz_assert_((engine->capability & sz_caps_cpus_k) != 0 &&
+               "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
     enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
     // The byte lanes read one word of one class row, so a rune batch is Skylake's whole and not one query at a time.
     if (engine->symbol != sz_levenshtein_bytes_k)

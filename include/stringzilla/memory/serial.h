@@ -17,6 +17,7 @@ extern "C" {
 
 STRINGZILLA_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                                char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
     sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
     sz_u8_t const *source_u8 = (sz_u8_t const *)source;
     sz_u8_t *target_u8 = (sz_u8_t *)target;

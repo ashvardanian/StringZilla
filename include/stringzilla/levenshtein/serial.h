@@ -926,6 +926,8 @@ STRINGZILLA_HELPER_INLINE void sz_levenshtein_serial_u64x1_distances_(sz_levensh
 STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engine_t *engine,
                                                                      sz_sequence_t const *candidates,
                                                                      sz_size_t *distances, sz_size_t distances_stride) {
+    sz_assert_((engine->capability & sz_caps_cpus_k) != 0 &&
+               "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
     enum { registers_k = sz_levenshtein_serial_u64x1_registers_per_position_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_levenshtein_transpose_t const transpose = engine->symbol == sz_levenshtein_bytes_k

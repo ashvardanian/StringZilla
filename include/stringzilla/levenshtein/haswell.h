@@ -289,6 +289,8 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_haswell(sz_levensh
                                                                       sz_sequence_t const *candidates,
                                                                       sz_size_t *distances,
                                                                       sz_size_t distances_stride) {
+    sz_assert_((engine->capability & sz_caps_cpus_k) != 0 &&
+               "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
     enum { registers_k = sz_levenshtein_haswell_u64x4_registers_per_position_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_bool_t const over_bytes = engine->symbol == sz_levenshtein_bytes_k ? sz_true_k : sz_false_k;

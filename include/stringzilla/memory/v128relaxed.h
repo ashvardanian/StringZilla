@@ -44,6 +44,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t len
  *  identical to @c sz_lookup_serial. */
 STRINGZILLA_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                                     char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
 
     // For tiny inputs the SIMD setup isn't worth it. Match the baseline heuristic.
     if (length <= 128) {

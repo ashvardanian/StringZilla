@@ -188,6 +188,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *k
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
     svuint8_t counter_u8x;
+    sz_assert_no_overlap_(output, length, text, length);
 
     if (length == 0) return;
     counter_u8x = sz_aes256_counter_advance_sve2aes_(sz_aes256_counter_broadcast_sve2aes_(nonce, block_index),
@@ -507,6 +508,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_st
     sz_size_t pass_blocks = group_blocks;
     svuint8_t accumulator_u8x;
     sz_size_t consumed = 0, partial_position;
+    sz_assert_(state->text_length == 0 && "Associated data must precede the message");
 
     if (length == 0) return;
     accumulator_u8x = sz_ghash_load_sve2aes_(state->accumulator);
@@ -634,6 +636,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_st
     svuint8_t accumulator_u8x, counter_u8x, last_keystream_u8x = svdup_n_u8(0);
     sz_u32_t block_index;
     sz_size_t produced = 0, pass_count = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     if (length == 0) return;
     accumulator_u8x = sz_ghash_load_sve2aes_(state->accumulator);

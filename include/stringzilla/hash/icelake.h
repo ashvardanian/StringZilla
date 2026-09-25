@@ -39,6 +39,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t l
     // A typical AWS Sapphire Rapids instance can have 48 KB x 2 blocks of L1 data cache per core,
     // 2 MB x 2 blocks of L2 cache per core, and one shared 60 MB buffer of L3 cache.
     // With two strings, we may consider the overall workload huge, if each exceeds 1 MB in length.
+    // It also keeps the saturating 32-bit `VPDPBUSDS` lanes far from their overflow, near 134 MB.
     int const is_huge = length >= 1ull * 1024ull * 1024ull;
     sz_u512_vec_t text_vec, sums_vec;
 

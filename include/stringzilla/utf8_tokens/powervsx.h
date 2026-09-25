@@ -156,6 +156,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_powervsx( //
     count += sz_utf8_newlines_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
                                       match_offsets + count, match_lengths + count, matches_capacity - count,
                                       bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
+                                         match_offsets, match_lengths, 0, sz_false_k));
     return count;
 }
 
@@ -257,6 +259,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
     count += sz_utf8_whitespaces_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
                                          match_offsets + count, match_lengths + count, matches_capacity - count,
                                          bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
+                                         match_offsets, match_lengths, 0, sz_false_k));
     return count;
 }
 

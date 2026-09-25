@@ -351,6 +351,8 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
+    sz_assert_(string_length < string_space && string_start[string_length] == 0 &&
+               "A string keeps its terminator inside its space, which a byte-copied stack string does not");
     // Shrinking is a no-op, matching `std::string::reserve` semantics. Without this check a smaller
     // `new_capacity` would allocate a smaller buffer and then overflow it with the old contents.
     if (new_space <= string_space) return string->external.start;
@@ -407,6 +409,8 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_expand( //
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
+    sz_assert_(string_length < string_space && string_start[string_length] == 0 &&
+               "A string keeps its terminator inside its space, which a byte-copied stack string does not");
 
     // The user intended to extend the string.
     offset = sz_min_of_two(offset, string_length);
@@ -448,6 +452,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_string_erase(sz_string_t *string, sz_size_
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
+    sz_assert_(string_length < string_space && string_start[string_length] == 0 &&
+               "A string keeps its terminator inside its space, which a byte-copied stack string does not");
 
     // Normalize the offset, it can't be larger than the length.
     offset = sz_min_of_two(offset, string_length);

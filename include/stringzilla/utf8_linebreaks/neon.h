@@ -643,7 +643,11 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_neon( //
     sz_cptr_t text, sz_size_t length,                       //
     sz_size_t *starts, sz_size_t *lengths,                  //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
-    return sz_utf8_linebreaks_neon_bytes_(text, length, starts, lengths, capacity, bytes_consumed);
+    sz_size_t const segments_count = sz_utf8_linebreaks_neon_bytes_(text, length, starts, lengths, capacity,
+                                                                    bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, capacity, segments_count, bytes_consumed ? *bytes_consumed : length,
+                                         starts, lengths, 0, sz_true_k));
+    return segments_count;
 }
 
 #pragma endregion Forward driver

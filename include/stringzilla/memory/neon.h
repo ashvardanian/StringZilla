@@ -25,6 +25,7 @@ extern "C" {
 #endif
 
 STRINGZILLA_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_assert_no_overlap_(target, length, source, length);
     // In most cases the `source` and the `target` are not aligned, but we should
     // at least make sure that writes don't touch many cache lines.
     // NEON has an instruction to load and write 64 bytes at once.
@@ -122,6 +123,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz
 
 STRINGZILLA_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                              char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.

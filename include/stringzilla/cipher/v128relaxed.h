@@ -216,6 +216,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t cons
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
+    sz_assert_no_overlap_(output, length, text, length);
 
     // A start that is not block aligned generates its first block whole and discards the leading bytes.
     if (within_block != 0 && length != 0) {
@@ -311,6 +312,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gc
     v128_t accumulator_u8x16;
     sz_u32_t block_index;
     sz_size_t produced = 0, byte_index;
+    sz_assert_no_overlap_(output, length, text, length);
 
     if (length == 0) return;
     accumulator_u8x16 = wasm_v128_load(state->accumulator);

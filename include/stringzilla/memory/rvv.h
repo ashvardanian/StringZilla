@@ -68,6 +68,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_
  *  is no serial path. */
 STRINGZILLA_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                             char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
     sz_u8_t *target_cursor = (sz_u8_t *)target;
     sz_u8_t const *source_cursor = (sz_u8_t const *)source;
     sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;

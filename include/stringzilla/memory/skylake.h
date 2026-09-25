@@ -58,6 +58,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length,
 }
 
 STRINGZILLA_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_assert_no_overlap_(target, length, source, length);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
     //

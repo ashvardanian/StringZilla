@@ -47,6 +47,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz
 }
 
 STRINGZILLA_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_assert_no_overlap_(target, length, source, length);
     if (length < 8) {
         while (length--) *(target++) = *(source++);
     }
@@ -132,6 +133,7 @@ STRINGZILLA_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz
 
 STRINGZILLA_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                              char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
 
     // The setup cost only pays off for larger inputs.
     if (length <= 128) {

@@ -55,6 +55,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_
 }
 
 STRINGZILLA_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_assert_no_overlap_(target, length, source, length);
     sz_size_t vector_length = svcntb(); // Vector length in bytes
 
     // When the buffer is small, there isn't much to innovate.
@@ -156,6 +157,7 @@ STRINGZILLA_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_
 
 STRINGZILLA_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                             char const lut[sz_at_least_(256)]) {
+    sz_assert_no_overlap_(target, length, source, length);
 
     if (length <= 128) {
         sz_lookup_serial(target, length, source, lut);

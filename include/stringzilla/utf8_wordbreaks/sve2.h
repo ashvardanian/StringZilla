@@ -918,9 +918,9 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b
  *  Each iteration commits at most `svcntb()` bytes (one byte-vector of engine lanes); the carry
  *  mechanism re-decodes the deferred tail, so the windowed result is bit-exact with serial
  *  regardless of the per-iteration ceiling. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *word_starts, sz_size_t *word_lengths,        //
+STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *word_starts, sz_size_t *word_lengths,          //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {
@@ -1028,6 +1028,18 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2( //
     ++words;
     if (bytes_consumed) *bytes_consumed = length;
     return words;
+}
+
+STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *word_starts, sz_size_t *word_lengths,        //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t const segments_count = sz_utf8_wordbreaks_sve2_(text, length, word_starts, word_lengths, words_capacity,
+                                                              bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, segments_count,
+                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
+                                         sz_true_k));
+    return segments_count;
 }
 
 #if defined(__clang__)
