@@ -1,4 +1,6 @@
-// File: golang/lib_sha256_test.go
+// SHA-256 against the NIST vectors, one-shot against streaming.
+//
+// File: golang/sha256_test.go
 // Author: Ash Vardanian
 
 //go:build !no_sha256

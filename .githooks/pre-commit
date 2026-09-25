@@ -1474,7 +1474,8 @@ check_go_package_comment_in_package_file() {
 
 # Rejects a Go file without its `// File: <path>` and `// Author: <author>` fields, as the Python and Rust
 # modules carry them. The package comment ends with them after an empty `//` line, so it still opens
-# with "Package <name>"; any other file opens with them, then an empty line.
+# with "Package <name>"; any other file opens with them, after an optional summary line and `//`, then an
+# empty line.
 check_go_file_header() {
     local header
     header=$(printf '%s\n' "$staged_file_text" | awk -v path="$staged_path" '
@@ -1485,8 +1486,11 @@ check_go_file_header() {
             if (package_line > 1 && lines[package_line - 1] ~ /^\/\//) {
                 if (lines[package_line - 2] != "// File: " path || lines[package_line - 1] !~ author || lines[package_line - 3] != "//")
                     print "line " package_line ": the package comment must end with //, // File: " path ", // Author: <author>"
-            } else if (lines[1] != "// File: " path || lines[2] !~ author || lines[3] != "")
-                print "line 1: the file must open with // File: " path ", // Author: <author>, an empty line"
+            } else {
+                first = (lines[1] ~ /^\/\/ [^ ]/ && lines[2] == "//") ? 3 : 1
+                if (lines[first] != "// File: " path || lines[first + 1] !~ author || lines[first + 2] != "")
+                    print "line 1: the file must open with an optional summary and //, then // File: " path ", // Author: <author>, an empty line"
+            }
         }')
     [ -z "$header" ] || reject_with_reason "$header" \
         "$staged_path opens without its file header, the // File: and // Author: fields:"

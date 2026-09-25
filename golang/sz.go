@@ -19,3 +19,42 @@
 // File: golang/sz.go
 // Author: Ash Vardanian
 package sz
+
+// #cgo CFLAGS: -O3 -I../include -DSTRINGZILLA_RUNTIME_DISPATCH=1
+// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_golang -L../build_release -L../build_shared
+// #cgo LDFLAGS: -lstringzilla_shared
+// #cgo noescape sz_find
+// #cgo nocallback sz_find
+// #cgo noescape sz_find_byte
+// #cgo nocallback sz_find_byte
+// #cgo noescape sz_rfind
+// #cgo nocallback sz_rfind
+// #cgo noescape sz_rfind_byte
+// #cgo nocallback sz_rfind_byte
+// #cgo noescape sz_find_byte_from
+// #cgo nocallback sz_find_byte_from
+// #cgo noescape sz_rfind_byte_from
+// #cgo nocallback sz_rfind_byte_from
+// #cgo noescape sz_bytesum
+// #cgo nocallback sz_bytesum
+// #cgo noescape sz_hash
+// #cgo nocallback sz_hash
+// #cgo noescape sz_utf8_uncased_fold
+// #cgo nocallback sz_utf8_uncased_fold
+// #cgo noescape sz_utf8_uncased_search
+// #cgo nocallback sz_utf8_uncased_search
+// #cgo noescape sz_utf8_count
+// #cgo nocallback sz_utf8_count
+// #cgo noescape sz_utf8_norm
+// #cgo nocallback sz_utf8_norm
+// #define STRINGZILLA_RUNTIME_DISPATCH 1
+// #include <stringzilla/stringzilla.h>
+import "C"
+
+// Explicitly initialize the dynamic dispatch table.
+func init() {
+	// The `__attribute__((constructor))` in the C library may not be called by CGO's internal linker
+	// (see golang/go#28909), so we call it manually to ensure the dispatch table is populated before
+	// any functions are used.
+	C.sz_dispatch_cpu_table_init()
+}

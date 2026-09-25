@@ -2020,6 +2020,15 @@ assert_verbatim_rejects "Go file without its header" "opens without its file hea
 package probe
 FIXTURE
 
+assert_verbatim_accepts "Go file opening with a summary above its header" golang/probe.go <<'FIXTURE'
+// Probes a value over Go strings.
+//
+// File: golang/probe.go
+// Author: Selftest
+
+package probe
+FIXTURE
+
 assert_verbatim_rejects "Python module without its fields" "opens without the module fields" python/probe.py <<'FIXTURE'
 """Probes a value."""
 FIXTURE

@@ -1,3 +1,5 @@
+// Benchmarks the Go binding against the standard library over the tokens or lines of a file.
+//
 // File: bench/stringzilla.go
 // Author: Ash Vardanian
 
