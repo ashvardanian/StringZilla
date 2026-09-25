@@ -291,7 +291,7 @@ typedef struct sz_sha256_state_t {
  *  a byte because it never exceeds 63, which also makes the struct identical on 32- and 64-bit
  *  builds. Alignment stays natural on purpose: @c malloc only promises 16 bytes, so demanding 64
  *  would under-align every heap-allocated batch. */
-sz_static_assert(sizeof(sz_sha256_state_t) == 128, sha256_state_is_two_cache_lines);
+sz_static_assert_(sizeof(sz_sha256_state_t) == 128, sha256_state_is_two_cache_lines);
 
 /**
  *  @brief Initializes the state for incremental construction of a hash.

@@ -96,6 +96,15 @@ STRINGZILLA_HELPER_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512
                                              codepoints_u32x16);
 }
 
+/** Flat-palette index for one sixteen-byte group, where `cp = (high << 8) | low`, narrowed back to
+ *  bytes with @c vpmovdb. */
+STRINGZILLA_HELPER_INLINE __m128i sz_line_break_flat_group_icelake_(__m128i high_u8x16, __m128i low_u8x16) {
+    __m512i const high_u32x16 = _mm512_cvtepu8_epi32(high_u8x16);
+    __m512i const low_u32x16 = _mm512_cvtepu8_epi32(low_u8x16);
+    __m512i const codepoints_u32x16 = _mm512_or_si512(_mm512_slli_epi32(high_u32x16, 8), low_u32x16);
+    return _mm512_cvtepi32_epi8(sz_line_break_bmp_flat_index16_icelake_(codepoints_u32x16));
+}
+
 /**
  *  @brief All-64-lane flat-palette index for `cp < 0x10000`, where `cp = (high << 8) | low`.
  *
@@ -106,19 +115,19 @@ STRINGZILLA_HELPER_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512
  */
 STRINGZILLA_HELPER_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64,
                                                                         __m512i low_bytes_u8x64) {
+    __m128i const group0_u8x16 = sz_line_break_flat_group_icelake_(_mm512_extracti32x4_epi32(high_bytes_u8x64, 0),
+                                                                   _mm512_extracti32x4_epi32(low_bytes_u8x64, 0));
+    __m128i const group1_u8x16 = sz_line_break_flat_group_icelake_(_mm512_extracti32x4_epi32(high_bytes_u8x64, 1),
+                                                                   _mm512_extracti32x4_epi32(low_bytes_u8x64, 1));
+    __m128i const group2_u8x16 = sz_line_break_flat_group_icelake_(_mm512_extracti32x4_epi32(high_bytes_u8x64, 2),
+                                                                   _mm512_extracti32x4_epi32(low_bytes_u8x64, 2));
+    __m128i const group3_u8x16 = sz_line_break_flat_group_icelake_(_mm512_extracti32x4_epi32(high_bytes_u8x64, 3),
+                                                                   _mm512_extracti32x4_epi32(low_bytes_u8x64, 3));
     __m512i palette_indices_u8x64 = _mm512_setzero_si512();
-    __m512i high_u32x16, low_u32x16, codepoints_u32x16, group_indices_u32x16;
-#define STRINGZILLA_LINE_BREAK_FLAT_GROUP_ICELAKE_(group)                                   \
-    high_u32x16 = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(high_bytes_u8x64, group)); \
-    low_u32x16 = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(low_bytes_u8x64, group));   \
-    codepoints_u32x16 = _mm512_or_si512(_mm512_slli_epi32(high_u32x16, 8), low_u32x16);     \
-    group_indices_u32x16 = sz_line_break_bmp_flat_index16_icelake_(codepoints_u32x16);      \
-    palette_indices_u8x64 = _mm512_inserti32x4(palette_indices_u8x64, _mm512_cvtepi32_epi8(group_indices_u32x16), group)
-    STRINGZILLA_LINE_BREAK_FLAT_GROUP_ICELAKE_(0);
-    STRINGZILLA_LINE_BREAK_FLAT_GROUP_ICELAKE_(1);
-    STRINGZILLA_LINE_BREAK_FLAT_GROUP_ICELAKE_(2);
-    STRINGZILLA_LINE_BREAK_FLAT_GROUP_ICELAKE_(3);
-#undef STRINGZILLA_LINE_BREAK_FLAT_GROUP_ICELAKE_
+    palette_indices_u8x64 = _mm512_inserti32x4(palette_indices_u8x64, group0_u8x16, 0);
+    palette_indices_u8x64 = _mm512_inserti32x4(palette_indices_u8x64, group1_u8x16, 1);
+    palette_indices_u8x64 = _mm512_inserti32x4(palette_indices_u8x64, group2_u8x16, 2);
+    palette_indices_u8x64 = _mm512_inserti32x4(palette_indices_u8x64, group3_u8x16, 3);
     return palette_indices_u8x64;
 }
 

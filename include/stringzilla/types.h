@@ -763,17 +763,17 @@ typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
  *  (C++11 @c static_assert, C11 @c _Static_assert); the older-C typedef fallback must sit at file
  *  scope to stay clear of @c -Wunused-local-typedef. */
 #if defined(__cplusplus) && __cplusplus >= 201103L
-#define sz_static_assert(condition, name) static_assert(condition, #name)
+#define sz_static_assert_(condition, name) static_assert(condition, #name)
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define sz_static_assert(condition, name) _Static_assert(condition, #name)
+#define sz_static_assert_(condition, name) _Static_assert(condition, #name)
 #elif defined(_MSC_VER)
-#define sz_static_assert(condition, name) static_assert(condition, #name)
+#define sz_static_assert_(condition, name) static_assert(condition, #name)
 #else
-#define sz_static_assert(condition, name) typedef char sz_static_assert_##name[(condition) ? 1 : -1]
+#define sz_static_assert_(condition, name) typedef char sz_static_assert_##name[(condition) ? 1 : -1]
 #endif
 
-sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
-sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
+sz_static_assert_(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
+sz_static_assert_(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
 
 typedef unsigned char sz_byte_t;            // A byte is an 8-bit unsigned integer
 typedef char *sz_ptr_t;                     // A type alias for `char *`

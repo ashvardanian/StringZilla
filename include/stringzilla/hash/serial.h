@@ -54,12 +54,12 @@ typedef struct sz_hash_state_aligned_for_short_t {
  *  `sz_hash_state_load_<isa>_` and `sz_hash_state_store_<isa>_` move it field-by-field. The packed
  *  @c sz_hash_state_t is defined in `hash.h`, which includes this header after that definition. */
 #if STRINGZILLA_WITH_LIBC
-sz_static_assert(offsetof(sz_hash_state_aligned_t, aes) == offsetof(sz_hash_state_t, aes), hash_aligned_aes_offset);
-sz_static_assert(offsetof(sz_hash_state_aligned_t, sum) == offsetof(sz_hash_state_t, sum), hash_aligned_sum_offset);
-sz_static_assert(offsetof(sz_hash_state_aligned_t, ins) == offsetof(sz_hash_state_t, ins), hash_aligned_ins_offset);
-sz_static_assert(offsetof(sz_hash_state_aligned_t, key) == offsetof(sz_hash_state_t, key), hash_aligned_key_offset);
-sz_static_assert(offsetof(sz_hash_state_aligned_t, ins_length) == offsetof(sz_hash_state_t, ins_length),
-                 hash_aligned_ins_length_offset);
+sz_static_assert_(offsetof(sz_hash_state_aligned_t, aes) == offsetof(sz_hash_state_t, aes), hash_aligned_aes_offset);
+sz_static_assert_(offsetof(sz_hash_state_aligned_t, sum) == offsetof(sz_hash_state_t, sum), hash_aligned_sum_offset);
+sz_static_assert_(offsetof(sz_hash_state_aligned_t, ins) == offsetof(sz_hash_state_t, ins), hash_aligned_ins_offset);
+sz_static_assert_(offsetof(sz_hash_state_aligned_t, key) == offsetof(sz_hash_state_t, key), hash_aligned_key_offset);
+sz_static_assert_(offsetof(sz_hash_state_aligned_t, ins_length) == offsetof(sz_hash_state_t, ins_length),
+                  hash_aligned_ins_length_offset);
 #endif
 
 STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length) {

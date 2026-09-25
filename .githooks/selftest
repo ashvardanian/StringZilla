@@ -817,7 +817,7 @@ int probe(void);
 FIXTURE
 
 assert_accepts "comment in a macro padded to its backslash" include/numkong/probe.h <<'FIXTURE'
-#define PROBE_(name)                                                                                   \
+#define probe_(name)                                                                                   \
     /* Short note inside a macro body. */                                                             \
     int name(void)
 FIXTURE
@@ -1708,12 +1708,12 @@ int probe(void);
 FIXTURE
 
 assert_accepts "ASCII arrow after a dereference in a macro" include/numkong/probe.h <<'FIXTURE'
-#define PROBE_READ(header, width) \
+#define probe_read_(header, width) \
     *width = header->column_count;
 FIXTURE
 
 assert_accepts "ASCII arrow in a C macro body" include/numkong/probe.h <<'FIXTURE'
-#define PROBE_FIELD(pointer) ((pointer)->field)
+#define probe_field_(pointer) ((pointer)->field)
 FIXTURE
 
 assert_rejects "glued bidirectional ASCII arrow" "writes an arrow as" include/numkong/probe.h <<'FIXTURE'
@@ -2329,6 +2329,15 @@ assert_accepts "fact tested by value, under its default guard" include/stringzil
 #if !defined(STRINGZILLA_ARCH_BIG_ENDIAN_)
 static int probe(void) { return STRINGZILLA_OS_LINUX_; }
 #endif
+FIXTURE
+
+assert_rejects "function-like ALL_CAPS macro" "defines a function-like ALL_CAPS macro" include/stringzilla/probe.h <<'FIXTURE'
+#define STRINGZILLA_PROBE_TWICE_(value) ((value) * 2)
+FIXTURE
+
+assert_accepts "object-like ALL_CAPS macro, and a snake_case_ generator" include/stringzilla/probe.h <<'FIXTURE'
+#define STRINGZILLA_PROBE_LIMIT (64)
+#define sz_probe_twice_(value) ((value) * 2)
 FIXTURE
 
 # endregion StringZilla Fixtures

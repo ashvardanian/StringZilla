@@ -388,55 +388,33 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_rvvcrypto_(
                                     ((sz_u32_t)block[word_index * 4 + 2] << 8) |
                                     ((sz_u32_t)block[word_index * 4 + 3] << 0);
 
-    // Four schedule vectors hold {W3,W2,W1,W0}, {W7..W4}, {W11..W8}, {W15..W12}; they roll forward
-    // by `vsha2ms`. RVV sizeless types cannot live in an array, so the four lanes are named locals and
-    // the 16 quad-rounds are emitted by macros that cycle (w0 -> w1 -> w2 -> w3 -> w0 ...).
+    // Four schedule vectors hold {W3,W2,W1,W0}, {W7..W4}, {W11..W8}, {W15..W12}. RVV sizeless
+    // types cannot live in an array, so each quad-round consumes `w0` and rotates the four locals.
     vuint32m1_t w0_u32m1 = __riscv_vle32_v_u32m1(&message_words[0], vector_length);
     vuint32m1_t w1_u32m1 = __riscv_vle32_v_u32m1(&message_words[4], vector_length);
     vuint32m1_t w2_u32m1 = __riscv_vle32_v_u32m1(&message_words[8], vector_length);
     vuint32m1_t w3_u32m1 = __riscv_vle32_v_u32m1(&message_words[12], vector_length);
 
-    // One quad-round: two compression rounds (`cl` then `ch`), then roll `current` forward via `ms`.
-    // `current` is the group being consumed/produced; `newer`/`older` feed the lane-0 merge that builds
-    // {W11,W10,W9,W4}; `newest` supplies {W15,W14,-,W12}.
-#define STRINGZILLA_RVVCRYPTO_SHA_QUAD_(current, newer, older, newest, k_offset)                                    \
-    do {                                                                                                            \
-        vuint32m1_t const round_key_u32m1 = __riscv_vadd_vv_u32m1(                                                  \
-            __riscv_vle32_v_u32m1(&round_constants[(k_offset)], vector_length), (current), vector_length);          \
-        cdgh_u32m1 = __riscv_vsha2cl_vv_u32m1(cdgh_u32m1, abef_u32m1, round_key_u32m1, vector_length);              \
-        abef_u32m1 = __riscv_vsha2ch_vv_u32m1(abef_u32m1, cdgh_u32m1, round_key_u32m1, vector_length);              \
-        vuint32m1_t const merged_u32m1 = __riscv_vmerge_vvm_u32m1((older), (newer), lane0_mask_b32, vector_length); \
-        (current) = __riscv_vsha2ms_vv_u32m1((current), merged_u32m1, (newest), vector_length);                     \
-    } while (0)
+    // Quad-rounds 0..11 compress (`cl` then `ch`) and extend the schedule via `ms`: the lane-0
+    // merge of `w1` into `w2` builds {W11,W10,W9,W4}, and `w3` supplies {W15,W14,-,W12}.
+    for (sz_size_t round_index = 0; round_index != 48; round_index += 4) {
+        vuint32m1_t const round_key_u32m1 = __riscv_vadd_vv_u32m1(
+            __riscv_vle32_v_u32m1(&round_constants[round_index], vector_length), w0_u32m1, vector_length);
+        cdgh_u32m1 = __riscv_vsha2cl_vv_u32m1(cdgh_u32m1, abef_u32m1, round_key_u32m1, vector_length);
+        abef_u32m1 = __riscv_vsha2ch_vv_u32m1(abef_u32m1, cdgh_u32m1, round_key_u32m1, vector_length);
+        vuint32m1_t const merged_u32m1 = __riscv_vmerge_vvm_u32m1(w2_u32m1, w1_u32m1, lane0_mask_b32, vector_length);
+        vuint32m1_t const extended_u32m1 = __riscv_vsha2ms_vv_u32m1(w0_u32m1, merged_u32m1, w3_u32m1, vector_length);
+        w0_u32m1 = w1_u32m1, w1_u32m1 = w2_u32m1, w2_u32m1 = w3_u32m1, w3_u32m1 = extended_u32m1;
+    }
 
-    // Quad-rounds 0..11 compress and extend the message schedule.
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w0_u32m1, w1_u32m1, w2_u32m1, w3_u32m1, 0);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w1_u32m1, w2_u32m1, w3_u32m1, w0_u32m1, 4);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w2_u32m1, w3_u32m1, w0_u32m1, w1_u32m1, 8);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w3_u32m1, w0_u32m1, w1_u32m1, w2_u32m1, 12);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w0_u32m1, w1_u32m1, w2_u32m1, w3_u32m1, 16);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w1_u32m1, w2_u32m1, w3_u32m1, w0_u32m1, 20);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w2_u32m1, w3_u32m1, w0_u32m1, w1_u32m1, 24);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w3_u32m1, w0_u32m1, w1_u32m1, w2_u32m1, 28);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w0_u32m1, w1_u32m1, w2_u32m1, w3_u32m1, 32);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w1_u32m1, w2_u32m1, w3_u32m1, w0_u32m1, 36);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w2_u32m1, w3_u32m1, w0_u32m1, w1_u32m1, 40);
-    STRINGZILLA_RVVCRYPTO_SHA_QUAD_(w3_u32m1, w0_u32m1, w1_u32m1, w2_u32m1, 44);
-#undef STRINGZILLA_RVVCRYPTO_SHA_QUAD_
-
-    // Quad-rounds 12..15 only compress; every schedule word we still consume already exists.
-#define STRINGZILLA_RVVCRYPTO_SHA_TAIL_(current, k_offset)                                                 \
-    do {                                                                                                   \
-        vuint32m1_t const round_key_u32m1 = __riscv_vadd_vv_u32m1(                                         \
-            __riscv_vle32_v_u32m1(&round_constants[(k_offset)], vector_length), (current), vector_length); \
-        cdgh_u32m1 = __riscv_vsha2cl_vv_u32m1(cdgh_u32m1, abef_u32m1, round_key_u32m1, vector_length);     \
-        abef_u32m1 = __riscv_vsha2ch_vv_u32m1(abef_u32m1, cdgh_u32m1, round_key_u32m1, vector_length);     \
-    } while (0)
-    STRINGZILLA_RVVCRYPTO_SHA_TAIL_(w0_u32m1, 48);
-    STRINGZILLA_RVVCRYPTO_SHA_TAIL_(w1_u32m1, 52);
-    STRINGZILLA_RVVCRYPTO_SHA_TAIL_(w2_u32m1, 56);
-    STRINGZILLA_RVVCRYPTO_SHA_TAIL_(w3_u32m1, 60);
-#undef STRINGZILLA_RVVCRYPTO_SHA_TAIL_
+    // Quad-rounds 12..15 only compress; every schedule word they consume already exists.
+    for (sz_size_t round_index = 48; round_index != 64; round_index += 4) {
+        vuint32m1_t const round_key_u32m1 = __riscv_vadd_vv_u32m1(
+            __riscv_vle32_v_u32m1(&round_constants[round_index], vector_length), w0_u32m1, vector_length);
+        cdgh_u32m1 = __riscv_vsha2cl_vv_u32m1(cdgh_u32m1, abef_u32m1, round_key_u32m1, vector_length);
+        abef_u32m1 = __riscv_vsha2ch_vv_u32m1(abef_u32m1, cdgh_u32m1, round_key_u32m1, vector_length);
+        w0_u32m1 = w1_u32m1, w1_u32m1 = w2_u32m1, w2_u32m1 = w3_u32m1;
+    }
 
     // Add the compressed working state back into the running hash.
     abef_u32m1 = __riscv_vadd_vv_u32m1(abef_saved_u32m1, abef_u32m1, vector_length);

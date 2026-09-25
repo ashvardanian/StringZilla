@@ -104,23 +104,23 @@ typedef union sz_string_t {
  *  big-endian 64-bit, internal.length is at offset 31 and external.length at 24; on big-endian
  *  32-bit, at 15 and 12. */
 #if STRINGZILLA_WITH_LIBC // `offsetof` comes from `stddef.h`, which is part of the C standard library.
-sz_static_assert(offsetof(sz_string_t, internal.start) == offsetof(sz_string_t, external.start),
-                 Alignment_confusion_between_internal_and_external_storage);
+sz_static_assert_(offsetof(sz_string_t, internal.start) == offsetof(sz_string_t, external.start),
+                  Alignment_confusion_between_internal_and_external_storage);
 #if !STRINGZILLA_ARCH_BIG_ENDIAN_
 #if STRINGZILLA_ARCH_64BIT_
-sz_static_assert(offsetof(sz_string_t, internal.length) == 8, Internal_length_offset_mismatch_on_little_endian_64);
-sz_static_assert(offsetof(sz_string_t, external.length) == 8, External_length_offset_mismatch_on_little_endian_64);
+sz_static_assert_(offsetof(sz_string_t, internal.length) == 8, Internal_length_offset_mismatch_on_little_endian_64);
+sz_static_assert_(offsetof(sz_string_t, external.length) == 8, External_length_offset_mismatch_on_little_endian_64);
 #else
-sz_static_assert(offsetof(sz_string_t, internal.length) == 4, Internal_length_offset_mismatch_on_little_endian_32);
-sz_static_assert(offsetof(sz_string_t, external.length) == 4, External_length_offset_mismatch_on_little_endian_32);
+sz_static_assert_(offsetof(sz_string_t, internal.length) == 4, Internal_length_offset_mismatch_on_little_endian_32);
+sz_static_assert_(offsetof(sz_string_t, external.length) == 4, External_length_offset_mismatch_on_little_endian_32);
 #endif
 #else // STRINGZILLA_ARCH_BIG_ENDIAN_
 #if STRINGZILLA_ARCH_64BIT_
-sz_static_assert(offsetof(sz_string_t, internal.length) == 31, Internal_length_offset_mismatch_on_big_endian_64);
-sz_static_assert(offsetof(sz_string_t, external.length) == 24, External_length_offset_mismatch_on_big_endian_64);
+sz_static_assert_(offsetof(sz_string_t, internal.length) == 31, Internal_length_offset_mismatch_on_big_endian_64);
+sz_static_assert_(offsetof(sz_string_t, external.length) == 24, External_length_offset_mismatch_on_big_endian_64);
 #else
-sz_static_assert(offsetof(sz_string_t, internal.length) == 15, Internal_length_offset_mismatch_on_big_endian_32);
-sz_static_assert(offsetof(sz_string_t, external.length) == 12, External_length_offset_mismatch_on_big_endian_32);
+sz_static_assert_(offsetof(sz_string_t, internal.length) == 15, Internal_length_offset_mismatch_on_big_endian_32);
+sz_static_assert_(offsetof(sz_string_t, external.length) == 12, External_length_offset_mismatch_on_big_endian_32);
 #endif
 #endif
 #endif

@@ -124,8 +124,8 @@ STRINGZILLA_HELPER_AUTO sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text,
  *  @c u16 entries fill a whole number of cache lines, so the class rows follow it at a
  *  constant aligned offset. */
 enum { sz_levenshtein_utf8_pages_k = 0x110000 / 256 };
-sz_static_assert(sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) % 64 == 0,
-                 sz_levenshtein_utf8_page_table_fills_cache_lines);
+sz_static_assert_(sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) % 64 == 0,
+                  sz_levenshtein_utf8_page_table_fills_cache_lines);
 
 /** The class rows behind the page table: 256 classes per row, row zero all zeros. */
 STRINGZILLA_API_COMPTIME sz_u32_t const *sz_levenshtein_utf8_class_rows_(sz_levenshtein_query_t const *query) {
