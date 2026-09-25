@@ -1251,7 +1251,7 @@ internal static unsafe partial class Native {
 
     static Native() {
         NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolve);
-        sz_dispatch_table_init(); // idempotent; the lib also self-initializes on load
+        sz_dispatch_cpu_table_init(); // idempotent; the lib also self-initializes on load
     }
 
     private static nint Resolve(string name, Assembly assembly, DllImportSearchPath? searchPath) {
@@ -1332,7 +1332,7 @@ internal static unsafe partial class Native {
     [LibraryImport(Lib)] internal static partial int sz_version_major();
     [LibraryImport(Lib)] internal static partial int sz_version_minor();
     [LibraryImport(Lib)] internal static partial int sz_version_patch();
-    [LibraryImport(Lib)] internal static partial void sz_dispatch_table_init();
+    [LibraryImport(Lib)] internal static partial void sz_dispatch_cpu_table_init();
 
     #endregion
 

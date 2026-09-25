@@ -44,7 +44,7 @@ func init() {
 	// The `__attribute__((constructor))` in the C library may not be called
 	// by CGO's internal linker (see golang/go#28909), so we call it manually
 	// to ensure the dispatch table is populated before any functions are used.
-	C.sz_dispatch_table_init()
+	C.sz_dispatch_cpu_table_init()
 }
 
 // Capabilities returns a string describing the detected CPU features.

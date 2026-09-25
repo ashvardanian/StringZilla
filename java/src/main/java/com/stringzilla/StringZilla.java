@@ -155,7 +155,7 @@ public final class StringZilla {
 
     static {
         try {
-            down("sz_dispatch_table_init", FunctionDescriptor.ofVoid()).invokeExact();
+            down("sz_dispatch_cpu_table_init", FunctionDescriptor.ofVoid()).invokeExact();
         } catch (Throwable t) {
             throw new ExceptionInInitializerError(t);
         }
