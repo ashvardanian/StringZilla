@@ -763,7 +763,7 @@ void bench_byteset_search(environment_t const &env) {
 #pragma endregion Byteset Search
 
 int main(int argc, char const **argv) {
-    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
+    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     log_environment();
     print_bench_environment();
 

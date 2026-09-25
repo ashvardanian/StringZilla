@@ -2282,6 +2282,12 @@ template <typename value_type_> using unified_vector = std::vector<value_type_>;
 } // namespace ashvardanian::stringzilla::test
 FIXTURE
 
+assert_accepts "scaffolding alias in the bench harness" bench/harness.hpp <<'FIXTURE'
+namespace ashvardanian::stringzilla::bench {
+template <typename value_type_> using unified_vector = std::vector<value_type_>;
+} // namespace ashvardanian::stringzilla::bench
+FIXTURE
+
 assert_rejects "Python scaffolding redefined" "redefines shared test scaffolding" test/probe.py <<'FIXTURE'
 def scale_iterations(count):
     return count

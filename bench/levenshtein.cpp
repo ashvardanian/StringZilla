@@ -570,7 +570,7 @@ void bench_levenshtein_steps(environment_t const &env, std::size_t query_bytes) 
 #pragma endregion
 
 int main(int argc, char const **argv) {
-    install_test_signal_handlers();
+    install_bench_signal_handlers();
     log_environment();
     print_bench_environment();
 

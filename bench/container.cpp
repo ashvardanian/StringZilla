@@ -51,6 +51,11 @@
 
 using namespace ashvardanian::stringzilla::bench;
 
+template <typename string_type_, typename other_string_type_>
+string_type_ string_cast(other_string_type_ const &other) noexcept {
+    return string_type_(other.data(), other.size());
+}
+
 /**
  *  @brief Helper function-like object to order string-view convertible objects with StringZilla.
  *  @see Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
@@ -94,7 +99,7 @@ struct callable_for_associative_lookups {
     inline callable_for_associative_lookups(environment_t const &env) noexcept : env(env) {}
     void preprocess() {
         using key_type = typename container_type_::key_type;
-        for (std::string_view const &key : env.tokens) container[to_str<key_type>(key)]++;
+        for (std::string_view const &key : env.tokens) container[string_cast<key_type>(key)]++;
     }
 
     /** Helper API to produce a delayed construction lambda. */
@@ -184,7 +189,7 @@ struct less_through_std_t {
     using is_transparent = void;
     template <typename first_type_, typename second_type_>
     inline bool operator()(first_type_ const &a, second_type_ const &b) const noexcept {
-        return std::less<std::string_view> {}(to_str<std::string_view>(a), to_str<std::string_view>(b));
+        return std::less<std::string_view> {}(string_cast<std::string_view>(a), string_cast<std::string_view>(b));
     }
 };
 
@@ -192,7 +197,7 @@ struct hash_through_std_t {
     using is_transparent = void;
     template <typename string_like_>
     inline std::size_t operator()(string_like_ const &str) const noexcept {
-        return std::hash<std::string_view> {}(to_str<std::string_view>(str));
+        return std::hash<std::string_view> {}(string_cast<std::string_view>(str));
     }
 };
 
@@ -200,7 +205,7 @@ struct equal_to_through_std_t {
     using is_transparent = void;
     template <typename first_type_, typename second_type_>
     inline bool operator()(first_type_ const &a, second_type_ const &b) const noexcept {
-        return std::equal_to<std::string_view> {}(to_str<std::string_view>(a), to_str<std::string_view>(b));
+        return std::equal_to<std::string_view> {}(string_cast<std::string_view>(a), string_cast<std::string_view>(b));
     }
 };
 
@@ -258,7 +263,7 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
 }
 
 int main(int argc, char const **argv) {
-    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
+    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     log_environment();
     print_bench_environment();
 

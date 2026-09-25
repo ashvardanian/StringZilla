@@ -59,7 +59,7 @@
 #pragma once
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstdint> // `std::uintptr_t` for cache-line alignment
-#include <cstdio>  // `std::FILE`, `std::fopen`, `stderr`
+#include <cstdio>  // `std::setvbuf`, `stderr`
 #include <cstdlib> // `std::getenv`, `std::strtod`, `std::abort`, `std::malloc`, `std::free`
 #include <cstring> // `std::strcmp`, `std::strlen`
 
@@ -279,37 +279,6 @@ template <typename value_type_>
 using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 #endif
 
-#if STRINGZILLA_TARGET_CUDA
-
-/**
- *  @brief Page-locked host memory, which the driver reports as host and every engine refuses.
- *
- *  A third memory kind beside unified and device, and the one a caller most expects to work.
- */
-template <typename value_type_>
-using pinned_vector = std::vector<value_type_, pinned_alloc<value_type_>>;
-
-/**
- *  @brief Plain device memory a kernel can write and the host cannot touch.
- *
- *  @c safe_vector is what the engines already store device-resident scratch in, and its
- *  @c try_resize_uninitialized is the only growth a non-host-accessible allocator admits.
- */
-template <typename value_type_>
-using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
-
-/**
- *  @brief Drains a device-resident buffer into @p destination, forwarding the driver's status.
- *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
- */
-template <typename value_type_>
-inline CUresult copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
-    if (source.size() == 0) return CUDA_SUCCESS;
-    if (destination.size() < source.size()) return CUDA_ERROR_INVALID_VALUE;
-    return cuMemcpyDtoH(destination.data(), (CUdeviceptr)source.data(), source.size() * sizeof(value_type_));
-}
-#endif // STRINGZILLA_TARGET_CUDA
-
 /**
  *  @brief Copies @p texts into unified memory a CUDA kernel can reach, as one span per string.
  *
@@ -328,25 +297,6 @@ struct unified_texts_t {
 
     span<span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
 };
-
-/** Reads a file into a string via LibC @c <cstdio>. A non-zero @p max_bytes stops the read after
- *  that many bytes, so the file tail is never touched. */
-inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexcept(false) {
-    std::FILE *file = std::fopen(path.c_str(), "rb");
-    if (!file) throw std::runtime_error("Failed to open file: " + path);
-    std::size_t capacity = max_bytes;
-    if (capacity == 0) {
-        std::fseek(file, 0, SEEK_END);
-        long const size = std::ftell(file);
-        std::fseek(file, 0, SEEK_SET);
-        capacity = size > 0 ? static_cast<std::size_t>(size) : 0;
-    }
-    std::string content(capacity, '\0');
-    std::size_t const read_bytes = std::fread(&content[0], 1, capacity, file);
-    std::fclose(file);
-    content.resize(read_bytes);
-    return content;
-}
 
 /** Reads the environment variable @p name as @p value_type_, or returns @p fallback when it is
  *  unset or empty; aborts naming the variable when the text does not parse, so a typo never becomes
@@ -464,11 +414,6 @@ inline std::size_t rotating_index(std::size_t step, std::size_t count) noexcept 
 template <typename value_type_, std::size_t count_>
 constexpr span<value_type_ const> span_over(value_type_ const (&array)[count_]) noexcept {
     return span<value_type_ const>(array, count_);
-}
-
-template <typename string_type_, typename other_string_type_>
-inline string_type_ to_str(other_string_type_ const &other) noexcept {
-    return string_type_(other.data(), other.size());
 }
 
 /**
@@ -691,7 +636,7 @@ inline char const *status_name(status_t s) noexcept {
     }
 }
 
-/** Prints the lines every test and benchmark opens with: the version and both capability lists. */
+/** Prints the lines every test opens with: the version and both capability lists. */
 inline void log_environment() {
     fmt::println("StringZilla {}.{}.{}", STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
                  STRINGZILLA_H_VERSION_PATCH);
@@ -703,9 +648,9 @@ inline void log_environment() {
 #if STRINGZILLA_TARGET_CUDA
 
 /**
- *  @brief Prints `- CUDA: <name> sm_<major><minor>` for the first visible device, or
- *      `- CUDA: no device`.
- *  @return Whether a device is visible; without one, the GPU tests and benchmarks skip.
+ *  @brief Prints the "- CUDA:" line naming the first visible device and its compute capability,
+ *      or "- CUDA: no device".
+ *  @return Whether a device is visible; without one, the GPU tests skip.
  */
 inline bool log_cuda_device() {
     // The device is asked directly rather than through `sz_capabilities`: that verb answers for the library this

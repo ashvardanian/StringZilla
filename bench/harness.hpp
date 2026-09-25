@@ -36,24 +36,28 @@
 #include <cctype>  // `std::isalnum`
 #include <clocale> // `std::setlocale`
 #include <cmath>   // `std::ceil`, `std::log`, `std::pow`
+#include <csignal> // `std::signal`, `std::raise`, `SIGSEGV`, `SIGABRT`
 #include <cstdio>  // `std::fopen`, `std::fclose`, `std::FILE`
-#include <cstdlib> // `std::abort`
-#include <cstring> // `std::memcpy`
+#include <cstdlib> // `std::abort`, `std::getenv`, `std::strtod`
+#include <cstring> // `std::memcpy`, `std::strcmp`, `std::strlen`
 
 #include <algorithm>
-#include <chrono>      // `std::chrono::high_resolution_clock`
-#include <exception>   // `std::invalid_argument`
-#include <functional>  // `std::equal_to`
-#include <limits>      // `std::numeric_limits`
-#include <numeric>     // `std::accumulate`
-#include <optional>    // `std::optional`
-#include <random>      // `std::random_device`, `std::mt19937`
-#include <regex>       // `std::regex`, `std::regex_search`
-#include <string>      // `std::hash`
-#include <string_view> // `std::string_view`
-#include <thread>      // `std::this_thread::sleep_for`, `std::thread::hardware_concurrency`
-#include <type_traits> // `std::invoke_result_t`
-#include <vector>      // `std::vector`
+#include <charconv>     // `std::from_chars`
+#include <chrono>       // `std::chrono::high_resolution_clock`
+#include <exception>    // `std::invalid_argument`
+#include <functional>   // `std::equal_to`
+#include <limits>       // `std::numeric_limits`
+#include <numeric>      // `std::accumulate`
+#include <optional>     // `std::optional`
+#include <random>       // `std::random_device`, `std::mt19937`
+#include <regex>        // `std::regex`, `std::regex_search`
+#include <span>         // `std::span`, `std::as_bytes`
+#include <string>       // `std::hash`
+#include <string_view>  // `std::string_view`
+#include <system_error> // `std::errc`
+#include <thread>       // `std::this_thread::sleep_for`, `std::thread::hardware_concurrency`
+#include <type_traits>  // `std::invoke_result_t`
+#include <vector>       // `std::vector`
 
 #if defined(_MSC_VER)
 #include <intrin.h> // `__rdtsc`, `_ReadStatusReg`
@@ -61,26 +65,162 @@
 #include <arm64intr.h> // `ARM64_CNTVCT`
 #endif
 #endif
+#if defined(_WIN32)
+#include <io.h> // `_write`
+#else
+#include <unistd.h> // `write`, `STDERR_FILENO`
+#endif
+#if defined(__linux__) && defined(__GLIBC__)
+#include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
+#endif
 
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <fmt/std.h> // `std::byte`
 
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/stringzilla.hpp"
-
-#include "../test/harness.hpp" // `read_file`
 
 namespace sz = ashvardanian::stringzilla;
 namespace stdc = std::chrono;
 
 namespace ashvardanian::stringzilla::bench {
 
-/** The benchmarks run on the test harness: @c unified_vector, @c arrow_strings_tape_t, @c read_file
- *  and the random helpers live in `test/harness.hpp`, which every benchmark target carries. */
-using namespace ashvardanian::stringzilla::test;
-
 using accurate_clock_t = stdc::high_resolution_clock;
+
+#if !STRINGZILLA_TARGET_CUDA
+template <typename value_type_>
+using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
+#else
+template <typename value_type_>
+using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
+
+/** Page-locked host memory, which the driver reports as host and every engine refuses. */
+template <typename value_type_>
+using pinned_vector = std::vector<value_type_, pinned_alloc<value_type_>>;
+
+/**
+ *  @brief Plain device memory a kernel can write and the host cannot touch.
+ *
+ *  @c safe_vector is what the engines already store device-resident scratch in, and its
+ *  @c try_resize_uninitialized is the only growth a non-host-accessible allocator admits.
+ */
+template <typename value_type_>
+using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
+
+/**
+ *  @brief Drains a device-resident buffer into @p destination, forwarding the driver's status.
+ *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
+ */
+template <typename value_type_>
+inline CUresult copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
+    if (source.size() == 0) return CUDA_SUCCESS;
+    if (destination.size() < source.size()) return CUDA_ERROR_INVALID_VALUE;
+    return cuMemcpyDtoH(destination.data(), (CUdeviceptr)source.data(), source.size() * sizeof(value_type_));
+}
+#endif // STRINGZILLA_TARGET_CUDA
+
+/** Reads a file into a string via LibC @c <cstdio>. A non-zero @p max_bytes stops the read after
+ *  that many bytes, so the file tail is never touched. */
+inline std::string read_file(std::string path, std::size_t max_bytes = 0) noexcept(false) {
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    if (!file) throw std::runtime_error("Failed to open file: " + path);
+    std::size_t capacity = max_bytes;
+    if (capacity == 0) {
+        std::fseek(file, 0, SEEK_END);
+        long const size = std::ftell(file);
+        std::fseek(file, 0, SEEK_SET);
+        capacity = size > 0 ? static_cast<std::size_t>(size) : 0;
+    }
+    std::string content(capacity, '\0');
+    std::size_t const read_bytes = std::fread(&content[0], 1, capacity, file);
+    std::fclose(file);
+    content.resize(read_bytes);
+    return content;
+}
+
+/** Reads the environment variable @p name as @p value_type_, or returns @p fallback when it is
+ *  unset or empty; aborts naming the variable when the text does not parse, so a typo never becomes
+ *  a silent default. */
+template <typename value_type_>
+[[nodiscard]] value_type_ env_variable(char const *name, value_type_ fallback) noexcept {
+    char const *const text = std::getenv(name);
+    if (!text || !*text) return fallback;
+    if constexpr (std::is_same_v<value_type_, char const *>) return text;
+    else if constexpr (std::is_same_v<value_type_, bool>) return std::strcmp(text, "0") && std::strcmp(text, "false");
+    else {
+        value_type_ value {};
+        char *stop = nullptr;
+        if constexpr (std::is_floating_point_v<value_type_>) value = static_cast<value_type_>(std::strtod(text, &stop));
+        else {
+            auto const [end, error] = std::from_chars(text, text + std::strlen(text), value);
+            stop = error == std::errc {} ? const_cast<char *>(end) : const_cast<char *>(text);
+        }
+        if (stop != text && *stop == '\0') return value;
+        fmt::println(stderr, "{}=\"{}\" does not parse", name, text);
+        std::abort();
+    }
+}
+
+/** Prints the lines every benchmark opens with: the version and both capability lists. */
+inline void log_environment() {
+    fmt::println("StringZilla {}.{}.{}", STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
+                 STRINGZILLA_H_VERSION_PATCH);
+    fmt::println("- Compiled for: {}", sz_capabilities_to_string(sz_capabilities_comptime()));
+    fmt::println("- This machine: {}", sz_capabilities_to_string(sz_capabilities_runtime()));
+}
+
+#if STRINGZILLA_TARGET_CUDA
+
+/**
+ *  @brief Prints the "- CUDA:" line naming the first visible device and its compute capability,
+ *      or "- CUDA: no device".
+ *  @return Whether a device is visible; without one, the GPU benchmarks skip.
+ */
+inline bool log_cuda_device() {
+    // The device is asked directly rather than through `sz_capabilities`: that verb answers for the
+    // library this binary links, and `define_stringzilla_library` compiles the core without CUDA.
+    int device_count = 0;
+    cudaDeviceProp properties;
+    if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0 ||
+        cudaGetDeviceProperties(&properties, 0) != cudaSuccess) {
+        fmt::println("- CUDA: no device");
+        return false;
+    }
+    fmt::println("- CUDA: {} sm_{}{}", properties.name, properties.major, properties.minor);
+    return true;
+}
+#endif // STRINGZILLA_TARGET_CUDA
+
+/** Prints a backtrace on a fatal signal, so a crashing kernel self-localizes instead of dying
+ *  silently under output redirection. Writes raw, since the crashing thread may already hold the
+ *  stdio lock that @c fmt::println takes. */
+inline void bench_fatal_signal_handler(int signal_number) noexcept {
+    std::string_view constexpr message = "\n*** Fatal signal - backtrace follows ***\n";
+#if defined(_WIN32)
+    [[maybe_unused]] auto const written = _write(2, message.data(), static_cast<unsigned>(message.size()));
+#else
+    [[maybe_unused]] auto const written = ::write(STDERR_FILENO, message.data(), message.size());
+#endif
+#if defined(__linux__) && defined(__GLIBC__)
+    void *frames[64];
+    int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
+    backtrace_symbols_fd(frames, frames_count, STDERR_FILENO);
+#endif
+    std::signal(signal_number, SIG_DFL);
+    std::raise(signal_number);
+}
+
+/** Installs the fatal-signal backtrace handler and line-buffers stdout; call once from @c main. */
+inline void install_bench_signal_handlers() noexcept {
+    // Size must be nonzero: Windows ucrt fast-fails on a zero-sized buffering mode.
+    std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
+    for (int signal_number : {SIGSEGV, SIGABRT, SIGILL, SIGFPE}) std::signal(signal_number, bench_fatal_signal_handler);
+#if defined(SIGBUS)
+    std::signal(SIGBUS, bench_fatal_signal_handler);
+#endif
+}
 
 template <std::size_t multiple_>
 std::size_t round_up_to_multiple(std::size_t n) {
@@ -444,7 +584,7 @@ inline std::size_t bench_seed() noexcept {
     return seed;
 }
 
-/** Prints the run's seed below the lines of @c log_environment, like @c print_test_environment. */
+/** Prints the run's seed below the lines of @c log_environment. */
 inline void print_bench_environment() noexcept { fmt::println("- Seed: {}", bench_seed()); }
 
 /**
@@ -647,7 +787,8 @@ inline void log_failure(                                              //
     fmt::println(file, "Dataset path: {}\nTokenization mode: {}\nSeed: {}", env.path, env.tokenization,
                  static_cast<std::size_t>(env.seed));
     if (token_index)
-        fmt::println(file, "Token index: {}\nToken Hex: {:02X}", *token_index, test::hex_bytes(env[*token_index]));
+        fmt::println(file, "Token index: {}\nToken Hex: {:02X}", *token_index,
+                     fmt::join(std::as_bytes(std::span(env[*token_index])), " "));
     fmt::println(file, "Expected: {}\nActual: {}", expected_check_value, actual_check_value);
     std::fclose(file);
 }

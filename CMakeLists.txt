@@ -310,7 +310,6 @@ endif ()
 function (define_launcher exec_name cpp_standard target_arch)
     add_executable(${exec_name})
     target_sources(${exec_name} PRIVATE ${ARGN})
-    target_include_directories(${exec_name} PRIVATE test bench)
     set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}" "${CMAKE_CXX_COMPILER_ID}")
     # Launchers dispatch at compile time, so a capability must be BOTH compilable by this toolchain AND runnable on
     # this machine — the intersection the RUN verdicts encode. When the caller pins an explicit `target_arch`, that
@@ -326,7 +325,6 @@ function (define_gpu_launcher exec_name cuda_standard target_arch)
     add_executable(${exec_name})
     target_sources(${exec_name} PRIVATE ${ARGN})
     set_source_files_properties(${ARGN} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CUDA)
-    target_include_directories(${exec_name} PRIVATE test bench)
     set_gpu_definitions(${exec_name} cuda)
     set_target_properties(${exec_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_include_directories(

@@ -211,7 +211,7 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
 #pragma endregion Verbs
 
 int main(int argc, char const **argv) {
-    install_test_signal_handlers();
+    install_bench_signal_handlers();
     log_environment();
     print_bench_environment();
 

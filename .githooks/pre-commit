@@ -2620,7 +2620,7 @@ check_cuda_memory_through_scaffolding() {
         grep -vE 'cudaFree[[:space:]]*\([[:space:]]*(0|NULL|nullptr)[[:space:]]*\)' || true)
     [ -z "$raw" ] || reject_with_reason "$raw" \
         "$staged_path manages CUDA memory by hand; use unified_vector, device_vector, pinned_vector or" \
-        "            unified_memory_allocator() from test/harness.hpp:"
+        "            unified_memory_allocator() from the harness.hpp beside it:"
 }
 
 # Rejects a releasing destructor in test/ and bench/, because such a struct stays copyable, and the
@@ -2633,14 +2633,14 @@ check_test_destructors_own_nothing() {
         "$staged_path releases memory in a destructor; hold the storage in a container with its own copy control:"
 }
 
-# Rejects a redefinition of the shared C++ scaffolding outside test/harness.hpp, because every test and
-# bench opens its namespace, so a file-scope alias turns ambiguous.
+# Rejects a redefinition of the shared C++ scaffolding outside test/harness.hpp and bench/harness.hpp, because
+# every test and bench opens its harness's namespace, so a file-scope alias turns ambiguous.
 check_cpp_scaffolding_in_one_header() {
     local redefined
     redefined=$(added_code_text |
         grep -E 'using[[:space:]]+(unified|pinned|device)_vector[[:space:]]*=|using[[:space:]]+arrow_strings_tape_t[[:space:]]*=|(unified|pinned|device)_alloc<[^>]*>[[:space:]]*\{[[:space:]]*\}[[:space:]]*\.[[:space:]]*(allocate|deallocate)' || true)
     [ -z "$redefined" ] || reject_with_reason "$redefined" \
-        "$staged_path redefines scaffolding test/harness.hpp owns; extend that header instead:"
+        "$staged_path redefines scaffolding its harness.hpp owns; extend that header instead:"
 }
 
 # Rejects a redefinition of the shared Python test scaffolding, because corpora, seeds, the iteration
@@ -2753,7 +2753,8 @@ run_project_checks() {
     case "$staged_path" in
     test/*.cpp | test/*.hpp | test/*.cu | test/*.cuh | bench/*.cpp | bench/*.hpp | bench/*.cu | bench/*.cuh)
         check_test_destructors_own_nothing
-        [ "$staged_path" = test/harness.hpp ] || check_cpp_scaffolding_in_one_header
+        [ "$staged_path" = test/harness.hpp ] || [ "$staged_path" = bench/harness.hpp ] ||
+            check_cpp_scaffolding_in_one_header
         ;;
     esac
     case "$staged_path" in

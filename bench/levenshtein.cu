@@ -411,7 +411,7 @@ static void bench_levenshtein_cross_product(environment_t const &env, levenshtei
 }
 
 int main(int argc, char const **argv) {
-    install_test_signal_handlers();
+    install_bench_signal_handlers();
     log_environment();
     print_bench_environment();
     if (!log_cuda_device()) return 0;

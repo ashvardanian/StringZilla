@@ -317,8 +317,8 @@ void memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value) { std::mem
  */
 void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
     std::minstd_rand generator(static_cast<std::minstd_rand::result_type>(nonce));
-    uniform_u8_distribution_t distribution;
-    std::generate(output, output + length, [&]() -> char { return distribution(generator); });
+    std::uniform_int_distribution<std::uint32_t> distribution(1, 255);
+    std::generate(output, output + length, [&]() -> char { return static_cast<char>(distribution(generator)); });
 }
 
 /**
@@ -492,7 +492,7 @@ void bench_lookup(environment_t const &env) {
 #pragma endregion Lookup Transformations
 
 int main(int argc, char const **argv) {
-    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
+    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     log_environment();
     print_bench_environment();
 
