@@ -474,14 +474,14 @@
 #define STRINGZILLA_SVE_WIDER_THAN_NEON_ (0)
 #endif
 
-/** LLVM 18 through 22 carry @c evex512 as a separate target feature, split out of AVX-512 for the
+/** LLVM 18 through 21 carry @c evex512 as a separate target feature, split out of AVX-512 for the
  *  AVX10 transition; ZMM codegen in a per-function @c target attribute needs it named. LLVM 17 and
- *  older never knew the token, LLVM 23 retired it again, and Clang drops the whole attribute over
+ *  older never knew the token, LLVM 22 retired it again, and Clang drops the whole attribute over
  *  one unknown feature - @c -Wignored-attributes, silently costing every AVX-512 kernel - so the
  *  fork is a closed version window, not a floor. Apple Clang 17 is LLVM-19-based and sits inside
  *  it. The same window is spelled out in `probes/x86_skylake.c` and `probes/x86_icelake.c`, which
  *  stay freestanding for Cargo. */
-#if defined(__clang__) && __clang_major__ < 23 && \
+#if defined(__clang__) && __clang_major__ < 22 && \
     (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
 #define STRINGZILLA_HAS_CLANG_EVEX512_ (1)
 #else

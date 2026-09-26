@@ -8,10 +8,10 @@
  */
 #include <immintrin.h>
 
-#if defined(__clang__) && __clang_major__ < 23 && \
+#if defined(__clang__) && __clang_major__ < 22 && \
     (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
-/* LLVM 18 through 22, and Apple Clang 17+ built on LLVM 19, split @c evex512 out of AVX-512: ZMM
- * codegen in @c target attributes needs it named explicitly. LLVM 23 retired the token, and Clang
+/* LLVM 18 through 21, and Apple Clang 17+ built on LLVM 19, split @c evex512 out of AVX-512: ZMM
+ * codegen in @c target attributes needs it named explicitly. LLVM 22 retired the token, and Clang
  * drops the whole @c target attribute over an unknown feature, so the plain string serves again. */
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
