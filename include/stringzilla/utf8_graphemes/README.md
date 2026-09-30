@@ -1,6 +1,7 @@
 # UTF-8 Graphemes: UAX-29 Grapheme Cluster Iteration
 
 This directory holds the kernels behind `sz_utf8_graphemes_best`, which walks a UTF-8 string and yields each grapheme cluster as defined by the Unicode UAX-29 rules, so a base letter plus its combining marks, or an emoji with its modifiers, counts as one user-perceived character rather than several codepoints.
+Each call writes one byte length per cluster, and the clusters tile the input, so a caller that fills its buffer resumes from the sum of the lengths it got.
 Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends on x86, and `sz_utf8_graphemes_best` runs the best kernel among the capabilities its caller passes.
 
 ## Methodology

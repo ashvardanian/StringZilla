@@ -177,6 +177,8 @@ class StringZillaTest {
     void decodeAll_matchesCodePoints() {
         String s = "AÉ世🦖";
         assertArrayEquals(s.codePoints().toArray(), StringZilla.decodeAll(b(s)));
+        byte[] truncated = {'a', (byte) 0xE2, (byte) 0x82}; // "€" missing its last byte
+        assertArrayEquals(new int[] {'a', 0xFFFD}, StringZilla.decodeAll(truncated));
     }
 
     @Test
@@ -195,27 +197,23 @@ class StringZillaTest {
     @Test
     void segment_words() {
         byte[] u = b("Hello, 世界!"); // Latin word, punctuation, CJK run
-        long[] starts = new long[32];
         long[] lengths = new long[32];
-        long[] consumed = new long[1];
-        int count = StringZilla.segment(u, 0, u.length, StringZilla.SegmentKind.WORDS, starts, lengths, consumed);
+        int count = StringZilla.segment(u, 0, u.length, StringZilla.SegmentKind.WORDS, lengths);
         var texts = new java.util.ArrayList<String>();
-        long covered = 0;
+        int start = 0;
         for (int i = 0; i < count; i++) {
-            texts.add(new String(u, (int) starts[i], (int) lengths[i], StandardCharsets.UTF_8));
-            covered += lengths[i];
+            texts.add(new String(u, start, (int) lengths[i], StandardCharsets.UTF_8));
+            start += (int) lengths[i];
         }
-        assertEquals(u.length, covered); // tiling: every byte belongs to exactly one segment
+        assertEquals(u.length, start); // tiling: every byte belongs to exactly one segment
         assertTrue(texts.contains("Hello"));
     }
 
     @Test
     void segment_graphemes() {
         byte[] u = b("éllo"); // 'e' + U+0301 combining acute => 4 grapheme clusters
-        long[] starts = new long[32];
         long[] lengths = new long[32];
-        long[] consumed = new long[1];
-        int count = StringZilla.segment(u, 0, u.length, StringZilla.SegmentKind.GRAPHEMES, starts, lengths, consumed);
+        int count = StringZilla.segment(u, 0, u.length, StringZilla.SegmentKind.GRAPHEMES, lengths);
         long covered = 0;
         for (int i = 0; i < count; i++) covered += lengths[i];
         assertEquals(u.length, covered); // tiling: every byte belongs to exactly one cluster
@@ -223,8 +221,7 @@ class StringZillaTest {
         // 🇺🇸 (two regional indicators) is one grapheme cluster spanning two codepoints, so the cluster
         // count is strictly below the codepoint count.
         byte[] flag = b("Hi 🇺🇸");
-        int flagClusters =
-                StringZilla.segment(flag, 0, flag.length, StringZilla.SegmentKind.GRAPHEMES, starts, lengths, consumed);
+        int flagClusters = StringZilla.segment(flag, 0, flag.length, StringZilla.SegmentKind.GRAPHEMES, lengths);
         assertTrue(flagClusters < StringZilla.countRunes(flag)); // clusters collapse multi-codepoint sequences
     }
 
@@ -461,7 +458,7 @@ class StringZillaTest {
 
     @Test
     void split_keepsEmptySegments() {
-        assertEquals(java.util.List.of("a", "bb", "", "c"), toStrings(StringZilla.split(b("a,bb,,c"), b(","))));
+        assertEquals(java.util.List.of("a", "bb", "", "c", ""), toStrings(StringZilla.split(b("a,bb,,c,"), b(","))));
     }
 
     @Test
@@ -476,6 +473,9 @@ class StringZillaTest {
         assertEquals(
                 java.util.List.of("a", "b", "c,d"),
                 toStrings(StringZilla.split(b("a,b,c,d"), b(",")).withMaxSplit(2)));
+        assertEquals(
+                java.util.List.of("a", "b", "c", "d"),
+                toStrings(StringZilla.split(b("a,b,c,d"), b(",")).withMaxSplit(-1)));
     }
 
     @Test
@@ -505,15 +505,18 @@ class StringZillaTest {
 
     @Test
     void splitNewlines_yieldsLines() {
-        assertEquals(java.util.List.of("a", "bb", "c"), toStrings(StringZilla.splitNewlines(b("a\nbb\nc"))));
+        assertEquals(java.util.List.of("a", "bb", "c", ""), toStrings(StringZilla.splitNewlines(b("a\r\nbb\nc\n"))));
     }
 
     @Test
     void splitWhitespaces_withSeparatorsRoundTrips() {
+        var builder = new StringBuilder();
+        for (int i = 0; i < 200; i++) builder.append('w').append(i).append(' '); // 4 batches
+        String text = builder.toString();
         var rebuilt = new StringBuilder();
-        for (MemorySegment part :
-                StringZilla.splitWhitespaces(b("the quick fox")).withSeparators()) rebuilt.append(str(part));
-        assertEquals("the quick fox", rebuilt.toString());
+        for (MemorySegment part : StringZilla.splitWhitespaces(b(text)).withSeparators()) rebuilt.append(str(part));
+        assertEquals(text, rebuilt.toString());
+        assertEquals(201, toStrings(StringZilla.splitWhitespaces(b(text))).size());
     }
 
     @Test
@@ -538,10 +541,24 @@ class StringZillaTest {
     }
 
     @Test
-    void uncasedMatches_emptyNeedleYieldsNothing() {
-        var matches = StringZilla.uncasedMatches(b("abc"), b(""));
-        assertTrue(matches.toList().isEmpty());
-        assertTrue(matches.overlapping().toList().isEmpty());
+    void emptyNeedle_matchesEveryBoundary() {
+        long[] everyOffset = {0, 1, 2, 3};
+        assertArrayEquals(everyOffset, StringZilla.matches(b("abc"), b("")).toArray());
+        assertArrayEquals(
+                everyOffset, StringZilla.matches(b("abc"), b("")).overlapping().toArray());
+        var uncased = StringZilla.uncasedMatches(b("aé"), b("")); // "é" takes two bytes
+        for (var matches : java.util.List.of(uncased, uncased.overlapping())) {
+            assertArrayEquals(
+                    new long[] {0, 1, 3},
+                    matches.stream().mapToLong(StringZilla.Match::offset).toArray());
+            assertTrue(matches.stream().allMatch(match -> match.matchedLength() == 0));
+        }
+        byte[] truncated = {'a', (byte) 0xE4, (byte) 0xB8}; // a truncated three-byte rune is one step
+        assertArrayEquals(
+                new long[] {0, 1, 3},
+                StringZilla.uncasedMatches(truncated, new byte[0]).stream()
+                        .mapToLong(StringZilla.Match::offset)
+                        .toArray());
     }
 
     @Test
@@ -568,10 +585,12 @@ class StringZillaTest {
     }
 
     @Test
-    void split_maxSplitZeroYieldsWhole() {
+    void split_maxSplitZeroOrEmptySeparatorYieldsWhole() {
         assertEquals(
                 java.util.List.of("a,b,c"),
                 toStrings(StringZilla.split(b("a,b,c"), b(",")).withMaxSplit(0)));
+        assertEquals(java.util.List.of("a,b,c"), toStrings(StringZilla.split(b("a,b,c"), b(""))));
+        assertEquals(java.util.List.of("a,b,c"), toStrings(StringZilla.rsplit(b("a,b,c"), b(""))));
     }
 
     @Test

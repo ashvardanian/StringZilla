@@ -61,7 +61,7 @@ typedef SSIZE_T ssize_t;
 /** Fast-call with keywords, the calling convention every `Str_like_*` and `Strs_*` method uses. */
 #define STRINGZILLA_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
 
-/* strs.c */
+/* `strs.c` */
 
 /** Reads the start pointer of the @p i -th element of a @c Strs handed as a raw `void const *`. */
 extern sz_cptr_t Strs_get_start_(void const *handle, sz_size_t i);
@@ -83,7 +83,7 @@ extern sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *da
 /** Helper function to replace the memory allocator in a @c Strs object. */
 extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator);
 
-/* shared.c */
+/* `shared.c` */
 
 /** Overwrites @p length bytes at @p start with zeros, in a way a compiler may not elide. */
 extern void sz_py_wipe_bytes(void *start, sz_size_t length);
@@ -170,18 +170,16 @@ typedef struct {
     sz_string_view_t memory;
 } Str;
 
-/** The shape of every segmenter's dispatch point, like @c sz_utf8_wordbreaks_best. */
-typedef sz_status_t (*sz_py_segmenter_t)(sz_cptr_t text, sz_size_t length, sz_size_t *starts, sz_size_t *lengths,
-                                         sz_size_t capacity, sz_size_t *count, sz_size_t *bytes_consumed,
-                                         sz_capability_t capabilities, void *stream);
+/** The shape of every tiling segmenter's dispatch point, like @c sz_utf8_wordbreaks_best. */
+typedef sz_status_t (*sz_py_segmenter_t)(sz_cptr_t text, sz_size_t length, sz_size_t *lengths, sz_size_t capacity,
+                                         sz_size_t *count, sz_capability_t capabilities, void *stream);
 
 /**
  *  @brief Iterator for finding UAX segment boundaries in UTF-8 text - words, grapheme clusters,
  *      sentences, and line-break opportunities.
  *
- *  Streams segments by refilling a small inline buffer with @c kernel, yielding one segment per
- *  @c __next__. The buffer lives in the iterator itself - no extra allocation. @c start advances
- *  past each batch as it is consumed.
+ *  Streams segments by refilling a small inline buffer of lengths with @c segmenter, yielding one
+ *  segment per @c __next__. Segments tile the text, so the next one always starts at @c start.
  */
 typedef struct {
     PyObject ob_base;
@@ -194,8 +192,6 @@ typedef struct {
     sz_py_segmenter_t segmenter;
     sz_capability_t capabilities;
 
-    /// @brief  Inline batch of segment offsets relative to @c start, refilled on demand.
-    sz_size_t batch_starts[sz_iterators_default_steps_k];
     sz_size_t batch_lengths[sz_iterators_default_steps_k];
     sz_size_t batch_count;
     sz_size_t batch_index;
@@ -225,16 +221,16 @@ typedef struct {
          */
         struct u32_tape_view_t {
             sz_size_t count;
-            sz_cptr_t data;    // Points to existing data (not owned)
-            sz_u32_t *offsets; // Points to existing offsets (not owned)
-            PyObject *parent;  // Parent Arrow array or other object
+            sz_cptr_t data;
+            sz_u32_t *offsets;
+            PyObject *parent;
         } u32_tape_view;
 
-        /** U32 tape - owns both offsets and data with custom allocator. */
+        /** U32 tape - owns the data and its N+1 offsets for N strings, with a custom allocator. */
         struct u32_tape_t {
             sz_size_t count;
-            sz_cptr_t data;    // Owned data
-            sz_u32_t *offsets; // Owned offsets (N+1 for N strings)
+            sz_cptr_t data;
+            sz_u32_t *offsets;
             sz_memory_allocator_t allocator;
         } u32_tape;
 
@@ -246,31 +242,34 @@ typedef struct {
          */
         struct u64_tape_view_t {
             sz_size_t count;
-            sz_cptr_t data;    // Points to existing data (not owned)
-            sz_u64_t *offsets; // Points to existing offsets (not owned)
-            PyObject *parent;  // Parent Arrow array or other object
+            sz_cptr_t data;
+            sz_u64_t *offsets;
+            PyObject *parent;
         } u64_tape_view;
 
-        /** U64 tape - owns both offsets and data with custom allocator. */
+        /** U64 tape - owns the data and its N+1 offsets for N strings, with a custom allocator. */
         struct u64_tape_t {
             sz_size_t count;
-            sz_cptr_t data;    // Owned data
-            sz_u64_t *offsets; // Owned offsets (N+1 for N strings)
+            sz_cptr_t data;
+            sz_u64_t *offsets;
             sz_memory_allocator_t allocator;
         } u64_tape;
 
         /** Reordered subviews - owns only the array of individual spans. Each span points to data
-         *  in the parent object. */
+         *  in the parent object, a @c Str, a @c Strs, or any other buffer. */
         struct fragmented_t {
             sz_size_t count;
-            sz_string_view_t *spans; // Owned array of spans
-            PyObject *parent;        // Parent object (Str, Strs, or other)
+            sz_string_view_t *spans;
+            PyObject *parent;
             sz_memory_allocator_t allocator;
         } fragmented;
 
     } data;
 
 } Strs;
+
+/** Headers retained per interpreter, per type. */
+enum { sz_freelist_capacity_k = 64 };
 
 /**
  *  @brief Per-interpreter module state, holding the intrusive free-lists for @c Str and @c Strs.
@@ -280,24 +279,25 @@ typedef struct {
  *  through @c PyObject_Malloc and @c PyObject_Free, dealloc parks the dead header on a
  *  singly-linked free-list and the allocation helper pops it back. The link is threaded through the
  *  dead object's own storage, @c Str::parent and @c Strs::data, so the state needs only a head
- *  pointer and a counter per type - no array. Living in module state keeps it per-interpreter, but
- *  on a free-threaded build the module state is shared by every thread in the interpreter, so all
- *  four fields are guarded by @c freelist_lock: without it, concurrent @c alloc_ and @c dealloc
- *  calls race on the same linked list and can hand out one header to two live objects at once.
+ *  pointer and a counter per type, never above @c sz_freelist_capacity_k. Living in module state
+ *  keeps it per-interpreter, but on a free-threaded build the module state is shared by every
+ *  thread in the interpreter, so all four fields are guarded by @c freelist_lock: without it,
+ *  concurrent @c alloc_ and @c dealloc calls race on the same linked list and can hand out one
+ *  header to two live objects at once.
  */
-enum { sz_freelist_capacity_k = 64 };
-
 typedef struct {
     Str *str_freelist_head;
     sz_size_t str_freelist_count;
     Strs *strs_freelist_head;
     sz_size_t strs_freelist_count;
+
+    /** Zero-initialized with the module state, so it starts unlocked. */
 #if defined(Py_GIL_DISABLED)
     PyMutex freelist_lock;
 #endif
 } stringzilla_state_t;
 
-/* shared.c */
+/* `shared.c` */
 
 /** Reach the per-interpreter free-list state, or @c NULL before registration / during teardown. */
 extern stringzilla_state_t *stringzilla_state_(void);
@@ -321,7 +321,7 @@ extern void wrap_current_exception(sz_cptr_t comment);
 /** The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
 extern Strs **Strs_freelist_next_(Strs *node);
 
-/* strs.c */
+/* `strs.c` */
 
 /** Number of live elements in a @c Strs collection, regardless of layout. */
 extern Py_ssize_t Strs_len(Strs *self);
@@ -364,12 +364,12 @@ extern Py_ssize_t Strs_len(Strs *self);
  *  `stringzilla_methods[]` @c PyMethodDef tables in `str.c`, `strs.c`, and `stringzilla.c`. Each
  *  symbol is visible here so those tables can reach the domain file that owns it. */
 
-/* memory.c */
+/* `memory.c` */
 extern char const doc_translate[];
 extern PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple);
 
-/* hash.c */
+/* `hash.c` */
 extern char const doc_like_hash[], doc_hash_multiseed[], doc_fill_random[], doc_random[], doc_like_bytesum[],
     doc_like_sha256[], doc_hmac_sha256[];
 extern Py_hash_t Str_hash(Str *self);
@@ -388,19 +388,19 @@ extern PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize
 extern PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple);
 
-/* cipher.c */
+/* `cipher.c` */
 
 /** Exception type raised when an AEAD tag fails to authenticate a ciphertext. */
 extern PyObject *AuthenticationErrorType;
 extern char const doc_AuthenticationError[];
 
-/* compare.c */
+/* `compare.c` */
 extern char const doc_like_equal[];
 extern PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple);
 extern PyObject *Str_richcompare(PyObject *self, PyObject *other, int op);
 
-/* find.c */
+/* `find.c` */
 extern char const doc_contains[], doc_find[], doc_index[], doc_rfind[], doc_rindex[], doc_partition[], doc_rpartition[],
     doc_count[], doc_startswith[], doc_endswith[], doc_find_first_of[], doc_find_first_not_of[], doc_find_last_of[],
     doc_find_last_not_of[], doc_count_byteset[], doc_split[], doc_rsplit[], doc_split_byteset[], doc_rsplit_byteset[],
@@ -462,26 +462,26 @@ extern PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_
 extern PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple);
 
-/* sort.c */
+/* `sort.c` */
 extern char const doc_argsort[];
 extern sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
                                      sz_size_t top, sz_bool_t reverse, sz_capability_t capabilities);
 extern PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple);
 
-/* intersect.c */
+/* `intersect.c` */
 extern char const doc_Strs_intersect[];
 extern PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple);
 
-/* utf8_runes.c */
+/* `utf8_runes.c` */
 extern char const doc_utf8_count[], doc_utf8_codepoints[];
 extern PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple);
 extern PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-/* utf8_tokens.c */
+/* `utf8_tokens.c` */
 extern char const doc_utf8_split_newlines[], doc_utf8_newlines[], doc_utf8_split_whitespaces[], doc_utf8_whitespaces[],
     doc_utf8_split_delimiters[], doc_utf8_delimiters[];
 extern PyObject *Str_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -497,7 +497,7 @@ extern PyObject *Str_like_utf8_split_delimiters(PyObject *self, PyObject *const 
 extern PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-/* utf8_boundaries.c */
+/* `utf8_boundaries.c` */
 
 /** Builds a @c Utf8Boundaries iterator of @p type, segmented by @p segmenter, over the one
  *  positional argument of a `Str_like_*` call named @p name, reading its `capabilities=`. */
@@ -514,32 +514,32 @@ extern void Utf8Boundaries_dealloc_(Utf8Boundaries *self);
 /** Returns the iterator itself, as required by the Python iterator protocol. */
 extern PyObject *Utf8Boundaries_iter_(PyObject *self);
 
-/* utf8_wordbreaks.c */
+/* `utf8_wordbreaks.c` */
 extern char const doc_utf8_wordbreaks[];
 extern PyObject *Str_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-/* utf8_graphemes.c */
+/* `utf8_graphemes.c` */
 extern char const doc_utf8_graphemes[];
 extern PyObject *Str_like_utf8_graphemes(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple);
 
-/* utf8_sentences.c */
+/* `utf8_sentences.c` */
 extern char const doc_utf8_sentences[];
 extern PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple);
 
-/* utf8_linebreaks.c */
+/* `utf8_linebreaks.c` */
 extern char const doc_utf8_linebreaks[];
 extern PyObject *Str_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple);
 
-/* utf8_uncased_fold.c */
+/* `utf8_uncased_fold.c` */
 extern char const doc_utf8_uncased_fold[];
 extern PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                             PyObject *args_names_tuple);
 
-/* utf8_uncased.c */
+/* `utf8_uncased.c` */
 extern char const doc_utf8_uncased_search[], doc_utf8_uncased_order[], doc_utf8_uncased_matches[];
 extern PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                               PyObject *args_names_tuple);
@@ -548,14 +548,14 @@ extern PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *ar
 extern PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                                PyObject *args_names_tuple);
 
-/* utf8_norm.c */
+/* `utf8_norm.c` */
 extern char const doc_utf8_norm[], doc_utf8_find_denormalized[];
 extern PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple);
 extern PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
                                                  Py_ssize_t positional_args_count, PyObject *args_names_tuple);
 
-/* stringzilla.c */
+/* `stringzilla.c` */
 
 /** The CPU capabilities a call dispatches with unless it passes its own, which
  *  @c capabilities_enable sets for the whole process. */
@@ -605,7 +605,7 @@ extern int sz_py_export_output_buffer(PyObject *object, char const *name, Py_ssi
 extern int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, sz_size_t count,
                                      Py_buffer *view);
 
-/* str.c */
+/* `str.c` */
 extern char const doc_offset_within[], doc_write_to[], doc_decode[];
 extern PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
 extern PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,

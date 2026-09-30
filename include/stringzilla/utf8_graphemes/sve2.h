@@ -121,21 +121,15 @@ STRINGZILLA_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svui
  *  claimed by a lead's declared length, retrying unclamped otherwise: classify work stays
  *  proportional to what the caller can consume.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_sve2_(      //
-    sz_cptr_t text, sz_size_t length,                      //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
-    sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_sve2_( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_size_t *cluster_lengths, sz_size_t clusters_capacity) {
 
     // Graviton 5 at 128 bits: serial leads each corpus, mixed 185 vs 101 MiB/s, Chinese 298 vs 106.
-    if (svcntb() <= 16)
-        return sz_utf8_graphemes_serial_(text, length, cluster_starts, cluster_lengths, clusters_capacity,
-                                         bytes_consumed);
+    if (svcntb() <= 16) return sz_utf8_graphemes_serial_(text, length, cluster_lengths, clusters_capacity);
 
     sz_size_t clusters = 0;
-    if (length == 0 || clusters_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || clusters_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const vector_bytes = svcntb();
     sz_size_t const chunk_bytes = vector_bytes < 64 ? vector_bytes : 64;
@@ -309,12 +303,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_sve2_(      //
             if (base == 0) boundary &= ~1ull; // GB1: the first cluster's own start is not a new break
 
             sz_size_t const clusters_before = clusters;
-            clusters = sz_utf8_rune_drain_forward_serial_(boundary, base, cluster_starts, cluster_lengths, clusters,
-                                                          clusters_capacity, &cluster_start);
-            if (clusters == clusters_capacity) {
-                if (bytes_consumed) *bytes_consumed = cluster_start;
-                return clusters;
-            }
+            clusters = sz_utf8_rune_drain_forward_serial_(boundary, base, cluster_lengths, clusters, clusters_capacity,
+                                                          &cluster_start);
+            if (clusters == clusters_capacity) return clusters;
             if (clusters > clusters_before) {
                 bytes_per_cluster = sz_size_divide_round_up(byte_span, clusters - clusters_before);
                 if (bytes_per_cluster < 1) bytes_per_cluster = 1;
@@ -325,27 +316,19 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_sve2_(      //
         }
     }
 
-    cluster_starts[clusters] = cluster_start;
     cluster_lengths[clusters] = length - cluster_start;
-    ++clusters;
-    if (bytes_consumed) *bytes_consumed = length;
-    return clusters;
+    return clusters + 1;
 }
 
 #pragma endregion Grapheme forward driver
 
 #if STRINGZILLA_TARGET_SVE2
 
-STRINGZILLA_API sz_status_t sz_utf8_graphemes_sve2(                                     //
-    sz_cptr_t text, sz_size_t length,                                                   //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, sz_size_t clusters_capacity, //
-    sz_size_t *clusters_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_graphemes_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                   sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *clusters_count = sz_utf8_graphemes_sve2_(text, length, cluster_starts, cluster_lengths, clusters_capacity,
-                                              bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, *clusters_count,
-                                         bytes_consumed ? *bytes_consumed : length, cluster_starts, cluster_lengths, 0,
-                                         sz_true_k));
+    *count = sz_utf8_graphemes_sve2_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

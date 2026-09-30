@@ -64,6 +64,15 @@ void test_utf8_uncased_unit() {
         verify(hits.size() == 4);
         verify(hits[0] == "Ab" && hits[1] == "aB" && hits[2] == "AB" && hits[3] == "ab");
         verify(str("xyz").utf8_uncased_matches("ab").empty());
+        // An empty needle matches at codepoint boundaries, so 3 times in the 3 bytes of "aé".
+        verify(str("a\xC3\xA9").utf8_uncased_matches("").size() == 3);
+        // A truncated rune is one step, capped at the end: {0, 1, 3}, where byte steps give 4.
+        {
+            str const truncated("a\xE4\xB8");
+            std::vector<std::size_t> offsets;
+            for (str match : truncated.utf8_uncased_matches("")) offsets.push_back(match.data() - truncated.data());
+            verify(offsets.size() == 3 && offsets[0] == 0 && offsets[1] == 1 && offsets[2] == 3);
+        }
 
         // 'ß' (U+00DF, 2 bytes) folds to "ss": each one is a length-2 match of the needle "SS".
         std::vector<str> folded;

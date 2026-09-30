@@ -33,16 +33,12 @@ static sz_capability_kernels_t const *sz_utf8_graphemes_capabilities(void) {
     return lists;
 }
 
-STRINGZILLA_API sz_status_t sz_utf8_graphemes_best(                                     //
-    sz_cptr_t text, sz_size_t length,                                                   //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, sz_size_t clusters_capacity, //
-    sz_size_t *clusters_count, sz_size_t *bytes_consumed,                               //
-    sz_capability_t capabilities, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_graphemes_best(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                   sz_size_t capacity, sz_size_t *count, sz_capability_t capabilities,
+                                                   void *stream) {
     sz_kernel_utf8_segmenter_t const kernel = (sz_kernel_utf8_segmenter_t)sz_kernel_pick_(
         capabilities, sz_utf8_graphemes_capabilities());
-    return kernel ? kernel(text, length, cluster_starts, cluster_lengths, clusters_capacity, clusters_count,
-                           bytes_consumed, stream)
-                  : sz_missing_kernel_k;
+    return kernel ? kernel(text, length, lengths, capacity, count, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_graphemes_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,

@@ -769,7 +769,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
     sz_utf8_uncased_alarm_strip_rvv_t_ alarm,                      //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
     sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,      //
+    sz_utf8_uncased_needle_t const *needle_metadata,               //
     sz_size_t *match_length) {
 
     sz_assert_(needle_metadata && "needle_metadata must be provided");
@@ -915,7 +915,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
     sz_cptr_t haystack, sz_size_t haystack_length,              //
     sz_cptr_t needle, sz_size_t needle_length,                  //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
                                                 (sz_utf8_uncased_alarm_strip_rvv_t_)STRINGZILLA_NULL, haystack,
                                                 haystack_length, needle, needle_length, needle_metadata, match_length);
@@ -924,7 +924,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_western_europe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
     sz_cptr_t needle, sz_size_t needle_length,                           //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_western_europe_strip_rvv_,
                                                 sz_utf8_uncased_alarm_western_europe_strip_rvv_, haystack,
                                                 haystack_length, needle, needle_length, needle_metadata, match_length);
@@ -933,7 +933,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_western_europe_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_central_europe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
     sz_cptr_t needle, sz_size_t needle_length,                           //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_central_europe_strip_rvv_,
                                                 sz_utf8_uncased_alarm_central_europe_strip_rvv_, haystack,
                                                 haystack_length, needle, needle_length, needle_metadata, match_length);
@@ -942,7 +942,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_central_europe_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_cyrillic_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
     sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_cyrillic_strip_rvv_,
                                                 sz_utf8_uncased_alarm_cyrillic_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
@@ -951,7 +951,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_cyrillic_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_greek_( //
     sz_cptr_t haystack, sz_size_t haystack_length,              //
     sz_cptr_t needle, sz_size_t needle_length,                  //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_greek_strip_rvv_,
                                                 sz_utf8_uncased_alarm_greek_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
@@ -960,7 +960,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_greek_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_armenian_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
     sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_armenian_strip_rvv_,
                                                 sz_utf8_uncased_alarm_armenian_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
@@ -969,7 +969,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_armenian_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_vietnamese_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
     sz_cptr_t needle, sz_size_t needle_length,                       //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_vietnamese_strip_rvv_,
                                                 sz_utf8_uncased_alarm_vietnamese_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
@@ -978,7 +978,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_vietnamese_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
     sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     // Mkhedruli is caseless, so the fold is the bare ASCII fold; the alarm watches the historical scripts.
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
                                                 sz_utf8_uncased_alarm_georgian_strip_rvv_, haystack, haystack_length,
@@ -990,7 +990,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
     sz_cptr_t needle, sz_size_t needle_length,            //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
 
     // Handle the obvious edge cases first.
     if (needle_length == 0) {
@@ -999,23 +999,13 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_( //
     }
 
     // If the needle is entirely case-less, perform a direct (exact) substring search.
-    int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
-    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
-    if (known_agnostic || (is_unknown && sz_utf8_find_cased_rvv_(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
+    if (needle_metadata->script == sz_utf8_uncased_rune_invariant_k) {
         sz_cptr_t result = sz_find_rvv_(haystack, haystack_length, needle, needle_length);
         *match_length = result ? needle_length : 0;
         return result;
     }
 
-    // Analyze the needle to find the best safe window and kernel.
-    if (is_unknown) {
-        sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
-        if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
-            return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                                  match_length);
-    }
-
-    switch (needle_metadata->kernel_id) {
+    switch (needle_metadata->script) {
     case sz_utf8_uncased_rune_ascii_invariant_k:
         return sz_utf8_uncased_search_rvv_ascii_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
@@ -1044,7 +1034,6 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_( //
     }
 
     // No suitable SIMD path (complex Unicode needle), fall back to serial.
-    needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
     return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
                                           match_length);
 }
@@ -1053,13 +1042,11 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_( //
 
 #if STRINGZILLA_TARGET_RVV
 
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_rvv( //
-    sz_cptr_t haystack, sz_size_t haystack_length,      //
-    sz_cptr_t needle, sz_size_t needle_length,          //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_rvv(                                    //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *match = sz_utf8_uncased_search_rvv_(haystack, haystack_length, needle, needle_length, needle_metadata,
+    *match = sz_utf8_uncased_search_rvv_(haystack, haystack_length, needle->start, needle->length, needle,
                                          match_length);
     return sz_success_k;
 }

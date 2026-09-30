@@ -9,8 +9,12 @@
 /** A vocabulary compiled once into an automaton, streamed over many collections of haystacks. */
 typedef struct {
     PyObject ob_base;
-    sz_substrings_engine_t engine; //< Owned; freed in `tp_dealloc`, rebuilt by a second `__init__`.
-    sz_engine_lock_field_          //< Guards the round arena and the report every call rewrites.
+
+    /** Owned; freed in @c tp_dealloc, rebuilt by a second @c __init__. */
+    sz_substrings_engine_t engine;
+
+    /** Guards the round arena and the report every call rewrites. */
+    sz_engine_lock_field_
 } SubstringsEngine;
 
 #pragma region Construction

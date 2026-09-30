@@ -6,26 +6,22 @@
  */
 #include "stringzilla.h"
 
-/** Iterator that yields all uncased matches of a needle in a haystack. Uses
- *  @c sz_utf8_uncased_search_best for Unicode-aware case folding. */
+/** Iterator that yields all uncased matches of a needle in a haystack, prepared once at
+ *  construction for @c sz_utf8_uncased_search_best. */
 typedef struct {
     PyObject ob_base;
 
-    PyObject *haystack_obj; //< Reference for garbage collection
-    PyObject *needle_obj;   //< Reference for garbage collection (needle bytes must remain valid)
+    PyObject *haystack_obj;
 
-    sz_cptr_t current;      //< Current search position in haystack
-    sz_cptr_t haystack_end; //< End boundary of haystack
+    /** Keeps alive the needle bytes that @c needle points at. */
+    PyObject *needle_obj;
 
-    sz_string_view_t needle; //< Needle view (bytes and length)
+    /** Where the next search starts, or NULL once exhausted. */
+    sz_cptr_t current;
+    sz_cptr_t haystack_end;
 
-    /// @brief  Reusable metadata for repeated searches with the same needle.
-    sz_utf8_uncased_needle_metadata_t metadata;
-
-    /// @brief  Whether to allow overlapping matches.
+    sz_utf8_uncased_needle_t needle;
     sz_bool_t include_overlapping;
-
-    /// @brief  The mask every search dispatches with.
     sz_capability_t capabilities;
 
 } Utf8UncasedMatches;
@@ -230,10 +226,12 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
     }
 
     sz_size_t match_length = 0;
-    sz_utf8_uncased_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
+    sz_utf8_uncased_needle_t prepared;
     sz_cptr_t result = NULL;
-    status = sz_utf8_uncased_search_best(haystack.start, haystack.length, needle.start, needle.length, &needle_metadata,
-                                         &result, &match_length, capabilities, NULL);
+    status = sz_utf8_uncased_needle_init_best(needle.start, needle.length, &prepared, capabilities, NULL);
+    if (status == sz_success_k)
+        status = sz_utf8_uncased_search_best(haystack.start, haystack.length, &prepared, &result, &match_length,
+                                             capabilities, NULL);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "utf8_uncased_search()");
         return NULL;
@@ -359,6 +357,7 @@ char const doc_utf8_uncased_matches[] =                                         
     "This function uses Unicode case folding for proper handling of\n"                                   //
     "international text. The matched region length may differ from the\n"                                //
     "needle length due to case folding expansions, like 'ß' matching 'SS'.\n"                            //
+    "An empty needle matches at every codepoint boundary, the end included.\n"                           //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
     "    haystack (Str or str or bytes): The string to search in.\n"                                     //
@@ -390,7 +389,7 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
 
     PyObject *haystack_obj = is_member ? self : args[0];
     PyObject *needle_obj = is_member ? args[0] : args[1];
-    int include_overlapping = 0;
+    PyObject *overlapping_object = positional_args_count == max_args ? args[max_args - 1] : NULL;
     PyObject *capabilities_object = NULL;
 
     // Parse keyword arguments
@@ -399,9 +398,7 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
         for (Py_ssize_t i = 0; i < n_kwnames; ++i) {
             PyObject *key = PyTuple_GET_ITEM(kwnames, i);
             PyObject *value = args[positional_args_count + i];
-            if (PyUnicode_CompareWithASCIIString(key, "include_overlapping") == 0) {
-                include_overlapping = PyObject_IsTrue(value);
-            }
+            if (PyUnicode_CompareWithASCIIString(key, "include_overlapping") == 0) { overlapping_object = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) { capabilities_object = value; }
             else {
                 PyErr_Format(PyExc_TypeError, "utf8_uncased_matches() got unexpected keyword argument '%U'", key);
@@ -411,9 +408,8 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
     }
     sz_capability_t capabilities;
     if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
-
-    // Check positional include_overlapping argument
-    if (positional_args_count > max_args - 1) include_overlapping = PyObject_IsTrue(args[is_member ? 1 : 2]);
+    int const include_overlapping = overlapping_object ? PyObject_IsTrue(overlapping_object) : 0;
+    if (include_overlapping < 0) return NULL;
 
     // Extract haystack and needle views
     sz_string_view_t haystack_view, needle_view;
@@ -422,27 +418,14 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
         return NULL; // Exception already set by helper
     }
 
-    // Handle edge case: empty needle yields nothing
-    if (needle_view.length == 0) {
-        // Return an empty iterator by setting current = end
-        Utf8UncasedMatches *iter = PyObject_New(Utf8UncasedMatches, &Utf8UncasedMatchesType);
-        if (!iter) return PyErr_NoMemory();
-
-        iter->haystack_obj = haystack_obj;
-        Py_INCREF(haystack_obj);
-        iter->needle_obj = needle_obj;
-        Py_INCREF(needle_obj);
-        iter->current = haystack_view.start + haystack_view.length; // Start at end = empty iterator
-        iter->haystack_end = haystack_view.start + haystack_view.length;
-        iter->needle = needle_view;
-        memset(&iter->metadata, 0, sizeof(iter->metadata));
-        iter->include_overlapping = sz_false_k;
-        iter->capabilities = capabilities;
-
-        return (PyObject *)iter;
+    sz_utf8_uncased_needle_t needle;
+    sz_status_t const status = sz_utf8_uncased_needle_init_best(needle_view.start, needle_view.length, &needle,
+                                                                capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "utf8_uncased_matches()");
+        return NULL;
     }
 
-    // Allocate iterator
     Utf8UncasedMatches *iter = PyObject_New(Utf8UncasedMatches, &Utf8UncasedMatchesType);
     if (!iter) return PyErr_NoMemory();
 
@@ -452,8 +435,7 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
     Py_INCREF(needle_obj);
     iter->current = haystack_view.start;
     iter->haystack_end = haystack_view.start + haystack_view.length;
-    iter->needle = needle_view;
-    memset(&iter->metadata, 0, sizeof(iter->metadata));
+    iter->needle = needle;
     iter->include_overlapping = include_overlapping ? sz_true_k : sz_false_k;
     iter->capabilities = capabilities;
 
@@ -461,24 +443,22 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
 }
 
 static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
-    // Check if we've reached the end
-    sz_size_t remaining = (sz_size_t)(self->haystack_end - self->current);
-    if (remaining == 0) return NULL;
+    if (!self->current) return NULL;
 
-    // Search for next match
     sz_size_t match_length = 0;
     sz_cptr_t match = NULL;
-    sz_status_t const status = sz_utf8_uncased_search_best(self->current, remaining, self->needle.start,
-                                                           self->needle.length, &self->metadata, &match, &match_length,
-                                                           self->capabilities, NULL);
+    sz_status_t const status = sz_utf8_uncased_search_best(
+        self->current, (sz_size_t)(self->haystack_end - self->current), &self->needle, &match, &match_length,
+        self->capabilities, NULL);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "__next__()");
         return NULL;
     }
+    if (!match) {
+        self->current = NULL;
+        return NULL;
+    }
 
-    if (!match) return NULL;
-
-    // Create a new `Str` object for the matched region
     Str *result_obj = Str_alloc_();
     if (result_obj == NULL) return PyErr_NoMemory();
 
@@ -487,17 +467,13 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
     result_obj->parent = self->haystack_obj;
     Py_INCREF(self->haystack_obj);
 
-    // Advance position for next search
-    if (self->include_overlapping) {
-        // Move forward by one UTF-8 codepoint to allow overlapping matches
-        sz_size_t pos = 0;
-        sz_utf8_next_rune_(match, match_length, &pos);
-        self->current = match + (pos > 0 ? pos : 1);
+    // A zero-width match steps one codepoint too, so an empty needle stops after matching the end.
+    if (self->include_overlapping || match_length == 0) {
+        sz_size_t const remaining = (sz_size_t)(self->haystack_end - match);
+        sz_size_t const step = sz_utf8_lead_length_(*(sz_u8_t const *)match);
+        self->current = remaining ? match + (step < remaining ? step : remaining) : NULL;
     }
-    else {
-        // Move past the entire matched region (non-overlapping)
-        self->current = match + match_length;
-    }
+    else { self->current = match + match_length; }
 
     return (PyObject *)result_obj;
 }

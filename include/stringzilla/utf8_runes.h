@@ -100,15 +100,19 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, 
  *    maximal ill-formed subpart (overlong, surrogate, out-of-range, or a stray byte) and resyncs.
  *  - @b Valid @b scalar @b values: every emitted rune is a Unicode scalar value (incl. U+FFFD),
  *    so callers may convert without re-validation.
- *  - @b Resumable @b truncation: a well-formed but truncated trailing prefix is left unconsumed,
- *    @p bytes_consumed stopping before it, so a streaming caller resumes once more bytes arrive.
+ *
+ *  End of text is end of input: a well-formed but truncated final sequence decodes to one U+FFFD
+ *  over its maximal subpart and is consumed, so `"a\xE2\x82"` yields `{'a', U+FFFD}` over all 3
+ *  bytes. Only a full @p runes buffer stops early, so @p bytes_consumed falls short of @p length
+ *  only when @p runes_count reaches @p runes_capacity, and then at a rune boundary. Callers
+ *  decoding a stream in chunks split it at a rune boundary.
  *
  *  @param[in] text UTF-8 string to unpack.
  *  @param[in] length Number of bytes in the string.
  *  @param[out] runes Buffer for UTF-32 codepoints, recommended to be at least @b 64 entries wide.
  *  @param[in] runes_capacity Capacity of the @p runes buffer, in @c sz_rune_t entries.
  *  @param[out] runes_count Number of runes unpacked.
- *  @param[out] bytes_consumed Bytes of @p text decoded, the offset a streaming caller resumes at.
+ *  @param[out] bytes_consumed Bytes of @p text decoded, the offset the next call resumes at.
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.

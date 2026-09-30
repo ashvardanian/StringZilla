@@ -53,41 +53,107 @@ static sz_status_t sz_py_rfind_byte_not_from_(sz_cptr_t haystack, sz_size_t hays
     return sz_rfind_byteset_best(haystack, haystack_length, &set, match, capabilities, stream);
 }
 
+typedef struct sz_py_split_t sz_py_split_t;
+
+/** Finds the next separator in the remainder of @p split, from its front or from its back. */
+typedef sz_status_t (*sz_py_split_finder_t)(sz_py_split_t const *split, sz_cptr_t *match);
+
 /**
- *  @brief String-splitting separator.
+ *  @brief A split in progress, shared by the lazy @c FindSplits and the eager @c split family.
  *
- *  Allows lazy evaluation of @c split and @c rsplit, and can be used to create a @c Strs object,
- *  which might be more memory-friendly than greedily invoking `str.split`.
+ *  `[start, end)` is the remainder not split yet: forward splits cut parts off its front, reverse
+ *  ones off its back. A substring finder looks for @c separator, a byteset finder for @c set.
+ */
+struct sz_py_split_t {
+    sz_cptr_t start;
+    sz_cptr_t end;
+    sz_py_split_finder_t finder;
+    sz_string_view_t separator;
+    sz_byteset_t set;
+    sz_capability_t capabilities;
+
+    /** Bytes a separator spans: the separator length, or 1 for a byteset. */
+    sz_size_t match_length;
+
+    /** Parts left to yield, 0 once the last one is out. */
+    sz_size_t max_parts;
+
+    sz_bool_t include_match;
+    sz_bool_t is_reverse;
+    sz_bool_t skip_empty;
+};
+
+static sz_status_t sz_py_split_find_(sz_py_split_t const *split, sz_cptr_t *match) {
+    return sz_find_best(split->start, (sz_size_t)(split->end - split->start), split->separator.start,
+                        split->separator.length, match, split->capabilities, NULL);
+}
+
+static sz_status_t sz_py_split_rfind_(sz_py_split_t const *split, sz_cptr_t *match) {
+    return sz_rfind_best(split->start, (sz_size_t)(split->end - split->start), split->separator.start,
+                         split->separator.length, match, split->capabilities, NULL);
+}
+
+static sz_status_t sz_py_split_find_byteset_(sz_py_split_t const *split, sz_cptr_t *match) {
+    return sz_find_byteset_best(split->start, (sz_size_t)(split->end - split->start), &split->set, match,
+                                split->capabilities, NULL);
+}
+
+static sz_status_t sz_py_split_rfind_byteset_(sz_py_split_t const *split, sz_cptr_t *match) {
+    return sz_rfind_byteset_best(split->start, (sz_size_t)(split->end - split->start), &split->set, match,
+                                 split->capabilities, NULL);
+}
+
+/**
+ *  @brief Cuts the next part off the remainder of @p split.
+ *  @return 1 with @p part set, 0 once every part is out, or -1 with a Python exception set.
+ */
+static int sz_py_split_next_(sz_py_split_t *split, sz_string_view_t *part) {
+    do {
+        if (split->max_parts == 0) return 0;
+        sz_cptr_t match = NULL;
+        if (split->max_parts != 1) {
+            sz_status_t const status = split->finder(split, &match);
+            if (status != sz_success_k) {
+                sz_py_raise_status(status, "split()");
+                return -1;
+            }
+        }
+        if (!match) {
+            part->start = split->start;
+            part->length = (sz_size_t)(split->end - split->start);
+            split->max_parts = 0;
+        }
+        else if (split->is_reverse) {
+            part->start = match + split->match_length * !split->include_match;
+            part->length = (sz_size_t)(split->end - part->start);
+            split->end = match;
+            split->max_parts--;
+        }
+        else {
+            part->start = split->start;
+            part->length = (sz_size_t)(match - split->start) + split->match_length * split->include_match;
+            split->start = match + split->match_length;
+            split->max_parts--;
+        }
+    } while (split->skip_empty && part->length == 0);
+    return 1;
+}
+
+/**
+ *  @brief String-splitting iterator.
+ *
+ *  Allows lazy evaluation of @c split and @c rsplit, which might be more memory-friendly than
+ *  greedily invoking `str.split`.
  */
 typedef struct {
     PyObject ob_base;
 
     PyObject *text_obj;
+
+    /** Keeps the bytes of a substring separator alive. */
     PyObject *separator_obj;
 
-    sz_string_view_t text;
-    sz_string_view_t separator;
-    sz_py_finder_t finder;
-    sz_capability_t capabilities;
-
-    /** How many bytes to skip after each successful find: generally @c needle_length, or 1 for
-     *  character sets. */
-    sz_size_t match_length;
-
-    /** Should we include the separator in the resulting slices? */
-    sz_bool_t include_match;
-
-    /** Should we enumerate the slices in normal or reverse order? */
-    sz_bool_t is_reverse;
-
-    /** Upper limit for the number of splits to report. Monotonically decreases during iteration. */
-    sz_size_t max_parts;
-
-    /** Indicates that we've already reported the tail of the split, and should return NULL next. */
-    sz_bool_t reached_tail;
-
-    /** Should we skip empty segments - trailing, leading, or consecutive? */
-    sz_bool_t skip_empty;
+    sz_py_split_t split;
 
 } FindSplits;
 
@@ -628,15 +694,14 @@ PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_t posit
         PyErr_SetString(PyExc_TypeError, "The end argument must be an integer");
         return NULL;
     }
-    int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
+    int const allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
+    if (allowoverlap < 0) return NULL;
 
     if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
         !sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
         wrap_current_exception("Haystack and needle must be string-like");
         return NULL;
     }
-
-    if (allowoverlap == -1 && PyErr_Occurred()) return NULL;
 
     sz_size_t normalized_offset, normalized_length;
     sz_bool_t const window_valid = sz_ssize_clamp_interval_checked(haystack.length, start, end, &normalized_offset,
@@ -1203,241 +1268,57 @@ PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize
     return PyLong_FromSize_t(count);
 }
 
-/** Given parsed split settings, constructs an iterator that would produce that split. */
-static FindSplits *Str_split_iter_(PyObject *text_obj, PyObject *separator_obj,                   //
-                                   sz_string_view_t const text, sz_string_view_t const separator, //
-                                   int keepseparator, Py_ssize_t maxsplit, sz_py_finder_t finder,
-                                   sz_capability_t capabilities, sz_size_t match_length, sz_bool_t is_reverse,
-                                   int skip_empty) {
+/** Collects every part of @p split into a @c Strs viewing @p parent_string, in source order even
+ *  when splitting from the back, as CPython's @c rsplit reports them. */
+static Strs *Str_split_(PyObject *parent_string, sz_py_split_t *split) {
+    sz_size_t spans_capacity = 4, spans_count = 0;
+    sz_string_view_t *spans = (sz_string_view_t *)malloc(spans_capacity * sizeof(sz_string_view_t));
+    if (!spans) return (Strs *)PyErr_NoMemory();
 
-    // Create a new `FindSplits` object
-    FindSplits *result_obj = (FindSplits *)FindSplitsType.tp_alloc(&FindSplitsType, 0);
-    if (result_obj == NULL) return PyErr_NoMemory();
-
-    // Set its properties based on the slice
-    result_obj->text_obj = text_obj;
-    result_obj->separator_obj = separator_obj;
-    result_obj->text = text;
-    result_obj->separator = separator;
-    result_obj->finder = finder;
-    result_obj->capabilities = capabilities;
-
-    result_obj->match_length = match_length;
-    result_obj->include_match = keepseparator;
-    result_obj->is_reverse = is_reverse;
-    // A negative maxsplit means "unlimited", matching the eager `Str_split_`/`Str_rsplit_` paths
-    result_obj->max_parts = maxsplit < 0 ? SIZE_MAX : (sz_size_t)maxsplit + 1;
-    result_obj->reached_tail = 0;
-    result_obj->skip_empty = skip_empty ? sz_true_k : sz_false_k;
-
-    // Increment the reference count of the parent
-    Py_INCREF(result_obj->text_obj);
-    Py_XINCREF(result_obj->separator_obj);
-    return result_obj;
-}
-
-/** Implements the normal order split logic for both string-delimiters and character sets. Produces
- *  a @c Strs object with @c REORDERED_SUBVIEWS layout. */
-static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
-                        int keepseparator, Py_ssize_t maxsplit, sz_py_finder_t finder, sz_capability_t capabilities,
-                        sz_size_t match_length, int skip_empty) {
-    // Create Strs object
-    Strs *result = Strs_alloc_();
-    if (!result) return NULL;
-
-    // Use reordered subviews layout with the haystack as parent
-    result->layout = STRS_FRAGMENTED;
-    result->data.fragmented.parent = parent_string;
-    Py_INCREF(parent_string);
-    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
-
-    // Collect split positions first
-    sz_string_view_t *spans = NULL;
-    sz_size_t spans_capacity = 4;
-    sz_size_t spans_count = 0;
-
-    spans = (sz_string_view_t *)malloc(spans_capacity * sizeof(sz_string_view_t));
-    if (!spans) {
-        Py_XDECREF(result);
-        PyErr_NoMemory();
-        return NULL;
-    }
-
-    sz_cptr_t current_start = text.start;
-    sz_size_t remaining_length = text.length;
-    sz_size_t splits_made = 0;
-    sz_size_t max_splits = (maxsplit < 0) ? SIZE_MAX : (sz_size_t)maxsplit;
-
-    while (remaining_length > 0 && splits_made < max_splits) {
-        sz_cptr_t match = NULL;
-        sz_status_t const status = finder(current_start, remaining_length, separator.start, separator.length, &match,
-                                          capabilities, NULL);
-        if (status != sz_success_k) {
+    for (;;) {
+        sz_string_view_t part;
+        int const step = sz_py_split_next_(split, &part);
+        if (step < 0) {
             free(spans);
-            Py_XDECREF(result);
-            sz_py_raise_status(status, "split()");
             return NULL;
         }
-
-        if (match) {
-            // Add the part before the separator
-            sz_size_t part_length = match - current_start;
-
-            // Skip empty segments when requested (the part before this separator is zero-length).
-            if (!skip_empty || part_length > 0) {
-                // Reallocate spans array if needed
-                if (spans_count >= spans_capacity) {
-                    spans_capacity *= 2;
-                    sz_string_view_t *new_spans = (sz_string_view_t *)realloc(
-                        spans, spans_capacity * sizeof(sz_string_view_t));
-                    if (!new_spans) {
-                        free(spans);
-                        Py_XDECREF(result);
-                        PyErr_NoMemory();
-                        return NULL;
-                    }
-                    spans = new_spans;
-                }
-
-                spans[spans_count].start = current_start;
-                spans[spans_count].length = keepseparator ? part_length + match_length : part_length;
-                spans_count++;
-            }
-
-            // Move past the separator
-            current_start = match + match_length;
-            remaining_length = text.length - (current_start - text.start);
-            splits_made++;
-        }
-        else { break; }
-    }
-
-    // Add the final part (everything remaining), unless it's empty and we're skipping empties.
-    if (!skip_empty || remaining_length > 0) {
-        if (spans_count >= spans_capacity) {
-            spans_capacity++;
+        if (step == 0) break;
+        if (spans_count == spans_capacity) {
+            spans_capacity *= 2;
             sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans, spans_capacity * sizeof(sz_string_view_t));
             if (!new_spans) {
                 free(spans);
-                Py_XDECREF(result);
-                PyErr_NoMemory();
-                return NULL;
+                return (Strs *)PyErr_NoMemory();
             }
             spans = new_spans;
         }
-
-        spans[spans_count].start = current_start;
-        spans[spans_count].length = remaining_length;
-        spans_count++;
+        spans[spans_count++] = part;
     }
 
-    // Set up the result
-    result->data.fragmented.spans = spans;
-    result->data.fragmented.count = spans_count;
+    if (split->is_reverse)
+        for (sz_size_t i = 0; i < spans_count / 2; i++) {
+            sz_string_view_t const temp = spans[i];
+            spans[i] = spans[spans_count - i - 1];
+            spans[spans_count - i - 1] = temp;
+        }
 
-    return result;
-}
-
-/** Implements the reverse order split logic for both string-delimiters and character sets. Produces
- *  a @c Strs object with @c REORDERED_SUBVIEWS layout. */
-static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
-                         int keepseparator, Py_ssize_t maxsplit, sz_py_finder_t finder, sz_capability_t capabilities,
-                         sz_size_t match_length, int skip_empty) {
-    // Create Strs object
-    Strs *result = Strs_alloc_();
-    if (!result) return NULL;
-
-    // Use reordered subviews layout with the haystack as parent
-    result->layout = STRS_FRAGMENTED;
-    result->data.fragmented.parent = parent_string;
-    Py_INCREF(parent_string);
-    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
-    result->data.fragmented.spans = NULL;
-    result->data.fragmented.count = 0;
-
-    // Keep track of the memory usage
-    sz_string_view_t *parts = NULL;
-    sz_size_t parts_capacity = 4;
-    sz_size_t parts_count = 0;
-
-    parts = (sz_string_view_t *)malloc(parts_capacity * sizeof(sz_string_view_t));
-    if (!parts) {
-        Py_XDECREF(result);
-        PyErr_NoMemory();
+    Strs *result = strs_make_empty_fragmented_();
+    if (!result) {
+        free(spans);
         return NULL;
     }
-
-    sz_bool_t reached_tail = 0;
-    sz_size_t total_skipped = 0;
-    sz_size_t splits_made = 0;
-    sz_size_t max_parts = (maxsplit < 0) ? SIZE_MAX : ((sz_size_t)maxsplit + 1);
-
-    while (!reached_tail) {
-        sz_cptr_t match = NULL;
-        if (splits_made + 1 < max_parts) {
-            sz_status_t const status = finder(text.start, text.length - total_skipped, separator.start,
-                                              separator.length, &match, capabilities, NULL);
-            if (status != sz_success_k) {
-                free(parts);
-                Py_XDECREF(result);
-                sz_py_raise_status(status, "rsplit()");
-                return NULL;
-            }
-        }
-
-        // Determine the next part
-        sz_string_view_t part;
-        if (match) {
-            part.start = match + match_length * !keepseparator;
-            part.length = text.start + text.length - total_skipped - part.start;
-            total_skipped = text.start + text.length - match;
-            splits_made++;
-        }
-        else {
-            part.start = text.start;
-            part.length = text.length - total_skipped;
-            reached_tail = 1;
-        }
-
-        // Skip empty segments when requested.
-        if (skip_empty && part.length == 0) continue;
-
-        // Reallocate parts array if needed
-        if (parts_count >= parts_capacity) {
-            parts_capacity *= 2;
-            sz_string_view_t *new_parts = (sz_string_view_t *)realloc(parts, parts_capacity * sizeof(sz_string_view_t));
-            if (!new_parts) {
-                free(parts);
-                Py_XDECREF(result);
-                PyErr_NoMemory();
-                return NULL;
-            }
-            parts = new_parts;
-        }
-
-        // Populate the parts array
-        parts[parts_count] = part;
-        parts_count++;
-    }
-
-    // Python does this weird thing, where the `rsplit` results appear in the same order as `split`
-    // so we need to reverse the order of elements in the `parts` array.
-    for (sz_size_t i = 0; i < parts_count / 2; i++) {
-        sz_string_view_t temp = parts[i];
-        parts[i] = parts[parts_count - i - 1];
-        parts[parts_count - i - 1] = temp;
-    }
-
-    result->data.fragmented.spans = parts;
-    result->data.fragmented.count = parts_count;
+    result->data.fragmented.parent = parent_string;
+    Py_INCREF(parent_string);
+    result->data.fragmented.spans = spans;
+    result->data.fragmented.count = spans_count;
     return result;
 }
 
 /** Proxy parsing the function arguments of `Str.split`, `Str.rsplit`, `Str.split_byteset`, and
- *  `Str.rsplit_byteset`, then routing them to the @c Str_split_ and @c Str_rsplit_ backends. */
+ *  `Str.rsplit_byteset`, then splitting eagerly with @c Str_split_ or lazily as @c FindSplits. */
 static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                               PyObject *args_names_tuple,                    //
-                                               sz_py_finder_t finder, sz_size_t match_length, //
+                                               PyObject *args_names_tuple,                        //
+                                               sz_py_split_finder_t finder, sz_bool_t is_byteset, //
                                                sz_bool_t is_reverse, sz_bool_t is_lazy_iterator) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1478,7 +1359,7 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     sz_string_view_t text;
-    sz_string_view_t separator;
+    sz_string_view_t separator = {" ", 1};
     int keepseparator;
     int skip_empty = 0;
     Py_ssize_t maxsplit;
@@ -1490,21 +1371,9 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     }
 
     // Validate and convert `separator`
-    if (separator_obj) {
-        if (!sz_py_export_string_like(separator_obj, &separator.start, &separator.length)) {
-            wrap_current_exception("The separator argument must be string-like");
-            return NULL;
-        }
-        // Raise a `ValueError` if it's length is zero, like the native `str.split`
-        if (separator.length == 0) {
-            PyErr_SetString(PyExc_ValueError, "The separator argument must not be empty");
-            return NULL;
-        }
-        if (match_length == 0) match_length = separator.length;
-    }
-    else {
-        separator.start = " ";
-        match_length = separator.length = 1;
+    if (separator_obj && !sz_py_export_string_like(separator_obj, &separator.start, &separator.length)) {
+        wrap_current_exception("The separator argument must be string-like");
+        return NULL;
     }
 
     // Validate and convert `keepseparator`
@@ -1536,15 +1405,32 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
         }
     }
 
-    // Dispatch the right backend
-    if (is_lazy_iterator)
-        return (PyObject *)Str_split_iter_(text_obj, separator_obj, text, separator, keepseparator, maxsplit, finder,
-                                           capabilities, match_length, is_reverse, skip_empty);
-    else
-        return (PyObject *)(!is_reverse ? Str_split_(text_obj, text, separator, keepseparator, maxsplit, finder,
-                                                     capabilities, match_length, skip_empty)
-                                        : Str_rsplit_(text_obj, text, separator, keepseparator, maxsplit, finder,
-                                                      capabilities, match_length, skip_empty));
+    // An empty separator never matches, leaving the whole text as one part.
+    if (separator.length == 0) maxsplit = 0;
+    sz_py_split_t split = {
+        .start = text.start,
+        .end = text.start + text.length,
+        .finder = finder,
+        .separator = separator,
+        .capabilities = capabilities,
+        .match_length = is_byteset ? 1 : separator.length,
+        .max_parts = maxsplit < 0 ? SIZE_MAX : (sz_size_t)maxsplit + 1,
+        .include_match = keepseparator ? sz_true_k : sz_false_k,
+        .is_reverse = is_reverse,
+        .skip_empty = skip_empty ? sz_true_k : sz_false_k,
+    };
+    if (is_byteset)
+        for (sz_size_t i = 0; i != separator.length; ++i) sz_byteset_add(&split.set, separator.start[i]);
+    if (!is_lazy_iterator) return (PyObject *)Str_split_(text_obj, &split);
+
+    FindSplits *iterator = (FindSplits *)FindSplitsType.tp_alloc(&FindSplitsType, 0);
+    if (!iterator) return NULL;
+    iterator->text_obj = text_obj;
+    Py_INCREF(text_obj);
+    iterator->separator_obj = separator_obj;
+    Py_XINCREF(separator_obj);
+    iterator->split = split;
+    return (PyObject *)iterator;
 }
 
 char const doc_split[] =                                                                                  //
@@ -1552,15 +1438,13 @@ char const doc_split[] =                                                        
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
     "  text (Str or str or bytes): The string object.\n"                                                  //
-    "  separator (str): The separator to split by, which cannot be empty.\n"                              //
+    "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include the separator in results, defaulting to False.\n"          //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  Strs: A list of strings split by the separator.\n"                                                 //
-    "Raises:\n"                                                                                           //
-    "  ValueError: If the separator is an empty string.\n"                                                //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> list(map(str, sz.Str('a,b,c').split(',')))\n"                                                  //
@@ -1568,8 +1452,8 @@ char const doc_split[] =                                                        
 
 PyObject *Str_like_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                          PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find_best, 0,
-                                         sz_false_k, sz_false_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_,
+                                         sz_false_k, sz_false_k, sz_false_k);
 }
 
 char const doc_rsplit[] =                                                                                 //
@@ -1577,15 +1461,13 @@ char const doc_rsplit[] =                                                       
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
     "  text (Str or str or bytes): The string object.\n"                                                  //
-    "  separator (str): The separator to split by, which cannot be empty.\n"                              //
+    "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include the separator in results, defaulting to False.\n"          //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  Strs: A list of strings split by the separator.\n"                                                 //
-    "Raises:\n"                                                                                           //
-    "  ValueError: If the separator is an empty string.\n"                                                //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> list(map(str, sz.Str('a,b,c').rsplit(',')))\n"                                                 //
@@ -1593,8 +1475,8 @@ char const doc_rsplit[] =                                                       
 
 PyObject *Str_like_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                           PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind_best, 0,
-                                         sz_true_k, sz_false_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_rfind_,
+                                         sz_false_k, sz_true_k, sz_false_k);
 }
 
 char const doc_split_byteset[] =                                                                          //
@@ -1616,8 +1498,8 @@ char const doc_split_byteset[] =                                                
 
 PyObject *Str_like_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_py_find_byte_from_, 1,
-                                         sz_false_k, sz_false_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_byteset_,
+                                         sz_true_k, sz_false_k, sz_false_k);
 }
 
 char const doc_rsplit_byteset[] =                                                                         //
@@ -1639,8 +1521,8 @@ char const doc_rsplit_byteset[] =                                               
 
 PyObject *Str_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                   PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_py_rfind_byte_from_,
-                                         1, sz_true_k, sz_false_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
+                                         sz_py_split_rfind_byteset_, sz_true_k, sz_true_k, sz_false_k);
 }
 
 char const doc_split_iter[] =                                                                             //
@@ -1648,14 +1530,13 @@ char const doc_split_iter[] =                                                   
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
     "  text (Str or str or bytes): The string object.\n"                                                  //
-    "  separator (str): The separator to split by, which cannot be empty.\n"                              //
+    "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
+    "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separator in results, defaulting to False.\n"              //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  iterator: An iterator yielding split substrings.\n"                                                //
-    "Raises:\n"                                                                                           //
-    "  ValueError: If the separator is an empty string.\n"                                                //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> # Stream parts lazily instead of materializing a list (that is what split() is for):\n"        //
@@ -1664,8 +1545,8 @@ char const doc_split_iter[] =                                                   
 
 PyObject *Str_like_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find_best, 0,
-                                         sz_false_k, sz_true_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_,
+                                         sz_false_k, sz_false_k, sz_true_k);
 }
 
 char const doc_rsplit_iter[] =                                                                            //
@@ -1673,14 +1554,13 @@ char const doc_rsplit_iter[] =                                                  
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
     "  text (Str or str or bytes): The string object.\n"                                                  //
-    "  separator (str): The separator to split by, which cannot be empty.\n"                              //
+    "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
+    "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separator in results, defaulting to False.\n"              //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  iterator: An iterator yielding split substrings in reverse.\n"                                     //
-    "Raises:\n"                                                                                           //
-    "  ValueError: If the separator is an empty string.\n"                                                //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> # Iterates from the end; the first yielded part is the last field:\n"                          //
@@ -1689,8 +1569,8 @@ char const doc_rsplit_iter[] =                                                  
 
 PyObject *Str_like_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind_best, 0,
-                                         sz_true_k, sz_true_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_rfind_,
+                                         sz_false_k, sz_true_k, sz_true_k);
 }
 
 char const doc_split_byteset_iter[] =                                                                     //
@@ -1699,6 +1579,7 @@ char const doc_split_byteset_iter[] =                                           
     "Args:\n"                                                                                             //
     "  text (Str or str or bytes): The string object.\n"                                                  //
     "  separators (str): A string containing separator characters.\n"                                     //
+    "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separators in results, defaulting to False.\n"             //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
@@ -1712,8 +1593,8 @@ char const doc_split_byteset_iter[] =                                           
 
 PyObject *Str_like_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_py_find_byte_from_, 1,
-                                         sz_false_k, sz_true_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_byteset_,
+                                         sz_true_k, sz_false_k, sz_true_k);
 }
 
 char const doc_rsplit_byteset_iter[] =                                                                    //
@@ -1722,6 +1603,7 @@ char const doc_rsplit_byteset_iter[] =                                          
     "Args:\n"                                                                                             //
     "  text (Str or str or bytes): The string object.\n"                                                  //
     "  separators (str): A string containing separator characters.\n"                                     //
+    "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separators in results, defaulting to False.\n"             //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
@@ -1735,8 +1617,8 @@ char const doc_rsplit_byteset_iter[] =                                          
 
 PyObject *Str_like_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                        PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_py_rfind_byte_from_,
-                                         1, sz_true_k, sz_true_k);
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
+                                         sz_py_split_rfind_byteset_, sz_true_k, sz_true_k, sz_true_k);
 }
 
 char const doc_splitlines[] =                                                                             //
@@ -1835,30 +1717,26 @@ PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t 
     //
     // We avoid all 2-byte sequences and only consider 1-byte delimiters.
     // CPython docs: https://docs.python.org/3/library/stdtypes.html#str.splitlines
-    sz_string_view_t separator;
-    separator.start = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E";
-    separator.length = 8;
-    Strs *result = Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_py_find_byte_from_, capabilities,
-                              1, /*skip_empty=*/0);
+    sz_py_split_t split = {
+        .start = text.start,
+        .end = text.start + text.length,
+        .finder = sz_py_split_find_byteset_,
+        .capabilities = capabilities,
+        .match_length = 1,
+        .max_parts = maxsplit < 0 ? SIZE_MAX : (sz_size_t)maxsplit + 1,
+        .include_match = keeplinebreaks ? sz_true_k : sz_false_k,
+    };
+    for (char const *terminator = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E"; *terminator; ++terminator)
+        sz_byteset_add(&split.set, *terminator);
+    Strs *result = Str_split_(text_obj, &split);
 
     // Unlike a plain split, CPython `splitlines` yields no trailing empty line after a final terminator,
     // and `[]` for an empty input. Drop that single spurious trailing segment (interior blank lines stay).
-    if (result && result->layout == STRS_FRAGMENTED && result->data.fragmented.count > 0) {
-        sz_size_t parts_count = result->data.fragmented.count;
-        sz_cptr_t terminator = NULL;
-        if (text.length != 0) {
-            sz_status_t const status = sz_py_find_byte_from_(text.start + text.length - 1, 1, separator.start,
-                                                             separator.length, &terminator, capabilities, NULL);
-            if (status != sz_success_k) {
-                Py_DECREF(result);
-                sz_py_raise_status(status, "splitlines()");
-                return NULL;
-            }
-        }
-        int text_ends_with_terminator = terminator != NULL;
-        if ((text.length == 0 || text_ends_with_terminator) &&
-            result->data.fragmented.spans[parts_count - 1].length == 0)
-            result->data.fragmented.count = parts_count - 1;
+    if (result && result->data.fragmented.count > 0) {
+        sz_size_t const last = result->data.fragmented.count - 1;
+        if ((text.length == 0 || sz_byteset_contains(&split.set, text.start[text.length - 1])) &&
+            result->data.fragmented.spans[last].length == 0)
+            result->data.fragmented.count = last;
     }
     return (PyObject *)result;
 }
@@ -2183,47 +2061,7 @@ PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t posit
 
 static PyObject *FindSplitsType_next(FindSplits *self) {
     sz_string_view_t result_memory;
-
-    // Compute the next segment, looping past zero-length segments when `skip_empty` is set.
-    do {
-        // No more data to split.
-        if (self->reached_tail) return NULL;
-
-        // Find the next needle
-        sz_cptr_t found = NULL;
-        if (self->max_parts > 1) {
-            sz_status_t const status = self->finder(self->text.start, self->text.length, self->separator.start,
-                                                    self->separator.length, &found, self->capabilities, NULL);
-            if (status != sz_success_k) {
-                sz_py_raise_status(status, "split iterator");
-                return NULL;
-            }
-        }
-
-        // We've reached the end of the string
-        if (found == NULL) {
-            result_memory.start = self->text.start;
-            result_memory.length = self->text.length;
-            self->text.length = 0;
-            self->reached_tail = 1;
-            self->max_parts = 0;
-        }
-        else {
-            if (self->is_reverse) {
-                result_memory.start = found + self->match_length * !self->include_match;
-                result_memory.length = self->text.start + self->text.length - result_memory.start;
-                self->text.length = found - self->text.start;
-            }
-            else {
-                result_memory.start = self->text.start;
-                result_memory.length = found - self->text.start;
-                self->text.start = found + self->match_length;
-                self->text.length -= result_memory.length + self->match_length;
-                result_memory.length += self->match_length * self->include_match;
-            }
-            self->max_parts--;
-        }
-    } while (self->skip_empty && result_memory.length == 0);
+    if (sz_py_split_next_(&self->split, &result_memory) <= 0) return NULL;
 
     // Create a new `Str` object
     Str *result_obj = Str_alloc_();

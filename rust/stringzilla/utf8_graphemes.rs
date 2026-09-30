@@ -8,16 +8,14 @@ use super::*;
 /// Kernel behind [`Utf8Graphemes`] (`sz_utf8_graphemes_best`).
 pub struct Graphemes;
 impl SegmenterKernel for Graphemes {
-    unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
+    unsafe fn segment(t: *const c_void, n: usize, l: *mut usize, c: usize) -> usize {
         let mut count = 0;
         sz_utf8_graphemes_best(
             t,
             n,
-            o,
             l,
             c,
             &mut count,
-            u,
             enabled_cpu_capabilities_mask(),
             core::ptr::null_mut(),
         )

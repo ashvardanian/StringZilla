@@ -190,8 +190,7 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_serial(                            
     *matches_count = sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
                                               bytes_consumed);
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
-                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
-                                         sz_false_k));
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths));
     return sz_success_k;
 }
 
@@ -203,8 +202,7 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_serial(                         
     *matches_count = sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
                                                  bytes_consumed);
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
-                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
-                                         sz_false_k));
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths));
     return sz_success_k;
 }
 
@@ -216,8 +214,7 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_serial(                          
     *matches_count = sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
                                                 bytes_consumed);
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
-                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
-                                         sz_false_k));
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths));
     return sz_success_k;
 }
 

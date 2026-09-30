@@ -324,13 +324,13 @@ STRINGZILLA_INLINE v128_t sz_utf8_rune_flat_lookup_v128_( //
 }
 
 /** v128 forward drain — the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_forward_.
- *  Emits one (start, length) per set boundary lane (ascending), honoring @p capacity and the
+ *  Emits one segment length per set boundary lane (ascending), honoring @p capacity and the
  *  carried previous-boundary via @p previous_io; bit-exact with the Ice Lake leaf.
- *  Consumption is inherently scalar (one output pair per lane), so each set lane is isolated
+ *  Consumption is inherently scalar (one length per set lane), so each set lane is isolated
  *  with the `63 - clz(mask & -mask)` first-set idiom and cleared with `mask & (mask - 1)` —
  *  the cost scales with the boundary count, and no @c ctz or @c popcount builtin is used. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_v128_( //
-    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t previous = *previous_io;
     sz_u64_t remaining = boundary;
@@ -338,7 +338,6 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_v128_( //
         sz_size_t const lane = (sz_size_t)(63 - sz_u64_clz(remaining & (~remaining + 1ull)));
         remaining &= remaining - 1ull;
         sz_size_t const position = base + lane;
-        starts[produced] = previous;
         lengths[produced] = position - previous;
         previous = position;
         ++produced;
@@ -704,17 +703,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_v128_( //
             cursor = next;
             continue;
         }
-        // `step_unpacked == 0` only when the first decodable lead declares a sequence crossing the window edge (a
-        // boundary truncation). A resumable truncation breaks and awaits more bytes; a bad/overlong truncated lead at
-        // the edge finalizes to one U+FFFD over its maximal ill-formed subpart - a bounded <=3-byte finalize, never a
-        // serial window re-decode.
-        if (sz_utf8_incomplete_tail_(cursor, end)) break;
+        // The step returns no runes only when the first lead declares a sequence crossing the end
+        // of `text`, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+        // bytes, never a serial re-decode of the window.
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return cursor;
 }
 

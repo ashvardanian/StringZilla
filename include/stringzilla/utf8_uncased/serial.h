@@ -19,10 +19,10 @@ extern "C" {
 #endif
 
 /**
- *  @brief Tiny wrapper for substring search queries with pre-located probing positions.
+ *  @brief A needle analysed once by @c sz_utf8_uncased_needle_init_best for any number of
+ *      uncased searches, under any capabilities.
  *
- *  Reuse this structure to avoid re-computing the probe positions for the same needle multiple
- *  times. It's created internally in a multi-step process of:
+ *  Preparing picks the per-script kernel for the needle in two steps:
  *
  *  1. locating the longest "safe" slice of the needle for the different SIMD folding kernels,
  *  2. shrinking it to the most diverse slice that fits into @c folded_slice when case-folded.
@@ -33,16 +33,32 @@ extern "C" {
  *  - second: @c probe_second
  *  - third: @c probe_third
  *  - last: implicit at `folded_slice[folded_slice_length - 1]`
+ *
+ *  The struct points at the needle rather than copying it, so the needle must outlive it.
  */
-typedef struct sz_utf8_uncased_needle_metadata_t {
-    sz_size_t offset_in_unfolded; // Number of bytes in the "unsafe LONG NeedLe" before the safe & folded part
-    sz_size_t length_in_unfolded; // Number of bytes in the safe part of the actual "NeedLe" before folding
+typedef struct sz_utf8_uncased_needle_t {
+
+    /** The needle's text, read by every search. */
+    sz_cptr_t start;
+    sz_size_t length;
+
+    /** Bytes of the needle before the slice that @c folded_slice holds folded. */
+    sz_size_t offset_in_unfolded;
+
+    /** Bytes of the needle that @c folded_slice holds folded. */
+    sz_size_t length_in_unfolded;
     sz_u8_t folded_slice[16];
     sz_u8_t folded_slice_length;
-    sz_u8_t probe_second; // Position of the second relevant character in the folded slice
-    sz_u8_t probe_third;  // Position of the third relevant character in the folded slice
-    sz_u8_t kernel_id;    // The unique identifier of the kernel best suited for searching this needle
-} sz_utf8_uncased_needle_metadata_t;
+
+    /** Offset of the second probe in @c folded_slice. */
+    sz_u8_t probe_second;
+
+    /** Offset of the third probe in @c folded_slice. */
+    sz_u8_t probe_third;
+
+    /** The @c sz_utf8_uncased_rune_*_k profile whose kernel searches this needle. */
+    sz_u8_t script;
+} sz_utf8_uncased_needle_t;
 
 /**
  *  @brief Safety profile for a single character across all script paths.
@@ -58,9 +74,6 @@ typedef struct sz_utf8_uncased_needle_metadata_t {
  *  separate them by language groups and Unicode subranges, the 5 GB/s target becomes approachable.
  */
 typedef enum {
-
-    /** Needle metadata is not computed yet, so the search classifies the needle on first use. */
-    sz_utf8_uncased_rune_unknown_k = 0,
 
     /**
      *  @brief Safety profile for contextually-safe ASCII characters, mostly for English text,
@@ -1536,16 +1549,14 @@ STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_uncased_search_3folded_serial_( //
 STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_uncased_search_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,              //
     sz_cptr_t needle, sz_size_t needle_length,                  //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
-
-    sz_unused_(needle_metadata); // Only used by SIMD kernels for debugging
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
 
     if (needle_length == 0) {
         *match_length = 0;
         return haystack;
     }
 
-    if (sz_utf8_find_cased_serial_(needle, needle_length) == STRINGZILLA_NULL_CHAR) {
+    if (needle_metadata->script == sz_utf8_uncased_rune_invariant_k) {
         sz_cptr_t result = sz_find_serial_(haystack, haystack_length, needle, needle_length);
         if (result) {
             *match_length = needle_length;
@@ -2260,22 +2271,34 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *da
  *  this is expected. The function also sets @c offset_in_unfolded and @c length_in_unfolded to
  *  track where the selected folded slice came from in the original unfolded input.
  *
+ *  A caseless needle skips the windows altogether, profiled @c sz_utf8_uncased_rune_invariant_k.
+ *
  *  @param[in] needle Pointer to needle string (original, not folded).
  *  @param[in] needle_length Length in bytes.
- *  @param[out] refined Output metadata structure to populate.
+ *  @param[out] refined The prepared needle, every field filled.
  */
-STRINGZILLA_CONSTEXPR void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
-                                                            sz_utf8_uncased_needle_metadata_t *refined) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_needle_init_serial_(sz_cptr_t needle, sz_size_t needle_length, //
+                                                               sz_utf8_uncased_needle_t *refined) {
 
     // Per-script window state during iteration
     typedef struct {
-        sz_size_t start_offset;   // Byte offset in original needle
-        sz_size_t input_length;   // Bytes consumed from original needle
-        sz_u8_t folded_bytes[16]; // Folded content
-        sz_size_t folded_length;  // Length of folded content (bytes)
-        sz_bool_t applicable;     // Has >=1 primary-script character
-        sz_bool_t broken;         // Window continuity broken - skip further extension
-        sz_size_t diversity;      // Distinct byte count (computed at end of each starting position)
+
+        /** Byte offset in the original needle. */
+        sz_size_t start_offset;
+
+        /** Bytes consumed from the original needle. */
+        sz_size_t input_length;
+        sz_u8_t folded_bytes[16];
+        sz_size_t folded_length;
+
+        /** Whether the window holds at least one character of the script. */
+        sz_bool_t applicable;
+
+        /** Whether the window's continuity broke, so it extends no further. */
+        sz_bool_t broken;
+
+        /** Distinct byte count, computed at the end of each starting position. */
+        sz_size_t diversity;
     } script_window_t_;
 
     // Number of script kernels (indices 1-8 used, index 0 reserved)
@@ -2292,14 +2315,13 @@ STRINGZILLA_CONSTEXPR void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz
         best[script_index].diversity = 0;
     }
 
-    // Handle empty needle
-    if (needle_length == 0) {
-        refined->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
-        refined->offset_in_unfolded = 0;
-        refined->length_in_unfolded = 0;
-        refined->folded_slice_length = 0;
-        refined->probe_second = 0;
-        refined->probe_third = 0;
+    refined->start = needle, refined->length = needle_length;
+    refined->offset_in_unfolded = refined->length_in_unfolded = 0;
+    refined->folded_slice_length = refined->probe_second = refined->probe_third = 0;
+
+    // A caseless needle, the empty one included, is found by an exact substring search.
+    if (sz_utf8_find_cased_serial_(needle, needle_length) == STRINGZILLA_NULL_CHAR) {
+        refined->script = sz_utf8_uncased_rune_invariant_k;
         return;
     }
 
@@ -2307,12 +2329,7 @@ STRINGZILLA_CONSTEXPR void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz
     // unchecked decode below; route it to the serial kernel, which handles malformed bytes losslessly (each is
     // folded to itself and resyncs by one byte), keeping SIMD and serial results identical.
     if (sz_utf8_find_malformed(needle, needle_length) != STRINGZILLA_NULL_CHAR) {
-        refined->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
-        refined->offset_in_unfolded = 0;
-        refined->length_in_unfolded = 0;
-        refined->folded_slice_length = 0;
-        refined->probe_second = 0;
-        refined->probe_third = 0;
+        refined->script = sz_utf8_uncased_rune_fallback_serial_k;
         return;
     }
 
@@ -2457,17 +2474,12 @@ STRINGZILLA_CONSTEXPR void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz
 
     // If no applicable window found, fall back to serial
     if (chosen_script == 0) {
-        refined->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
-        refined->offset_in_unfolded = 0;
-        refined->length_in_unfolded = 0;
-        refined->folded_slice_length = 0;
-        refined->probe_second = 0;
-        refined->probe_third = 0;
+        refined->script = sz_utf8_uncased_rune_fallback_serial_k;
         return;
     }
 
     // Populate output metadata
-    refined->kernel_id = (sz_u8_t)chosen_script;
+    refined->script = (sz_u8_t)chosen_script;
     refined->offset_in_unfolded = best[chosen_script].start_offset;
     refined->length_in_unfolded = best[chosen_script].input_length;
     refined->folded_slice_length = (sz_u8_t)best[chosen_script].folded_length;
@@ -2547,13 +2559,18 @@ STRINGZILLA_CONSTEXPR void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz
 
 #if STRINGZILLA_TARGET_SERIAL
 
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_serial( //
-    sz_cptr_t haystack, sz_size_t haystack_length,         //
-    sz_cptr_t needle, sz_size_t needle_length,             //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,    //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_serial(sz_cptr_t needle, sz_size_t needle_length,
+                                                               sz_utf8_uncased_needle_t *prepared, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_utf8_uncased_needle_init_serial_(needle, needle_length, prepared);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_serial(                                 //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *match = sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
+    *match = sz_utf8_uncased_search_serial_(haystack, haystack_length, needle->start, needle->length, needle,
                                             match_length);
     return sz_success_k;
 }

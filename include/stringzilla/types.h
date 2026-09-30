@@ -1419,7 +1419,7 @@ STRINGZILLA_OUTLINED_ void sz_assert_failure_(char const *condition, char const 
                     : (sz_size_t)(output) - (sz_size_t)(input) >= (input_length)))
 
 /**
- *  @brief Whether one batch from a UTF-8 decoder or segmenter keeps the contract its resuming
+ *  @brief Whether one batch from a UTF-8 decoder or token finder keeps the contract its resuming
  *      callers loop on.
  *  @param[in] length Bytes offered to the call.
  *  @param[in] capacity Entries the caller had room for.
@@ -1428,26 +1428,20 @@ STRINGZILLA_OUTLINED_ void sz_assert_failure_(char const *condition, char const 
  *  @param[in] starts Span offsets, or @c STRINGZILLA_NULL for the decoder, which reports
  *      runes, not spans.
  *  @param[in] lengths Span lengths, read only alongside @p starts.
- *  @param[in] resumable_tail Bytes a call may leave unconsumed without progress: a truncated
- *      sequence for the decoder, none for a segmenter.
- *  @param[in] tiling Whether the spans cover the text from its first byte, with no gap and no empty
- *      span, as grapheme, word, sentence and line segments do and the separators of a split do not.
  *
  *  The batch fits @p capacity and never runs past @p length, its spans ascend inside the consumed
- *  prefix, and it makes progress whenever it had room for an entry and more than @p resumable_tail
- *  bytes to cover, because a caller resuming from @p consumed would otherwise loop forever.
+ *  prefix, and it makes progress whenever it had room for an entry and bytes to cover, because a
+ *  caller resuming from @p consumed would otherwise loop forever.
  */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_batch_consistent_(sz_size_t length, sz_size_t capacity, sz_size_t count,
                                                           sz_size_t consumed, sz_size_t const *starts,
-                                                          sz_size_t const *lengths, sz_size_t resumable_tail,
-                                                          sz_bool_t tiling) {
+                                                          sz_size_t const *lengths) {
     if (count > capacity || consumed > length) return sz_false_k;
-    if (consumed == 0 && capacity != 0 && length > resumable_tail) return sz_false_k;
+    if (consumed == 0 && capacity != 0 && length != 0) return sz_false_k;
     for (sz_size_t index = 0; starts && index != count; ++index) {
         sz_size_t const earliest = index == 0 ? 0 : starts[index - 1] + lengths[index - 1];
         if (starts[index] < earliest || starts[index] > consumed || lengths[index] > consumed - starts[index])
             return sz_false_k;
-        if (tiling && (starts[index] != earliest || lengths[index] == 0)) return sz_false_k;
     }
     return sz_true_k;
 }

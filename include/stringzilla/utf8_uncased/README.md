@@ -3,6 +3,7 @@
 This directory holds the kernels behind `sz_utf8_uncased_search_best`, which locates a needle inside a haystack while ignoring case differences.
 The match is done without pre-folding the haystack: each candidate position is compared under Unicode case folding on the fly, so the original bytes are never rewritten.
 Every operation has a serial baseline plus per-ISA SIMD backends, and `sz_utf8_uncased_search_best` runs the best kernel among the capabilities its caller passes.
+The needle is analysed once, by the serial `sz_utf8_uncased_needle_init_best`, and every search backend only reads that analysis.
 
 ## Methodology
 

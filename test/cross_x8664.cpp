@@ -183,7 +183,7 @@ std::size_t test_cross_x8664(test_environment_t const &environment) {
     check("test_utf8_tokens_equivalence_haswell",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_haswell); });
 
-    constexpr utf8_segment_backend_t utf8_delimiters_haswell {"haswell", sz_utf8_delimiters_haswell};
+    constexpr utf8_delimiters_backend_t utf8_delimiters_haswell {"haswell", sz_utf8_delimiters_haswell};
     check("test_utf8_delimiters_unit_haswell", [&] { check_utf8_delimiters_unit_(utf8_delimiters_haswell); });
     check("test_utf8_delimiters_safety_haswell",
           [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_haswell); });
@@ -408,7 +408,7 @@ std::size_t test_cross_x8664(test_environment_t const &environment) {
     check("test_utf8_tokens_equivalence_icelake",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_icelake); });
 
-    constexpr utf8_segment_backend_t utf8_delimiters_icelake {"icelake", sz_utf8_delimiters_icelake};
+    constexpr utf8_delimiters_backend_t utf8_delimiters_icelake {"icelake", sz_utf8_delimiters_icelake};
     check("test_utf8_delimiters_unit_icelake", [&] { check_utf8_delimiters_unit_(utf8_delimiters_icelake); });
     check("test_utf8_delimiters_safety_icelake",
           [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_icelake); });

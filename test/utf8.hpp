@@ -15,7 +15,7 @@
  *    confirm every named UAX boundary rule fires at least once.
  *
  *  Two segmentation backends are compared by streaming them in lockstep through
- *  @ref utf8_segment_cursor_t, a fixed-capacity batch pull with @c bytes_consumed resume, and
+ *  @ref utf8_segment_cursor_t, a fixed-capacity batch pull resuming where its segments end, and
  *  asserting each emitted segment agrees — no `std::vector<std::string>` is ever materialized, and
  *  the comparison stops at the first divergence with a full reproduction dump: iteration, stressor,
  *  capacity and hex, with the seed on the @c rerun line @c run_test prints beneath it. Random
@@ -615,19 +615,20 @@ inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_l
 #pragma region Lazy streaming comparison
 
 /** Streams one backend at a fixed @ref capacity, yielding one segment at a time as an absolute
- *  start and a length, and refilling from the C finder with @c bytes_consumed resume. Bounded
+ *  start and a length, and refilling from the C finder where its last batch ended. Bounded
  *  memory: a single batch buffer, no heap. */
 struct utf8_segment_cursor_t {
     sz_kernel_utf8_segmenter_t finder;
     sz_cptr_t data;
     sz_size_t length;
-    sz_size_t capacity;   // caller capacity passed to the finder (<= utf8_segment_batch_k)
-    sz_size_t next_base;  // absolute offset where the next batch refill starts
-    sz_size_t batch_base; // absolute base of the CURRENT batch (for absolute segment offsets)
-    sz_size_t count;      // segments buffered in the current batch
-    sz_size_t index;      // next segment within the current batch
-    sz_bool_t exhausted;
-    sz_size_t starts[utf8_segment_batch_k];
+
+    /** Capacity passed to the finder, at most @c utf8_segment_batch_k. */
+    sz_size_t capacity;
+
+    /** Absolute offset of the next segment, as segments tile the input. */
+    sz_size_t next_start;
+    sz_size_t count;
+    sz_size_t index;
     sz_size_t lengths[utf8_segment_batch_k];
 };
 
@@ -637,46 +638,40 @@ inline utf8_segment_cursor_t utf8_segment_cursor_make_(sz_kernel_utf8_segmenter_
     utf8_segment_cursor_t cursor;
     cursor.finder = finder, cursor.data = data, cursor.length = length;
     cursor.capacity = capacity < utf8_segment_batch_k ? capacity : utf8_segment_batch_k;
-    cursor.next_base = 0, cursor.batch_base = 0, cursor.count = 0, cursor.index = 0, cursor.exhausted = sz_false_k;
+    cursor.next_start = 0, cursor.count = 0, cursor.index = 0;
     return cursor;
 }
 
 /** Pulls the next segment; returns @c sz_false_k at end of stream, else fills the absolute
  *  @p out_start and @p out_length. */
 inline sz_bool_t utf8_segment_cursor_next_(utf8_segment_cursor_t &cursor, sz_size_t &out_start, sz_size_t &out_length) {
-    while (cursor.index == cursor.count) {
-        if (cursor.exhausted || cursor.next_base >= cursor.length) return sz_false_k;
-        sz_size_t consumed = 0;
-        cursor.batch_base = cursor.next_base;
-        verify(cursor.finder(cursor.data + cursor.batch_base, cursor.length - cursor.batch_base, cursor.starts,
-                             cursor.lengths, cursor.capacity, &cursor.count, &consumed, nullptr) == sz_success_k);
+    if (cursor.index == cursor.count) {
+        if (cursor.next_start >= cursor.length) return sz_false_k;
+        verify(cursor.finder(cursor.data + cursor.next_start, cursor.length - cursor.next_start, cursor.lengths,
+                             cursor.capacity, &cursor.count, nullptr) == sz_success_k);
         cursor.index = 0;
-        if (cursor.count == 0 && consumed == 0) {
-            cursor.exhausted = sz_true_k;
-            return sz_false_k;
-        }
-        cursor.next_base = cursor.batch_base + consumed;
+        if (cursor.count == 0) return sz_false_k;
     }
-    out_start = cursor.batch_base + cursor.starts[cursor.index];
-    out_length = cursor.lengths[cursor.index];
-    ++cursor.index;
+    out_start = cursor.next_start;
+    out_length = cursor.lengths[cursor.index++];
+    cursor.next_start += out_length;
     return sz_true_k;
 }
 
-/** Asserts one segmenter's output stands on its own: segments tile `[0, length)` and, for
- *  well-formed input, start on a codepoint boundary — needing no reference, so a rule both backends
- *  get wrong is still caught. */
+/** Asserts one segmenter's output stands on its own: segments are never empty, cover `[0, length)`
+ *  and, for well-formed input, start on a codepoint boundary — needing no reference, so a rule both
+ *  backends get wrong is still caught. */
 inline void utf8_check_segment_invariants_(sz_kernel_utf8_segmenter_t finder, sz_size_t capacity, sz_cptr_t data,
                                            sz_size_t length, utf8_corpus_flavor_t flavor) {
     utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(finder, data, length, capacity);
-    sz_size_t start = 0, segment_length = 0, running_cursor = 0;
+    sz_size_t start = 0, segment_length = 0, covered = 0;
     while (utf8_segment_cursor_next_(cursor, start, segment_length)) {
-        verify(start == running_cursor && "segments do not tile the input contiguously");
-        if (flavor == utf8_corpus_flavor_t::valid_k && segment_length != 0)
+        verify(segment_length != 0 && "segment finder emitted an empty segment");
+        if (flavor == utf8_corpus_flavor_t::valid_k)
             verify((((sz_u8_t)data[start]) & 0xC0u) != 0x80u && "segment starts mid-codepoint");
-        running_cursor += segment_length;
+        covered += segment_length;
     }
-    verify(running_cursor == length && "segments do not cover the whole input");
+    verify(covered == length && "segments do not cover the whole input");
 }
 
 /** Emits a full reproduction record to @c stderr, then fails; called on the first divergence. */
@@ -870,26 +865,23 @@ inline void for_each_adversarial_utf8_input_(test_context_t &context, std::size_
     }
 }
 
-/** Feeds the adversarial battery through every @p finders entry, asserting each survives, every
- *  emitted segment is in-bounds, and no finder consumes past the input. One battery drives all
- *  backends over the same bytes. */
+/** Feeds the adversarial battery through every @p finders entry, asserting each survives and its
+ *  segments tile exactly the input. One battery drives all backends over the same bytes. */
 inline void check_utf8_segment_safety_(test_context_t &context, char const *family,
                                        sz::span<utf8_segment_backend_t const> finders) {
-    sz_size_t offsets[utf8_unit_capacity_k + 1], lengths[utf8_unit_capacity_k + 1];
+    sz_size_t lengths[utf8_unit_capacity_k + 1];
     auto probe = [&](char const *input, std::size_t input_length) {
         for (utf8_segment_backend_t const &backend : finders) {
-            sz_size_t found = 0, bytes_consumed = 0;
-            verify(backend.finder(input, (sz_size_t)input_length, offsets, lengths,
-                                  (sz_size_t)(utf8_unit_capacity_k + 1), &found, &bytes_consumed,
-                                  nullptr) == sz_success_k);
-            verify(bytes_consumed <= input_length && "segment finder consumed past the input");
-            for (sz_size_t index = 0; index != found; ++index) {
-                if (offsets[index] + lengths[index] <= input_length) continue;
-                fmt::println(stderr, "{} {} emitted out-of-bounds segment (offset={} len={}, input={})", family,
-                             backend.name, (std::size_t)offsets[index], (std::size_t)lengths[index], input_length);
-                print_utf8_test_bytes_("input", {input, input_length});
-                verify(false && "segment finder emitted a span outside the input");
-            }
+            sz_size_t found = 0;
+            verify(backend.finder(input, (sz_size_t)input_length, lengths, (sz_size_t)(utf8_unit_capacity_k + 1),
+                                  &found, nullptr) == sz_success_k);
+            sz_size_t covered = 0;
+            for (sz_size_t index = 0; index != found; ++index) covered += lengths[index];
+            if (covered == input_length) continue;
+            fmt::println(stderr, "{} {} segments cover {} bytes of a {}-byte input", family, backend.name,
+                         (std::size_t)covered, input_length);
+            print_utf8_test_bytes_("input", {input, input_length});
+            verify(false && "segment finder must tile the whole input");
         }
     };
     for_each_adversarial_utf8_input_(context, context.iterations(10000), probe);
@@ -905,16 +897,17 @@ inline void check_utf8_segment_safety_(test_context_t &context, char const *fami
  */
 inline void check_utf8_segment_against_oracle_(char const *family, sz_kernel_utf8_segmenter_t segmenter,
                                                utf8_boundary_oracle_t oracle, char const *text, std::size_t length) {
-    sz_size_t offsets[utf8_unit_capacity_k + 1], lengths[utf8_unit_capacity_k + 1];
-    sz_size_t found = 0, bytes_consumed = 0;
-    verify(segmenter(text, (sz_size_t)length, offsets, lengths, (sz_size_t)(utf8_unit_capacity_k + 1), &found,
-                     &bytes_consumed, nullptr) == sz_success_k);
-    if (bytes_consumed != (sz_size_t)length || found > utf8_unit_capacity_k) return;
+    sz_size_t lengths[utf8_unit_capacity_k + 1];
+    sz_size_t found = 0, covered = 0;
+    verify(segmenter(text, (sz_size_t)length, lengths, (sz_size_t)(utf8_unit_capacity_k + 1), &found, nullptr) ==
+           sz_success_k);
+    for (sz_size_t index = 0; index != found; ++index) covered += lengths[index];
+    if (covered != (sz_size_t)length || found > utf8_unit_capacity_k) return;
 
     // Segments tile the input, so a position is a boundary exactly when one starts there.
     bool starts_a_segment[utf8_unit_capacity_k + 1] = {};
     starts_a_segment[0] = true, starts_a_segment[length] = true;
-    for (sz_size_t index = 0; index != found; ++index) starts_a_segment[offsets[index]] = true;
+    for (sz_size_t index = 0, start = 0; index != found; start += lengths[index++]) starts_a_segment[start] = true;
 
     for (sz_size_t position = 0; position <= (sz_size_t)length; ++position) {
         bool const oracle_says = oracle(text, (sz_size_t)length, position) == sz_true_k;
@@ -993,11 +986,15 @@ static sz_size_t const utf8_malformed_seam_phases[] = {0, 60, 61, 62, 63};
 struct utf8_differential_context_t {
     sz_kernel_utf8_segmenter_t reference;
     sz::span<utf8_segment_backend_t const> candidates;
-    std::vector<std::string> labels; // "<family>:<candidate>" per candidate, named in the divergence record
+
+    /** `"<family>:<candidate>"` per candidate, named in the divergence record. */
+    std::vector<std::string> labels;
     utf8_segment_corpora_t const *corpora;
     test_context_t *test;
     std::string scratch;
-    std::size_t input_index; // rotates the capacity sweep when the multiplier samples instead of exhausts
+
+    /** Rotates the capacity sweep when the multiplier samples instead of exhausts. */
+    std::size_t input_index;
 };
 
 /** The family's alphabet, or the shared default when it supplies none. */
@@ -1037,8 +1034,10 @@ struct utf8_sink_context_t {
     utf8_differential_context_t *context;
     char const *stressor;
     std::size_t iteration;
-    std::size_t filler; // phase-shift prefix length (zero for the plain dense runs)
-    std::string buffer; // prefix+run scratch
+
+    /** Length of the prefix shifting the run's window phase, zero for the plain dense runs. */
+    std::size_t filler;
+    std::string buffer;
 };
 
 /** Run sink: prepends an ASCII filler to shift the run's window phase, then compares. */

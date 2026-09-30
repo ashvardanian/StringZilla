@@ -13,7 +13,7 @@
  *  the whole buffer (or drains the input) per call regardless of script width, and substitutes
  *  U+FFFD for ill-formed bytes. The buffer lives in the iterator itself, so nothing is allocated,
  *  and @c cursor advances by the bytes consumed on each refill. Mirrors the @c Utf8Boundaries
- *  batched model, but buffers decoded runes rather than (start, length) pairs.
+ *  batched model, but buffers decoded runes rather than segment lengths.
  */
 typedef struct {
     PyObject ob_base;
@@ -24,7 +24,6 @@ typedef struct {
     sz_cptr_t end;
     sz_capability_t capabilities;
 
-    /// @brief  Inline batch of decoded UTF-32 code points, refilled on demand.
     sz_rune_t batch_runes[sz_iterators_default_steps_k];
     sz_size_t batch_count;
     sz_size_t batch_index;
@@ -165,31 +164,19 @@ PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssi
 }
 
 static PyObject *Utf8CodepointsType_next(Utf8Codepoints *self) {
-    // Refill the inline batch when drained. `sz_utf8_decode_best` fills the whole buffer (or drains
-    // the input) per call and substitutes U+FFFD for ill-formed bytes, so every buffered value is a
-    // valid Unicode scalar value.
-    if (self->batch_index >= self->batch_count) {
-        if (self->cursor >= self->end) return NULL;
+    if (self->batch_index == self->batch_count) {
+        if (self->cursor == self->end) return NULL;
         sz_size_t unpacked = 0, bytes_consumed = 0;
-        sz_size_t const bytes_remaining = (sz_size_t)(self->end - self->cursor);
-        sz_status_t const status = sz_utf8_decode_best(self->cursor, bytes_remaining, self->batch_runes,
-                                                       sz_iterators_default_steps_k, &unpacked, &bytes_consumed,
-                                                       self->capabilities, NULL);
+        sz_status_t const status = sz_utf8_decode_best(self->cursor, (sz_size_t)(self->end - self->cursor),
+                                                       self->batch_runes, sz_iterators_default_steps_k, &unpacked,
+                                                       &bytes_consumed, self->capabilities, NULL);
         if (status != sz_success_k) {
             sz_py_raise_status(status, "__next__()");
             return NULL;
         }
-        // A well-formed but truncated trailing sequence yields nothing and does not advance; we own the whole text,
-        // so finalize it as one U+FFFD (its maximal subpart) rather than silently dropping it.
-        if (unpacked == 0 && bytes_consumed < bytes_remaining) {
-            self->batch_runes[0] = (sz_rune_t)sz_rune_replacement_k;
-            unpacked = 1;
-            bytes_consumed = bytes_remaining;
-        }
         self->cursor += bytes_consumed;
         self->batch_count = unpacked;
         self->batch_index = 0;
-        if (self->batch_count == 0) return NULL;
     }
 
     sz_rune_t rune = self->batch_runes[self->batch_index++];

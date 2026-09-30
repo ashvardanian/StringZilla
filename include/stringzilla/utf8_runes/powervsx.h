@@ -1120,12 +1120,12 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_rune_flat_lookup_powervsx_( //
 }
 
 /** POWER VSX forward drain, the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_forward_neon_,
- *  bit-exact with it. Emits one (start, length) per set boundary lane (ascending), honoring
+ *  bit-exact with it. Emits one segment length per set boundary lane (ascending), honoring
  *  @p capacity and the carried previous boundary @p previous_io. The set boundary lanes are
  *  left-packed to ascending byte offsets by the shuffle-LUT compaction (no scalar @c ctz walk);
  *  that compaction's return value is the boundary count, so no popcount is needed either. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_powervsx_( //
-    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t previous = *previous_io;
     if (boundary == 0 || produced >= capacity) {
@@ -1142,7 +1142,6 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_powervsx_( //
     sz_size_t emitted = 0;
     while (emitted < boundary_count && produced < capacity) {
         sz_size_t const position = base + (sz_size_t)indices[emitted];
-        starts[produced] = previous;
         lengths[produced] = position - previous;
         previous = position;
         ++produced, ++emitted;
@@ -1172,17 +1171,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_powervsx_( //
             cursor = next;
             continue;
         }
-        // The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
-        // declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and
-        // awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
-        // ill-formed subpart — a bounded <=3-byte finalize, never a serial window re-decode.
-        if (sz_utf8_incomplete_tail_(cursor, end)) break;
+        // The step returns no runes only when the first lead declares a sequence crossing the end
+        // of `text`, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+        // bytes, never a serial re-decode of the window.
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return cursor;
 #else
     return sz_utf8_decode_serial_(text, length, runes, runes_capacity, runes_count);

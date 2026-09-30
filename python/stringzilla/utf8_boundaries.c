@@ -63,40 +63,28 @@ PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segme
 }
 
 PyObject *Utf8Boundaries_next_(Utf8Boundaries *self) {
-    // Refill the inline batch when drained. UAX segmentation never yields zero-length segments, so the
-    // `skip_empty` option is a no-op here and needs no special handling. Batch offsets are always relative to
-    // `self->start` (the not-yet-segmented suffix start); forward only, so `start` advances past each batch.
-    if (self->batch_index >= self->batch_count) {
-        if (self->start >= self->end) return NULL;
-        sz_size_t consumed = 0;
-        sz_status_t const status = self->segmenter(
-            self->start, (sz_size_t)(self->end - self->start), self->batch_starts, self->batch_lengths,
-            sz_iterators_default_steps_k, &self->batch_count, &consumed, self->capabilities, NULL);
+    if (self->batch_index == self->batch_count) {
+        if (self->start == self->end) return NULL;
+        sz_status_t const status = self->segmenter(self->start, (sz_size_t)(self->end - self->start),
+                                                   self->batch_lengths, sz_iterators_default_steps_k,
+                                                   &self->batch_count, self->capabilities, NULL);
         self->batch_index = 0;
         if (status != sz_success_k) {
             self->batch_count = 0;
             sz_py_raise_status(status, "__next__()");
             return NULL;
         }
-        if (self->batch_count == 0) return NULL;
     }
 
-    sz_size_t i = self->batch_index++;
-    sz_cptr_t segment_start = self->start + self->batch_starts[i];
-    sz_size_t segment_len = self->batch_lengths[i];
-
-    // Once the batch is drained, move the suffix start to the last buffered segment's end (a UAX boundary) so
-    // the next refill resumes there.
-    if (self->batch_index >= self->batch_count) {
-        sz_size_t last = self->batch_count - 1;
-        self->start += self->batch_starts[last] + self->batch_lengths[last]; // last segment's end
-    }
+    sz_cptr_t const segment_start = self->start;
+    sz_size_t const segment_length = self->batch_lengths[self->batch_index++];
+    self->start += segment_length;
 
     Str *result_obj = Str_alloc_();
     if (result_obj == NULL) return PyErr_NoMemory();
 
     result_obj->memory.start = segment_start;
-    result_obj->memory.length = segment_len;
+    result_obj->memory.length = segment_length;
     result_obj->parent = self->text_obj;
     Py_INCREF(self->text_obj);
 

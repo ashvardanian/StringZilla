@@ -457,16 +457,17 @@ extension StringZillaViewable {
         var result: Range<Index>?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
-                var metadata = sz_utf8_uncased_needle_metadata_t()
+                var prepared = sz_utf8_uncased_needle_t()
+                stringZillaCheck(
+                    sz_utf8_uncased_needle_init_best(nPointer, nLength, &prepared, Device.cpuEnabled.native, nil)
+                )
                 var match: sz_cptr_t?
                 var matchedLength: sz_size_t = 0
                 stringZillaCheck(
                     sz_utf8_uncased_search_best(
                         hPointer,
                         hLength,
-                        nPointer,
-                        nLength,
-                        &metadata,
+                        &prepared,
                         &match,
                         &matchedLength,
                         Device.cpuEnabled.native,
@@ -490,32 +491,28 @@ extension StringZillaViewable {
     public func utf8Words() -> [Range<Index>] {
         var ranges: [Range<Index>] = []
         withStringZillaScope { pointer, length in
-            var cursor: sz_size_t = 0
-            while cursor < length {
-                var wordStart: sz_size_t = 0
-                var wordLength: sz_size_t = 0
+            let capacity = 64
+            var lengths = [sz_size_t](repeating: 0, count: capacity)
+            var start: sz_size_t = 0
+            while start < length {
                 var count: sz_size_t = 0
-                var consumed: sz_size_t = 0
                 stringZillaCheck(
                     sz_utf8_wordbreaks_best(
-                        pointer.advanced(by: Int(cursor)),
-                        length - cursor,
-                        &wordStart,
-                        &wordLength,
-                        1,
+                        pointer.advanced(by: Int(start)),
+                        length - start,
+                        &lengths,
+                        sz_size_t(capacity),
                         &count,
-                        &consumed,
                         Device.cpuEnabled.native,
                         nil
                     )
                 )
-                if count == 0 { break }
-                let begin = cursor + wordStart  // The first word of the suffix starts at offset 0.
-                let end = begin + wordLength
-                let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(begin)), after: pointer)
-                let hi = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(end)), after: pointer)
-                ranges.append(lo ..< hi)
-                cursor = end
+                for wordLength in lengths[..<Int(count)] {
+                    let lower = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(start)), after: pointer)
+                    start += wordLength
+                    let upper = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(start)), after: pointer)
+                    ranges.append(lower ..< upper)
+                }
             }
         }
         return ranges
@@ -555,86 +552,55 @@ extension StringZillaViewable {
 
     /// Shared driver for delimiter-based UTF-8 splitting (`utf8Lines` / `utf8Tokens`).
     ///
-    /// Buffers delimiter boundaries through the multistep FFI kernel, just like `utf8Words()`, but
+    /// Batches delimiters through the tokenizer kernel, like `utf8Words()` batches words, but
     /// whereas words _tile_ the input, the delimiters here are discarded and the _gaps_ between
-    /// them become the segments: delimiter `d` spans `[start, start + length)`, and the segment
-    /// preceding it runs from the previous delimiter's end up to this delimiter's start. When the
-    /// kernel reports it consumed the whole remaining region, the trailing segment after the last
-    /// delimiter, possibly empty, is appended too, so N delimiters always produce N+1 segments.
+    /// them become the segments. A full batch resumes right after its last delimiter, and the gap
+    /// after the last delimiter, possibly empty, closes the split, so N delimiters always produce
+    /// N+1 segments.
     ///
     /// - Parameters:
     ///   - skipEmpty: When `true`, zero-length segments are omitted.
     ///   - onNewlines: When `true`, calls `sz_utf8_newlines_best`, else `sz_utf8_whitespaces_best`.
     /// - Returns: Byte-accurate ranges into the receiver, one per segment.
     private func utf8Split(skipEmpty: Bool, onNewlines: Bool) -> [Range<Index>] {
+        let tokenize = onNewlines ? sz_utf8_newlines_best : sz_utf8_whitespaces_best
         var ranges: [Range<Index>] = []
         withStringZillaScope { pointer, length in
-            // Buffer a handful of delimiters per FFI call, then transform them into segment gaps.
-            let steps = Int(sz_iterators_default_steps_k)
-            var offsets = [sz_size_t](repeating: 0, count: steps)
-            var lengths = [sz_size_t](repeating: 0, count: steps)
-            var suffix: sz_size_t = 0  // Byte offset of the not-yet-segmented suffix within `pointer`.
+            let capacity = 64
+            var offsets = [sz_size_t](repeating: 0, count: capacity)
+            var lengths = [sz_size_t](repeating: 0, count: capacity)
+            var gapStart: sz_size_t = 0
 
-            // Emits one segment `[begin, end)`, with offsets relative to
-            // `pointer`, honoring `skipEmpty`.
-            func appendSegment(_ begin: sz_size_t, _ end: sz_size_t) {
-                if skipEmpty && end == begin { return }
-                let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(begin)), after: pointer)
-                let hi = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(end)), after: pointer)
-                ranges.append(lo ..< hi)
+            func appendSegment(until gapEnd: sz_size_t) {
+                if skipEmpty && gapEnd == gapStart { return }
+                let lower = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(gapStart)), after: pointer)
+                let upper = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(gapEnd)), after: pointer)
+                ranges.append(lower ..< upper)
             }
 
-            while suffix <= length {
-                let region = length - suffix
-                var delimiters: sz_size_t = 0
+            var count: sz_size_t = 0
+            repeat {
+                let scanStart = gapStart
                 var consumed: sz_size_t = 0
-                let status = offsets.withUnsafeMutableBufferPointer { offsetsBuffer in
-                    lengths.withUnsafeMutableBufferPointer { lengthsBuffer in
-                        onNewlines
-                            ? sz_utf8_newlines_best(
-                                pointer.advanced(by: Int(suffix)),
-                                region,
-                                offsetsBuffer.baseAddress,
-                                lengthsBuffer.baseAddress,
-                                sz_size_t(steps),
-                                &delimiters,
-                                &consumed,
-                                Device.cpuEnabled.native,
-                                nil
-                            )
-                            : sz_utf8_whitespaces_best(
-                                pointer.advanced(by: Int(suffix)),
-                                region,
-                                offsetsBuffer.baseAddress,
-                                lengthsBuffer.baseAddress,
-                                sz_size_t(steps),
-                                &delimiters,
-                                &consumed,
-                                Device.cpuEnabled.native,
-                                nil
-                            )
-                    }
+                stringZillaCheck(
+                    tokenize(
+                        pointer.advanced(by: Int(scanStart)),
+                        length - scanStart,
+                        &offsets,
+                        &lengths,
+                        sz_size_t(capacity),
+                        &count,
+                        &consumed,
+                        Device.cpuEnabled.native,
+                        nil
+                    )
+                )
+                for delimiter in 0 ..< Int(count) {
+                    appendSegment(until: scanStart + offsets[delimiter])
+                    gapStart = scanStart + offsets[delimiter] + lengths[delimiter]
                 }
-                stringZillaCheck(status)
-                // Each delimiter's gap, the segment before it, becomes one output range;
-                // offsets are relative to `pointer.advanced(by: suffix)`, so re-base them onto
-                // `pointer` via `suffix`.
-                var previousEnd: sz_size_t = 0
-                for delimiter in 0 ..< Int(delimiters) {
-                    let delimiterStart = offsets[delimiter]
-                    let delimiterLength = lengths[delimiter]
-                    appendSegment(suffix + previousEnd, suffix + delimiterStart)
-                    previousEnd = delimiterStart + delimiterLength
-                }
-                if consumed == region {
-                    // Reached end-of-text: append the trailing segment after the last
-                    // delimiter, then stop.
-                    appendSegment(suffix + previousEnd, suffix + region)
-                    break
-                }
-                if consumed == 0 { break }  // Defensive: never spin in place on a non-advancing batch.
-                suffix += consumed
-            }
+            } while count == capacity
+            appendSegment(until: length)
         }
         return ranges
     }
@@ -702,46 +668,39 @@ extension StringZillaViewable {
     }
 }
 
-/// Pre-compiled uncased search pattern for UTF-8 strings.
-/// Caches metadata for efficient repeated searches with the same needle.
-public final class Utf8UncasedNeedle {
-    private let needleBytes: [UInt8]
-    private var metadata: sz_utf8_uncased_needle_metadata_t
+/// Uncased search pattern for UTF-8 strings, prepared once for many searches.
+/// It is immutable once built, so one needle can search from many threads at once.
+public final class Utf8UncasedNeedle: @unchecked Sendable {
+    private let bytes: UnsafeMutablePointer<CChar>  // The needle copy that `prepared` points into.
+    private let prepared: sz_utf8_uncased_needle_t
 
     public init<S: StringZillaViewable>(_ needle: S) {
-        var bytes: [UInt8] = []
-        needle.withStringZillaScope { pointer, length in
-            if length == 0 {
-                bytes = []
-                return
-            }
-            let start = UnsafeRawPointer(pointer).assumingMemoryBound(to: UInt8.self)
-            bytes = Array(UnsafeBufferPointer(start: start, count: Int(length)))
+        var prepared = sz_utf8_uncased_needle_t()
+        bytes = needle.withStringZillaScope { pointer, length in
+            let copy = UnsafeMutablePointer<CChar>.allocate(capacity: max(Int(length), 1))
+            copy.initialize(from: pointer, count: Int(length))
+            stringZillaCheck(
+                sz_utf8_uncased_needle_init_best(copy, length, &prepared, Device.cpuEnabled.native, nil)
+            )
+            return copy
         }
-        needleBytes = bytes
-        metadata = sz_utf8_uncased_needle_metadata_t()
+        self.prepared = prepared
     }
 
-    /// Note: not safe for concurrent use. The internal metadata is computed lazily and
-    /// mutated during searches.
-    public func findFirst<S: StringZillaViewable>(in haystack: S) -> Range<S.Index>? {
-        if needleBytes.isEmpty { return haystack.startIndex ..< haystack.startIndex }
+    deinit { bytes.deallocate() }
 
+    /// Finds the first uncased match of the needle, whose byte length folding may change.
+    public func findFirst<S: StringZillaViewable>(in haystack: S) -> Range<S.Index>? {
         var result: Range<S.Index>?
         haystack.withStringZillaScope { hPointer, hLength in
-            needleBytes.withUnsafeBufferPointer { needleBuffer in
-                let nPointer = UnsafeRawPointer(needleBuffer.baseAddress!).assumingMemoryBound(to: CChar.self)
-                let nLength = sz_size_t(needleBuffer.count)
-
+            withUnsafePointer(to: prepared) { needle in
                 var match: sz_cptr_t?
                 var matchedLength: sz_size_t = 0
                 stringZillaCheck(
                     sz_utf8_uncased_search_best(
                         hPointer,
                         hLength,
-                        nPointer,
-                        nLength,
-                        &metadata,
+                        needle,
                         &match,
                         &matchedLength,
                         Device.cpuEnabled.native,

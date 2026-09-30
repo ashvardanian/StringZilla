@@ -810,12 +810,10 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
     return text + consumed_total;
 }
 
-/** Decode @p text into dense UTF-32 @p runes (SVE2). Drives @ref sz_utf8_decode_once_sve2_ window
- *  by window. The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when
- *  the very first lead declares a sequence crossing the window edge (a boundary truncation). A
- *  resumable truncation breaks and awaits more bytes; a bad/overlong truncated lead at the edge
- *  finalizes to one U+FFFD over its maximal ill-formed subpart - a bounded <=3-byte finalize, never
- *  a serial window re-decode. */
+/** Decode @p text into dense UTF-32 @p runes (SVE2), driving @ref sz_utf8_decode_once_sve2_ window
+ *  by window. The step returns no runes only when the first lead declares a sequence crossing the
+ *  end of @p text, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+ *  bytes, never a serial re-decode of the window. */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_sve2_( //
     sz_cptr_t text, sz_size_t length,              //
     sz_rune_t *runes, sz_size_t runes_capacity,    //
@@ -833,13 +831,12 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_sve2_( //
             cursor = next;
             continue;
         }
-        if (sz_utf8_incomplete_tail_(cursor, end)) break;
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return cursor;
 }
 

@@ -19,12 +19,10 @@ extern "C" {
 /**
  *  @brief Enumerates every UTF-8 newline delimiter in a string.
  *
- *  Enumerates every newline delimiter in a single sweep, like @c sz_utf8_wordbreaks_best: writes
- *  the byte offset and byte length of each match into the parallel @p match_offsets and
- *  @p match_lengths arrays, a @c "\r\n" CRLF being one match of length 2, and their number into
- *  @p matches_count. When the output fills before the input is exhausted, @p bytes_consumed is set
- *  to the resume offset, always past the last emitted delimiter and at a byte that begins fresh
- *  content, so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder.
+ *  Enumerates every newline delimiter in a single sweep: writes the byte offset and byte length of
+ *  each match into the parallel @p match_offsets and @p match_lengths arrays, a @c "\r\n" CRLF
+ *  being one match of length 2, and their number into @p matches_count. A caller resuming from
+ *  `text + *bytes_consumed` after a full output obtains the identical remainder.
  *
  *  Here are all the UTF-8 newline characters we are looking for (7 characters + CRLF):
  *  - single-byte chars (4 total):
@@ -50,7 +48,8 @@ extern "C" {
  *  @param[out] match_lengths Delimiter byte lengths, at least @p matches_capacity entries.
  *  @param[in] matches_capacity Capacity of the output arrays.
  *  @param[out] matches_count Number of delimiters written to the output arrays.
- *  @param[out] bytes_consumed Byte offset to resume scanning from.
+ *  @param[out] bytes_consumed Optional resume offset: once @p matches_count reaches
+ *      @p matches_capacity, the end of the last match, or zero with no capacity; else @p length.
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
@@ -120,7 +119,8 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_best(                              
  *  @param[out] match_lengths Delimiter byte lengths, at least @p matches_capacity entries.
  *  @param[in] matches_capacity Capacity of the output arrays.
  *  @param[out] matches_count Number of delimiters written to the output arrays.
- *  @param[out] bytes_consumed Byte offset to resume scanning from.
+ *  @param[out] bytes_consumed Optional resume offset: once @p matches_count reaches
+ *      @p matches_capacity, the end of the last match, or zero with no capacity; else @p length.
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
@@ -136,11 +136,10 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_best(                           
  *
  *  The general superset of @c sz_utf8_newlines_best and @c sz_utf8_whitespaces_best: every
  *  codepoint whose Unicode general category is a punctuation (P*), symbol (S*), or separator (Z*)
- *  is a delimiter. Shares the segmenter contract: writes the byte offset and byte length of each
- *  match into the parallel @p match_offsets and @p match_lengths arrays, their number into
- *  @p matches_count, and sets @p bytes_consumed to the resume offset (always a fresh codepoint
- *  boundary) when the output fills before the input is exhausted. A byte that does not begin a
- *  well-formed codepoint is skipped and never reported.
+ *  is a delimiter. Shares the contract of @c sz_utf8_newlines_best: writes the byte offset and byte
+ *  length of each match into the parallel @p match_offsets and @p match_lengths arrays, their
+ *  number into @p matches_count, and sets @p bytes_consumed to the resume offset. A byte that does
+ *  not begin a well-formed codepoint is skipped and never reported.
  *
  *  @param[in] text String to be scanned.
  *  @param[in] length Number of bytes in the string.
@@ -148,7 +147,8 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_best(                           
  *  @param[out] match_lengths Delimiter byte lengths, at least @p matches_capacity entries.
  *  @param[in] matches_capacity Capacity of the output arrays.
  *  @param[out] matches_count Number of delimiters written to the output arrays.
- *  @param[out] bytes_consumed Byte offset to resume scanning from.
+ *  @param[out] bytes_consumed Optional resume offset: once @p matches_count reaches
+ *      @p matches_capacity, the end of the last match, or zero with no capacity; else @p length.
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.

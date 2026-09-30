@@ -164,12 +164,28 @@ void test_compare_unit() {
 
 #pragma region Safety
 
-/** Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl
- *  in a haystack formed of @p haystack_pattern repeated from one to @c max_repeats times,
- *  misaligned by @p misalignment bytes within the cacheline. */
-template <typename stl_matcher_, typename sz_matcher_>
-void check_find_misaligned_(test_context_t &context, std::string_view haystack_pattern, std::string_view needle_stl,
-                            std::size_t misalignment) {
+/** The STL reference for a byteset matcher: an STL character-set search over the set's members. */
+template <std::size_t (*search_)(std::string_view, std::string_view)>
+struct stl_matcher_bytes_ {
+    using size_type = std::size_t;
+    std::string_view members_;
+    constexpr size_type needle_length() const noexcept { return 1; }
+    constexpr size_type skip_length() const noexcept { return 1; }
+    size_type operator()(std::string_view haystack) const noexcept { return search_(haystack, members_); }
+};
+
+static std::size_t stl_first_of_(std::string_view h, std::string_view n) { return h.find_first_of(n); }
+static std::size_t stl_last_of_(std::string_view h, std::string_view n) { return h.find_last_of(n); }
+static std::size_t stl_first_not_of_(std::string_view h, std::string_view n) { return h.find_first_not_of(n); }
+static std::size_t stl_last_not_of_(std::string_view h, std::string_view n) { return h.find_last_not_of(n); }
+
+/** Evaluates the correctness of a "matcher", searching for all the occurrences of a needle in a
+ *  haystack formed of @p haystack_pattern repeated from one to @c max_repeats times, misaligned by
+ *  @p misalignment bytes within the cacheline. */
+template <typename stl_matches_, typename sz_matches_>
+void check_find_misaligned_(test_context_t &context, std::string_view haystack_pattern,
+                            typename stl_matches_::matcher_type const &stl_matcher,
+                            typename sz_matches_::matcher_type const &sz_matcher, std::size_t misalignment) {
     // Each repetition re-scans the whole growing haystack, so the work is quadratic in this count, and it is
     // multiplied again by every case, misalignment and matcher family.
     std::size_t const max_repeats = context.iterations_quadratic(40);
@@ -198,11 +214,10 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
 
         auto haystack_stl = std::string_view(haystack, haystack_length);
         auto haystack_sz = sz::string_view_t(haystack, haystack_length);
-        auto needle_sz = sz::string_view_t(needle_stl.data(), needle_stl.size());
 
         // Wrap into ranges
-        auto matches_stl = stl_matcher_(haystack_stl, {needle_stl});
-        auto matches_sz = sz_matcher_(haystack_sz, {needle_sz});
+        auto matches_stl = stl_matches_(haystack_stl, stl_matcher);
+        auto matches_sz = sz_matches_(haystack_sz, sz_matcher);
         auto begin_stl = matches_stl.begin();
         auto begin_sz = matches_sz.begin();
         auto end_stl = matches_stl.end();
@@ -256,36 +271,38 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
  *  characters, in a haystack. */
 void check_find_misaligned_(test_context_t &context, std::string_view haystack_pattern, std::string_view needle_stl,
                             std::size_t misalignment) {
+    sz::string_view_t const needle_sz(needle_stl.data(), needle_stl.size());
+    sz::byteset_t const set(needle_stl.data(), needle_stl.size());
 
     check_find_misaligned_<                                                             //
         sz::find_matches_view<std::string_view, sz::matcher_find<std::string_view>>,    //
         sz::find_matches_view<sz::string_view_t, sz::matcher_find<sz::string_view_t>>>( //
-        context, haystack_pattern, needle_stl, misalignment);
+        context, haystack_pattern, {needle_stl}, {needle_sz}, misalignment);
 
     check_find_misaligned_<                                                               //
         sz::rfind_matches_view<std::string_view, sz::matcher_rfind<std::string_view>>,    //
         sz::rfind_matches_view<sz::string_view_t, sz::matcher_rfind<sz::string_view_t>>>( //
-        context, haystack_pattern, needle_stl, misalignment);
+        context, haystack_pattern, {needle_stl}, {needle_sz}, misalignment);
 
     check_find_misaligned_<                                                                      //
-        sz::find_matches_view<std::string_view, sz::matcher_find_first_of<std::string_view>>,    //
+        sz::find_matches_view<std::string_view, stl_matcher_bytes_<stl_first_of_>>,              //
         sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_of<sz::string_view_t>>>( //
-        context, haystack_pattern, needle_stl, misalignment);
+        context, haystack_pattern, {needle_stl}, {set}, misalignment);
 
     check_find_misaligned_<                                                                      //
-        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_of<std::string_view>>,    //
+        sz::rfind_matches_view<std::string_view, stl_matcher_bytes_<stl_last_of_>>,              //
         sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_of<sz::string_view_t>>>( //
-        context, haystack_pattern, needle_stl, misalignment);
+        context, haystack_pattern, {needle_stl}, {set}, misalignment);
 
-    check_find_misaligned_<                                                                          //
-        sz::find_matches_view<std::string_view, sz::matcher_find_first_not_of<std::string_view>>,    //
-        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_not_of<sz::string_view_t>>>( //
-        context, haystack_pattern, needle_stl, misalignment);
+    check_find_misaligned_<                                                                      //
+        sz::find_matches_view<std::string_view, stl_matcher_bytes_<stl_first_not_of_>>,          //
+        sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_of<sz::string_view_t>>>( //
+        context, haystack_pattern, {needle_stl}, {set.inverted()}, misalignment);
 
-    check_find_misaligned_<                                                                          //
-        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_not_of<std::string_view>>,    //
-        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_not_of<sz::string_view_t>>>( //
-        context, haystack_pattern, needle_stl, misalignment);
+    check_find_misaligned_<                                                                      //
+        sz::rfind_matches_view<std::string_view, stl_matcher_bytes_<stl_last_not_of_>>,          //
+        sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_of<sz::string_view_t>>>( //
+        context, haystack_pattern, {needle_stl}, {set.inverted()}, misalignment);
 }
 
 /** Replays the misaligned-repetition search across a fixed sweep of intra-cacheline offsets. */

@@ -150,6 +150,7 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_utf8_norm_best),
         call_stub_(sz_utf8_find_denormalized_best),
         call_stub_(sz_utf8_uncased_fold_best),
+        call_stub_(sz_utf8_uncased_needle_init_best),
         call_stub_(sz_utf8_uncased_search_best),
         call_stub_(sz_utf8_uncased_order_best),
         call_stub_(sz_utf8_find_cased_best),

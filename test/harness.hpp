@@ -413,9 +413,15 @@ template <typename value_type_>
 struct test_environment_t {
     std::uint32_t seed = 42;
     double scale = 1.0;
-    char const *filter = nullptr;      // ? Points into `environ`, alive for the whole run
-    std::optional<std::regex> pattern; // ? The compiled @c filter, empty when it does not compile
-    char const *program = "";          // ? `argv[0]`, which closes every rerun line
+
+    /** Points into @c environ, alive for the whole run. */
+    char const *filter = nullptr;
+
+    /** The compiled @c filter, empty when it does not compile. */
+    std::optional<std::regex> pattern;
+
+    /** `argv[0]`, which closes every rerun line. */
+    char const *program = "";
 
     /** Whether @c filter selects @p name: as a regex, or as a substring if it does not compile. */
     bool selects(std::string_view name) const {
@@ -687,9 +693,13 @@ inline sz_sequence_t sequence_from_(std::vector<std::string> const &strings) {
 }
 
 struct fuzzy_config_t {
-    std::string alphabet = "ABC"; // ? Drawn one UTF-8 character at a time, so `"αβγ"` yields valid multi-byte text.
+
+    /** Drawn one UTF-8 character at a time, so `"αβγ"` yields valid multi-byte text. */
+    std::string alphabet = "ABC";
     std::size_t batch_size = 16;
-    std::size_t min_string_length = 1; // ? In characters, which equals bytes only for an ASCII alphabet.
+
+    /** In characters, which equals bytes only for an ASCII alphabet. */
+    std::size_t min_string_length = 1;
     std::size_t max_string_length = 200;
 
     fuzzy_config_t() = default;

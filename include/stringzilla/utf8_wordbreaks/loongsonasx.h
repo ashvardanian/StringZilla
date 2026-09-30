@@ -522,13 +522,9 @@ STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_l
  *  every other windowed backend. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_loongsonasx_( //
     sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *word_starts, sz_size_t *word_lengths,          //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t *word_lengths, sz_size_t words_capacity) {
 
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || words_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     sz_size_t words = 0;         // words written to the output
@@ -603,22 +599,15 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_loongsonasx_( //
         sz_size_t const adv = win.resolved;
         sz_u64_t const boundary_lanes = win.breaks & sz_u64_mask_until_serial_(adv);
         if (win.deferred_break) {
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_start;
-                return words;
-            }
-            word_starts[words] = word_start;
+            if (words == words_capacity) return words;
             word_lengths[words] = bridge_anchor - word_start;
             ++words;
             word_start = bridge_anchor;
         }
 
-        words = sz_utf8_rune_drain_forward_loongsonasx_(boundary_lanes, position, word_starts, word_lengths, words,
-                                                        words_capacity, &word_start);
-        if (words == words_capacity) {
-            if (bytes_consumed) *bytes_consumed = word_start;
-            return words;
-        }
+        words = sz_utf8_rune_drain_forward_loongsonasx_(boundary_lanes, position, word_lengths, words, words_capacity,
+                                                        &word_start);
+        if (words == words_capacity) return words;
 
         if (adv > 0 && adv < complete_limit) {
             sz_utf8_word_break_carry_t carry_to_edge = carry;
@@ -635,27 +624,16 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_loongsonasx_( //
         }
     }
 
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_start;
-        return words;
-    }
-    word_starts[words] = word_start;
+    if (words == words_capacity) return words;
     word_lengths[words] = length - word_start;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = length;
-    return words;
+    return words + 1;
 }
 
-STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_loongsonasx(                    //
-    sz_cptr_t text, sz_size_t length,                                          //
-    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
-    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                           sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *words_count = sz_utf8_wordbreaks_loongsonasx_(text, length, word_starts, word_lengths, words_capacity,
-                                                   bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, *words_count,
-                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
-                                         sz_true_k));
+    *count = sz_utf8_wordbreaks_loongsonasx_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

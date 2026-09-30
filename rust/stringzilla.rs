@@ -236,12 +236,17 @@ extern "C" {
         capabilities: sz_capability_t,
         stream: *mut c_void,
     ) -> sz_status_t;
+    pub(crate) fn sz_utf8_uncased_needle_init_best(
+        needle: *const c_void,
+        needle_length: sz_size_t,
+        prepared: *mut Utf8UncasedNeedle<'_>,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
     pub(crate) fn sz_utf8_uncased_search_best(
         haystack: *const c_void,
         haystack_length: sz_size_t,
-        needle: *const c_void,
-        needle_length: sz_size_t,
-        needle_metadata: *mut Utf8UncasedNeedleMetadata,
+        needle: *const Utf8UncasedNeedle<'_>,
         found: *mut *const c_void,
         match_length: *mut sz_size_t,
         capabilities: sz_capability_t,
@@ -260,44 +265,36 @@ extern "C" {
     pub(crate) fn sz_utf8_wordbreaks_best(
         text: *const c_void,
         length: sz_size_t,
-        word_starts: *mut sz_size_t,
-        word_lengths: *mut sz_size_t,
-        words_capacity: sz_size_t,
-        words_count: *mut sz_size_t,
-        bytes_consumed: *mut sz_size_t,
+        lengths: *mut sz_size_t,
+        capacity: sz_size_t,
+        count: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: *mut c_void,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_graphemes_best(
         text: *const c_void,
         length: sz_size_t,
-        cluster_starts: *mut sz_size_t,
-        cluster_lengths: *mut sz_size_t,
-        clusters_capacity: sz_size_t,
-        clusters_count: *mut sz_size_t,
-        bytes_consumed: *mut sz_size_t,
+        lengths: *mut sz_size_t,
+        capacity: sz_size_t,
+        count: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: *mut c_void,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_sentences_best(
         text: *const c_void,
         length: sz_size_t,
-        sentence_starts: *mut sz_size_t,
-        sentence_lengths: *mut sz_size_t,
-        sentences_capacity: sz_size_t,
-        sentences_count: *mut sz_size_t,
-        bytes_consumed: *mut sz_size_t,
+        lengths: *mut sz_size_t,
+        capacity: sz_size_t,
+        count: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: *mut c_void,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_linebreaks_best(
         text: *const c_void,
         length: sz_size_t,
-        line_starts: *mut sz_size_t,
-        line_lengths: *mut sz_size_t,
-        lines_capacity: sz_size_t,
-        lines_count: *mut sz_size_t,
-        bytes_consumed: *mut sz_size_t,
+        lengths: *mut sz_size_t,
+        capacity: sz_size_t,
+        count: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: *mut c_void,
     ) -> sz_status_t;
@@ -727,7 +724,7 @@ pub trait StringZillableUnary {
     /// Returns a lazy UTF-8 character view with SIMD-accelerated operations.
     ///
     /// The view provides:
-    /// - `.len()` for character count, computed lazily on first call and cached
+    /// - `.len()` for character count, computed on demand
     /// - `.offset_of(n)` for random access to Nth character offset
     /// - `.iter()` for efficient batched iteration over characters
     ///

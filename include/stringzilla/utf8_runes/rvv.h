@@ -8,7 +8,7 @@
 #define STRINGZILLA_UTF8_RUNES_RVV_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_utf8_incomplete_tail_`
+#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_utf8_maximal_subpart_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -322,9 +322,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
     vbool8_t const starts_b8 = __riscv_vmnot_m_b8(continuations_b8, vector_length);
 
     // Defer every start whose declared sequence would reach past the window: well-formed text has
-    // only the trailing one (a resumable truncation), but a malformed lead-in-lead (e.g. `E0 C0`)
-    // can overrun earlier - the first overrunning start bounds the decodable prefix, and its bytes
-    // resume next window or via serial.
+    // only the trailing one (a truncation), but a malformed lead-in-lead (e.g. `E0 C0`) can overrun
+    // earlier - the first overrunning start bounds the decodable prefix, and its bytes resume next
+    // window, or the driver finalizes them at the end of the text.
     vuint8m1_t const sequence_end_u8m1 = __riscv_vadd_vv_u8m1(__riscv_vid_v_u8m1(vector_length), lengths_u8m1,
                                                               vector_length);
     vbool8_t const overruns_b8 = __riscv_vmand_mm_b8(
@@ -559,7 +559,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_rvv_( //
         }
 
         // Now `*text_cursor` is a multi-byte lead (or a stray continuation). Decode a whole window in-register; the
-        // step declines an ill-formed or truncated-only window, in which case the serial reference guarantees progress.
+        // step declines only a first lead truncated by the end of `text`, finalized below.
         sz_size_t step_unpacked = 0;
         sz_cptr_t next = sz_utf8_decode_once_rvv_((sz_cptr_t)text_cursor, (sz_size_t)(text_end - text_cursor),
                                                   runes + runes_written, runes_capacity - runes_written,
@@ -570,19 +570,17 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_rvv_( //
             continue;
         }
 
-        // The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
-        // declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and awaits
-        // more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal ill-formed
-        // subpart - a bounded <=3-byte finalize, never a per-codepoint serial re-decode.
-        if (sz_utf8_incomplete_tail_((sz_cptr_t)text_cursor, (sz_cptr_t)text_end)) break;
+        // The step returns no runes only when the first lead declares a sequence crossing the end
+        // of `text`, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+        // bytes, never a serial re-decode of the window.
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         text_cursor += sz_utf8_maximal_subpart_((sz_cptr_t)text_cursor, (sz_cptr_t)text_end);
     }
 
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written,
-                                         (sz_size_t)((sz_cptr_t)text_cursor - text), STRINGZILLA_NULL, STRINGZILLA_NULL,
-                                         3, sz_false_k));
+                                         (sz_size_t)((sz_cptr_t)text_cursor - text), STRINGZILLA_NULL,
+                                         STRINGZILLA_NULL));
     return (sz_cptr_t)text_cursor;
 }
 
@@ -788,10 +786,10 @@ STRINGZILLA_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
 /** RVV forward drain — the vector twin of @ref sz_utf8_rune_drain_forward_neon_, bit-exact with it.
  *  The set boundary lanes compress to dense u16 indices (via @c vid and @c vcompress), widen to u64
  *  absolute positions, and emit as a shifted-difference stream:
- *  `starts = vslide1up(positions, previous)`, `lengths = positions - starts`, honoring @p capacity
- *  and the carried open-word start @p previous_io. */
+ *  `lengths = positions - vslide1up(positions, previous)`, honoring @p capacity and the carried
+ *  open-word start @p previous_io. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_rvv_( //
-    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     if (!boundary || produced >= capacity) return produced;
 
@@ -812,11 +810,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_rvv_( //
         vuint64m8_t const positions_u64m8 = __riscv_vadd_vx_u64m8(__riscv_vzext_vf4_u64m8(chunk_indices_u16m2, chunk),
                                                                   (sz_u64_t)base, chunk);
         vuint64m8_t const starts_u64m8 = __riscv_vslide1up_vx_u64m8(positions_u64m8, previous, chunk);
-        __riscv_vse64_v_u64m8((sz_u64_t *)starts + produced + emitted, starts_u64m8, chunk);
         __riscv_vse64_v_u64m8((sz_u64_t *)lengths + produced + emitted,
                               __riscv_vsub_vv_u64m8(positions_u64m8, starts_u64m8, chunk), chunk);
         emitted += chunk;
-        previous = starts[produced + emitted - 1] + lengths[produced + emitted - 1];
+        previous = __riscv_vmv_x_s_u64m8_u64(__riscv_vslidedown_vx_u64m8(positions_u64m8, chunk - 1, chunk));
     }
     *previous_io = (sz_size_t)previous;
     return produced + emit_count;

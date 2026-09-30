@@ -208,7 +208,7 @@ assert_eq!(sz::utf8_uncased_order("Hello", "HELLO"), Ordering::Equal);
 ## Splitting and Partitioning
 
 The crate exposes iterator-based match and split operations.
-The `StringZillableBinary` trait yields these iterators; the underlying `FindMatches`, `RFindMatches`, `FindSplits`, and `RFindSplits` structs can also be constructed directly from a `MatcherType`.
+The `StringZillableBinary` trait yields these iterators; the underlying `FindMatches`, `RFindMatches`, `FindSplits`, and `RFindSplits` structs can also be constructed directly from a `Matcher`.
 
 Trait methods, each taking a borrowed needle `&'a N`:
 
@@ -267,22 +267,25 @@ let nonempty: Vec<&[u8]> = b"a,,b,".sz_splits(b",").skip_empty().collect();
 assert_eq!(nonempty, vec![b"a", b"b"]);
 ```
 
-For direct construction, `MatcherType<'a>` selects the search mode and is paired with `FindMatches::new(haystack, matcher)`, `RFindMatches::new(...)`, `FindSplits::new(haystack, matcher)`, or `RFindSplits::new(...)`.
+For direct construction, a `Matcher<'a>` names what to look for, `Matcher::Substring(needle)` or `Matcher::Bytes(set)`, and the iterator type picks the direction: `FindMatches` and `FindSplits` search front to back, `RFindMatches` and `RFindSplits` back to front.
+An inverted `Byteset` matches the bytes outside the set.
 Policies are compile-time markers, opted into with builder methods: `.overlapping()` (default `NonOverlapping`, like `str::matches`) and `.skip_empty()` (default `KeepEmpty`, like `str::split`):
 
 ```rust
-use stringzilla::sz::{MatcherType, FindMatches, FindSplits};
+use stringzilla::sz::{Byteset, FindMatches, FindSplits, Matcher};
 
-let non_overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", MatcherType::Find(b"aa")).collect();
+let non_overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", Matcher::Substring(b"aa")).collect();
 assert_eq!(non_overlapping, vec![&b"aa"[..], &b"aa"[..]]);
-let overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", MatcherType::Find(b"aa")).overlapping().collect();
+let overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", Matcher::Substring(b"aa")).overlapping().collect();
 assert_eq!(overlapping, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
 
-let split: Vec<&[u8]> = FindSplits::new(b",a;;b,", MatcherType::FindFirstOf(b",;")).skip_empty().collect();
+let separators = Matcher::Bytes(Byteset::from(b",;"));
+let split: Vec<&[u8]> = FindSplits::new(b",a;;b,", separators).skip_empty().collect();
 assert_eq!(split, vec![b"a", b"b"]);
 ```
 
-`MatcherType` variants: `Find`, `RFind`, `FindFirstOf`, `FindLastOf`, `FindFirstNotOf`, `FindLastNotOf`.
+An empty needle matches at every offset, `n + 1` times in an `n`-byte haystack, like `"abc".matches("")`.
+An empty separator never splits, so the whole haystack comes back as one segment.
 
 ## Trimming and Translating
 
@@ -390,7 +393,8 @@ pub fn utf8_uncased_search<H: AsRef<[u8]>, N: Utf8UncasedNeedleArg>(haystack: H,
 ```
 
 Returns `Some((offset, match_length))`, where the matched length may differ from the needle length due to case folding — `ß` matching `SS`, for instance.
-A reusable `Utf8UncasedNeedle` caches needle metadata across searches, and `Utf8UncasedMatches` iterates all matches as `IndexSpan`s:
+A `Utf8UncasedNeedle` is prepared once and only read by every search, so one needle serves many haystacks and threads, and `Utf8UncasedMatches` iterates all matches as `IndexSpan`s.
+Matches start on codepoint boundaries: overlapping iteration and any zero-length match advance one codepoint, so an empty needle matches at every codepoint boundary, the end included, three times in `"aé"`:
 
 ```rust
 use stringzilla::sz::{self, Utf8UncasedNeedle, Utf8UncasedMatches, IndexSpan};
@@ -826,7 +830,7 @@ There is no backing vector and no per-element heap buffer.
 Contrast this with the standard library, where collecting into a `Vec<String>` allocates the vector and a fresh heap buffer for every element, and even a `Vec<&str>` allocates the backing vector up front.
 Because these iterators borrow from the input, you can stream over millions of words or grapheme clusters of a large document with effectively zero per-element allocation, and the borrow lifetimes keep the yielded slices zero-copy.
 
-`Utf8View` offers O(1) construction with lazy, cached `len()` for the codepoint count, `offset_of(n)` for the byte offset of the Nth codepoint, and `iter()` for batched `char` iteration:
+`Utf8View` offers O(1) construction, `len()` counting the codepoints on demand, `offset_of(n)` for the byte offset of the Nth codepoint, and `iter()` for batched `char` iteration:
 
 ```rust
 use stringzilla::sz::StringZillableUnary;
@@ -879,12 +883,15 @@ pub fn utf8_decode(text: &[u8], runes: &mut [u32]) -> (usize, usize); // (bytes_
 
 `utf8_decode` decodes UTF-8 into UTF-32 codepoints, filling the output buffer or draining the input per call.
 For inputs larger than the buffer, loop and resume at `bytes_consumed`.
-It is total: ill-formed bytes decode to U+FFFD, so every value written is a valid Unicode scalar:
+It is total: ill-formed bytes decode to U+FFFD, so every value written is a valid Unicode scalar.
+The end of `text` is the end of the input, so a truncated final sequence also decodes to one U+FFFD and is consumed; cut a streamed input into chunks at rune boundaries:
 
 ```rust
 use stringzilla::sz;
 
 let mut runes = [0u32; 16];
+assert_eq!(sz::utf8_decode(b"a\xE2\x82", &mut runes), (3, 2));
+assert_eq!(&runes[..2], &['a' as u32, 0xFFFD]);
 let (bytes, count) = sz::utf8_decode("Hello".as_bytes(), &mut runes);
 assert_eq!((bytes, count), (5, 5));
 assert_eq!(runes[0], 'H' as u32);

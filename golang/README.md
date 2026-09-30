@@ -196,8 +196,8 @@ idx, length, _ := sz.Utf8CaseInsensitiveFind("Hello WÖRLD", "wörld", false)
 // idx == 6, length == 6
 ```
 
-For repeated searches with the same needle, `Utf8CaseInsensitiveNeedle` caches the precomputed needle metadata.
-It is not safe for concurrent use, since the metadata is computed lazily and mutated on first search.
+For repeated searches with the same needle, `Utf8CaseInsensitiveNeedle` prepares it once, over its own copy of the bytes.
+It is safe for concurrent use, since searches only read it.
 
 ```go
 type Utf8CaseInsensitiveNeedle struct { /* ... */ }

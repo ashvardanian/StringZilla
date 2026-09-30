@@ -78,17 +78,28 @@ STRINGZILLA_CONSTEXPR sz_rune_length_t sz_rune_decode(sz_cptr_t utf8, sz_cptr_t 
     return sz_rune_invalid_k; // F5..FF
 }
 
-/** Emit one @b (start,length) segment per set boundary lane of @p boundary (ascending), honoring
- *  @p capacity and the carried previous boundary in @p previous_io - the portable scalar twin of
- *  the per-ISA @c drain_forward leaves, shared by back-ends that carry their window state as
- *  @c sz_u64_t masks. */
+/** Whether one batch of a tiling segmenter keeps the contract its resuming callers loop on: it fits
+ *  @p capacity, has no empty segment, stays within @p length, and covers it all unless full. */
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_segments_consistent_(sz_size_t length, sz_size_t capacity, sz_size_t count,
+                                                             sz_size_t const *lengths) {
+    if (count > capacity) return sz_false_k;
+    sz_size_t covered = 0;
+    for (sz_size_t index = 0; index != count; ++index) {
+        if (lengths[index] == 0 || lengths[index] > length - covered) return sz_false_k;
+        covered += lengths[index];
+    }
+    return (sz_bool_t)(count == capacity || covered == length);
+}
+
+/** Emit one segment length per set boundary lane of @p boundary (ascending), honoring @p capacity
+ *  and the carried previous boundary in @p previous_io - the portable scalar twin of the per-ISA
+ *  @c drain_forward leaves, shared by the back-ends carrying window state as @c sz_u64_t masks. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_rune_drain_forward_serial_( //
-    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t previous = *previous_io;
     for (; boundary && produced < capacity; boundary &= boundary - 1) {
         sz_size_t const position = base + (sz_size_t)sz_u64_ctz(boundary);
-        starts[produced] = previous;
         lengths[produced] = position - previous;
         previous = position;
         ++produced;
@@ -192,36 +203,6 @@ STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_find_malformed(sz_cptr_t text, sz_size_t
     return STRINGZILLA_NULL_CHAR;
 }
 
-/** Whether `[text, end)` is a well-formed but @b truncated multi-byte prefix: a valid lead followed
- *  only by valid (so far) continuation bytes, with fewer bytes present than the lead declares. Such
- *  a tail is not ill-formed - a streaming decoder stops on it and resumes once more bytes arrive,
- *  rather than substituting U+FFFD. Genuinely ill-formed bytes (a bad lead, a malformed present
- *  continuation, or an overlong/surrogate/out-of-range prefix) return false so the caller emits the
- *  replacement character. */
-STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_incomplete_tail_(sz_cptr_t text, sz_cptr_t end) {
-    sz_size_t const available = (sz_size_t)(end - text);
-    if (!available) return sz_false_k;
-    sz_u8_t const lead = sz_utf8_byte_at_(text, 0);
-    sz_rune_length_t declared;
-    if (lead < 0x80) return sz_false_k;
-    else if (lead >= 0xC2 && lead < 0xE0) declared = sz_rune_2bytes_k;
-    else if (lead >= 0xE0 && lead < 0xF0) declared = sz_rune_3bytes_k;
-    else if (lead >= 0xF0 && lead <= 0xF4) declared = sz_rune_4bytes_k;
-    else return sz_false_k; // C0/C1, F5..FF, or a lone continuation - ill-formed, not merely truncated
-    if (available >= (sz_size_t)declared) return sz_false_k; // all bytes present; `sz_rune_decode` judges validity
-    for (sz_size_t index = 1; index < available; ++index)
-        if ((sz_utf8_byte_at_(text, index) & 0xC0) != 0x80)
-            return sz_false_k; // a present continuation is malformed - ill-formed now
-    if (available >= 2) {      // first-continuation range constraints, where present
-        sz_u8_t const second = sz_utf8_byte_at_(text, 1);
-        if (lead == 0xE0 && second < 0xA0) return sz_false_k;  // overlong
-        if (lead == 0xED && second >= 0xA0) return sz_false_k; // surrogate
-        if (lead == 0xF0 && second < 0x90) return sz_false_k;  // overlong
-        if (lead == 0xF4 && second >= 0x90) return sz_false_k; // > U+10FFFF
-    }
-    return sz_true_k;
-}
-
 #pragma endregion Rune Codec
 
 STRINGZILLA_INLINE sz_size_t sz_utf8_count_serial_(sz_cptr_t text, sz_size_t length) {
@@ -265,11 +246,11 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_serial_( //
     sz_cptr_t text_end = text + length;
     sz_size_t runes_written = 0;
 
-    // The reference for the unified contract: decode each codepoint, substitute one U+FFFD per maximal ill-formed
-    // subpart (resyncing by the subpart's 1-3 byte length, Unicode 17.0 §3.9 / W3C), and stop on a well-formed but
-    // truncated trailing prefix so a streaming caller resumes once more bytes arrive. Every emitted rune is valid.
+    // The reference for the unified contract: decode each codepoint and substitute one U+FFFD per
+    // maximal ill-formed subpart (resyncing by its 1-3 byte length, Unicode 17.0 §3.9 / W3C), a
+    // sequence truncated by the end of `text` included, so only a full `runes` buffer stops early.
+    // Every emitted rune is valid.
     while (text_cursor < text_end && runes_written < runes_capacity) {
-        if (sz_utf8_incomplete_tail_(text_cursor, text_end)) break; // Resumable truncation - hand back to caller.
         sz_rune_t rune;
         sz_rune_length_t rune_length = sz_rune_decode(text_cursor, text_end, &rune);
         if (rune_length == sz_rune_invalid_k) {
@@ -283,7 +264,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_serial_( //
 
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(text_cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return text_cursor;
 }
 

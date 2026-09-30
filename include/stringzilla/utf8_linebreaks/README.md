@@ -1,6 +1,7 @@
 # UTF-8 Line Wraps: UAX-14 Line Break Opportunity Iteration
 
 This directory holds the kernels behind `sz_utf8_linebreaks_best`, which walks a UTF-8 string and yields each line-break opportunity as defined by the Unicode UAX-14 rules, marking the positions where a text layout engine is allowed to wrap rather than splitting on raw spaces or hard newlines alone.
+Each call writes one byte length per line, and the lines tile the input, so a caller that fills its buffer resumes from the sum of the lengths it got.
 Each operation has a serial baseline plus per-ISA SIMD backends, like `haswell`, `icelake` on x86.
 `sz_utf8_linebreaks_best` runs the best kernel among the capabilities its caller passes.
 

@@ -26,13 +26,11 @@ extern "C" {
 #pragma GCC target("lasx")
 #endif
 
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_loongsonasx( //
-    sz_cptr_t haystack, sz_size_t haystack_length,              //
-    sz_cptr_t needle, sz_size_t needle_length,                  //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,         //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_loongsonasx(                            //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *match = sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
+    *match = sz_utf8_uncased_search_serial_(haystack, haystack_length, needle->start, needle->length, needle,
                                             match_length);
     return sz_success_k;
 }

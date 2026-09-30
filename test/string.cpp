@@ -1309,6 +1309,13 @@ void test_extensions_ranges_unit() {
     verify(".."_sv.rfind_all(".", sz::include_overlaps_t {}).size() == 2);
     verify(".."_sv.rfind_all(".", sz::exclude_overlaps_t {}).size() == 2);
 
+    // An empty needle matches at every offset from 0 to `size()` inclusive, in either direction.
+    verify("abc"_sv.find_all("").size() == 4);
+    verify("abc"_sv.find_all("", sz::exclude_overlaps_t {}).size() == 4);
+    verify("abc"_sv.rfind_all("").size() == 4);
+    verify(""_sv.find_all("").size() == 1);
+    verify(sz::find_all(sz::string_t("abc"), "").size() == 4);
+
     verify("a.b.c.d"_sv.find_all(".").size() == 3);
     verify("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
     verify("a.,b.,c.,d"_sv.rfind_all(".,").size() == 3);
@@ -1386,6 +1393,9 @@ void test_extensions_ranges_unit() {
 
     verify(""_sv.split(".").size() == 1);
     verify(""_sv.rsplit(".").size() == 1);
+    verify("a.b"_sv.split("").size() == 1 && *"a.b"_sv.split("").begin() == "a.b"); // Empty separators never split
+    verify("a.b"_sv.rsplit("").size() == 1);
+    verify(sz::string_view_t {}.split(",").size() == 1 && sz::string_view_t {}.rsplit(",").size() == 1);
 
     verify("hello"_sv.split("l").size() == 3);
     verify("hello"_sv.rsplit("l").size() == 3);

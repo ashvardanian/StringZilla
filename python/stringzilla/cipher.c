@@ -834,7 +834,8 @@ static char const doc_Aes256GcmEncryptor[] =                                    
     "Example:\n"                                                                                   //
     "  >>> key, nonce = sz.Aes256GcmKey(bytes(32)), bytes(12)\n"                                   //
     "  >>> sealed = sz.Aes256GcmEncryptor(key, nonce)\n"                                           //
-    "  >>> sealed.encrypt(b'hel') + sealed.encrypt(b'lo') == key.encrypt(b'hello', nonce)[0]\n"    //
+    "  >>> ciphertext, tag = key.encrypt(b'hello', nonce)\n"                                       //
+    "  >>> sealed.encrypt(b'hel') + sealed.encrypt(b'lo') == ciphertext\n"                         //
     "  True";
 
 static char const doc_Aes256GcmEncryptor_associate[] =                                       //
@@ -850,7 +851,8 @@ static char const doc_Aes256GcmEncryptor_associate[] =                          
     "Example:\n"                                                                             //
     "  >>> key, nonce = sz.Aes256GcmKey(bytes(32)), bytes(12)\n"                             //
     "  >>> sealed = sz.Aes256GcmEncryptor(key, nonce).associate(b'head')\n"                  //
-    "  >>> sealed.encrypt(b'body') == key.encrypt(b'body', nonce, b'head')[0]\n"             //
+    "  >>> ciphertext, tag = key.encrypt(b'body', nonce, b'head')\n"                         //
+    "  >>> sealed.encrypt(b'body') == ciphertext\n"                                          //
     "  True";
 
 static char const doc_Aes256GcmEncryptor_encrypt[] =                                //
@@ -878,7 +880,8 @@ static char const doc_Aes256GcmEncryptor_digest[] =                             
     "  >>> key, nonce = sz.Aes256GcmKey(bytes(32)), bytes(12)\n"                             //
     "  >>> sealed = sz.Aes256GcmEncryptor(key, nonce)\n"                                     //
     "  >>> _ = sealed.encrypt(b'hello')\n"                                                   //
-    "  >>> sealed.digest() == key.encrypt(b'hello', nonce)[1]\n"                             //
+    "  >>> ciphertext, tag = key.encrypt(b'hello', nonce)\n"                                 //
+    "  >>> sealed.digest() == tag\n"                                                         //
     "  True";
 
 static char const doc_Aes256GcmDecryptor[] =                                                     //

@@ -124,6 +124,9 @@ def test_utf8_count_malformed():
 def test_utf8_codepoints_malformed():
     """Lossy + total: malformed bytes decode to U+FFFD, iteration never raises, and only scalar values are emitted."""
     assert list(sz.utf8_codepoints(b"a\xffb")) == [0x61, 0xFFFD, 0x62]
+    # A truncated tail is one U+FFFD, also when it starts a fresh batch past a full one.
+    assert list(sz.utf8_codepoints(b"a\xe2\x82")) == [0x61, 0xFFFD]
+    assert list(sz.utf8_codepoints(b"a" * 64 + b"\xe2\x82")) == [0x61] * 64 + [0xFFFD]
     rng = Random(0)
     for raw in adversarial_utf8_inputs(rng, random_input_count=scale_iterations(500)):
         for codepoint in sz.utf8_codepoints(raw):

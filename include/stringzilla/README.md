@@ -321,6 +321,7 @@ int main(void) {
 
 The view and the owning string expose `find`/`rfind` for sub-strings, single characters, and byte-sets, plus `contains`, `starts_with`, `ends_with`, and the full `find_first_of` / `find_last_of` / `find_first_not_of` / `find_last_not_of` family taking either a `byteset` or a view.
 For repeated matching the view offers lazy, allocation-free ranges: `find_all(needle)` and `rfind_all(needle)`, each with `sz::include_overlaps` / `sz::exclude_overlaps` tag overloads, alongside `find_all(byteset)` and `rfind_all(byteset)`.
+An empty needle matches at every offset from 0 to `size()` inclusive, so it yields `size() + 1` zero-width matches.
 
 ```cpp
 #include <stringzilla/stringzilla.hpp>
@@ -357,6 +358,7 @@ The pattern can be a view, a single character, or a byte-set.
 `split`, `rsplit`, and `splitlines` return lazy ranges of `string_view`s.
 `split(view)` yields a `sz::find_splits_view`, `rsplit(view)` yields a `sz::rfind_splits_view`, and the byte-set overloads `split(byteset)` and `rsplit(byteset)` yield the matching character-splitter views.
 `split(byteset)` and `rsplit(byteset)` default to whitespace, and `splitlines()` defaults to the newline set.
+A trailing separator yields a final empty segment, and an empty separator never splits, yielding the whole text as the only segment.
 
 The key property is that these ranges are _lazy_ — they borrow from the source buffer and walk it one `string_view` at a time, so the next boundary is computed only when you ask for it.
 Splitting a large document into millions of tokens therefore costs __no per-token allocation__: each iteration step advances a cursor and hands back a borrowed view.
@@ -444,7 +446,7 @@ assert(sentences == 2); // the dot inside $9.99 is not a sentence break
 The full family of ranges, each borrowing from the source and yielding `sz::string_view_t` segments, or `sz_rune_t` for runes.
 Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the __separators__ the kernel finds, while `split_*` yields the content __between__ them:
 
-- `utf8_runes()` — every codepoint as a decoded `sz_rune_t` UTF-32 scalar.
+- `utf8_runes()` — every codepoint as a decoded `sz_rune_t` UTF-32 scalar, with U+FFFD for ill-formed bytes and a truncated tail.
 - `utf8_graphemes()` — UAX-29 grapheme clusters, the user-perceived characters.
 - `utf8_wordbreaks()` — all UAX-29 word segments (words and the separators between them).
 - `utf8_sentences()` — UAX-29 sentence boundaries.
@@ -457,10 +459,14 @@ On any `split_*` range, `.skip_empty()` drops empty segments and `.with_separato
 The `utf8_wordbreaks`, `utf8_graphemes`, `utf8_sentences`, and `utf8_linebreaks` ranges _tile_ the input — every byte belongs to exactly one segment, with no gaps and no empty slices.
 Because every range borrows and walks the buffer once, segmenting a multi-megabyte document into graphemes or words allocates nothing.
 
+In C, `sz_utf8_graphemes_best` and its three tiling siblings write one length per segment, each segment starting where the previous one ended, so after a full batch the caller resumes at the sum of its lengths.
+The newline, whitespace and delimiter finders write offsets and lengths of their matches, and after a full batch `bytes_consumed` ends exactly at the last match; otherwise it is the whole input.
+`sz_utf8_decode_best` treats the end of the text as the end of the input, decoding a truncated final sequence to one U+FFFD, so a caller feeding it chunks splits them at a rune boundary.
+
 ## Case Insensitive Search and Folding
 
 Case-insensitive matching across full Unicode is more than ASCII `tolower` — `ß` matches `ss`, accents fold, and the matched byte-length can differ from the needle's.
-`utf8_uncased_find` searches case-insensitively _without pre-folding the haystack_: it folds on the fly, so you never allocate a folded copy of a large document just to search it.
+`utf8_uncased_search` searches case-insensitively _without pre-folding the haystack_: it folds on the fly, so you never allocate a folded copy of a large document just to search it.
 
 ```cpp
 #include <stringzilla/stringzilla.hpp>
@@ -469,7 +475,7 @@ namespace sz = ashvardanian::stringzilla;
 
 int main() {
     sz::string_view_t hay = "Take the STRAßE downtown";
-    auto m = hay.utf8_uncased_find("strasse"); // no folded copy of `hay` is made
+    auto m = hay.utf8_uncased_search("strasse"); // no folded copy of `hay` is made
     assert(m.offset == 9);
     assert(hay.sub(m.offset, m.offset + m.length) == "STRAßE"); // matched the mixed-case ß form
     return 0;
@@ -477,6 +483,8 @@ int main() {
 ```
 
 The result carries both the `offset` and the matched `length`, since folding can make the matched span longer or shorter than the needle.
+To search many haystacks for one needle, prepare it once as a `sz::utf8_uncased_needle_t`, which borrows the needle's bytes, and pass it to `utf8_uncased_search` or to `utf8_uncased_matches`, the lazy range of every non-overlapping match.
+Matches sit on codepoint boundaries, so an empty needle matches at every boundary, the end included.
 When you need the folded text itself, fold a `sz::string_t` in place:
 
 ```cpp
@@ -485,17 +493,21 @@ greeting.try_utf8_uncased_fold(); // in place; `ß` expands to `ss`
 assert(greeting == "grüsse");
 ```
 
-In C, `sz_utf8_uncased_search_best` takes a `sz_utf8_uncased_needle_metadata_t *` that it fills on the first call and reuses on later ones, so repeated searches for the same needle skip re-analysis, whichever capability runs them:
+In C, `sz_utf8_uncased_needle_init_best` analyses the needle once into a `sz_utf8_uncased_needle_t`, and `sz_utf8_uncased_search_best` only reads it, so any number of searches, under any capabilities, share one analysis.
+The prepared needle points at the needle's bytes rather than copying them, so they must outlive it:
 
 ```c
 #include <stringzilla/stringzilla.h>
 
-sz_utf8_uncased_needle_metadata_t needle = {0}; // cached across searches of the same pattern
+sz_utf8_uncased_needle_t needle;
+sz_utf8_uncased_needle_init_best("café", 5, &needle, capabilities, NULL);
 sz_cptr_t hit = NULL;
 sz_size_t match_length = 0;
-sz_utf8_uncased_search_best(haystack, haystack_length, "café", 5, &needle, &hit, &match_length, capabilities, NULL);
+sz_utf8_uncased_search_best(haystack, haystack_length, &needle, &hit, &match_length, capabilities, NULL);
 // `hit` points at the first case-insensitive match, or NULL; reuse `needle` for the next haystack.
 ```
+
+An empty needle matches at the start of every haystack, with a zero `match_length`.
 
 ## Trimming and Translating
 
@@ -959,7 +971,7 @@ It picks exactly what the dispatch point picks for the same mask, and returns `s
 Each family exports its own finder over its kinds, like `sz_compare_find_kernel` in `compare.h`, and `sz_find_kernel_punned` covers every family through one entry point.
 Every verb has a kind, `sz_kernel_<verb>_k`, and a pointer type to cast the result to, `sz_kernel_<verb>_t`, taking the dispatch point's arguments short of the mask.
 `sz_kernel_name` spells a kind without its `sz_kernel_` prefix and `_k` suffix, like `"find_byte"`, and `sz_kernel_named` maps such a name back, or to `sz_kernel_unknown_k`.
-Verbs of one shape share a type, like `sz_kernel_find_t` for both `sz_kernel_find_k` and `sz_kernel_rfind_k`, and `sz_kernel_utf8_segmenter_t` for the seven UTF-8 segmenters.
+Verbs of one shape share a type, like `sz_kernel_find_t` for both `sz_kernel_find_k` and `sz_kernel_rfind_k`, `sz_kernel_utf8_segmenter_t` for the four tiling UTF-8 segmenters, and `sz_kernel_utf8_tokenizer_t` for the newline, whitespace and delimiter finders.
 In C++, every wrapper that takes a mask, like `sz::lookup` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_cpu_configure_thread`.
 
 ## Memory Ownership and Small String Optimization

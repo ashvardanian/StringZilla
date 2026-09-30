@@ -109,7 +109,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_icelake_( //
     if (position != 0 && position < length && text_u8[position - 1] == '\r' && text_u8[position] == '\n') ++position;
     if (bytes_consumed) *bytes_consumed = position;
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 
@@ -210,7 +210,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_icelake_( //
 
     if (bytes_consumed) *bytes_consumed = position;
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 
@@ -501,8 +501,7 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_icelake(                         
     *matches_count = sz_utf8_delimiters_icelake_(text, length, match_offsets, match_lengths, matches_capacity,
                                                  bytes_consumed);
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
-                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
-                                         sz_false_k));
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths));
     return sz_success_k;
 }
 

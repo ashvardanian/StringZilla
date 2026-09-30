@@ -118,7 +118,7 @@ std::size_t test_cross_serial(test_environment_t const &environment) {
     check("test_utf8_tokens_safety_serial",
           [&](test_context_t &context) { check_utf8_tokens_safety_(context, utf8_tokens_serial); });
 
-    constexpr utf8_segment_backend_t utf8_delimiters_serial {"serial", sz_utf8_delimiters_serial};
+    constexpr utf8_delimiters_backend_t utf8_delimiters_serial {"serial", sz_utf8_delimiters_serial};
     check("test_utf8_delimiters_unit_serial", [&] { check_utf8_delimiters_unit_(utf8_delimiters_serial); });
     check("test_utf8_delimiters_safety_serial",
           [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_serial); });

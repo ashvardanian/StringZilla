@@ -157,7 +157,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_powervsx_( //
                                       match_offsets + count, match_lengths + count, matches_capacity - count,
                                       bytes_consumed);
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 
@@ -270,7 +270,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_powervsx_( //
                                          match_offsets + count, match_lengths + count, matches_capacity - count,
                                          bytes_consumed);
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 

@@ -347,6 +347,9 @@ typedef enum sz_kernel_kind_t {
     /** Unicode case folding. */
     sz_kernel_utf8_uncased_fold_k,
 
+    /** Needle analysis for case-insensitive substring search. */
+    sz_kernel_utf8_uncased_needle_init_k,
+
     /** Case-insensitive substring search. */
     sz_kernel_utf8_uncased_search_k,
 
@@ -445,6 +448,7 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_utf8_norm_k: return "utf8_norm";
     case sz_kernel_utf8_find_denormalized_k: return "utf8_find_denormalized";
     case sz_kernel_utf8_uncased_fold_k: return "utf8_uncased_fold";
+    case sz_kernel_utf8_uncased_needle_init_k: return "utf8_uncased_needle_init";
     case sz_kernel_utf8_uncased_search_k: return "utf8_uncased_search";
     case sz_kernel_utf8_uncased_order_k: return "utf8_uncased_order";
     case sz_kernel_utf8_find_cased_k: return "utf8_find_cased";
@@ -521,6 +525,7 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
     if (sz_same_literal_(name, length, "utf8_norm")) return sz_kernel_utf8_norm_k;
     if (sz_same_literal_(name, length, "utf8_find_denormalized")) return sz_kernel_utf8_find_denormalized_k;
     if (sz_same_literal_(name, length, "utf8_uncased_fold")) return sz_kernel_utf8_uncased_fold_k;
+    if (sz_same_literal_(name, length, "utf8_uncased_needle_init")) return sz_kernel_utf8_uncased_needle_init_k;
     if (sz_same_literal_(name, length, "utf8_uncased_search")) return sz_kernel_utf8_uncased_search_k;
     if (sz_same_literal_(name, length, "utf8_uncased_order")) return sz_kernel_utf8_uncased_order_k;
     if (sz_same_literal_(name, length, "utf8_find_cased")) return sz_kernel_utf8_find_cased_k;
@@ -575,13 +580,16 @@ typedef sz_status_t (*sz_kernel_utf8_norm_t)(sz_cptr_t, sz_size_t, sz_normal_for
 /** Signature of the kernels behind @c sz_utf8_find_denormalized_best. */
 typedef sz_status_t (*sz_kernel_utf8_find_denormalized_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_cptr_t *, void *);
 
-/** Forward declaration for uncased needle metadata. */
-struct sz_utf8_uncased_needle_metadata_t;
+/** Forward declaration of the prepared uncased needle. */
+struct sz_utf8_uncased_needle_t;
+
+/** Signature of the kernels behind @c sz_utf8_uncased_needle_init_best. */
+typedef sz_status_t (*sz_kernel_utf8_uncased_needle_init_t)(sz_cptr_t, sz_size_t, struct sz_utf8_uncased_needle_t *,
+                                                            void *);
 
 /** Signature of the kernels behind @c sz_utf8_uncased_search_best. */
-typedef sz_status_t (*sz_kernel_utf8_uncased_search_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t,
-                                                       struct sz_utf8_uncased_needle_metadata_t *, sz_cptr_t *,
-                                                       sz_size_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_uncased_search_t)(sz_cptr_t, sz_size_t, struct sz_utf8_uncased_needle_t const *,
+                                                       sz_cptr_t *, sz_size_t *, void *);
 
 /** Signature of the kernels behind @c sz_utf8_uncased_order_best. */
 typedef sz_status_t (*sz_kernel_utf8_uncased_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_ordering_t *,
@@ -590,10 +598,13 @@ typedef sz_status_t (*sz_kernel_utf8_uncased_order_t)(sz_cptr_t, sz_size_t, sz_c
 /** Signature of the kernels behind @c sz_utf8_find_cased_best. */
 typedef sz_status_t (*sz_kernel_utf8_find_cased_t)(sz_cptr_t, sz_size_t, sz_cptr_t *, void *);
 
-/** Signature of every UTF-8 "find boundaries" kernel - words, graphemes, sentences, lines,
- *  newlines, whitespace, delimiters. Emits parallel (offset, length) arrays for each
- *  segment/delimiter, their count, and a resume @c bytes_consumed. */
-typedef sz_status_t (*sz_kernel_utf8_segmenter_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
+/** Signature of the tiling segmenters - graphemes, words, sentences, lines. Emits one length per
+ *  segment and their count; each segment starts where the previous one ended. */
+typedef sz_status_t (*sz_kernel_utf8_segmenter_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t, sz_size_t *, void *);
+
+/** Signature of the token kernels - newlines, whitespace, delimiters. Emits parallel (offset,
+ *  length) arrays for each match, their count, and a resume @c bytes_consumed. */
+typedef sz_status_t (*sz_kernel_utf8_tokenizer_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
                                                   sz_size_t *, sz_size_t *, void *);
 
 /** Signature of the @c sz_fill_random_best kernels. */

@@ -704,11 +704,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8
 }
 
 /** NEON forward drain — the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_forward_. Emits one
- *  (start, length) per set boundary lane (ascending), honoring @p capacity and the carried
+ *  segment length per set boundary lane (ascending), honoring @p capacity and the carried
  *  previous-boundary via @p previous_io; bit-exact with the Ice Lake leaf. Indices are unpacked
- *  once, then each segment's (start, length) is computed from the carried previous boundary. */
+ *  once, then each segment's length is computed from the carried previous boundary. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_neon_( //
-    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = (sz_size_t)sz_u64_popcount_neon_(boundary);
     sz_size_t previous = *previous_io;
@@ -723,7 +723,6 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_neon_( //
     sz_size_t emitted = 0;
     while (emitted < boundary_count && produced < capacity) {
         sz_size_t const position = base + (sz_size_t)indices[emitted];
-        starts[produced] = previous;
         lengths[produced] = position - previous;
         previous = position;
         ++produced, ++emitted;
@@ -987,10 +986,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_tile3_neon_( //
 
 /** Decode one <=64-byte window of @p text into dense UTF-32 @p runes by the uniform "classify →
  *  whole-window soundness gate → compress starts → gather → width-blend" path, the NEON twin of
- *  @ref sz_utf8_decode_once_icelake_. Pure ASCII takes a dedicated widen lane. An ill-formed
- *  (overlong / surrogate / out-of-range / framing) or truncated-only window declines
- *  (`*runes_count == 0`, cursor unchanged) and the public entry hands the remainder to the
- *  serial reference (the U+FFFD oracle). */
+ *  @ref sz_utf8_decode_once_icelake_. Pure ASCII takes a dedicated widen lane. The step declines
+ *  (`*runes_count == 0`, cursor unchanged) only when the first lead's declared sequence crosses
+ *  the end of the text, which the public entry finalizes without a serial re-decode. */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
     sz_cptr_t text, sz_size_t length,                   //
     sz_rune_t *runes, sz_size_t runes_capacity,         //
@@ -1307,17 +1305,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_neon_( //
             cursor = next;
             continue;
         }
-        // The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
-        // declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and
-        // awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
-        // ill-formed subpart - a bounded <=3-byte finalize, never a serial window re-decode.
-        if (sz_utf8_incomplete_tail_(cursor, end)) break;
+        // The step returns no runes only when the first lead declares a sequence crossing the end
+        // of `text`, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+        // bytes, never a serial re-decode of the window.
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return cursor;
 }
 

@@ -249,7 +249,11 @@ test("Edge Cases - Empty Buffers", () => {
 
     // Empty in empty
     assert.strictEqual(stringzilla.find(empty, empty), 0n);
-    assert.strictEqual(stringzilla.count(empty, empty), 0n);
+
+    // An empty needle matches at every offset, the end included
+    assert.strictEqual(stringzilla.count(empty, empty), 1n);
+    assert.strictEqual(stringzilla.count(haystack, empty), BigInt(haystack.length + 1));
+    assert.strictEqual(stringzilla.count(haystack, empty, true), BigInt(haystack.length + 1));
 });
 
 test("Find Byte - Boundary Values", () => {
@@ -340,6 +344,15 @@ test("UTF-8 Uncased Needle - Reuse Metadata", () => {
 
     const secondResult = compiledNeedle.findIn(haystack.subarray(firstEnd));
     assert.notStrictEqual(secondResult.index, -1n);
+
+    // The needle keeps its own copy, so later writes to the source buffer cannot reach it
+    needleBytes.fill(0x20);
+    assert.deepStrictEqual(compiledNeedle.findIn(haystack), firstResult);
+
+    // An empty needle matches at the start with zero length, like the one-shot search
+    const emptyResult = { index: 0n, length: 0n };
+    assert.deepStrictEqual(new stringzilla.Utf8UncasedNeedle(Buffer.alloc(0)).findIn(haystack), emptyResult);
+    assert.deepStrictEqual(stringzilla.utf8UncasedFind(haystack, Buffer.alloc(0)), emptyResult);
 });
 
 test("Pattern at Buffer Boundaries", () => {
@@ -542,8 +555,12 @@ test("Utf8 Segmentation - Words, Graphemes, Sentences, Linebreaks", () => {
     buf[0] = "L".charCodeAt(0);
     assert.strictEqual(first.toString(), "Live");
 
-    // Empty input yields nothing
+    // Empty input yields nothing, and an exhausted segmenter stays exhausted
     assert.deepStrictEqual([...new stringzilla.Utf8Wordbreaks(Buffer.alloc(0))], []);
+    const segmenter = new stringzilla.Utf8Graphemes(Buffer.from("ab"));
+    assert.strictEqual(segmenter[Symbol.iterator](), segmenter);
+    assert.strictEqual([...segmenter].length, 2);
+    assert.strictEqual(segmenter.next().done, true);
 });
 
 test("Utf8 Segmentation - Batch Refill Beyond 64 Segments", () => {

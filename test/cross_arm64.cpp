@@ -75,7 +75,7 @@ std::size_t test_cross_arm64(test_environment_t const &environment) {
     check("test_utf8_tokens_equivalence_neon",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_neon); });
 
-    constexpr utf8_segment_backend_t utf8_delimiters_neon {"neon", sz_utf8_delimiters_neon};
+    constexpr utf8_delimiters_backend_t utf8_delimiters_neon {"neon", sz_utf8_delimiters_neon};
     check("test_utf8_delimiters_unit_neon", [&] { check_utf8_delimiters_unit_(utf8_delimiters_neon); });
     check("test_utf8_delimiters_safety_neon",
           [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_neon); });
@@ -247,7 +247,7 @@ std::size_t test_cross_arm64(test_environment_t const &environment) {
     check("test_utf8_tokens_equivalence_sve2",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_sve2); });
 
-    constexpr utf8_segment_backend_t utf8_delimiters_sve2 {"sve2", sz_utf8_delimiters_sve2};
+    constexpr utf8_delimiters_backend_t utf8_delimiters_sve2 {"sve2", sz_utf8_delimiters_sve2};
     check("test_utf8_delimiters_unit_sve2", [&] { check_utf8_delimiters_unit_(utf8_delimiters_sve2); });
     check("test_utf8_delimiters_safety_sve2",
           [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_sve2); });

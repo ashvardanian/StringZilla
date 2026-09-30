@@ -47,8 +47,8 @@ using sz::literals::operator""_sv; // for `sz::string_view_t`
 static utf8_tokens_backend_t const utf8_tokens_dispatched = {
     "dispatched", cpu_best<sz_utf8_count_best>, cpu_best<sz_utf8_newlines_best>, cpu_best<sz_utf8_whitespaces_best>};
 
-/** The delimiter dispatch point in the shape of a segmentation backend. */
-static utf8_segment_backend_t const utf8_delimiters_dispatched = {"dispatched", cpu_best<sz_utf8_delimiters_best>};
+/** The delimiter dispatch point in the shape of a token backend. */
+static utf8_delimiters_backend_t const utf8_delimiters_dispatched = {"dispatched", cpu_best<sz_utf8_delimiters_best>};
 
 #pragma region Unit
 

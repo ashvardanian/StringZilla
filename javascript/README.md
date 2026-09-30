@@ -104,6 +104,7 @@ assert.strictEqual(sz.findLastByteFrom(haystack, vowels), 22n); // last 'e' in "
 
 `count` returns how many times a needle occurs in a haystack as a `BigInt`.
 Pass `true` as the third argument to count overlapping matches; the default is non-overlapping.
+An empty needle matches at every offset, the end included, so it counts `haystack.length + 1` times.
 
 ```js
 assert.strictEqual(sz.count(Buffer.from("aaaa"), Buffer.from("aa")), 2n);       // non-overlapping
@@ -182,7 +183,9 @@ It returns an object `{ index, length }`, both `BigInt`, where `index` is the ma
 const { index, length } = sz.utf8UncasedFind(Buffer.from("Hello WÖRLD"), Buffer.from("wörld"));
 ```
 
-The `Utf8UncasedNeedle` class precompiles a needle for repeated searches, amortizing the folding setup.
+The `Utf8UncasedNeedle` class prepares a needle once for repeated searches, amortizing the folding setup.
+It keeps its own copy of the needle bytes, so later writes to the source buffer do not affect it.
+An empty needle matches at index `0n` with length `0n`, in both forms.
 Construct it with the needle buffer and an optional `validate` flag, then call `findIn(haystack, validate?)`, which returns the same `{ index, length }` object.
 
 ```js
@@ -211,7 +214,7 @@ assert.strictEqual(sz.utf8FindDenormalized(decomposed, sz.Utf8NormalForm.NFC), 3
 ## Unicode Segmentation
 
 Four iterable classes lazily split a UTF-8 buffer into TR29 and UAX14 segments: `Utf8Wordbreaks` for words, `Utf8Graphemes` for grapheme clusters, `Utf8Sentences` for sentences, and `Utf8Linebreaks` for line-break opportunities.
-Each is constructed with the source buffer and an optional `validate` flag, and yields zero-copy `subarray` views into it, so the buffer must outlive the iteration.
+Each is constructed with the source buffer and an optional `validate` flag, and is its own iterator, yielding zero-copy `subarray` views into the buffer it keeps alive.
 
 ```js
 const words = [...new sz.Utf8Wordbreaks(Buffer.from("Hello world!"))].map((b) => b.toString());

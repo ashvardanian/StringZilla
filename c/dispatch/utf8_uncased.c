@@ -2,7 +2,8 @@
  *  @file c/dispatch/utf8_uncased.c
  *  @author Ash Vardanian
  *  @date November 23, 2025
- *  @brief The uncased search, order and cased-finder capability lists, dispatch points and finder.
+ *  @brief The uncased search preparation, search, order and cased-finder capability lists, dispatch
+ *      points and finder.
  *
  *  Isolated from the folding unit, `utf8_uncased_fold.c`, because the AVX-512 per-script find
  *  kernels in `utf8_uncased/icelake.h` are by far the heaviest single compilation in the core;
@@ -11,6 +12,20 @@
 #include <stringzilla/utf8_uncased.h>
 
 #include "dispatch.h"
+
+static sz_capability_kernels_t const *sz_utf8_uncased_needle_init_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_utf8_uncased_needle_init_serial,
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k, cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
 
 static sz_capability_kernels_t const *sz_utf8_uncased_search_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
@@ -141,17 +156,21 @@ static sz_capability_kernels_t const *sz_utf8_find_cased_capabilities(void) {
     return lists;
 }
 
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
-    sz_cptr_t *match, sz_size_t *match_length,           //
-    sz_capability_t capabilities, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, sz_size_t needle_length,
+                                                             sz_utf8_uncased_needle_t *prepared,
+                                                             sz_capability_t capabilities, void *stream) {
+    sz_kernel_utf8_uncased_needle_init_t const kernel = (sz_kernel_utf8_uncased_needle_init_t)sz_kernel_pick_(
+        capabilities, sz_utf8_uncased_needle_init_capabilities());
+    return kernel ? kernel(needle, needle_length, prepared, stream) : sz_missing_kernel_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_utf8_uncased_needle_t const *needle, sz_cptr_t *match,
+                                                        sz_size_t *match_length, sz_capability_t capabilities,
+                                                        void *stream) {
     sz_kernel_utf8_uncased_search_t const kernel = (sz_kernel_utf8_uncased_search_t)sz_kernel_pick_(
         capabilities, sz_utf8_uncased_search_capabilities());
-    return kernel
-               ? kernel(haystack, haystack_length, needle, needle_length, needle_metadata, match, match_length, stream)
-               : sz_missing_kernel_k;
+    return kernel ? kernel(haystack, haystack_length, needle, match, match_length, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
@@ -174,6 +193,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_find_kernel(sz_kernel_kind_t kind, s
                                                         sz_kernel_punned_t *kernel, sz_capability_t *capability) {
     sz_capability_kernels_t const *lists = STRINGZILLA_NULL;
     switch (kind) {
+    case sz_kernel_utf8_uncased_needle_init_k: lists = sz_utf8_uncased_needle_init_capabilities(); break;
     case sz_kernel_utf8_uncased_search_k: lists = sz_utf8_uncased_search_capabilities(); break;
     case sz_kernel_utf8_uncased_order_k: lists = sz_utf8_uncased_order_capabilities(); break;
     case sz_kernel_utf8_find_cased_k: lists = sz_utf8_find_cased_capabilities(); break;

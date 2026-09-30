@@ -12,8 +12,9 @@ use core::ffi::c_void;
 /// u32 array. It fills the output buffer, or drains the input, in a single call, looping internally
 /// regardless of how many byte-widths the text mixes. Ill-formed bytes decode to the replacement
 /// character U+FFFD, one per maximal ill-formed subpart, so every written value is a valid Unicode
-/// scalar value; a well-formed but truncated trailing sequence is left unconsumed so a streaming
-/// caller can resume once more bytes arrive.
+/// scalar value. The end of `text` is the end of the input: a well-formed but truncated final
+/// sequence decodes to one U+FFFD and is consumed, so a caller decoding a stream in chunks must cut
+/// them at rune boundaries.
 ///
 /// # Arguments
 ///
@@ -181,7 +182,7 @@ where
 
 /// Lazy UTF-8 character view with SIMD-accelerated operations.
 ///
-/// Provides O(1) construction with lazy character counting and efficient random access.
+/// Provides O(1) construction, character counting on demand, and efficient random access.
 ///
 /// # Examples
 ///
@@ -191,7 +192,7 @@ where
 /// let text = "Hello🌍";
 /// let view = sz::Utf8View::new(text.as_bytes());
 ///
-/// // Lazy character count (computed once, then cached)
+/// // Character count, each call counting anew
 /// assert_eq!(view.len(), 6);
 ///
 /// // Random access to byte offset of Nth character
@@ -203,26 +204,17 @@ where
 /// ```
 pub struct Utf8View<'a> {
     octets: &'a [u8],
-    cached_len: core::cell::Cell<Option<usize>>,
 }
 
 impl<'a> Utf8View<'a> {
     /// Creates a new UTF-8 view (O(1) - no scanning).
     pub const fn new(octets: &'a [u8]) -> Self {
-        Self {
-            octets,
-            cached_len: core::cell::Cell::new(None),
-        }
+        Self { octets }
     }
 
-    /// Returns the number of UTF-8 characters, evaluated lazily and cached after the first call.
+    /// Returns the number of UTF-8 characters, counting them on every call.
     pub fn len(&self) -> usize {
-        if let Some(len) = self.cached_len.get() {
-            return len;
-        }
-        let len = count_utf8(self.octets);
-        self.cached_len.set(Some(len));
-        len
+        count_utf8(self.octets)
     }
 
     /// Checks if the view is empty.
@@ -261,11 +253,10 @@ impl<'a> Utf8View<'a> {
 /// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
 /// ```
 pub struct Utf8Runes<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
-    octets: &'a [u8],
-    octets_offset: usize,
-    runes: [u32; STEPS], // Buffered codepoints decoded from the current chunk
-    runes_count: usize,  // Number of buffered codepoints (0 once exhausted)
-    runes_offset: usize, // Index of the next codepoint to yield from the buffer
+    rest: &'a [u8],      // Bytes not yet decoded
+    runes: [u32; STEPS], // Codepoints decoded from the last chunk
+    count: usize,        // Number of buffered codepoints
+    index: usize,        // Index of the next codepoint to yield from the buffer
 }
 
 impl<'a> Utf8Runes<'a, ITERATORS_DEFAULT_STEPS> {
@@ -281,55 +272,11 @@ impl<'a, const STEPS: usize> Utf8Runes<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` codepoints per FFI call.
     pub fn with_steps(octets: &'a [u8]) -> Self {
         const { assert!(STEPS > 0, "STEPS must be positive") };
-        let mut iter = Self {
-            octets,
-            octets_offset: 0,
+        Self {
+            rest: octets,
             runes: [0; STEPS],
-            runes_count: 0,
-            runes_offset: 0,
-        };
-        iter.decode_batch();
-        iter
-    }
-
-    /// Decodes the next chunk of UTF-8 bytes into the runes buffer; `runes_count` becomes
-    /// 0 once drained.
-    fn decode_batch(&mut self) {
-        if self.octets_offset >= self.octets.len() {
-            self.runes_count = 0;
-            return;
-        }
-
-        let octets_ptr = unsafe { self.octets.as_ptr().add(self.octets_offset) as *const c_void };
-        let mut unpacked_count: usize = 0;
-        let mut bytes_consumed: usize = 0;
-        unsafe {
-            sz_utf8_decode_best(
-                octets_ptr,
-                self.octets.len() - self.octets_offset,
-                self.runes.as_mut_ptr(),
-                STEPS,
-                &mut unpacked_count,
-                &mut bytes_consumed,
-                enabled_cpu_capabilities_mask(),
-                core::ptr::null_mut(),
-            )
-        }
-        .infallible();
-
-        self.octets_offset += bytes_consumed;
-        self.runes_offset = 0;
-
-        // The decoder stops, yielding nothing, on a well-formed but truncated trailing sequence so
-        // a streaming caller can resume. We own the whole slice, so there is nothing more to resume
-        // with: finalize that tail as a single U+FFFD, its maximal subpart, instead of silently
-        // dropping it, matching `from_utf8_lossy`.
-        if unpacked_count == 0 && self.octets_offset < self.octets.len() {
-            self.runes[0] = 0xFFFD;
-            self.runes_count = 1;
-            self.octets_offset = self.octets.len();
-        } else {
-            self.runes_count = unpacked_count;
+            count: 0,
+            index: 0,
         }
     }
 }
@@ -338,16 +285,18 @@ impl<'a, const STEPS: usize> Iterator for Utf8Runes<'a, STEPS> {
     type Item = char;
 
     fn next(&mut self) -> Option<char> {
-        // If the buffer is drained, decode the next chunk.
-        if self.runes_offset >= self.runes_count {
-            self.decode_batch();
-            if self.runes_count == 0 {
+        if self.index == self.count {
+            if self.rest.is_empty() {
                 return None;
             }
+            let (consumed, count) = utf8_decode(self.rest, &mut self.runes);
+            debug_assert!(count > 0, "the decoder stopped short of a full buffer");
+            self.rest = &self.rest[consumed..];
+            self.count = count;
+            self.index = 0;
         }
-
-        let codepoint = self.runes[self.runes_offset];
-        self.runes_offset += 1;
+        let codepoint = self.runes[self.index];
+        self.index += 1;
         // Safety: `sz_utf8_decode_best` only emits valid Unicode scalar values (ill-formed input
         // becomes U+FFFD), so the conversion never sees a surrogate or an out-of-range value - no
         // per-codepoint re-validation needed.
@@ -355,10 +304,7 @@ impl<'a, const STEPS: usize> Iterator for Utf8Runes<'a, STEPS> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        // Lower bound: remaining runes in current buffer; upper bound unknown without counting
-        // the whole string.
-        let lower = self.runes_count.saturating_sub(self.runes_offset);
-        (lower, None)
+        (self.count - self.index, None)
     }
 }
 
@@ -414,20 +360,14 @@ mod tests {
         let ill_formed: [&[u8]; 4] = [b"\x80", b"\xC0\x80", b"\xED\xA0\x80", b"a\xFFb"];
         for bytes in ill_formed {
             let mut runes = [0u32; 16];
-            let mut offset = 0;
-            while offset < bytes.len() {
-                let (consumed, count) = sz::utf8_decode(&bytes[offset..], &mut runes);
-                for &rune in &runes[..count] {
-                    assert!(
-                        rune <= 0x10FFFF && !(0xD800..=0xDFFF).contains(&rune),
-                        "non-scalar value 0x{:X}",
-                        rune
-                    );
-                }
-                if consumed == 0 {
-                    break;
-                }
-                offset += consumed;
+            let (consumed, count) = sz::utf8_decode(bytes, &mut runes);
+            assert_eq!(consumed, bytes.len());
+            for &rune in &runes[..count] {
+                assert!(
+                    rune <= 0x10FFFF && !(0xD800..=0xDFFF).contains(&rune),
+                    "non-scalar value 0x{:X}",
+                    rune
+                );
             }
         }
         // A lone 0xFF between two ASCII bytes yields exactly 'a', U+FFFD, 'b' -
@@ -439,10 +379,15 @@ mod tests {
 
     #[test]
     fn utf8_runes_finalize_truncated_tail() {
-        // A string ending mid-codepoint yields the leading runes then a single U+FFFD for the
-        // truncated tail, never silently dropping it, matching `String::from_utf8_lossy`.
+        // The decoder itself consumes a truncated final sequence as one U+FFFD, matching
+        // `String::from_utf8_lossy`, so the iterators need no patch of their own.
+        let mut runes = [0u32; 4];
+        assert_eq!(sz::utf8_decode(b"a\xE2\x82", &mut runes), (3, 2));
+        assert_eq!(&runes[..2], &['a' as u32, 0xFFFD]);
         let truncated = b"hi\xF0\x9F\x98"; // "hi" + the first 3 bytes of a 4-byte emoji
         let runes: Vec<char> = sz::Utf8View::new(truncated).iter().collect();
         assert_eq!(runes, vec!['h', 'i', '\u{FFFD}']);
+        let one_by_one: Vec<char> = sz::Utf8Runes::<1>::with_steps(truncated).collect();
+        assert_eq!(one_by_one, runes);
     }
 }

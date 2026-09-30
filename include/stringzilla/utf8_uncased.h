@@ -6,6 +6,7 @@
  *
  *  Public Core API:
  *
+ *  - @c sz_utf8_uncased_needle_init_best - one-time analysis of a needle for uncased search
  *  - @c sz_utf8_uncased_search_best - uncased substring search in UTF-8 strings
  *  - @c sz_utf8_uncased_order_best - uncased lexicographical comparison of UTF-8 strings
  *  - @c sz_utf8_find_cased_best - the first cased (foldable) codepoint, or NULL if caseless
@@ -15,8 +16,8 @@
  *  Folding is locale-independent and deterministic across platforms.
  *
  *  On fast vectorized paths there may be significant algorithmic differences between ISA versions;
- *  the per-script SIMD kernels (Ice Lake, ...) consume needle metadata produced by the ISA-agnostic
- *  classifier in `utf8_uncased/serial.h`.
+ *  the per-script SIMD kernels (Ice Lake, ...) consume the needle analysis produced once by the
+ *  ISA-agnostic classifier in `utf8_uncased/serial.h`.
  *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
@@ -25,13 +26,41 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h"        // `sz_capability_t`
-#include "stringzilla/utf8_uncased/serial.h" // `sz_utf8_uncased_needle_metadata_t`
+#include "stringzilla/utf8_uncased/serial.h" // `sz_utf8_uncased_needle_t`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #pragma region Core API
+
+/**
+ *  @brief Analyses a needle once for any number of uncased searches, under any capabilities.
+ *
+ *  Picks the per-script search kernel and the probe positions it matches on, so that
+ *  @c sz_utf8_uncased_search_best never re-analyses the needle. The prepared needle points at
+ *  @p needle rather than copying it, so the needle must outlive it:
+ *
+ *  @code{.c}
+ *      sz_utf8_uncased_needle_t prepared;
+ *      sz_utf8_uncased_needle_init_best("STRASSE", 7, &prepared, capabilities, STRINGZILLA_NULL);
+ *      sz_cptr_t match;
+ *      sz_size_t match_length;
+ *      sz_utf8_uncased_search_best("die Straße", 11, &prepared, &match, &match_length, capabilities,
+ *                                  STRINGZILLA_NULL);
+ *      // match points at "Straße", match_length == 7
+ *  @endcode
+ *
+ *  @param[in] needle UTF-8 substring to search for, possibly empty.
+ *  @param[in] needle_length Number of bytes in @p needle.
+ *  @param[out] prepared The prepared needle, every field filled.
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ */
+STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, sz_size_t needle_length,
+                                                             sz_utf8_uncased_needle_t *prepared,
+                                                             sz_capability_t capabilities, void *stream);
 
 /**
  *  @brief Uncased substring search in UTF-8 strings.
@@ -109,10 +138,8 @@ extern "C" {
  *
  *  @param[in] haystack UTF-8 string to be searched.
  *  @param[in] haystack_length Number of bytes in the haystack buffer.
- *  @param[in] needle UTF-8 substring to search for.
- *  @param[in] needle_length Number of bytes in the needle buffer.
- *  @param[inout] needle_metadata Needle analysis, filled on first use: zero it for a new needle and
- *      reuse it across searches of the same needle, under any @p capabilities.
+ *  @param[in] needle The needle, prepared by @c sz_utf8_uncased_needle_init_best; an empty one
+ *      matches at the start of @p haystack with a zero @p match_length.
  *  @param[out] match The first match in @p haystack, or @c STRINGZILLA_NULL_CHAR if not found.
  *  @param[out] match_length Number of bytes in the matched region.
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
@@ -125,12 +152,10 @@ extern "C" {
  *  @see Efficient Parameterized Pattern Matching in Sublinear Space: https://arxiv.org/abs/2306.10714
  *  @see uni-algo: https://github.com/uni-algo/uni-algo
  */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
-    sz_cptr_t *match, sz_size_t *match_length,           //
-    sz_capability_t capabilities, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_utf8_uncased_needle_t const *needle, sz_cptr_t *match,
+                                                        sz_size_t *match_length, sz_capability_t capabilities,
+                                                        void *stream);
 
 /**
  *  @brief Uncased lexicographic comparison of two UTF-8 strings.
@@ -223,10 +248,11 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
  *          sz_find_best(haystack, haystack_length, needle, needle_length, &match, capabilities, STRINGZILLA_NULL);
  *      } else {
  *          // Slow path: full uncased search
- *          sz_utf8_uncased_needle_metadata_t needle_metadata = {0};
+ *          sz_utf8_uncased_needle_t prepared;
  *          sz_size_t match_length;
- *          sz_utf8_uncased_search_best(haystack, haystack_length, needle, needle_length, &needle_metadata, &match,
- *                                      &match_length, capabilities, STRINGZILLA_NULL);
+ *          sz_utf8_uncased_needle_init_best(needle, needle_length, &prepared, capabilities, STRINGZILLA_NULL);
+ *          sz_utf8_uncased_search_best(haystack, haystack_length, &prepared, &match, &match_length, capabilities,
+ *                                      STRINGZILLA_NULL);
  *      }
  *  @endcode
  *
@@ -253,11 +279,12 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_find_kernel(sz_kernel_kind_t kind, s
 
 #pragma region Platform Specific Backends
 
+/** @copydoc sz_utf8_uncased_needle_init_best */
+STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_serial(sz_cptr_t needle, sz_size_t needle_length,
+                                                               sz_utf8_uncased_needle_t *prepared, void *stream);
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_serial( //
-    sz_cptr_t haystack, sz_size_t haystack_length,         //
-    sz_cptr_t needle, sz_size_t needle_length,             //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,    //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_serial(                                 //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_serial( //
@@ -267,10 +294,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_serial(sz_cptr_t text, sz_size_t 
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_haswell( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
-    sz_cptr_t needle, sz_size_t needle_length,              //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,     //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_haswell(                                //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_haswell( //
@@ -282,10 +307,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_haswell(sz_cptr_t text, sz_size_t
 
 #if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_icelake( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
-    sz_cptr_t needle, sz_size_t needle_length,              //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,     //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_icelake(                                //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_icelake( //
@@ -297,10 +320,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_icelake(sz_cptr_t text, sz_size_t
 
 #if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_neon( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_neon(                                   //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_neon( //
@@ -311,10 +332,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_neon(sz_cptr_t text, sz_size_t le
 
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_sve2( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_sve2(                                   //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_sve2( //
@@ -325,10 +344,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_sve2(sz_cptr_t text, sz_size_t le
 
 #if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_rvv( //
-    sz_cptr_t haystack, sz_size_t haystack_length,      //
-    sz_cptr_t needle, sz_size_t needle_length,          //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_rvv(                                    //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_rvv( //
@@ -339,10 +356,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_rvv(sz_cptr_t text, sz_size_t len
 
 #if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128(                                   //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_v128( //
@@ -353,10 +368,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t le
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_loongsonasx( //
-    sz_cptr_t haystack, sz_size_t haystack_length,              //
-    sz_cptr_t needle, sz_size_t needle_length,                  //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,         //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_loongsonasx(                            //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_loongsonasx( //
@@ -368,10 +381,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_loongsonasx(sz_cptr_t text, sz_si
 
 #if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_uncased_search_best */
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_powervsx( //
-    sz_cptr_t haystack, sz_size_t haystack_length,           //
-    sz_cptr_t needle, sz_size_t needle_length,               //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,      //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_powervsx(                               //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_powervsx( //
@@ -399,15 +410,19 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_powervsx(sz_cptr_t text, sz_size_
 
 #if STRINGZILLA_HEADER_ONLY
 
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
-    sz_cptr_t *match, sz_size_t *match_length,           //
-    sz_capability_t capabilities, void *stream) {
-    sz_unused_(haystack), sz_unused_(haystack_length), sz_unused_(needle), sz_unused_(needle_length),
-        sz_unused_(needle_metadata), sz_unused_(match), sz_unused_(match_length), sz_unused_(capabilities),
-        sz_unused_(stream);
+STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, sz_size_t needle_length,
+                                                             sz_utf8_uncased_needle_t *prepared,
+                                                             sz_capability_t capabilities, void *stream) {
+    sz_unused_(needle), sz_unused_(needle_length), sz_unused_(prepared), sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                        sz_utf8_uncased_needle_t const *needle, sz_cptr_t *match,
+                                                        sz_size_t *match_length, sz_capability_t capabilities,
+                                                        void *stream) {
+    sz_unused_(haystack), sz_unused_(haystack_length), sz_unused_(needle), sz_unused_(match), sz_unused_(match_length),
+        sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 

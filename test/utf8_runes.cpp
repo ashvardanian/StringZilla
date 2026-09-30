@@ -157,6 +157,15 @@ void test_utf8_runes_unit() {
         scope_verify(std::string exact_boundary(64, 'x'), exact_boundary += "\xD0\x9F\xE4\xB8\x96\xF0\x9F\x98\x80",
                      sz::string_view_t(exact_boundary).utf8_count() == 67);
     }
+
+    // `+=` counts from the current rune, both inside the decoded batch and past it.
+    {
+        auto rune = "abcdefgh"_sv.utf8_runes().begin();
+        verify(*(++rune += 2) == 'd');
+        sz::utf8_runes_view<sz::string_view_t, 2> pairs("a\xD0\x9F\xE4\xB8\x96\xF0\x9F\x98\x80xy"_sv);
+        auto paired = pairs.begin();
+        verify(*(paired += 3) == 0x1F600 && *(paired += 2) == 'y' && ++paired == pairs.end());
+    }
 }
 
 /**
@@ -229,6 +238,9 @@ void test_utf8_runes_scripts_unit() {
         let_verify(auto c = runes_of("a\xE2\x80\x8B" "b"),
                    c.size() == 3 && c[0] == 'a' && c[1] == 0x200B && c[2] == 'b');
         let_verify(auto c = runes_of("\xEF\xBB\xBF"), c.size() == 1 && c[0] == 0xFEFF); // BOM
+
+        // A truncated sequence at the end is one U+FFFD, not dropped
+        let_verify(auto c = runes_of("a\xE2\x82"), c.size() == 2 && c[0] == 'a' && c[1] == 0xFFFD);
 
         // Combining diacritics (e + combining acute) vs precomposed. Written as \xHH escapes so the decomposed
         // sequence cannot be NFC-composed away by an editor/normalizer.

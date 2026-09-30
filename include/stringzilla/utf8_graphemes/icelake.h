@@ -462,16 +462,12 @@ STRINGZILLA_INLINE sz_grapheme_window_t sz_grapheme_classify_window_full_icelake
 
 #pragma region Grapheme forward driver
 
-STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_icelake_(   //
-    sz_cptr_t text, sz_size_t length,                      //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
-    sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_icelake_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_size_t *cluster_lengths, sz_size_t clusters_capacity) {
 
     sz_size_t clusters = 0;
-    if (length == 0 || clusters_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || clusters_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
 
@@ -487,32 +483,21 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_icelake_(   //
         // The GB1 anchor at byte 0 of the first window is the open cluster's own start, not a new break: clear it so
         // the substrate drain (which has no zero-length-cluster guard) never emits an empty leading cluster.
         sz_u64_t boundary = base == 0 ? (window.boundary & ~1ull) : window.boundary;
-        clusters = sz_utf8_rune_drain_forward_(boundary, base, lane_identity_u8x64, cluster_starts, cluster_lengths,
-                                               clusters, clusters_capacity, &cluster_start);
-        if (clusters == clusters_capacity) {
-            if (bytes_consumed) *bytes_consumed = cluster_start;
-            return clusters;
-        }
+        clusters = sz_utf8_rune_drain_forward_(boundary, base, lane_identity_u8x64, cluster_lengths, clusters,
+                                               clusters_capacity, &cluster_start);
+        if (clusters == clusters_capacity) return clusters;
         base += window.byte_span;
     }
 
-    cluster_starts[clusters] = cluster_start;
     cluster_lengths[clusters] = length - cluster_start;
-    ++clusters;
-    if (bytes_consumed) *bytes_consumed = length;
-    return clusters;
+    return clusters + 1;
 }
 
-STRINGZILLA_API sz_status_t sz_utf8_graphemes_icelake(                                  //
-    sz_cptr_t text, sz_size_t length,                                                   //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, sz_size_t clusters_capacity, //
-    sz_size_t *clusters_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                      sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *clusters_count = sz_utf8_graphemes_icelake_(text, length, cluster_starts, cluster_lengths, clusters_capacity,
-                                                 bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, *clusters_count,
-                                         bytes_consumed ? *bytes_consumed : length, cluster_starts, cluster_lengths, 0,
-                                         sz_true_k));
+    *count = sz_utf8_graphemes_icelake_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

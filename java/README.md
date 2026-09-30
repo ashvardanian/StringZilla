@@ -61,17 +61,19 @@ byte[] sha = StringZilla.Sha256.hashData(data); // cf. MessageDigest "SHA-256"
 
 ## UTF-8 Codepoints and Segmentation
 
-The segmentation primitive is allocation-free: it fills the caller's arrays and returns the count.
+The segmentation primitive is allocation-free: it fills the caller's array with segment lengths and returns the count.
+Segments tile the text, so each starts where the previous one ended.
 
 ```java
-int decoded = StringZilla.decode(text, codepoints); // fill an int[]; ill-formed -> U+FFFD
+int decoded = StringZilla.decode(text, codepoints); // fill an int[]; ill-formed or truncated -> U+FFFD
 
-long[] starts = new long[64];
 long[] lengths = new long[64];
-long[] consumed = new long[1];
-int count = StringZilla.segment(text, 0, text.length, StringZilla.SegmentKind.WORDS, starts, lengths, consumed); // UAX-29
-for (int segment = 0; segment < count; segment++)
-    use(text, (int) starts[segment], (int) lengths[segment]);
+int count = StringZilla.segment(text, 0, text.length, StringZilla.SegmentKind.WORDS, lengths); // UAX-29
+int start = 0;
+for (int segment = 0; segment < count; segment++) {
+    use(text, start, (int) lengths[segment]);
+    start += (int) lengths[segment];
+}
 ```
 
 Codepoints count scalar values, not bytes or UTF-16 chars.
@@ -102,10 +104,13 @@ for (MemorySegment token : StringZilla.splitAny(text, separators)) use(token);  
 for (MemorySegment line : StringZilla.splitWhitespaces(text).skipEmpty()) use(line); // collapse runs
 
 long[] offsets = StringZilla.matches(haystack, needle).toArray(); // every offset; .overlapping() for overlaps
-StringZilla.uncasedMatches(haystack, needle).stream().forEach(this::use); // caseless; Match.offset/length
+StringZilla.uncasedMatches(haystack, needle).stream().forEach(this::use); // caseless; Match.offset/matchedLength
 
 StringZilla.Partition parts = StringZilla.partition(text, equals); // (before, separator, after)
 ```
+
+`withMaxSplit(n)` stops after `n` separators: `0` yields the whole text, and a negative `n`, the default, splits at every separator.
+An empty separator yields the whole text, a trailing separator leaves a final empty segment unless `.skipEmpty()`, and an empty needle matches at every offset up to and including the end, or at every codepoint boundary when uncased.
 
 The zero-allocation cursor, e.g. to sort a file's lines without materializing them:
 

@@ -293,16 +293,12 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_u
  *  classify, and dense-compaction front-end feeds the shared portable rule engine
  *  @ref sz_utf8_sentence_break_decide_block_, whose dense breaks are scattered back
  *  to byte lanes. */
-STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_(     //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
-    sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_size_t *sentence_lengths, sz_size_t sentences_capacity) {
 
     sz_size_t sentences = 0;
-    if (length == 0 || sentences_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || sentences_capacity == 0) return 0;
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t sentence_start = 0;
@@ -400,11 +396,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_(     //
         //  Resolve a previously deferred SB8 boundary before any of this window's boundaries.
         if (sb8_pending_active && win.sb8_resolution != 0) {
             if (win.sb8_resolution == 1) {
-                if (sentences == sentences_capacity) {
-                    if (bytes_consumed) *bytes_consumed = sentence_start;
-                    return sentences;
-                }
-                sentence_starts[sentences] = sentence_start;
+                if (sentences == sentences_capacity) return sentences;
                 sentence_lengths[sentences] = sb8_pending_position - sentence_start;
                 ++sentences;
                 sentence_start = sb8_pending_position;
@@ -425,12 +417,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_(     //
             byte_adv = (sz_size_t)_tzcnt_u64(upto);
         }
 
-        sentences = sz_utf8_rune_drain_forward_haswell_(boundary_lanes, position, sentence_starts, sentence_lengths,
-                                                        sentences, sentences_capacity, &sentence_start);
-        if (sentences == sentences_capacity) {
-            if (bytes_consumed) *bytes_consumed = sentence_start;
-            return sentences;
-        }
+        sentences = sz_utf8_rune_drain_forward_haswell_(boundary_lanes, position, sentence_lengths, sentences,
+                                                        sentences_capacity, &sentence_start);
+        if (sentences == sentences_capacity) return sentences;
 
         if (dense_adv >= dense_count) {
             carry = carry_full;
@@ -454,25 +443,15 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_(     //
     }
 
     if (sb8_pending_active) {
-        if (sentences == sentences_capacity) {
-            if (bytes_consumed) *bytes_consumed = sentence_start;
-            return sentences;
-        }
-        sentence_starts[sentences] = sentence_start;
+        if (sentences == sentences_capacity) return sentences;
         sentence_lengths[sentences] = sb8_pending_position - sentence_start;
         ++sentences;
         sentence_start = sb8_pending_position;
     }
 
-    if (sentences == sentences_capacity) {
-        if (bytes_consumed) *bytes_consumed = sentence_start;
-        return sentences;
-    }
-    sentence_starts[sentences] = sentence_start;
+    if (sentences == sentences_capacity) return sentences;
     sentence_lengths[sentences] = length - sentence_start;
-    ++sentences;
-    if (bytes_consumed) *bytes_consumed = length;
-    return sentences;
+    return sentences + 1;
 }
 
 #pragma endregion Forward driver
@@ -481,16 +460,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_(     //
 
 #if STRINGZILLA_TARGET_HASWELL
 
-STRINGZILLA_API sz_status_t sz_utf8_sentences_haswell(                                     //
-    sz_cptr_t text, sz_size_t length,                                                      //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, sz_size_t sentences_capacity, //
-    sz_size_t *sentences_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_sentences_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                      sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *sentences_count = sz_utf8_sentences_haswell_(text, length, sentence_starts, sentence_lengths, sentences_capacity,
-                                                  bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, *sentences_count,
-                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
-                                         0, sz_true_k));
+    *count = sz_utf8_sentences_haswell_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

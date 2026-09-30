@@ -219,33 +219,28 @@ STRINGZILLA_CONSTEXPR sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sen
     return sz_sentence_decision_no_break_k; // SB998
 }
 
-/** Appends the sentence ending at @p boundary to the output arrays and re-anchors the running
- *  start. Returns @c sz_false_k when the capacity is exhausted: the caller stops and reports
- *  the emitted prefix. */
-STRINGZILLA_CONSTEXPR sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t *sentence_starts,
-                                                         sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                         sz_size_t *sentences, sz_size_t *sentence_start) {
+/** Appends the length of the sentence ending at @p boundary to the output and re-anchors the
+ *  running start. Returns @c sz_false_k when the capacity is exhausted: the caller stops and
+ *  reports the emitted prefix. */
+STRINGZILLA_CONSTEXPR sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t *sentence_lengths,
+                                                         sz_size_t sentences_capacity, sz_size_t *sentences,
+                                                         sz_size_t *sentence_start) {
     if (*sentences == sentences_capacity) return sz_false_k;
-    sentence_starts[*sentences] = *sentence_start;
     sentence_lengths[*sentences] = boundary - *sentence_start;
     ++(*sentences);
     *sentence_start = boundary;
     return sz_true_k;
 }
 
-/** Plural UAX-29 sentence segmentation: one forward sweep emits every sentence into parallel
- *  @p sentence_starts and @p sentence_lengths, carrying the SB run-state so each codepoint is
- *  decoded once, O(n) with no backward re-walks. */
-STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_(      //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
-    sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
+/** Plural UAX-29 sentence segmentation: one forward sweep emits the length of every sentence to
+ *  @p sentence_lengths, carrying the SB run-state so each codepoint is decoded once, in O(n) and
+ *  with no backward re-walks. */
+STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *sentence_lengths, sz_size_t sentences_capacity) {
 
     sz_size_t sentences = 0;
-    if (length == 0 || sentences_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || sentences_capacity == 0) return 0;
 
     sz_sentence_serial_state_t state;
     state.previous_property = (sz_u8_t)sz_sentence_break_other_k;
@@ -266,11 +261,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_(      //
         if (boundary_pending) {
             if (after == sz_sentence_break_lower_k) { boundary_pending = sz_false_k; } // SB8: Lower → suppress
             else if (sz_sentence_break_sb8_stops_(after)) { // stop → confirm the deferred break
-                if (!sz_sentence_serial_emit_(boundary_pending_position, sentence_starts, sentence_lengths,
-                                              sentences_capacity, &sentences, &sentence_start)) {
-                    if (bytes_consumed) *bytes_consumed = sentence_start;
+                if (!sz_sentence_serial_emit_(boundary_pending_position, sentence_lengths, sentences_capacity,
+                                              &sentences, &sentence_start))
                     return sentences;
-                }
                 boundary_pending = sz_false_k;
             }
             else { // a neutral codepoint extends the SB8 run: keep the deferred verdict, no boundary here
@@ -281,11 +274,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_(      //
         }
         sz_sentence_decision_t const decision = sz_sentence_serial_boundary_(&state, after);
         if (decision == sz_sentence_decision_break_k) {
-            if (!sz_sentence_serial_emit_(position, sentence_starts, sentence_lengths, sentences_capacity, &sentences,
-                                          &sentence_start)) {
-                if (bytes_consumed) *bytes_consumed = sentence_start;
+            if (!sz_sentence_serial_emit_(position, sentence_lengths, sentences_capacity, &sentences, &sentence_start))
                 return sentences;
-            }
         }
         else if (decision == sz_sentence_decision_pending_k) {
             boundary_pending = sz_true_k;
@@ -296,17 +286,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_(      //
     }
 
     // End of text: no Lower can follow, so any deferred SB8 verdict settles as a break before the final sentence.
-    if (boundary_pending && !sz_sentence_serial_emit_(boundary_pending_position, sentence_starts, sentence_lengths,
-                                                      sentences_capacity, &sentences, &sentence_start)) {
-        if (bytes_consumed) *bytes_consumed = sentence_start;
+    if (boundary_pending && !sz_sentence_serial_emit_(boundary_pending_position, sentence_lengths, sentences_capacity,
+                                                      &sentences, &sentence_start))
         return sentences;
-    }
-    if (!sz_sentence_serial_emit_(length, sentence_starts, sentence_lengths, sentences_capacity, &sentences,
-                                  &sentence_start)) {
-        if (bytes_consumed) *bytes_consumed = sentence_start;
-        return sentences;
-    }
-    if (bytes_consumed) *bytes_consumed = length;
+    sz_sentence_serial_emit_(length, sentence_lengths, sentences_capacity, &sentences, &sentence_start);
     return sentences;
 }
 
@@ -614,7 +597,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
 }
 
 /**
- *  @brief Emits the resolved dense sentence boundaries as @b (start,length) segments, walking the
+ *  @brief Emits the resolved dense sentence boundaries as segment lengths, walking the
  *      codepoint-start lanes once.
  *
  *  Dense index j maps to the j-th set bit of @p start_lanes, a set bit of @p dense_breaks below
@@ -627,8 +610,8 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
  */
 STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_sentence_break_emit_dense_serial_(                              //
     sz_u64_t start_lanes, sz_u64_t dense_breaks, sz_size_t dense_limit, sz_size_t base, int skip_lane0, //
-    sz_size_t loaded, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
-    sz_size_t *segment_start_io, sz_size_t *advance_lane_out) {
+    sz_size_t loaded, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity, sz_size_t *segment_start_io,
+    sz_size_t *advance_lane_out) {
     sz_size_t segment_start = *segment_start_io;
     sz_size_t dense_index = 0;
     sz_size_t advance_lane = loaded;
@@ -642,7 +625,6 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_sentence_break_emit_dense_serial_(      
         if (skip_lane0 && lane == 0) continue;
         if (produced == capacity) break;
         sz_size_t const boundary = base + lane;
-        starts[produced] = segment_start;
         lengths[produced] = boundary - segment_start;
         segment_start = boundary;
         ++produced;
@@ -666,16 +648,11 @@ STRINGZILLA_CONSTEXPR sz_utf8_sentence_break_window_t sz_utf8_sentence_break_dec
 
 #if STRINGZILLA_TARGET_SERIAL
 
-STRINGZILLA_API sz_status_t sz_utf8_sentences_serial(                                      //
-    sz_cptr_t text, sz_size_t length,                                                      //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, sz_size_t sentences_capacity, //
-    sz_size_t *sentences_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_sentences_serial(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                     sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *sentences_count = sz_utf8_sentences_serial_(text, length, sentence_starts, sentence_lengths, sentences_capacity,
-                                                 bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, *sentences_count,
-                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
-                                         0, sz_true_k));
+    *count = sz_utf8_sentences_serial_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

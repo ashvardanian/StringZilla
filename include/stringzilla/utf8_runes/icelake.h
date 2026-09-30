@@ -348,21 +348,21 @@ STRINGZILLA_INLINE __m512i sz_utf8_rune_flat_lookup_icelake_( //
 #pragma region Drains
 
 /**
- *  @brief Emit boundary-lane offsets within an effective window via @c vpcompressb, honoring
- *      @p capacity and a carried previous-boundary position.
+ *  @brief Emit one segment length per boundary lane within an effective window via
+ *      @c vpcompressb, honoring @p capacity and a carried previous-boundary position.
  *
  *  Effective-window aware: only lanes in `[effective_lo, effective_hi]` (those with full
  *  in-register context) are trusted; the caller advances by `effective_step < 64` so edge lanes
  *  serve as context only and are never re-walked scalar-wise.
  *
- *  The @p boundary mask is pre-masked by the caller to the trusted band. Each set lane @c i opens a
- *  segment whose start is the previous boundary position and whose length reaches to `base + i`.
- *  Output is widened to 64-bit `starts[]` / `lengths[]` in waves of eight, carrying the open
- *  segment across waves and windows via @p previous_io.
+ *  The @p boundary mask is pre-masked by the caller to the trusted band. Each set lane @c i closes
+ *  a segment whose start is the previous boundary position and whose length reaches `base + i`.
+ *  Output is widened to 64-bit `lengths[]` in waves of eight, carrying the open segment across
+ *  waves and windows via @p previous_io.
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_( //
-    sz_u64_t boundary, sz_size_t base, __m512i lane_identity_u8x64, sz_size_t *starts, sz_size_t *lengths,
-    sz_size_t produced, sz_size_t capacity, sz_size_t *previous_io) {
+    sz_u64_t boundary, sz_size_t base, __m512i lane_identity_u8x64, sz_size_t *lengths, sz_size_t produced,
+    sz_size_t capacity, sz_size_t *previous_io) {
     __m512i const wave_shift_u8x64 = _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(8));
     sz_size_t const boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
     __m512i packed_u8x64 = _mm512_maskz_compress_epi8(_cvtu64_mask64(boundary), lane_identity_u8x64);
@@ -374,12 +374,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_( //
                                                          _mm512_set1_epi64((long long)base));
         __m512i const segment_starts_u64x8 = _mm512_alignr_epi64(positions_u64x8,
                                                                  _mm512_set1_epi64((long long)previous), 7);
-        __mmask8 const store_mask_m8 = sz_u8_clamp_mask_until_(wave);
-        _mm512_mask_storeu_epi64((void *)(starts + produced), store_mask_m8, segment_starts_u64x8);
-        _mm512_mask_storeu_epi64((void *)(lengths + produced), store_mask_m8,
+        _mm512_mask_storeu_epi64((void *)(lengths + produced), sz_u8_clamp_mask_until_(wave),
                                  _mm512_sub_epi64(positions_u64x8, segment_starts_u64x8));
         produced += wave, emitted += wave;
-        previous = (sz_u64_t)(starts[produced - 1] + lengths[produced - 1]);
+        previous = (sz_u64_t)_mm_cvtsi128_si64(_mm512_castsi512_si128(
+            _mm512_permutexvar_epi64(_mm512_set1_epi64((long long)(wave - 1)), positions_u64x8)));
         packed_u8x64 = _mm512_permutexvar_epi8(wave_shift_u8x64, packed_u8x64);
     }
     *previous_io = (sz_size_t)previous;
@@ -630,9 +629,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_icelake_( //
     __m512i const lengths_u8x64 = _mm512_shuffle_epi8(length_lut_u8x64, high_nibble_u8x64);
     sz_u64_t const starts_bits = _cvtmask64_u64(starts_m64);
     // Any start whose declared sequence would reach past the window is deferred: well-formed text
-    // has only the trailing one (a resumable truncation), but a malformed lead-in-lead (e.g.
-    // `E0 C0`) can overrun earlier - the first overrunning start bounds the decodable prefix, and
-    // its bytes resume in the next window or via serial.
+    // has only the trailing one (a truncation), but a malformed lead-in-lead (e.g. `E0 C0`) can
+    // overrun earlier - the first overrunning start bounds the decodable prefix, and its bytes
+    // resume in the next window, or the driver finalizes them at the end of the text.
     __m512i const sequence_end_u8x64 = _mm512_add_epi8(lane_identity_u8x64, lengths_u8x64);
     __mmask64 const overruns_m64 = _kand_mask64(
         _mm512_cmpgt_epu8_mask(sequence_end_u8x64, _mm512_set1_epi8((char)chunk)), starts_m64);
@@ -822,17 +821,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_icelake_( //
             cursor = next;
             continue;
         }
-        // The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
-        // declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and
-        // awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
-        // ill-formed subpart, a bounded <=3-byte finalize, never a serial window re-decode.
-        if (sz_utf8_incomplete_tail_(cursor, end)) break;
+        // The step returns no runes only when the first lead declares a sequence crossing the end
+        // of `text`, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+        // bytes, never a serial re-decode of the window.
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return cursor;
 }
 

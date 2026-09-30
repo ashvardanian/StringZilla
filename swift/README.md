@@ -99,7 +99,8 @@ if let range = "Grüße".utf8UncasedFind(substring: "GRÜSSE") {
 ```
 
 For repeated case-insensitive searches with the same needle, build a `Utf8UncasedNeedle` once and reuse it.
-The needle caches its precomputed metadata, but is not safe for concurrent use.
+The needle is prepared once and never changes, so one needle can search from many threads at once.
+An empty needle matches at the start of any haystack with an empty range.
 
 ```swift
 let needle = Utf8UncasedNeedle("hello")

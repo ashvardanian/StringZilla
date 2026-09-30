@@ -15,10 +15,10 @@
  *  and SVE2, unlike NEON, has a real hardware gather, so it takes the flat path directly.
  *
  *  The engine and decode leaves were validated bit-exact vs @c sz_utf8_wordbreaks_serial
- *  (streaming-cursor: clamped capacity + @c bytes_consumed resume) over the regression cases, a
- *  capacity × alignment sweep, and ≥ 2,000,000 random valid/malformed inputs at `svcntb()==64` (so
- *  one window == one 64-bit lane-mask domain) - but that campaign predates the flat BMP leaf and
- *  must be re-run on Arm hardware to cover it. The flat table is bit-exact with the cascade by
+ *  (streaming-cursor: clamped capacity, resumed past the words written) over the regression cases,
+ *  a capacity × alignment sweep, and ≥ 2,000,000 random valid/malformed inputs at `svcntb()==64`
+ *  (so one window == one 64-bit lane-mask domain) - but that campaign predates the flat BMP leaf
+ *  and must be re-run on Arm hardware to cover it. The flat table is bit-exact with the cascade by
  *  construction (see @c sz_utf8_word_break_flat_bmp_), and the flat leaf's throughput on Arm is
  *  likewise unmeasured to date.
  *
@@ -868,10 +868,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(           
 
 /** In-register boundary drain over a full byte-vector of lanes: each 32-bit quarter of
  *  @p boundary_b8x is compacted, widened to absolute 64-bit positions, and chained through the
- *  carried open @c word_start with an @c svinsr shift-in, so consecutive boundaries become (start,
- *  length) pairs without a stack round-trip. */
-STRINGZILLA_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *starts,
-                                                      sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+ *  carried open @c word_start with an @c svinsr shift-in, so consecutive boundaries become word
+ *  lengths without a stack round-trip. */
+STRINGZILLA_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *lengths,
+                                                      sz_size_t produced, sz_size_t capacity,
                                                       sz_size_t *word_start_io) {
     svbool_t const pg_b32x = svptrue_b32();
     svbool_t const pg_b64x = svptrue_b64();
@@ -897,8 +897,6 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_
         svuint64_t const starts_high_u64x = svinsr_n_u64(high_u64x, svlastb_u64(pg_b64x, low_u64x));
         svbool_t const store_low_b64x = svwhilelt_b64_u64(0, (sz_u64_t)emitting);
         svbool_t const store_high_b64x = svwhilelt_b64_u64((sz_u64_t)half_lanes, (sz_u64_t)emitting);
-        svst1_u64(store_low_b64x, (sz_u64_t *)(starts + produced), starts_low_u64x);
-        svst1_u64(store_high_b64x, (sz_u64_t *)(starts + produced + half_lanes), starts_high_u64x);
         svst1_u64(store_low_b64x, (sz_u64_t *)(lengths + produced), svsub_u64_x(pg_b64x, low_u64x, starts_low_u64x));
         svst1_u64(store_high_b64x, (sz_u64_t *)(lengths + produced + half_lanes),
                   svsub_u64_x(pg_b64x, high_u64x, starts_high_u64x));
@@ -917,13 +915,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_
  *  regardless of the per-iteration ceiling. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //
     sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *word_starts, sz_size_t *word_lengths,   //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t *word_lengths, sz_size_t words_capacity) {
 
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || words_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const cap = (sz_size_t)svcntb(); // full byte-vector of engine lanes (16 at VL=128, 64 at VL=512)
 
@@ -994,11 +988,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //
             &carry, &breaks_b8x, &deferred_break);
 
         if (deferred_break) {
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_start;
-                return words;
-            }
-            word_starts[words] = word_start;
+            if (words == words_capacity) return words;
             word_lengths[words] = bridge_anchor - word_start;
             ++words;
             word_start = bridge_anchor;
@@ -1006,38 +996,24 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //
         if (carry.bridge_open && !bridge_was_open) bridge_anchor = position;
 
         svbool_t const boundary_b8x = svand_b_z(svptrue_b8(), breaks_b8x, svwhilelt_b8_u64(0, (sz_u64_t)adv));
-        words = sz_utf8_word_drain_sve2_(boundary_b8x, position, word_starts, word_lengths, words, words_capacity,
-                                         &word_start);
-        if (words == words_capacity) {
-            if (bytes_consumed) *bytes_consumed = word_start;
-            return words;
-        }
+        words = sz_utf8_word_drain_sve2_(boundary_b8x, position, word_lengths, words, words_capacity, &word_start);
+        if (words == words_capacity) return words;
 
         position += (adv > 0 && adv < complete_limit) ? adv : (complete_limit ? complete_limit : loaded);
     }
 
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_start;
-        return words;
-    }
-    word_starts[words] = word_start;
+    if (words == words_capacity) return words;
     word_lengths[words] = length - word_start;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = length;
-    return words;
+    return words + 1;
 }
 
 #if STRINGZILLA_TARGET_SVE2
 
-STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_sve2(                           //
-    sz_cptr_t text, sz_size_t length,                                          //
-    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
-    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                    sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *words_count = sz_utf8_wordbreaks_sve2_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, *words_count,
-                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
-                                         sz_true_k));
+    *count = sz_utf8_wordbreaks_sve2_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

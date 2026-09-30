@@ -1,6 +1,7 @@
 # UTF-8 Sentences: UAX-29 Sentence Boundary Iteration
 
 This directory holds the kernels behind `sz_utf8_sentences_best`, which walks a UTF-8 string and yields each sentence as defined by the Unicode UAX-29 sentence-boundary rules, distinguishing a real sentence terminator from an abbreviation dot or a decimal point rather than breaking on every period.
+Each call writes one byte length per sentence, and the sentences tile the input, so a caller that fills its buffer resumes from the sum of the lengths it got.
 Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends on x86, and `sz_utf8_sentences_best` runs the best kernel among the capabilities its caller passes.
 
 ## Methodology

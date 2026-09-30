@@ -194,15 +194,15 @@ assert big[6:].offset_within(big) == 6
 
 ### Eager Splits Returning `Strs`
 
-- `split(separator, maxsplit=∞, keepseparator=False, skip_empty=False)` — split on a non-empty substring separator; raises `ValueError` on an empty separator.
+- `split(separator, maxsplit=∞, keepseparator=False, skip_empty=False)` — split on a substring separator; unlike `str.split`, an empty separator leaves the text whole instead of raising.
 - `rsplit(separator, maxsplit=∞, keepseparator=False, skip_empty=False)` — same, scanning from the right.
 - `split_byteset(separators, maxsplit=∞, keepseparator=False, skip_empty=False)` — split on any single byte from the `separators` set.
 - `rsplit_byteset(separators, maxsplit=∞, keepseparator=False, skip_empty=False)` — same, from the right.
 - `splitlines(keeplinebreaks=False, maxsplit=∞)` — split on line breaks.
 
-`maxsplit` caps the number of splits and defaults to unlimited.
+`maxsplit` caps the number of separators consumed, so `0` leaves the text whole, while a negative value or the default means unlimited.
 `keepseparator` keeps the matched separator attached to the parts.
-`skip_empty` drops empty segments between adjacent separators.
+`skip_empty` drops zero-length parts, so a part keeping its separator is never dropped.
 
 ```python
 import stringzilla as sz
@@ -216,12 +216,12 @@ assert list(map(str, sz.Str("a\nb\nc").splitlines())) == ["a", "b", "c"]
 ### Lazy Split Iterators
 
 Each eager split has a lazy counterpart that yields `Str` views one at a time without building the whole `Strs`.
-These take `keepseparator=False` and `skip_empty=False` but no `maxsplit`.
+They take the same arguments.
 
-- `split_iter(separator, keepseparator=False, skip_empty=False)`
-- `rsplit_iter(separator, keepseparator=False, skip_empty=False)`
-- `split_byteset_iter(separators, keepseparator=False, skip_empty=False)`
-- `rsplit_byteset_iter(separators, keepseparator=False, skip_empty=False)`
+- `split_iter(separator, maxsplit=∞, keepseparator=False, skip_empty=False)`
+- `rsplit_iter(separator, maxsplit=∞, keepseparator=False, skip_empty=False)`
+- `split_byteset_iter(separators, maxsplit=∞, keepseparator=False, skip_empty=False)`
+- `rsplit_byteset_iter(separators, maxsplit=∞, keepseparator=False, skip_empty=False)`
 
 The reverse iterators yield the last field first.
 
@@ -650,7 +650,7 @@ These apply Unicode case folding, correctly handling one-to-many expansions such
 - `utf8_uncased_search(haystack, needle, start=0, end=len, validate=False)` — index of the first uncased match, or `-1`.
   For `str` inputs `start`/`end` and the result are codepoint offsets; for `bytes` inputs they are byte offsets.
 - `utf8_uncased_order(a, b, validate=False)` — uncased lexicographic comparison: negative, zero, or positive `int`.
-- `utf8_uncased_matches(haystack, needle, include_overlapping=False)` — iterate over all uncased matches, yielding each matched region as a `Str` view whose length may differ from `needle` due to folding expansions.
+- `utf8_uncased_matches(haystack, needle, include_overlapping=False)` — iterate over all uncased matches, yielding each matched region as a `Str` view whose length may differ from `needle` due to folding expansions; an empty `needle` matches at every codepoint boundary, the end included.
 
 Pass `validate=True` to validate UTF-8 before processing.
 

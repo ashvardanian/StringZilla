@@ -70,6 +70,7 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     case sz_kernel_utf8_norm_k:
     case sz_kernel_utf8_find_denormalized_k: return sz_utf8_norm_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_utf8_uncased_fold_k: return sz_utf8_uncased_fold_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_utf8_uncased_needle_init_k:
     case sz_kernel_utf8_uncased_search_k:
     case sz_kernel_utf8_uncased_order_k:
     case sz_kernel_utf8_find_cased_k: return sz_utf8_uncased_find_kernel(kind, capabilities, kernel, capability);

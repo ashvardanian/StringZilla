@@ -100,6 +100,12 @@ func search(_ search: Search) throws {
     #expect(rest[second] == "ein Maß von etwa 20 μK")
 }
 
+@Test func utf8UncasedFindEmptyNeedle() {
+    let empty = "aé".startIndex ..< "aé".startIndex
+    #expect("aé".utf8UncasedFind(substring: "") == empty)
+    #expect(Utf8UncasedNeedle("").findFirst(in: "aé") == empty)
+}
+
 @Test func hash() {
     let text = "Hello, world!"
     #expect(text.hash() == text.hash(seed: 0))
@@ -166,6 +172,8 @@ func sha256(_ message: String, _ hex: String) {
     #expect(words.joined() == text)
     #expect(words.contains("Hello"))
     #expect(words.contains("world"))
+    let long = String(repeating: "word ", count: 100)  // 200 segments, four 64-entry batches
+    #expect(long.utf8Words().map { String(long[$0]) } == Array(repeating: ["word", " "], count: 100).flatMap { $0 })
 }
 
 /// One split of `text`, and the segments it must produce.
@@ -195,6 +203,13 @@ struct Split: Sendable, CustomTestStringConvertible {
     Split("lines without a trailing newline", "a\nb", ["a", "b"]) { $0.utf8Lines() },
     Split("an empty text is one empty line", "", [""]) { $0.utf8Lines() },
     Split("an empty text has no non-empty lines", "", []) { $0.utf8Lines(skipEmpty: true) },
+    Split(
+        "lines across delimiter batches",
+        String(repeating: "a\n", count: 100),
+        Array(repeating: "a", count: 100) + [""]
+    ) {
+        $0.utf8Lines()
+    },
     Split("tokens keep empty gaps", "  hi  ", ["", "", "hi", "", ""]) { $0.utf8Tokens() },
     Split("tokens skip empty gaps", "  hi  ", ["hi"]) { $0.utf8Tokens(skipEmpty: true) },
     Split("spaces, tabs and newlines all separate", "the quick\tbrown\nfox", ["the", "quick", "brown", "fox"]) {

@@ -1319,7 +1319,8 @@ static char const doc_Sha256_update[] =                                         
     "Returns:\n"                                                                       //
     "  Sha256: The same object, enabling `h.update(a).update(b)`.\n"                   //
     "Example:\n"                                                                       //
-    "  >>> sz.Sha256().update(b'a').update(b'bc').hexdigest()[:8]\n"                   //
+    "  >>> hexdigest = sz.Sha256().update(b'a').update(b'bc').hexdigest()\n"           //
+    "  >>> hexdigest[:8]\n"                                                            //
     "  'ba7816bf'";
 
 static char const doc_Sha256_digest[] =                                    //
@@ -1393,7 +1394,10 @@ PyTypeObject Sha256Type = {
 typedef struct {
     PyObject ob_base;
     sz_sha256_state_t *states;
+
+    /** Reused across @c update calls, so streaming never allocates. */
     sz_string_view_t *chunks;
+
     sz_size_t lanes_count;
     sz_capability_t capabilities;
 } Sha256s;
@@ -1687,7 +1691,8 @@ static char const doc_Sha256s[] =                                               
     "  >>> lanes = sz.Sha256s(2)\n"                                                          //
     "  >>> _ = lanes.update([b'Hello, ', b'Goodbye, '])\n"                                   //
     "  >>> _ = lanes.update([b'world!', b'world!'])\n"                                       //
-    "  >>> lanes.digest()[0] == sz.Sha256().update(b'Hello, world!').digest()\n"             //
+    "  >>> hello, goodbye = lanes.digest()\n"                                                //
+    "  >>> hello == sz.Sha256().update(b'Hello, world!').digest()\n"                         //
     "  True";
 
 static char const doc_Sha256s_update[] =                                                         //

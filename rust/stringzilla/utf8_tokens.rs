@@ -9,17 +9,18 @@ use super::*;
 use core::ffi::c_void;
 use core::marker::PhantomData;
 
-/// A zero-sized UTF-8 segmentation kernel selector. Each implementor binds one FFI segmenter, so
-/// the shared [`Utf8Split`] / [`Utf8Segments`] iterators monomorphize to a direct, branch-free call
+/// A zero-sized selector of a UTF-8 kernel reporting separator runs. Each implementor binds one
+/// FFI tokenizer, so the shared [`Utf8Split`] iterator monomorphizes to a direct, branch-free call
 /// rather than a function pointer.
-pub trait SegmenterKernel {
-    /// Reports up to `capacity` segments of `text` into `offsets` / `lengths`, returning the count
-    /// and writing the number of consumed bytes to `consumed`.
+pub trait TokenizerKernel {
+    /// Reports up to `capacity` separator runs of `text` into `offsets` / `lengths`, returning the
+    /// count and writing the number of consumed bytes to `consumed`: the end of the last run when
+    /// the count reaches `capacity`, otherwise `length`.
     ///
     /// # Safety
     /// `offsets` and `lengths` must each point to at least `capacity` writable `usize` slots, and
     /// `text` to `length` readable bytes.
-    unsafe fn segment(
+    unsafe fn tokenize(
         text: *const c_void,
         length: usize,
         offsets: *mut usize,
@@ -29,10 +30,22 @@ pub trait SegmenterKernel {
     ) -> usize;
 }
 
+/// A zero-sized selector of a UTF-8 kernel tiling text into segments. Each implementor binds one
+/// FFI segmenter, so the shared [`Utf8Segments`] iterator monomorphizes to a direct call.
+pub trait SegmenterKernel {
+    /// Reports the lengths of up to `capacity` segments tiling the front of `text`, returning the
+    /// count; each segment starts where the previous one ends.
+    ///
+    /// # Safety
+    /// `lengths` must point to at least `capacity` writable `usize` slots, and `text` to `length`
+    /// readable bytes.
+    unsafe fn segment(text: *const c_void, length: usize, lengths: *mut usize, capacity: usize) -> usize;
+}
+
 /// Kernel behind [`Utf8SplitNewlines`] (`sz_utf8_newlines_best`).
 pub struct Newlines;
-impl SegmenterKernel for Newlines {
-    unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
+impl TokenizerKernel for Newlines {
+    unsafe fn tokenize(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
         let mut count = 0;
         sz_utf8_newlines_best(
             t,
@@ -52,8 +65,8 @@ impl SegmenterKernel for Newlines {
 
 /// Kernel behind [`Utf8SplitWhitespaces`] (`sz_utf8_whitespaces_best`).
 pub struct Whitespaces;
-impl SegmenterKernel for Whitespaces {
-    unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
+impl TokenizerKernel for Whitespaces {
+    unsafe fn tokenize(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
         let mut count = 0;
         sz_utf8_whitespaces_best(
             t,
@@ -73,8 +86,8 @@ impl SegmenterKernel for Whitespaces {
 
 /// Kernel behind [`Utf8SplitDelimiters`] (`sz_utf8_delimiters_best`).
 pub struct Delimiters;
-impl SegmenterKernel for Delimiters {
-    unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
+impl TokenizerKernel for Delimiters {
+    unsafe fn tokenize(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
         let mut count = 0;
         sz_utf8_delimiters_best(
             t,
@@ -123,31 +136,26 @@ impl SplitParts for Both {
 /// A range over UTF-8 text split on the separators a kernel reports, selecting which
 /// parts to yield.
 ///
-/// The kernel's separator endpoints are the span boundaries `{0, s0.start, s0.end, ..., [len]}`;
-/// span `k` is `bound(k)..bound(k+1)`, and `P` reduces the mode to a `(FIRST, STRIDE)` walk over
-/// them - so the hot path is one formula for all three modes. Rust stable cannot size an array of
-/// 2 × STEPS + 2 bounds, so the raw separator spans are kept and each boundary is computed on the
-/// fly rather than materialized into an array.
+/// A batch's boundaries are `0`, each separator's start and end, and the end of the text once the
+/// batch reaches it; part `k` spans boundaries `k` and `k + 1`, and `Parts` walks them as `(FIRST,
+/// STRIDE)`, so all three modes share one formula. A batch holding `STEPS` separators stops at the
+/// end of its last one, where the next batch begins.
 pub struct Utf8Split<
     'a,
-    Kernel: SegmenterKernel,
+    Kernel: TokenizerKernel,
     Parts: SplitParts = Between,
     Empty: EmptySegments = KeepEmpty,
     const STEPS: usize = ITERATORS_DEFAULT_STEPS,
 > {
-    text: &'a [u8],
-    suffix: usize,           // Base of the current batch (absolute offset into `text`)
-    starts: [usize; STEPS],  // Raw separator offsets from the kernel, relative to `suffix`
-    lengths: [usize; STEPS], // Raw separator lengths
-    separators: usize,       // Separators in the current batch (the kernel's return value)
-    region: usize,           // Bytes of the current batch (`text.len() - suffix` at the last refill)
-    spans: usize,            // Number of yieldable boundary spans; `spans == 0` is the end sentinel
-    index: usize,            // Current boundary cursor (span is `bound(index)..bound(index + 1)`)
-    advance: usize,          // Bytes to advance `suffix` by when the batch drains
+    rest: Option<&'a [u8]>,  // The current batch through the end, `None` once exhausted
+    starts: [usize; STEPS],  // Separator offsets in the batch
+    lengths: [usize; STEPS], // Separator lengths
+    count: usize,            // Separators in the batch
+    index: usize,            // Boundary starting the next part to yield
     _markers: PhantomData<(Kernel, Parts, Empty)>,
 }
 
-impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments>
+impl<'a, Kernel: TokenizerKernel, Parts: SplitParts, Empty: EmptySegments>
     Utf8Split<'a, Kernel, Parts, Empty, ITERATORS_DEFAULT_STEPS>
 {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
@@ -157,146 +165,127 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments>
     }
 }
 
-impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const STEPS: usize>
+impl<'a, Kernel: TokenizerKernel, Parts: SplitParts, Empty: EmptySegments, const STEPS: usize>
     Utf8Split<'a, Kernel, Parts, Empty, STEPS>
 {
     /// Constructs an iterator buffering up to `STEPS` separators per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         const { assert!(STEPS > 0, "STEPS must be positive") };
-        let mut splits = Self {
-            text,
-            suffix: 0,
+        // A drained full batch ending at 0, so the first `next` fetches from the start.
+        Self {
+            rest: Some(text),
             starts: [0; STEPS],
             lengths: [0; STEPS],
-            separators: 0,
-            region: 0,
-            spans: 0,
-            index: 0,
-            advance: 0,
+            count: STEPS,
+            index: 2 * STEPS,
             _markers: PhantomData,
-        };
-        splits.refill();
-        splits.settle();
-        splits
-    }
-
-    /// The `boundary`-th span boundary relative to `suffix`:
-    /// `{0, s0.start, s0.end, s1.start, ..., [region]}`.
-    #[inline]
-    fn bound(&self, boundary: usize) -> usize {
-        if boundary == 0 {
-            0
-        } else if boundary > 2 * self.separators {
-            self.region // the end-of-text closing boundary
-        } else if boundary & 1 == 1 {
-            self.starts[(boundary - 1) / 2]
-        } else {
-            let separator = boundary / 2 - 1;
-            self.starts[separator] + self.lengths[separator]
         }
     }
 
-    /// Refill from `suffix`: fetch a separator batch; boundaries are derived
-    /// lazily by [`Self::bound`].
-    fn refill(&mut self) {
-        self.region = self.text.len() - self.suffix;
+    /// The `boundary`-th boundary of the batch starting `rest`.
+    #[inline]
+    fn bound(&self, rest: &[u8], boundary: usize) -> usize {
+        if boundary == 0 {
+            0
+        } else if boundary > 2 * self.count {
+            rest.len()
+        } else if boundary % 2 == 1 {
+            self.starts[boundary / 2]
+        } else {
+            self.starts[boundary / 2 - 1] + self.lengths[boundary / 2 - 1]
+        }
+    }
+
+    /// Fetches the batch of separators starting `rest`.
+    fn refill(&mut self, rest: &'a [u8]) {
         let mut consumed = 0usize;
-        self.separators = unsafe {
-            Kernel::segment(
-                self.text[self.suffix..].as_ptr() as *const c_void,
-                self.region,
+        self.count = unsafe {
+            Kernel::tokenize(
+                rest.as_ptr() as *const c_void,
+                rest.len(),
                 self.starts.as_mut_ptr(),
                 self.lengths.as_mut_ptr(),
                 STEPS,
                 &mut consumed,
             )
         };
-        debug_assert!(
-            self.separators <= STEPS,
-            "segmenter reported more spans than the capacity STEPS"
-        );
-        debug_assert!(consumed <= self.region, "segmenter consumed past the region end");
-        debug_assert!(
-            consumed > 0 || self.region == 0,
-            "segmenter made no progress (the iterator would loop forever)"
-        );
-        debug_assert!(
-            (0..self.separators).all(|s| self.starts[s] + self.lengths[s] <= self.region
-                && (s == 0 || self.starts[s] >= self.starts[s - 1] + self.lengths[s - 1])),
-            "separator spans run past the region, overlap, or are out of order"
-        );
-        // A batch cut short by `STEPS` must resume exactly at the end of its last separator: the
-        // bytes between that separator and wherever the kernel's own scan stopped belong to the
-        // next segment, and a resume offset past them drops them from the output.
-        debug_assert!(
-            self.separators < STEPS || consumed == self.starts[self.separators - 1] + self.lengths[self.separators - 1],
-            "segmenter resumed past the end of its last emitted separator"
-        );
-        let eof = consumed == self.region;
-        // Boundaries: `0`, then 2 per separator, plus the closing `region` at end-of-text.
-        self.spans = 2 * self.separators + if eof { 1 } else { 0 };
-        self.advance = if eof { self.region + 1 } else { consumed };
+        self.rest = Some(rest);
         self.index = Parts::FIRST;
-    }
-
-    /// Position `index` on the next yieldable span, refilling, and skipping empty spans when
-    /// `Empty::SKIP` is set. `Empty::SKIP` is a const, so the skip loop folds away entirely for the
-    /// default keep-empties case, `KeepEmpty`.
-    fn settle(&mut self) {
-        loop {
-            if Empty::SKIP {
-                while self.index < self.spans && self.bound(self.index + 1) == self.bound(self.index) {
-                    self.index += Parts::STRIDE;
-                }
-            }
-            if self.index < self.spans || self.spans == 0 {
-                return;
-            }
-            self.suffix += self.advance;
-            if self.suffix > self.text.len() {
-                self.spans = 0;
-                return;
-            }
-            self.refill();
-        }
+        debug_assert!(
+            self.count <= STEPS,
+            "tokenizer reported more runs than the capacity STEPS"
+        );
+        debug_assert!(
+            (0..self.count).all(|s| self.lengths[s] > 0
+                && self.starts[s] + self.lengths[s] <= rest.len()
+                && (s == 0 || self.starts[s] >= self.starts[s - 1] + self.lengths[s - 1])),
+            "separator runs are empty, run past the text, overlap, or are out of order"
+        );
+        debug_assert!(
+            consumed == self.bound(rest, 2 * self.count + usize::from(self.count < STEPS)),
+            "tokenizer resumed anywhere but the end of its last run or of the text"
+        );
     }
 }
 
-impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, const STEPS: usize>
+impl<'a, Kernel: TokenizerKernel, Parts: SplitParts, const STEPS: usize>
     Utf8Split<'a, Kernel, Parts, KeepEmpty, STEPS>
 {
     /// Skips zero-length spans, returning the `SkipEmpty` variant. A compile-time policy rather
     /// than a runtime flag, so the keep-empties default stays branchless.
     pub fn skip_empty(self) -> Utf8Split<'a, Kernel, Parts, SkipEmpty, STEPS> {
-        Utf8Split::with_steps(self.text)
+        Utf8Split {
+            rest: self.rest,
+            starts: self.starts,
+            lengths: self.lengths,
+            count: self.count,
+            index: self.index,
+            _markers: PhantomData,
+        }
     }
 }
 
-impl<'a, Kernel: SegmenterKernel, Empty: EmptySegments, const STEPS: usize>
+impl<'a, Kernel: TokenizerKernel, Empty: EmptySegments, const STEPS: usize>
     Utf8Split<'a, Kernel, Between, Empty, STEPS>
 {
     /// The same split yielding segments __and__ separators interleaved. Lossless (concatenation
     /// reproduces the input) only when empties are kept; the `Empty` policy carries through the
     /// type, so `.skip_empty()` and `.with_separators()` compose in either order.
     pub fn with_separators(self) -> Utf8Split<'a, Kernel, Both, Empty, STEPS> {
-        Utf8Split::with_steps(self.text)
+        Utf8Split {
+            rest: self.rest,
+            starts: self.starts,
+            lengths: self.lengths,
+            count: self.count,
+            index: self.index,
+            _markers: PhantomData,
+        }
     }
 }
 
-impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const STEPS: usize> Iterator
+impl<'a, Kernel: TokenizerKernel, Parts: SplitParts, Empty: EmptySegments, const STEPS: usize> Iterator
     for Utf8Split<'a, Kernel, Parts, Empty, STEPS>
 {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.spans == 0 {
-            return None;
+        loop {
+            let rest = self.rest?;
+            let full = self.count == STEPS;
+            if self.index >= 2 * self.count + usize::from(!full) {
+                if !full {
+                    self.rest = None;
+                    return None;
+                }
+                self.refill(&rest[self.bound(rest, 2 * self.count)..]);
+                continue;
+            }
+            let part = &rest[self.bound(rest, self.index)..self.bound(rest, self.index + 1)];
+            self.index += Parts::STRIDE;
+            if !(Empty::SKIP && part.is_empty()) {
+                return Some(part);
+            }
         }
-        let begin = self.suffix + self.bound(self.index);
-        let end = self.suffix + self.bound(self.index + 1);
-        self.index += Parts::STRIDE;
-        self.settle();
-        Some(&self.text[begin..end])
     }
 }
 
@@ -373,14 +362,13 @@ pub type Utf8SplitDelimiters<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
 pub type Utf8Delimiters<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
     Utf8Split<'a, Delimiters, Separators, KeepEmpty, STEPS>;
 
+/// An iterator over the segments a kernel tiles UTF-8 text into, in order.
 pub struct Utf8Segments<'a, Kernel: SegmenterKernel, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
-    text: &'a [u8],
-    suffix: usize, // Start of the not-yet-segmented suffix (a UAX-29 boundary; `text.len()` once exhausted)
-    starts: [usize; STEPS], // Buffered word offsets, relative to `suffix`
-    lengths: [usize; STEPS], // Buffered word lengths
-    count: usize,  // Number of buffered words (0 once exhausted)
-    index: usize,  // Index of the next word to yield from the buffer
-    _kernel: PhantomData<Kernel>, // Zero-sized; selects the FFI segmenter at monomorphization.
+    rest: &'a [u8],          // Text from the next segment to yield through the end
+    lengths: [usize; STEPS], // Lengths of the buffered segments
+    count: usize,            // Number of buffered segments
+    index: usize,            // Index of the next segment to yield from the buffer
+    _kernel: PhantomData<Kernel>,
 }
 
 impl<'a, Kernel: SegmenterKernel> Utf8Segments<'a, Kernel, ITERATORS_DEFAULT_STEPS> {
@@ -393,36 +381,16 @@ impl<'a, Kernel: SegmenterKernel> Utf8Segments<'a, Kernel, ITERATORS_DEFAULT_STE
 }
 
 impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Utf8Segments<'a, Kernel, STEPS> {
-    /// Constructs an iterator buffering up to `STEPS` words per FFI call.
+    /// Constructs an iterator buffering up to `STEPS` segments per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         const { assert!(STEPS > 0, "STEPS must be positive") };
-        let mut splits = Self {
-            text,
-            suffix: 0,
-            starts: [0; STEPS],
+        Self {
+            rest: text,
             lengths: [0; STEPS],
             count: 0,
             index: 0,
             _kernel: PhantomData,
-        };
-        splits.fill();
-        splits
-    }
-
-    /// Refills the buffer from the current suffix; `count` becomes 0 once the suffix is empty.
-    fn fill(&mut self) {
-        let mut consumed = 0usize;
-        self.count = unsafe {
-            Kernel::segment(
-                self.text[self.suffix..].as_ptr() as *const c_void,
-                self.text.len() - self.suffix,
-                self.starts.as_mut_ptr(),
-                self.lengths.as_mut_ptr(),
-                STEPS,
-                &mut consumed,
-            )
-        };
-        self.index = 0;
+        }
     }
 }
 
@@ -431,21 +399,27 @@ impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Iterator for Utf8Segments<
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index == self.count {
-            if self.count == 0 {
-                return None; // Empty input or fully drained.
-            }
-            // Batch drained: advance past the last word, a UAX-29 boundary, and refill from
-            // the remaining suffix.
-            self.suffix += self.starts[self.count - 1] + self.lengths[self.count - 1];
-            self.fill();
-            if self.count == 0 {
+            if self.rest.is_empty() {
                 return None;
             }
+            self.count = unsafe {
+                Kernel::segment(
+                    self.rest.as_ptr() as *const c_void,
+                    self.rest.len(),
+                    self.lengths.as_mut_ptr(),
+                    STEPS,
+                )
+            };
+            self.index = 0;
+            debug_assert!(
+                self.count > 0 && self.lengths[..self.count].iter().all(|&length| length > 0),
+                "segmenter made no progress (the iterator would loop forever)"
+            );
         }
-        let begin = self.suffix + self.starts[self.index];
-        let end = begin + self.lengths[self.index];
+        let (segment, rest) = self.rest.split_at(self.lengths[self.index]);
+        self.rest = rest;
         self.index += 1;
-        Some(&self.text[begin..end])
+        Some(segment)
     }
 }
 

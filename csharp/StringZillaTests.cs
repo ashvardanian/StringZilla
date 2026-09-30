@@ -156,6 +156,12 @@ public class StringZillaTests {
         var expected = new List<int>();
         foreach (var r in s.EnumerateRunes()) expected.Add(r.Value);
         Assert.Equal(expected, Sz.DecodeAll(B(s)).ToList());
+
+        byte[] truncated = { (byte)'a', 0xE2, 0x82 }; // "€" missing its last byte
+        Assert.Equal(new[] { 'a', 0xFFFD }, Sz.DecodeAll(truncated));
+        var enumerated = new List<int>();
+        foreach (var rune in Sz.EnumerateRunes(truncated)) enumerated.Add(rune.Value);
+        Assert.Equal(new[] { 'a', 0xFFFD }, enumerated);
     }
 
     [Fact]
@@ -174,25 +180,23 @@ public class StringZillaTests {
     [Fact]
     public void Segment_Words_TilesMixedScriptText() {
         byte[] u = B("Hello, 世界!"); // Latin word, punctuation, CJK run
-        Span<long> starts = stackalloc long[32];
         Span<long> lengths = stackalloc long[32];
-        int count = Sz.Segment(u, Sz.SegmentKind.Words, starts, lengths, out _);
+        int count = Sz.Segment(u, Sz.SegmentKind.Words, lengths);
         var texts = new List<string>();
-        long covered = 0;
+        int start = 0;
         for (int i = 0; i < count; i++) {
-            texts.Add(Encoding.UTF8.GetString(u, (int)starts[i], (int)lengths[i]));
-            covered += lengths[i];
+            texts.Add(Encoding.UTF8.GetString(u, start, (int)lengths[i]));
+            start += (int)lengths[i];
         }
-        Assert.Equal((long)u.Length, covered); // tiling: every byte belongs to exactly one segment
+        Assert.Equal(u.Length, start); // tiling: every byte belongs to exactly one segment
         Assert.Contains("Hello", texts);
     }
 
     [Fact]
     public void Segment_Graphemes_CombiningMarkIsOneCluster() {
         byte[] u = B("éllo"); // e + combining acute, then l l o => 4 grapheme clusters
-        Span<long> starts = stackalloc long[32];
         Span<long> lengths = stackalloc long[32];
-        int count = Sz.Segment(u, Sz.SegmentKind.Graphemes, starts, lengths, out _);
+        int count = Sz.Segment(u, Sz.SegmentKind.Graphemes, lengths);
         long covered = 0;
         for (int i = 0; i < count; i++) covered += lengths[i];
         Assert.Equal((long)u.Length, covered); // tiling: every byte belongs to exactly one cluster
@@ -200,7 +204,7 @@ public class StringZillaTests {
         // 🇺🇸 (two regional indicators) is one grapheme cluster spanning two codepoints, so the cluster
         // count is strictly below the codepoint count; explicit escapes avoid editor re-normalization.
         byte[] flag = B("Hi \U0001F1FA\U0001F1F8");
-        int flagClusters = Sz.Segment(flag, Sz.SegmentKind.Graphemes, starts, lengths, out _);
+        int flagClusters = Sz.Segment(flag, Sz.SegmentKind.Graphemes, lengths);
         Assert.True(flagClusters < Sz.CountRunes(flag)); // clusters collapse multi-codepoint sequences
     }
 
@@ -395,9 +399,8 @@ public class StringZillaTests {
         byte[] u = B("éllo, world!");
         var viaEnumerator = new List<int>();
         foreach (var g in Sz.EnumerateGraphemes(u)) viaEnumerator.Add(g.Length);
-        Span<long> starts = stackalloc long[64];
         Span<long> lengths = stackalloc long[64];
-        int count = Sz.Segment(u, Sz.SegmentKind.Graphemes, starts, lengths, out _);
+        int count = Sz.Segment(u, Sz.SegmentKind.Graphemes, lengths);
         Assert.Equal(count, viaEnumerator.Count);
         for (int i = 0; i < count; i++) Assert.Equal((int)lengths[i], viaEnumerator[i]);
     }
@@ -437,7 +440,7 @@ public class StringZillaTests {
 
     [Fact]
     public void Split_KeepsEmptySegments() {
-        Assert.Equal(new[] { "a", "bb", "", "c" }, SplitToList(Sz.Split(B("a,bb,,c"), ","u8)));
+        Assert.Equal(new[] { "a", "bb", "", "c", "" }, SplitToList(Sz.Split(B("a,bb,,c,"), ","u8)));
     }
 
     [Fact]
@@ -448,6 +451,7 @@ public class StringZillaTests {
     [Fact]
     public void Split_MaxSplit() {
         Assert.Equal(new[] { "a", "b", "c,d" }, SplitToList(Sz.Split(B("a,b,c,d"), ","u8).WithMaxSplit(2)));
+        Assert.Equal(new[] { "a", "b", "c", "d" }, SplitToList(Sz.Split(B("a,b,c,d"), ","u8).WithMaxSplit(-1)));
     }
 
     [Fact]
@@ -490,8 +494,8 @@ public class StringZillaTests {
     [Fact]
     public void SplitNewlines_YieldsLines() {
         var lines = new List<string>();
-        foreach (var line in Sz.SplitNewlines(B("a\nbb\nc"))) lines.Add(Encoding.UTF8.GetString(line));
-        Assert.Equal(new[] { "a", "bb", "c" }, lines);
+        foreach (var line in Sz.SplitNewlines(B("a\r\nbb\nc\n"))) lines.Add(Encoding.UTF8.GetString(line));
+        Assert.Equal(new[] { "a", "bb", "c", "" }, lines);
     }
 
     [Fact]
@@ -504,10 +508,16 @@ public class StringZillaTests {
 
     [Fact]
     public void SplitWhitespaces_WithSeparatorsRoundTrips() {
+        var builder = new StringBuilder();
+        for (int i = 0; i < 200; i++) builder.Append('w').Append(i).Append(' '); // 4 token batches
+        string text = builder.ToString();
         var rebuilt = new StringBuilder();
-        foreach (var part in Sz.SplitWhitespaces(B("the quick fox")).WithSeparators())
+        foreach (var part in Sz.SplitWhitespaces(B(text)).WithSeparators())
             rebuilt.Append(Encoding.UTF8.GetString(part));
-        Assert.Equal("the quick fox", rebuilt.ToString());
+        Assert.Equal(text, rebuilt.ToString());
+        int fields = 0;
+        foreach (var _ in Sz.SplitWhitespaces(B(text))) fields++;
+        Assert.Equal(201, fields);
     }
 
     [Fact]
@@ -516,8 +526,10 @@ public class StringZillaTests {
     }
 
     [Fact]
-    public void Split_MaxSplitZeroYieldsWhole() {
+    public void Split_MaxSplitZeroOrEmptySeparatorYieldsWhole() {
         Assert.Equal(new[] { "a,b,c" }, SplitToList(Sz.Split(B("a,b,c"), ","u8).WithMaxSplit(0)));
+        Assert.Equal(new[] { "a,b,c" }, SplitToList(Sz.Split(B("a,b,c"), default)));
+        Assert.Equal(new[] { "a,b,c" }, SplitToList(Sz.RSplit(B("a,b,c"), default)));
     }
 
     [Fact]
@@ -564,11 +576,23 @@ public class StringZillaTests {
     }
 
     [Fact]
-    public void EnumerateUncasedMatches_EmptyNeedleYieldsNothing() {
-        int count = 0;
-        foreach (var _ in Sz.EnumerateUncasedMatches(B("abc"), default)) count++;
-        foreach (var _ in Sz.EnumerateUncasedMatches(B("abc"), default).Overlapping()) count++;
-        Assert.Equal(0, count);
+    public void EmptyNeedle_MatchesEveryBoundary() {
+        var offsets = new List<long>();
+        foreach (long at in Sz.EnumerateMatches(B("abc"), default)) offsets.Add(at);
+        foreach (long at in Sz.EnumerateMatches(B("abc"), default).Overlapping()) offsets.Add(at);
+        Assert.Equal(new long[] { 0, 1, 2, 3, 0, 1, 2, 3 }, offsets);
+
+        // Uncased matches start on codepoint boundaries, and "é" takes two bytes.
+        var matches = new List<(long, long)>();
+        foreach (var match in Sz.EnumerateUncasedMatches(B("aé"), default)) matches.Add((match.Offset, match.Length));
+        foreach (var match in Sz.EnumerateUncasedMatches(B("aé"), default).Overlapping())
+            matches.Add((match.Offset, match.Length));
+        Assert.Equal(new (long, long)[] { (0, 0), (1, 0), (3, 0), (0, 0), (1, 0), (3, 0) }, matches);
+
+        offsets.Clear(); // a truncated three-byte rune is one step
+        foreach (var match in Sz.EnumerateUncasedMatches(new byte[] { (byte)'a', 0xE4, 0xB8 }, default))
+            offsets.Add(match.Offset);
+        Assert.Equal(new long[] { 0, 1, 3 }, offsets);
     }
 
     [Fact]

@@ -28,6 +28,7 @@ import java.io.InputStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
+import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
@@ -39,6 +40,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
@@ -149,28 +152,32 @@ public final class StringZilla {
 
     // endregion
 
-    // region UTF-8 Segmentation
-    private static final MethodHandle STRINGZILLA_UTF8_GRAPHEMES = downSeg(SegmentKind.GRAPHEMES);
-    private static final MethodHandle STRINGZILLA_UTF8_WORDBREAKS = downSeg(SegmentKind.WORDS);
-    private static final MethodHandle STRINGZILLA_UTF8_SENTENCES = downSeg(SegmentKind.SENTENCES);
-    private static final MethodHandle STRINGZILLA_UTF8_LINEBREAKS = downSeg(SegmentKind.LINE_BREAKS);
-    private static final MethodHandle STRINGZILLA_UTF8_NEWLINES = downSeg(SegmentKind.NEWLINES);
-    private static final MethodHandle STRINGZILLA_UTF8_WHITESPACES = downSeg(SegmentKind.WHITESPACES);
-    private static final MethodHandle STRINGZILLA_UTF8_DELIMITERS = downSeg(SegmentKind.DELIMITERS);
-
-    // endregion
-
     // region UTF-8 Case Folding and Uncased
     private static final MethodHandle STRINGZILLA_UTF8_UNCASED_FOLD = downCritical(
             "sz_utf8_uncased_fold_best",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_UTF8_UNCASED_NEEDLE_INIT = downCritical(
+            "sz_utf8_uncased_needle_init_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_UTF8_UNCASED_SEARCH = downCritical(
             "sz_utf8_uncased_search_best",
-            FunctionDescriptor.of(
-                    JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_UTF8_UNCASED_ORDER = downCritical(
             "sz_utf8_uncased_order_best",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+
+    /** {@code sz_utf8_uncased_needle_t}, which the binding allocates for the C side to prepare. */
+    private static final MemoryLayout UNCASED_NEEDLE = MemoryLayout.structLayout(
+            ADDRESS.withName("start"),
+            JAVA_LONG.withName("length"),
+            JAVA_LONG.withName("offset_in_unfolded"),
+            JAVA_LONG.withName("length_in_unfolded"),
+            MemoryLayout.sequenceLayout(16, JAVA_BYTE).withName("folded_slice"),
+            JAVA_BYTE.withName("folded_slice_length"),
+            JAVA_BYTE.withName("probe_second"),
+            JAVA_BYTE.withName("probe_third"),
+            JAVA_BYTE.withName("script"),
+            MemoryLayout.paddingLayout(4));
 
     // endregion
 
@@ -190,14 +197,6 @@ public final class StringZilla {
     private static final MethodHandle STRINGZILLA_LOOKUP = downCritical(
             "sz_lookup_best",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
-
-    private static MethodHandle downSeg(SegmentKind kind) {
-        return downCritical(
-                kind.function,
-                FunctionDescriptor.of(
-                        JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG,
-                        ADDRESS));
-    }
 
     // endregion
 
@@ -453,8 +452,9 @@ public final class StringZilla {
         }
     }
 
-    /** Decodes codepoints into {@code destination} (one Int32 scalar each; ill-formed → U+FFFD) and
-     *  returns the count written. Like {@code String.codePoints()}, SIMD-accelerated. */
+    /** Decodes codepoints into {@code destination} (one Int32 scalar each; ill-formed or truncated
+     *  → U+FFFD) and returns the count written, stopping early only when {@code destination} fills.
+     *  Like {@code String.codePoints()}, SIMD-accelerated. */
     public static int decode(byte[] text, int[] destination) {
         return decode(MemorySegment.ofArray(text), destination);
     }
@@ -484,82 +484,95 @@ public final class StringZilla {
     }
 
     public static int[] decodeAll(MemorySegment text) {
-        int[] out = new int[(int) countRunes(text)];
-        decode(text, out);
-        return out;
+        int[] runes = new int[Math.toIntExact(text.byteSize())]; // a rune per byte at most
+        return java.util.Arrays.copyOf(runes, decode(text, runes));
     }
 
     // endregion
 
     // region UTF-8 Segmentation
 
+    /** A tiling segmentation: every byte lands in exactly one segment. */
     public enum SegmentKind {
         GRAPHEMES("sz_utf8_graphemes_best"),
         WORDS("sz_utf8_wordbreaks_best"),
         SENTENCES("sz_utf8_sentences_best"),
-        LINE_BREAKS("sz_utf8_linebreaks_best"),
+        LINE_BREAKS("sz_utf8_linebreaks_best");
+
+        private final String function;
+        private final MethodHandle kernel;
+
+        SegmentKind(String function) {
+            this.function = function;
+            this.kernel = downCritical(
+                    function,
+                    FunctionDescriptor.of(
+                            JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+        }
+    }
+
+    /** The separator tokens that {@link TokenSplits} splits on. */
+    private enum TokenKind {
         NEWLINES("sz_utf8_newlines_best"),
         WHITESPACES("sz_utf8_whitespaces_best"),
         DELIMITERS("sz_utf8_delimiters_best");
 
         private final String function;
+        private final MethodHandle kernel;
 
-        SegmentKind(String function) {
+        TokenKind(String function) {
             this.function = function;
+            this.kernel = downCritical(
+                    function,
+                    FunctionDescriptor.of(
+                            JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG,
+                            ADDRESS));
         }
     }
 
-    private static MethodHandle segHandle(SegmentKind k) {
-        return switch (k) {
-            case GRAPHEMES -> STRINGZILLA_UTF8_GRAPHEMES;
-            case WORDS -> STRINGZILLA_UTF8_WORDBREAKS;
-            case SENTENCES -> STRINGZILLA_UTF8_SENTENCES;
-            case LINE_BREAKS -> STRINGZILLA_UTF8_LINEBREAKS;
-            case NEWLINES -> STRINGZILLA_UTF8_NEWLINES;
-            case WHITESPACES -> STRINGZILLA_UTF8_WHITESPACES;
-            case DELIMITERS -> STRINGZILLA_UTF8_DELIMITERS;
-        };
+    /** Writes the byte lengths of the next segments of {@code text}, from {@code textOffset} for
+     *  {@code textLength} bytes, into the caller's {@code lengths} and returns the count written.
+     *  Allocation-free. Segments tile the text, each starting where the previous one ended, so
+     *  resume at the sum of the lengths; only an empty text yields 0. Like
+     *  {@link java.text.BreakIterator} / ICU4J, but deterministic, SIMD-accelerated, over UTF-8
+     *  bytes (no locale, no transcode). By {@code GRAPHEMES}, the flag 🇺🇸 is one cluster spanning
+     *  two codepoints; by {@code WORDS}, "Hello, 世界" splits the Latin run from the CJK run. */
+    public static int segment(byte[] text, int textOffset, int textLength, SegmentKind kind, long[] lengths) {
+        return segment(MemorySegment.ofArray(text), textOffset, textLength, kind, lengths);
     }
 
-    /** Writes the byte (start, length) ranges of the next segments into the caller's {@code starts}
-     *  and {@code lengths} arrays and returns the count written. Allocation-free. Resumable: advance
-     *  the input by {@code bytesConsumed[0]} and call again until it returns 0. Starts are relative to
-     *  {@code textOffset}. Like {@link java.text.BreakIterator} / ICU4J, but deterministic, SIMD-accelerated,
-     *  over UTF-8 bytes (no locale, no transcode). Segmentation tiles the text — every byte lands in exactly
-     *  one segment. By {@code GRAPHEMES}, the flag 🇺🇸 is one cluster spanning two codepoints; by
-     *  {@code WORDS}, "Hello, 世界" splits the Latin run from the CJK run. */
-    public static int segment(
-            byte[] text,
-            int textOffset,
-            int textLength,
-            SegmentKind kind,
-            long[] starts,
-            long[] lengths,
-            long[] bytesConsumed) {
-        return segment(MemorySegment.ofArray(text), textOffset, textLength, kind, starts, lengths, bytesConsumed);
-    }
-
-    public static int segment(
-            MemorySegment text,
-            int textOffset,
-            int textLength,
-            SegmentKind kind,
-            long[] starts,
-            long[] lengths,
-            long[] bytesConsumed) {
-        int cap = Math.min(starts.length, lengths.length);
-        MethodHandle h = segHandle(kind);
-        MemorySegment slice = text.asSlice(textOffset, textLength);
+    public static int segment(MemorySegment text, long textOffset, long textLength, SegmentKind kind, long[] lengths) {
         try {
             long[] count = new long[1];
-            check(kind.function, (int) h.invokeExact(
-                    slice,
-                    (long) textLength,
-                    MemorySegment.ofArray(starts),
+            check(kind.function, (int) kind.kernel.invokeExact(
+                    text.asSlice(textOffset, textLength),
+                    textLength,
                     MemorySegment.ofArray(lengths),
-                    (long) cap,
+                    (long) lengths.length,
                     MemorySegment.ofArray(count),
-                    MemorySegment.ofArray(bytesConsumed),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return (int) count[0];
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Writes the (offset, length) of the next separator tokens of {@code text} into
+     *  {@code offsets} and {@code lengths} and returns the count. Only a full batch leaves text
+     *  unscanned, and the scan resumes right after its last token. */
+    private static int tokenize(MemorySegment text, TokenKind kind, long[] offsets, long[] lengths) {
+        try {
+            long[] count = new long[1];
+            long[] consumed = new long[1];
+            check(kind.function, (int) kind.kernel.invokeExact(
+                    text,
+                    text.byteSize(),
+                    MemorySegment.ofArray(offsets),
+                    MemorySegment.ofArray(lengths),
+                    (long) offsets.length,
+                    MemorySegment.ofArray(count),
+                    MemorySegment.ofArray(consumed),
                     enabledCapabilities,
                     MemorySegment.NULL));
             return (int) count[0];
@@ -608,12 +621,8 @@ public final class StringZilla {
      *  For repeated searches with the same needle, prefer {@link UncasedNeedle}. */
     public static Match uncasedIndexOf(byte[] haystack, byte[] needle) {
         try (Arena a = Arena.ofConfined()) {
-            MemorySegment h = a.allocate(Math.max(haystack.length, 1));
-            MemorySegment.copy(haystack, 0, h, JAVA_BYTE, 0, haystack.length);
-            MemorySegment n = a.allocate(Math.max(needle.length, 1));
-            MemorySegment.copy(needle, 0, n, JAVA_BYTE, 0, needle.length);
-            MemorySegment meta = a.allocate(64); // zeroed; the native dereferences it (NULL is unsafe)
-            return uncasedSearch(h.asSlice(0, haystack.length), n.asSlice(0, needle.length), meta);
+            MemorySegment prepared = uncasedNeedleInit(nativeView(MemorySegment.ofArray(needle), a), a);
+            return uncasedMatch(nativeView(MemorySegment.ofArray(haystack), a), prepared);
         }
     }
 
@@ -636,25 +645,41 @@ public final class StringZilla {
         }
     }
 
-    /** Searches the off-heap {@code haystack} for {@code needle}, caching its folding in {@code meta}. */
-    private static Match uncasedSearch(MemorySegment haystack, MemorySegment needle, MemorySegment meta) {
+    /** Prepares the native {@code needle}, which must outlive the result, into an {@code arena}
+     *  struct. */
+    private static MemorySegment uncasedNeedleInit(MemorySegment needle, Arena arena) {
+        MemorySegment prepared = arena.allocate(UNCASED_NEEDLE);
         try {
-            long[] match = new long[1];
-            long[] matchedLength = new long[1];
-            check("sz_utf8_uncased_search_best", (int) STRINGZILLA_UTF8_UNCASED_SEARCH.invokeExact(
-                    haystack,
-                    haystack.byteSize(),
-                    needle,
-                    needle.byteSize(),
-                    meta,
-                    MemorySegment.ofArray(match),
-                    MemorySegment.ofArray(matchedLength),
-                    enabledCapabilities,
-                    MemorySegment.NULL));
-            return match[0] == 0 ? new Match(-1, 0) : new Match(match[0] - haystack.address(), matchedLength[0]);
+            check("sz_utf8_uncased_needle_init_best", (int) STRINGZILLA_UTF8_UNCASED_NEEDLE_INIT.invokeExact(
+                    needle, needle.byteSize(), prepared, enabledCapabilities, MemorySegment.NULL));
+            return prepared;
         } catch (Throwable t) {
             throw rethrow(t);
         }
+    }
+
+    /** Offset of the first match of the {@code prepared} needle in the native {@code haystack}, or
+     *  -1; {@code found} receives the match address and its byte length. */
+    private static long uncasedSearch(MemorySegment haystack, MemorySegment prepared, long[] found) {
+        try {
+            check("sz_utf8_uncased_search_best", (int) STRINGZILLA_UTF8_UNCASED_SEARCH.invokeExact(
+                    haystack,
+                    haystack.byteSize(),
+                    prepared,
+                    MemorySegment.ofArray(found),
+                    MemorySegment.ofArray(found).asSlice(JAVA_LONG.byteSize()),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return found[0] == 0 ? -1 : found[0] - haystack.address();
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    private static Match uncasedMatch(MemorySegment haystack, MemorySegment prepared) {
+        long[] found = new long[2];
+        long offset = uncasedSearch(haystack, prepared, found);
+        return offset < 0 ? new Match(-1, 0) : new Match(offset, found[1]);
     }
 
     // endregion
@@ -1005,41 +1030,42 @@ public final class StringZilla {
     /** Lazily splits on Unicode newline runs, yielding the lines between them. Chain
      *  {@code .withSeparators()} for a lossless interleave or {@code .skipEmpty()} to drop blanks. */
     public static TokenSplits splitNewlines(byte[] text) {
-        return new TokenSplits(MemorySegment.ofArray(text), SegmentKind.NEWLINES, SplitParts.BETWEEN, false);
+        return new TokenSplits(MemorySegment.ofArray(text), TokenKind.NEWLINES, SplitParts.BETWEEN, false);
     }
 
     public static TokenSplits splitNewlines(MemorySegment text) {
-        return new TokenSplits(text, SegmentKind.NEWLINES, SplitParts.BETWEEN, false);
+        return new TokenSplits(text, TokenKind.NEWLINES, SplitParts.BETWEEN, false);
     }
 
     public static TokenSplits splitWhitespaces(byte[] text) {
-        return new TokenSplits(MemorySegment.ofArray(text), SegmentKind.WHITESPACES, SplitParts.BETWEEN, false);
+        return new TokenSplits(MemorySegment.ofArray(text), TokenKind.WHITESPACES, SplitParts.BETWEEN, false);
     }
 
     public static TokenSplits splitWhitespaces(MemorySegment text) {
-        return new TokenSplits(text, SegmentKind.WHITESPACES, SplitParts.BETWEEN, false);
+        return new TokenSplits(text, TokenKind.WHITESPACES, SplitParts.BETWEEN, false);
     }
 
     public static TokenSplits splitDelimiters(byte[] text) {
-        return new TokenSplits(MemorySegment.ofArray(text), SegmentKind.DELIMITERS, SplitParts.BETWEEN, false);
+        return new TokenSplits(MemorySegment.ofArray(text), TokenKind.DELIMITERS, SplitParts.BETWEEN, false);
     }
 
     public static TokenSplits splitDelimiters(MemorySegment text) {
-        return new TokenSplits(text, SegmentKind.DELIMITERS, SplitParts.BETWEEN, false);
+        return new TokenSplits(text, TokenKind.DELIMITERS, SplitParts.BETWEEN, false);
     }
 
     /** Lazily enumerates the byte offsets of every match of {@code needle} in {@code haystack}; chain
      *  {@code .overlapping()} for overlapping matches. Counting the result is the occurrence count. */
     public static Matches matches(byte[] haystack, byte[] needle) {
-        return new Matches(MemorySegment.ofArray(haystack), MemorySegment.ofArray(needle), false);
+        return matches(MemorySegment.ofArray(haystack), MemorySegment.ofArray(needle));
     }
 
     public static Matches matches(MemorySegment haystack, MemorySegment needle) {
-        return new Matches(haystack, needle, false);
+        return new Matches(haystack, needle, Math.max(needle.byteSize(), 1));
     }
 
     /** Lazily enumerates case-insensitive (full-fold) matches; chain {@code .overlapping()}. Each
-     *  {@link Match} carries the offset and matched length (folding may make the latter differ). */
+     *  {@link Match} carries the offset and matched length (folding may make the latter differ). An
+     *  empty needle matches at every codepoint boundary, the end included. */
     public static UncasedMatches uncasedMatches(byte[] haystack, byte[] needle) {
         return new UncasedMatches(MemorySegment.ofArray(haystack), MemorySegment.ofArray(needle), false);
     }
@@ -1354,26 +1380,20 @@ public final class StringZilla {
         }
     }
 
-    /** A reusable case-folding search needle. Close to free native memory. */
+    /** A case-folding search needle, prepared once and reusable from any thread. Close to free
+     *  native memory. */
     public static final class UncasedNeedle implements AutoCloseable {
         private final Arena arena = Arena.ofShared();
-        private final MemorySegment needle;
-        private final long needleLen;
-        private final MemorySegment meta; // zeroed; populated on use
+        private final MemorySegment prepared; // points into the arena's copy of the needle
 
         public UncasedNeedle(byte[] needle) {
-            this.needleLen = needle.length;
-            this.needle = arena.allocate(Math.max(needle.length, 1));
-            MemorySegment.copy(needle, 0, this.needle, JAVA_BYTE, 0, needle.length);
-            this.meta = arena.allocate(64);
+            prepared = uncasedNeedleInit(nativeView(MemorySegment.ofArray(needle), arena), arena);
         }
 
         /** First match of this needle in {@code haystack} (caseless), or offset -1. */
         public Match indexIn(byte[] haystack) {
             try (Arena a = Arena.ofConfined()) {
-                MemorySegment h = a.allocate(Math.max(haystack.length, 1));
-                MemorySegment.copy(haystack, 0, h, JAVA_BYTE, 0, haystack.length);
-                return uncasedSearch(h.asSlice(0, haystack.length), needle.asSlice(0, needleLen), meta);
+                return uncasedMatch(nativeView(MemorySegment.ofArray(haystack), a), prepared);
             }
         }
 
@@ -1513,16 +1533,33 @@ public final class StringZilla {
     /** A single split point: the spans before, of, and after a separator. See {@link #partition}. */
     public record Partition(MemorySegment before, MemorySegment separator, MemorySegment after) {}
 
+    /** Adapts a cursor to an {@link Iterator}, looking one element ahead. */
+    private static <T> Iterator<T> iterator(BooleanSupplier advance, Supplier<T> current) {
+        return new Iterator<>() {
+            private boolean pulled;
+
+            @Override
+            public boolean hasNext() {
+                return pulled || (pulled = advance.getAsBoolean());
+            }
+
+            @Override
+            public T next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                pulled = false;
+                return current.get();
+            }
+        };
+    }
+
     /** Zero-allocation forward cursor over tiling UTF-8 segments (words, graphemes, …). Reuses one 64-entry
      *  batch buffer; call {@link #next()} then read {@link #startOffset()}/{@link #length()}. */
     public static final class Segmenter {
         private final MemorySegment text;
         private final SegmentKind kind;
-        private final long[] starts = new long[64];
         private final long[] lengths = new long[64];
-        private final long[] consumed = new long[1];
-        private int count, index, scanCursor;
-        private long chunkBase, curStart, curLength;
+        private int count, index;
+        private long start, length; // the current segment; the next one starts at its end
 
         Segmenter(MemorySegment text, SegmentKind kind) {
             this.text = text;
@@ -1530,34 +1567,27 @@ public final class StringZilla {
         }
 
         public boolean next() {
-            while (true) {
-                if (index < count) {
-                    curStart = chunkBase + starts[index];
-                    curLength = lengths[index];
-                    index++;
-                    return true;
-                }
-                long remaining = text.byteSize() - scanCursor;
-                if (remaining <= 0) return false;
-                chunkBase = scanCursor;
-                consumed[0] = 0;
-                count = segment(text, scanCursor, (int) remaining, kind, starts, lengths, consumed);
-                if (count == 0 || consumed[0] == 0) return false;
+            long end = start + length;
+            if (index == count) {
+                if (end == text.byteSize()) return false;
+                count = segment(text, end, text.byteSize() - end, kind, lengths);
                 index = 0;
-                scanCursor += (int) consumed[0];
             }
+            start = end;
+            length = lengths[index++];
+            return true;
         }
 
         public long startOffset() {
-            return curStart;
+            return start;
         }
 
         public long length() {
-            return curLength;
+            return length;
         }
 
         public MemorySegment current() {
-            return text.asSlice(curStart, curLength);
+            return text.asSlice(start, length);
         }
     }
 
@@ -1578,26 +1608,8 @@ public final class StringZilla {
 
         @Override
         public Iterator<MemorySegment> iterator() {
-            Segmenter cursor = new Segmenter(text, kind);
-            return new Iterator<>() {
-                private boolean has, pulled;
-
-                @Override
-                public boolean hasNext() {
-                    if (!pulled) {
-                        has = cursor.next();
-                        pulled = true;
-                    }
-                    return has;
-                }
-
-                @Override
-                public MemorySegment next() {
-                    if (!hasNext()) throw new NoSuchElementException();
-                    pulled = false;
-                    return cursor.current();
-                }
-            };
+            Segmenter cursor = cursor();
+            return StringZilla.iterator(cursor::next, cursor::current);
         }
 
         public Stream<MemorySegment> stream() {
@@ -1610,107 +1622,72 @@ public final class StringZilla {
     public static final class Splitter {
         private final MemorySegment data; // native-addressable view; finds run on it and yielded views slice it
         private final MemorySegment needle; // null for a byte-set split
-        private final MemorySegment bytesetSeg; // null for a substring split
+        private final MemorySegment byteset; // null for a substring split
         private final boolean reverse, keepSeparator, skipEmpty;
-        private final long maxSplit; // < 0 == unlimited
-        private long forwardCursor, reverseEnd, splitsDone;
-        private boolean finished;
-        private long curStart, curLength;
+        private long splitsLeft; // negative for unlimited
+        private long cursor; // start of the remaining text, its end in reverse, or -1 once done
+        private long start, length;
 
         Splitter(
                 MemorySegment data,
                 MemorySegment needle,
-                MemorySegment bytesetSeg,
+                MemorySegment byteset,
                 boolean reverse,
                 boolean keepSeparator,
                 boolean skipEmpty,
                 long maxSplit) {
             this.data = data;
             this.needle = needle;
-            this.bytesetSeg = bytesetSeg;
+            this.byteset = byteset;
             this.reverse = reverse;
             this.keepSeparator = keepSeparator;
             this.skipEmpty = skipEmpty;
-            this.maxSplit = maxSplit;
-            this.forwardCursor = 0;
-            this.reverseEnd = data.byteSize();
+            // An empty separator yields the whole text.
+            this.splitsLeft = needle != null && needle.byteSize() == 0 ? 0 : maxSplit;
+            this.cursor = reverse ? data.byteSize() : 0;
         }
 
         public boolean next() {
-            while (true) {
-                if (finished) return false;
-                if (!(reverse ? stepReverse() : stepForward())) {
-                    finished = true;
-                    return false;
+            while (cursor >= 0) {
+                MemorySegment rest = reverse ? data.asSlice(0, cursor) : data.asSlice(cursor);
+                long at = splitsLeft == 0 ? -1 : find(rest);
+                if (at < 0) {
+                    start = reverse ? 0 : cursor;
+                    length = rest.byteSize();
+                    cursor = -1;
+                } else {
+                    long separatorLength = needle != null ? needle.byteSize() : 1;
+                    splitsLeft--;
+                    if (reverse) {
+                        start = keepSeparator ? at : at + separatorLength;
+                        length = cursor - start;
+                        cursor = at;
+                    } else {
+                        start = cursor;
+                        length = at + (keepSeparator ? separatorLength : 0);
+                        cursor += at + separatorLength;
+                    }
                 }
-                if (skipEmpty && curLength == 0) continue;
-                return true;
+                if (!skipEmpty || length != 0) return true;
             }
+            return false;
         }
 
-        private long separatorLength() {
-            return needle != null ? needle.byteSize() : 1;
-        }
-
-        private long findForward(long from) {
-            MemorySegment rest = data.asSlice(from, data.byteSize() - from);
-            long rel = needle != null
-                    ? (needle.byteSize() == 0 ? -1 : indexOf(rest, needle))
-                    : findByteset(rest, bytesetSeg);
-            return rel < 0 ? -1 : from + rel;
-        }
-
-        private long findReverse(long end) {
-            MemorySegment prefix = data.asSlice(0, end);
-            if (needle != null) return needle.byteSize() == 0 ? -1 : lastIndexOf(prefix, needle);
-            return rfindByteset(prefix, bytesetSeg);
-        }
-
-        private boolean stepForward() {
-            long textLength = data.byteSize();
-            if (forwardCursor > textLength) return false;
-            long sepAt = (maxSplit >= 0 && splitsDone >= maxSplit) ? -1 : findForward(forwardCursor);
-            if (sepAt < 0) {
-                curStart = forwardCursor;
-                curLength = textLength - forwardCursor;
-                forwardCursor = textLength + 1;
-                return true;
-            }
-            long segmentEnd = keepSeparator ? sepAt + separatorLength() : sepAt;
-            curStart = forwardCursor;
-            curLength = segmentEnd - forwardCursor;
-            forwardCursor = sepAt + separatorLength();
-            splitsDone++;
-            return true;
-        }
-
-        private boolean stepReverse() {
-            if (reverseEnd < 0) return false;
-            long sepAt = (maxSplit >= 0 && splitsDone >= maxSplit) ? -1 : findReverse(reverseEnd);
-            if (sepAt < 0) {
-                curStart = 0;
-                curLength = reverseEnd;
-                reverseEnd = -1;
-                return true;
-            }
-            long segmentStart = keepSeparator ? sepAt : sepAt + separatorLength();
-            curStart = segmentStart;
-            curLength = reverseEnd - segmentStart;
-            reverseEnd = sepAt;
-            splitsDone++;
-            return true;
+        private long find(MemorySegment rest) {
+            if (needle != null) return reverse ? lastIndexOf(rest, needle) : indexOf(rest, needle);
+            return reverse ? rfindByteset(rest, byteset) : findByteset(rest, byteset);
         }
 
         public long startOffset() {
-            return curStart;
+            return start;
         }
 
         public long length() {
-            return curLength;
+            return length;
         }
 
         public MemorySegment current() {
-            return data.asSlice(curStart, curLength);
+            return data.asSlice(start, length);
         }
     }
 
@@ -1757,6 +1734,8 @@ public final class StringZilla {
             return new Splits(text, separator, byteset, reverse, true, skipEmpty, maxSplit);
         }
 
+        /** Stop after {@code limit} separators, leaving the rest as one final segment: 0 yields the
+         *  whole text, and a negative limit, the default, splits at every separator. */
         public Splits withMaxSplit(long limit) {
             return new Splits(text, separator, byteset, reverse, keepSeparator, skipEmpty, limit);
         }
@@ -1764,33 +1743,15 @@ public final class StringZilla {
         public Splitter cursor() {
             Arena arena = Arena.ofAuto();
             MemorySegment data = nativeView(text, arena);
-            MemorySegment needleSeg = separator != null ? nativeView(separator, arena) : null;
-            MemorySegment bytesetSeg = byteset != null ? byteset.toSegment(arena) : null;
-            return new Splitter(data, needleSeg, bytesetSeg, reverse, keepSeparator, skipEmpty, maxSplit);
+            MemorySegment needle = separator != null ? nativeView(separator, arena) : null;
+            MemorySegment set = byteset != null ? byteset.toSegment(arena) : null;
+            return new Splitter(data, needle, set, reverse, keepSeparator, skipEmpty, maxSplit);
         }
 
         @Override
         public Iterator<MemorySegment> iterator() {
             Splitter cursor = cursor();
-            return new Iterator<>() {
-                private boolean has, pulled;
-
-                @Override
-                public boolean hasNext() {
-                    if (!pulled) {
-                        has = cursor.next();
-                        pulled = true;
-                    }
-                    return has;
-                }
-
-                @Override
-                public MemorySegment next() {
-                    if (!hasNext()) throw new NoSuchElementException();
-                    pulled = false;
-                    return cursor.current();
-                }
-            };
+            return StringZilla.iterator(cursor::next, cursor::current);
         }
 
         public Stream<MemorySegment> stream() {
@@ -1802,102 +1763,64 @@ public final class StringZilla {
      *  64 separators per native call, applying the {@link SplitParts} policy. */
     public static final class TokenSplitter {
         private final MemorySegment text;
-        private final SegmentKind kind;
+        private final TokenKind kind;
         private final SplitParts parts;
         private final boolean skipEmpty;
-        private final long[] starts = new long[64];
+        private final long[] offsets = new long[64];
         private final long[] lengths = new long[64];
-        private final long[] consumed = new long[1];
-        private int count, index, scanCursor;
-        private long chunkBase, prevEnd, curStart, curLength;
-        private boolean atSeparator, exhausted, emittedTail;
+        // Step 2k is the gap before token k and 2k + 1 the token; past 2 * count once done.
+        private int count, step;
+        private long base, start, length; // base is where the batch's scan began
 
-        TokenSplitter(MemorySegment text, SegmentKind kind, SplitParts parts, boolean skipEmpty) {
+        TokenSplitter(MemorySegment text, TokenKind kind, SplitParts parts, boolean skipEmpty) {
             this.text = text;
             this.kind = kind;
             this.parts = parts;
             this.skipEmpty = skipEmpty;
+            this.count = tokenize(text, kind, offsets, lengths);
         }
 
         public boolean next() {
             while (true) {
-                if (!exhausted && index >= count) {
-                    long remaining = text.byteSize() - scanCursor;
-                    if (remaining <= 0) {
-                        exhausted = true;
-                    } else {
-                        chunkBase = scanCursor;
-                        consumed[0] = 0;
-                        count = segment(text, scanCursor, (int) remaining, kind, starts, lengths, consumed);
-                        if (count == 0 || consumed[0] == 0) {
-                            exhausted = true;
-                        } else {
-                            index = 0;
-                            scanCursor += (int) consumed[0];
-                        }
-                    }
+                if (step == 2 * count && count == offsets.length) {
+                    base += offsets[count - 1] + lengths[count - 1];
+                    count = tokenize(text.asSlice(base), kind, offsets, lengths);
+                    step = 0;
                 }
-                if (exhausted) {
-                    if (emittedTail) return false;
-                    emittedTail = true;
-                    if (parts != SplitParts.SEPARATORS) {
-                        long length = text.byteSize() - prevEnd;
-                        if (!(skipEmpty && length == 0)) {
-                            curStart = prevEnd;
-                            curLength = length;
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                long runStart = chunkBase + starts[index];
-                long runEnd = runStart + lengths[index];
-                if (!atSeparator) {
-                    atSeparator = true;
-                    if (parts != SplitParts.SEPARATORS) {
-                        long length = runStart - prevEnd;
-                        if (!(skipEmpty && length == 0)) {
-                            curStart = prevEnd;
-                            curLength = length;
-                            return true;
-                        }
-                    }
-                }
-                atSeparator = false;
-                prevEnd = runEnd;
-                index++;
-                if (parts != SplitParts.BETWEEN) {
-                    long length = runEnd - runStart;
-                    if (!(skipEmpty && length == 0)) {
-                        curStart = runStart;
-                        curLength = length;
-                        return true;
-                    }
-                }
+                if (step > 2 * count) return false;
+                int token = step >> 1;
+                boolean isToken = (step++ & 1) != 0;
+                if (parts == (isToken ? SplitParts.BETWEEN : SplitParts.SEPARATORS)) continue;
+                long from = isToken ? offsets[token] : token == 0 ? 0 : offsets[token - 1] + lengths[token - 1];
+                long to = isToken ? from + lengths[token] : token == count ? text.byteSize() - base : offsets[token];
+                if (skipEmpty && from == to) continue;
+                start = base + from;
+                length = to - from;
+                return true;
             }
         }
 
         public long startOffset() {
-            return curStart;
+            return start;
         }
 
         public long length() {
-            return curLength;
+            return length;
         }
 
         public MemorySegment current() {
-            return text.asSlice(curStart, curLength);
+            return text.asSlice(start, length);
         }
     }
 
     /** Iterable / streamable view over separator-token splits, yielding zero-copy slices. */
     public static final class TokenSplits implements Iterable<MemorySegment> {
         private final MemorySegment text;
-        private final SegmentKind kind;
+        private final TokenKind kind;
         private final SplitParts parts;
         private final boolean skipEmpty;
 
-        TokenSplits(MemorySegment text, SegmentKind kind, SplitParts parts, boolean skipEmpty) {
+        TokenSplits(MemorySegment text, TokenKind kind, SplitParts parts, boolean skipEmpty) {
             this.text = text;
             this.kind = kind;
             this.parts = parts;
@@ -1924,26 +1847,8 @@ public final class StringZilla {
 
         @Override
         public Iterator<MemorySegment> iterator() {
-            TokenSplitter cursor = new TokenSplitter(text, kind, parts, skipEmpty);
-            return new Iterator<>() {
-                private boolean has, pulled;
-
-                @Override
-                public boolean hasNext() {
-                    if (!pulled) {
-                        has = cursor.next();
-                        pulled = true;
-                    }
-                    return has;
-                }
-
-                @Override
-                public MemorySegment next() {
-                    if (!hasNext()) throw new NoSuchElementException();
-                    pulled = false;
-                    return cursor.current();
-                }
-            };
+            TokenSplitter cursor = cursor();
+            return StringZilla.iterator(cursor::next, cursor::current);
         }
 
         public Stream<MemorySegment> stream() {
@@ -1955,53 +1860,54 @@ public final class StringZilla {
     public static final class Matcher {
         private final MemorySegment data;
         private final MemorySegment needle;
-        private final boolean overlapping;
-        private long cursor, curOffset;
+        private final long stride;
+        private long cursor, offset; // cursor passes the end once exhausted
 
-        Matcher(MemorySegment data, MemorySegment needle, boolean overlapping) {
+        Matcher(MemorySegment data, MemorySegment needle, long stride) {
             this.data = data;
             this.needle = needle;
-            this.overlapping = overlapping;
+            this.stride = stride;
         }
 
         public boolean next() {
-            long textLength = data.byteSize();
-            if (needle.byteSize() == 0 || cursor > textLength) return false;
-            long rel = indexOf(data.asSlice(cursor, textLength - cursor), needle);
-            if (rel < 0) {
-                cursor = textLength + 1;
+            if (cursor > data.byteSize()) return false;
+            long found = indexOf(data.asSlice(cursor), needle);
+            if (found < 0) {
+                cursor = data.byteSize() + 1;
                 return false;
             }
-            curOffset = cursor + rel;
-            cursor = curOffset + (overlapping ? 1 : needle.byteSize());
+            offset = cursor + found;
+            cursor = offset + stride;
             return true;
         }
 
         public long offset() {
-            return curOffset;
+            return offset;
         }
     }
 
-    /** Streamable view over substring matches; {@link #overlapping()} reports overlapping matches and
-     *  {@link #cursor()} is the zero-allocation path. */
+    /** Streamable view over substring matches; {@link #overlapping()} reports overlapping matches
+     *  and {@link #cursor()} is the zero-allocation path. An empty needle matches at every offset,
+     *  the end included. */
     public static final class Matches {
         private final MemorySegment haystack;
         private final MemorySegment needle;
-        private final boolean overlapping;
+        private final long stride;
 
-        Matches(MemorySegment haystack, MemorySegment needle, boolean overlapping) {
+        Matches(MemorySegment haystack, MemorySegment needle, long stride) {
             this.haystack = haystack;
             this.needle = needle;
-            this.overlapping = overlapping;
+            this.stride = stride;
         }
 
+        /** Report overlapping matches, stepping one byte past each instead of the needle. */
         public Matches overlapping() {
-            return new Matches(haystack, needle, true);
+            return new Matches(haystack, needle, 1);
         }
 
         public Matcher cursor() {
             Arena arena = Arena.ofAuto();
-            return new Matcher(nativeView(haystack, arena), nativeView(needle, arena), overlapping);
+            return new Matcher(nativeView(haystack, arena), nativeView(needle, arena), stride);
         }
 
         public long[] toArray() {
@@ -2020,41 +1926,46 @@ public final class StringZilla {
         }
     }
 
-    /** Zero-allocation cursor over case-insensitive matches, reusing one cached needle-metadata buffer. */
+    /** Zero-allocation cursor over case-insensitive matches of a needle prepared once. */
     public static final class UncasedMatcher {
         private final MemorySegment data;
-        private final MemorySegment needle;
-        private final MemorySegment meta; // populated on first search, reused thereafter
+        private final MemorySegment needle; // prepared
         private final boolean overlapping;
-        private long cursor;
-        private Match current;
+        private final long[] found = new long[2]; // the match address and length the search writes
+        private long cursor, offset; // cursor passes the end once exhausted
 
-        UncasedMatcher(MemorySegment data, MemorySegment needle, MemorySegment meta, boolean overlapping) {
+        UncasedMatcher(MemorySegment data, MemorySegment needle, boolean overlapping) {
             this.data = data;
             this.needle = needle;
-            this.meta = meta;
             this.overlapping = overlapping;
         }
 
         public boolean next() {
             long textLength = data.byteSize();
-            if (needle.byteSize() == 0 || cursor > textLength) return false;
-            Match found = uncasedSearch(data.asSlice(cursor, textLength - cursor), needle, meta);
-            if (found.offset() < 0) {
+            if (cursor > textLength) return false;
+            long at = uncasedSearch(data.asSlice(cursor), needle, found);
+            if (at < 0) {
                 cursor = textLength + 1;
                 return false;
             }
-            long offset = cursor + found.offset();
-            long matchedLength = found.matchedLength();
-            current = new Match(offset, matchedLength);
-            // Overlapping advances one codepoint (not one byte): caseless folding is Unicode-aware, so
-            // the next search must start on a UTF-8 boundary rather than mid-codepoint.
-            cursor = offset + (overlapping ? utf8LeadWidth(data.get(JAVA_BYTE, offset)) : Math.max(matchedLength, 1));
+            offset = cursor + at;
+            // Overlapping and empty matches step a codepoint, keeping to rune boundaries.
+            cursor = offset
+                    + (found[1] != 0 && !overlapping
+                            ? found[1]
+                            : offset < textLength
+                                    ? Math.min(utf8LeadWidth(data.get(JAVA_BYTE, offset)), textLength - offset)
+                                    : 1);
             return true;
         }
 
-        public Match current() {
-            return current;
+        public long offset() {
+            return offset;
+        }
+
+        /** The matched byte length, which folding may make differ from the needle's. */
+        public long matchedLength() {
+            return found[1];
         }
     }
 
@@ -2077,16 +1988,14 @@ public final class StringZilla {
 
         public UncasedMatcher cursor() {
             Arena arena = Arena.ofAuto();
-            MemorySegment data = nativeView(haystack, arena);
-            MemorySegment needleSeg = nativeView(needle, arena);
-            MemorySegment meta = arena.allocate(64); // zeroed; the native dereferences it (NULL is unsafe)
-            return new UncasedMatcher(data, needleSeg, meta, overlapping);
+            MemorySegment needle = uncasedNeedleInit(nativeView(this.needle, arena), arena);
+            return new UncasedMatcher(nativeView(haystack, arena), needle, overlapping);
         }
 
         public java.util.List<Match> toList() {
             UncasedMatcher cursor = cursor();
             java.util.List<Match> out = new java.util.ArrayList<>();
-            while (cursor.next()) out.add(cursor.current());
+            while (cursor.next()) out.add(new Match(cursor.offset(), cursor.matchedLength()));
             return out;
         }
 

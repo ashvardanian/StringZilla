@@ -5,10 +5,12 @@
 
 package sz
 
+// #include <stdlib.h>
 // #include <stringzilla/stringzilla.h>
 import "C"
 import (
 	"errors"
+	"runtime"
 	"unsafe"
 )
 
@@ -93,67 +95,65 @@ func Utf8CaseInsensitiveFind(haystack, needle string, validate bool) (index int6
 			return -1, 0, ErrInvalidUTF8
 		}
 	}
-	if len(needle) == 0 {
-		return 0, 0, nil
-	}
 
-	hPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(haystack)))
-	hLen := C.sz_size_t(len(haystack))
-	nPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(needle)))
-	nLen := C.sz_size_t(len(needle))
-
-	var meta C.sz_utf8_uncased_needle_metadata_t
-	var matchPtr C.sz_cptr_t
-	var matchedLen C.sz_size_t
-	if err := statusError(C.sz_utf8_uncased_search_best(hPtr, hLen, nPtr, nLen, &meta, &matchPtr, &matchedLen,
-		capabilities(), nil)); err != nil {
+	// The prepared needle points into `needle`, and cgo only passes Go pointers that are pinned.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(unsafe.StringData(needle))
+	var prepared C.sz_utf8_uncased_needle_t
+	if err := statusError(C.sz_utf8_uncased_needle_init_best((*C.char)(unsafe.Pointer(unsafe.StringData(needle))),
+		C.sz_size_t(len(needle)), &prepared, capabilities(), nil)); err != nil {
 		return -1, 0, err
 	}
-	if matchPtr == nil {
-		return -1, 0, nil
-	}
-	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(hPtr))), int64(matchedLen), nil
+	return utf8UncasedSearch(haystack, &prepared)
 }
 
-// Utf8CaseInsensitiveNeedle caches metadata for efficient repeated case-insensitive UTF-8 searches.
-// It is not safe for concurrent use, as its internal metadata is computed lazily and mutated.
+// Utf8CaseInsensitiveNeedle is a needle prepared once for repeated case-insensitive UTF-8 searches.
+// It is safe for concurrent use, as searches only read it.
 type Utf8CaseInsensitiveNeedle struct {
-	needle   string
-	metadata C.sz_utf8_uncased_needle_metadata_t
+	prepared C.sz_utf8_uncased_needle_t
 }
 
-// NewUtf8CaseInsensitiveNeedle constructs a reusable case-insensitive needle.
+// NewUtf8CaseInsensitiveNeedle prepares a reusable case-insensitive needle over its own copy of it.
 // If validate is true, the needle is validated as UTF-8.
 func NewUtf8CaseInsensitiveNeedle(needle string, validate bool) (*Utf8CaseInsensitiveNeedle, error) {
 	if validate && !isValidUTF8String(needle) {
 		return nil, ErrInvalidUTF8
 	}
-	return &Utf8CaseInsensitiveNeedle{needle: needle}, nil
+	// The prepared needle points at its bytes, so they live in C memory, which cgo never checks.
+	bytes := C.CString(needle)
+	n := &Utf8CaseInsensitiveNeedle{}
+	if err := statusError(C.sz_utf8_uncased_needle_init_best(bytes, C.sz_size_t(len(needle)), &n.prepared,
+		capabilities(), nil)); err != nil {
+		C.free(unsafe.Pointer(bytes))
+		return nil, err
+	}
+	runtime.AddCleanup(n, func(bytes *C.char) { C.free(unsafe.Pointer(bytes)) }, bytes)
+	return n, nil
 }
 
-// FindIn searches for the needle in haystack using cached metadata and returns byte offsets.
+// FindIn searches for the prepared needle in haystack and returns byte offsets.
 func (n *Utf8CaseInsensitiveNeedle) FindIn(haystack string, validate bool) (index int64, length int64, err error) {
 	if n == nil {
 		return -1, 0, errors.New("nil Utf8CaseInsensitiveNeedle")
 	}
-	if validate {
-		if !isValidUTF8String(haystack) {
-			return -1, 0, ErrInvalidUTF8
-		}
+	if validate && !isValidUTF8String(haystack) {
+		return -1, 0, ErrInvalidUTF8
 	}
-	if len(n.needle) == 0 {
+	return utf8UncasedSearch(haystack, &n.prepared)
+}
+
+// utf8UncasedSearch finds a prepared needle in haystack, returning byte offsets like FindIn.
+func utf8UncasedSearch(haystack string, needle *C.sz_utf8_uncased_needle_t) (index int64, length int64, err error) {
+	// An empty haystack may have no data pointer to report the empty needle's match against.
+	if needle.length == 0 {
 		return 0, 0, nil
 	}
-
 	hPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(haystack)))
-	hLen := C.sz_size_t(len(haystack))
-	nPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(n.needle)))
-	nLen := C.sz_size_t(len(n.needle))
-
 	var matchPtr C.sz_cptr_t
 	var matchedLen C.sz_size_t
-	if err := statusError(C.sz_utf8_uncased_search_best(hPtr, hLen, nPtr, nLen, &n.metadata, &matchPtr, &matchedLen,
-		capabilities(), nil)); err != nil {
+	if err := statusError(C.sz_utf8_uncased_search_best(hPtr, C.sz_size_t(len(haystack)), needle, &matchPtr,
+		&matchedLen, capabilities(), nil)); err != nil {
 		return -1, 0, err
 	}
 	if matchPtr == nil {

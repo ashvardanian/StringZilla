@@ -682,13 +682,9 @@ STRINGZILLA_INLINE sz_size_t sz_line_break_complete_limit_haswell_(sz_utf8_rune_
  *  mirroring @ref sz_utf8_linebreaks_icelake_ over the AVX2 window, classify and drain leaves. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_haswell_( //
     sz_cptr_t text, sz_size_t length,                     //
-    sz_size_t *starts, sz_size_t *lengths,                //
-    sz_size_t capacity, sz_size_t *bytes_consumed) {
+    sz_size_t *lengths, sz_size_t capacity) {
 
-    if (length == 0 || capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || capacity == 0) return 0;
     sz_u8_t const *bytes = (sz_u8_t const *)text;
     sz_size_t produced = 0;
     sz_size_t line_start = 0;
@@ -707,20 +703,15 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_haswell_( //
                                                                                 complete_limit, more_text);
         sz_u64_t const commit = win.breaks & sz_u64_mask_until_serial_(win.resolved);
 
-        produced = sz_utf8_rune_drain_forward_haswell_(commit, position, starts, lengths, produced, capacity,
-                                                       &line_start);
-        if (produced >= capacity) {
-            if (bytes_consumed) *bytes_consumed = line_start;
-            return produced;
-        }
+        produced = sz_utf8_rune_drain_forward_haswell_(commit, position, lengths, produced, capacity, &line_start);
+        if (produced >= capacity) return produced;
 
         sz_size_t const advance = win.resolved ? win.resolved : complete_limit;
         carry = carry_next;
         position += advance ? advance : window.loaded;
     }
 
-    if (produced < capacity) starts[produced] = line_start, lengths[produced] = length - line_start, ++produced;
-    if (bytes_consumed) *bytes_consumed = length;
+    if (produced < capacity) lengths[produced] = length - line_start, ++produced;
     return produced;
 }
 
@@ -732,14 +723,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_haswell_( //
 
 /** Forward UAX-14 line-break-opportunity kernel for Haswell AVX2. Bit-exact with
  *  @c sz_utf8_linebreaks_serial and @c sz_utf8_linebreaks_icelake. */
-STRINGZILLA_API sz_status_t sz_utf8_linebreaks_haswell(        //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *starts, sz_size_t *lengths, sz_size_t capacity, //
-    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                       sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *lines_count = sz_utf8_linebreaks_haswell_(text, length, starts, lengths, capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, capacity, *lines_count, bytes_consumed ? *bytes_consumed : length,
-                                         starts, lengths, 0, sz_true_k));
+    *count = sz_utf8_linebreaks_haswell_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

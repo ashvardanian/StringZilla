@@ -2994,8 +2994,8 @@ inline std::string uniform_utf8_run_(char const *encoded_rune, std::size_t repea
  *  @brief Streams @c unpack over the entire @p text, collecting every decoded rune.
  *
  *  Mirrors the documented streaming contract: each call decodes a prefix of the remaining bytes and
- *  reports how many runes it produced and how many bytes it consumed; on valid UTF-8 every call
- *  must advance, so the loop terminates.
+ *  reports how many runes it produced and how many bytes it consumed; every call must advance, so
+ *  the loop terminates.
  *
  *  A small @p chunk_capacity forces the capacity-limited resume path, where the decoder fills the
  *  buffer, returns mid-input, and resumes after the consumed bytes.
@@ -3059,6 +3059,13 @@ inline void check_utf8_runes_unit_(utf8_runes_backend_t const &backend) {
     // `sz_utf8_decode_best`: streaming the decoder must reproduce exactly the expected runes at
     // every caller capacity, the tiny ones landing mid-rune-sequence on each resume.
     if (!backend.decode) return;
+
+    // The end of the text ends the input, so a truncated final sequence decodes to one U+FFFD.
+    sz_rune_t tail_runes[4];
+    sz_size_t tail_count = 0;
+    verify(kernel_result<sz_size_t>(backend.decode, "a\xE2\x82", 3, tail_runes, 4, &tail_count) == 3u);
+    verify(tail_count == 2 && tail_runes[0] == 'a' && tail_runes[1] == 0xFFFDu);
+
     sz_size_t const capacities[] = {1u, 2u, 3u, 16u, 64u};
     std::vector<sz_rune_t> decoded;
     for (sz_size_t capacity : capacities) {
@@ -3158,8 +3165,7 @@ inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend
 
         // Every emitted rune must be a valid Unicode scalar value (no surrogate, none beyond
         // U+10FFFF) - the precondition every binding relies on to convert runes without
-        // re-validation. A well-formed but truncated trailing sequence legitimately stalls
-        // (consumes nothing) - so we stop rather than spin.
+        // re-validation - and only a full output may stop a call short of the end.
         if (!backend.decode) return;
         // The tiny capacities force the fill-and-resume path to restart inside malformed bytes,
         // which the whole-input capacity never does.
@@ -3173,13 +3179,14 @@ inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend
                     backend.decode, input + offset, (sz_size_t)(input_length - offset), rune_destination.data(),
                     (sz_size_t)rune_capacity, &produced);
                 verify(produced <= rune_capacity && "Unpack reported more runes than the destination holds");
-                verify(consumed <= input_length - offset && "Unpack consumed past the input");
+                verify(consumed != 0 && consumed <= input_length - offset && "Unpack must advance within the input");
+                verify((produced == rune_capacity || consumed == input_length - offset) &&
+                       "Unpack stopped short of the end without filling its output");
                 for (sz_size_t rune_index = 0; rune_index != produced; ++rune_index) {
                     sz_rune_t const rune = rune_destination[rune_index];
                     verify(rune <= 0x10FFFFu && !(rune >= 0xD800u && rune <= 0xDFFFu) &&
                            "Unpack emitted a non-scalar value (surrogate or out of range)");
                 }
-                if (!consumed) break; // Stalled on a truncated trailing sequence - the caller would refill
                 offset += consumed;
             }
         }
@@ -3213,12 +3220,13 @@ struct boundary_span_t {
 };
 
 /**
- *  @brief Drain every match a segmenter emits over the whole input, resuming via @c bytes_consumed
+ *  @brief Drain every match a tokenizer emits over the whole input, resuming via @c bytes_consumed
  *      so an arbitrarily small @p capacity yields the identical full match list.
  *
- *  Offsets are absolute. @p matcher is any callable with the @c sz_kernel_utf8_segmenter_t
+ *  Offsets are absolute. @p matcher is any callable with the @c sz_kernel_utf8_tokenizer_t
  *  signature - a kernel pointer or a @c cpu_best dispatch point - so newlines, whitespaces and
- *  delimiters all share this one driver.
+ *  delimiters all share this one driver, and every batch is held to the resume guarantee: a full
+ *  batch consumes exactly through its last match, any other batch the whole input.
  */
 template <typename matcher_type_>
 void drain_matches_(matcher_type_ &&matcher, sz_cptr_t text, sz_size_t length, sz_size_t capacity,
@@ -3230,7 +3238,9 @@ void drain_matches_(matcher_type_ &&matcher, sz_cptr_t text, sz_size_t length, s
         sz_size_t emitted = 0, consumed = 0;
         verify(matcher(text + position, length - position, offset_batch.data(), length_batch.data(), capacity, &emitted,
                        &consumed, nullptr) == sz_success_k);
-        verify(consumed <= length - position && "Segmenter consumed past the input");
+        sz_size_t const last_end = emitted ? offset_batch[emitted - 1] + length_batch[emitted - 1] : 0;
+        verify(consumed == (emitted == capacity ? last_end : length - position) &&
+               "A full batch must resume right after its last match, any other one at the end of the input");
         for (sz_size_t index = 0; index != emitted; ++index)
             offsets.push_back(position + offset_batch[index]), lengths.push_back(length_batch[index]);
         if (consumed == 0) break; // No forward progress: stop rather than spin.
@@ -3285,12 +3295,18 @@ inline std::string exact_byte_length_(char const *pattern, std::size_t pattern_l
 }
 
 /** One backend's UTF-8 count, newline and whitespace kernels: a capability's, or the dispatch
- *  points in their shape. V128 Relaxed has its own counter over the V128 segmenters. */
+ *  points in their shape. V128 Relaxed has its own counter over the V128 tokenizers. */
 struct utf8_tokens_backend_t {
     char const *name;
     sz_kernel_utf8_count_t count;
-    sz_kernel_utf8_segmenter_t newlines;
-    sz_kernel_utf8_segmenter_t whitespaces;
+    sz_kernel_utf8_tokenizer_t newlines;
+    sz_kernel_utf8_tokenizer_t whitespaces;
+};
+
+/** One backend's delimiter tokenizer: a capability's, or the dispatch point in its shape. */
+struct utf8_delimiters_backend_t {
+    char const *name;
+    sz_kernel_utf8_tokenizer_t finder;
 };
 
 /**
@@ -3305,7 +3321,7 @@ inline void check_utf8_tokens_unit_(utf8_tokens_backend_t const &backend) {
     char const mixed[] = "a\xC3\x9F\xE4\xB8\xAD";
     verify(kernel_result<sz_size_t>(backend.count, mixed, (sz_size_t)(sizeof(mixed) - 1)) == 3u);
 
-    auto check_boundaries_ = [](sz_kernel_utf8_segmenter_t finder, sz_cptr_t text, sz_size_t length,
+    auto check_boundaries_ = [](sz_kernel_utf8_tokenizer_t finder, sz_cptr_t text, sz_size_t length,
                                 std::initializer_list<boundary_span_t> expected) {
         sz_size_t found_offsets[16], found_lengths[16], found = 0, consumed = 0;
         verify(finder(text, length, found_offsets, found_lengths, 16u, &found, &consumed, nullptr) == sz_success_k);
@@ -3513,7 +3529,7 @@ inline void check_utf8_tokens_safety_(test_context_t &context, utf8_tokens_backe
     static constexpr std::size_t max_input_length = utf8_unit_capacity_k;
     auto check = [&](char const *input, std::size_t input_length) {
         sz_size_t boundary_offsets[max_input_length + 1], boundary_lengths[max_input_length + 1];
-        auto check_boundaries_ = [&](sz_kernel_utf8_segmenter_t finder, char const *finder_name) {
+        auto check_boundaries_ = [&](sz_kernel_utf8_tokenizer_t finder, char const *finder_name) {
             sz_size_t found = 0, bytes_consumed = 0;
             verify(finder(input, (sz_size_t)input_length, boundary_offsets, boundary_lengths,
                           (sz_size_t)(max_input_length + 1), &found, &bytes_consumed, nullptr) == sz_success_k);
@@ -3535,7 +3551,7 @@ inline void check_utf8_tokens_safety_(test_context_t &context, utf8_tokens_backe
 
 /** Known-answer checks of one UTF-8 delimiter segmenter on simple, hand-verifiable inputs, and on
  *  capacity-limited batches whose resume offset must land on the last emitted delimiter. */
-inline void check_utf8_delimiters_unit_(utf8_segment_backend_t const &backend) {
+inline void check_utf8_delimiters_unit_(utf8_delimiters_backend_t const &backend) {
     struct {
         char const *text;
         sz_size_t length, expected_offset, expected_length, expected_count;
@@ -3608,9 +3624,9 @@ inline void check_utf8_delimiters_unit_(utf8_segment_backend_t const &backend) {
 /** Cross-checks one UTF-8 delimiter segmenter against serial on random, well-formed inputs: the
  *  full (offset, length) match list must agree, both in one shot and when a tiny capacity drains
  *  the candidate through its @c bytes_consumed resume path. */
-inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_segment_backend_t const &candidate) {
+inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_delimiters_backend_t const &candidate) {
     std::mt19937 &generator = context.generator;
-    sz_kernel_utf8_segmenter_t const finder_serial = sz_utf8_delimiters_serial;
+    sz_kernel_utf8_tokenizer_t const finder_serial = sz_utf8_delimiters_serial;
     std::vector<sz_size_t> serial_offsets, serial_lengths, candidate_offsets, candidate_lengths, resumed_offsets,
         resumed_lengths;
 
@@ -3674,7 +3690,7 @@ inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_seg
 }
 
 /** Feeds malformed UTF-8 to a delimiter segmenter, asserting in-bounds, ascending, valid spans. */
-inline void check_utf8_delimiters_safety_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_delimiters_safety_(test_context_t &context, utf8_delimiters_backend_t const &backend) {
     std::vector<sz_size_t> offsets, lengths;
 
     // Malformed bytes meet a capacity too small to hold the batch, so the resume path - not just
@@ -3713,18 +3729,17 @@ inline utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
     {"Hello, world!"sv, {"Hello"sv, ","sv, " "sv, "world"sv, "!"sv}},     // letter/punct/space boundaries
 };
 
-/** Segment @p text with @p forward at @p capacity and assert the (start, length) stream tiles the
- *  input into exactly @p expected_lengths. */
+/** Segment @p text with @p forward at @p capacity and assert the segments have exactly
+ *  @p expected_lengths. */
 inline void check_utf8_wordbreaks_lengths_(char const *label, sz_kernel_utf8_segmenter_t forward,
                                            std::string const &text, std::vector<sz_size_t> const &expected_lengths,
                                            sz_size_t capacity) {
     utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(forward, text.data(), text.size(), capacity);
-    sz_size_t start = 0, length = 0, position = 0;
+    sz_size_t start = 0, length = 0;
     for (sz_size_t const expected : expected_lengths) {
         sz_bool_t const more = utf8_segment_cursor_next_(cursor, start, length);
         verify(more && label && "deferred-mid golden emitted fewer segments than expected");
-        verify(start == position && length == expected && label && "deferred-mid golden segment mismatch");
-        position += length;
+        verify(length == expected && label && "deferred-mid golden segment mismatch");
     }
     verify(!utf8_segment_cursor_next_(cursor, start, length) && label && "deferred-mid golden emitted extra segments");
 }
@@ -4739,16 +4754,22 @@ struct utf8_uncased_kernels_t {
     sz_kernel_utf8_find_cased_t find_cased;
 };
 
+/** Prepares @p needle with the serial analysis, the one every uncased search backend consumes. */
+inline sz_utf8_uncased_needle_t uncased_needle_(char const *needle, sz_size_t needle_length) {
+    sz_utf8_uncased_needle_t prepared;
+    verify(sz_utf8_uncased_needle_init_serial(needle, needle_length, &prepared, nullptr) == sz_success_k);
+    return prepared;
+}
+
 /** Runs one uncased-find backend over a known case and asserts the match offset and length. */
 inline void check_uncased_find_unit_(                                                      //
     sz_kernel_utf8_uncased_search_t find, char const *haystack, sz_size_t haystack_length, //
     char const *needle, sz_size_t needle_length,                                           //
     sz_size_t expected_offset, sz_size_t expected_length) {
-    sz_utf8_uncased_needle_metadata_t metadata = {};
+    sz_utf8_uncased_needle_t const prepared = uncased_needle_(needle, needle_length);
     sz_cptr_t match = STRINGZILLA_NULL_CHAR;
     sz_size_t match_length = 0;
-    verify(find(haystack, haystack_length, needle, needle_length, &metadata, &match, &match_length, nullptr) ==
-           sz_success_k);
+    verify(find(haystack, haystack_length, &prepared, &match, &match_length, nullptr) == sz_success_k);
     verify(match != STRINGZILLA_NULL_CHAR);
     verify((sz_size_t)(match - haystack) == expected_offset);
     verify(match_length == expected_length);
@@ -4860,13 +4881,11 @@ inline void check_uncased_find_three_way_(                                      
     char const *haystack, std::size_t haystack_length,                                    //
     char const *needle, std::size_t needle_length, char const *test_name) {
 
-    sz_utf8_uncased_needle_metadata_t base_metadata = {}, simd_metadata = {};
+    sz_utf8_uncased_needle_t const prepared = uncased_needle_(needle, needle_length);
     sz_size_t base_matched = 0, simd_matched = 0;
     sz_cptr_t base_result = STRINGZILLA_NULL_CHAR, simd_result = STRINGZILLA_NULL_CHAR;
-    verify(find_base(haystack, haystack_length, needle, needle_length, &base_metadata, &base_result, &base_matched,
-                     nullptr) == sz_success_k);
-    verify(find_simd(haystack, haystack_length, needle, needle_length, &simd_metadata, &simd_result, &simd_matched,
-                     nullptr) == sz_success_k);
+    verify(find_base(haystack, haystack_length, &prepared, &base_result, &base_matched, nullptr) == sz_success_k);
+    verify(find_simd(haystack, haystack_length, &prepared, &simd_result, &simd_matched, nullptr) == sz_success_k);
 
     std::size_t reference_matched = 0;
     sz_cptr_t reference_result = reference_uncased_find_(haystack, haystack_length, needle, needle_length,
@@ -4886,7 +4905,7 @@ inline void check_uncased_find_three_way_(                                      
     fmt::println(stderr,
                  "{} FAIL: base offset={} len={} | simd offset={} len={} kernel={} | reference offset={} len={}",
                  test_name, base_offset, (std::size_t)base_matched, simd_offset, (std::size_t)simd_matched,
-                 simd_metadata.kernel_id, reference_offset, (std::size_t)reference_matched);
+                 prepared.script, reference_offset, (std::size_t)reference_matched);
     print_utf8_test_bytes_("needle  ", {needle, needle_length});
     print_utf8_test_bytes_("haystack", {haystack, haystack_length});
     verify(base_matches_reference && "Uncased find base backend disagrees with the reference");
@@ -5132,12 +5151,12 @@ inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_unc
             sz_size_t needle_bytes = needle_end - needle_start;
             sz_size_t serial_matched = 0, simd_matched = 0;
             sz_cptr_t serial_result = STRINGZILLA_NULL_CHAR, simd_result = STRINGZILLA_NULL_CHAR;
-            sz_utf8_uncased_needle_metadata_t serial_meta = {}, simd_meta = {};
+            sz_utf8_uncased_needle_t const prepared = uncased_needle_(needle_start, needle_bytes);
 
-            verify(find_serial(haystack.data(), haystack.size(), needle_start, needle_bytes, &serial_meta,
-                               &serial_result, &serial_matched, nullptr) == sz_success_k);
-            verify(find_simd(haystack.data(), haystack.size(), needle_start, needle_bytes, &simd_meta, &simd_result,
-                             &simd_matched, nullptr) == sz_success_k);
+            verify(find_serial(haystack.data(), haystack.size(), &prepared, &serial_result, &serial_matched, nullptr) ==
+                   sz_success_k);
+            verify(find_simd(haystack.data(), haystack.size(), &prepared, &simd_result, &simd_matched, nullptr) ==
+                   sz_success_k);
 
             if (serial_result != simd_result || serial_matched != simd_matched) {
                 sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack.data())
@@ -5154,7 +5173,7 @@ inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_unc
   Needle bytes: {needle:02X}
   Serial: offset={serial_offset}, len={serial_length}
   SIMD:   offset={simd_offset}, len={simd_length}
-  SIMD metadata: kernel={kernel} offset_in_unfolded={unfolded_offset}, length_in_unfolded={unfolded_length}
+  Prepared needle: script={kernel} offset_in_unfolded={unfolded_offset}, length_in_unfolded={unfolded_length}
   Haystack bytes from offset {shown_from}:
     {haystack:02X}
 )",
@@ -5163,9 +5182,9 @@ inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_unc
                            fmt::arg("needle_length", needle_bytes), fmt::arg("needle", hex_bytes(needle_shown)),
                            fmt::arg("serial_offset", (sz_ssize_t)serial_off), fmt::arg("serial_length", serial_matched),
                            fmt::arg("simd_offset", (sz_ssize_t)simd_off), fmt::arg("simd_length", simd_matched),
-                           fmt::arg("kernel", simd_meta.kernel_id),
-                           fmt::arg("unfolded_offset", simd_meta.offset_in_unfolded),
-                           fmt::arg("unfolded_length", simd_meta.length_in_unfolded),
+                           fmt::arg("kernel", prepared.script),
+                           fmt::arg("unfolded_offset", prepared.offset_in_unfolded),
+                           fmt::arg("unfolded_length", prepared.length_in_unfolded),
                            fmt::arg("shown_from", print_start), fmt::arg("haystack", hex_bytes(haystack_shown)));
                 verify(serial_result == simd_result && "Fuzz offset mismatch");
                 verify(serial_matched == simd_matched && "Fuzz length mismatch");
@@ -5499,11 +5518,29 @@ inline void check_uncased_find_battery_(test_context_t &context, sz_kernel_utf8_
 
     // A miss must zero the length too, as callers read it without checking the match first.
     {
-        sz_utf8_uncased_needle_metadata_t metadata = {};
+        sz_utf8_uncased_needle_t const prepared = uncased_needle_("zzz", 3);
         sz_cptr_t match = "";
         sz_size_t match_length = 7;
-        verify(find_simd("Hello, World!", 13, "zzz", 3, &metadata, &match, &match_length, nullptr) == sz_success_k &&
+        verify(find_simd("Hello, World!", 13, &prepared, &match, &match_length, nullptr) == sz_success_k &&
                match == STRINGZILLA_NULL_CHAR && match_length == 0);
+    }
+
+    // One prepared needle serves every haystack, as search only reads it, and an empty one matches
+    // at the start.
+    {
+        sz_utf8_uncased_needle_t const prepared = uncased_needle_("STRASSE", 7);
+        sz_cptr_t match = STRINGZILLA_NULL_CHAR;
+        sz_size_t match_length = 0;
+        char const first[] = "die Stra\xC3\x9F" //
+                             "e";
+        verify(find_simd(first, 11, &prepared, &match, &match_length, nullptr) == sz_success_k && match == first + 4 &&
+               match_length == 7);
+        char const second[] = "a strasse";
+        verify(find_simd(second, 9, &prepared, &match, &match_length, nullptr) == sz_success_k && match == second + 2 &&
+               match_length == 7);
+        sz_utf8_uncased_needle_t const empty = uncased_needle_("", 0);
+        verify(find_simd(second, 9, &empty, &match, &match_length, nullptr) == sz_success_k && match == second &&
+               match_length == 0);
     }
 
     check_uncased_find_fuzz_(context.generator, find_serial, find_simd, sz_utf8_uncased_fold_serial,
@@ -5792,7 +5829,8 @@ inline void check_utf8_uncased_equivalence_(test_context_t &context, utf8_uncase
  *  the contract documents.
  */
 inline void check_utf8_uncased_safety_(test_context_t &context, utf8_uncased_kernels_t kernels) {
-    char const *needle = "st"; // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
+    // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
+    sz_utf8_uncased_needle_t const prepared = uncased_needle_("st", 2);
 
     auto check = [&](char const *input, std::size_t input_length) {
         // A canary-guarded fold output buffer catches any write past the documented bound, as the
@@ -5809,11 +5847,9 @@ inline void check_utf8_uncased_safety_(test_context_t &context, utf8_uncased_ker
         });
         // The classifier and the finder return arbitrary verdicts on garbage, and must only survive
         kernel_result<sz_cptr_t>(kernels.find_cased, input, input_length);
-        sz_utf8_uncased_needle_metadata_t needle_metadata = {};
         sz_cptr_t match = STRINGZILLA_NULL_CHAR;
         sz_size_t match_length = 0;
-        verify(kernels.search(input, input_length, needle, 2, &needle_metadata, &match, &match_length, nullptr) ==
-               sz_success_k);
+        verify(kernels.search(input, input_length, &prepared, &match, &match_length, nullptr) == sz_success_k);
     };
 
     for_each_adversarial_utf8_input_(context, context.iterations(10000), check);

@@ -57,6 +57,21 @@ func TestUtf8CaseInsensitiveFind(t *testing.T) {
 		t.Fatalf("second match = %q, want %q", secondMatch, "ein Maß von etwa 20 μK")
 	}
 
+	// A needle built at run time lives on the Go heap, where cgo checks what points at it
+	heapNeedle := strings.ToUpper("ein mass")
+	if index, _, err := sz.Utf8CaseInsensitiveFind(haystack, heapNeedle, false); err != nil || index != firstIndex {
+		t.Fatalf("Utf8CaseInsensitiveFind with a heap needle = %d, %v, want %d", index, err, firstIndex)
+	}
+	heapCompiled, _ := sz.NewUtf8CaseInsensitiveNeedle(heapNeedle, false)
+	if index, _, err := heapCompiled.FindIn(haystack, false); err != nil || index != firstIndex {
+		t.Fatalf("FindIn with a heap needle = %d, %v, want %d", index, err, firstIndex)
+	}
+
+	// An empty needle matches at the start, even of an empty haystack
+	if index, length, err := sz.Utf8CaseInsensitiveFind("", "", false); index != 0 || length != 0 || err != nil {
+		t.Fatalf("Utf8CaseInsensitiveFind(\"\", \"\") = %d, %d, %v, want 0, 0, nil", index, length, err)
+	}
+
 	// An empty needle still validates the haystack
 	if _, _, err := sz.Utf8CaseInsensitiveFind("\xff", "", true); err != sz.ErrInvalidUTF8 {
 		t.Fatalf("Utf8CaseInsensitiveFind with an empty needle returned %v, want ErrInvalidUTF8", err)

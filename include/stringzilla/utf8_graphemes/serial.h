@@ -321,20 +321,16 @@ STRINGZILLA_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *
     state->previous_descriptor = after;
 }
 
-/** Plural UAX-29 grapheme cluster segmentation: one forward sweep emits every cluster into
- *  parallel @p cluster_starts and @p cluster_lengths, carrying the GB9c, GB11, and GB12-13
- *  runs in a register state, O(n) with no backward re-walks. Byte-identical to the
- *  per-position @c sz_utf8_is_grapheme_boundary_serial. */
-STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_serial_(    //
-    sz_cptr_t text, sz_size_t length,                      //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
-    sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
+/** Plural UAX-29 grapheme cluster segmentation: one forward sweep emits every cluster's length
+ *  into @p cluster_lengths, carrying the GB9c, GB11, and GB12-13 runs in a register state, O(n)
+ *  with no backward re-walks. Byte-identical to the per-position
+ *  @c sz_utf8_is_grapheme_boundary_serial. */
+STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_serial_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *cluster_lengths, sz_size_t clusters_capacity) {
 
     sz_size_t clusters = 0;
-    if (length == 0 || clusters_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || clusters_capacity == 0) return 0;
 
     sz_size_t cluster_start = 0;
     sz_grapheme_serial_state_t state;
@@ -355,11 +351,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_serial_(    //
                                        ? sz_true_k
                                        : sz_grapheme_serial_boundary_(&state, after_descriptor);
         if (boundary) {
-            if (clusters == clusters_capacity) {
-                if (bytes_consumed) *bytes_consumed = cluster_start;
-                return clusters;
-            }
-            cluster_starts[clusters] = cluster_start;
+            if (clusters == clusters_capacity) return clusters;
             cluster_lengths[clusters] = position - cluster_start;
             ++clusters;
             cluster_start = position;
@@ -368,15 +360,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_serial_(    //
         position = sz_grapheme_break_next_start_(text, length, position);
     }
 
-    if (clusters == clusters_capacity) {
-        if (bytes_consumed) *bytes_consumed = cluster_start;
-        return clusters;
-    }
-    cluster_starts[clusters] = cluster_start;
+    if (clusters == clusters_capacity) return clusters;
     cluster_lengths[clusters] = length - cluster_start;
-    ++clusters;
-    if (bytes_consumed) *bytes_consumed = length;
-    return clusters;
+    return clusters + 1;
 }
 
 #pragma endregion UAX 29 Grapheme Cluster Boundaries
@@ -659,16 +645,11 @@ STRINGZILLA_INLINE sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_ma
 
 #if STRINGZILLA_TARGET_SERIAL
 
-STRINGZILLA_API sz_status_t sz_utf8_graphemes_serial(                                   //
-    sz_cptr_t text, sz_size_t length,                                                   //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, sz_size_t clusters_capacity, //
-    sz_size_t *clusters_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_graphemes_serial(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                     sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *clusters_count = sz_utf8_graphemes_serial_(text, length, cluster_starts, cluster_lengths, clusters_capacity,
-                                                bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, *clusters_count,
-                                         bytes_consumed ? *bytes_consumed : length, cluster_starts, cluster_lengths, 0,
-                                         sz_true_k));
+    *count = sz_utf8_graphemes_serial_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

@@ -89,9 +89,15 @@ STRINGZILLA_INLINE v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16,
 
 /** A 16-byte fold window: the chunk at `src + pos` plus its cross-boundary neighbours. */
 typedef struct {
-    v128_t source_u8x16;   // The 16 bytes at `src + pos`.
-    v128_t previous_u8x16; // `source_u8x16` slid up one lane, carrying the real predecessor byte (0 at `pos == 0`).
-    v128_t next_u8x16;     // `source_u8x16` slid down one lane, carrying the real successor byte.
+
+    /** The 16 bytes at `src + pos`. */
+    v128_t source_u8x16;
+
+    /** @c source_u8x16 slid up one lane, carrying the real predecessor byte, zero at `pos == 0`. */
+    v128_t previous_u8x16;
+
+    /** @c source_u8x16 slid down one lane, carrying the real successor byte. */
+    v128_t next_u8x16;
 } sz_utf8_uncased_window_v128_t;
 
 /** Loads the fold window at `src + pos`, reading one byte on each side for cross-window folds. */
@@ -512,7 +518,7 @@ typedef long (*sz_utf8_uncased_alarm_strip_v128_t_)(sz_u8_t const *, sz_size_t);
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(                           //
     sz_utf8_uncased_fold_strip_v128_t_ fold, sz_utf8_uncased_alarm_strip_v128_t_ alarm,       //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -718,29 +724,20 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_v128_(sz_cptr_t str, sz_size_t l
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_v128_( //
     sz_cptr_t haystack, sz_size_t haystack_length,         //
     sz_cptr_t needle, sz_size_t needle_length,             //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
+    sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
 
     if (needle_length == 0) {
         *match_length = 0;
         return haystack;
     }
 
-    int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
-    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
-    if (known_agnostic || (is_unknown && sz_utf8_find_cased_v128_(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
+    if (needle_metadata->script == sz_utf8_uncased_rune_invariant_k) {
         sz_cptr_t result = sz_find_v128_(haystack, haystack_length, needle, needle_length);
         *match_length = result ? needle_length : 0;
         return result;
     }
 
-    if (is_unknown) {
-        sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
-        if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
-            return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                                  match_length);
-    }
-
-    switch (needle_metadata->kernel_id) {
+    switch (needle_metadata->script) {
     case sz_utf8_uncased_rune_ascii_invariant_k:
         return sz_utf8_uncased_search_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, STRINGZILLA_NULL, haystack,
                                                      haystack_length, needle, needle_length, needle_metadata,
@@ -776,20 +773,17 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_v128_( //
     default: break;
     }
 
-    needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
     return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
                                           match_length);
 }
 
 #if STRINGZILLA_TARGET_V128
 
-STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128( //
-    sz_cptr_t haystack, sz_size_t haystack_length,       //
-    sz_cptr_t needle, sz_size_t needle_length,           //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128(                                   //
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
     sz_cptr_t *match, sz_size_t *match_length, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *match = sz_utf8_uncased_search_v128_(haystack, haystack_length, needle, needle_length, needle_metadata,
+    *match = sz_utf8_uncased_search_v128_(haystack, haystack_length, needle->start, needle->length, needle,
                                           match_length);
     return sz_success_k;
 }

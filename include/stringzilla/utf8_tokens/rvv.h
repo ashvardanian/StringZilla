@@ -204,7 +204,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_iterate_multistep_rvv_( //
         ++position;
     if (bytes_consumed) *bytes_consumed = position;
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 

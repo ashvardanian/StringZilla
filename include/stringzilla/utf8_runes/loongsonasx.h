@@ -782,18 +782,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_loongsonasx_( //
             cursor = next;
             continue;
         }
-        // `step_unpacked == 0` only when the very first lead declares a sequence crossing the
-        // window edge (a boundary truncation). A resumable truncation breaks and awaits more bytes;
-        // a bad or overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
-        // ill-formed subpart, a bounded finalize of at most 3 bytes rather than a serial re-decode
-        // of the window.
-        if (sz_utf8_incomplete_tail_(cursor, end)) break;
+        // The step returns no runes only when the first lead declares a sequence crossing the end
+        // of `text`, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+        // bytes, never a serial re-decode of the window.
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return cursor;
 }
 
@@ -1233,13 +1230,13 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_pack_boundaries_loongsonasx_(sz_u64_t 
 }
 
 /** LASX forward drain - the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_forward_. Emits one
- *  (start, length) per set boundary lane (ascending), honoring @p capacity and the carried
+ *  segment length per set boundary lane (ascending), honoring @p capacity and the carried
  *  previous-boundary via @p previous_io; bit-exact with the Ice Lake leaf. The set lanes are
  *  left-packed once (pack8 LUT), then streamed in waves of four u64 positions (`xvperm.w` shift and
  *  lane-0 carry seat via `xvinsgr2vr.d`, lengths via `xvsub.d`), with a scalar tail for the final
  *  partial wave. Count is `xvpcnt.d`, never a scalar @c popcount. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_loongsonasx_( //
-    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = sz_utf8_rune_popcount64_loongsonasx_(boundary);
     sz_u64_t previous = (sz_u64_t)*previous_io;
@@ -1271,19 +1268,14 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_loongsonasx_( //
         __m256i segment_starts_u64x4 = __lasx_xvperm_w(positions_u64x4, shift_up_u32x8);
         segment_starts_u64x4 = __lasx_xvinsgr2vr_d(segment_starts_u64x4, (long long)previous, 0);
         __m256i const segment_lengths_u64x4 = __lasx_xvsub_d(positions_u64x4, segment_starts_u64x4);
-        if (produced + 4 <= capacity && wave == 4) {
-            __lasx_xvst(segment_starts_u64x4, starts + produced, 0);
-            __lasx_xvst(segment_lengths_u64x4, lengths + produced, 0);
-        }
+        if (produced + 4 <= capacity && wave == 4) __lasx_xvst(segment_lengths_u64x4, lengths + produced, 0);
         else {
-            sz_size_t tail_starts[4], tail_lengths[4];
-            __lasx_xvst(segment_starts_u64x4, tail_starts, 0);
+            sz_size_t tail_lengths[4];
             __lasx_xvst(segment_lengths_u64x4, tail_lengths, 0);
-            for (sz_size_t lane = 0; lane < wave; ++lane)
-                starts[produced + lane] = tail_starts[lane], lengths[produced + lane] = tail_lengths[lane];
+            for (sz_size_t lane = 0; lane < wave; ++lane) lengths[produced + lane] = tail_lengths[lane];
         }
         produced += wave, emitted += wave;
-        previous = (sz_u64_t)(starts[produced - 1] + lengths[produced - 1]);
+        previous = (sz_u64_t)base + indices_vec.u8s[emitted - 1];
     }
     *previous_io = (sz_size_t)previous;
     return produced;

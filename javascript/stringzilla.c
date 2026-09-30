@@ -192,11 +192,12 @@ napi_value utf8UncasedFindAPI(napi_env env, napi_callback_info info) {
         return NULL;
     }
 
-    sz_utf8_uncased_needle_metadata_t metadata = {0};
+    sz_utf8_uncased_needle_t prepared;
     sz_cptr_t match;
     sz_size_t match_length = 0;
-    if (!check_status(env, sz_utf8_uncased_search_best((sz_cptr_t)haystack_data, haystack_length,
-                                                       (sz_cptr_t)needle_data, needle_length, &metadata, &match,
+    if (!check_status(env, sz_utf8_uncased_needle_init_best((sz_cptr_t)needle_data, needle_length, &prepared,
+                                                            default_capabilities, NULL)) ||
+        !check_status(env, sz_utf8_uncased_search_best((sz_cptr_t)haystack_data, haystack_length, &prepared, &match,
                                                        &match_length, default_capabilities, NULL)))
         return NULL;
 
@@ -204,19 +205,8 @@ napi_value utf8UncasedFindAPI(napi_env env, napi_callback_info info) {
     return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)match_length);
 }
 
-typedef struct {
-    sz_u8_t *needle_data;
-    size_t needle_length;
-    sz_utf8_uncased_needle_metadata_t metadata;
-} utf8_uncased_needle_t;
-
-static void utf8_uncased_needle_cleanup(napi_env env, void *data, void *hint) {
-    utf8_uncased_needle_t *needle = (utf8_uncased_needle_t *)data;
-    if (!needle) return;
-    if (needle->needle_data) free(needle->needle_data);
-    free(needle);
-}
-
+/** Prepares a @c Utf8UncasedNeedle over its own copy of the needle bytes, stored right after the
+ *  prepared struct, so later writes to the source Buffer cannot reach it. */
 napi_value utf8UncasedNeedleConstructor(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2];
@@ -243,31 +233,21 @@ napi_value utf8UncasedNeedleConstructor(napi_env env, napi_callback_info info) {
         return NULL;
     }
 
-    utf8_uncased_needle_t *needle = (utf8_uncased_needle_t *)malloc(sizeof(*needle));
+    sz_utf8_uncased_needle_t *needle = (sz_utf8_uncased_needle_t *)malloc(sizeof(*needle) + needle_length);
     if (!needle) {
         napi_throw_error(env, NULL, "Memory allocation failed");
         return NULL;
     }
-    needle->needle_length = needle_length;
-    needle->metadata = (sz_utf8_uncased_needle_metadata_t) {0};
-    needle->needle_data = NULL;
-
-    if (needle_length) {
-        needle->needle_data = (sz_u8_t *)malloc(needle_length);
-        if (!needle->needle_data) {
-            free(needle);
-            napi_throw_error(env, NULL, "Memory allocation failed");
-            return NULL;
-        }
-        if (!check_status(env, sz_copy_best((sz_ptr_t)needle->needle_data, (sz_cptr_t)needle_data, needle_length,
-                                            default_capabilities, NULL))) {
-            free(needle->needle_data);
-            free(needle);
-            return NULL;
-        }
+    sz_ptr_t const needle_copy = (sz_ptr_t)(needle + 1);
+    if (!check_status(env,
+                      sz_copy_best(needle_copy, (sz_cptr_t)needle_data, needle_length, default_capabilities, NULL)) ||
+        !check_status(
+            env, sz_utf8_uncased_needle_init_best(needle_copy, needle_length, needle, default_capabilities, NULL))) {
+        free(needle);
+        return NULL;
     }
 
-    napi_wrap(env, js_this, needle, utf8_uncased_needle_cleanup, NULL, NULL);
+    napi_wrap(env, js_this, needle, external_buffer_cleanup, NULL, NULL);
     return js_this;
 }
 
@@ -282,7 +262,7 @@ napi_value utf8UncasedNeedleFindIn(napi_env env, napi_callback_info info) {
         return NULL;
     }
 
-    utf8_uncased_needle_t *needle = unwrap_this(env, js_this);
+    sz_utf8_uncased_needle_t const *needle = unwrap_this(env, js_this);
     if (!needle) return NULL;
 
     void *haystack_data;
@@ -302,10 +282,8 @@ napi_value utf8UncasedNeedleFindIn(napi_env env, napi_callback_info info) {
 
     sz_cptr_t match;
     sz_size_t match_length = 0;
-    if (!check_status(
-            env, sz_utf8_uncased_search_best((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle->needle_data,
-                                             needle->needle_length, &needle->metadata, &match, &match_length,
-                                             default_capabilities, NULL)))
+    if (!check_status(env, sz_utf8_uncased_search_best((sz_cptr_t)haystack_data, haystack_length, needle, &match,
+                                                       &match_length, default_capabilities, NULL)))
         return NULL;
     if (!match) return makeFindResultObject(env, -1, 0);
     return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)match_length);
@@ -415,16 +393,17 @@ napi_value utf8FindDenormalizedAPI(napi_env env, napi_callback_info info) {
 }
 
 /** The dispatch point a segmenter class carries, like @c sz_utf8_wordbreaks_best. */
-typedef sz_status_t (*utf8_segmenter_best_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *,
-                                             sz_size_t *, sz_capability_t, void *);
+typedef sz_status_t (*utf8_segmenter_best_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t, sz_size_t *, sz_capability_t,
+                                             void *);
 
+/** A segmenter over a Buffer it keeps alive, yielding @c subarray views of it; the segments tile
+ *  the text, so the next one always starts at @c cursor. */
 typedef struct {
-    napi_ref text_ref; // Keeps the source Buffer alive while the iterator holds pointers into it
+    napi_ref text_ref;
     sz_cptr_t text_data;
     sz_size_t text_length;
     sz_size_t cursor;
     utf8_segmenter_best_t kernel;
-    sz_size_t batch_starts[sz_iterators_default_steps_k];
     sz_size_t batch_lengths[sz_iterators_default_steps_k];
     sz_size_t batch_count;
     sz_size_t batch_index;
@@ -432,8 +411,7 @@ typedef struct {
 
 static void utf8_segments_cleanup(napi_env env, void *data, void *hint) {
     utf8_segments_t *segments = (utf8_segments_t *)data;
-    if (!segments) return;
-    if (segments->text_ref) napi_delete_reference(env, segments->text_ref);
+    napi_delete_reference(env, segments->text_ref);
     free(segments);
 }
 
@@ -475,13 +453,13 @@ napi_value utf8SegmentsConstructor(napi_env env, napi_callback_info info) {
     segments->kernel = (utf8_segmenter_best_t)kernel;
     segments->batch_count = 0;
     segments->batch_index = 0;
-    segments->text_ref = NULL;
     napi_create_reference(env, args[0], 1, &segments->text_ref);
 
     napi_wrap(env, js_this, segments, utf8_segments_cleanup, NULL, NULL);
     return js_this;
 }
 
+/** Returns the next segment as an iterator result, `{done, value}`, with a @c subarray view. */
 napi_value utf8SegmentsNext(napi_env env, napi_callback_info info) {
     napi_value js_this;
     napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
@@ -489,38 +467,41 @@ napi_value utf8SegmentsNext(napi_env env, napi_callback_info info) {
     utf8_segments_t *segments = unwrap_this(env, js_this);
     if (!segments) return NULL;
 
-    if (segments->batch_index >= segments->batch_count) {
-        // Resume from the end of the last buffered segment - a guaranteed break boundary.
-        if (segments->batch_count) {
-            sz_size_t const last = segments->batch_count - 1;
-            segments->cursor += segments->batch_starts[last] + segments->batch_lengths[last];
+    napi_value js_result, js_done;
+    napi_create_object(env, &js_result);
+    if (segments->batch_index == segments->batch_count) {
+        if (segments->cursor == segments->text_length) {
+            napi_get_boolean(env, true, &js_done);
+            napi_set_named_property(env, js_result, "done", js_done);
+            return js_result;
         }
-        napi_value js_null;
-        napi_get_null(env, &js_null);
-        if (segments->cursor >= segments->text_length) return js_null;
-        sz_size_t count = 0, consumed = 0;
-        if (!check_status(
-                env, segments->kernel(segments->text_data + segments->cursor, segments->text_length - segments->cursor,
-                                      segments->batch_starts, segments->batch_lengths, sz_iterators_default_steps_k,
-                                      &count, &consumed, default_capabilities, NULL)))
+        sz_size_t count = 0;
+        if (!check_status(env, segments->kernel(segments->text_data + segments->cursor,
+                                                segments->text_length - segments->cursor, segments->batch_lengths,
+                                                sz_iterators_default_steps_k, &count, default_capabilities, NULL)))
             return NULL;
         segments->batch_count = count;
         segments->batch_index = 0;
-        if (segments->batch_count == 0) {
-            // Trailing bytes without a single segment (e.g. closing whitespace) - the iteration is over.
-            segments->cursor = segments->text_length;
-            return js_null;
-        }
     }
 
-    sz_size_t const i = segments->batch_index++;
-    napi_value js_obj, js_start, js_length;
-    napi_create_object(env, &js_obj);
-    napi_create_bigint_uint64(env, (uint64_t)(segments->cursor + segments->batch_starts[i]), &js_start);
-    napi_create_bigint_uint64(env, (uint64_t)segments->batch_lengths[i], &js_length);
-    napi_set_named_property(env, js_obj, "start", js_start);
-    napi_set_named_property(env, js_obj, "length", js_length);
-    return js_obj;
+    napi_value js_text, js_subarray, js_bounds[2], js_value;
+    napi_create_double(env, (double)segments->cursor, &js_bounds[0]);
+    segments->cursor += segments->batch_lengths[segments->batch_index++];
+    napi_create_double(env, (double)segments->cursor, &js_bounds[1]);
+    napi_get_reference_value(env, segments->text_ref, &js_text);
+    napi_get_named_property(env, js_text, "subarray", &js_subarray);
+    if (napi_call_function(env, js_text, js_subarray, 2, js_bounds, &js_value) != napi_ok) return NULL;
+    napi_get_boolean(env, false, &js_done);
+    napi_set_named_property(env, js_result, "done", js_done);
+    napi_set_named_property(env, js_result, "value", js_value);
+    return js_result;
+}
+
+/** Returns @c this, making every segmenter its own iterable. */
+static napi_value returnThis(napi_env env, napi_callback_info info) {
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
+    return js_this;
 }
 
 napi_value countAPI(napi_env env, napi_callback_info info) {
@@ -547,33 +528,19 @@ napi_value countAPI(napi_env env, napi_callback_info info) {
     sz_string_view_t haystack = {(sz_cptr_t)haystack_data, haystack_length};
     sz_string_view_t needle = {(sz_cptr_t)needle_data, needle_length};
 
-    size_t count = 0;
-    if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
-    else if (overlap) {
-        while (haystack.length) {
-            sz_cptr_t ptr;
-            if (!check_status(env, sz_find_best(haystack.start, haystack.length, needle.start, needle.length, &ptr,
-                                                default_capabilities, NULL)))
-                return NULL;
-            sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
-            count += found;
-            haystack.start += offset + found;
-            haystack.length -= offset + found;
-        }
-    }
-    else {
-        while (haystack.length) {
-            sz_cptr_t ptr;
-            if (!check_status(env, sz_find_best(haystack.start, haystack.length, needle.start, needle.length, &ptr,
-                                                default_capabilities, NULL)))
-                return NULL;
-            sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
-            count += found;
-            haystack.start += offset + needle.length;
-            haystack.length -= offset + needle.length * found;
-        }
+    // An empty needle matches at every offset, the end included.
+    size_t count = needle.length ? 0 : haystack.length + 1;
+    sz_size_t const stride = overlap ? 1 : needle.length;
+    while (needle.length && haystack.length) {
+        sz_cptr_t match;
+        if (!check_status(env, sz_find_best(haystack.start, haystack.length, needle.start, needle.length, &match,
+                                            default_capabilities, NULL)))
+            return NULL;
+        if (!match) break;
+        ++count;
+        sz_size_t const skipped = (sz_size_t)(match - haystack.start) + stride;
+        haystack.start += skipped;
+        haystack.length -= skipped;
     }
 
     napi_value js_count;
@@ -615,7 +582,9 @@ napi_value hashAPI(napi_env env, napi_callback_info info) {
 static void hasher_cleanup(napi_env env, void *data, void *hint) { free(data); }
 typedef struct {
     sz_hash_state_t state;
-    sz_u64_t seed; // Used for `reset`
+
+    /** Kept for @c reset. */
+    sz_u64_t seed;
 } hasher_t;
 
 napi_value hasherConstructor(napi_env env, napi_callback_info info) {
@@ -1360,8 +1329,13 @@ napi_value Init(napi_env env, napi_value exports) {
                       sizeof(utf8NeedleProps) / sizeof(utf8NeedleProps[0]), utf8NeedleProps, &utf8NeedleClass);
 
     // Create the four TR29/UAX14 segmenter classes sharing one implementation, parameterized by kernel
+    napi_value global, symbol, symbolIterator;
+    napi_get_global(env, &global);
+    napi_get_named_property(env, global, "Symbol", &symbol);
+    napi_get_named_property(env, symbol, "iterator", &symbolIterator);
     napi_property_descriptor segmenterProps[] = {
         {"next", 0, utf8SegmentsNext, 0, 0, 0, napi_default, 0},
+        {0, symbolIterator, returnThis, 0, 0, 0, napi_default, 0},
     };
     napi_value utf8WordbreaksClass, utf8GraphemesClass, utf8SentencesClass, utf8LinebreaksClass;
     napi_define_class(env, "Utf8Wordbreaks", NAPI_AUTO_LENGTH, utf8SegmentsConstructor,

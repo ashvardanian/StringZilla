@@ -189,7 +189,8 @@ def test_str_write_to():
 
 def test_unit_split():
     """`sz.split`/`sz.rsplit` and their byteset and `keepseparator` variants match CPython
-    `str.split`/`str.rsplit` across every `maxsplit` value; an empty separator raises `ValueError`."""
+    `str.split`/`str.rsplit` across every `maxsplit` value; unlike CPython, an empty separator leaves the
+    text whole instead of raising."""
     native = "line1\nline2\nline3"
     big = Str(native)
 
@@ -239,15 +240,11 @@ def test_unit_split():
     assert native.rsplit("\n", maxsplit=3) == list(big.rsplit("\n", maxsplit=3))
     assert native.rsplit("\n", maxsplit=4) == list(big.rsplit("\n", maxsplit=4))
 
-    # If the passed separator is an empty string, the library must raise a `ValueError`
-    with pytest.raises(ValueError):
-        sz.split(big, "")
-    with pytest.raises(ValueError):
-        sz.rsplit(big, "")
-    with pytest.raises(ValueError):
-        sz.split_byteset(big, "")
-    with pytest.raises(ValueError):
-        sz.rsplit_byteset(big, "")
+    # An empty separator never matches, whatever the `maxsplit`
+    for split in (sz.split, sz.rsplit, sz.split_byteset, sz.rsplit_byteset):
+        assert split(big, "") == [native]
+        assert split(big, "", maxsplit=-1) == [native]
+        assert split("", "") == [""]
 
 
 def test_unit_split_skip_empty():
@@ -282,6 +279,10 @@ def test_unit_split_skip_empty():
     # An all-separator string collapses to nothing when skipping empties.
     assert strs(Str(",,,").split(",", skip_empty=True)) == []
     assert strs(sz.split_iter(",,,", ",", skip_empty=True)) == []
+
+    # A kept separator is content, so its part is never empty, eagerly or lazily.
+    assert strs(Str(",a,").split(",", keepseparator=True, skip_empty=True)) == [",", "a,"]
+    assert strs(sz.split_iter(",a,", ",", keepseparator=True, skip_empty=True)) == [",", "a,"]
 
 
 def test_unit_split_iterators():
@@ -336,15 +337,11 @@ def test_unit_split_iterators():
     assert native.rsplit("\n", maxsplit=3) == rlist(big.rsplit_iter("\n", maxsplit=3))
     assert native.rsplit("\n", maxsplit=4) == rlist(big.rsplit_iter("\n", maxsplit=4))
 
-    # If the passed separator is an empty string, the library must raise a `ValueError`
-    with pytest.raises(ValueError):
-        sz.split_iter(big, "")
-    with pytest.raises(ValueError):
-        sz.rsplit_iter(big, "")
-    with pytest.raises(ValueError):
-        sz.split_byteset_iter(big, "")
-    with pytest.raises(ValueError):
-        sz.rsplit_byteset_iter(big, "")
+    # An empty separator never matches, and an exhausted iterator stays exhausted
+    for split_iter in (sz.split_iter, sz.rsplit_iter, sz.split_byteset_iter, sz.rsplit_byteset_iter):
+        parts = split_iter(big, "")
+        assert list(parts) == [native]
+        assert next(parts, None) is None
 
 
 def test_unit_strip():

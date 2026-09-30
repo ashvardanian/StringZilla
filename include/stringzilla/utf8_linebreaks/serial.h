@@ -238,7 +238,7 @@ STRINGZILLA_CONSTEXPR void sz_line_break_serial_advance_(sz_line_break_serial_st
 
 /**
  *  @brief Plural UAX-14 line-break segmentation: one streaming left-to-right sweep emits every
- *      LB1-LB31 break opportunity into the parallel @c line_starts and @c line_lengths.
+ *      LB1-LB31 break opportunity as a line length into @c line_lengths.
  *      Forward-only, with no reverse counterpart.
  *
  *  Like the word, grapheme and sentence serial kernels, this decodes each codepoint once and
@@ -247,20 +247,15 @@ STRINGZILLA_CONSTEXPR void sz_line_break_serial_advance_(sz_line_break_serial_st
  *  LB9/LB10-collapsed clusters, two back for LB19/LB20a/LB21a/LB28a and two ahead for
  *  LB15/LB19/LB25/LB28a, plus the scalar run-state the rules summarise: the nearest non-space
  *  cluster for LB8/14-17, the "NU (SY|IS)*" numeric run for LB25, and the Regional_Indicator
- *  parity for LB30a. On a full output buffer `*bytes_consumed` is the start of the open line that
- *  did not fit - always a true LB boundary - so a caller resumes from `text + *bytes_consumed`
- *  and obtains the identical remainder.
+ *  parity for LB30a. A full output buffer ends at a true LB boundary, so a caller resuming from
+ *  @p text advanced by the sum of the lengths written obtains the identical remainder.
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
     sz_cptr_t text, sz_size_t length,                    //
-    sz_size_t *line_starts, sz_size_t *line_lengths,     //
-    sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t *line_lengths, sz_size_t lines_capacity) {
 
     sz_size_t lines = 0;
-    if (length == 0 || lines_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || lines_capacity == 0) return 0;
 
     sz_size_t position = 0;
     sz_line_break_serial_state_t state;
@@ -575,11 +570,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
         if (!resolved) is_break = sz_true_k; // LB31
 
         if (is_break) {
-            if (lines == lines_capacity) {
-                if (bytes_consumed) *bytes_consumed = open_line_start;
-                return lines;
-            }
-            line_starts[lines] = open_line_start;
+            if (lines == lines_capacity) return lines;
             line_lengths[lines] = right.byte_start - open_line_start;
             ++lines;
             open_line_start = right.byte_start;
@@ -596,15 +587,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
     }
 
     // The trailing span [open_line_start, length) is the final line; end of text is a boundary (LB3).
-    if (lines == lines_capacity) {
-        if (bytes_consumed) *bytes_consumed = open_line_start;
-        return lines;
-    }
-    line_starts[lines] = open_line_start;
+    if (lines == lines_capacity) return lines;
     line_lengths[lines] = length - open_line_start;
-    ++lines;
-    if (bytes_consumed) *bytes_consumed = length;
-    return lines;
+    return lines + 1;
 }
 
 #pragma endregion UAX 14 Line Boundaries
@@ -1563,15 +1548,11 @@ STRINGZILLA_INLINE sz_line_break_window_t sz_line_break_decide_window_(
 
 #if STRINGZILLA_TARGET_SERIAL
 
-STRINGZILLA_API sz_status_t sz_utf8_linebreaks_serial(                         //
-    sz_cptr_t text, sz_size_t length,                                          //
-    sz_size_t *line_starts, sz_size_t *line_lengths, sz_size_t lines_capacity, //
-    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                      sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *lines_count = sz_utf8_linebreaks_serial_(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, lines_capacity, *lines_count,
-                                         bytes_consumed ? *bytes_consumed : length, line_starts, line_lengths, 0,
-                                         sz_true_k));
+    *count = sz_utf8_linebreaks_serial_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

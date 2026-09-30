@@ -55,18 +55,21 @@ byte[] sha = Sha256.HashData(data); // cf. System.Security.Cryptography.SHA256
 
 ## UTF-8 Codepoints and Segmentation
 
-The segmentation primitive is allocation-free: it fills the caller's spans and returns the count.
+The segmentation primitive is allocation-free: it fills the caller's span with segment lengths and returns the count.
+Segments tile the text, so each starts where the previous one ended.
 
 ```csharp
 long runeCount = Sz.CountRunes(text);    // cf. counting System.Text.Rune
-int decoded = Sz.Decode(text, codepoints); // fill a Span<int>; ill-formed -> U+FFFD
+int decoded = Sz.Decode(text, codepoints); // fill a Span<int>; ill-formed or truncated -> U+FFFD
 
-Span<long> starts = stackalloc long[64];
 Span<long> lengths = stackalloc long[64];
-int count = Sz.Segment(text, Sz.SegmentKind.Words, starts, lengths, out long consumed); // UAX-29
-for (int segment = 0; segment < count; segment++)
-    Use(text.Slice((int)starts[segment], (int)lengths[segment]));
-// Kinds: Graphemes (cf. StringInfo), Words, Sentences, LineBreaks (UAX-14), Newlines, Whitespaces, Delimiters
+int count = Sz.Segment(text, Sz.SegmentKind.Words, lengths); // UAX-29
+ReadOnlySpan<byte> rest = text;
+foreach (long length in lengths[..count]) {
+    Use(rest[..(int)length]);
+    rest = rest[(int)length..];
+}
+// Kinds: Graphemes (cf. StringInfo), Words, Sentences, LineBreaks (UAX-14)
 ```
 
 Codepoints count scalar values, not bytes or UTF-16 chars.
@@ -101,6 +104,9 @@ foreach (var m in Sz.EnumerateUncasedMatches(haystack, "ß"u8)) Use(m); // casel
 var (before, separator, after) = Sz.Partition(text, "="u8); // split at the first "="
 ```
 
+`WithMaxSplit(n)` stops after `n` separators: `0` yields the whole text, and a negative `n`, the default, splits at every separator.
+An empty separator yields the whole text, a trailing separator leaves a final empty segment unless `.SkipEmpty()`, and an empty needle matches at every offset up to and including the end, or at every codepoint boundary when uncased.
+
 ## Case Folding and Normalization
 
 Case folding fills a gap: .NET has no public Unicode case-folding API.
@@ -109,7 +115,7 @@ Case folding fills a gap: .NET has no public Unicode case-folding API.
 byte[] folded = Sz.CaseFold("Straße"u8);              // -> "strasse"
 long position = Sz.UncasedIndexOf(haystack, "WÖRLD"u8, out long matched); // caseless search
 
-using UncasedNeedle needle = new("fox"u8); // reuse across haystacks
+using UncasedNeedle needle = new("fox"u8); // prepared once, reusable across haystacks and threads
 needle.IndexIn(document, out long matchedLength);
 
 byte[] composed = Sz.Normalize(text, Sz.NormalForm.Nfc); // cf. string.Normalize

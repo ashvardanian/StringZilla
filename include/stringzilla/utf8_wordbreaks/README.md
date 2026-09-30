@@ -1,6 +1,7 @@
 # UTF-8 Words: UAX-29 Word Boundary Iteration
 
 This directory holds the kernels behind `sz_utf8_wordbreaks_best`, which walks a UTF-8 string and yields each word as defined by the Unicode UAX-29 word-boundary rules, so "don't" or a CJK run is split the way a human reader expects rather than on raw spaces.
+Each call writes one byte length per word, and the words tile the input, so a caller that fills its buffer resumes from the sum of the lengths it got.
 Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends on x86, and `sz_utf8_wordbreaks_best` runs the best kernel among the capabilities its caller passes.
 
 ## Methodology

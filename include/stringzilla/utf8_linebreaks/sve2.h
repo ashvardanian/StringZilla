@@ -178,16 +178,12 @@ STRINGZILLA_INLINE sz_u64_t sz_line_break_plane_class_sve2_(sz_u64_t const *plan
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
     sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *starts, sz_size_t *lengths,             //
-    sz_size_t capacity, sz_size_t *bytes_consumed) {
+    sz_size_t *lengths, sz_size_t capacity) {
 
     // Graviton 5: the scalable front only outruns NEON with wider-than-NEON registers.
-    if (svcntb() <= 16) return sz_utf8_linebreaks_neon_(text, length, starts, lengths, capacity, bytes_consumed);
+    if (svcntb() <= 16) return sz_utf8_linebreaks_neon_(text, length, lengths, capacity);
 
-    if (length == 0 || capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const vector_bytes = svcntb();
     sz_size_t const chunk_bytes = vector_bytes < 64 ? vector_bytes : 64;
@@ -467,20 +463,15 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
                                                                         &carry_next, complete_limit, more_text);
         sz_u64_t const commit = win.breaks & sz_u64_mask_until_serial_(win.resolved);
 
-        produced = sz_utf8_rune_drain_forward_serial_(commit, position, starts, lengths, produced, capacity,
-                                                      &line_start);
-        if (produced >= capacity) {
-            if (bytes_consumed) *bytes_consumed = line_start;
-            return produced;
-        }
+        produced = sz_utf8_rune_drain_forward_serial_(commit, position, lengths, produced, capacity, &line_start);
+        if (produced >= capacity) return produced;
 
         sz_size_t const advance = win.resolved ? win.resolved : complete_limit;
         carry = carry_next;
         position += advance ? advance : loaded;
     }
 
-    if (produced < capacity) starts[produced] = line_start, lengths[produced] = length - line_start, ++produced;
-    if (bytes_consumed) *bytes_consumed = length;
+    if (produced < capacity) lengths[produced] = length - line_start, ++produced;
     return produced;
 }
 
@@ -488,14 +479,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
 
 #if STRINGZILLA_TARGET_SVE2
 
-STRINGZILLA_API sz_status_t sz_utf8_linebreaks_sve2(           //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *starts, sz_size_t *lengths, sz_size_t capacity, //
-    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                    sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *lines_count = sz_utf8_linebreaks_sve2_(text, length, starts, lengths, capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, capacity, *lines_count, bytes_consumed ? *bytes_consumed : length,
-                                         starts, lengths, 0, sz_true_k));
+    *count = sz_utf8_linebreaks_sve2_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

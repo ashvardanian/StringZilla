@@ -835,8 +835,6 @@ mod tests {
         // not this run.
         const SPAN: sz::IndexSpan = sz::IndexSpan::new(6, 5);
         const WHITESPACE: sz::Byteset = sz::Byteset::from_bytes(b" \t\r\n");
-        #[allow(clippy::declare_interior_mutable_const)] // Each use copies a fresh needle, as intended here.
-        const NEEDLE: sz::Utf8UncasedNeedle = sz::Utf8UncasedNeedle::new(b"hello");
         const TOP_TWO_DESCENDING: sz::ArgsortOptions = sz::ArgsortOptions {
             reverse: false,
             uncased: false,
@@ -848,8 +846,6 @@ mod tests {
         assert_eq!(SPAN.extract(b"Hello World"), Some(&b"World"[..]));
         assert_eq!(sz::IndexSpan::new(usize::MAX, 2).extract(b"Hello World"), None);
         assert_eq!(sz::find_byteset("ab cd", WHITESPACE), Some(2));
-        let needle = NEEDLE;
-        assert_eq!(sz::utf8_uncased_search(b"say HELLO now", &needle), Some((4, 5)));
 
         let fruits = ["banana", "apple", "cherry"];
         let mut order = [0; 3];

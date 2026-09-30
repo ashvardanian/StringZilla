@@ -688,6 +688,8 @@ inline void print_bench_environment() noexcept { fmt::println("- Seed: {}", benc
  *
  *  @param[in] default_dataset Default dataset file path, if @b STRINGWARS_DATASET is not set.
  *  @param[in] default_tokens Tokenization mode, if @b STRINGWARS_TOKENS is not set.
+ *  @param[in] default_dataset_limit_bytes Dataset bytes to read, zero for the whole file, if
+ *      @b STRINGWARS_DATASET_LIMIT is not set.
  *  @param[in] default_duration Time limit per benchmark, if @b STRINGWARS_MAX_SECONDS is not set.
  *
  *  @param[in] default_stress Whether to stress-test backends, if @b STRINGWARS_STRESS is not set.
@@ -698,10 +700,10 @@ inline void print_bench_environment() noexcept { fmt::println("- Seed: {}", benc
  *  @param[in] default_filter Regex to filter the backends, if @b STRINGWARS_FILTER is not set.
  */
 inline environment_t build_environment(                                        //
-    int argc, char const *argv[],                                              //< Ignored
-    std::string default_dataset, environment_t::tokenization_t default_tokens, //< Mandatory
-    std::size_t default_dataset_limit_bytes = 0,                               //< Optional, 0 = whole file
-    std::size_t default_duration = STRINGZILLA_DEBUG ? 1 : 10,                 //< Optional
+    int argc, char const *argv[],                                              //
+    std::string default_dataset, environment_t::tokenization_t default_tokens, //
+    std::size_t default_dataset_limit_bytes = 0,                               //
+    std::size_t default_duration = STRINGZILLA_DEBUG ? 1 : 10,                 //
     stress_default_t default_stress = stress_default_t::stress_k,              //
     std::string default_stress_dir = ".tmp",                                   //
     std::size_t default_stress_limit = 1,                                      //
@@ -934,8 +936,10 @@ template <std::size_t slots_ = 128>
 struct duration_histogram {
     using count_t = std::uint32_t;
     std::array<count_t, slots_> bins = {};
-    static constexpr double max_cpu_cycles_k = 1e14; // ~9 hours at 3 GHz — hard to imagine a slower single call
-    static constexpr double min_cpu_cycles_k = 1;    // A call can't take fewer than a single cycle
+
+    /** About 9 hours at 3 GHz, far slower than any single call. */
+    static constexpr double max_cpu_cycles_k = 1e14;
+    static constexpr double min_cpu_cycles_k = 1;
 
     inline count_t &operator[](double cpu_cycles) {
         auto bin_float = std::log(cpu_cycles / min_cpu_cycles_k) / std::log(max_cpu_cycles_k / min_cpu_cycles_k) *
@@ -979,23 +983,27 @@ struct bench_result_t {
     std::string name;
     bool skipped = false;
 
-    std::size_t stress_calls = 0;   //< Number of calls to the callable for stress-testing
-    std::size_t profiled_calls = 0; //< Number of calls to the callable for profiling/benchmarking
+    std::size_t stress_calls = 0;
+    std::size_t profiled_calls = 0;
 
-    std::size_t stress_inputs = 0;   //< Can be larger than `stress_calls` for batch-capable functions
-    std::size_t profiled_inputs = 0; //< Can be larger than `profiled_calls` for batch-capable functions
+    /** Can exceed @c stress_calls, as one call of a batch-capable function takes many inputs. */
+    std::size_t stress_inputs = 0;
 
-    std::size_t profiled_cpu_cycles = 0; //< Number of CPU cycles used in the benchmark by the main thread
-    double profiled_seconds = 0;         //< Wall clock duration of the benchmark
+    /** Can exceed @c profiled_calls, as one call of a batch-capable function takes many inputs. */
+    std::size_t profiled_inputs = 0;
+
+    /** Cycles of the main thread only. */
+    std::size_t profiled_cpu_cycles = 0;
+    double profiled_seconds = 0;
 
     duration_histogram_t cpu_cycles_histogram;
 
     /** Cheapest single call observed, in CPU cycles; a less noisy cost estimator than the mean. */
     std::uint64_t profiled_cpu_cycles_min = std::numeric_limits<std::uint64_t>::max();
 
-    std::size_t bytes_passed = 0; //< Pulled from the `call_result_t`
-    std::size_t operations = 0;   //< Pulled from the `call_result_t`
-    std::size_t errors = 0;       //< Pulled from the `call_result_t`
+    std::size_t bytes_passed = 0;
+    std::size_t operations = 0;
+    std::size_t errors = 0;
 
     /**
      *  @brief Logs the benchmark results to the console, including the throughput and latency,

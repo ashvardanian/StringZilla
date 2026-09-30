@@ -212,6 +212,26 @@ def test_utf8_uncased_matches_overlapping():
     assert len(list(sz.utf8_uncased_matches(b"Hello HELLO", b"hello"))) == 2
 
 
+def test_utf8_uncased_matches_edges():
+    """An empty needle matches at every codepoint boundary, an exhausted iterator stays exhausted, and a
+    failing `include_overlapping` truth test propagates."""
+    assert [str(m) for m in sz.utf8_uncased_matches("aé", "")] == ["", "", ""]
+    assert [str(m) for m in sz.utf8_uncased_matches("aé", "", include_overlapping=True)] == ["", "", ""]
+    assert [str(m) for m in sz.utf8_uncased_matches("", "")] == [""]
+    assert len(list(sz.utf8_uncased_matches(b"a\xe4\xb8", b""))) == 3  # a truncated rune is one step
+
+    matches = sz.utf8_uncased_matches("abc", "B")
+    assert [str(m) for m in matches] == ["b"]
+    assert next(matches, None) is None
+
+    class Unjudgeable:
+        def __bool__(self):
+            raise ZeroDivisionError
+
+    with pytest.raises(ZeroDivisionError):
+        sz.utf8_uncased_matches("a", "a", include_overlapping=Unjudgeable())
+
+
 def test_utf8_uncased_order():
     """Uncased order compares equal, less-than, and greater-than cases across ASCII, German sharp S,
     Greek, Cyrillic, prefix ordering, and bytes input."""

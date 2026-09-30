@@ -419,13 +419,13 @@ STRINGZILLA_INLINE void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *
 }
 
 /** AVX2 forward drain — the @c vpcompressb-free twin of @ref sz_utf8_rune_drain_forward_. Emits one
- *  (start, length) per set boundary lane (ascending), honoring @p capacity and the carried
+ *  segment length per set boundary lane (ascending), honoring @p capacity and the carried
  *  previous-boundary via @p previous_io; bit-exact with the Ice Lake leaf. The set lanes are
  *  index-unpacked once (BMI2), then streamed in waves of four u64 positions (a @c vpmovzxbq widen +
  *  @p base, segment starts via @c vpermq shift + @c vpblendd carry-seat, lengths via @c vpsubq),
  *  with a scalar tail for the final partial wave (no AVX2 masked store). */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
-    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
     sz_u64_t previous = (sz_u64_t)*previous_io;
@@ -452,19 +452,15 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
         __m256i const positions_shifted_u64x4 = _mm256_permute4x64_epi64(positions_u64x4, _MM_SHUFFLE(2, 1, 0, 0));
         __m256i const segment_starts_u64x4 = _mm256_blend_epi32(positions_shifted_u64x4, previous_start_u64x4, 0x03);
         __m256i const segment_lengths_u64x4 = _mm256_sub_epi64(positions_u64x4, segment_starts_u64x4);
-        if (produced + 4 <= capacity && wave == 4) {
-            _mm256_storeu_si256((__m256i *)(starts + produced), segment_starts_u64x4);
+        if (produced + 4 <= capacity && wave == 4)
             _mm256_storeu_si256((__m256i *)(lengths + produced), segment_lengths_u64x4);
-        }
         else {
-            sz_size_t tail_starts[4], tail_lengths[4];
-            _mm256_storeu_si256((__m256i *)tail_starts, segment_starts_u64x4);
+            sz_size_t tail_lengths[4];
             _mm256_storeu_si256((__m256i *)tail_lengths, segment_lengths_u64x4);
-            for (sz_size_t lane = 0; lane < wave; ++lane)
-                starts[produced + lane] = tail_starts[lane], lengths[produced + lane] = tail_lengths[lane];
+            for (sz_size_t lane = 0; lane < wave; ++lane) lengths[produced + lane] = tail_lengths[lane];
         }
         produced += wave, emitted += wave;
-        previous = (sz_u64_t)(starts[produced - 1] + lengths[produced - 1]);
+        previous = (sz_u64_t)base + indices[emitted - 1];
     }
     *previous_io = (sz_size_t)previous;
     return produced;
@@ -1197,16 +1193,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_haswell_( //
             cursor = next;
             continue;
         }
-        // `step_unpacked == 0` only when the very first lead declares a sequence crossing the window edge. A resumable
-        // truncation breaks and awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD
-        // over its maximal ill-formed subpart - a bounded <=3-byte finalize, never a serial window re-decode.
-        if (sz_utf8_incomplete_tail_(cursor, end)) break;
+        // The step returns no runes only when the first lead declares a sequence crossing the end
+        // of `text`, which finalizes to one U+FFFD over its maximal ill-formed subpart, at most 3
+        // bytes, never a serial re-decode of the window.
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
     *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
-                                         STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
+                                         STRINGZILLA_NULL, STRINGZILLA_NULL));
     return cursor;
 }
 

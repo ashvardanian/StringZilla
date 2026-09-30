@@ -8,16 +8,14 @@ use super::*;
 /// Kernel behind [`Utf8Sentences`] (`sz_utf8_sentences_best`).
 pub struct Sentences;
 impl SegmenterKernel for Sentences {
-    unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
+    unsafe fn segment(t: *const c_void, n: usize, l: *mut usize, c: usize) -> usize {
         let mut count = 0;
         sz_utf8_sentences_best(
             t,
             n,
-            o,
             l,
             c,
             &mut count,
-            u,
             enabled_cpu_capabilities_mask(),
             core::ptr::null_mut(),
         )

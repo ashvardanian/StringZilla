@@ -40,6 +40,8 @@ package sz
 // #cgo nocallback sz_hash_best
 // #cgo noescape sz_utf8_uncased_fold_best
 // #cgo nocallback sz_utf8_uncased_fold_best
+// #cgo noescape sz_utf8_uncased_needle_init_best
+// #cgo nocallback sz_utf8_uncased_needle_init_best
 // #cgo noescape sz_utf8_uncased_search_best
 // #cgo nocallback sz_utf8_uncased_search_best
 // #cgo noescape sz_utf8_count_best

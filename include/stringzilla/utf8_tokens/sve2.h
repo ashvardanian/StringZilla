@@ -168,7 +168,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_sve2_(    //
 
     if (bytes_consumed) *bytes_consumed = position;
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 
@@ -273,7 +273,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_sve2_( //
 
     if (bytes_consumed) *bytes_consumed = position;
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 
@@ -497,7 +497,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_sve2_(  //
 
     if (bytes_consumed) *bytes_consumed = sz_min_of_two(position, length);
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
-                                         match_offsets, match_lengths, 0, sz_false_k));
+                                         match_offsets, match_lengths));
     return count;
 }
 

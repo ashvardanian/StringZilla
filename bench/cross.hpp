@@ -1998,7 +1998,10 @@ struct utf8_count_from_sz {
 template <sz_kernel_utf8_seek_t func_>
 struct utf8_seek_from_sz {
     environment_t const &env;
-    std::vector<sz_size_t> targets; // Nth codepoint to locate per token, precomputed outside the timed call.
+
+    /** The codepoint to locate per token, counted outside the timed call. */
+    std::vector<sz_size_t> targets;
+
     utf8_seek_from_sz(environment_t const &env_) : env(env_) {
         targets.reserve(env.tokens.size());
         for (auto const &token : env.tokens) {
@@ -2023,7 +2026,7 @@ struct utf8_seek_from_sz {
 template <sz_kernel_utf8_decode_t func_>
 struct utf8_unpack_from_sz {
     environment_t const &env;
-    mutable std::vector<sz_rune_t> runes; // Reusable output buffer, sized to the largest token.
+    mutable std::vector<sz_rune_t> runes;
     utf8_unpack_from_sz(environment_t const &env_) : env(env_) {
         std::size_t max_token = 1;
         for (auto const &token : env.tokens) max_token = std::max(max_token, token.size());
@@ -2037,7 +2040,6 @@ struct utf8_unpack_from_sz {
         while (remaining) {
             sz_size_t unpacked = 0, consumed = 0;
             func_(cursor, remaining, runes.data(), runes.size(), &unpacked, &consumed, nullptr);
-            if (consumed == 0) break; // Incomplete trailing sequence; nothing more to do.
             produced += unpacked;
             cursor += consumed;
             remaining -= consumed;
@@ -2078,7 +2080,7 @@ void bench_utf8_decode_kernels(corpora_t &corpora, std::string_view kit) {
 /** Enumerates every match of a codepoint class (newline, whitespace, delimiter) across each token
  *  via the multistep "find boundaries" API, resuming through the whole token in batches of
  *  @c sz_iterators_default_steps_k; the checksum is the total number of matches. */
-template <sz_kernel_utf8_segmenter_t find_func_>
+template <sz_kernel_utf8_tokenizer_t find_func_>
 struct utf8_enumerate_delimiters {
     environment_t const &env;
     utf8_enumerate_delimiters(environment_t const &env_) : env(env_) {}
@@ -2093,7 +2095,6 @@ struct utf8_enumerate_delimiters {
             find_func_(text + pos, len - pos, offsets, lengths, sz_iterators_default_steps_k, &matches, &consumed,
                        nullptr);
             total += matches;
-            if (consumed == 0) break;
             pos += consumed;
         }
         do_not_optimize(total);
@@ -2102,7 +2103,7 @@ struct utf8_enumerate_delimiters {
 };
 
 /** Times one capability's newline enumeration over the multilingual slice. */
-template <sz_kernel_utf8_segmenter_t newlines_>
+template <sz_kernel_utf8_tokenizer_t newlines_>
 void bench_utf8_newlines_kernels(corpora_t &corpora, std::string_view kit) {
     environment_t const &env = corpora.multilingual_slice();
     bench_kernel_unary(env, fmt::format("sz_utf8_newlines_{}", kit), "sz_utf8_newlines_serial",
@@ -2111,7 +2112,7 @@ void bench_utf8_newlines_kernels(corpora_t &corpora, std::string_view kit) {
 }
 
 /** Times one capability's whitespace enumeration over the multilingual slice. */
-template <sz_kernel_utf8_segmenter_t whitespaces_>
+template <sz_kernel_utf8_tokenizer_t whitespaces_>
 void bench_utf8_whitespaces_kernels(corpora_t &corpora, std::string_view kit) {
     environment_t const &env = corpora.multilingual_slice();
     bench_kernel_unary(env, fmt::format("sz_utf8_whitespaces_{}", kit), "sz_utf8_whitespaces_serial",
@@ -2120,7 +2121,7 @@ void bench_utf8_whitespaces_kernels(corpora_t &corpora, std::string_view kit) {
 }
 
 /** Times one capability's delimiter enumeration over the multilingual slice. */
-template <sz_kernel_utf8_segmenter_t delimiters_>
+template <sz_kernel_utf8_tokenizer_t delimiters_>
 void bench_utf8_delimiters_kernels(corpora_t &corpora, std::string_view kit) {
     environment_t const &env = corpora.multilingual_slice();
     bench_kernel_unary(env, fmt::format("sz_utf8_delimiters_{}", kit), "sz_utf8_delimiters_serial",
@@ -2142,14 +2143,16 @@ struct utf8_word_forward_from_sz {
         token_view_t token = env.tokens[i];
         sz_cptr_t cursor = token.data();
         sz_size_t remaining = token.size();
-        sz_size_t starts[16], lengths[16];
+        sz_size_t lengths[16];
         std::size_t words = 0;
         while (remaining) {
             sz_size_t produced = 0, consumed = 0;
-            func_(cursor, remaining, starts, lengths, 16, &produced, &consumed, nullptr);
+            func_(cursor, remaining, lengths, 16, &produced, nullptr);
             words += static_cast<std::size_t>(produced);
-            if (produced == 0 || consumed >= remaining) break; // Whole suffix segmented.
-            cursor += consumed;                                // Resume from the first word that did not fit.
+            // Only a full batch leaves a suffix to segment.
+            if (produced != 16) break;
+            for (sz_size_t index = 0; index != produced; ++index) consumed += lengths[index];
+            cursor += consumed;
             remaining -= consumed;
         }
         do_not_optimize(words);
@@ -2214,7 +2217,7 @@ template <sz_kernel_utf8_norm_t func_>
 struct utf8_norm_from_sz {
 
     environment_t const &env;
-    mutable std::vector<char> output_buffer; // Reusable buffer to avoid repeated allocation
+    mutable std::vector<char> output_buffer;
     sz_kernel_bytesum_t checksum_ = output_checksum_kernel();
 
     utf8_norm_from_sz(environment_t const &env_) : env(env_) {
@@ -2294,7 +2297,7 @@ template <sz_kernel_utf8_uncased_fold_t func_>
 struct utf8_uncased_fold_from_sz {
 
     environment_t const &env;
-    mutable std::vector<char> output_buffer; // Reusable buffer to avoid repeated allocation
+    mutable std::vector<char> output_buffer;
     sz_kernel_bytesum_t checksum_ = output_checksum_kernel();
 
     utf8_uncased_fold_from_sz(environment_t const &env_) : env(env_) {
@@ -2342,13 +2345,13 @@ struct utf8_uncased_search_from_sz {
         std::size_t count_matches = 0;
         sz_cptr_t h = haystack.data();
         sz_size_t haystack_length = haystack.size();
-        sz_utf8_uncased_needle_metadata_t metadata;
-        std::memset(&metadata, 0, sizeof(metadata));
+        sz_utf8_uncased_needle_t prepared;
+        sz_utf8_uncased_needle_init_serial(needle.data(), needle.size(), &prepared, nullptr);
 
         // Count all uncased matches
         while (haystack_length >= needle.size()) {
             sz_cptr_t match = nullptr;
-            func_(h, haystack_length, needle.data(), needle.size(), &metadata, &match, &match_length, nullptr);
+            func_(h, haystack_length, &prepared, &match, &match_length, nullptr);
             if (!match) break;
             ++count_matches;
             // Move past the match

@@ -632,18 +632,14 @@ STRINGZILLA_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t
  *  rule engine, drains the trusted band below the trust horizon, and advances by `win.resolved`
  *  with the small register carry threaded forward. No byte is re-read - there is no
  *  @c start_at_or_before_ and no left-context back-walk - because the carry alone supplies lane-0
- *  left context. @c bytes_consumed is always a confirmed break, a @c line_start, so resume is
+ *  left context. A full buffer always ends at a confirmed break, a @c line_start, so resume is
  *  bit-identical and capacity-free.
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_icelake_( //
     sz_cptr_t text, sz_size_t length,                     //
-    sz_size_t *starts, sz_size_t *lengths,                //
-    sz_size_t capacity, sz_size_t *bytes_consumed) {
+    sz_size_t *lengths, sz_size_t capacity) {
 
-    if (length == 0 || capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || capacity == 0) return 0;
     sz_u8_t const *bytes = (sz_u8_t const *)text;
     __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
     sz_size_t produced = 0;
@@ -664,12 +660,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_icelake_( //
                                                                                 complete_limit, more_text);
         sz_u64_t const commit = win.breaks & sz_u64_mask_until_(win.resolved);
 
-        produced = sz_utf8_rune_drain_forward_(commit, position, lane_identity_u8x64, starts, lengths, produced,
-                                               capacity, &line_start);
-        if (produced >= capacity) {
-            if (bytes_consumed) *bytes_consumed = line_start;
-            return produced;
-        }
+        produced = sz_utf8_rune_drain_forward_(commit, position, lane_identity_u8x64, lengths, produced, capacity,
+                                               &line_start);
+        if (produced >= capacity) return produced;
 
         //  Advance by the trust horizon when it bit before the complete edge, else the whole complete span (guaranteed
         //  progress). `carry_next` is already anchored at exactly this byte by `decide_window_` -- one decision per
@@ -680,8 +673,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_icelake_( //
     }
 
     //  The trailing (still-open) line `[line_start, length)` finalizes the output (end of text is a break).
-    if (produced < capacity) starts[produced] = line_start, lengths[produced] = length - line_start, ++produced;
-    if (bytes_consumed) *bytes_consumed = length;
+    if (produced < capacity) lengths[produced] = length - line_start, ++produced;
     return produced;
 }
 
@@ -692,17 +684,13 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_icelake_( //
  *  per-segment mandatory flag. The classifier and rule engine are fully vectorized, with no
  *  per-lane scalar loop and no serial-oracle deferral; the 64-codepoint block engine threads
  *  cross-block state through a register carry rather than a halo back-scan, so throughput is
- *  flat in run length. Emits at most @p capacity segments and stores the resume offset
- *  through @p bytes_consumed.
+ *  flat in run length. Emits at most @p capacity segment lengths.
  */
-STRINGZILLA_API sz_status_t sz_utf8_linebreaks_icelake(        //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *starts, sz_size_t *lengths, sz_size_t capacity, //
-    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                       sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *lines_count = sz_utf8_linebreaks_icelake_(text, length, starts, lengths, capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, capacity, *lines_count, bytes_consumed ? *bytes_consumed : length,
-                                         starts, lengths, 0, sz_true_k));
+    *count = sz_utf8_linebreaks_icelake_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

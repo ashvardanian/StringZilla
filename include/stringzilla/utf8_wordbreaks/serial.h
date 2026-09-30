@@ -494,22 +494,18 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t 
     return sz_true_k; // WB999
 }
 
-/*  Plural UAX-29 word segmentation: one left-to-right sweep emits every word into parallel
- *  @c word_starts and @c word_lengths, carrying the WB run-state so each codepoint is decoded once
- *  and no boundary re-walks its left context (O(n), no per-position backward rescans).
- *  Byte-identical to driving @c sz_utf8_is_word_boundary_serial per position. On a full buffer
- *  `*bytes_consumed` is the start of the first word that did not fit, always a true TR29 boundary,
- *  so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder. */
+/*  Plural UAX-29 word segmentation: one left-to-right sweep emits the length of every word into
+ *  @c word_lengths, carrying the WB run-state so each codepoint is decoded once and no boundary
+ *  re-walks its left context (O(n), no per-position backward rescans). Byte-identical to driving
+ *  @c sz_utf8_is_word_boundary_serial per position. On a full buffer the words written end at a
+ *  true TR29 boundary, so resuming from @p text advanced by the sum of their lengths reproduces
+ *  the single-pass remainder. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
     sz_cptr_t text, sz_size_t length,                    //
-    sz_size_t *word_starts, sz_size_t *word_lengths,     //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+    sz_size_t *word_lengths, sz_size_t words_capacity) {
 
     sz_size_t words = 0;
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = 0;
-        return 0;
-    }
+    if (length == 0 || words_capacity == 0) return 0;
 
     sz_word_serial_state_t state;
     state.previous_property = (sz_u8_t)sz_utf8_word_break_other_k;
@@ -535,11 +531,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
         sz_rune_t const next_codepoint = sz_utf8_next_rune_(text, length, &next_position);
         sz_u8_t const next_property = sz_rune_word_break_property(next_codepoint);
         if (sz_word_serial_boundary_(&state, next_property, next_codepoint, text, length, position)) {
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_start;
-                return words;
-            }
-            word_starts[words] = word_start;
+            if (words == words_capacity) return words;
             word_lengths[words] = position - word_start;
             ++words;
             word_start = position;
@@ -549,15 +541,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
     }
 
     // The trailing span [word_start, length) is the last word (end of text is always a boundary).
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_start;
-        return words;
-    }
-    word_starts[words] = word_start;
+    if (words == words_capacity) return words;
     word_lengths[words] = length - word_start;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = length;
-    return words;
+    return words + 1;
 }
 
 #pragma region Portable Word_Break Codepoint Partition
@@ -1139,15 +1125,11 @@ STRINGZILLA_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_
 
 #if STRINGZILLA_TARGET_SERIAL
 
-STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_serial(                         //
-    sz_cptr_t text, sz_size_t length,                                          //
-    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
-    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                      sz_size_t capacity, sz_size_t *count, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *words_count = sz_utf8_wordbreaks_serial_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, *words_count,
-                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
-                                         sz_true_k));
+    *count = sz_utf8_wordbreaks_serial_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
     return sz_success_k;
 }
 

@@ -85,6 +85,15 @@ def test_empty_and_skip_empty():
     assert list(sz.utf8_split_whitespaces("a  b", skip_empty=True)) == [Str("a"), Str("b")]
 
 
+@pytest.mark.parametrize("count", [63, 64, 65, 200])
+def test_split_across_batches(count):
+    """Splits carry over batch refills, including a full batch whose last separator ends the text."""
+    text = "a," * count
+    assert [str(s) for s in sz.utf8_split_delimiters(text)] == ["a"] * count + [""]
+    assert [str(s) for s in sz.utf8_delimiters(text)] == [","] * count
+    assert "".join(str(s) for s in sz.utf8_split_delimiters(text, with_separators=True)) == text
+
+
 def test_zero_width_format_chars_are_not_whitespace():
     """Regression: U+200B/200C/200D (ZWSP/ZWNJ/ZWJ) are Format chars with White_Space=No and must not be
     whitespace separators, while U+200A HAIR SPACE, the last codepoint of the U+2000 space block, must split.
