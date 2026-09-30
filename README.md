@@ -120,7 +120,7 @@ Python
 C++
   Find a substring         std::string::find         sz::string_t::find
   Sort a collection        std::sort of indices      sz::argsort
-  Intersect string sets    std::set_intersection     sz::try_intersect
+  Intersect string sets    std::set_intersection     sz::intersect
   Hash map, string keys    std::unordered_map<K, V>  sz::hash + sz::equal_to
 ```
 

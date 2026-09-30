@@ -30,8 +30,8 @@
 
 #include "stringzilla/types.h"
 
-#include "stringzilla/find.h"   // `sz_equal`
-#include "stringzilla/memory.h" // `sz_copy`, `sz_move`, `sz_fill`
+#include "stringzilla/compare/serial.h" // `sz_equal_serial_`, `sz_order_serial_`
+#include "stringzilla/memory/serial.h"  // `sz_copy_serial_`, `sz_move_serial_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -130,10 +130,10 @@ sz_static_assert_(offsetof(sz_string_t, external.length) == 12, External_length_
 #pragma region Core API
 
 /** Initializes a string class instance to an empty value. */
-STRINGZILLA_API_COMPTIME void sz_string_init(sz_string_t *string);
+STRINGZILLA_INLINE void sz_string_init(sz_string_t *string);
 
 /** Checks if @p string is stored inside of the instance itself, rather than on the heap. */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
+STRINGZILLA_INLINE sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
 
 /**
  *  @brief Unpacks the opaque instance of a string class into its components, best used only in
@@ -146,7 +146,7 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_string_is_on_stack(sz_string_t const *stri
  *      @c STRINGZILLA_NULL byte.
  *  @param[out] is_external Whether the string is on the heap, or fits within the @p string itself.
  */
-STRINGZILLA_API_COMPTIME void sz_string_unpack( //
+STRINGZILLA_INLINE void sz_string_unpack( //
     sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space, sz_bool_t *is_external);
 
 /**
@@ -156,10 +156,10 @@ STRINGZILLA_API_COMPTIME void sz_string_unpack( //
  *  @param[out] start Pointer to the start of the string.
  *  @param[out] length Number of bytes in the string, before the @c STRINGZILLA_NULL character.
  */
-STRINGZILLA_API_COMPTIME void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
+STRINGZILLA_INLINE void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
 
 /** Returns the length of the string in a branchless manner. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_string_length(sz_string_t const *string);
+STRINGZILLA_INLINE sz_size_t sz_string_length(sz_string_t const *string);
 
 /**
  *  @brief Constructs a string of a given @p length with noisy contents. Use the returned character
@@ -171,8 +171,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_string_length(sz_string_t const *string);
  *  @return @c STRINGZILLA_NULL if the operation failed, pointer to the start of
  *      the string otherwise.
  */
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length,
-                                                        sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length,
+                                                  sz_memory_allocator_t *allocator);
 
 /**
  *  @brief Grows the available memory capacity, without changing the contents or the length.
@@ -186,15 +186,15 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_init_length(sz_string_t *string, sz_
  *  @return @c STRINGZILLA_NULL if the operation failed, pointer to the new start of
  *      the string otherwise.
  */
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity,
-                                                    sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity,
+                                              sz_memory_allocator_t *allocator);
 
 /**
  *  @brief Grows the string by adding an uninitialized region of @p added_length at the given
  *      @p offset.
  *
- *  Would often be used in conjunction with one or more @c sz_copy calls to populate the allocated
- *  region. Similar to @c sz_string_reserve, but changes the length of the @p string.
+ *  Would often be used in conjunction with one or more @c sz_copy_best calls to populate the
+ *  allocated region. Similar to @c sz_string_reserve, but changes the length of the @p string.
  *
  *  @param[inout] string String to grow.
  *  @param[in] offset Offset of the first byte to reserve space for, capped at the length.
@@ -203,7 +203,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size
  *  @return @c STRINGZILLA_NULL if the operation failed, pointer to the new start of
  *      the string otherwise.
  */
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_expand( //
+STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
     sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator);
 
 /**
@@ -215,7 +215,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_expand( //
  *  @param[in] length Number of bytes to remove. Out-of-bound ranges will be capped.
  *  @return Number of bytes removed, zero if @p offset ≥ the string length.
  */
-STRINGZILLA_API_COMPTIME sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
+STRINGZILLA_INLINE sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
 
 /**
  *  @brief Shrinks the string to fit the current length, if it's allocated on the heap. It's the
@@ -226,21 +226,21 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_string_erase(sz_string_t *string, sz_size_
  *  @return Whether the operation was successful. The only failures can come from the allocator, and
  *      leave the string unchanged.
  */
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
 
 /** Frees the string, if it's allocated on the heap, and resets its state either way. */
-STRINGZILLA_API_COMPTIME void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
 
 #pragma endregion
 
 #pragma region Serial Implementation
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
+STRINGZILLA_INLINE sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
     // It doesn't matter if it's on stack or heap, the pointer location is the same.
     return (sz_bool_t)((sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0]);
 }
 
-STRINGZILLA_API_COMPTIME void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length) {
+STRINGZILLA_INLINE void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length) {
     sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
     sz_size_t is_big_mask = is_small - (sz_size_t)1;
     *start = string->external.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
@@ -248,13 +248,13 @@ STRINGZILLA_API_COMPTIME void sz_string_range(sz_string_t const *string, sz_ptr_
     *length = string->external.length & ((sz_size_t)0xFF | is_big_mask);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_string_length(sz_string_t const *string) {
+STRINGZILLA_INLINE sz_size_t sz_string_length(sz_string_t const *string) {
     sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
     sz_size_t is_big_mask = is_small - (sz_size_t)1;
     return string->external.length & ((sz_size_t)0xFF | is_big_mask);
 }
 
-STRINGZILLA_API_COMPTIME void sz_string_unpack( //
+STRINGZILLA_INLINE void sz_string_unpack( //
     sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space, sz_bool_t *is_external) {
     sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
     sz_size_t is_big_mask = is_small - (sz_size_t)1;
@@ -266,7 +266,7 @@ STRINGZILLA_API_COMPTIME void sz_string_unpack( //
     *is_external = (sz_bool_t)!is_small;
 }
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b) {
+STRINGZILLA_INLINE sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b) {
     // Fast path for self-comparison
     if (a == b) return sz_true_k;
     // Tempting to say that the external.length is bitwise the same even if it includes
@@ -284,10 +284,10 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_string_equal(sz_string_t const *a, sz_stri
     sz_size_t a_length, b_length;
     sz_string_range(a, &a_start, &a_length);
     sz_string_range(b, &b_start, &b_length);
-    return (sz_bool_t)(a_length == b_length && sz_equal(a_start, b_start, b_length));
+    return (sz_bool_t)(a_length == b_length && sz_equal_serial_(a_start, b_start, b_length));
 }
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const *b) {
+STRINGZILLA_INLINE sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const *b) {
 #if STRINGZILLA_ALLOW_MISALIGNED_LOADS
     // Dealing with StringZilla strings, we know that the `start` pointer always points
     // to a word at least 8 bytes long. Therefore, we can compare the first 8 bytes at once.
@@ -298,10 +298,10 @@ STRINGZILLA_API_COMPTIME sz_ordering_t sz_string_order(sz_string_t const *a, sz_
     sz_size_t a_length, b_length;
     sz_string_range(a, &a_start, &a_length);
     sz_string_range(b, &b_start, &b_length);
-    return sz_order(a_start, a_length, b_start, b_length);
+    return sz_order_serial_(a_start, a_length, b_start, b_length);
 }
 
-STRINGZILLA_API_COMPTIME void sz_string_init(sz_string_t *string) {
+STRINGZILLA_INLINE void sz_string_init(sz_string_t *string) {
     sz_assert_(string && "String can't be STRINGZILLA_NULL.");
 
     // Only 8 + 1 + 1 need to be initialized.
@@ -314,8 +314,8 @@ STRINGZILLA_API_COMPTIME void sz_string_init(sz_string_t *string) {
     string->words[3] = 0;
 }
 
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length,
-                                                        sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length,
+                                                  sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
     sz_assert_(string && allocator && "String and allocator can't be STRINGZILLA_NULL.");
     // Initialize the string to zeros for safety.
@@ -338,8 +338,8 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_init_length(sz_string_t *string, sz_
     return string->external.start;
 }
 
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity,
-                                                    sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity,
+                                              sz_memory_allocator_t *allocator) {
 
     sz_assert_(string && allocator && "Strings and allocators can't be STRINGZILLA_NULL.");
 
@@ -360,7 +360,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return STRINGZILLA_NULL_CHAR;
 
-    sz_copy(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
+    sz_copy_serial_(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
     string->external.start = new_start;
     string->external.space = new_space;
     string->external.padding = 0;
@@ -371,7 +371,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size
     return string->external.start;
 }
 
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator) {
 
     sz_assert_(string && allocator && "Strings and allocators can't be STRINGZILLA_NULL.");
 
@@ -388,7 +388,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, s
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return STRINGZILLA_NULL_CHAR;
 
-    sz_copy(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
+    sz_copy_serial_(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
     string->external.start = new_start;
     string->external.space = new_space;
     string->external.padding = 0;
@@ -399,7 +399,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, s
     return string->external.start;
 }
 
-STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_expand( //
+STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
     sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator) {
 
     sz_assert_(string && allocator && "String and allocator can't be STRINGZILLA_NULL.");
@@ -420,7 +420,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_expand( //
 
     // If we are lucky, no memory allocations will be needed.
     if (string_length + added_length < string_space) {
-        sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
+        sz_move_serial_(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         // Even if the string is on the stack, the `+=` won't affect the tail of the string.
         string->external.length += added_length;
@@ -435,7 +435,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_expand( //
         if (!string_start) return STRINGZILLA_NULL_CHAR;
 
         // Copy into the new buffer.
-        sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
+        sz_move_serial_(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         string->external.length = string_length + added_length;
     }
@@ -443,7 +443,7 @@ STRINGZILLA_API_COMPTIME sz_ptr_t sz_string_expand( //
     return string_start;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
+STRINGZILLA_INLINE sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
 
     sz_assert_(string && "String can't be STRINGZILLA_NULL.");
 
@@ -473,7 +473,7 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_string_erase(sz_string_t *string, sz_size_
     // the erasing is as easy as setting the length to the offset.
     // In every other case, we must `memmove` the tail of the string to the left.
     if (offset + length < string_length)
-        sz_move(string_start + offset, string_start + offset + length, string_length - offset - length);
+        sz_move_serial_(string_start + offset, string_start + offset + length, string_length - offset - length);
 
     // The `string->external.length = offset` assignment would discard last characters
     // of the on-the-stack string, but inplace subtraction would work.
@@ -482,7 +482,7 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_string_erase(sz_string_t *string, sz_size_
     return length;
 }
 
-STRINGZILLA_API_COMPTIME void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
     if (!sz_string_is_on_stack(string))
         allocator->free(string->external.start, string->external.space, allocator->handle);
     sz_string_init(string);

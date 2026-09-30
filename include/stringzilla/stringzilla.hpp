@@ -17,6 +17,10 @@
 
 #include "stringzilla/types.hpp"
 
+#if STRINGZILLA_HEADER_ONLY
+#error "The C++ layer dispatches through the compiled library: link `stringzilla::static` or `stringzilla::shared`."
+#endif
+
 /**
  *  @brief For higher safety, we annotate the lifetime bound of the returned string slices.
  *  @see Clang lifetimebound attribute: https://clang.llvm.org/docs/AttributeReference.html#id11
@@ -47,7 +51,6 @@
 #include <cstdlib> // `std::rand`
 
 #include <array>       // `std::array`
-#include <bitset>      // `std::bitset`
 #include <concepts>    // `std::convertible_to`
 #include <iosfwd>      // `std::basic_ostream`
 #include <stdexcept>   // `std::out_of_range`
@@ -74,42 +77,28 @@ using string_view_t = basic_string_slice<char const>;
 template <std::size_t count_characters>
 using carray = char[count_characters];
 
-#pragma region Memory Operations
-
 /**
- *  @brief Analog to @c std::memset, but with a more efficient implementation.
- *  @param[out] target The pointer to the target memory region.
- *  @param[in] value The byte value to set.
- *  @param[in] n The number of bytes to set.
- *  @see https://en.cppreference.com/w/cpp/string/byte/memset
+ *  @brief Calls the dispatch point @p best_ over @c default_capabilities, for the calls that take
+ *      no mask from their caller.
+ *
+ *  That mask always holds serial and the library is linked, so the call cannot fail by
+ *  construction, and debug builds assert that it didn't. Every call over a mask the caller passes
+ *  returns the status of the dispatch point instead.
  */
-inline void memset(void *target, char value, std::size_t n) noexcept {
-    return sz_fill(reinterpret_cast<sz_ptr_t>(target), n, value);
+template <auto best_, typename... arguments_types_>
+void best_call_(arguments_types_... arguments) noexcept {
+    sz_status_t const status = best_(arguments..., default_capabilities(), nullptr);
+    sz_assert_(status == sz_success_k);
 }
 
-/**
- *  @brief Analog to @c std::memmove, but with a more efficient implementation.
- *  @param[out] target The pointer to the target memory region.
- *  @param[in] source The pointer to the source memory region.
- *  @param[in] n The number of bytes to copy.
- *  @see https://en.cppreference.com/w/cpp/string/byte/memmove
- */
-inline void memmove(void *target, void const *source, std::size_t n) noexcept {
-    return sz_move(reinterpret_cast<sz_ptr_t>(target), reinterpret_cast<sz_cptr_t>(source), n);
+/** Like @c best_call_, returning the result @p best_ reports through its out-parameter, the last
+ *  one before the mask. */
+template <auto best_, typename result_type_, typename... arguments_types_>
+result_type_ best_result_(arguments_types_... arguments) noexcept {
+    result_type_ result {};
+    best_call_<best_>(arguments..., &result);
+    return result;
 }
-
-/**
- *  @brief Analog to @c std::memcpy, but with a more efficient implementation.
- *  @param[out] target The pointer to the target memory region.
- *  @param[in] source The pointer to the source memory region.
- *  @param[in] n The number of bytes to copy.
- *  @see https://en.cppreference.com/w/cpp/string/byte/memcpy
- */
-inline void memcpy(void *target, void const *source, std::size_t n) noexcept {
-    return sz_copy(reinterpret_cast<sz_ptr_t>(target), reinterpret_cast<sz_cptr_t>(source), n);
-}
-
-#pragma endregion
 
 #pragma region Character Sets
 
@@ -338,19 +327,17 @@ inline byteset_t base64_set() { return byteset_t {base64(), sizeof(base64())}; }
 class look_up_table_t {
     static constexpr std::size_t size_k = 256;
 
-    char lut_[size_k];
+    char lut_[size_k] {};
 
   public:
     using char_type = char;
 
-    look_up_table_t() noexcept { sz_fill(&lut_[0], size_k, 0); }
-    explicit look_up_table_t(char_type const (&chars)[size_k]) noexcept { sz_copy(&lut_[0], chars, size_k); }
-    look_up_table_t(std::array<char_type, size_k> const &chars) noexcept { sz_copy(&lut_[0], chars.data(), size_k); }
-
-    look_up_table_t(look_up_table_t const &other) noexcept { sz_copy(&lut_[0], other.lut_, size_k); }
-    look_up_table_t &operator=(look_up_table_t const &other) noexcept {
-        sz_copy(&lut_[0], other.lut_, size_k);
-        return *this;
+    look_up_table_t() noexcept = default;
+    explicit look_up_table_t(char_type const (&chars)[size_k]) noexcept {
+        for (std::size_t i = 0; i != size_k; ++i) lut_[i] = chars[i];
+    }
+    look_up_table_t(std::array<char_type, size_k> const &chars) noexcept {
+        for (std::size_t i = 0; i != size_k; ++i) lut_[i] = chars[i];
     }
 
     /**
@@ -1047,9 +1034,9 @@ class rfind_splits_view {
  *  @brief A range view over UTF-8 characters (codepoints) in a string.
  *
  *  Iterates over UTF-32 codepoints decoded from UTF-8 bytes using efficient batched decoding. Each
- *  refill decodes up to @p steps_ codepoints in a single @c sz_utf8_decode call (the decoder fills
- *  the whole buffer regardless of script width), then yields them one by one. Ill-formed bytes
- *  decode to U+FFFD.
+ *  refill decodes up to @p steps_ codepoints in a single @c sz_utf8_decode_best call (the decoder
+ *  fills the whole buffer regardless of script width), then yields them one by one. Ill-formed
+ *  bytes decode to U+FFFD.
  *
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  *  @tparam steps_ Codepoints buffered per decode call, the batch width, defaulting to the shared
@@ -1091,11 +1078,8 @@ class utf8_runes_view {
             char const *octets_ptr = octets_start_ + octets_offset_;
             size_type unpacked_count = 0;
 
-            char const *next_ptr = sz_utf8_decode(octets_ptr, chunk_size, runes_, steps_, &unpacked_count);
-
-            // Update position
-            size_type bytes_consumed = static_cast<size_type>(next_ptr - octets_ptr);
-            octets_offset_ += bytes_consumed;
+            octets_offset_ += best_result_<sz_utf8_decode_best, sz_size_t>(octets_ptr, chunk_size, runes_, steps_,
+                                                                           &unpacked_count);
             runes_offset_ = 0;
 
             // The decoder stops (yielding nothing) on a well-formed but truncated trailing sequence so a streaming
@@ -1151,7 +1135,8 @@ class utf8_runes_view {
         iterator &operator+=(size_type n) noexcept {
             if (n == 0 || octets_offset_ >= octets_length_) return *this;
 
-            sz_cptr_t ptr = sz_utf8_seek(octets_start_ + octets_offset_, octets_length_ - octets_offset_, n);
+            sz_cptr_t ptr = best_result_<sz_utf8_seek_best, sz_cptr_t>(octets_start_ + octets_offset_,
+                                                                       octets_length_ - octets_offset_, n);
             if (!ptr) {
                 // Past the end.
                 octets_offset_ = octets_length_;
@@ -1194,7 +1179,7 @@ class utf8_runes_view {
     /** Count UTF-8 characters in the string. */
     size_type size() const noexcept {
         string_view_type view(haystack_);
-        return sz_utf8_count(view.data(), view.size());
+        return best_result_<sz_utf8_count_best, sz_size_t>(view.data(), view.size());
     }
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
@@ -1231,6 +1216,11 @@ enum class split_parts_t {
 /** Whether a @ref utf8_split_view keeps or drops empty (zero-length) segments. */
 enum class empty_segments_t { keep_k, skip_k };
 
+/** A segmenter's dispatch point, like @c sz_utf8_newlines_best, which the split and segment views
+ *  drive over @c default_capabilities. */
+using utf8_segmenter_best_t = sz_status_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *,
+                                              sz_size_t *, sz_capability_t, void *);
+
 /**
  *  @brief A range of string slices split on the delimiter codepoints that a @b transform kernel
  *      reports to it.
@@ -1250,13 +1240,13 @@ enum class empty_segments_t { keep_k, skip_k };
  *  @c empties_, a compile-time switch reachable via `.skip_empty()`, drops empty segments, and
  *  @c both_k is lossless only when empties are kept.
  *
- *  @tparam kernel_ A @c sz_utf8_segmenter_t reporting delimiter spans, like @c sz_utf8_whitespaces.
+ *  @tparam segmenter_ A segmenter reporting delimiter spans, like @c sz_utf8_whitespaces_best.
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  *  @tparam steps_ Delimiters fetched per kernel call.
  *  @tparam parts_ Which parts to yield: between segments, the delimiters, or both interleaved.
  *  @tparam empties_ Whether empty segments are kept or skipped.
  */
-template <sz_utf8_segmenter_t kernel_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+template <utf8_segmenter_best_t segmenter_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           split_parts_t parts_ = split_parts_t::between_k, empty_segments_t empties_ = empty_segments_t::keep_k>
 class utf8_split_view {
   public:
@@ -1311,8 +1301,8 @@ class utf8_split_view {
             size_type offsets[steps_], lengths[steps_];
             size_type const base = static_cast<size_type>(suffix_ - origin_);
             size_type const region = static_cast<size_type>(end_ - suffix_);
-            sz_size_t consumed = 0;
-            size_type const separators = kernel_(suffix_, region, offsets, lengths, steps_, &consumed);
+            sz_size_t separators = 0, consumed = 0;
+            best_call_<segmenter_>(suffix_, region, offsets, lengths, steps_, &separators, &consumed);
             bounds_[0] = base;
             for (size_type s = 0; s < separators; ++s)
                 bounds_[2 * s + 1] = base + offsets[s], bounds_[2 * s + 2] = base + offsets[s] + lengths[s];
@@ -1385,13 +1375,14 @@ class utf8_split_view {
     end_sentinel_t end_sentinel() const noexcept { return {}; }
 
     /** The same split with empty segments dropped (compile-time, branchless). */
-    utf8_split_view<kernel_, string_type_, steps_, parts_, empty_segments_t::skip_k> skip_empty() const noexcept {
+    utf8_split_view<segmenter_, string_type_, steps_, parts_, empty_segments_t::skip_k> skip_empty() const noexcept {
         return {haystack_};
     }
 
     /** The same split yielding segments @b and delimiters interleaved, losslessly, turning
      *  @c between_k into @c both_k. */
-    utf8_split_view<kernel_, string_type_, steps_, split_parts_t::both_k, empties_> with_separators() const noexcept {
+    utf8_split_view<segmenter_, string_type_, steps_, split_parts_t::both_k, empties_> with_separators()
+        const noexcept {
         return {haystack_};
     }
 
@@ -1417,11 +1408,11 @@ class utf8_split_view {
  *  directly: every byte belongs to exactly one unit, so consecutive units are contiguous and no
  *  empty segments arise.
  *
- *  @tparam kernel_ A @c sz_utf8_segmenter_t returning tiling units (e.g. @c sz_utf8_wordbreaks).
+ *  @tparam segmenter_ A segmenter returning tiling units, like @c sz_utf8_wordbreaks_best.
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  *  @tparam steps_ Units fetched per kernel call.
  */
-template <sz_utf8_segmenter_t kernel_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
+template <utf8_segmenter_best_t segmenter_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
 class utf8_segments_view {
   public:
     using string_type = string_type_;
@@ -1460,7 +1451,7 @@ class utf8_segments_view {
         void fill_() noexcept {
             size_type const region = static_cast<size_type>(end_ - suffix_);
             sz_size_t consumed = 0;
-            count_ = kernel_(suffix_, region, starts_, lengths_, steps_, &consumed);
+            best_call_<segmenter_>(suffix_, region, starts_, lengths_, steps_, &count_, &consumed);
             index_ = 0;
         }
 
@@ -1525,14 +1516,14 @@ class utf8_segments_view {
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
 using utf8_split_newlines_view =
-    utf8_split_view<sz_utf8_newlines, string_type_, steps_, split_parts_t::between_k, empties_>;
+    utf8_split_view<sz_utf8_newlines_best, string_type_, steps_, split_parts_t::between_k, empties_>;
 
 /** A range of the UTF-8 newline runs themselves (LF, CR, CRLF, NEL, LS, PS, ...); see
  *  @ref utf8_split_newlines_view. */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
 using utf8_newlines_view =
-    utf8_split_view<sz_utf8_newlines, string_type_, steps_, split_parts_t::separators_k, empties_>;
+    utf8_split_view<sz_utf8_newlines_best, string_type_, steps_, split_parts_t::separators_k, empties_>;
 
 /**
  *  @brief A range of string slices @b between UTF-8 whitespace runs - i.e. the tokens.
@@ -1545,14 +1536,14 @@ using utf8_newlines_view =
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
 using utf8_split_whitespaces_view =
-    utf8_split_view<sz_utf8_whitespaces, string_type_, steps_, split_parts_t::between_k, empties_>;
+    utf8_split_view<sz_utf8_whitespaces_best, string_type_, steps_, split_parts_t::between_k, empties_>;
 
 /** A range of the UTF-8 whitespace runs themselves; see @ref utf8_split_whitespaces_view for the
  *  tokens between them. */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
 using utf8_whitespaces_view =
-    utf8_split_view<sz_utf8_whitespaces, string_type_, steps_, split_parts_t::separators_k, empties_>;
+    utf8_split_view<sz_utf8_whitespaces_best, string_type_, steps_, split_parts_t::separators_k, empties_>;
 
 /**
  *  @brief A range of string slices @b between any UTF-8 delimiter codepoints - i.e. the fields.
@@ -1566,51 +1557,51 @@ using utf8_whitespaces_view =
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
 using utf8_split_delimiters_view =
-    utf8_split_view<sz_utf8_delimiters, string_type_, steps_, split_parts_t::between_k, empties_>;
+    utf8_split_view<sz_utf8_delimiters_best, string_type_, steps_, split_parts_t::between_k, empties_>;
 
 /** A range of the UTF-8 delimiter runs themselves (P/S/Z categories); see
  *  @ref utf8_split_delimiters_view. */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
 using utf8_delimiters_view =
-    utf8_split_view<sz_utf8_delimiters, string_type_, steps_, split_parts_t::separators_k, empties_>;
+    utf8_split_view<sz_utf8_delimiters_best, string_type_, steps_, split_parts_t::separators_k, empties_>;
 
 /**
  *  @brief A range of UAX-29 word segments, in order.
  *
- *  Word segmentation tiles the input: every byte belongs to exactly one segment - alternating
- *  "words" (letter / number / mark / CJK runs) and the whitespace / punctuation between them - so
- *  consecutive segments are contiguous and no empty segments arise. Drives @c sz_utf8_wordbreaks.
+ *  Word segmentation, driven by @c sz_utf8_wordbreaks_best, tiles the input: every byte belongs
+ *  to exactly one segment - alternating "words" (letter / number / mark / CJK runs) and the
+ *  whitespace / punctuation between them - so consecutive segments are contiguous, never empty.
  *
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  *  @tparam steps_ Segments fetched per kernel call.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_wordbreaks_view = utf8_segments_view<sz_utf8_wordbreaks, string_type_, steps_>;
+using utf8_wordbreaks_view = utf8_segments_view<sz_utf8_wordbreaks_best, string_type_, steps_>;
 
 /**
  *  @brief A range of string slices split at UAX-29 grapheme cluster boundaries, in order.
  *
  *  Unlike whitespace splitting, the graphemes tile the input: every byte belongs to exactly one
  *  grapheme, so consecutive graphemes are contiguous and no empty segments are produced. Drives
- *  @c sz_utf8_graphemes.
+ *  @c sz_utf8_graphemes_best.
  *
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_graphemes_view = utf8_segments_view<sz_utf8_graphemes, string_type_, steps_>;
+using utf8_graphemes_view = utf8_segments_view<sz_utf8_graphemes_best, string_type_, steps_>;
 
 /**
  *  @brief A range of string slices split at UAX-29 sentence boundaries, in order.
  *
  *  Unlike whitespace splitting, the sentences tile the input: every byte belongs to exactly one
  *  sentence, so consecutive sentences are contiguous and no empty segments are produced. Drives
- *  @c sz_utf8_sentences.
+ *  @c sz_utf8_sentences_best.
  *
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_sentences_view = utf8_segments_view<sz_utf8_sentences, string_type_, steps_>;
+using utf8_sentences_view = utf8_segments_view<sz_utf8_sentences_best, string_type_, steps_>;
 
 /**
  *  @brief A range of string slices split at UAX-14 line break opportunities, in order.
@@ -1618,12 +1609,12 @@ using utf8_sentences_view = utf8_segments_view<sz_utf8_sentences, string_type_, 
  *  Unlike whitespace splitting, the segments tile the input: every byte belongs to exactly one
  *  segment, so consecutive segments are contiguous and no empty segments are produced. Each segment
  *  ends at an allowed line break opportunity (both mandatory hard breaks and soft wrap points).
- *  Drives @c sz_utf8_linebreaks. Split with @c utf8_split_newlines for hard line breaks only.
+ *  Drives @c sz_utf8_linebreaks_best. Split with @c utf8_split_newlines for hard line breaks only.
  *
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_linebreaks_view = utf8_segments_view<sz_utf8_linebreaks, string_type_, steps_>;
+using utf8_linebreaks_view = utf8_segments_view<sz_utf8_linebreaks_best, string_type_, steps_>;
 
 /**
  *  @brief Resolves a forwarded haystack into the form the range views store, checking that it
@@ -1868,12 +1859,21 @@ std::size_t range_length(iterator_type first, iterator_type last) {
 #pragma region Helper Types
 
 #if STRINGZILLA_WITH_STL
+
+/**
+ *  @brief Throws the exception matching a failed @p status, and returns on success.
+ *  @throws @c std::bad_alloc for @c bad_alloc_k, @c std::length_error for @c overflow_risk_k,
+ *      @c std::invalid_argument for malformed inputs, and @c std::runtime_error for the rest.
+ */
 inline void raise(status_t status) noexcept(false) {
     switch (status) {
+    case status_t::success_k: return;
     case status_t::bad_alloc_k: throw std::bad_alloc();
-    case status_t::invalid_utf8_k: throw std::invalid_argument("Invalid UTF-8 string");
-    case status_t::contains_duplicates_k: throw std::invalid_argument("Array contains identical strings");
-    default: break;
+    case status_t::overflow_risk_k: throw std::length_error(status_name(status));
+    case status_t::invalid_utf8_k:
+    case status_t::contains_duplicates_k:
+    case status_t::unexpected_dimensions_k: throw std::invalid_argument(status_name(status));
+    default: throw std::runtime_error(status_name(status));
     }
 }
 
@@ -1883,38 +1883,30 @@ inline void raise(status_t status) noexcept(false) {
 
 #pragma region Global Operations with Dynamic Memory
 
+/** Allocates @p n bytes through the C++ allocator behind @p allocator_state, reading its throw as
+ *  null, so the C side reports @c bad_alloc_k rather than unwinding through its frames. */
 template <typename allocator_type_>
-static void *_call_allocate(sz_size_t n, void *allocator_state) noexcept {
-    return reinterpret_cast<allocator_type_ *>(allocator_state)->allocate(n);
+inline void *allocate_through_(sz_size_t n, void *allocator_state) noexcept {
+    return allocate_or_null_(*reinterpret_cast<allocator_type_ *>(allocator_state), n);
 }
 
 template <typename allocator_type_>
-static void _call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
+inline void free_through_(void *ptr, sz_size_t n, void *allocator_state) noexcept {
     using value_type_ = typename allocator_type_::value_type;
     return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
 }
 
 /**
- *  @brief Helper function, wrapping a C++ allocator into a C-style allocator.
- *  @return Error code or success. All allocating functions may fail.
+ *  @brief Lends the byte @p allocator to @p callback as a C-style @c sz_memory_allocator_t.
+ *  @return The status the callback reports.
  */
 template <typename allocator_type_, typename allocator_callback_>
-static status_t _with_alloc(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
-    sz_memory_allocator_t alloc;
-    alloc.allocate = &_call_allocate<allocator_type_>;
-    alloc.free = &_call_free<allocator_type_>;
-    alloc.handle = &allocator;
-    return static_cast<status_t>(callback(alloc));
-}
-
-/**
- *  @brief Helper function, wrapping a C++ allocator into a C-style allocator.
- *  @return Error code or success. All allocating functions may fail.
- */
-template <typename allocator_type_, typename allocator_callback_>
-static status_t _with_alloc(allocator_callback_ &&callback) noexcept {
-    allocator_type_ allocator;
-    return _with_alloc(allocator, std::forward<allocator_callback_>(callback));
+inline status_t with_allocator_(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
+    sz_memory_allocator_t c_allocator;
+    c_allocator.allocate = &allocate_through_<allocator_type_>;
+    c_allocator.free = &free_through_<allocator_type_>;
+    c_allocator.handle = &allocator;
+    return static_cast<status_t>(callback(c_allocator));
 }
 
 #pragma endregion
@@ -2090,8 +2082,8 @@ class utf8_uncased_needle_t {
 /**
  *  @brief Stateful matcher driving @ref find_matches_view over @b case-insensitive UTF-8 matches.
  *
- *  The uncased twin of @ref matcher_find: each match is resolved through @c sz_utf8_uncased_search,
- *  and the needle's folding metadata is cached in the @ref utf8_uncased_needle_t across calls, so a
+ *  The uncased twin of @ref matcher_find: @c sz_utf8_uncased_search_best resolves each match, and
+ *  the needle's folding metadata is cached in the @ref utf8_uncased_needle_t across calls, so a
  *  repeated scan compiles the needle once. Because case folding can change a match's byte length,
  *  @ref needle_length reports the byte span of the @b last match rather than the needle's own
  *  length. Matches are reported @b non-overlapping.
@@ -2110,8 +2102,9 @@ struct matcher_utf8_uncased_search {
     size_type skip_length() const noexcept { return matched_length_ ? matched_length_ : 1; }
     size_type operator()(string_type_ haystack) const noexcept {
         sz_size_t match_length = 0;
-        sz_cptr_t ptr = sz_utf8_uncased_search(haystack.data(), haystack.size(), needle_.data(), needle_.size(),
-                                               &needle_.metadata_ref(), &match_length);
+        sz_cptr_t ptr = nullptr;
+        best_call_<sz_utf8_uncased_search_best>(haystack.data(), haystack.size(), needle_.data(), needle_.size(),
+                                                &needle_.metadata_ref(), &ptr, &match_length);
         matched_length_ = static_cast<size_type>(match_length);
         return ptr ? static_cast<size_type>(ptr - haystack.data()) : string_type_::npos;
     }
@@ -2315,7 +2308,7 @@ class basic_string_slice {
     /** Exports this entire view. Not an STL function, but useful for concatenations.
      *  The STL variant expects at least two arguments. */
     size_type copy(value_type *destination) const noexcept {
-        sz_copy((sz_ptr_t)destination, start_, length_);
+        best_call_<sz_copy_best>(destination, start_, length_);
         return length_;
     }
 
@@ -2374,7 +2367,7 @@ class basic_string_slice {
     size_type copy(value_type *destination, size_type count, size_type n = 0) const noexcept(false) {
         if (n > size()) throw std::out_of_range("string_slice_t::copy");
         count = sz_min_of_two(count, length_ - n);
-        sz_copy((sz_ptr_t)destination, start_ + n, count);
+        best_call_<sz_copy_best>(destination, start_ + n, count);
         return count;
     }
 
@@ -2394,7 +2387,7 @@ class basic_string_slice {
      *      greater than @p other.
      */
     int compare(string_view_t other) const noexcept {
-        return (int)sz_order(data(), size(), other.data(), other.size());
+        return (int)best_result_<sz_order_best, sz_ordering_t>(data(), size(), other.data(), other.size());
     }
 
     /**
@@ -2451,13 +2444,16 @@ class basic_string_slice {
 
     /** Checks if the string is equal to the other string. */
     bool operator==(string_view_t other) const noexcept {
-        return size() == other.size() && sz_equal(data(), other.data(), other.size()) == sz_true_k;
+        return size() == other.size() &&
+               best_result_<sz_equal_best, sz_bool_t>(data(), other.data(), other.size()) == sz_true_k;
     }
 
     /** Checks if the string is equal to a concatenation of two strings. */
     bool operator==(concatenation<string_view_t, string_view_t> const &other) const noexcept {
-        return size() == other.size() && sz_equal(data(), other.first.data(), other.first.size()) == sz_true_k &&
-               sz_equal(data() + other.first.size(), other.second.data(), other.second.size()) == sz_true_k;
+        return size() == other.size() &&
+               best_result_<sz_equal_best, sz_bool_t>(data(), other.first.data(), other.first.size()) == sz_true_k &&
+               best_result_<sz_equal_best, sz_bool_t>(data() + other.first.size(), other.second.data(),
+                                                      other.second.size()) == sz_true_k;
     }
 
     /** Computes the lexicographic ordering between this and the ::other string. */
@@ -2472,13 +2468,15 @@ class basic_string_slice {
 
     /** Checks if the string starts with the other string. */
     bool starts_with(string_view_t other) const noexcept {
-        return length_ >= other.size() && sz_equal(start_, other.data(), other.size()) == sz_true_k;
+        return length_ >= other.size() &&
+               best_result_<sz_equal_best, sz_bool_t>(start_, other.data(), other.size()) == sz_true_k;
     }
 
     /** Checks if the string starts with the other string. */
     bool starts_with(const_pointer other) const noexcept {
         auto other_length = null_terminated_length(other);
-        return length_ >= other_length && sz_equal(start_, other, other_length) == sz_true_k;
+        return length_ >= other_length &&
+               best_result_<sz_equal_best, sz_bool_t>(start_, other, other_length) == sz_true_k;
     }
 
     /** Checks if the string starts with the other character. */
@@ -2486,14 +2484,17 @@ class basic_string_slice {
 
     /** Checks if the string ends with the other string. */
     bool ends_with(string_view_t other) const noexcept {
-        return length_ >= other.size() &&
-               sz_equal(start_ + length_ - other.size(), other.data(), other.size()) == sz_true_k;
+        if (length_ < other.size()) return false;
+        auto suffix = start_ + length_ - other.size();
+        return best_result_<sz_equal_best, sz_bool_t>(suffix, other.data(), other.size()) == sz_true_k;
     }
 
     /** Checks if the string ends with the other string. */
     bool ends_with(const_pointer other) const noexcept {
         auto other_length = null_terminated_length(other);
-        return length_ >= other_length && sz_equal(start_ + length_ - other_length, other, other_length) == sz_true_k;
+        if (length_ < other_length) return false;
+        auto suffix = start_ + length_ - other_length;
+        return best_result_<sz_equal_best, sz_bool_t>(suffix, other, other_length) == sz_true_k;
     }
 
     /** Checks if the string ends with the other character. */
@@ -2536,7 +2537,7 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(string_view_t other, size_type skip = 0) const noexcept {
-        auto ptr = sz_find(start_ + skip, length_ - skip, other.data(), other.size());
+        auto ptr = best_result_<sz_find_best, sz_cptr_t>(start_ + skip, length_ - skip, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2546,7 +2547,7 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(value_type character, size_type skip = 0) const noexcept {
-        auto ptr = sz_find_byte(start_ + skip, length_ - skip, &character);
+        auto ptr = best_result_<sz_find_byte_best, sz_cptr_t>(start_ + skip, length_ - skip, &character);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2566,7 +2567,7 @@ class basic_string_slice {
      *  @return `size()` for an @b empty @p other.
      */
     size_type rfind(string_view_t other) const noexcept {
-        auto ptr = sz_rfind(start_, length_, other.data(), other.size());
+        auto ptr = best_result_<sz_rfind_best, sz_cptr_t>(start_, length_, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2584,7 +2585,7 @@ class basic_string_slice {
      *  @return The offset of the match, or @c npos if not found.
      */
     size_type rfind(value_type character) const noexcept {
-        auto ptr = sz_rfind_byte(start_, length_, &character);
+        auto ptr = best_result_<sz_rfind_byte_best, sz_cptr_t>(start_, length_, &character);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2669,7 +2670,7 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_of(byteset_t set, size_type skip = 0) const noexcept {
-        auto ptr = sz_find_byteset(start_ + skip, length_ - skip, &set.raw());
+        auto ptr = best_result_<sz_find_byteset_best, sz_cptr_t>(start_ + skip, length_ - skip, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2684,7 +2685,7 @@ class basic_string_slice {
 
     /** Find the last occurrence of a character from a @p set. */
     size_type find_last_of(byteset_t set) const noexcept {
-        auto ptr = sz_rfind_byteset(start_, length_, &set.raw());
+        auto ptr = best_result_<sz_rfind_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2697,7 +2698,7 @@ class basic_string_slice {
      */
     size_type find_last_of(byteset_t set, size_type until) const noexcept {
         auto len = sz_min_of_two(until + 1, length_);
-        auto ptr = sz_rfind_byteset(start_, len, &set.raw());
+        auto ptr = best_result_<sz_rfind_byteset_best, sz_cptr_t>(start_, len, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2713,7 +2714,7 @@ class basic_string_slice {
      *  @brief Count the number of UTF-8 characters (not bytes) in the string.
      *  @return Number of UTF-8 codepoints.
      */
-    size_type utf8_count() const noexcept { return sz_utf8_count(start_, length_); }
+    size_type utf8_count() const noexcept { return best_result_<sz_utf8_count_best, sz_size_t>(start_, length_); }
 
     /**
      *  @brief Return a pointer to the first byte violating the given Unicode normalization form.
@@ -2723,7 +2724,7 @@ class basic_string_slice {
      *      into this string at the first offending byte.
      */
     sz_cptr_t utf8_find_denormalized(sz_normal_form_t form) const noexcept {
-        return sz_utf8_find_denormalized(start_, length_, form);
+        return best_result_<sz_utf8_find_denormalized_best, sz_cptr_t>(start_, length_, form);
     }
 
     /**
@@ -2742,7 +2743,7 @@ class basic_string_slice {
      *  @return Byte offset of the Nth character, or npos if string has fewer than n characters.
      */
     size_type utf8_seek(size_type n) const noexcept {
-        auto ptr = sz_utf8_seek(start_, length_, n);
+        auto ptr = best_result_<sz_utf8_seek_best, sz_cptr_t>(start_, length_, n);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2752,7 +2753,8 @@ class basic_string_slice {
      *      greater than @p other.
      */
     int utf8_uncased_order(string_view_t other) const noexcept {
-        return (int)sz_utf8_uncased_order(start_, length_, other.data(), other.size());
+        return (int)best_result_<sz_utf8_uncased_order_best, sz_ordering_t>(start_, length_, other.data(),
+                                                                            other.size());
     }
 
     struct sized_match_t {
@@ -2778,7 +2780,9 @@ class basic_string_slice {
     sized_match_t utf8_uncased_search(string_view_t other) const noexcept {
         sz_utf8_uncased_needle_metadata_t metadata = {};
         sz_size_t match_length = 0;
-        auto ptr = sz_utf8_uncased_search(start_, length_, other.data(), other.size(), &metadata, &match_length);
+        sz_cptr_t ptr = nullptr;
+        best_call_<sz_utf8_uncased_search_best>(start_, length_, other.data(), other.size(), &metadata, &ptr,
+                                                &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
@@ -2790,8 +2794,9 @@ class basic_string_slice {
      */
     sized_match_t utf8_uncased_search(utf8_uncased_needle_t const &needle) const noexcept {
         sz_size_t match_length = 0;
-        auto ptr = sz_utf8_uncased_search(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
-                                          &match_length);
+        sz_cptr_t ptr = nullptr;
+        best_call_<sz_utf8_uncased_search_best>(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
+                                                &ptr, &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
@@ -2969,7 +2974,7 @@ class basic_string_slice {
      */
     string_slice_t lstrip(byteset_t set) const noexcept {
         set = set.inverted();
-        auto new_start = (pointer)sz_find_byteset(start_, length_, &set.raw());
+        auto new_start = (pointer)best_result_<sz_find_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
         return new_start ? string_slice_t {new_start, length_ - static_cast<size_type>(new_start - start_)}
                          : string_slice_t();
     }
@@ -2980,7 +2985,7 @@ class basic_string_slice {
      */
     string_slice_t rstrip(byteset_t set) const noexcept {
         set = set.inverted();
-        auto new_end = (pointer)sz_rfind_byteset(start_, length_, &set.raw());
+        auto new_end = (pointer)best_result_<sz_rfind_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
         return new_end ? string_slice_t {start_, static_cast<size_type>(new_end - start_ + 1)} : string_slice_t();
     }
 
@@ -2990,12 +2995,11 @@ class basic_string_slice {
      */
     string_slice_t strip(byteset_t set) const noexcept {
         set = set.inverted();
-        auto new_start = (pointer)sz_find_byteset(start_, length_, &set.raw());
-        return new_start ? string_slice_t {new_start,
-                                           static_cast<size_type>(
-                                               sz_rfind_byteset(new_start, length_ - (new_start - start_), &set.raw()) -
-                                               new_start + 1)}
-                         : string_slice_t();
+        auto new_start = (pointer)best_result_<sz_find_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
+        if (!new_start) return string_slice_t();
+        auto new_end = best_result_<sz_rfind_byteset_best, sz_cptr_t>(new_start, length_ - (new_start - start_),
+                                                                      &set.raw());
+        return string_slice_t {new_start, static_cast<size_type>(new_end - new_start + 1)};
     }
 
 #pragma endregion
@@ -3079,23 +3083,27 @@ class basic_string_slice {
 
     /** Hashes the string, equivalent to `std::hash<string_view_t>{}(str)`. */
     size_type hash(std::uint64_t seed = 0) const noexcept {
-        return static_cast<size_type>(sz_hash(start_, length_, static_cast<sz_u64_t>(seed)));
+        return static_cast<size_type>(
+            best_result_<sz_hash_best, sz_u64_t>(start_, length_, static_cast<sz_u64_t>(seed)));
     }
 
     /**
      *  @brief Hashes the string under each of @p seeds at once, writing one hash per seed into
      *      @p hashes.
      *  @note Equivalent to `hashes[i] = hash(seeds[i])`, but amortizes the input loading.
-     *  @sa sz_hash_multiseed
+     *  @sa sz_hash_multiseed_best
      */
     void hash_multiseed(span<std::uint64_t const> seeds, span<std::uint64_t> hashes) const noexcept {
         sz_assert_(seeds.size() == hashes.size() && "Need one output slot per seed");
-        sz_hash_multiseed(start_, length_, reinterpret_cast<sz_u64_t const *>(seeds.data()),
-                          static_cast<sz_size_t>(seeds.size()), reinterpret_cast<sz_u64_t *>(hashes.data()));
+        best_call_<sz_hash_multiseed_best>(start_, length_, reinterpret_cast<sz_u64_t const *>(seeds.data()),
+                                           static_cast<sz_size_t>(seeds.size()),
+                                           reinterpret_cast<sz_u64_t *>(hashes.data()));
     }
 
     /** Aggregates the values of individual bytes of a string. */
-    size_type bytesum() const noexcept { return static_cast<size_type>(sz_bytesum(start_, length_)); }
+    size_type bytesum() const noexcept {
+        return static_cast<size_type>(best_result_<sz_bytesum_best, sz_u64_t>(start_, length_));
+    }
 
     /** Populate a character set with characters present in this string. */
     byteset_t as_set() const noexcept {
@@ -3156,7 +3164,7 @@ inline utf8_uncased_needle_t::utf8_uncased_needle_t(string_view_t needle) noexce
  *  Functions defined for @c basic_string, but not present in @c basic_string_slice:
  *
  *  - @c replace, @c insert, @c erase, @c append, @c push_back, @c pop_back, @c resize,
- *  - @c try_ exception-free "try" operations that return non-zero values on success,
+ *  - @c try_ exception-free twins, returning a @c status_t instead of throwing,
  *  - @c replace_all and @c erase_all similar to Boost,
  *  - @c translate for character mapping,
  *  - @c randomize, @c random for fast random string generation.
@@ -3187,33 +3195,33 @@ class basic_string {
     sz_no_unique_address_ allocator_type_ allocator_;
 
     template <typename allocator_callback_>
-    status_t _with_alloc(allocator_callback_ &&callback) noexcept {
-        return ashvardanian::stringzilla::_with_alloc(allocator_, callback);
+    status_t with_allocator_(allocator_callback_ &&callback) noexcept {
+        return ashvardanian::stringzilla::with_allocator_(allocator_, callback);
     }
 
     /** Returns the heap block, if any, to the allocator that granted it, leaving an empty SSO
      *  string. */
     void release() noexcept {
-        _with_alloc([&](sz_alloc_type &alloc) {
-            sz_string_free(&string_, &alloc);
+        [[maybe_unused]] status_t const status = with_allocator_([&](sz_alloc_type &allocator) {
+            sz_string_free(&string_, &allocator);
             return sz_success_k;
         });
     }
 
     void init(std::size_t length, char_type value) noexcept(false) {
         sz_ptr_t start;
-        raise(_with_alloc([&](sz_alloc_type &alloc) {
-            return (start = sz_string_init_length(&string_, length, &alloc)) ? sz_success_k : sz_bad_alloc_k;
+        raise(with_allocator_([&](sz_alloc_type &allocator) {
+            return (start = sz_string_init_length(&string_, length, &allocator)) ? sz_success_k : sz_bad_alloc_k;
         }));
-        sz_fill(start, length, sz_bitcast_(sz_u8_t, value));
+        best_call_<sz_fill_best>(start, length, value);
     }
 
     void init(string_view_t other) noexcept(false) {
         sz_ptr_t start;
-        raise(_with_alloc([&](sz_alloc_type &alloc) {
-            return (start = sz_string_init_length(&string_, other.size(), &alloc)) ? sz_success_k : sz_bad_alloc_k;
+        raise(with_allocator_([&](sz_alloc_type &allocator) {
+            return (start = sz_string_init_length(&string_, other.size(), &allocator)) ? sz_success_k : sz_bad_alloc_k;
         }));
-        sz_copy(start, (sz_cptr_t)other.data(), other.size());
+        best_call_<sz_copy_best>(start, other.data(), other.size());
     }
 
     void move(basic_string &other) noexcept {
@@ -3407,8 +3415,8 @@ class basic_string {
      */
     template <typename first_type_, typename second_type_>
     basic_string(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
-        raise(_with_alloc([&](sz_alloc_type &alloc) {
-            sz_ptr_t ptr = sz_string_init_length(&string_, expression.length(), &alloc);
+        raise(with_allocator_([&](sz_alloc_type &allocator) {
+            sz_ptr_t ptr = sz_string_init_length(&string_, expression.length(), &allocator);
             if (!ptr) return sz_bad_alloc_k;
             expression.copy(ptr);
             return sz_success_k;
@@ -3417,7 +3425,7 @@ class basic_string {
 
     template <typename first_type_, typename second_type_>
     basic_string &operator=(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
-        if (!try_assign(expression)) throw std::bad_alloc();
+        raise(try_assign(expression));
         return *this;
     }
 
@@ -3938,79 +3946,67 @@ class basic_string {
      *  @param[in] count The new size of the string.
      *  @param[in] character The character to fill new elements with, if expanding, by default
      *      the null character.
-     *  @return @c true if the resizing was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_resize(size_type count, value_type character = '\0') noexcept;
+    status_t try_resize(size_type count, value_type character = '\0') noexcept;
 
     /**
      *  @brief Attempts to reduce memory usage by freeing unused memory.
-     *  @return @c true if the operation was successful and potentially reduced the memory
-     *      footprint, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_shrink_to_fit() noexcept {
-        auto status = _with_alloc([&](sz_alloc_type &alloc) {
-            return sz_string_shrink_to_fit(&string_, &alloc) ? sz_success_k : sz_bad_alloc_k;
+    status_t try_shrink_to_fit() noexcept {
+        return with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_shrink_to_fit(&string_, &allocator) ? sz_success_k : sz_bad_alloc_k;
         });
-        return status == status_t::success_k;
     }
 
     /**
      *  @brief Attempts to reserve enough space for a specified number of characters.
      *  @param[in] capacity The new capacity to reserve.
-     *  @return @c true if the reservation was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_reserve(size_type capacity) noexcept {
-        auto status = _with_alloc([&](sz_alloc_type &alloc) {
-            return sz_string_reserve(&string_, capacity, &alloc) ? sz_success_k : sz_bad_alloc_k;
+    status_t try_reserve(size_type capacity) noexcept {
+        return with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_reserve(&string_, capacity, &allocator) ? sz_success_k : sz_bad_alloc_k;
         });
-        return status == status_t::success_k;
     }
 
     /**
      *  @brief Assigns a new value to the string, replacing its current contents.
      *  @param[in] other The string view whose contents to assign.
-     *  @return @c true if the assignment was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_assign(string_view_t other) noexcept;
+    status_t try_assign(string_view_t other) noexcept;
 
     /**
      *  @brief Assigns a concatenated sequence to the string, replacing its current contents.
      *  @param[in] other The concatenation object representing the sequence to assign.
-     *  @return @c true if the assignment was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
     template <typename first_type_, typename second_type_>
-    bool try_assign(concatenation<first_type_, second_type_> const &other) noexcept;
+    status_t try_assign(concatenation<first_type_, second_type_> const &other) noexcept;
 
     /**
      *  @brief Attempts to add a single character to the end of the string.
      *  @param[in] c The character to add.
-     *  @return @c true if the character was successfully added, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_push_back(char_type c) noexcept;
+    status_t try_push_back(char_type c) noexcept;
 
     /**
      *  @brief Attempts to append a given character array to the string.
      *  @param[in] str The pointer to the array of characters to append.
      *  @param[in] length The number of characters to append.
-     *  @return @c true if the append operation was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_append(const_pointer str, size_type length) noexcept;
+    status_t try_append(const_pointer str, size_type length) noexcept;
 
     /**
      *  @brief Attempts to append a string view to the string.
      *  @param[in] str The string view to append.
-     *  @return @c true if the append operation was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_append(string_view_t str) noexcept { return try_append(str.data(), str.size()); }
-
-    /**
-     *  @brief Clears the contents of the string and resets its length to 0.
-     *  @return Always returns @c true as this operation cannot fail under normal conditions.
-     */
-    bool try_clear() noexcept {
-        clear();
-        return true;
-    }
+    status_t try_append(string_view_t str) noexcept { return try_append(str.data(), str.size()); }
 
     /**
      *  @brief Erases @b (in-place) a range of characters defined with signed offsets.
@@ -4026,33 +4022,33 @@ class basic_string {
 
     /**
      *  @brief Inserts @b (in-place) a range of characters at a given signed offset.
-     *  @return @c true if the insertion was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_insert(difference_type signed_offset, string_view_t string) noexcept {
+    status_t try_insert(difference_type signed_offset, string_view_t string) noexcept {
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_offset, 0, &normalized_offset, &normalized_length);
-        if (_with_alloc([&](sz_alloc_type &alloc) {
-                return sz_string_expand(&string_, normalized_offset, string.size(), &alloc) ? sz_success_k
+        status_t const status = with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_expand(&string_, normalized_offset, string.size(), &allocator) ? sz_success_k
                                                                                             : sz_bad_alloc_k;
-            }) != status_t::success_k)
-            return false;
-
-        sz_copy(data() + normalized_offset, string.data(), string.size());
-        return true;
+        });
+        if (failed(status)) return status;
+        best_call_<sz_copy_best>(data() + normalized_offset, string.data(), string.size());
+        return status_t::success_k;
     }
 
     /**
      *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @return @c true if the replacement was successful, @c false otherwise.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_replace(difference_type signed_start_offset, difference_type signed_end_offset,
-                     string_view_t replacement) noexcept {
+    status_t try_replace(difference_type signed_start_offset, difference_type signed_end_offset,
+                         string_view_t replacement) noexcept {
 
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_start_offset, signed_end_offset, &normalized_offset, &normalized_length);
-        if (!try_preparing_replacement(normalized_offset, normalized_length, replacement.size())) return false;
-        sz_copy(data() + normalized_offset, replacement.data(), replacement.size());
-        return true;
+        status_t const status = try_preparing_replacement(normalized_offset, normalized_length, replacement.size());
+        if (failed(status)) return status;
+        best_call_<sz_copy_best>(data() + normalized_offset, replacement.data(), replacement.size());
+        return status_t::success_k;
     }
 
     /**
@@ -4061,12 +4057,13 @@ class basic_string {
      *  @param[in] count The new size of the string.
      *  @param[in] operation A callback that receives a pointer and the new size, and returns the
      *      actual new size.
-     *  @return @c true if the resizing was successful, @c false otherwise.
+     *  @return @c success_k, @c overflow_risk_k for a @p count past @c max_size, or @c bad_alloc_k
+     *      if the allocation failed.
      *  @see https://en.cppreference.com/w/cpp/string/basic_string/resize_and_overwrite
      */
     template <typename operation_type_>
-    bool try_resize_and_overwrite(size_type count, operation_type_ operation) noexcept {
-        if (count > max_size()) return false;
+    status_t try_resize_and_overwrite(size_type count, operation_type_ operation) noexcept {
+        if (count > max_size()) return status_t::overflow_risk_k;
 
         sz_ptr_t string_start;
         sz_size_t string_length;
@@ -4076,12 +4073,12 @@ class basic_string {
 
         // Allocate more space if needed, without initializing
         if (count >= string_space) {
-            if (_with_alloc([&](sz_alloc_type &alloc) {
-                    return sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, count - string_length, &alloc)
-                               ? sz_success_k
-                               : sz_bad_alloc_k;
-                }) != status_t::success_k)
-                return false;
+            status_t const status = with_allocator_([&](sz_alloc_type &allocator) {
+                return sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, count - string_length, &allocator)
+                           ? sz_success_k
+                           : sz_bad_alloc_k;
+            });
+            if (failed(status)) return status;
             sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
         }
 
@@ -4102,7 +4099,7 @@ class basic_string {
         }
         else { sz_string_erase(&string_, actual_count, STRINGZILLA_SIZE_MAX); }
 
-        return true;
+        return status_t::success_k;
     }
 #pragma endregion
 
@@ -4138,7 +4135,7 @@ class basic_string {
      */
     void resize(size_type count, value_type character = '\0') noexcept(false) {
         if (count > max_size()) throw std::length_error("sz::basic_string::resize");
-        if (!try_resize(count, character)) throw std::bad_alloc();
+        raise(try_resize(count, character));
     }
 
     /**
@@ -4154,16 +4151,14 @@ class basic_string {
     template <typename operation_type_>
     void resize_and_overwrite(size_type count, operation_type_ operation) noexcept(false) {
         if (count > max_size()) throw std::length_error("sz::basic_string::resize_and_overwrite");
-        if (!try_resize_and_overwrite(count, operation)) throw std::bad_alloc();
+        raise(try_resize_and_overwrite(count, operation));
     }
 
     /**
      *  @brief Reclaims the unused memory, if any.
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    void shrink_to_fit() noexcept(false) {
-        if (!try_shrink_to_fit()) throw std::bad_alloc();
-    }
+    void shrink_to_fit() noexcept(false) { raise(try_shrink_to_fit()); }
 
     /**
      *  @brief Informs the string object of a planned change in size, so that it pre-allocate once.
@@ -4171,7 +4166,7 @@ class basic_string {
      */
     void reserve(size_type capacity) noexcept(false) {
         if (capacity > max_size()) throw std::length_error("sz::basic_string::reserve");
-        if (!try_reserve(capacity)) throw std::bad_alloc();
+        raise(try_reserve(capacity));
     }
 
     /**
@@ -4183,10 +4178,10 @@ class basic_string {
     basic_string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
         if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
         if (size() + repeats > max_size()) throw std::length_error("sz::basic_string::insert");
-        raise(_with_alloc([&](sz_alloc_type &alloc) {
-            return sz_string_expand(&string_, offset, repeats, &alloc) ? sz_success_k : sz_bad_alloc_k;
+        raise(with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_expand(&string_, offset, repeats, &allocator) ? sz_success_k : sz_bad_alloc_k;
         }));
-        sz_fill(data() + offset, repeats, character);
+        best_call_<sz_fill_best>(data() + offset, repeats, character);
         return *this;
     }
 
@@ -4199,10 +4194,10 @@ class basic_string {
     basic_string &insert(size_type offset, string_view_t other) noexcept(false) {
         if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
         if (size() + other.size() > max_size()) throw std::length_error("sz::basic_string::insert");
-        raise(_with_alloc([&](sz_alloc_type &alloc) {
-            return sz_string_expand(&string_, offset, other.size(), &alloc) ? sz_success_k : sz_bad_alloc_k;
+        raise(with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_expand(&string_, offset, other.size(), &allocator) ? sz_success_k : sz_bad_alloc_k;
         }));
-        sz_copy(data() + offset, other.data(), other.size());
+        best_call_<sz_copy_best>(data() + offset, other.data(), other.size());
         return *this;
     }
 
@@ -4266,8 +4261,8 @@ class basic_string {
         auto added_length = range_length(first, last);
         if (size() + added_length > max_size()) throw std::length_error("sz::basic_string::insert");
 
-        raise(_with_alloc([&](sz_alloc_type &alloc) {
-            return sz_string_expand(&string_, pos, added_length, &alloc) ? sz_success_k : sz_bad_alloc_k;
+        raise(with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_expand(&string_, pos, added_length, &allocator) ? sz_success_k : sz_bad_alloc_k;
         }));
 
         iterator result = begin() + pos;
@@ -4306,8 +4301,8 @@ class basic_string {
     basic_string &replace(size_type pos, size_type count, string_view_t const &str) noexcept(false) {
         if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
         if (size() - count + str.size() > max_size()) throw std::length_error("sz::basic_string::replace");
-        if (!try_preparing_replacement(pos, count, str.size())) throw std::bad_alloc();
-        sz_copy(data() + pos, str.data(), str.size());
+        raise(try_preparing_replacement(pos, count, str.size()));
+        best_call_<sz_copy_best>(data() + pos, str.data(), str.size());
         return *this;
     }
 
@@ -4382,8 +4377,8 @@ class basic_string {
     basic_string &replace(size_type pos, size_type count, size_type count2, char_type character) noexcept(false) {
         if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
         if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
-        if (!try_preparing_replacement(pos, count, count2)) throw std::bad_alloc();
-        sz_fill(data() + pos, count2, character);
+        raise(try_preparing_replacement(pos, count, count2));
+        best_call_<sz_fill_best>(data() + pos, count2, character);
         return *this;
     }
 
@@ -4412,7 +4407,7 @@ class basic_string {
         auto count2 = range_length(first2, last2);
         if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
         if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
-        if (!try_preparing_replacement(pos, count, count2)) throw std::bad_alloc();
+        raise(try_preparing_replacement(pos, count, count2));
         for (iterator output = begin() + pos; first2 != last2; ++first2, ++output) *output = *first2;
         return *this;
     }
@@ -4435,7 +4430,7 @@ class basic_string {
      */
     void push_back(char_type ch) noexcept(false) {
         if (size() == max_size()) throw std::length_error("string::push_back");
-        if (!try_push_back(ch)) throw std::bad_alloc();
+        raise(try_push_back(ch));
     }
 
     /**
@@ -4451,7 +4446,7 @@ class basic_string {
      *  @sa try_assign for a cleaner exception-less alternative.
      */
     basic_string &assign(string_view_t other) noexcept(false) {
-        if (!try_assign(other)) throw std::bad_alloc();
+        raise(try_assign(other));
         return *this;
     }
 
@@ -4463,7 +4458,7 @@ class basic_string {
      */
     basic_string &assign(size_type repeats, char_type character) noexcept(false) {
         resize(repeats, character);
-        sz_fill(data(), repeats, sz_bitcast_(sz_u8_t, character));
+        best_call_<sz_fill_best>(data(), repeats, character);
         return *this;
     }
 
@@ -4515,7 +4510,7 @@ class basic_string {
      *  @sa try_append for a cleaner exception-less alternative.
      */
     basic_string &append(string_view_t str) noexcept(false) {
-        if (!try_append(str)) throw std::bad_alloc();
+        raise(try_append(str));
         return *this;
     }
 
@@ -4612,24 +4607,24 @@ class basic_string {
      *  @brief Overwrites the string with random binary data.
      *  @param[in] nonce "Number used once" seeding the random number generator, @b never repeat it!
      */
-    basic_string &fill_random(sz_u64_t nonce) noexcept {
+    basic_string &fill_random(std::uint64_t nonce) noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_fill_random(start, length, nonce);
+        best_call_<sz_fill_random_best>(start, length, static_cast<sz_u64_t>(nonce));
         return *this;
     }
 
     /**
      *  @brief Overwrites the string with random binary data.
-     *  @sa sz_fill_random
+     *  @sa sz_fill_random_best
      *
      *  This overload produces the nonce from a static variable, incrementing it each time.
      *  In this case the undefined behaviour in concurrent environments may play in our favor,
      *  but it's recommended to use the other overload in such cases.
      */
     basic_string &fill_random() noexcept {
-        static sz_u64_t nonce = 42;
+        static std::uint64_t nonce = 42;
         return fill_random(nonce++);
     }
 
@@ -4639,7 +4634,7 @@ class basic_string {
      *  @param[in] nonce "Number used once" seeding the random number generator, @b never repeat it!
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    static basic_string random(size_type length, sz_u64_t nonce) noexcept(false) {
+    static basic_string random(size_type length, std::uint64_t nonce) noexcept(false) {
         return basic_string(length, '\0').fill_random(nonce);
     }
 
@@ -4659,7 +4654,7 @@ class basic_string {
      *  or when this string is made exclusively of the pattern.
      */
     basic_string &replace_all(string_view_t pattern, string_view_t replacement) noexcept(false) {
-        if (!try_replace_all(pattern, replacement)) throw std::bad_alloc();
+        raise(try_replace_all(pattern, replacement));
         return *this;
     }
 
@@ -4673,7 +4668,7 @@ class basic_string {
      *  or when this string is made exclusively of the pattern.
      */
     basic_string &replace_all(byteset_t pattern, string_view_t replacement) noexcept(false) {
-        if (!try_replace_all(pattern, replacement)) throw std::bad_alloc();
+        raise(try_replace_all(pattern, replacement));
         return *this;
     }
 
@@ -4685,7 +4680,7 @@ class basic_string {
      *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
      *  or when this string is made exclusively of the pattern.
      */
-    bool try_replace_all(string_view_t pattern, string_view_t replacement) noexcept {
+    status_t try_replace_all(string_view_t pattern, string_view_t replacement) noexcept {
         return try_replace_all_<string_view_t>(pattern, replacement);
     }
 
@@ -4698,14 +4693,14 @@ class basic_string {
      *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
      *  or when this string is made exclusively of the pattern.
      */
-    bool try_replace_all(byteset_t pattern, string_view_t replacement) noexcept {
+    status_t try_replace_all(byteset_t pattern, string_view_t replacement) noexcept {
         return try_replace_all_<byteset_t>(pattern, replacement);
     }
 
     /**
      *  @brief Replaces @b (in-place) all characters in the string using the provided lookup
      *      @p table.
-     *  @sa sz_lookup
+     *  @sa sz_lookup_best
      */
     basic_string &lookup(look_up_table_t const &table) noexcept {
         lookup(table, data());
@@ -4716,13 +4711,13 @@ class basic_string {
      *  @brief Maps all characters in the current string into the @p output buffer using the
      *      provided lookup @p table.
      *  @param[out] output The buffer to write the transformed string into.
-     *  @sa sz_lookup
+     *  @sa sz_lookup_best
      */
     void lookup(look_up_table_t const &table, pointer output) const noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_lookup((sz_ptr_t)output, (sz_size_t)length, (sz_cptr_t)start, (sz_cptr_t)table.raw());
+        best_call_<sz_lookup_best>((sz_ptr_t)output, (sz_cptr_t)start, (sz_size_t)length, (sz_cptr_t)table.raw());
     }
 
     /**
@@ -4733,7 +4728,7 @@ class basic_string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        return sz_utf8_count(start, length);
+        return best_result_<sz_utf8_count_best, sz_size_t>(start, length);
     }
 
     /**
@@ -4745,7 +4740,7 @@ class basic_string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        auto ptr = sz_utf8_seek(start, length, n);
+        auto ptr = best_result_<sz_utf8_seek_best, sz_cptr_t>(start, length, n);
         return ptr ? ptr - start : npos;
     }
 
@@ -4790,10 +4785,10 @@ class basic_string {
      *  Case folding normalizes text for uncased comparisons by mapping uppercase letters to their
      *  lowercase equivalents and handling special expansions defined in Unicode CaseFolding.txt.
      *
-     *  @return @c true if the operation was successful, @c false if memory allocation failed.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      *  @note The string may grow due to expansions, like U+00DF → "ss", by 3× in the worst case.
      */
-    bool try_utf8_uncased_fold() noexcept {
+    status_t try_utf8_uncased_fold() noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_size_t string_space;
@@ -4801,15 +4796,15 @@ class basic_string {
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
 
         // Allocate result buffer (worst-case 3x expansion), fold into it, then swap
-        basic_string result;
-        if (!result.try_resize_and_overwrite(string_length * 3,
-                                             [string_start, string_length](char_type *buf, size_type) {
-                                                 return sz_utf8_uncased_fold(string_start, string_length, buf);
-                                             }))
-            return false;
+        basic_string result(allocator_);
+        status_t const status = result.try_resize_and_overwrite(
+            string_length * 3, [string_start, string_length](char_type *buf, size_type) {
+                return best_result_<sz_utf8_uncased_fold_best, sz_size_t>(string_start, string_length, buf);
+            });
+        if (failed(status)) return status;
 
         swap(result);
-        return true;
+        return status_t::success_k;
     }
 
     /**
@@ -4823,7 +4818,7 @@ class basic_string {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_string_range(&string_, &string_start, &string_length);
-        return sz_utf8_find_denormalized(string_start, string_length, form);
+        return best_result_<sz_utf8_find_denormalized_best, sz_cptr_t>(string_start, string_length, form);
     }
 
     /**
@@ -4844,9 +4839,9 @@ class basic_string {
      *
      *  @param[in] form One of @c sz_normal_form_nfd_k, @c sz_normal_form_nfc_k,
      *      @c sz_normal_form_nfkd_k, or @c sz_normal_form_nfkc_k.
-     *  @return @c true if the operation succeeded, @c false if memory allocation failed.
+     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    bool try_utf8_normalize(sz_normal_form_t form) noexcept {
+    status_t try_utf8_normalize(sz_normal_form_t form) noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_size_t string_space;
@@ -4854,26 +4849,26 @@ class basic_string {
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
 
         // Allocate result buffer (worst-case 18x expansion), normalize into it, then swap
-        basic_string result;
-        if (!result.try_resize_and_overwrite(string_length * 18,
-                                             [string_start, string_length, form](char_type *buf, size_type) {
-                                                 return sz_utf8_norm(string_start, string_length, form, buf);
-                                             }))
-            return false;
+        basic_string result(allocator_);
+        status_t const status = result.try_resize_and_overwrite(
+            string_length * 18, [string_start, string_length, form](char_type *buf, size_type) {
+                return best_result_<sz_utf8_norm_best, sz_size_t>(string_start, string_length, form, buf);
+            });
+        if (failed(status)) return status;
 
         swap(result);
-        return true;
+        return status_t::success_k;
     }
 
   private:
     template <typename pattern_type>
-    bool try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept;
+    status_t try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept;
 
     /**
      *  @brief Tries to prepare the string for a replacement of a given range with a new string.
      *  @warning Allocates memory if the replacement is longer than the replaced range.
      */
-    bool try_preparing_replacement(size_type offset, size_type length, size_type new_length) noexcept;
+    status_t try_preparing_replacement(size_type offset, size_type length, size_type new_length) noexcept;
 };
 
 using string_t = basic_string<>;
@@ -4888,7 +4883,7 @@ inline constexpr byteset_t operator""_bs(char const *str, std::size_t length) no
 } // namespace literals
 
 template <typename allocator_>
-bool basic_string<allocator_>::try_resize(size_type count, value_type character) noexcept {
+status_t basic_string<allocator_>::try_resize(size_type count, value_type character) noexcept {
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
@@ -4897,17 +4892,17 @@ bool basic_string<allocator_>::try_resize(size_type count, value_type character)
 
     // Allocate more space if needed.
     if (count >= string_space) {
-        if (_with_alloc([&](sz_alloc_type &alloc) {
-                return sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, count - string_length, &alloc) ? sz_success_k
+        status_t const status = with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, count - string_length, &allocator) ? sz_success_k
                                                                                                        : sz_bad_alloc_k;
-            }) != status_t::success_k)
-            return false;
+        });
+        if (failed(status)) return status;
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
     }
 
     // Fill the trailing characters.
     if (count > string_length) {
-        sz_fill(string_start + string_length, count - string_length, character);
+        best_call_<sz_fill_best>(string_start + string_length, count - string_length, character);
         string_start[count] = '\0';
         // Safe for both SSO and heap strings: on little-endian, internal.length
         // overlaps with LSB of external.length, so += affects only the length byte.
@@ -4915,11 +4910,11 @@ bool basic_string<allocator_>::try_resize(size_type count, value_type character)
         string_.external.length += count - string_length;
     }
     else { sz_string_erase(&string_, count, STRINGZILLA_SIZE_MAX); }
-    return true;
+    return status_t::success_k;
 }
 
 template <typename allocator_>
-bool basic_string<allocator_>::try_assign(string_view_t other) noexcept {
+status_t basic_string<allocator_>::try_assign(string_view_t other) noexcept {
     // We can't just assign the other string state, as its start address may be somewhere else on the stack.
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -4939,55 +4934,52 @@ bool basic_string<allocator_>::try_assign(string_view_t other) noexcept {
     }
     // In the common case, however, we need to allocate.
     else {
-        if (_with_alloc([&](sz_alloc_type &alloc) {
-                string_start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, other.length() - string_length, &alloc);
-                if (!string_start) return sz_bad_alloc_k;
-                other.copy(string_start, other.length());
-                return sz_success_k;
-            }) != status_t::success_k)
-            return false;
+        return with_allocator_([&](sz_alloc_type &allocator) {
+            string_start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, other.length() - string_length, &allocator);
+            if (!string_start) return sz_bad_alloc_k;
+            other.copy(string_start, other.length());
+            return sz_success_k;
+        });
     }
-    return true;
+    return status_t::success_k;
 }
 
 template <typename allocator_>
-bool basic_string<allocator_>::try_push_back(char_type c) noexcept {
-    auto result = _with_alloc([&](sz_alloc_type &alloc) {
+status_t basic_string<allocator_>::try_push_back(char_type c) noexcept {
+    return with_allocator_([&](sz_alloc_type &allocator) {
         auto old_size = size();
-        sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, 1, &alloc);
+        sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, 1, &allocator);
         if (!start) return sz_bad_alloc_k;
         start[old_size] = c;
         return sz_success_k;
     });
-    return result == status_t::success_k;
 }
 
 template <typename allocator_>
-bool basic_string<allocator_>::try_append(const_pointer str, size_type length) noexcept {
-    auto result = _with_alloc([&](sz_alloc_type &alloc) {
+status_t basic_string<allocator_>::try_append(const_pointer str, size_type length) noexcept {
+    return with_allocator_([&](sz_alloc_type &allocator) {
         // Sometimes we are inserting part of this string into itself.
         // By the time `sz_string_expand` finished, the old `str` pointer may be invalidated,
         // so we need to handle that special case separately.
         auto this_span = span();
         if (str >= this_span.begin() && str < this_span.end()) {
             auto str_offset_in_this = str - data();
-            sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &alloc);
+            sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &allocator);
             if (!start) return sz_bad_alloc_k;
-            sz_copy(start + this_span.size(), start + str_offset_in_this, length);
+            best_call_<sz_copy_best>(start + this_span.size(), start + str_offset_in_this, length);
         }
         else {
-            sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &alloc);
+            sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &allocator);
             if (!start) return sz_bad_alloc_k;
-            sz_copy(start + this_span.size(), str, length);
+            best_call_<sz_copy_best>(start + this_span.size(), str, length);
         }
         return sz_success_k;
     });
-    return result == status_t::success_k;
 }
 
 template <typename allocator_>
 template <typename pattern_type>
-bool basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept {
+status_t basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept {
     // Depending on the size of the pattern and the replacement, we may need to allocate more space.
     // There are 3 cases to consider:
     // 1. The pattern and the replacement are of the same length. Piece of cake!
@@ -5000,7 +4992,7 @@ bool basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_vie
     string_view_t this_view = view();
 
     // Empty pattern: nothing to replace.
-    if (matcher.needle_length() == 0) return true;
+    if (matcher.needle_length() == 0) return status_t::success_k;
 
     // 1. The pattern and the replacement are of the same length.
     if (matcher.needle_length() == replacement.length()) {
@@ -5011,7 +5003,7 @@ bool basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_vie
         for (auto matches_iterator = matches.begin(); matches_iterator != end_sentinel_t {}; ++matches_iterator) {
             replacement.copy(const_cast<pointer>((*matches_iterator).data()));
         }
-        return true;
+        return status_t::success_k;
     }
 
     // 2. The pattern is longer than the replacement. We need to compact the strings.
@@ -5023,21 +5015,19 @@ bool basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_vie
         splits_type splits = splits_type(this_view, {pattern});
         auto matches_iterator = splits.begin();
         auto compacted_end = (*matches_iterator).end();
-        if (compacted_end == end()) return true; // No matches.
+        if (compacted_end == end()) return status_t::success_k; // No matches.
 
         ++matches_iterator; // Skip the first match.
         do {
             string_view_t match_view = *matches_iterator;
             replacement.copy(const_cast<pointer>(compacted_end));
             compacted_end += replacement.length();
-            sz_move((sz_ptr_t)compacted_end, match_view.begin(), match_view.length());
+            best_call_<sz_move_best>((sz_ptr_t)compacted_end, match_view.begin(), match_view.length());
             compacted_end += match_view.length();
             ++matches_iterator;
         } while (matches_iterator != end_sentinel_t {});
 
-        // Can't fail, so let's just return true :)
-        try_resize(compacted_end - begin());
-        return true;
+        return try_resize(compacted_end - begin());
     }
 
     // 3. The pattern is shorter than the replacement. We may have to allocate more memory.
@@ -5051,14 +5041,15 @@ bool basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_vie
         // It's cheaper to iterate through the whole string once, counting the number of matches,
         // reserving memory once, than re-allocating and copying the string multiple times.
         auto matches_count = rmatches.size();
-        if (matches_count == 0) return true; // No matches.
+        if (matches_count == 0) return status_t::success_k; // No matches.
 
         // TODO: Resize without initializing the memory.
         auto replacement_delta_length = replacement.length() - matcher.needle_length();
         auto added_length = matches_count * replacement_delta_length;
         auto old_length = size();
         auto new_length = old_length + added_length;
-        if (!try_resize(new_length)) return false;
+        status_t const status = try_resize(new_length);
+        if (failed(status)) return status;
         this_view = view().front(old_length);
 
         // Now iterate through splits similarly to the 2nd case, but in reverse order.
@@ -5073,19 +5064,19 @@ bool basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_vie
         do {
             string_view_t slice_view = *splits_iterator;
             compacted_begin -= slice_view.length();
-            sz_move((sz_ptr_t)compacted_begin, slice_view.begin(), slice_view.length());
+            best_call_<sz_move_best>((sz_ptr_t)compacted_begin, slice_view.begin(), slice_view.length());
             compacted_begin -= replacement.length();
             replacement.copy(const_cast<pointer>(compacted_begin));
             ++splits_iterator;
         } while (!splits_iterator.is_last());
 
-        return true;
+        return status_t::success_k;
     }
 }
 
 template <typename allocator_>
 template <typename first_type_, typename second_type_>
-bool basic_string<allocator_>::try_assign(concatenation<first_type_, second_type_> const &other) noexcept {
+status_t basic_string<allocator_>::try_assign(concatenation<first_type_, second_type_> const &other) noexcept {
     // We can't just assign the other string state, as its start address may be somewhere else on the stack.
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -5094,21 +5085,18 @@ bool basic_string<allocator_>::try_assign(concatenation<first_type_, second_type
     if (string_length >= other.length()) {
         sz_string_erase(&string_, other.length(), STRINGZILLA_SIZE_MAX);
         other.copy(string_start, other.length());
+        return status_t::success_k;
     }
-    else {
-        if (_with_alloc([&](sz_alloc_type &alloc) {
-                string_start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, other.length(), &alloc);
-                if (!string_start) return false;
-                other.copy(string_start, other.length());
-                return true;
-            }) != status_t::success_k)
-            return false;
-    }
-    return true;
+    return with_allocator_([&](sz_alloc_type &allocator) {
+        string_start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, other.length() - string_length, &allocator);
+        if (!string_start) return sz_bad_alloc_k;
+        other.copy(string_start, other.length());
+        return sz_success_k;
+    });
 }
 
 template <typename allocator_>
-bool basic_string<allocator_>::try_preparing_replacement( //
+status_t basic_string<allocator_>::try_preparing_replacement( //
     size_type offset, size_type length, size_type replacement_length) noexcept {
 
     // There are three cases:
@@ -5118,20 +5106,20 @@ bool basic_string<allocator_>::try_preparing_replacement( //
     sz_assert_(offset + length <= size());
 
     // 1. The replacement is the same length as the replaced range.
-    if (replacement_length == length) return true;
+    if (replacement_length == length) return status_t::success_k;
 
     // 2. The replacement is shorter than the replaced range.
     else if (replacement_length < length) {
         sz_string_erase(&string_, offset + replacement_length, length - replacement_length);
-        return true;
+        return status_t::success_k;
     }
     // 3. The replacement is longer than the replaced range. An allocation may occur.
     else {
-        auto result = _with_alloc([&](sz_alloc_type &alloc) {
-            return sz_string_expand(&string_, offset + length, replacement_length - length, &alloc) ? sz_success_k
-                                                                                                    : sz_bad_alloc_k;
+        return with_allocator_([&](sz_alloc_type &allocator) {
+            return sz_string_expand(&string_, offset + length, replacement_length - length, &allocator)
+                       ? sz_success_k
+                       : sz_bad_alloc_k;
         });
-        return result == status_t::success_k;
     }
 }
 
@@ -5224,39 +5212,52 @@ typename concatenation_result<first_type_, second_type_, following_types_...>::t
  *  @brief Overwrites the @p string slice with random bytes.
  *  @param[out] string The string to overwrite.
  *  @param[in] nonce "Number used once" seeding the random number generator, @b never repeat it!
- *  @sa sz_fill_random
+ *  @param[in] capabilities Capabilities to pick from.
+ *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
+ *  @sa sz_fill_random_best
  */
-inline void fill_random(string_span_t string, sz_u64_t nonce) noexcept {
-    sz_fill_random(string.data(), string.size(), nonce);
+inline status_t fill_random(string_span_t string, std::uint64_t nonce,
+                            sz_capability_t capabilities = default_capabilities(), void *stream = nullptr) noexcept {
+    return static_cast<status_t>(
+        sz_fill_random_best(string.data(), string.size(), static_cast<sz_u64_t>(nonce), capabilities, stream));
 }
 
 /**
  *  @brief Overwrites the @p string slice with random bytes using @c std::rand for the nonce.
  *  @param[out] string The string to overwrite.
- *  @sa sz_fill_random
+ *  @sa sz_fill_random_best
  */
-inline void fill_random(string_span_t string) noexcept { fill_random(string, std::rand()); }
+inline status_t fill_random(string_span_t string) noexcept {
+    return fill_random(string, static_cast<std::uint64_t>(std::rand()));
+}
 
 /**
  *  @brief Maps all characters in the @p source string into the @p target buffer using the provided
  *      lookup @p table.
- *  @sa sz_lookup
+ *  @param[in] capabilities Capabilities to pick from.
+ *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
+ *  @sa sz_lookup_best
  */
-inline void lookup(string_view_t source, look_up_table_t const &table, char *target) noexcept {
-    sz_lookup((sz_ptr_t)target, (sz_size_t)source.size(), (sz_cptr_t)source.data(), (sz_cptr_t)table.raw());
+inline status_t lookup(string_view_t source, look_up_table_t const &table, char *target,
+                       sz_capability_t capabilities = default_capabilities(), void *stream = nullptr) noexcept {
+    return static_cast<status_t>(sz_lookup_best((sz_ptr_t)target, (sz_cptr_t)source.data(), (sz_size_t)source.size(),
+                                                (sz_cptr_t)table.raw(), capabilities, stream));
 }
 
 /**
  *  @brief Replaces @b (in-place) all characters in the string using the provided lookup table.
- *  @sa sz_lookup
+ *  @param[in] capabilities Capabilities to pick from.
+ *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
+ *  @sa sz_lookup_best
  */
-inline void lookup(string_span_t string, look_up_table_t const &table) noexcept {
-    lookup(string_view_t(string.data(), string.size()), table, string.data());
+inline status_t lookup(string_span_t string, look_up_table_t const &table,
+                       sz_capability_t capabilities = default_capabilities(), void *stream = nullptr) noexcept {
+    return lookup(string_view_t(string.data(), string.size()), table, string.data(), capabilities, stream);
 }
 
 /**
  *  @brief Internal data-structure wrapping arbitrary sequential containers for random lookups.
- *  @sa try_argsort, argsort, try_join, join
+ *  @sa argsort, intersect
  */
 template <typename container_type_, typename string_extractor_>
 struct sequence_args_ {
@@ -5283,8 +5284,8 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
 /**
  *  @brief Computes the permutation of an array, that would lead to sorted order. The elements of
  *      the array must be convertible to a @c string_view_t with the given extractor. Unlike the
- *      @c sz_sequence_argsort C interface, overwrites the output span.
- *  @sa sz_sequence_argsort
+ *      @c sz_sequence_argsort_best C interface, overwrites the output span.
+ *  @sa sz_sequence_argsort_best
  *
  *  @param[in] container The array of string-like elements to sort.
  *  @param[in] extractor The function object that extracts the string from the object.
@@ -5293,11 +5294,16 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
  *  @param[in] top_count If non-zero, only the first @p top_count entries are guaranteed fully
  *      sorted (partial sort).
  *  @param[in] reverse If true, sorts in descending order.
+ *  @param[in] capabilities Capabilities to pick from.
+ *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
+ *  @param[in] allocator Serves the scratch memory of the sort.
+ *  @return @c success_k, @c unexpected_dimensions_k if @p order is too short, or @c bad_alloc_k.
  */
-template <typename container_type_, typename string_extractor_>
-status_t try_argsort(container_type_ const &container, string_extractor_ const &extractor, span<sorted_idx_t> order,
-                     std::size_t top_count = 0, bool reverse = false) noexcept {
-    sz_assert_(order.size() >= container.size() && "The output span must hold the full permutation.");
+template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
+status_t argsort(container_type_ const &container, string_extractor_ const &extractor, span<sorted_idx_t> order,
+                 std::size_t top_count = 0, bool reverse = false, sz_capability_t capabilities = default_capabilities(),
+                 void *stream = nullptr, allocator_type_ allocator = {}) noexcept {
+    if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
 
     // Pack the arguments into a single structure to reference it from the callback.
     using args_t = sequence_args_<container_type_, string_extractor_>;
@@ -5309,20 +5315,23 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
     sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
-    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
-        return sz_sequence_argsort(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
-                                   static_cast<sz_bool_t>(reverse));
+    typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
+    return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
+        return sz_sequence_argsort_best(&sequence, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
+                                        &c_allocator, order.data(), capabilities, stream);
     });
 }
 
 /**
- *  @brief Uncased (Unicode case-folded) counterpart of @c try_argsort.
- *  @sa sz_sequence_argsort_uncased
+ *  @brief Uncased (Unicode case-folded) counterpart of @c argsort over an output span.
+ *  @sa sz_sequence_argsort_uncased_best
  */
-template <typename container_type_, typename string_extractor_>
-status_t try_argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
-                                  span<sorted_idx_t> order, std::size_t top_count = 0, bool reverse = false) noexcept {
-    sz_assert_(order.size() >= container.size() && "The output span must hold the full permutation.");
+template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
+status_t argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
+                              span<sorted_idx_t> order, std::size_t top_count = 0, bool reverse = false,
+                              sz_capability_t capabilities = default_capabilities(), void *stream = nullptr,
+                              allocator_type_ allocator = {}) noexcept {
+    if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
 
     using args_t = sequence_args_<container_type_, string_extractor_>;
     args_t args {container, extractor};
@@ -5333,15 +5342,17 @@ status_t try_argsort_utf8_uncased(container_type_ const &container, string_extra
     sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
-    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
-        return sz_sequence_argsort_uncased(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
-                                           static_cast<sz_bool_t>(reverse));
+    typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
+    return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
+        return sz_sequence_argsort_uncased_best(&sequence, static_cast<sz_size_t>(top_count),
+                                                static_cast<sz_bool_t>(reverse), &c_allocator, order.data(),
+                                                capabilities, stream);
     });
 }
 
 /**
  *  @brief Locates the positions of identically valued elements in 2 deduplicated string arrays.
- *  @sa sz_sequence_intersect
+ *  @sa sz_sequence_intersect_best
  *
  *  @param[in] first_container The first array of string-like elements.
  *  @param[in] first_extractor Extracts the string from each object of the first array.
@@ -5351,15 +5362,25 @@ status_t try_argsort_utf8_uncased(container_type_ const &container, string_extra
  *  @param[out] first_positions The caller-owned output span of indices from the first array.
  *  @param[out] second_positions The caller-owned output span of indices from the second array.
  *      Each span must fit at least `min(first.size(), second.size())` entries.
- *  @return The number of matched pairs paired with a @c status_t; the first @p N entries of each
- *      output span are valid.
+ *  @param[in] capabilities Capabilities to pick from.
+ *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
+ *  @param[in] allocator Serves the scratch memory of the hash table.
+ *  @return The number of matched pairs, valid in the first entries of each output span, with
+ *      @c unexpected_dimensions_k if a span is too short, or the status of the kernel.
  */
-template <typename first_container_, typename second_container_, typename first_extractor_, typename second_extractor_>
-expected<std::size_t, status_t> try_intersect(                                            //
+template <typename first_container_, typename second_container_, typename first_extractor_, typename second_extractor_,
+          typename allocator_type_ = std::allocator<char>>
+expected<std::size_t> intersect(                                                          //
     first_container_ const &first_container, first_extractor_ const &first_extractor,     //
     second_container_ const &second_container, second_extractor_ const &second_extractor, //
     std::uint64_t seed,                                                                   //
-    span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions) noexcept {
+    span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions,              //
+    sz_capability_t capabilities = default_capabilities(), void *stream = nullptr,        //
+    allocator_type_ allocator = {}) noexcept {
+
+    std::size_t const max_count = sz_min_of_two(first_container.size(), second_container.size());
+    if (first_positions.size() < max_count || second_positions.size() < max_count)
+        return {0, status_t::unexpected_dimensions_k};
 
     // Pack the arguments into a single structure to reference it from the callback.
     using first_t = sequence_args_<first_container_, first_extractor_>;
@@ -5375,55 +5396,19 @@ expected<std::size_t, status_t> try_intersect(                                  
     second_sequence.get_start = call_sequence_member_start_<second_container_, second_extractor_>;
     second_sequence.get_length = call_sequence_member_length_<second_container_, second_extractor_>;
 
-    std::size_t intersection_size = 0;
+    std::size_t intersection_count = 0;
     using sz_alloc_type = sz_memory_allocator_t;
-    status_t status = _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+    typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
+    status_t status = with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
         static_assert(sizeof(sz_size_t) == sizeof(std::size_t), "sz_size_t must be the same size as std::size_t.");
-        return sz_sequence_intersect(&first_sequence, &second_sequence, &alloc, static_cast<sz_u64_t>(seed),
-                                     reinterpret_cast<sz_size_t *>(&intersection_size), first_positions.data(),
-                                     second_positions.data());
+        return sz_sequence_intersect_best(&first_sequence, &second_sequence, &c_allocator, static_cast<sz_u64_t>(seed),
+                                          reinterpret_cast<sz_size_t *>(&intersection_count), first_positions.data(),
+                                          second_positions.data(), capabilities, stream);
     });
-    return {intersection_size, status};
+    return {intersection_count, status};
 }
 
 #if STRINGZILLA_WITH_STL
-#if _SZ_DEPRECATED_FINGERPRINTS
-
-/**
- *  @brief Computes the Rabin-Karp-like rolling binary fingerprint of a string.
- *  @sa sz_hashes
- */
-template <std::size_t bitset_bits_, typename char_type_>
-void hashes_fingerprint( //
-    basic_string_slice<char_type_> const &str, std::size_t window_length,
-    std::bitset<bitset_bits_> &fingerprint) noexcept {
-    constexpr std::size_t fingerprint_bytes = sizeof(std::bitset<bitset_bits_>);
-    return sz_hashes_fingerprint(str.data(), str.size(), window_length, (sz_ptr_t)&fingerprint, fingerprint_bytes);
-}
-
-/**
- *  @brief Computes the Rabin-Karp-like rolling binary fingerprint of a string.
- *  @sa sz_hashes
- */
-template <std::size_t bitset_bits_, typename char_type_>
-std::bitset<bitset_bits_> hashes_fingerprint( //
-    basic_string_slice<char_type_> const &str, std::size_t window_length) noexcept {
-    std::bitset<bitset_bits_> fingerprint;
-    ashvardanian::stringzilla::hashes_fingerprint(str, window_length, fingerprint);
-    return fingerprint;
-}
-
-/**
- *  @brief Computes the Rabin-Karp-like rolling binary fingerprint of a string.
- *  @sa sz_hashes
- */
-template <std::size_t bitset_bits_, typename allocator_type_>
-std::bitset<bitset_bits_> hashes_fingerprint(basic_string<allocator_type_> const &str,
-                                             std::size_t window_length) noexcept {
-    return ashvardanian::stringzilla::hashes_fingerprint<bitset_bits_>(str.view(), window_length);
-}
-#endif
-
 /** A callable exposing each element of @p container_type_ as something a @c string_view_t is built
  *  from. */
 template <typename extractor_type_, typename container_type_>
@@ -5432,96 +5417,129 @@ concept string_extractor = requires(extractor_type_ const &extract, container_ty
     { extract(container[index]) } -> std::convertible_to<string_view_t>;
 };
 
-/**
- *  @brief Computes the permutation of an array, that would lead to sorted order.
- *  @return The array of indices, that will be populated with the permutation.
- *  @throws @c std::bad_alloc if the allocation fails.
- */
-template <typename container_type_, string_extractor<container_type_> string_extractor_>
-std::vector<sorted_idx_t> argsort( //
-    container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
-    bool reverse = false) noexcept(false) {
-    std::vector<sorted_idx_t> order(container.size());
-    status_t status = try_argsort(container, extractor, {order.data(), order.size()}, top_count, reverse);
-    raise(status);
-    return order;
-}
+/** Indices into a sorted or intersected array, in memory from the caller's allocator. */
+template <typename allocator_type_>
+using sorted_indices =
+    std::vector<sorted_idx_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<sorted_idx_t>>;
 
-/**
- *  @brief Computes the permutation of an array, that would lead to sorted order.
- *  @return The array of indices, that will be populated with the permutation.
- *  @throws @c std::bad_alloc if the allocation fails.
- */
+/** Resizes @p container, reading its throw as @c bad_alloc_k, for the @c noexcept functions that
+ *  return STL containers. */
 template <typename container_type_>
-    requires std::is_convertible_v<typename container_type_::value_type, string_view_t>
-std::vector<sorted_idx_t> argsort(container_type_ const &container, std::size_t top_count = 0,
-                                  bool reverse = false) noexcept(false) {
-    using string_like_type = typename container_type_::value_type;
-    return argsort(container, [](string_like_type const &s) -> string_view_t { return s; }, top_count, reverse);
+status_t resize_or_bad_alloc_(container_type_ &container, std::size_t count) noexcept {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+        container.resize(count);
+    }
+    catch (...) {
+        return status_t::bad_alloc_k;
+    }
+#else
+    container.resize(count);
+#endif
+    return status_t::success_k;
 }
 
 /**
- *  @brief Uncased (Unicode case-folded) permutation that would lead to sorted order.
- *  @throws @c std::bad_alloc if the allocation fails.
+ *  @brief Computes the permutation of an array, that would lead to sorted order.
+ *  @param[in] allocator Serves the returned indices and the scratch memory of the sort.
+ *  @return The permutation, with @c bad_alloc_k if an allocation failed.
  */
-template <typename container_type_, string_extractor<container_type_> string_extractor_>
-std::vector<sorted_idx_t> argsort_utf8_uncased( //
+template <typename container_type_, string_extractor<container_type_> string_extractor_,
+          typename allocator_type_ = std::allocator<char>>
+expected<sorted_indices<allocator_type_>> argsort( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
-    bool reverse = false) noexcept(false) {
-    std::vector<sorted_idx_t> order(container.size());
-    status_t status = try_argsort_utf8_uncased(container, extractor, {order.data(), order.size()}, top_count, reverse);
-    raise(status);
+    bool reverse = false, allocator_type_ allocator = {}) noexcept {
+    expected<sorted_indices<allocator_type_>> order {sorted_indices<allocator_type_>(allocator), status_t::success_k};
+    order.status = resize_or_bad_alloc_(order.value, container.size());
+    if (succeeded(order.status))
+        order.status = argsort(container, extractor, {order.value.data(), order.value.size()}, top_count, reverse,
+                               default_capabilities(), nullptr, allocator);
     return order;
 }
 
 /** @overload */
-template <typename container_type_>
+template <typename container_type_, typename allocator_type_ = std::allocator<char>>
     requires std::is_convertible_v<typename container_type_::value_type, string_view_t>
-std::vector<sorted_idx_t> argsort_utf8_uncased(container_type_ const &container, std::size_t top_count = 0,
-                                               bool reverse = false) noexcept(false) {
+expected<sorted_indices<allocator_type_>> argsort(container_type_ const &container, std::size_t top_count = 0,
+                                                  bool reverse = false, allocator_type_ allocator = {}) noexcept {
+    using string_like_type = typename container_type_::value_type;
+    return argsort(
+        container, [](string_like_type const &s) -> string_view_t { return s; }, top_count, reverse, allocator);
+}
+
+/**
+ *  @brief Uncased (Unicode case-folded) permutation that would lead to sorted order.
+ *  @param[in] allocator Serves the returned indices and the scratch memory of the sort.
+ *  @return The permutation, with @c bad_alloc_k if an allocation failed.
+ */
+template <typename container_type_, string_extractor<container_type_> string_extractor_,
+          typename allocator_type_ = std::allocator<char>>
+expected<sorted_indices<allocator_type_>> argsort_utf8_uncased( //
+    container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
+    bool reverse = false, allocator_type_ allocator = {}) noexcept {
+    expected<sorted_indices<allocator_type_>> order {sorted_indices<allocator_type_>(allocator), status_t::success_k};
+    order.status = resize_or_bad_alloc_(order.value, container.size());
+    if (succeeded(order.status))
+        order.status = argsort_utf8_uncased(container, extractor, {order.value.data(), order.value.size()}, top_count,
+                                            reverse, default_capabilities(), nullptr, allocator);
+    return order;
+}
+
+/** @overload */
+template <typename container_type_, typename allocator_type_ = std::allocator<char>>
+    requires std::is_convertible_v<typename container_type_::value_type, string_view_t>
+expected<sorted_indices<allocator_type_>> argsort_utf8_uncased(container_type_ const &container,
+                                                               std::size_t top_count = 0, bool reverse = false,
+                                                               allocator_type_ allocator = {}) noexcept {
     using string_like_type = typename container_type_::value_type;
     return argsort_utf8_uncased(
-        container, [](string_like_type const &s) -> string_view_t { return s; }, top_count, reverse);
+        container, [](string_like_type const &s) -> string_view_t { return s; }, top_count, reverse, allocator);
 }
 
-struct intersect_result_t {
-    std::vector<std::size_t> first_offsets;
-    std::vector<std::size_t> second_offsets;
+/** The positions of the identical elements in both arrays, as @c intersect finds them. */
+template <typename allocator_type_ = std::allocator<char>>
+struct intersect_result {
+    sorted_indices<allocator_type_> first_offsets;
+    sorted_indices<allocator_type_> second_offsets;
 };
 
+using intersect_result_t = intersect_result<>;
+
 /**
  *  @brief Locates identical elements in two arrays.
+ *  @param[in] allocator Serves the returned indices and the scratch memory of the hash table.
  *  @return Two arrays of indices, mapping the elements of the first and the second array that
- *      hold identical values.
- *  @throws @c std::bad_alloc if the allocation fails.
+ *      hold identical values, with @c bad_alloc_k if an allocation failed.
  */
-template <typename first_type_, typename second_type_, typename first_extractor_, typename second_extractor_>
-intersect_result_t intersect(first_type_ const &first, second_type_ const &second,
-                             first_extractor_ const &first_extractor, second_extractor_ const &second_extractor,
-                             std::uint64_t seed = 0) noexcept(false) {
+template <typename first_type_, typename second_type_, string_extractor<first_type_> first_extractor_,
+          string_extractor<second_type_> second_extractor_, typename allocator_type_ = std::allocator<char>>
+expected<intersect_result<allocator_type_>> intersect(first_type_ const &first, second_type_ const &second,
+                                                      first_extractor_ const &first_extractor,
+                                                      second_extractor_ const &second_extractor, std::uint64_t seed = 0,
+                                                      allocator_type_ allocator = {}) noexcept {
 
-    std::size_t const max_count = (std::min)(first.size(), second.size());
-    std::vector<sorted_idx_t> first_positions(max_count);
-    std::vector<sorted_idx_t> second_positions(max_count);
-    expected<std::size_t, status_t> result = try_intersect( //
-        first, first_extractor,                             //
-        second, second_extractor,                           //
-        seed, {first_positions.data(), first_positions.size()}, {second_positions.data(), second_positions.size()});
-    raise(result.status);
-    first_positions.resize(result.value);
-    second_positions.resize(result.value);
-    return {std::move(first_positions), std::move(second_positions)};
+    std::size_t const max_count = sz_min_of_two(first.size(), second.size());
+    expected<intersect_result<allocator_type_>> result {
+        {sorted_indices<allocator_type_>(allocator), sorted_indices<allocator_type_>(allocator)},
+        status_t::success_k};
+    intersect_result<allocator_type_> &offsets = result.value;
+    result.status = resize_or_bad_alloc_(offsets.first_offsets, max_count);
+    if (succeeded(result.status)) result.status = resize_or_bad_alloc_(offsets.second_offsets, max_count);
+    if (failed(result.status)) return result;
+
+    expected<std::size_t> const matches = intersect( //
+        first, first_extractor, second, second_extractor, seed, {offsets.first_offsets.data(), max_count},
+        {offsets.second_offsets.data(), max_count}, default_capabilities(), nullptr, allocator);
+    result.status = matches.status;
+    offsets.first_offsets.resize(matches.value);
+    offsets.second_offsets.resize(matches.value);
+    return result;
 }
 
-/**
- *  @brief Locates identical elements in two arrays.
- *  @return Two arrays of indices, mapping the elements of the first and the second array that
- *      hold identical values.
- *  @throws @c std::bad_alloc if the allocation fails.
- */
-template <typename first_type_, typename second_type_>
-intersect_result_t intersect(first_type_ const &first, second_type_ const &second,
-                             std::uint64_t seed = 0) noexcept(false) {
+/** @overload */
+template <typename first_type_, typename second_type_, typename allocator_type_ = std::allocator<char>>
+expected<intersect_result<allocator_type_>> intersect(first_type_ const &first, second_type_ const &second,
+                                                      std::uint64_t seed = 0, allocator_type_ allocator = {}) noexcept {
     using first_string_type = typename first_type_::value_type;
     using second_string_type = typename second_type_::value_type;
     static_assert( //
@@ -5533,7 +5551,7 @@ intersect_result_t intersect(first_type_ const &first, second_type_ const &secon
         first, second,                                                  //
         [](first_string_type const &s) -> string_view_t { return s; },  //
         [](second_string_type const &s) -> string_view_t { return s; }, //
-        seed);
+        seed, allocator);
 }
 
 #endif

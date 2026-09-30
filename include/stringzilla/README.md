@@ -717,16 +717,19 @@ assert(intersection_count == 2); // "banana" and "cherry"
 Matching the all-`noexcept` surface, the C++ sort takes any container plus a string-extractor callable and writes the permutation into a caller-owned span, returning a `status_t`:
 
 ```cpp
-status_t sz::try_argsort(container, extractor, span<sorted_idx_t> order, top_count = 0, reverse = false);
-status_t sz::try_argsort_utf8_uncased(container, extractor, span<sorted_idx_t> order, top_count = 0, reverse = false);
-expected<size_t, status_t> sz::try_intersect(first, extractor, second, extractor, seed,
-                                             span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions);
+status_t sz::argsort(container, extractor, span<sorted_idx_t> order, top_count = 0, reverse = false,
+                     capabilities = sz::default_capabilities(), stream = nullptr, allocator = {});
+status_t sz::argsort_utf8_uncased(container, extractor, span<sorted_idx_t> order, top_count = 0, reverse = false,
+                                  capabilities = sz::default_capabilities(), stream = nullptr, allocator = {});
+expected<size_t> sz::intersect(first, extractor, second, extractor, seed,
+                               span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions,
+                               capabilities = sz::default_capabilities(), stream = nullptr, allocator = {});
 ```
 
-The outputs are sized `sz::span<sorted_idx_t>` views over caller-owned storage.
+The outputs are sized `sz::span<sorted_idx_t>` views over caller-owned storage, and the scratch memory comes from `allocator`.
 Size `order` to `container.size()` — the whole span receives a permutation, and a non-zero `top_count` only requests that the first `top_count` entries be fully sorted.
-Size each position span to `min(first.size(), second.size())`.
-`try_intersect` returns the number of matched pairs as an `expected<size_t, status_t>`, so there is no separate count out-parameter.
+Size each position span to `min(first.size(), second.size())`; a shorter span returns `unexpected_dimensions_k`.
+`intersect` returns the number of matched pairs as an `expected<size_t>`, so there is no separate count out-parameter.
 
 ```cpp
 #include <stringzilla/stringzilla.hpp>
@@ -738,15 +741,18 @@ int main() {
     std::vector<sz::string_t> names = {"banana", "apple", "cherry"};
 
     sz::sorted_idx_t order[3];
-    sz::status_t status = sz::try_argsort(
+    sz::status_t status = sz::argsort(
         names, [](sz::string_t const &s) -> sz::string_view_t { return s; }, {order, 3});
     assert(status == sz::status_t::success_k);
     assert(order[0] == 1 && order[1] == 0 && order[2] == 2); // apple, banana, cherry
+
+    auto [sorted, sort_status] = sz::argsort(names);
+    assert(sz::succeeded(sort_status) && sorted[0] == 1);
     return 0;
 }
 ```
 
-For code that accepts exceptions, throwing `sz::argsort` and `sz::argsort_utf8_uncased` convenience overloads return the `std::vector<sorted_idx_t>` directly.
+Without output spans, `sz::argsort`, `sz::argsort_utf8_uncased` and `sz::intersect` allocate their results from the allocator passed last and return them in an `expected`, never throwing.
 
 ## Memory Operations
 
@@ -813,27 +819,27 @@ sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *all
 void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
 ```
 
-`sz_string_expand` opens an uninitialized gap of `added_length` at `offset` that you then populate, often via `sz_copy`; `sz_string_erase` removes a range without ever allocating and cannot fail.
+`sz_string_expand` opens an uninitialized gap of `added_length` at `offset` that you then populate, often via `sz_copy_best`; `sz_string_erase` removes a range without ever allocating and cannot fail.
 
 ```c
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
-    sz_memory_allocator_t alloc;
-    sz_memory_allocator_init_default(&alloc);
+    sz_memory_allocator_t allocator;
+    sz_memory_allocator_init_default(&allocator);
 
     sz_string_t s;
     sz_string_init(&s);
 
-    sz_ptr_t room = sz_string_expand(&s, 0, 5, &alloc);  // 5-byte gap at offset 0
+    sz_ptr_t room = sz_string_expand(&s, 0, 5, &allocator);  // 5-byte gap at offset 0
     if (!room) return 1;
-    sz_copy(room, "hello", 5);
+    sz_copy_best(room, "hello", 5, sz_cap_serial_k, NULL); // five bytes gain nothing from SIMD
 
     sz_ptr_t start; sz_size_t length;
     sz_string_range(&s, &start, &length);
     assert(length == 5);
 
-    sz_string_free(&s, &alloc);
+    sz_string_free(&s, &allocator);
     return 0;
 }
 ```
@@ -855,8 +861,8 @@ int main() {
     assert(greeting == "hello, world");
     greeting.push_back('!');
 
-    if (!greeting.try_reserve(1024)) return 1;   // non-throwing growth
-    greeting.replace_all("l", "L");              // via try_replace_all under the hood
+    if (sz::failed(greeting.try_reserve(1024))) return 1; // non-throwing growth
+    greeting.replace_all("l", "L");                       // via try_replace_all under the hood
 
     assert(greeting.starts_with("heLLo"));
     return 0;
@@ -954,7 +960,7 @@ Each family exports its own finder over its kinds, like `sz_compare_find_kernel`
 Every verb has a kind, `sz_kernel_<verb>_k`, and a pointer type to cast the result to, `sz_kernel_<verb>_t`, taking the dispatch point's arguments short of the mask.
 `sz_kernel_name` spells a kind without its `sz_kernel_` prefix and `_k` suffix, like `"find_byte"`, and `sz_kernel_named` maps such a name back, or to `sz_kernel_unknown_k`.
 Verbs of one shape share a type, like `sz_kernel_find_t` for both `sz_kernel_find_k` and `sz_kernel_rfind_k`, and `sz_kernel_utf8_segmenter_t` for the seven UTF-8 segmenters.
-In C++, every wrapper that takes a mask, like `sz::memcpy` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_cpu_configure_thread`.
+In C++, every wrapper that takes a mask, like `sz::lookup` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_cpu_configure_thread`.
 
 ## Memory Ownership and Small String Optimization
 
@@ -1071,7 +1077,7 @@ str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
 "a:b"_sv[{-2, -1}] == ":"; // works on views and overloads `operator[]`
 ```
 
-Assuming StringZilla is a header-only library you can use the full API in some translation units and gradually transition to safer restricted API in others.
+The C++ layer is a set of headers, so you can use the full API in some translation units and gradually transition to safer restricted API in others.
 Bonus - all the bound checking is branchless, so it has a constant cost and won't hurt your branch predictor.
 
 ## Beyond the C++ Standard Library, Learning from Python
@@ -1144,7 +1150,7 @@ text.back(sz::digits_set()); // all numerical symbols forming the suffix
 using sz::string_t::unchecked;
 text.push_back('x'); // no surprises here
 text.push_back('x', unchecked); // no bounds checking, Rust style
-text.try_push_back('x'); // returns `false` if the string is full and the allocation failed
+text.try_push_back('x'); // returns `bad_alloc_k` instead of throwing if growing fails
 
 sz::concatenate(text, "@", domain, ".", tld); // No allocations
 ```

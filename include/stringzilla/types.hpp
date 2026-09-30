@@ -10,7 +10,7 @@
  *  the `types.h` header:
  *
  *  - @c u8_t, @c u16_t, @c u32_t, @c u64_t, @c i8_t, @c i16_t, @c i32_t, @c i64_t - sized integers.
- *  - @c size_t, @c ssize_t, @c ptr_t, @c cptr_t - address-related types.
+ *  - @c ssize_t, @c ptr_t, @c cptr_t - address-related types.
  *  - @c status_t, @c bool_t, @c ordering_t, @c rune_t, @c rune_length_t, @c error_cost_t - logic.
  *
  *  The library also defines the following higher-level structures:
@@ -24,8 +24,9 @@
 #define STRINGZILLA_TYPES_HPP_
 
 #include "stringzilla/types.h"
-#if STRINGZILLA_TARGET_CUDA
-#include "stringzilla/types.cuh" // `sz_cuda_device_t`, the three allocators
+#include "stringzilla/capabilities.h" // `sz_cpu_capabilities_enabled`, `sz_cuda_capabilities_enabled`
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#include "stringzilla/types.cuh" // the three allocators' helpers
 #endif
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
@@ -114,7 +115,6 @@ using i64_t = sz_i64_t;
 using byte_t = sz_byte_t;
 using rune_t = sz_rune_t;
 
-using size_t = sz_size_t;
 using ssize_t = sz_ssize_t;
 
 /** A size or offset deliberately held in 32 bits, where the narrower arithmetic is cheaper -
@@ -142,25 +142,188 @@ using u128_vec_t = sz_u128_vec_t;
 using u256_vec_t = sz_u256_vec_t;
 using u512_vec_t = sz_u512_vec_t;
 
-/** @sa sz_status_t */
-enum class status_t : int {
+#pragma region Status
+
+/**
+ *  @brief Why a call failed, in the vocabulary the C ABI and every binding share.
+ *
+ *  Every enumerator takes its value from @c sz_status_t in @c types.h, so the C++ mirror and the
+ *  ABI cannot drift, and the crossing is a cast rather than a table.
+ */
+enum class [[nodiscard]] status_t : int {
+
+    /** Finished without error. */
     success_k = sz_success_k,
+
+    /** An allocation failed. */
     bad_alloc_k = sz_bad_alloc_k,
+
+    /** The input is not valid UTF-8. */
     invalid_utf8_k = sz_invalid_utf8_k,
+
+    /** A collection that must hold unique elements holds duplicates. */
     contains_duplicates_k = sz_contains_duplicates_k,
+
+    /** The input is too large for the counters or the offsets holding it. */
     overflow_risk_k = sz_overflow_risk_k,
+
+    /** Operand sizes contradict each other, like an output span shorter than the input. */
     unexpected_dimensions_k = sz_unexpected_dimensions_k,
+
+    /** No GPU of the vendor this build targets answers. */
     missing_gpu_k = sz_missing_gpu_k,
+
+    /** The device code lacks the kernel, or it failed to build, launch or finish. */
     device_code_mismatch_k = sz_device_code_mismatch_k,
+
+    /** An operand lies in memory the device cannot address. */
     device_memory_mismatch_k = sz_device_memory_mismatch_k,
+
+    /** An authenticated decryption saw a tag that does not match its ciphertext. */
+    authentication_failed_k = sz_authentication_failed_k,
+
+    /** No capability in the capability mask has this kernel. */
+    missing_kernel_k = sz_missing_kernel_k,
+
+    /** A dispatch point or finder called from a header-only build, which links no library. */
+    missing_library_k = sz_missing_library_k,
+
+    /** A failure no other status describes. */
     unknown_k = sz_status_unknown_k,
 };
 
-template <typename value_type_, typename status_type_>
-struct expected {
+/** Whether @p status reports success. */
+constexpr bool succeeded(status_t status) noexcept { return status == status_t::success_k; }
+
+/** Whether @p status reports failure. */
+constexpr bool failed(status_t status) noexcept { return status != status_t::success_k; }
+
+/** Static, English description of @p status. Never returns @c nullptr, never allocates. */
+inline char const *status_name(status_t status) noexcept { return sz_status_name_(static_cast<sz_status_t>(status)); }
+
+/** A result paired with the @c status_t explaining it; the value is only meaningful
+ *  on @c success_k. */
+template <typename value_type_>
+struct [[nodiscard]] expected {
     value_type_ value;
-    status_type_ status;
+    status_t status;
+
+    explicit operator bool() const noexcept { return succeeded(status); }
 };
+
+/** The borrowing face of @ref expected for reference results: there is no null
+ *  reference, so the borrow is stored as an address and @c value() binds it only on
+ *  @c success_k. */
+template <typename value_type_>
+struct [[nodiscard]] expected<value_type_ &> {
+    value_type_ *borrowed;
+    status_t status;
+
+    value_type_ &value() const noexcept { return *borrowed; }
+    explicit operator bool() const noexcept { return succeeded(status); }
+};
+
+#pragma endregion Status
+
+#pragma region Devices
+
+/** Which runtime a device belongs to, as the `sz_<kind>_*` C functions name it. */
+enum class device_kind_t : int { cpu_k, cuda_k, rocm_k, metal_k };
+
+/** One device StringZilla runs kernels on: the host CPU, or a GPU by its runtime's own ordinal. */
+class device_t {
+    device_kind_t kind_;
+    std::size_t ordinal_;
+
+    constexpr device_t(device_kind_t kind, std::size_t ordinal) noexcept : kind_(kind), ordinal_(ordinal) {}
+
+  public:
+    /** The host CPU, which every build has. */
+    static constexpr device_t cpu() noexcept { return {device_kind_t::cpu_k, 0}; }
+
+    /** How many devices of @p kind the process sees: one CPU, or @c missing_gpu_k and zero GPUs. */
+    static expected<std::size_t> count(device_kind_t kind) noexcept {
+        sz_size_t count = 1;
+        sz_status_t status = sz_success_k;
+        switch (kind) {
+        case device_kind_t::cpu_k: break;
+        case device_kind_t::cuda_k: status = sz_cuda_count_devices(&count); break;
+        case device_kind_t::rocm_k: status = sz_rocm_count_devices(&count); break;
+        case device_kind_t::metal_k: status = sz_metal_count_devices(&count); break;
+        }
+        return {static_cast<std::size_t>(count), static_cast<status_t>(status)};
+    }
+
+    /** Device @p ordinal of @p kind, or @c missing_gpu_k past the last one. */
+    static expected<device_t> make(device_kind_t kind, std::size_t ordinal) noexcept {
+        expected<std::size_t> const devices = count(kind);
+        status_t const status = devices && ordinal >= devices.value ? status_t::missing_gpu_k : devices.status;
+        return {device_t {kind, ordinal}, status};
+    }
+
+    constexpr device_kind_t kind() const noexcept { return kind_; }
+    constexpr std::size_t ordinal() const noexcept { return ordinal_; }
+
+    /** What this device runs, whether or not this binary holds kernels for it; zero on failure. */
+    expected<sz_capability_t> capabilities_detected() const noexcept {
+        sz_capability_t capabilities = 0;
+        sz_status_t status = sz_success_k;
+        switch (kind_) {
+        case device_kind_t::cpu_k: status = sz_cpu_capabilities_detected(&capabilities); break;
+        case device_kind_t::cuda_k: status = sz_cuda_capabilities_detected(ordinal_, &capabilities); break;
+        case device_kind_t::rocm_k: status = sz_rocm_capabilities_detected(ordinal_, &capabilities); break;
+        case device_kind_t::metal_k: status = sz_metal_capabilities_detected(ordinal_, &capabilities); break;
+        }
+        return {capabilities, static_cast<status_t>(status)};
+    }
+
+    /** What this binary holds kernels for on devices of this kind, whether or not this one runs. */
+    sz_capability_t capabilities_compiled() const noexcept {
+        sz_capability_t capabilities = 0;
+        [[maybe_unused]] sz_status_t status = sz_success_k; // Never fails: the mask is fixed at build time
+        switch (kind_) {
+        case device_kind_t::cpu_k: status = sz_cpu_capabilities_compiled(&capabilities); break;
+        case device_kind_t::cuda_k: status = sz_cuda_capabilities_compiled(&capabilities); break;
+        case device_kind_t::rocm_k: status = sz_rocm_capabilities_compiled(&capabilities); break;
+        case device_kind_t::metal_k: status = sz_metal_capabilities_compiled(&capabilities); break;
+        }
+        return capabilities;
+    }
+
+    /** Both at once: the mask for this device's dispatch points; zero on failure. */
+    expected<sz_capability_t> capabilities_enabled() const noexcept {
+        sz_capability_t capabilities = 0;
+        sz_status_t status = sz_success_k;
+        switch (kind_) {
+        case device_kind_t::cpu_k: status = sz_cpu_capabilities_enabled(&capabilities); break;
+        case device_kind_t::cuda_k: status = sz_cuda_capabilities_enabled(ordinal_, &capabilities); break;
+        case device_kind_t::rocm_k: status = sz_rocm_capabilities_enabled(ordinal_, &capabilities); break;
+        case device_kind_t::metal_k: status = sz_metal_capabilities_enabled(ordinal_, &capabilities); break;
+        }
+        return {capabilities, static_cast<status_t>(status)};
+    }
+
+    /** Prepares the calling thread for the CPU kernels of @p capabilities; GPUs have no such
+     *  kernels, so they report @c missing_kernel_k. */
+    status_t configure_thread(sz_capability_t capabilities) const noexcept {
+        if (kind_ != device_kind_t::cpu_k) return status_t::missing_kernel_k;
+        return static_cast<status_t>(sz_cpu_configure_thread(capabilities));
+    }
+};
+
+/** The mask every wrapper dispatches over by default: the CPU's enabled capabilities, as
+ *  @c device_t::cpu().capabilities_enabled() reports them, or none in header-only builds, whose
+ *  dispatch points are stubs. */
+inline sz_capability_t default_capabilities() noexcept {
+#if STRINGZILLA_HEADER_ONLY
+    return 0;
+#else
+    sz_capability_t capabilities = 0;
+    return sz_cpu_capabilities_enabled(&capabilities) == sz_success_k ? capabilities : sz_cap_serial_k;
+#endif
+}
+
+#pragma endregion Devices
 
 /**
  *  @brief A trivial function object for uniform character substitution costs in
@@ -322,7 +485,7 @@ template <typename value_type_>
 struct dummy_alloc {
     using value_type = value_type_;     // ? For STL compatibility
     using pointer = value_type *;       // ? For STL compatibility
-    using size_type = size_t;           // ? For STL compatibility
+    using size_type = std::size_t;      // ? For STL compatibility
     using difference_type = sz_ssize_t; // ? For STL compatibility
 
     template <typename other_value_type_>
@@ -352,6 +515,23 @@ struct dummy_alloc {
 
 using dummy_alloc_t = dummy_alloc<char>;
 
+/** Allocates @p count elements through @p allocator, reading a throw as null, so the @c noexcept
+ *  containers report @c bad_alloc_k where @c std::allocator would terminate them. */
+template <typename allocator_type_>
+typename std::allocator_traits<allocator_type_>::pointer allocate_or_null_(allocator_type_ &allocator,
+                                                                           std::size_t count) noexcept {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+        return std::allocator_traits<allocator_type_>::allocate(allocator, count);
+    }
+    catch (...) {
+        return nullptr;
+    }
+#else
+    return std::allocator_traits<allocator_type_>::allocate(allocator, count);
+#endif
+}
+
 /**
  *  @brief Random access iterator for any immutable container with indexed element lookup support.
  *
@@ -374,11 +554,11 @@ struct indexed_container_iterator {
 
   private:
     container_t const *parent_;
-    size_t index_;
+    std::size_t index_;
 
   public:
     constexpr indexed_container_iterator() noexcept : parent_(nullptr), index_(0) {}
-    constexpr indexed_container_iterator(container_t const &parent, size_t index) noexcept
+    constexpr indexed_container_iterator(container_t const &parent, std::size_t index) noexcept
         : parent_(&parent), index_(index) {}
     constexpr reference operator*() const noexcept { return (*parent_)[index_]; }
 
@@ -508,7 +688,7 @@ struct arrow_strings_view {
 
     /** Bytes excluded from every element's length — one for the NULL terminator, zero for the
      *  terminator-free Apache Arrow / cuDF convention. */
-    static constexpr size_t terminator_width_k = termination_ == arrow_termination_t::nul_terminated_k ? 1u : 0u;
+    static constexpr std::size_t terminator_width_k = termination_ == arrow_termination_t::nul_terminated_k ? 1u : 0u;
 
     span<char_t const> buffer_;
     span<offset_t const> offsets_;
@@ -517,9 +697,9 @@ struct arrow_strings_view {
     constexpr arrow_strings_view(span<char_t const> buf, span<offset_t const> offs) noexcept
         : buffer_(buf), offsets_(offs) {}
 
-    constexpr size_t size() const noexcept { return offsets_.size() != 0 ? offsets_.size() - 1 : 0; }
-    constexpr value_t operator[](size_t i) const noexcept {
-        return {&buffer_[offsets_[i]], static_cast<size_t>(offsets_[i + 1] - offsets_[i]) - terminator_width_k};
+    constexpr std::size_t size() const noexcept { return offsets_.size() != 0 ? offsets_.size() - 1 : 0; }
+    constexpr value_t operator[](std::size_t i) const noexcept {
+        return {&buffer_[offsets_[i]], static_cast<std::size_t>(offsets_[i + 1] - offsets_[i]) - terminator_width_k};
     }
 
     /**
@@ -529,9 +709,9 @@ struct arrow_strings_view {
      *  @note Starts at `offsets_[0]`, which a tape that is a slice of a wider one leaves non-zero.
      */
     constexpr span<char_t const> tape_bytes() const noexcept {
-        return size() == 0
-                   ? span<char_t const> {}
-                   : span<char_t const> {&buffer_[offsets_[0]], static_cast<size_t>(offsets_[size()] - offsets_[0])};
+        return size() == 0 ? span<char_t const> {}
+                           : span<char_t const> {&buffer_[offsets_[0]],
+                                                 static_cast<std::size_t>(offsets_[size()] - offsets_[0])};
     }
 
     /**
@@ -547,7 +727,7 @@ struct arrow_strings_view {
     }
 
     /** One element's length, terminator excluded, in the tape's own offset width. */
-    constexpr offset_t tape_length_at(size_t i) const noexcept {
+    constexpr offset_t tape_length_at(std::size_t i) const noexcept {
         return static_cast<offset_t>(offsets_[i + 1] - offsets_[i] - terminator_width_k);
     }
 
@@ -586,14 +766,14 @@ struct arrow_strings_tape {
     using offset_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<offset_t>;
 
     /** Largest byte offset the tape can address, past which an @c offset_t would wrap around. */
-    static constexpr size_t max_offset_k = static_cast<size_t>((std::numeric_limits<offset_t>::max)());
+    static constexpr std::size_t max_offset_k = static_cast<std::size_t>((std::numeric_limits<offset_t>::max)());
 
   private:
     span<char_t> buffer_;
     span<offset_t> offsets_;
     char_alloc_t char_alloc_;
     offset_alloc_t offset_alloc_;
-    size_t count_ = 0;
+    std::size_t count_ = 0;
 
   public:
     constexpr arrow_strings_tape() = default;
@@ -616,8 +796,8 @@ struct arrow_strings_tape {
         return *this;
     }
 
-    constexpr arrow_strings_tape(span<char_t> buffer, span<offset_t> offsets, allocator_t alloc)
-        : buffer_(buffer), offsets_(offsets), char_alloc_(alloc), offset_alloc_(alloc) {}
+    constexpr arrow_strings_tape(span<char_t> buffer, span<offset_t> offsets, allocator_t allocator)
+        : buffer_(buffer), offsets_(offsets), char_alloc_(allocator), offset_alloc_(allocator) {}
 
     constexpr ~arrow_strings_tape() noexcept { reset(); }
     constexpr void reset() noexcept {
@@ -633,26 +813,26 @@ struct arrow_strings_tape {
     constexpr iterator_t cend() const noexcept { return end(); }
 
     template <typename strings_iterator_type_>
-    status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
+    status_t assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
         // The range is walked twice - once to measure, once to copy - so single-pass "input"
         // iterators, like `std::istream_iterator`, would compile but silently copy nothing.
         static_assert(std::is_base_of<std::forward_iterator_tag,
                                       typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
-                      "arrow_strings_tape::try_assign needs multi-pass (forward) iterators");
+                      "arrow_strings_tape::assign needs multi-pass (forward) iterators");
 
         reset(); // ? Drops the old contents, so every failure below leaves an empty tape rather than a stale one
 
         // Estimate required memory: total characters + one extra per string for the NULL.
-        size_t count = 0;
-        size_t combined_length = 0;
+        std::size_t count = 0;
+        std::size_t combined_length = 0;
         for (auto it = first; it != last; ++it, ++count) combined_length += it->length();
         combined_length += count; // ? NULL-terminate every string
 
         if (combined_length > max_offset_k) return status_t::overflow_risk_k;
 
         // Allocate exactly the required memory
-        buffer_ = {char_alloc_.allocate(combined_length), combined_length};
-        offsets_ = {offset_alloc_.allocate(count + 1), count + 1};
+        buffer_ = {allocate_or_null_(char_alloc_, combined_length), combined_length};
+        offsets_ = {allocate_or_null_(offset_alloc_, count + 1), count + 1};
         if (!buffer_.data_ || !offsets_.data_) return status_t::bad_alloc_k;
 
         // Copy the strings to the buffer and store the offsets
@@ -662,8 +842,8 @@ struct arrow_strings_tape {
             *offsets_ptr++ = static_cast<offset_t>(buffer_ptr - buffer_.data_);
             // Perform a byte-level copy of the string, similar to `sz_copy`
             char_t const *from_ptr = it->data();
-            size_t const from_length = it->length();
-            for (size_t i = 0; i != from_length; ++i) *buffer_ptr++ = *from_ptr++;
+            std::size_t const from_length = it->length();
+            for (std::size_t i = 0; i != from_length; ++i) *buffer_ptr++ = *from_ptr++;
             *buffer_ptr++ = '\0'; // ? NULL-terminated
         }
         *offsets_ptr = static_cast<offset_t>(buffer_ptr - buffer_.data_);
@@ -673,22 +853,22 @@ struct arrow_strings_tape {
 
 #if STRINGZILLA_WITH_STL
     template <typename string_convertible_type_>
-    status_t try_assign(std::initializer_list<string_convertible_type_> inits) noexcept {
-        return try_assign(inits.begin(), inits.end());
+    status_t assign(std::initializer_list<string_convertible_type_> inits) noexcept {
+        return assign(inits.begin(), inits.end());
     }
 #endif
 
-    status_t try_append(span<char_t const> string) noexcept {
-        size_t const string_length = string.length();
-        size_t const required = string_length + 1; // Space needed for the new string and its NULL
-        size_t current_used = count_ > 0 ? offsets_.data_[count_] : 0;
+    status_t append(span<char_t const> string) noexcept {
+        std::size_t const string_length = string.length();
+        std::size_t const required = string_length + 1; // Space needed for the new string and its NULL
+        std::size_t current_used = count_ > 0 ? offsets_.data_[count_] : 0;
 
         if (required > max_offset_k - current_used) return status_t::overflow_risk_k;
 
         // Reallocate the buffer if needed (oversubscribe in powers of two).
         if (current_used + required > buffer_.size_) {
-            size_t new_capacity = sz_size_bit_ceil(current_used + required);
-            char_t *new_buffer = char_alloc_.allocate(new_capacity);
+            std::size_t new_capacity = sz_size_bit_ceil(current_used + required);
+            char_t *new_buffer = allocate_or_null_(char_alloc_, new_capacity);
             if (!new_buffer) return status_t::bad_alloc_k;
             if (buffer_.data_) {
                 // Copy the existing data to the new array, before deallocating the old one.
@@ -704,8 +884,8 @@ struct arrow_strings_tape {
         // Reallocate the offsets array if needed. Appending writes both `offsets_[count_]` (the new string's start)
         // and `offsets_[count_ + 1]` (its end), so the array must hold `count_ + 2` entries before we touch it.
         if (count_ + 2 > offsets_.size_) {
-            size_t new_offsets_capacity = sz_size_bit_ceil(count_ + 2);
-            offset_t *new_offsets = offset_alloc_.allocate(new_offsets_capacity);
+            std::size_t new_offsets_capacity = sz_size_bit_ceil(count_ + 2);
+            offset_t *new_offsets = allocate_or_null_(offset_alloc_, new_offsets_capacity);
             if (!new_offsets) return status_t::bad_alloc_k;
             if (offsets_.data_) {
                 // Copy the existing offsets to the new array, before deallocating the old one.
@@ -721,7 +901,7 @@ struct arrow_strings_tape {
         // Record the starting offset for the new string.
         offsets_.data_[count_] = static_cast<offset_t>(current_used);
         // Copy the string into the buffer.
-        for (size_t i = 0; i < string_length; ++i) buffer_.data_[current_used++] = string[i];
+        for (std::size_t i = 0; i < string_length; ++i) buffer_.data_[current_used++] = string[i];
         // Append the NULL terminator.
         buffer_.data_[current_used++] = '\0';
         // Update the offsets array with the new end-of-buffer position.
@@ -729,12 +909,12 @@ struct arrow_strings_tape {
         return status_t::success_k;
     }
 
-    constexpr value_type operator[](size_t i) const noexcept {
+    constexpr value_type operator[](std::size_t i) const noexcept {
         sz_assert_(i < count_ && "Index out of bounds");
         return {buffer_.data_ + offsets_.data_[i], offsets_.data_[i + 1] - offsets_.data_[i] - 1};
     }
 
-    constexpr size_t size() const noexcept { return count_; }
+    constexpr std::size_t size() const noexcept { return count_; }
     constexpr view_t view() const noexcept { return {{buffer_.data(), buffer_.size()}, {offsets_.data_, count_ + 1}}; }
     constexpr span<char_t> const &buffer() const noexcept { return buffer_; }
     constexpr span<offset_t> const &offsets() const noexcept { return offsets_; }
@@ -823,10 +1003,10 @@ struct random_access_range {
 template <typename begin_type_, typename end_type_>
 random_access_range(begin_type_, end_type_) -> random_access_range<begin_type_, end_type_>;
 
-template <typename value_type_, size_t count_>
+template <typename value_type_, std::size_t count_>
 struct safe_array {
     using value_type = value_type_;
-    using size_type = size_t;
+    using size_type = std::size_t;
     using iterator = value_type *;
     using const_iterator = value_type const *;
     static constexpr size_type count_k = count_;
@@ -861,14 +1041,14 @@ struct is_same_type {
 };
 
 struct cpu_specs_t {
-    size_t l1_bytes = 32 * 1024;       // ? typically around 32 KB
-    size_t l2_bytes = 256 * 1024;      // ? typically around 256 KB
-    size_t l3_bytes = 8 * 1024 * 1024; // ? typically around 8 MB
-    size_t cache_line_width = 64;      // ? 64 bytes on x86, sometimes 128 on ARM
-    size_t cores_per_socket = 1;       // ? at least 1 core
-    size_t sockets = 1;                // ? at least 1 socket
+    std::size_t l1_bytes = 32 * 1024;       // ? typically around 32 KB
+    std::size_t l2_bytes = 256 * 1024;      // ? typically around 256 KB
+    std::size_t l3_bytes = 8 * 1024 * 1024; // ? typically around 8 MB
+    std::size_t cache_line_width = 64;      // ? 64 bytes on x86, sometimes 128 on ARM
+    std::size_t cores_per_socket = 1;       // ? at least 1 core
+    std::size_t sockets = 1;                // ? at least 1 socket
 
-    size_t cores_total() const noexcept { return cores_per_socket * sockets; }
+    std::size_t cores_total() const noexcept { return cores_per_socket * sockets; }
 };
 
 /**
@@ -878,18 +1058,18 @@ struct cpu_specs_t {
  *  @sa pack_sm_code, cores_per_multiprocessor
  */
 struct gpu_specs_t {
-    size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
-    size_t l2_bytes = 40ul * 1024 * 1024;          // ? On A100 it's 40 MB, shared by every multiprocessor
-    size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
-    size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
-    size_t streaming_multiprocessors = 108;        // ? On A100
-    size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
-    size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
-    size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
-    size_t max_blocks_per_multiprocessor = 0;      // ? Maximum number of blocks per SM
-    size_t sm_code = 0;                            // ? Compute capability code, e.g. 90a for Hopper (H100)
+    std::size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
+    std::size_t l2_bytes = 40ul * 1024 * 1024;          // ? On A100 it's 40 MB, shared by every multiprocessor
+    std::size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
+    std::size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
+    std::size_t streaming_multiprocessors = 108;        // ? On A100
+    std::size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
+    std::size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
+    std::size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
+    std::size_t max_blocks_per_multiprocessor = 0;      // ? Maximum number of blocks per SM
+    std::size_t sm_code = 0;                            // ? Compute capability code, e.g. 90a for Hopper (H100)
 
-    inline size_t shared_memory_per_multiprocessor() const noexcept {
+    inline std::size_t shared_memory_per_multiprocessor() const noexcept {
         return shared_memory_bytes / streaming_multiprocessors;
     }
 
@@ -903,8 +1083,8 @@ struct gpu_specs_t {
      *  - 9.0 is Hopper, like H100                      - maps to 90
      *  - 12.0, 12.1 is Blackwell, like B200            - maps to 120, 121
      */
-    inline static size_t pack_sm_code(int major, int minor) noexcept {
-        return static_cast<size_t>((major * 10) + minor);
+    inline static std::size_t pack_sm_code(int major, int minor) noexcept {
+        return static_cast<std::size_t>((major * 10) + minor);
     }
 
     /**
@@ -912,10 +1092,10 @@ struct gpu_specs_t {
      *      populate the @c cuda_cores property.
      *  @param[in] sm The compute capability code obtained from `pack_sm_code(major, minor)`.
      */
-    inline static size_t cores_per_multiprocessor(size_t sm) noexcept {
+    inline static std::size_t cores_per_multiprocessor(std::size_t sm) noexcept {
         typedef struct {
-            size_t sm;
-            size_t cores;
+            std::size_t sm;
+            std::size_t cores;
         } generation_to_core_count;
         generation_to_core_count generations_to_core_counts[] = {
             // Kepler architecture (2012-2014)
@@ -957,7 +1137,7 @@ struct gpu_specs_t {
 
             {0, 0}};
 
-        size_t index = 0;
+        std::size_t index = 0;
         for (; generations_to_core_counts[index].sm != 0; ++index)
             if (generations_to_core_counts[index].sm == sm) return generations_to_core_counts[index].cores;
 
@@ -1051,33 +1231,33 @@ constexpr void trivial_swap(value_type_ &x, value_type_ &y) noexcept {
 /** Helper structure for dividing a range of data into three parts: head, body, and tail, generally
  *  used to minimize misaligned (split) stores and operate on aligned pages. */
 struct head_body_tail_t {
-    size_t head = 0;
-    size_t body = 0;
-    size_t tail = 0;
+    std::size_t head = 0;
+    std::size_t body = 0;
+    std::size_t tail = 0;
 
     constexpr head_body_tail_t() = default;
-    constexpr head_body_tail_t(size_t h, size_t b, size_t t) : head(h), body(b), tail(t) {}
+    constexpr head_body_tail_t(std::size_t h, std::size_t b, std::size_t t) : head(h), body(b), tail(t) {}
 };
 
-template <size_t elements_per_page_, typename element_type_>
-constexpr head_body_tail_t head_body_tail(element_type_ *first_address, size_t total_length) noexcept {
-    constexpr size_t bytes_per_element = sizeof(element_type_);
-    constexpr size_t bytes_per_page = elements_per_page_ * bytes_per_element;
+template <std::size_t elements_per_page_, typename element_type_>
+constexpr head_body_tail_t head_body_tail(element_type_ *first_address, std::size_t total_length) noexcept {
+    constexpr std::size_t bytes_per_element = sizeof(element_type_);
+    constexpr std::size_t bytes_per_page = elements_per_page_ * bytes_per_element;
     static_assert(bytes_per_page > 0, "Slice size must be positive");
 
     // To split into head, body, and tail, we need the `first_address` to be
     // a multiple of `bytes_per_element`, otherwise the `body` will always be a zero!
-    sz_assert_((size_t)first_address % bytes_per_element == 0);
-    size_t bytes_misalignment = (size_t)first_address % bytes_per_page;
-    size_t bytes_in_head = (bytes_per_page - bytes_misalignment) % bytes_per_page;
-    size_t elements_in_head = bytes_in_head / bytes_per_element;
+    sz_assert_((std::size_t)first_address % bytes_per_element == 0);
+    std::size_t bytes_misalignment = (std::size_t)first_address % bytes_per_page;
+    std::size_t bytes_in_head = (bytes_per_page - bytes_misalignment) % bytes_per_page;
+    std::size_t elements_in_head = bytes_in_head / bytes_per_element;
 
     // Round down the remaining count to a multiple of `elements_per_page_`.
-    size_t aligned_pages = (total_length - elements_in_head) / elements_per_page_;
-    size_t elements_in_body = aligned_pages * elements_per_page_;
+    std::size_t aligned_pages = (total_length - elements_in_head) / elements_per_page_;
+    std::size_t elements_in_body = aligned_pages * elements_per_page_;
 
     // Tail is simply what remains:
-    size_t elements_in_tail = total_length - elements_in_head - elements_in_body;
+    std::size_t elements_in_tail = total_length - elements_in_head - elements_in_body;
     sz_assert_(elements_in_head < elements_per_page_ && elements_in_head <= total_length);
     sz_assert_(elements_in_tail < elements_per_page_ && elements_in_tail <= total_length);
     sz_assert_(elements_in_body % elements_per_page_ == 0);
@@ -1085,8 +1265,8 @@ constexpr head_body_tail_t head_body_tail(element_type_ *first_address, size_t t
     return head_body_tail_t {elements_in_head, elements_in_body, elements_in_tail};
 }
 
-/** Safer alternative to @c std::vector, that avoids exceptions, copy constructors, and provides
- *  alternative @c try_push_back and @c try_reserve for faulty memory allocations. */
+/** Safer alternative to @c std::vector, that avoids exceptions and copy constructors: every member
+ *  that allocates returns a @c status_t instead of throwing. */
 template <typename value_type_, typename allocator_type_>
 class safe_vector {
   public:
@@ -1123,7 +1303,7 @@ class safe_vector {
 
   public:
     safe_vector() noexcept : data_(nullptr), size_(0), capacity_(0), alloc_() {}
-    safe_vector(allocator_type alloc) noexcept : data_(nullptr), size_(0), capacity_(0), alloc_(alloc) {}
+    safe_vector(allocator_type allocator) noexcept : data_(nullptr), size_(0), capacity_(0), alloc_(allocator) {}
     ~safe_vector() noexcept { reset(); }
 
     void clear() noexcept {
@@ -1140,10 +1320,10 @@ class safe_vector {
         capacity_ = 0;
     }
 
-    /** @warning Use @c try_assign instead to handle out-of-memory failures. */
+    /** @warning Use @c assign instead to handle out-of-memory failures. */
     safe_vector(safe_vector const &other) = delete;
 
-    /** @warning Use @c try_assign instead to handle out-of-memory failures. */
+    /** @warning Use @c assign instead to handle out-of-memory failures. */
     safe_vector &operator=(safe_vector const &other) = delete;
 
     safe_vector(safe_vector &&other) noexcept
@@ -1168,14 +1348,14 @@ class safe_vector {
         return *this;
     }
 
-    status_t try_assign(span<value_type const> const other) noexcept {
+    status_t assign(span<value_type const> const other) noexcept {
         reset();
 
         if (other.size() == 0) return status_t::success_k; // Nothing to do :)
 
         // Allocate exact needed capacity
         size_type new_cap = other.size();
-        allocated_type *raw = allocator_traits::allocate(alloc_, new_cap);
+        allocated_type *raw = allocate_or_null_(alloc_, new_cap);
         if (!raw) return status_t::bad_alloc_k;
         data_ = reinterpret_cast<value_type *>(raw);
         capacity_ = new_cap;
@@ -1189,17 +1369,16 @@ class safe_vector {
         return status_t::success_k;
     }
 
-    template <typename other_allocator_type_ = allocator_type>
-    status_t try_assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
-        if constexpr (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
-        return try_assign(span<value_type>(other.data(), other.size()));
+    template <typename other_allocator_type_>
+    status_t assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
+        return assign(span<value_type const>(other.data(), other.size()));
     }
 
-    status_t try_reserve(size_type new_cap) noexcept {
+    status_t reserve(size_type new_cap) noexcept {
         static_assert(allocator_reachable_from_host_(),
-                      "Growing host-moves live elements, so device-only storage must use `try_resize_uninitialized`");
+                      "Growing host-moves live elements, so device-only storage must use `resize_uninitialized`");
         if (new_cap <= capacity_) return status_t::success_k;
-        value_type *new_data = (value_type *)alloc_.allocate(new_cap);
+        value_type *new_data = (value_type *)allocate_or_null_(alloc_, new_cap);
         if (!new_data) return status_t::bad_alloc_k;
         for (size_type i = 0; i < size_; ++i) {
             new (new_data + i) value_type(std::move(data_[i]));
@@ -1211,8 +1390,8 @@ class safe_vector {
         return status_t::success_k;
     }
 
-    status_t try_resize(size_type new_size) noexcept {
-        if (new_size > capacity_ && try_reserve(new_size) != status_t::success_k) return status_t::bad_alloc_k;
+    status_t resize(size_type new_size) noexcept {
+        if (new_size > capacity_ && reserve(new_size) != status_t::success_k) return status_t::bad_alloc_k;
 
         if (new_size > size_) {
             if constexpr (!std::is_trivially_constructible<value_type>::value)
@@ -1235,11 +1414,11 @@ class safe_vector {
      *  it is safe even when the storage lives in @b device memory the host cannot dereference, like
      *  a task array backed by @ref device_alloc. Requires a trivially-destructible type.
      */
-    status_t try_resize_uninitialized(size_type new_size) noexcept {
+    status_t resize_uninitialized(size_type new_size) noexcept {
         static_assert(std::is_trivially_destructible<value_type>::value,
-                      "try_resize_uninitialized requires a trivially-destructible value type");
+                      "resize_uninitialized requires a trivially-destructible value type");
         if (new_size > capacity_) {
-            value_type *new_data = (value_type *)alloc_.allocate(new_size);
+            value_type *new_data = (value_type *)allocate_or_null_(alloc_, new_size);
             if (!new_data) return status_t::bad_alloc_k;
             if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
             data_ = new_data;
@@ -1249,32 +1428,32 @@ class safe_vector {
         return status_t::success_k;
     }
 
-    status_t try_push_back(value_type const &val) noexcept {
+    status_t push_back(value_type const &value) noexcept {
         if (size_ == capacity_) {
             size_type new_cap = capacity_ ? capacity_ * 2 : 1;
-            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+            if (reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
         }
-        new (data_ + size_) value_type(val);
+        new (data_ + size_) value_type(value);
         ++size_;
         return status_t::success_k;
     }
 
-    status_t try_push_back(value_type &&val) noexcept {
+    status_t push_back(value_type &&value) noexcept {
         if (size_ == capacity_) {
             size_type new_cap = capacity_ ? capacity_ * 2 : 1;
-            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+            if (reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
         }
-        new (data_ + size_) value_type(std::move(val));
+        new (data_ + size_) value_type(std::move(value));
         ++size_;
         return status_t::success_k;
     }
 
-    status_t try_append(span<value_type const> source) noexcept {
+    status_t append(span<value_type const> source) noexcept {
         size_type needed = size_ + source.size();
         if (needed > capacity_) {
             size_type new_cap = capacity_ ? capacity_ : 1;
             while (new_cap < needed) new_cap *= 2;
-            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+            if (reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
         }
         for (size_type i = 0; i < source.size(); ++i) new (data_ + size_ + i) value_type(source[i]);
         size_ = needed;
@@ -1317,15 +1496,14 @@ class safe_vector {
     operator span<value_type const>() const noexcept { return {data_, size_}; }
 };
 
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 #pragma region CUDA Allocators
 
 /**
  *  @brief Allocator over CUDA @b unified memory, which both the host and every device address.
  *
  *  Standard-allocator shaped, so @c std::vector, @ref arrow_strings_tape and @ref safe_vector all
- *  take it. The @c device it binds is the caller's, never a hidden one; a default-constructed
- *  allocator uses whatever context the calling thread already has current.
+ *  take it. The @c ordinal it allocates on is the caller's, never a hidden one, and defaults to 0.
  */
 template <typename value_type_>
 struct unified_alloc {
@@ -1336,9 +1514,8 @@ struct unified_alloc {
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
 
-    /** The device every allocation binds before touching the driver, or @c nullptr for
-     *  the current context. */
-    sz_cuda_device_t *device = nullptr;
+    /** The runtime ordinal of the device every allocation and release switches to. */
+    std::size_t ordinal = 0;
 
     template <typename other_value_type_>
     struct rebind {
@@ -1346,24 +1523,25 @@ struct unified_alloc {
     };
 
     constexpr unified_alloc() noexcept = default;
-    constexpr explicit unified_alloc(sz_cuda_device_t *bound) noexcept : device(bound) {}
+    constexpr explicit unified_alloc(std::size_t device) noexcept : ordinal(device) {}
     constexpr unified_alloc(unified_alloc const &) noexcept = default;
+    constexpr unified_alloc &operator=(unified_alloc const &) noexcept = default;
     template <typename other_value_type_>
-    constexpr unified_alloc(unified_alloc<other_value_type_> const &other) noexcept : device(other.device) {}
+    constexpr unified_alloc(unified_alloc<other_value_type_> const &other) noexcept : ordinal(other.ordinal) {}
 
     value_type *allocate(size_type count) const noexcept {
-        return (value_type *)sz_memory_allocate_unified_(count * sizeof(value_type), device);
+        return (value_type *)sz_memory_allocate_unified_(count * sizeof(value_type), (void *)ordinal);
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        sz_memory_free_driver_(start, count * sizeof(value_type), device);
+        sz_memory_free_device_(start, count * sizeof(value_type), (void *)ordinal);
     }
     template <typename other_type_>
     bool operator==(unified_alloc<other_type_> const &other) const noexcept {
-        return device == other.device;
+        return ordinal == other.ordinal;
     }
     template <typename other_type_>
     bool operator!=(unified_alloc<other_type_> const &other) const noexcept {
-        return device != other.device;
+        return ordinal != other.ordinal;
     }
 };
 
@@ -1372,7 +1550,7 @@ struct unified_alloc {
  *
  *  For scratch that only a kernel ever reads or writes, where unified memory would pay page
  *  migration on every access from the wrong side. @ref safe_vector is the only container that grows
- *  it, through @c try_resize_uninitialized, because moving elements on the host is exactly what
+ *  it, through @c resize_uninitialized, because moving elements on the host is exactly what
  *  @c host_accessible_k forbids.
  */
 template <typename value_type_>
@@ -1387,9 +1565,8 @@ struct device_alloc {
     /** Plain device memory: a container must not move elements through it on the host to grow. */
     static constexpr bool host_accessible_k = false;
 
-    /** The device every allocation binds before touching the driver, or @c nullptr for
-     *  the current context. */
-    sz_cuda_device_t *device = nullptr;
+    /** The runtime ordinal of the device every allocation and release switches to. */
+    std::size_t ordinal = 0;
 
     template <typename other_value_type_>
     struct rebind {
@@ -1397,24 +1574,25 @@ struct device_alloc {
     };
 
     constexpr device_alloc() noexcept = default;
-    constexpr explicit device_alloc(sz_cuda_device_t *bound) noexcept : device(bound) {}
+    constexpr explicit device_alloc(std::size_t device) noexcept : ordinal(device) {}
     constexpr device_alloc(device_alloc const &) noexcept = default;
+    constexpr device_alloc &operator=(device_alloc const &) noexcept = default;
     template <typename other_value_type_>
-    constexpr device_alloc(device_alloc<other_value_type_> const &other) noexcept : device(other.device) {}
+    constexpr device_alloc(device_alloc<other_value_type_> const &other) noexcept : ordinal(other.ordinal) {}
 
     value_type *allocate(size_type count) const noexcept {
-        return (value_type *)sz_memory_allocate_device_(count * sizeof(value_type), device);
+        return (value_type *)sz_memory_allocate_device_(count * sizeof(value_type), (void *)ordinal);
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        sz_memory_free_driver_(start, count * sizeof(value_type), device);
+        sz_memory_free_device_(start, count * sizeof(value_type), (void *)ordinal);
     }
     template <typename other_type_>
     bool operator==(device_alloc<other_type_> const &other) const noexcept {
-        return device == other.device;
+        return ordinal == other.ordinal;
     }
     template <typename other_type_>
     bool operator!=(device_alloc<other_type_> const &other) const noexcept {
-        return device != other.device;
+        return ordinal != other.ordinal;
     }
 };
 
@@ -1422,8 +1600,8 @@ struct device_alloc {
  *  @brief Allocator over CUDA @b pinned page-locked host memory, which the driver copies at
  *      the bus rate.
  *
- *  A kernel cannot address what this hands back - @ref sz_memory_reaches_device answers false for
- *  it - so it is the staging side of a transfer rather than anything a launch reads.
+ *  A kernel cannot address what this hands back - @ref sz_cuda_memory_reaches_device answers false
+ *  for it - so it is the staging side of a transfer rather than anything a launch reads.
  */
 template <typename value_type_>
 struct pinned_alloc {
@@ -1434,9 +1612,8 @@ struct pinned_alloc {
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
 
-    /** The device every allocation binds before touching the driver, or @c nullptr for
-     *  the current context. */
-    sz_cuda_device_t *device = nullptr;
+    /** The runtime ordinal of the device every allocation and release switches to. */
+    std::size_t ordinal = 0;
 
     template <typename other_value_type_>
     struct rebind {
@@ -1444,29 +1621,30 @@ struct pinned_alloc {
     };
 
     constexpr pinned_alloc() noexcept = default;
-    constexpr explicit pinned_alloc(sz_cuda_device_t *bound) noexcept : device(bound) {}
+    constexpr explicit pinned_alloc(std::size_t device) noexcept : ordinal(device) {}
     constexpr pinned_alloc(pinned_alloc const &) noexcept = default;
+    constexpr pinned_alloc &operator=(pinned_alloc const &) noexcept = default;
     template <typename other_value_type_>
-    constexpr pinned_alloc(pinned_alloc<other_value_type_> const &other) noexcept : device(other.device) {}
+    constexpr pinned_alloc(pinned_alloc<other_value_type_> const &other) noexcept : ordinal(other.ordinal) {}
 
     value_type *allocate(size_type count) const noexcept {
-        return (value_type *)sz_memory_allocate_pinned_(count * sizeof(value_type), device);
+        return (value_type *)sz_memory_allocate_pinned_(count * sizeof(value_type), (void *)ordinal);
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        sz_memory_free_pinned_(start, count * sizeof(value_type), device);
+        sz_memory_free_pinned_(start, count * sizeof(value_type), (void *)ordinal);
     }
     template <typename other_type_>
     bool operator==(pinned_alloc<other_type_> const &other) const noexcept {
-        return device == other.device;
+        return ordinal == other.ordinal;
     }
     template <typename other_type_>
     bool operator!=(pinned_alloc<other_type_> const &other) const noexcept {
-        return device != other.device;
+        return ordinal != other.ordinal;
     }
 };
 
 #pragma endregion CUDA Allocators
-#endif // STRINGZILLA_TARGET_CUDA
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 } // namespace stringzilla
 } // namespace ashvardanian
