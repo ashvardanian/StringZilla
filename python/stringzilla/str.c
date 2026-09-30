@@ -315,7 +315,13 @@ PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positio
     }
 
     // An embedded NUL would silently truncate the path at `fopen`; reject it like CPython's open()
-    if (sz_find_byte(path.start, path.length, "\0") != NULL) {
+    sz_cptr_t null_byte = NULL;
+    sz_status_t status = sz_find_byte_best(path.start, path.length, "\0", &null_byte, sz_py_enabled_capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "write_to()");
+        return NULL;
+    }
+    if (null_byte != NULL) {
         PyErr_SetString(PyExc_ValueError, "embedded null byte in path");
         return NULL;
     }
@@ -332,7 +338,12 @@ PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positio
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the path");
         return NULL;
     }
-    sz_copy(path_buffer, path.start, path.length);
+    status = sz_copy_best(path_buffer, path.start, path.length, sz_py_enabled_capabilities, NULL);
+    if (status != sz_success_k) {
+        free(path_buffer);
+        sz_py_raise_status(status, "write_to()");
+        return NULL;
+    }
     path_buffer[path.length] = '\0';
 
     // Unlock the Global Interpreter Lock (GIL) to allow other threads to run
@@ -347,9 +358,9 @@ PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positio
     }
 
     setbuf(file_pointer, NULL); // Set the stream to unbuffered
-    int status = fwrite(text.start, 1, text.length, file_pointer);
+    size_t const written = fwrite(text.start, 1, text.length, file_pointer);
     PyEval_RestoreThread(gil_state);
-    if (status != (Py_ssize_t)text.length) {
+    if (written != text.length) {
         PyErr_SetFromErrnoWithFilename(PyExc_OSError, path_buffer);
         free(path_buffer);
         fclose(file_pointer);
@@ -438,8 +449,16 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
     }
 
     // Perform the string concatenation
-    sz_copy(result_str->memory.start, self_str.start, self_str.length);
-    sz_copy(result_str->memory.start + self_str.length, other_str.start, other_str.length);
+    sz_ptr_t const target = (sz_ptr_t)result_str->memory.start;
+    sz_status_t status = sz_copy_best(target, self_str.start, self_str.length, sz_py_enabled_capabilities, NULL);
+    if (status == sz_success_k)
+        status = sz_copy_best(target + self_str.length, other_str.start, other_str.length, sz_py_enabled_capabilities,
+                              NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(result_str);
+        sz_py_raise_status(status, "Str concatenation");
+        return NULL;
+    }
 
     return (PyObject *)result_str;
 }

@@ -46,8 +46,9 @@ pub struct OverlapEngine {
     lengths: *const u32,
     count: usize,
     widths_count: usize,
-    capability: i32,
-    alloc: _SzMemoryAllocator,
+    capability: u64,
+    ordinal: usize,
+    allocator: _SzMemoryAllocator,
     memory: *mut c_void,
     memory_bytes: usize,
     scratch: *mut c_void,
@@ -55,7 +56,8 @@ pub struct OverlapEngine {
 }
 
 impl OverlapEngine {
-    /// Sorts `queries` into one forest on the host, resolving the CPU tier once.
+    /// Sorts `queries` into one forest on the host, on the CPU's [`Device::capabilities_enabled`],
+    /// fixing the CPU capability once.
     ///
     /// `window_widths` are n-gram widths in bytes and need not form a doubling chain; a width past
     /// a text scores zero for every pair it spans. Zero widths are refused.
@@ -64,60 +66,66 @@ impl OverlapEngine {
         Query: AsRef<[u8]>,
     {
         let mut engine = MaybeUninit::<Self>::uninit();
-        let status = with_sequence(queries, |sequence| unsafe {
-            sz_overlap_engine_init_cpu(
+        with_sequence(queries, |sequence| unsafe {
+            sz_overlap_engine_init(
+                engine.as_mut_ptr(),
                 sequence,
                 window_widths.as_ptr(),
                 window_widths.len(),
+                0,
+                enabled_cpu_capabilities_mask(),
+                0,
                 core::ptr::null(),
-                engine.as_mut_ptr(),
+                core::ptr::null_mut(),
             )
-        });
-        match status {
-            Status::Success => Ok(unsafe { engine.assume_init() }),
-            error => Err(error),
-        }
+        })
+        .check()?;
+        Ok(unsafe { engine.assume_init() })
     }
 
-    /// Sorts `queries` into one forest on `stream`'s device, resolving the launch geometry once.
+    /// Sorts `queries` into one forest on `device`, with its [`Device::capabilities_enabled`],
+    /// fixing the capability once; the engine keeps the device.
     ///
-    /// `stream` is a `cudaStream_t`, or null for the current device's default one. A width the
-    /// device backend's per-thread ring cannot hold is refused here rather than at the first round.
+    /// A width the device backend's per-thread ring cannot hold is refused here rather than at the
+    /// first round. `candidates_budget` bounds one round for a backend that keeps state per
+    /// candidate, zero asking for its default, and is ignored by one that keeps none.
     ///
-    /// A compute verb of a device engine also needs a candidate sequence whose accessors run on the
-    /// device, which this crate cannot build yet, so such an engine is constructible here before it
-    /// is drivable and every verb below answers `Status::DeviceMemoryMismatch` for it.
+    /// `stream` serves this call's own work alone: a `cudaStream_t` or `hipStream_t` of `device`,
+    /// or null for its default one, on Metal a `sz_metal_device_t *` opened on `device`, and null
+    /// on the CPU. The verbs below pass a null stream and host candidates, so a GPU engine answers
+    /// them with an error status such as `Status::DeviceMemoryMismatch` until this crate can build
+    /// device-resident candidates.
     ///
     /// # Safety
     ///
-    /// `stream` must be a live stream of the current context, and it makes every later verb of this
-    /// engine asynchronous: [`OverlapEngine::scores`] enqueues and returns, so its output slice has
-    /// to be device-reachable, has to outlive the launch, and must not be read before the caller
-    /// joins `stream` itself.
-    #[cfg(feature = "cuda")]
-    pub unsafe fn new_on_gpu<Query>(
+    /// `stream` must be a live stream or Metal device of `device`, or null; this call may join it.
+    pub unsafe fn new_on<Query>(
         queries: &[Query],
         window_widths: &[usize],
+        candidates_budget: usize,
+        device: Device,
         stream: *mut c_void,
     ) -> Result<Self, Status>
     where
         Query: AsRef<[u8]>,
     {
+        let capabilities = device.capabilities_enabled()?;
         let mut engine = MaybeUninit::<Self>::uninit();
-        let status = with_sequence(queries, |sequence| unsafe {
-            sz_overlap_engine_init_gpu(
+        with_sequence(queries, |sequence| unsafe {
+            sz_overlap_engine_init(
+                engine.as_mut_ptr(),
                 sequence,
                 window_widths.as_ptr(),
                 window_widths.len(),
+                candidates_budget,
+                capabilities.bits(),
+                device.ordinal(),
                 core::ptr::null(),
                 stream,
-                engine.as_mut_ptr(),
             )
-        });
-        match status {
-            Status::Success => Ok(unsafe { engine.assume_init() }),
-            error => Err(error),
-        }
+        })
+        .check()?;
+        Ok(unsafe { engine.assume_init() })
     }
 
     /// Queries the forest holds, which is the first axis of every output.
@@ -178,13 +186,17 @@ impl OverlapEngine {
 
         let engine = self as *mut Self;
         let output = scores.as_mut_ptr();
-        let status = with_sequence(candidates, |sequence| unsafe {
-            sz_overlap_scores(engine, sequence, output, scores_query_stride, scores_candidate_stride)
-        });
-        match status {
-            Status::Success => Ok(()),
-            error => Err(error),
-        }
+        with_sequence(candidates, |sequence| unsafe {
+            sz_overlap_scores(
+                engine,
+                sequence,
+                output,
+                scores_query_stride,
+                scores_candidate_stride,
+                core::ptr::null_mut(),
+            )
+        })
+        .check()
     }
 }
 

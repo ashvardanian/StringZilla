@@ -15,18 +15,23 @@ import (
 // Bytesum computes a simple 64-bit checksum by summing bytes.
 func Bytesum(str string) uint64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
-	strLen := C.ulong(len(str))
-	return uint64(C.sz_bytesum(strPtr, strLen))
+	strLen := C.sz_size_t(len(str))
+	var checksum C.sz_u64_t
+	check(C.sz_bytesum_best(strPtr, strLen, &checksum, capabilities(), nil))
+	return uint64(checksum)
 }
 
 // Hash computes a 64-bit non-cryptographic hash with a seed.
 func Hash(str string, seed uint64) uint64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
-	strLen := C.ulong(len(str))
-	return uint64(C.sz_hash(strPtr, strLen, (C.sz_u64_t)(seed)))
+	strLen := C.sz_size_t(len(str))
+	var hash C.sz_u64_t
+	check(C.sz_hash_best(strPtr, strLen, (C.sz_u64_t)(seed), &hash, capabilities(), nil))
+	return uint64(hash)
 }
 
 // Hasher is a streaming 64-bit non-cryptographic hasher that implements hash.Hash64 and io.Writer.
+// Create one with [NewHasher]; the zero value is not ready to use.
 type Hasher struct {
 	state C.sz_hash_state_t
 	seed  uint64
@@ -38,14 +43,17 @@ var _ io.Writer = (*Hasher)(nil)
 // NewHasher creates a new streaming hasher with the given seed.
 func NewHasher(seed uint64) *Hasher {
 	h := &Hasher{seed: seed}
-	C.sz_hash_state_init(&h.state, (C.sz_u64_t)(seed))
+	h.Reset()
 	return h
 }
 
 // Write adds data to the streaming hasher. Implements io.Writer.
 func (h *Hasher) Write(p []byte) (n int, err error) {
 	if len(p) > 0 {
-		C.sz_hash_state_update(&h.state, (*C.char)(unsafe.Pointer(&p[0])), C.ulong(len(p)))
+		if err := statusError(C.sz_hash_state_update_best(&h.state, (*C.char)(unsafe.Pointer(&p[0])),
+			C.sz_size_t(len(p)), capabilities(), nil)); err != nil {
+			return 0, err
+		}
 	}
 	return len(p), nil
 }
@@ -61,7 +69,7 @@ func (h *Hasher) Sum(b []byte) []byte {
 
 // Reset resets the hasher to its initial state. Implements hash.Hash.
 func (h *Hasher) Reset() {
-	C.sz_hash_state_init(&h.state, (C.sz_u64_t)(h.seed))
+	check(C.sz_hash_state_init_best(&h.state, (C.sz_u64_t)(h.seed), capabilities(), nil))
 }
 
 // Size returns the number of bytes Sum will return. Implements hash.Hash.
@@ -76,7 +84,9 @@ func (h *Hasher) BlockSize() int {
 
 // Sum64 returns the current 64-bit hash without consuming the state. Implements hash.Hash64.
 func (h *Hasher) Sum64() uint64 {
-	return uint64(C.sz_hash_state_digest(&h.state))
+	var digest C.sz_u64_t
+	check(C.sz_hash_state_digest_best(&h.state, &digest, capabilities(), nil))
+	return uint64(digest)
 }
 
 // Digest returns the current 64-bit hash without consuming the state.

@@ -6,7 +6,7 @@
 use super::*;
 use core::ffi::c_void;
 
-/// Applies Unicode case folding to a UTF-8 string, writing the result to a destination buffer.
+/// Applies Unicode case folding to a UTF-8 string, writing the result to a target buffer.
 ///
 /// Case folding normalizes text for uncased comparisons by mapping uppercase letters to their
 /// lowercase equivalents and handling special cases like German U+00DF → ss expansion.
@@ -14,42 +14,52 @@ use core::ffi::c_void;
 /// # Arguments
 ///
 /// - `source`: The UTF-8 string to case-fold.
-/// - `destination`: The destination buffer to write the case-folded string.
+/// - `target`: The target buffer to write the case-folded string.
 ///
 /// # Returns
 ///
-/// Returns the number of bytes written to the destination buffer.
+/// Returns the number of bytes written to the target buffer.
 ///
-/// # Safety
+/// # Errors
 ///
-/// The caller must ensure the destination buffer is large enough.
-/// Use `source.len() * 3` bytes for worst-case 3:1 expansion ratio.
+/// The C kernel writes without a capacity, so `target` must hold the worst-case 3:1 expansion of
+/// `source.len() * 3` bytes whatever the input, or [`Status::UnexpectedDimensions`] is returned.
 ///
 /// # Examples
 ///
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// let source = "HELLO WORLD";
-/// let mut dest = [0u8; 32];
-/// let len = sz::utf8_uncased_fold(source, &mut dest);
+/// let mut dest = [0u8; 33];
+/// let len = sz::utf8_uncased_fold(source, &mut dest).unwrap();
 /// assert_eq!(&dest[..len], b"hello world");
 /// ```
 ///
-pub fn utf8_uncased_fold<Source, Destination>(source: Source, destination: &mut Destination) -> usize
+pub fn utf8_uncased_fold<Source, Target>(source: Source, target: &mut Target) -> Result<usize, Status>
 where
     Source: AsRef<[u8]>,
-    Destination: AsMut<[u8]> + ?Sized,
+    Target: AsMut<[u8]> + ?Sized,
 {
     let source_ref = source.as_ref();
-    let dest_slice = destination.as_mut();
+    let target_slice = target.as_mut();
+    let worst_case = source_ref.len().checked_mul(3).ok_or(Status::OverflowRisk)?;
+    if target_slice.len() < worst_case {
+        return Err(Status::UnexpectedDimensions);
+    }
 
+    let mut written = 0;
     unsafe {
-        sz_utf8_uncased_fold(
+        sz_utf8_uncased_fold_best(
             source_ref.as_ptr() as *const c_void,
             source_ref.len(),
-            dest_slice.as_mut_ptr() as *mut c_void,
+            target_slice.as_mut_ptr() as *mut c_void,
+            &mut written,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
         )
     }
+    .check()?;
+    Ok(written)
 }
 
 #[cfg(test)]
@@ -57,7 +67,6 @@ mod tests {
     extern crate alloc;
     use alloc::vec;
 
-    use super::*;
     use crate::sz;
 
     #[test]
@@ -92,16 +101,22 @@ mod tests {
             ("\u{10D50}", "\u{10D70}".as_bytes()), // Garay capital Ca → small Ca
         ];
         for (source, expected) in golden {
-            let mut destination = vec![0u8; source.len() * 3];
-            let folded_length = sz::utf8_uncased_fold(source, &mut destination[..]);
-            assert_eq!(&destination[..folded_length], *expected, "folding {:?}", source);
+            let mut target = vec![0u8; source.len() * 3];
+            let folded_length = sz::utf8_uncased_fold(source, &mut target[..]).unwrap();
+            assert_eq!(&target[..folded_length], *expected, "folding {:?}", source);
         }
 
         // Returned length tracks expansion: ẞ shrinks 3 → 2 bytes, ΐ grows 2 → 6 bytes
-        let mut destination = [0u8; 16];
-        assert_eq!(sz::utf8_uncased_fold("\u{1E9E}", &mut destination), 2);
-        let folded_length = sz::utf8_uncased_fold("\u{0390}", &mut destination);
+        let mut target = [0u8; 16];
+        assert_eq!(sz::utf8_uncased_fold("\u{1E9E}", &mut target), Ok(2));
+        let folded_length = sz::utf8_uncased_fold("\u{0390}", &mut target).unwrap();
         assert_eq!(folded_length, 6);
-        assert_eq!(&destination[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
+        assert_eq!(&target[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
+
+        // Refused below the worst case although ASCII fits, as the kernel takes no capacity.
+        assert_eq!(
+            sz::utf8_uncased_fold("HELLO", &mut target[..14]),
+            Err(sz::Status::UnexpectedDimensions)
+        );
     }
 }

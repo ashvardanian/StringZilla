@@ -39,12 +39,24 @@ where
     let haystack_length = haystack_ref.len();
     let needle_pointer = needle_ref.as_ptr() as _;
     let needle_length = needle_ref.len();
-    let result = unsafe { sz_find(haystack_pointer, haystack_length, needle_pointer, needle_length) };
+    let mut result = core::ptr::null();
+    unsafe {
+        sz_find_best(
+            haystack_pointer,
+            haystack_length,
+            needle_pointer,
+            needle_length,
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
 
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
+        Some(match_offset(result, haystack_pointer))
     }
 }
 
@@ -79,12 +91,24 @@ where
     let haystack_length = haystack_ref.len();
     let needle_pointer = needle_ref.as_ptr() as _;
     let needle_length = needle_ref.len();
-    let result = unsafe { sz_rfind(haystack_pointer, haystack_length, needle_pointer, needle_length) };
+    let mut result = core::ptr::null();
+    unsafe {
+        sz_rfind_best(
+            haystack_pointer,
+            haystack_length,
+            needle_pointer,
+            needle_length,
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
 
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
+        Some(match_offset(result, haystack_pointer))
     }
 }
 
@@ -134,11 +158,22 @@ where
     let haystack_pointer = haystack_ref.as_ptr() as _;
     let haystack_length = haystack_ref.len();
 
-    let result = unsafe { sz_find_byteset(haystack_pointer, haystack_length, &needles as *const _ as *const c_void) };
+    let mut result = core::ptr::null();
+    unsafe {
+        sz_find_byteset_best(
+            haystack_pointer,
+            haystack_length,
+            &needles as *const _ as *const c_void,
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
+        Some(match_offset(result, haystack_pointer))
     }
 }
 
@@ -163,11 +198,22 @@ where
     let haystack_pointer = haystack_ref.as_ptr() as _;
     let haystack_length = haystack_ref.len();
 
-    let result = unsafe { sz_rfind_byteset(haystack_pointer, haystack_length, &needles as *const _ as *const c_void) };
+    let mut result = core::ptr::null();
+    unsafe {
+        sz_rfind_byteset_best(
+            haystack_pointer,
+            haystack_length,
+            &needles as *const _ as *const c_void,
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
+        Some(match_offset(result, haystack_pointer))
     }
 }
 
@@ -414,6 +460,7 @@ impl<'a, const STEPS: usize> FindSplits<'a, KeepEmpty, STEPS> {
     /// Constructs an iterator with an explicit batch size (kept for API uniformity with
     /// the UTF-8 splits).
     pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
+        const { assert!(STEPS > 0, "STEPS must be positive") };
         Self {
             haystack,
             matcher,
@@ -618,6 +665,7 @@ impl<'a, const STEPS: usize> RFindSplits<'a, KeepEmpty, STEPS> {
     /// Constructs an iterator with an explicit batch size (kept for API uniformity with
     /// the UTF-8 splits).
     pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
+        const { assert!(STEPS > 0, "STEPS must be positive") };
         Self {
             haystack,
             matcher,
@@ -1292,7 +1340,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn replace_all_same_length() {
         let mut buffer = b"abcabc".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"ab", b"XY").expect("try_replace_all failed");
+        let replaced = sz::replace_all(&mut buffer, b"ab", b"XY").expect("replace_all failed");
         assert_eq!(replaced, 2);
         assert_eq!(buffer, b"XYcXYc");
     }
@@ -1301,7 +1349,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn replace_all_shrinks() {
         let mut buffer = b"aaaa".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"aa", b"b").expect("try_replace_all failed");
+        let replaced = sz::replace_all(&mut buffer, b"aa", b"b").expect("replace_all failed");
         assert_eq!(replaced, 2);
         assert_eq!(buffer, b"bb");
     }
@@ -1310,7 +1358,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn replace_all_grows() {
         let mut buffer = b"aba".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"a", b"XYZ").expect("try_replace_all failed");
+        let replaced = sz::replace_all(&mut buffer, b"a", b"XYZ").expect("replace_all failed");
         assert_eq!(replaced, 2);
         assert_eq!(buffer, b"XYZbXYZ");
     }
@@ -1320,7 +1368,7 @@ mod tests {
     fn replace_all_byteset_basic() {
         let mut buffer = b"hello world".to_vec();
         let vowels = sz::Byteset::from("aeiou");
-        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"_").expect("try_replace_all_byteset failed");
+        let replaced = sz::replace_all_byteset(&mut buffer, vowels, b"_").expect("replace_all_byteset failed");
         assert_eq!(replaced, 3);
         assert_eq!(buffer, b"h_ll_ w_rld");
     }
@@ -1330,8 +1378,7 @@ mod tests {
     fn replace_all_byteset_grows() {
         let mut buffer = b"yzz".to_vec();
         let vowels = sz::Byteset::from("y");
-        let replaced =
-            sz::try_replace_all_byteset(&mut buffer, vowels, b"(y)").expect("try_replace_all_byteset failed");
+        let replaced = sz::replace_all_byteset(&mut buffer, vowels, b"(y)").expect("replace_all_byteset failed");
         assert_eq!(replaced, 1);
         assert_eq!(buffer, b"(y)zz");
     }
@@ -1340,7 +1387,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn replace_all_noop_on_empty_pattern() {
         let mut buffer = b"unchanged".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"", b"anything").expect("try_replace_all failed");
+        let replaced = sz::replace_all(&mut buffer, b"", b"anything").expect("replace_all failed");
         assert_eq!(replaced, 0);
         assert_eq!(buffer, b"unchanged");
     }

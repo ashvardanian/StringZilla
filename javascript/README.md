@@ -16,22 +16,59 @@ npm install stringzilla
 import sz from "stringzilla";
 ```
 
-The addon requires Node.js 22 or newer and is compiled on install via `node-gyp`.
-You can inspect which SIMD backends were selected at load time:
+The addon requires Node.js 22 or newer.
+Supported platforms get a prebuilt one from their `@stringzilla/<platform>-<arch>` package, and elsewhere the install compiles it through `cmake-js`, which needs CMake and a C compiler.
+A checkout builds it with `npm run prebuild`, which stages the addon under `prebuilds/` where the loader finds it first.
+
+## Capabilities and Runtime Selection
+
+Every call runs on the CPU and dispatches to the best kernel of its enabled capabilities, a `BigInt` bitmask a `Device` reports:
 
 ```js
-console.log(sz.capabilities); // e.g. "serial,haswell,skylake"
+const cpu = sz.Device.cpu();
+console.log(cpu.capabilitiesEnabled()); // what dispatch uses
+console.log((cpu.capabilitiesEnabled() & sz.Capability.haswell) !== 0n);
+cpu.capabilitiesEnable(cpu.capabilitiesEnabled() & ~sz.Capability.skylake); // stop dispatching to AVX-512
 ```
+
+`capabilitiesEnabled()` is the one you usually want, and derives from two independent axes:
+
+- `capabilitiesDetected()`: what this device can execute.
+- `capabilitiesCompiled()`: what this build contains for devices of its kind, from the ISA probes at build time.
+- `capabilitiesEnabled()`: what dispatch uses, both axes at once unless narrowed.
+- `capabilitiesEnable(wanted)`: makes `wanted` the CPU's enabled set, clamped to both axes, and returns what took effect.
+
+`capabilitiesDetected()` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
+The enabled set always keeps the `serial` fallback.
+
+A `Device` is the host CPU or one GPU of a runtime, named by that runtime's own ordinal:
+
+```js
+sz.Device.count("cpu");            // 1
+const gpu = new sz.Device("cuda"); // throws without a CUDA device, or past the last one
+gpu.capabilitiesEnabled();         // what that GPU runs, like `Capability.cuda`
+```
+
+- `Device.cpu()` is the host CPU, which every build has.
+- `Device.count(kind)` counts the devices of `"cpu"`, `"cuda"`, `"rocm"` or `"metal"`, and throws without a GPU of that kind.
+- `new Device(kind, ordinal)` throws a `RangeError` past the last device.
+- `capabilitiesEnable` throws on a GPU, which keeps no enabled set of its own; this binding only reports GPU masks.
+
+`Capability` maps each lowercase capability name, like `haswell`, `neon` or `cuda`, to its bit, and the `cpus`, `devices` and `any` groups to theirs.
+It is built at load from the C library's own names.
+
+There is no `configure_thread` call in the JS binding.
+Thread configuration is managed internally by the native addon.
 
 ## Runtimes
 
 The binding is a native __Node-API__ addon, compiled from C against `node_api.h`.
 Node-API is a stable, runtime-agnostic ABI, so the same compiled `.node` addon runs beyond Node.js.
 It also loads on __Bun__ and __Deno__ through their Node-API compatibility layers, which implement the `napi_*` interface that this addon links against.
-No Bun- or Deno-specific build is required; the addon and its `bindings`-based loader are shared across all three runtimes.
+No Bun- or Deno-specific build is required; the addon and its `node-gyp-build`-based loader are shared across all three runtimes.
 
 Separately, StringZilla's C/C++ core __compiles to WebAssembly__.
-Targeting `wasm32-wasip1` with `-msimd128` and `-mrelaxed-simd` auto-enables the core's `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` SIMD backends — the same v128 kernels the native addon uses.
+Targeting `wasm32-wasip1` with `STRINGZILLA_TARGET_ARCH` set to `v128` or `v128relaxed` enables the core's `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` SIMD backends — the same v128 kernels the native addon uses.
 This is a capability of the C core, exercised by the WebAssembly test builds; the npm package itself ships the N-API native addon and does not bundle a prebuilt `.wasm` artifact.
 
 ## Searching and Counting
@@ -87,6 +124,7 @@ assert.strictEqual(sz.compare(Buffer.from("abc"), Buffer.from("abd")), -1);
 
 `hash` computes StringZilla's fast 64-bit hash of a buffer, returned as a `BigInt`.
 An optional second argument seeds the hash and accepts a `BigInt` or a number, defaulting to `0`.
+A seed that is not a non-negative integer within 64 bits throws a `RangeError`, here and in the `Hasher` constructor.
 
 ```js
 sz.hash(Buffer.from("hello"));        // => 64-bit BigInt

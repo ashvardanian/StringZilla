@@ -19,40 +19,29 @@ PyObject *AuthenticationErrorType = NULL;
 typedef struct {
     PyObject ob_base;
     sz_aes256_key_t key;
+    sz_capability_t capabilities;
 } Aes256CtrKey;
 
 /** An expanded schedule plus the Galois hash powers, wiped when the object is collected. */
 typedef struct {
     PyObject ob_base;
     sz_aes256_gcm_key_t key;
+    sz_capability_t capabilities;
 } Aes256GcmKey;
 
 /** A chunked authenticated seal, holding its own copy of the key. */
 typedef struct {
     PyObject ob_base;
     sz_aes256_gcm_encryptor_t encryptor;
+    sz_capability_t capabilities;
 } Aes256GcmEncryptor;
 
 /** A chunked authenticated open, holding its own copy of the key. */
 typedef struct {
     PyObject ob_base;
     sz_aes256_gcm_decryptor_t decryptor;
+    sz_capability_t capabilities;
 } Aes256GcmDecryptor;
-
-/**
- *  @brief Overwrites @p length bytes at @p start with zeros, in a way a compiler may not elide.
- *
- *  The C core exposes no wipe entry point, and a plain @c memset over storage that is dead
- *  immediately afterwards is precisely the store an optimizer is licensed to drop. Writing
- *  through a @c volatile pointer makes every byte an observable side effect, so no schedule
- *  survives in memory a freed object once held. This translation unit sits outside the
- *  header-only tier, so it may spell the loop out rather than route through a kernel bound by the
- *  no-LibC-symbols rule of that tier.
- */
-static void sz_py_wipe_bytes(void *start, sz_size_t length) {
-    volatile sz_u8_t *cursor = (volatile sz_u8_t *)start;
-    while (length--) *cursor++ = 0;
-}
 
 /** Exports a string-like object and confirms it spans exactly @p expected bytes. On failure sets a
  *  Python exception naming @p role and returns 0. */
@@ -70,19 +59,26 @@ static int sz_py_export_exact_bytes(PyObject *object, sz_size_t expected, char c
     return 1;
 }
 
-/** Reads the single @c secret argument every key constructor takes, positionally or by name. On
- *  failure sets a Python exception naming @p type_name and returns NULL. */
-static PyObject *sz_py_export_secret_argument(PyObject *args, PyObject *kwargs, char const *type_name) {
+/** Reads the single @c secret argument every key constructor takes, positionally or by name, and
+ *  its optional @c capabilities keyword, or sets a Python exception naming @p type_name and returns
+ *  NULL on failure. */
+static PyObject *sz_py_export_secret_argument(PyObject *args, PyObject *kwargs, char const *type_name,
+                                              sz_capability_t *capabilities) {
     Py_ssize_t const positional_args_count = PyTuple_Size(args);
     if (positional_args_count > 1) {
         PyErr_Format(PyExc_TypeError, "%s() takes at most 1 positional argument", type_name);
         return NULL;
     }
     PyObject *secret_obj = positional_args_count == 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
+    PyObject *capabilities_object = NULL;
     if (kwargs) {
         Py_ssize_t position = 0;
         PyObject *name, *value;
         while (PyDict_Next(kwargs, &position, &name, &value)) {
+            if (PyUnicode_CompareWithASCIIString(name, "capabilities") == 0) {
+                capabilities_object = value;
+                continue;
+            }
             if (PyUnicode_CompareWithASCIIString(name, "secret") != 0) {
                 PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", name);
                 return NULL;
@@ -95,6 +91,7 @@ static PyObject *sz_py_export_secret_argument(PyObject *args, PyObject *kwargs, 
         }
     }
     if (!secret_obj) PyErr_Format(PyExc_TypeError, "%s() missing the required `secret` argument", type_name);
+    if (!secret_obj || sz_py_export_capabilities(capabilities_object, capabilities) != 0) return NULL;
     return secret_obj;
 }
 
@@ -109,16 +106,26 @@ static PyObject *Aes256CtrKey_new(PyTypeObject *type, PyObject *args, PyObject *
     Aes256CtrKey *self = (Aes256CtrKey *)type->tp_alloc(type, 0);
     if (!self) return NULL;
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
-    sz_aes256_key_init(&self->key, placeholder_secret);
+    self->capabilities = sz_py_enabled_capabilities;
+    sz_status_t const status = sz_aes256_key_init_best(&self->key, placeholder_secret, self->capabilities, NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(self);
+        sz_py_raise_status(status, "Aes256CtrKey()");
+        return NULL;
+    }
     return (PyObject *)self;
 }
 
 static int Aes256CtrKey_init(Aes256CtrKey *self, PyObject *args, PyObject *kwargs) {
-    PyObject *secret_obj = sz_py_export_secret_argument(args, kwargs, "Aes256CtrKey");
+    PyObject *secret_obj = sz_py_export_secret_argument(args, kwargs, "Aes256CtrKey", &self->capabilities);
     if (!secret_obj) return -1;
     sz_cptr_t secret;
     if (!sz_py_export_exact_bytes(secret_obj, STRINGZILLA_AES256_KEY_LENGTH, "secret", &secret)) return -1;
-    sz_aes256_key_init(&self->key, (sz_u8_t const *)secret);
+    sz_status_t const status = sz_aes256_key_init_best(&self->key, (sz_u8_t const *)secret, self->capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "Aes256CtrKey()");
+        return -1;
+    }
     return 0;
 }
 
@@ -204,8 +211,14 @@ static PyObject *Aes256CtrKey_xor(PyObject *self_obj, PyObject *const *args, Py_
 
     PyObject *output_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)text.length);
     if (!output_obj) return NULL;
-    sz_aes256_ctr_xor(&self->key, (sz_u8_t const *)nonce, byte_offset, text.start, text.length,
-                      (sz_ptr_t)PyBytes_AS_STRING(output_obj));
+    sz_status_t const status = sz_aes256_ctr_xor_best(&self->key, (sz_u8_t const *)nonce, byte_offset, text.start,
+                                                      text.length, (sz_ptr_t)PyBytes_AS_STRING(output_obj),
+                                                      self->capabilities, NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(output_obj);
+        sz_py_raise_status(status, "xor()");
+        return NULL;
+    }
     return output_obj;
 }
 
@@ -220,16 +233,27 @@ static PyObject *Aes256GcmKey_new(PyTypeObject *type, PyObject *args, PyObject *
     Aes256GcmKey *self = (Aes256GcmKey *)type->tp_alloc(type, 0);
     if (!self) return NULL;
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
-    sz_aes256_gcm_key_init(&self->key, placeholder_secret);
+    self->capabilities = sz_py_enabled_capabilities;
+    sz_status_t const status = sz_aes256_gcm_key_init_best(&self->key, placeholder_secret, self->capabilities, NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(self);
+        sz_py_raise_status(status, "Aes256GcmKey()");
+        return NULL;
+    }
     return (PyObject *)self;
 }
 
 static int Aes256GcmKey_init(Aes256GcmKey *self, PyObject *args, PyObject *kwargs) {
-    PyObject *secret_obj = sz_py_export_secret_argument(args, kwargs, "Aes256GcmKey");
+    PyObject *secret_obj = sz_py_export_secret_argument(args, kwargs, "Aes256GcmKey", &self->capabilities);
     if (!secret_obj) return -1;
     sz_cptr_t secret;
     if (!sz_py_export_exact_bytes(secret_obj, STRINGZILLA_AES256_KEY_LENGTH, "secret", &secret)) return -1;
-    sz_aes256_gcm_key_init(&self->key, (sz_u8_t const *)secret);
+    sz_status_t const status = sz_aes256_gcm_key_init_best(&self->key, (sz_u8_t const *)secret, self->capabilities,
+                                                           NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "Aes256GcmKey()");
+        return -1;
+    }
     return 0;
 }
 
@@ -314,8 +338,14 @@ static PyObject *Aes256GcmKey_encrypt(PyObject *self_obj, PyObject *const *args,
     PyObject *output_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)text.length);
     if (!output_obj) return NULL;
     sz_u8_t tag[STRINGZILLA_AES256_TAG_LENGTH];
-    sz_aes256_gcm_encrypt(&self->key, (sz_u8_t const *)nonce, associated.start, associated.length, text.start,
-                          text.length, (sz_ptr_t)PyBytes_AS_STRING(output_obj), tag);
+    sz_status_t const status = sz_aes256_gcm_encrypt_best(
+        &self->key, (sz_u8_t const *)nonce, associated.start, associated.length, text.start, text.length,
+        (sz_ptr_t)PyBytes_AS_STRING(output_obj), tag, self->capabilities, NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(output_obj);
+        sz_py_raise_status(status, "encrypt()");
+        return NULL;
+    }
 
     PyObject *tag_obj = PyBytes_FromStringAndSize((char const *)tag, STRINGZILLA_AES256_TAG_LENGTH);
     if (!tag_obj) {
@@ -423,21 +453,25 @@ static PyObject *Aes256GcmKey_decrypt(PyObject *self_obj, PyObject *const *args,
 
     PyObject *output_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)text.length);
     if (!output_obj) return NULL;
-    sz_status_t const status = sz_aes256_gcm_decrypt(&self->key, (sz_u8_t const *)nonce, associated.start,
-                                                     associated.length, text.start, text.length,
-                                                     (sz_ptr_t)PyBytes_AS_STRING(output_obj), (sz_u8_t const *)tag);
+    sz_status_t const status = sz_aes256_gcm_decrypt_best(
+        &self->key, (sz_u8_t const *)nonce, associated.start, associated.length, text.start, text.length,
+        (sz_ptr_t)PyBytes_AS_STRING(output_obj), (sz_u8_t const *)tag, self->capabilities, NULL);
     if (status != sz_success_k) {
         Py_DECREF(output_obj);
-        PyErr_SetString(AuthenticationErrorType, "The tag does not authenticate this ciphertext");
+        if (status == sz_authentication_failed_k)
+            PyErr_SetString(AuthenticationErrorType, "The tag does not authenticate this ciphertext");
+        else sz_py_raise_status(status, "decrypt()");
         return NULL;
     }
     return output_obj;
 }
 
-/** Reads the @p key and @p nonce arguments both chunked types take, positionally or by name. On
- *  failure sets a Python exception naming @p type_name and returns 0. */
+/** Reads the @p key and @p nonce arguments both chunked types take, positionally or by name, and
+ *  their optional @c capabilities keyword. On failure sets a Python exception naming @p type_name
+ *  and returns 0. */
 static int sz_py_export_key_and_nonce_arguments(PyObject *args, PyObject *kwargs, char const *type_name,
-                                                Aes256GcmKey const **key, sz_cptr_t *nonce) {
+                                                Aes256GcmKey const **key, sz_cptr_t *nonce,
+                                                sz_capability_t *capabilities) {
     Py_ssize_t const positional_args_count = PyTuple_Size(args);
     if (positional_args_count > 2) {
         PyErr_Format(PyExc_TypeError, "%s() takes at most 2 positional arguments", type_name);
@@ -445,6 +479,7 @@ static int sz_py_export_key_and_nonce_arguments(PyObject *args, PyObject *kwargs
     }
     PyObject *key_obj = positional_args_count >= 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
     PyObject *nonce_obj = positional_args_count >= 2 ? PyTuple_GET_ITEM(args, 1) : NULL;
+    PyObject *capabilities_object = NULL;
 
     if (kwargs) {
         Py_ssize_t position = 0;
@@ -464,12 +499,14 @@ static int sz_py_export_key_and_nonce_arguments(PyObject *args, PyObject *kwargs
                 }
                 nonce_obj = value;
             }
+            else if (PyUnicode_CompareWithASCIIString(name, "capabilities") == 0) { capabilities_object = value; }
             else {
                 PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", name);
                 return 0;
             }
         }
     }
+    if (sz_py_export_capabilities(capabilities_object, capabilities) != 0) return 0;
 
     if (!key_obj || !nonce_obj) {
         PyErr_Format(PyExc_TypeError, "%s() missing the required `key` and `nonce` arguments", type_name);
@@ -497,17 +534,31 @@ static PyObject *Aes256GcmEncryptor_new(PyTypeObject *type, PyObject *args, PyOb
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
     sz_u8_t const placeholder_nonce[STRINGZILLA_AES256_NONCE_LENGTH] = {0};
     sz_aes256_gcm_key_t placeholder_key;
-    sz_aes256_gcm_key_init(&placeholder_key, placeholder_secret);
-    sz_aes256_gcm_encryptor_init(&self->encryptor, &placeholder_key, placeholder_nonce);
+    self->capabilities = sz_py_enabled_capabilities;
+    sz_status_t status = sz_aes256_gcm_key_init_best(&placeholder_key, placeholder_secret, self->capabilities, NULL);
+    if (status == sz_success_k)
+        status = sz_aes256_gcm_encryptor_init_best(&self->encryptor, &placeholder_key, placeholder_nonce,
+                                                   self->capabilities, NULL);
     sz_py_wipe_bytes(&placeholder_key, sizeof(placeholder_key));
+    if (status != sz_success_k) {
+        Py_DECREF(self);
+        sz_py_raise_status(status, "Aes256GcmEncryptor()");
+        return NULL;
+    }
     return (PyObject *)self;
 }
 
 static int Aes256GcmEncryptor_init(Aes256GcmEncryptor *self, PyObject *args, PyObject *kwargs) {
     Aes256GcmKey const *key;
     sz_cptr_t nonce;
-    if (!sz_py_export_key_and_nonce_arguments(args, kwargs, "Aes256GcmEncryptor", &key, &nonce)) return -1;
-    sz_aes256_gcm_encryptor_init(&self->encryptor, &key->key, (sz_u8_t const *)nonce);
+    if (!sz_py_export_key_and_nonce_arguments(args, kwargs, "Aes256GcmEncryptor", &key, &nonce, &self->capabilities))
+        return -1;
+    sz_status_t const status = sz_aes256_gcm_encryptor_init_best(&self->encryptor, &key->key, (sz_u8_t const *)nonce,
+                                                                 self->capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "Aes256GcmEncryptor()");
+        return -1;
+    }
     return 0;
 }
 
@@ -518,7 +569,12 @@ static PyObject *Aes256GcmEncryptor_associate(PyObject *self_obj, PyObject *arg)
         wrap_current_exception("Argument must be string-like");
         return NULL;
     }
-    sz_aes256_gcm_encryptor_associate(&self->encryptor, text.start, text.length);
+    sz_status_t const status = sz_aes256_gcm_encryptor_associate_best(&self->encryptor, text.start, text.length,
+                                                                      self->capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "associate()");
+        return NULL;
+    }
     Py_INCREF(self_obj);
     return self_obj;
 }
@@ -532,7 +588,13 @@ static PyObject *Aes256GcmEncryptor_encrypt(PyObject *self_obj, PyObject *arg) {
     }
     PyObject *output_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)text.length);
     if (!output_obj) return NULL;
-    sz_aes256_gcm_encryptor_update(&self->encryptor, text.start, text.length, (sz_ptr_t)PyBytes_AS_STRING(output_obj));
+    sz_status_t const status = sz_aes256_gcm_encryptor_update_best(
+        &self->encryptor, text.start, text.length, (sz_ptr_t)PyBytes_AS_STRING(output_obj), self->capabilities, NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(output_obj);
+        sz_py_raise_status(status, "encrypt()");
+        return NULL;
+    }
     return output_obj;
 }
 
@@ -540,7 +602,11 @@ static PyObject *Aes256GcmEncryptor_digest(PyObject *self_obj, PyObject *noargs)
     sz_unused_(noargs);
     Aes256GcmEncryptor *self = (Aes256GcmEncryptor *)self_obj;
     sz_u8_t tag[STRINGZILLA_AES256_TAG_LENGTH];
-    sz_aes256_gcm_encryptor_digest(&self->encryptor, tag);
+    sz_status_t const status = sz_aes256_gcm_encryptor_digest_best(&self->encryptor, tag, self->capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "digest()");
+        return NULL;
+    }
     return PyBytes_FromStringAndSize((char const *)tag, STRINGZILLA_AES256_TAG_LENGTH);
 }
 
@@ -557,17 +623,31 @@ static PyObject *Aes256GcmDecryptor_new(PyTypeObject *type, PyObject *args, PyOb
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
     sz_u8_t const placeholder_nonce[STRINGZILLA_AES256_NONCE_LENGTH] = {0};
     sz_aes256_gcm_key_t placeholder_key;
-    sz_aes256_gcm_key_init(&placeholder_key, placeholder_secret);
-    sz_aes256_gcm_decryptor_init(&self->decryptor, &placeholder_key, placeholder_nonce);
+    self->capabilities = sz_py_enabled_capabilities;
+    sz_status_t status = sz_aes256_gcm_key_init_best(&placeholder_key, placeholder_secret, self->capabilities, NULL);
+    if (status == sz_success_k)
+        status = sz_aes256_gcm_decryptor_init_best(&self->decryptor, &placeholder_key, placeholder_nonce,
+                                                   self->capabilities, NULL);
     sz_py_wipe_bytes(&placeholder_key, sizeof(placeholder_key));
+    if (status != sz_success_k) {
+        Py_DECREF(self);
+        sz_py_raise_status(status, "Aes256GcmDecryptor()");
+        return NULL;
+    }
     return (PyObject *)self;
 }
 
 static int Aes256GcmDecryptor_init(Aes256GcmDecryptor *self, PyObject *args, PyObject *kwargs) {
     Aes256GcmKey const *key;
     sz_cptr_t nonce;
-    if (!sz_py_export_key_and_nonce_arguments(args, kwargs, "Aes256GcmDecryptor", &key, &nonce)) return -1;
-    sz_aes256_gcm_decryptor_init(&self->decryptor, &key->key, (sz_u8_t const *)nonce);
+    if (!sz_py_export_key_and_nonce_arguments(args, kwargs, "Aes256GcmDecryptor", &key, &nonce, &self->capabilities))
+        return -1;
+    sz_status_t const status = sz_aes256_gcm_decryptor_init_best(&self->decryptor, &key->key, (sz_u8_t const *)nonce,
+                                                                 self->capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "Aes256GcmDecryptor()");
+        return -1;
+    }
     return 0;
 }
 
@@ -578,7 +658,12 @@ static PyObject *Aes256GcmDecryptor_associate(PyObject *self_obj, PyObject *arg)
         wrap_current_exception("Argument must be string-like");
         return NULL;
     }
-    sz_aes256_gcm_decryptor_associate(&self->decryptor, text.start, text.length);
+    sz_status_t const status = sz_aes256_gcm_decryptor_associate_best(&self->decryptor, text.start, text.length,
+                                                                      self->capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "associate()");
+        return NULL;
+    }
     Py_INCREF(self_obj);
     return self_obj;
 }
@@ -592,8 +677,13 @@ static PyObject *Aes256GcmDecryptor_decrypt_unverified(PyObject *self_obj, PyObj
     }
     PyObject *output_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)text.length);
     if (!output_obj) return NULL;
-    sz_aes256_gcm_decryptor_update_unverified(&self->decryptor, text.start, text.length,
-                                              (sz_ptr_t)PyBytes_AS_STRING(output_obj));
+    sz_status_t const status = sz_aes256_gcm_decryptor_update_unverified_best(
+        &self->decryptor, text.start, text.length, (sz_ptr_t)PyBytes_AS_STRING(output_obj), self->capabilities, NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(output_obj);
+        sz_py_raise_status(status, "decrypt_unverified()");
+        return NULL;
+    }
     return output_obj;
 }
 
@@ -601,8 +691,14 @@ static PyObject *Aes256GcmDecryptor_verify(PyObject *self_obj, PyObject *arg) {
     Aes256GcmDecryptor *self = (Aes256GcmDecryptor *)self_obj;
     sz_cptr_t tag;
     if (!sz_py_export_exact_bytes(arg, STRINGZILLA_AES256_TAG_LENGTH, "tag", &tag)) return NULL;
-    if (sz_aes256_gcm_decryptor_verify(&self->decryptor, (sz_u8_t const *)tag) != sz_success_k) {
+    sz_status_t const status = sz_aes256_gcm_decryptor_verify_best(&self->decryptor, (sz_u8_t const *)tag,
+                                                                   self->capabilities, NULL);
+    if (status == sz_authentication_failed_k) {
         PyErr_SetString(AuthenticationErrorType, "The tag does not authenticate this ciphertext");
+        return NULL;
+    }
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "verify()");
         return NULL;
     }
     Py_RETURN_NONE;
@@ -619,7 +715,7 @@ char const doc_AuthenticationError[] =                                          
     "  True";
 
 static char const doc_Aes256CtrKey[] =                                                             //
-    "Aes256CtrKey(secret)\n"                                                                       //
+    "Aes256CtrKey(secret, *, capabilities=None)\n"                                                 //
     "\n"                                                                                           //
     "AES-256 in counter mode, abbreviated CTR: unauthenticated, seekable, and its own inverse.\n"  //
     "The 32-byte secret is expanded once into a round-key schedule the object holds and wipes\n"   //
@@ -627,6 +723,8 @@ static char const doc_Aes256CtrKey[] =                                          
     "\n"                                                                                           //
     "Args:\n"                                                                                      //
     "  secret (str | bytes): Exactly 32 secret bytes.\n"                                           //
+    "  capabilities (Capability, optional): Capabilities this key and its calls run,\n"            //
+    "    defaulting to the CPU's enabled ones.\n"                                                  //
     "Raises:\n"                                                                                    //
     "  ValueError: If the secret is not exactly 32 bytes long.\n"                                  //
     "Note:\n"                                                                                      //
@@ -658,7 +756,7 @@ static char const doc_Aes256CtrKey_xor[] =                                      
     "  True";
 
 static char const doc_Aes256GcmKey[] =                                                              //
-    "Aes256GcmKey(secret)\n"                                                                        //
+    "Aes256GcmKey(secret, *, capabilities=None)\n"                                                  //
     "\n"                                                                                            //
     "AES-256 in Galois/counter mode, abbreviated GCM: authenticated, and therefore not seekable.\n" //
     "The 32-byte secret is expanded once into a schedule and the Galois hash powers, also called\n" //
@@ -666,6 +764,8 @@ static char const doc_Aes256GcmKey[] =                                          
     "\n"                                                                                            //
     "Args:\n"                                                                                       //
     "  secret (str | bytes): Exactly 32 secret bytes.\n"                                            //
+    "  capabilities (Capability, optional): Capabilities this key and its calls run,\n"             //
+    "    defaulting to the CPU's enabled ones.\n"                                                   //
     "Raises:\n"                                                                                     //
     "  ValueError: If the secret is not exactly 32 bytes long.\n"                                   //
     "Note:\n"                                                                                       //
@@ -718,7 +818,7 @@ static char const doc_Aes256GcmKey_decrypt[] =                                  
     "  b'hello'";
 
 static char const doc_Aes256GcmEncryptor[] =                                                       //
-    "Aes256GcmEncryptor(key, nonce)\n"                                                             //
+    "Aes256GcmEncryptor(key, nonce, *, capabilities=None)\n"                                       //
     "\n"                                                                                           //
     "The same Galois/counter mode construction as `Aes256GcmKey`, sealing a message in chunks.\n"  //
     "Chunk boundaries are invisible to the result. Opening a message uses `Aes256GcmDecryptor`,\n" //
@@ -728,6 +828,8 @@ static char const doc_Aes256GcmEncryptor[] =                                    
     "Args:\n"                                                                                      //
     "  key (Aes256GcmKey): The expanded key, copied into the encryptor.\n"                         //
     "  nonce (str | bytes): Exactly 12 nonce bytes, never repeated under one secret.\n"            //
+    "  capabilities (Capability, optional): Capabilities this encryptor and its calls run,\n"      //
+    "    defaulting to the CPU's enabled ones.\n"                                                  //
     "\n"                                                                                           //
     "Example:\n"                                                                                   //
     "  >>> key, nonce = sz.Aes256GcmKey(bytes(32)), bytes(12)\n"                                   //
@@ -780,7 +882,7 @@ static char const doc_Aes256GcmEncryptor_digest[] =                             
     "  True";
 
 static char const doc_Aes256GcmDecryptor[] =                                                     //
-    "Aes256GcmDecryptor(key, nonce)\n"                                                           //
+    "Aes256GcmDecryptor(key, nonce, *, capabilities=None)\n"                                     //
     "\n"                                                                                         //
     "The same Galois/counter mode construction as `Aes256GcmKey`, opening a message in chunks\n" //
     "and checking its tag at the end. Chunk boundaries are invisible to the result. Sealing a\n" //
@@ -789,6 +891,8 @@ static char const doc_Aes256GcmDecryptor[] =                                    
     "Args:\n"                                                                                    //
     "  key (Aes256GcmKey): The expanded key, copied into the decryptor.\n"                       //
     "  nonce (str | bytes): The 12 nonce bytes the message was sealed under.\n"                  //
+    "  capabilities (Capability, optional): Capabilities this decryptor and its calls run,\n"    //
+    "    defaulting to the CPU's enabled ones.\n"                                                //
     "\n"                                                                                         //
     "Example:\n"                                                                                 //
     "  >>> key, nonce = sz.Aes256GcmKey(bytes(32)), bytes(12)\n"                                 //

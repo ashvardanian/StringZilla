@@ -76,8 +76,8 @@ pub struct SubstringsReport {
     pub matches_emitted: usize,
     /// Matches written out, which is `matches_emitted` clipped at the capacity.
     pub matches_stored: usize,
-    /// Bytes a rewrite needs, which is the truth whatever the tape held.
-    pub tape_bytes: usize,
+    /// Bytes a rewrite needs, which is the truth whatever the target held.
+    pub target_length: usize,
     /// Matches or bytes the round could not hold, zero when everything fit.
     pub shortfall: usize,
 }
@@ -187,9 +187,12 @@ pub struct SubstringsEngine {
     overlap_policy: SubstringsOverlapPolicy,
     matches_budget: usize,
     chunk_budget: usize,
+    haystacks_budget: usize,
     report: *mut SubstringsReport,
-    capability: i32,
-    alloc: _SzMemoryAllocator,
+    capability: u64,
+    ordinal: usize,
+    copy: *const c_void,
+    allocator: _SzMemoryAllocator,
     memory: *mut c_void,
     memory_bytes: usize,
     scratch: *mut c_void,
@@ -197,12 +200,13 @@ pub struct SubstringsEngine {
 }
 
 impl SubstringsEngine {
-    /// Compiles `needles` into an automaton the matching verbs read, on the host.
+    /// Compiles `needles` into an automaton the matching verbs read, on the host, on the CPU's
+    /// [`Device::capabilities_enabled`].
     ///
     /// An empty needle is refused rather than skipped, since it would match at every position
     /// and dropping it would shift every later needle's reported index. `hot_states` is the
     /// count kept in the dense hot rows, or [`SUBSTRINGS_HOT_STATES_AUTO`] to fill a fixed byte
-    /// budget instead; `matches_budget` bounds one device round and is read by a device tier
+    /// budget instead; `matches_budget` bounds one device round and is read by a device kernel
     /// alone, so a host engine takes [`SUBSTRINGS_MATCHES_BUDGET_AUTO`] and walks straight into
     /// the caller's output.
     pub fn new<Needle>(
@@ -216,68 +220,75 @@ impl SubstringsEngine {
         Needle: AsRef<[u8]>,
     {
         let mut engine = MaybeUninit::<Self>::uninit();
-        let status = with_sequence(needles, |sequence| unsafe {
-            sz_substrings_engine_init_cpu(
+        with_sequence(needles, |sequence| unsafe {
+            sz_substrings_engine_init(
+                engine.as_mut_ptr(),
                 sequence,
                 case_sensitivity,
                 overlap_policy,
                 hot_states,
                 matches_budget,
+                0,
+                enabled_cpu_capabilities_mask(),
+                0,
                 core::ptr::null(),
-                engine.as_mut_ptr(),
+                core::ptr::null_mut(),
             )
-        });
-        match status {
-            Status::Success => Ok(unsafe { engine.assume_init() }),
-            error => Err(error),
-        }
+        })
+        .check()?;
+        Ok(unsafe { engine.assume_init() })
     }
 
-    /// Compiles `needles` into an automaton on `stream`'s device, round arena included.
+    /// Compiles `needles` into an automaton on `device`, with its [`Device::capabilities_enabled`],
+    /// round arena included; the engine keeps the device.
     ///
-    /// `stream` is a `cudaStream_t`, or null for the default stream. `matches_budget` is
-    /// what a round may emit before every later kernel retires, and is the one size
-    /// bound construction takes.
+    /// `matches_budget` is what a device round may emit before every later kernel retires, and
+    /// `haystacks_budget` how many haystacks it may carry; the round's arena is sized for both
+    /// here, zero asking for a default, so no verb allocates, a round carrying more haystacks is
+    /// refused, and matches past the budget surface as the report's `shortfall`.
     ///
-    /// A compute verb of a device engine also needs a candidate sequence whose accessors run on the
-    /// device, which this crate cannot build yet, so such an engine is constructible here before it
-    /// is drivable and every verb below answers `Status::DeviceMemoryMismatch` for it.
+    /// `stream` serves this call's own work alone: a `cudaStream_t` or `hipStream_t` of `device`,
+    /// or null for its default one, on Metal a `sz_metal_device_t *` opened on `device`, and null
+    /// on the CPU. The verbs below pass a null stream and host haystacks, so a GPU engine answers
+    /// them with an error status such as `Status::DeviceMemoryMismatch` until this crate can build
+    /// device-resident haystacks.
     ///
     /// # Safety
     ///
-    /// `stream` must be a live stream of the current context, and it makes every later verb of this
-    /// engine asynchronous: each one enqueues and returns, so every output slice has to be
-    /// device-reachable, has to outlive the launch, and neither it nor [`SubstringsEngine::report`]
-    /// may be read before the caller joins `stream` itself.
-    #[cfg(feature = "cuda")]
-    pub unsafe fn new_on_gpu<Needle>(
+    /// `stream` must be a live stream or Metal device of `device`, or null; this call may join it.
+    #[allow(clippy::too_many_arguments)] // The C init's own arguments, each a separate knob.
+    pub unsafe fn new_on<Needle>(
         needles: &[Needle],
         case_sensitivity: CaseSensitivity,
         overlap_policy: SubstringsOverlapPolicy,
         hot_states: usize,
         matches_budget: usize,
+        haystacks_budget: usize,
+        device: Device,
         stream: *mut c_void,
     ) -> Result<Self, Status>
     where
         Needle: AsRef<[u8]>,
     {
+        let capabilities = device.capabilities_enabled()?;
         let mut engine = MaybeUninit::<Self>::uninit();
-        let status = with_sequence(needles, |sequence| unsafe {
-            sz_substrings_engine_init_gpu(
+        with_sequence(needles, |sequence| unsafe {
+            sz_substrings_engine_init(
+                engine.as_mut_ptr(),
                 sequence,
                 case_sensitivity,
                 overlap_policy,
                 hot_states,
                 matches_budget,
+                haystacks_budget,
+                capabilities.bits(),
+                device.ordinal(),
                 core::ptr::null(),
                 stream,
-                engine.as_mut_ptr(),
             )
-        });
-        match status {
-            Status::Success => Ok(unsafe { engine.assume_init() }),
-            error => Err(error),
-        }
+        })
+        .check()?;
+        Ok(unsafe { engine.assume_init() })
     }
 
     /// Needles the vocabulary holds, which bounds every reported `needle_index`.
@@ -293,7 +304,7 @@ impl SubstringsEngine {
     /// What the last round found, which is how a capacity shortfall surfaces instead of
     /// as an error.
     ///
-    /// On an engine built by `new_on_gpu` the record is written by the device, so
+    /// On a device engine built by `new_on` the record is written by the device, so
     /// this reads it only correctly after the caller has joined its own stream.
     pub fn report(&self) -> SubstringsReport {
         unsafe { *self.report }
@@ -317,13 +328,10 @@ impl SubstringsEngine {
 
         let engine = self as *mut Self;
         let output = counts.as_mut_ptr();
-        let status = with_sequence(haystacks, |sequence| unsafe {
-            sz_substrings_counts(engine, sequence, output, counts_stride)
-        });
-        match status {
-            Status::Success => Ok(()),
-            error => Err(error),
-        }
+        with_sequence(haystacks, |sequence| unsafe {
+            sz_substrings_counts(engine, sequence, output, counts_stride, core::ptr::null_mut())
+        })
+        .check()
     }
 
     /// Reports every match of every needle in every haystack, ascending by haystack.
@@ -349,21 +357,18 @@ impl SubstringsEngine {
         let capacity = matches.len();
         let output = optional_mut_ptr(matches);
         let offsets = matches_offsets.as_mut_ptr();
-        let status = with_sequence(haystacks, |sequence| unsafe {
-            sz_substrings_find(engine, sequence, output, capacity, offsets)
-        });
-        match status {
-            Status::Success => Ok(()),
-            error => Err(error),
-        }
+        with_sequence(haystacks, |sequence| unsafe {
+            sz_substrings_find(engine, sequence, output, capacity, offsets, core::ptr::null_mut())
+        })
+        .check()
     }
 
-    /// Rewrites every haystack onto one tape, substituting one replacement per needle.
+    /// Rewrites every haystack into one `target` buffer, substituting one replacement per needle.
     ///
     /// `replacements` is indexed by needle and an empty one deletes the match, so it holds exactly
     /// [`SubstringsEngine::needles_count`] entries. `offsets` holds one boundary per haystack plus
-    /// a final total and is filled whether or not the tape held the result, which is what sizes the
-    /// next call; a tape too small leaves its contents unspecified rather than failing, and
+    /// a final total and is filled whether or not `target` held the result, which is what sizes the
+    /// next call; a `target` too small leaves its contents unspecified rather than failing, and
     /// [`SubstringsEngine::report`] names the bytes the rewrite needed.
     ///
     /// The engine's policy must be a cover, since a substitution over matches that share bytes is
@@ -372,7 +377,7 @@ impl SubstringsEngine {
         &mut self,
         haystacks: &[Haystack],
         replacements: &[Replacement],
-        tape: &mut [u8],
+        target: &mut [u8],
         offsets: &mut [usize],
     ) -> Result<(), Status>
     where
@@ -387,10 +392,10 @@ impl SubstringsEngine {
         }
 
         let engine = self as *mut Self;
-        let capacity = tape.len();
-        let output = optional_mut_ptr(tape);
+        let capacity = target.len();
+        let output = optional_mut_ptr(target);
         let boundaries = offsets.as_mut_ptr();
-        let status = with_sequence(haystacks, |haystacks_sequence| {
+        with_sequence(haystacks, |haystacks_sequence| {
             with_sequence(replacements, |replacements_sequence| unsafe {
                 sz_substrings_replace(
                     engine,
@@ -399,13 +404,11 @@ impl SubstringsEngine {
                     output,
                     capacity,
                     boundaries,
+                    core::ptr::null_mut(),
                 )
             })
-        });
-        match status {
-            Status::Success => Ok(()),
-            error => Err(error),
-        }
+        })
+        .check()
     }
 
     /// Scores every haystack against the whole vocabulary as one BM25 query, one
@@ -443,7 +446,7 @@ impl SubstringsEngine {
 
         let engine = self as *mut Self;
         let output = scores.as_mut_ptr();
-        let status = with_sequence(haystacks, |sequence| unsafe {
+        with_sequence(haystacks, |sequence| unsafe {
             sz_substrings_bm25_scores(
                 engine,
                 sequence,
@@ -452,12 +455,10 @@ impl SubstringsEngine {
                 needle_weights.as_ptr(),
                 output,
                 scores_stride,
+                core::ptr::null_mut(),
             )
-        });
-        match status {
-            Status::Success => Ok(()),
-            error => Err(error),
-        }
+        })
+        .check()
     }
 }
 

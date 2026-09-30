@@ -61,8 +61,22 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
 }
 
 static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
-    sz_cptr_t path;
-    if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
+    if (PyTuple_GET_SIZE(positional_args) != 1 || (named_args && PyDict_GET_SIZE(named_args))) {
+        PyErr_SetString(PyExc_TypeError, "File() takes exactly one positional argument: the path");
+        return -1;
+    }
+    PyObject *const path_object = PyTuple_GET_ITEM(positional_args, 0);
+    if (!PyUnicode_Check(path_object)) {
+        PyErr_Format(PyExc_TypeError, "File() path must be a str, got %s", Py_TYPE(path_object)->tp_name);
+        return -1;
+    }
+    Py_ssize_t path_length = 0;
+    sz_cptr_t const path = PyUnicode_AsUTF8AndSize(path_object, &path_length);
+    if (!path) return -1;
+    if (strlen(path) != (size_t)path_length) {
+        PyErr_SetString(PyExc_ValueError, "File() path contains an embedded null character");
+        return -1;
+    }
 
     // Re-initialization: release any mapping/handles from a prior __init__ before opening a new file
     File_release_(self);

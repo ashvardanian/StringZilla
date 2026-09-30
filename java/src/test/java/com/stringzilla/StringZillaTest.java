@@ -112,8 +112,45 @@ class StringZillaTest {
 
     @Test
     void metadata_isPopulated() {
-        assertFalse(StringZilla.backend().isEmpty());
         assertTrue(Character.isDigit(StringZilla.version().charAt(0)));
+    }
+
+    @Test
+    void capabilities_enableClampsAndKeepsSerial() {
+        StringZilla.Device cpu = StringZilla.Device.cpu();
+        long enabled = cpu.capabilitiesEnabled();
+        assertEquals("serial", StringZilla.capabilitiesName(1));
+        assertEquals(1, enabled & 1);
+        assertEquals(0, enabled & ~(cpu.capabilitiesDetected() & cpu.capabilitiesCompiled()));
+        try {
+            assertEquals(1, cpu.capabilitiesEnable(0));
+            assertEquals(1, cpu.capabilitiesEnabled());
+            assertEquals(4, StringZilla.indexOf(b("the quick"), b("quick")));
+        } finally {
+            assertEquals(enabled, cpu.capabilitiesEnable(enabled));
+        }
+    }
+
+    @Test
+    void devices_refuseMissingOrdinalsAndCpuOnlyCalls() {
+        assertEquals(1, StringZilla.Device.count(StringZilla.DeviceKind.CPU));
+        assertThrows(StringZilla.StatusException.class, () -> new StringZilla.Device(StringZilla.DeviceKind.CPU, 1));
+        StringZilla.Device cpu = StringZilla.Device.cpu();
+        cpu.configureThread(cpu.capabilitiesEnabled());
+        for (StringZilla.DeviceKind kind : StringZilla.DeviceKind.values()) {
+            if (kind == StringZilla.DeviceKind.CPU) continue;
+            long count;
+            try {
+                count = StringZilla.Device.count(kind);
+            } catch (StringZilla.StatusException missing) {
+                continue;
+            }
+            assertThrows(StringZilla.StatusException.class, () -> new StringZilla.Device(kind, count));
+            StringZilla.Device gpu = new StringZilla.Device(kind, 0);
+            assertEquals(0, gpu.capabilitiesCompiled() & ((1L << 48) - 1));
+            assertThrows(StringZilla.StatusException.class, () -> gpu.capabilitiesEnable(-1));
+            assertThrows(StringZilla.StatusException.class, () -> gpu.configureThread(-1));
+        }
     }
 
     /** Zero-copy adapter: hash a Lucene BytesRef's backing bytes with no copy (heap slice via critical). */
@@ -303,6 +340,15 @@ class StringZillaTest {
     }
 
     @Test
+    void normalize_rejectsTextWhoseBoundOverflowsInt() {
+        byte[] text = new byte[Integer.MAX_VALUE / 18 + 1]; // text.length * 18 wraps past Integer.MAX_VALUE
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> StringZilla.normalize(text, StringZilla.NormalForm.NFC, new byte[16]));
+        assertThrows(ArithmeticException.class, () -> StringZilla.normalize(text, StringZilla.NormalForm.NFC));
+    }
+
+    @Test
     void normalize_nfcOfNfdRoundTrips() {
         byte[] precomposed = {(byte) 0xC3, (byte) 0xA9}; // é U+00E9
         byte[] decomposed = StringZilla.normalize(precomposed, StringZilla.NormalForm.NFD);
@@ -356,6 +402,18 @@ class StringZillaTest {
         int count = StringZilla.argSort(text, starts, lengths, order, false, 0, false);
         assertEquals(3, count);
         assertArrayEquals(new long[] {1, 0, 2}, order); // apple, banana, cherry
+    }
+
+    @Test
+    void argSort_bufferSegmentsRejectRangesPastText() {
+        byte[] text = b("banana\napple");
+        long[] order = new long[2];
+        assertThrows(
+                IndexOutOfBoundsException.class,
+                () -> StringZilla.argSort(text, new long[] {0, 7}, new long[] {6, 6}, order, false, 0, false));
+        assertThrows(
+                IndexOutOfBoundsException.class,
+                () -> StringZilla.argSort(text, new long[] {-1, 7}, new long[] {6, 5}, order, false, 0, false));
     }
     // endregion
 
@@ -477,6 +535,13 @@ class StringZillaTest {
                 .map(StringZilla.Match::offset)
                 .toList();
         assertEquals(java.util.List.of(0L, 6L, 12L), offsets);
+    }
+
+    @Test
+    void uncasedMatches_emptyNeedleYieldsNothing() {
+        var matches = StringZilla.uncasedMatches(b("abc"), b(""));
+        assertTrue(matches.toList().isEmpty());
+        assertTrue(matches.overlapping().toList().isEmpty());
     }
 
     @Test

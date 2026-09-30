@@ -9,42 +9,44 @@
 /**
  *  @brief Iterator yielding Unicode code points (as Python @c int) decoded from UTF-8 text.
  *
- *  Streams code points by refilling a small inline buffer with @c sz_utf8_decode, which fills the
- *  whole buffer (or drains the input) per call regardless of script width, and substitutes U+FFFD
- *  for ill-formed bytes. The buffer lives in the iterator itself - no extra allocation. @c cursor
- *  advances by the bytes consumed on each refill. Mirrors the @c Utf8Boundaries batched model, but
- *  buffers decoded runes rather than (start, length) pairs.
+ *  Streams code points by refilling a small inline buffer with @c sz_utf8_decode_best, which fills
+ *  the whole buffer (or drains the input) per call regardless of script width, and substitutes
+ *  U+FFFD for ill-formed bytes. The buffer lives in the iterator itself, so nothing is allocated,
+ *  and @c cursor advances by the bytes consumed on each refill. Mirrors the @c Utf8Boundaries
+ *  batched model, but buffers decoded runes rather than (start, length) pairs.
  */
 typedef struct {
     PyObject ob_base;
 
-    PyObject *text_obj; //< For reference counting
+    PyObject *text_obj;
 
-    sz_cptr_t cursor; //< Resume cursor into the text; advances by the bytes consumed per refill.
-    sz_cptr_t end;    //< End of the text (immutable).
+    sz_cptr_t cursor;
+    sz_cptr_t end;
+    sz_capability_t capabilities;
 
     /// @brief  Inline batch of decoded UTF-32 code points, refilled on demand.
     sz_rune_t batch_runes[sz_iterators_default_steps_k];
-    sz_size_t batch_count; //< Number of code points currently buffered.
-    sz_size_t batch_index; //< Index of the next code point to yield from the buffer.
+    sz_size_t batch_count;
+    sz_size_t batch_index;
 
 } Utf8Codepoints;
 
-char const doc_utf8_count[] =                                                    //
-    "Count the number of UTF-8 characters in a string.\n"                        //
-    "\n"                                                                         //
-    "Unlike len() which returns bytes, this counts actual Unicode characters,\n" //
-    "handling multi-byte UTF-8 sequences correctly.\n"                           //
-    "\n"                                                                         //
-    "Args:\n"                                                                    //
-    "  text (Str or str or bytes): The string object.\n"                         //
-    "Returns:\n"                                                                 //
-    "  int: Number of UTF-8 characters in the string.\n"                         //
-    "\n"                                                                         //
-    "Example:\n"                                                                 //
-    "  >>> sz.utf8_count('hello')  # 5 ASCII chars = 5\n"                        //
-    "  5\n"                                                                      //
-    "  >>> sz.utf8_count('\xc3\xa9')  # 1 e-acute char = 1\n"                    //
+char const doc_utf8_count[] =                                                                             //
+    "Count the number of UTF-8 characters in a string.\n"                                                 //
+    "\n"                                                                                                  //
+    "Unlike len() which returns bytes, this counts actual Unicode characters,\n"                          //
+    "handling multi-byte UTF-8 sequences correctly.\n"                                                    //
+    "\n"                                                                                                  //
+    "Args:\n"                                                                                             //
+    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
+    "Returns:\n"                                                                                          //
+    "  int: Number of UTF-8 characters in the string.\n"                                                  //
+    "\n"                                                                                                  //
+    "Example:\n"                                                                                          //
+    "  >>> sz.utf8_count('hello')  # 5 ASCII chars = 5\n"                                                 //
+    "  5\n"                                                                                               //
+    "  >>> sz.utf8_count('\xc3\xa9')  # 1 e-acute char = 1\n"                                             //
     "  1";
 
 PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -58,11 +60,18 @@ PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t 
         return NULL;
     }
 
-    // No keyword arguments expected
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_count() takes no keyword arguments");
-        return NULL;
+    PyObject *capabilities_object = NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+        PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+        if (PyUnicode_CompareWithASCIIString(key, "capabilities") != 0) {
+            PyErr_Format(PyExc_TypeError, "utf8_count() got an unexpected keyword argument '%U'", key);
+            return NULL;
+        }
+        capabilities_object = args[positional_args_count + i];
     }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     PyObject *text_obj = is_member ? self : args[0];
     sz_string_view_t text;
@@ -73,33 +82,51 @@ PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t 
         return NULL;
     }
 
-    sz_size_t count = sz_utf8_count(text.start, text.length);
+    sz_size_t count = 0;
+    sz_status_t const status = sz_utf8_count_best(text.start, text.length, &count, capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "utf8_count()");
+        return NULL;
+    }
     return PyLong_FromSize_t(count);
 }
 
-char const doc_utf8_codepoints[] =                                                    //
-    "utf8_codepoints(string)\n"                                                       //
-    "\n"                                                                              //
-    "Return an iterator yielding Unicode code points as int, decoded from UTF-8.\n"   //
-    "Ill-formed bytes decode to U+FFFD, the replacement character, so iteration is\n" //
-    "total and never raises on malformed input.\n"                                    //
-    "\n"                                                                              //
-    "Args:\n"                                                                         //
-    "    string: The input UTF-8 string to decode into code points.\n"                //
-    "\n"                                                                              //
-    "Returns:\n"                                                                      //
-    "    Iterator yielding int code points, one per Unicode scalar value.\n\n"        //
-    "\n"                                                                              //
-    "Example:\n"                                                                      //
-    "  >>> list(sz.utf8_codepoints('AB'))\n"                                          //
+char const doc_utf8_codepoints[] =                                                                       //
+    "utf8_codepoints(string, /, *, capabilities=None)\n"                                                 //
+    "\n"                                                                                                 //
+    "Return an iterator yielding Unicode code points as int, decoded from UTF-8.\n"                      //
+    "Ill-formed bytes decode to U+FFFD, the replacement character, so iteration is\n"                    //
+    "total and never raises on malformed input.\n"                                                       //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    string: The input UTF-8 string to decode into code points.\n"                                   //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Returns:\n"                                                                                         //
+    "    Iterator yielding int code points, one per Unicode scalar value.\n\n"                           //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "  >>> list(sz.utf8_codepoints('AB'))\n"                                                             //
     "  [65, 66]";
 
 PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                    PyObject *kwnames) {
-    if (positional_args_count != 1 || (kwnames && PyTuple_GET_SIZE(kwnames) != 0)) {
+    if (positional_args_count != 1) {
         PyErr_SetString(PyExc_TypeError, "utf8_codepoints() requires exactly one positional argument");
         return NULL;
     }
+    PyObject *capabilities_object = NULL;
+    Py_ssize_t const kwnames_count = kwnames ? PyTuple_GET_SIZE(kwnames) : 0;
+    for (Py_ssize_t i = 0; i < kwnames_count; ++i) {
+        PyObject *key = PyTuple_GET_ITEM(kwnames, i);
+        if (PyUnicode_CompareWithASCIIString(key, "capabilities") != 0) {
+            PyErr_Format(PyExc_TypeError, "utf8_codepoints() got an unexpected keyword argument '%U'", key);
+            return NULL;
+        }
+        capabilities_object = args[positional_args_count + i];
+    }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     PyObject *text_obj = args[0];
     sz_string_view_t text_view;
@@ -129,6 +156,7 @@ PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssi
     Py_INCREF(text_obj);
     iter->cursor = text_view.start;
     iter->end = text_view.start + text_view.length;
+    iter->capabilities = capabilities;
     iter->batch_count = 0;
     iter->batch_index = 0;
 
@@ -137,21 +165,28 @@ PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssi
 }
 
 static PyObject *Utf8CodepointsType_next(Utf8Codepoints *self) {
-    // Refill the inline batch when drained. `sz_utf8_decode` fills the whole buffer (or drains the input) per
-    // call and substitutes U+FFFD for ill-formed bytes, so every buffered value is a valid Unicode scalar value.
+    // Refill the inline batch when drained. `sz_utf8_decode_best` fills the whole buffer (or drains
+    // the input) per call and substitutes U+FFFD for ill-formed bytes, so every buffered value is a
+    // valid Unicode scalar value.
     if (self->batch_index >= self->batch_count) {
         if (self->cursor >= self->end) return NULL;
-        sz_size_t unpacked = 0;
-        sz_cptr_t next = sz_utf8_decode(self->cursor, (sz_size_t)(self->end - self->cursor), self->batch_runes,
-                                        sz_iterators_default_steps_k, &unpacked);
+        sz_size_t unpacked = 0, bytes_consumed = 0;
+        sz_size_t const bytes_remaining = (sz_size_t)(self->end - self->cursor);
+        sz_status_t const status = sz_utf8_decode_best(self->cursor, bytes_remaining, self->batch_runes,
+                                                       sz_iterators_default_steps_k, &unpacked, &bytes_consumed,
+                                                       self->capabilities, NULL);
+        if (status != sz_success_k) {
+            sz_py_raise_status(status, "__next__()");
+            return NULL;
+        }
         // A well-formed but truncated trailing sequence yields nothing and does not advance; we own the whole text,
         // so finalize it as one U+FFFD (its maximal subpart) rather than silently dropping it.
-        if (unpacked == 0 && next < self->end) {
+        if (unpacked == 0 && bytes_consumed < bytes_remaining) {
             self->batch_runes[0] = (sz_rune_t)sz_rune_replacement_k;
             unpacked = 1;
-            next = self->end;
+            bytes_consumed = bytes_remaining;
         }
-        self->cursor = next;
+        self->cursor += bytes_consumed;
         self->batch_count = unpacked;
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;

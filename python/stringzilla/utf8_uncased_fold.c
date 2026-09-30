@@ -6,23 +6,24 @@
  */
 #include "stringzilla.h"
 
-char const doc_utf8_uncased_fold[] =                                                    //
-    "Apply Unicode case folding to a UTF-8 string.\n"                                   //
-    "\n"                                                                                //
-    "Case folding normalizes text for uncased comparisons,\n"                           //
-    "handling one-to-many expansions, like German sharp S to 'ss'.\n"                   //
-    "\n"                                                                                //
-    "Args:\n"                                                                           //
-    "    text (Str or str or bytes): The input UTF-8 string.\n"                         //
-    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n" //
-    "\n"                                                                                //
-    "Returns:\n"                                                                        //
-    "    bytes: The case-folded UTF-8 string.\n"                                        //
-    "\n"                                                                                //
-    "Example:\n"                                                                        //
-    "    >>> sz.utf8_uncased_fold('HELLO')\n"                                           //
-    "    b'hello'\n"                                                                    //
-    "    >>> sz.utf8_uncased_fold('Stra\\u00dfe')  # German sharp S\n"                  //
+char const doc_utf8_uncased_fold[] =                                                                     //
+    "Apply Unicode case folding to a UTF-8 string.\n"                                                    //
+    "\n"                                                                                                 //
+    "Case folding normalizes text for uncased comparisons,\n"                                            //
+    "handling one-to-many expansions, like German sharp S to 'ss'.\n"                                    //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    text (Str or str or bytes): The input UTF-8 string.\n"                                          //
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Returns:\n"                                                                                         //
+    "    bytes: The case-folded UTF-8 string.\n"                                                         //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "    >>> sz.utf8_uncased_fold('HELLO')\n"                                                            //
+    "    b'hello'\n"                                                                                     //
+    "    >>> sz.utf8_uncased_fold('Stra\\u00dfe')  # German sharp S\n"                                   //
     "    b'strasse'";
 
 PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -30,6 +31,7 @@ PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_s
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = !is_member; // 0 if method, 1 if module function
     int validate = 0;                       // Default: no validation
+    PyObject *capabilities_object = NULL;
 
     if (positional_args_count != nargs_expected) {
         PyErr_Format(PyExc_TypeError, "utf8_uncased_fold() takes exactly %zd positional argument(s)", nargs_expected);
@@ -46,6 +48,9 @@ PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_s
                 validate = PyObject_IsTrue(val);
                 if (validate < 0) return NULL;
             }
+            else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) {
+                capabilities_object = args[positional_args_count + i];
+            }
             else {
                 PyErr_Format(PyExc_TypeError, "utf8_uncased_fold() got unexpected keyword argument '%U'", key);
                 return NULL;
@@ -54,6 +59,8 @@ PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_s
     }
 
     PyObject *str_obj = is_member ? self : args[0];
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     sz_string_view_t str;
     if (!sz_py_export_string_like(str_obj, &str.start, &str.length)) {
@@ -72,13 +79,17 @@ PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_s
     if (max_result_length == 0) { return PyBytes_FromStringAndSize("", 0); }
 
     PyObject *result_bytes = PyBytes_FromStringAndSize(NULL, max_result_length);
-    if (!result_bytes) {
-        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for case-folded string");
-        return NULL;
-    }
+    if (!result_bytes) return NULL;
 
     sz_ptr_t destination = (sz_ptr_t)PyBytes_AS_STRING(result_bytes);
-    sz_size_t actual_length = sz_utf8_uncased_fold(str.start, str.length, destination);
+    sz_size_t actual_length = 0;
+    sz_status_t const status = sz_utf8_uncased_fold_best(str.start, str.length, destination, &actual_length,
+                                                         capabilities, NULL);
+    if (status != sz_success_k) {
+        Py_DECREF(result_bytes);
+        sz_py_raise_status(status, "utf8_uncased_fold()");
+        return NULL;
+    }
 
     // Resize to actual length if smaller than allocated
     if (actual_length < max_result_length) {

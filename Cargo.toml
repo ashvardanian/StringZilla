@@ -9,11 +9,15 @@ homepage = "https://ashvardanian.com/posts/stringzilla/"
 # Leading slashes anchor to the package root; Cargo matches these like gitignore.
 include = [
   "/rust/**",
-  "/c/**",
-  "/include/**",
-  "/probes/**",
   "/build.rs",
   "/LICENSE",
+  # Everything CMake reads to build the archive
+  "/CMakeLists.txt",
+  "/cmake/*",
+  "/c/**",
+  "/include/**",
+  "/probes/*.c",
+  "/VERSION",
 ]
 keywords = ["simd", "search", "retrieval", "hash", "sort"]
 license = "Apache-2.0"
@@ -32,19 +36,17 @@ name = "stringzilla"
 path = "rust/lib.rs"
 
 [features]
-default = ["std", "dynamic-dispatch"]
+default = ["std"]
 std = []
-# Runtime SIMD dispatch: compile every ISA tier and pick the best one at load via the dispatch table
-# (mirrors CMake's `stringzilla_shared`). Disable (`--no-default-features`) to resolve the tier at
-# compile time instead - the analog of the header-only `stringzilla_header`.
-cuda = ["std"] # CUDA device engines; a caller shards across cores itself
-dynamic-dispatch = []
-rocm = ["std"] # ROCm device engines
+# The GPU backends, each added to the library CMake builds
+cuda = ["std"]
+metal = ["std"]
+rocm = ["std"]
 
 [dependencies]
 
 [build-dependencies]
-cc = "1.4.5"
+cmake = "0.1"
 
 # Third-party oracles the `#[cfg(test)]` suites differential against. Dev-dependencies rather than an
 # optional feature, so they never reach a consumer's build graph, never appear on docs.rs, and never
@@ -58,8 +60,6 @@ aho-corasick = "1.1"
 cast-sign-loss = "warn"
 # Catch potential FFI issues
 not-unsafe-ptr-arg-deref = "warn"
-# Catch undefined behavior with pointers
-invalid_null_ptr_usage = "warn"
 # Catch transmute issues
 transmute_ptr_to_ptr = "warn"
 
@@ -68,10 +68,3 @@ transmute_ptr_to_ptr = "warn"
 improper_ctypes = "warn"
 # Catch platform-specific code that might fail on other targets
 unexpected_cfgs = "warn"
-
-[profile.release]
-# Align the optimized build with the CMake and Python builds at -O2; `build.rs` forwards this `OPT_LEVEL`
-# to `cc` for the bundled C/C++ sources. -O3's aggressive inlining bloats the heavy `utf8_uncased`
-# translation unit (~3 MB object, ~44s to compile) with no measured runtime win. `dev` keeps the default
-# -O0 so clean builds stay fast.
-opt-level = 2

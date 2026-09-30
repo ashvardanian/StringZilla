@@ -4,7 +4,6 @@
 //! Author: Ash Vardanian
 
 use super::*;
-use core::ffi::c_void;
 
 /// Intersects two sequences, as an inner join, using their default byte-slice views.
 ///
@@ -30,156 +29,85 @@ pub fn intersection<Element: AsRef<[u8]>>(
     positions1: &mut [SortedIdx],
     positions2: &mut [SortedIdx],
 ) -> Result<usize, Status> {
-    let min_count = data1.len().min(data2.len());
-    if positions1.len() < min_count || positions2.len() < min_count {
-        return Err(Status::BadAlloc);
-    }
-
-    // Call the lower-level implementation with accurate counts for both sequences.
-    let adapter1 = move |i: usize| -> &'static [u8] {
-        // SAFETY: used only during the FFI call
-        unsafe { core::mem::transmute::<&[u8], &'static [u8]>(data1[i].as_ref()) }
-    };
-    let adapter2 = move |j: usize| -> &'static [u8] {
-        // SAFETY: used only during the FFI call
-        unsafe { core::mem::transmute::<&[u8], &'static [u8]>(data2[j].as_ref()) }
-    };
-    _intersection_by_impl(
-        adapter1,
-        adapter2,
+    intersection_by(
+        data1,
+        |item| item.as_ref(),
+        data2,
+        |item| item.as_ref(),
         seed,
         positions1,
         positions2,
-        data1.len(),
-        data2.len(),
     )
 }
 
-/// Intersects two sequences, as an inner join, using their elements corresponding byte-slice views.
-/// The caller must provide a closure that maps an index to the byte slice representation of the
-/// corresponding element in the first and second sequences.
+/// Intersects two sequences, as an inner join, on a byte-slice key of each element.
+///
+/// The sequences may differ in length and element type, and each output buffer must hold at least
+/// as many positions as the shorter sequence has elements, or [`Status::UnexpectedDimensions`] is
+/// returned. The keys run inside the C call, where a panic cannot unwind and aborts the process.
 ///
 /// # Example
 ///
 /// ```rust
 /// use stringzilla::stringzilla as sz;
 ///
-/// #[derive(Debug)]
 /// struct Person { name: &'static str, age: u32 }
 ///
-/// let people1 = [
+/// let people = [
 ///     Person { name: "Charlie", age: 20 },
 ///     Person { name: "Alice", age: 25 },
 ///     Person { name: "Bob", age: 30 },
 /// ];
-/// let people2 = [
-///     Person { name: "Alice", age: 25 },
-///     Person { name: "Bob", age: 30 },
-///     Person { name: "Charlie", age: 20 },
-/// ];
-/// let mut positions1 = [0; 3]; // min(people1.len(), people2.len())
-/// let mut positions2 = [0; 3]; // min(people1.len(), people2.len())
+/// let invited = ["Alice", "Bob", "Dave", "Eve"];
+/// let mut positions1 = [0; 3]; // min(people.len(), invited.len())
+/// let mut positions2 = [0; 3];
 /// let n = sz::intersection_by(
-///     |i| people1[i].name.as_bytes(),
-///     |j| people2[j].name.as_bytes(),
+///     &people,
+///     |person| person.name.as_bytes(),
+///     &invited,
+///     |name| name.as_bytes(),
 ///     0,
 ///     &mut positions1,
 ///     &mut positions2,
 /// ).expect("intersection_by failed");
-/// assert!(n == 3); // "Alice", "Bob", and "Charlie" are common.
+/// assert!(n == 2); // "Alice" and "Bob" are common.
 /// ```
-pub fn intersection_by<Mapper1, Mapper2, Key1, Key2>(
-    mapper1: Mapper1,
-    mapper2: Mapper2,
+pub fn intersection_by<Element1, Element2, Key1, Key2>(
+    data1: &[Element1],
+    key1: Key1,
+    data2: &[Element2],
+    key2: Key2,
     seed: u64,
     positions1: &mut [SortedIdx],
     positions2: &mut [SortedIdx],
 ) -> Result<usize, Status>
 where
-    Mapper1: Fn(usize) -> Key1,
-    Key1: AsRef<[u8]>,
-    Mapper2: Fn(usize) -> Key2,
-    Key2: AsRef<[u8]>,
+    Key1: Fn(&Element1) -> &[u8],
+    Key2: Fn(&Element2) -> &[u8],
 {
-    if positions1.len() != positions2.len() {
-        return Err(Status::BadAlloc);
+    let min_count = data1.len().min(data2.len());
+    if positions1.len() < min_count || positions2.len() < min_count {
+        return Err(Status::UnexpectedDimensions);
     }
 
-    // Adapter closure: given an index, call the provided mapper and then transmute the
-    // resulting slice to have a `'static` lifetime. This transmute is safe as long as
-    // the FFI call is synchronous and the returned slices are only used during the call.
-    let adapter1 = move |i: usize| -> &'static [u8] {
-        let binding = mapper1(i);
-        let slice = binding.as_ref();
-        unsafe { core::mem::transmute(slice) }
-    };
-    let adapter2 = move |i: usize| -> &'static [u8] {
-        let binding = mapper2(i);
-        let slice = binding.as_ref();
-        unsafe { core::mem::transmute(slice) }
-    };
-
-    _intersection_by_impl(
-        adapter1,
-        adapter2,
-        seed,
-        positions1,
-        positions2,
-        positions1.len(),
-        positions2.len(),
-    )
-}
-
-fn _intersection_by_impl<Adapter1, Adapter2>(
-    adapter1: Adapter1,
-    adapter2: Adapter2,
-    seed: u64,
-    positions1: &mut [SortedIdx],
-    positions2: &mut [SortedIdx],
-    count1: usize,
-    count2: usize,
-) -> Result<usize, Status>
-where
-    Adapter1: Fn(usize) -> &'static [u8],
-    Adapter2: Fn(usize) -> &'static [u8],
-{
-    let wrapper1 = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<Adapter1>() },
-        data: &adapter1 as *const Adapter1 as *const c_void,
-    };
-    let wrapper2 = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<Adapter2>() },
-        data: &adapter2 as *const Adapter2 as *const c_void,
-    };
-    let seq1 = _SzSequence {
-        handle: &wrapper1 as *const _ as *const c_void,
-        count: count1,
-        get_start: Some(_slice_get_start_punned),
-        get_length: Some(_slice_get_length_punned),
-    };
-    let seq2 = _SzSequence {
-        handle: &wrapper2 as *const _ as *const c_void,
-        count: count2,
-        get_start: Some(_slice_get_start_punned),
-        get_length: Some(_slice_get_length_punned),
-    };
-    let mut inter_size: usize = 0;
-    let status = unsafe {
-        sz_sequence_intersect(
-            &seq1,
-            &seq2,
-            core::ptr::null(),
-            seed,
-            &mut inter_size as *mut usize,
-            positions1.as_mut_ptr(),
-            positions2.as_mut_ptr(),
-        )
-    };
-    if status == Status::Success {
-        Ok(inter_size)
-    } else {
-        Err(status)
-    }
+    let mut intersection_count: usize = 0;
+    with_sequence_by(data1, key1, |sequence1| {
+        with_sequence_by(data2, key2, |sequence2| unsafe {
+            sz_sequence_intersect_best(
+                sequence1,
+                sequence2,
+                core::ptr::null(),
+                seed,
+                &mut intersection_count,
+                positions1.as_mut_ptr(),
+                positions2.as_mut_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
+        })
+    })
+    .check()?;
+    Ok(intersection_count)
 }
 
 #[cfg(test)]
@@ -189,7 +117,6 @@ mod tests {
     #[cfg(feature = "std")]
     use std::collections::HashSet;
 
-    use super::*;
     use crate::sz;
 
     #[test]
@@ -240,20 +167,16 @@ mod tests {
                 age: 35,
             },
         ];
-        let group2 = [
-            Person { name: "David", age: 40 },
-            Person {
-                name: "Charlie",
-                age: 50,
-            },
-            Person { name: "Alice", age: 60 },
-        ];
+        // A different length and element type on the second side, which is all the C call needs.
+        let group2 = ["David", "Charlie", "Alice", "Eve", "Mallory"];
         let mut out1 = [0; 3];
         let mut out2 = [0; 3];
 
         let n = sz::intersection_by(
-            |i: sz::SortedIdx| group1[i].name.as_bytes(),
-            |j: sz::SortedIdx| group2[j].name.as_bytes(),
+            &group1,
+            |person| person.name.as_bytes(),
+            &group2,
+            |name| name.as_bytes(),
             0,
             &mut out1,
             &mut out2,
@@ -269,21 +192,26 @@ mod tests {
             .iter()
             .map(|p| p.name)
             .collect::<HashSet<_>>()
-            .intersection(&group2.iter().map(|p| p.name).collect())
+            .intersection(&group2.iter().cloned().collect())
             .cloned()
             .collect();
 
         assert_eq!(common_from_api, expected);
+        for position in 0..n {
+            assert_eq!(group1[out1[position]].name, group2[out2[position]]);
+        }
     }
 
     #[test]
-    #[should_panic(expected = "BadAlloc")]
     fn intersection_size_checks() {
+        let data = [vec![0x41u8; 12], vec![0x42u8; 12], vec![0x43u8; 12]];
         let mut indices = [0usize; 10];
-        let mut indices2 = [0usize; 5];
-        let data = vec![0x41u8; 12];
+        let mut too_few = [0usize; 2];
 
-        sz::intersection_by(|_: usize| &data, |_: usize| &data, 1, &mut indices, &mut indices2).unwrap();
+        assert_eq!(
+            sz::intersection(&data, &data, 1, &mut indices, &mut too_few),
+            Err(sz::Status::UnexpectedDimensions)
+        );
     }
 
     #[test]

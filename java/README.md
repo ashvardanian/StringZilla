@@ -140,6 +140,8 @@ long[] secondPositions = new long[firstPositions.length];
 int matches = StringZilla.intersect(left, right, firstPositions, secondPositions); // matching index pairs
 ```
 
+A failed native call throws `StringZilla.StatusException`, whose `status()` is the C `sz_status_t` code and `statusName()` its enumerator name.
+
 ## Zero-Copy and Memory
 
 Every operation accepts an on-heap `byte[]` or any `MemorySegment`.
@@ -201,11 +203,40 @@ long digest = StringZilla.hash(view, 0);
 `UTF8String` lives in `org.apache.spark.unsafe`, a low-level surface best used at the Catalyst-expression or native-engine level rather than from ordinary UDFs.
 A plain UDF receives a decoded `java.lang.String`, which is UTF-16 and would transcode.
 
-## Runtime Dispatch
+## Devices and Capabilities
 
-The bundled native library auto-selects the best SIMD backend for the host CPU at load time.
+Every call dispatches to the fastest kernel among the CPU's enabled capabilities, a bitmask with one bit per SIMD capability.
+A `StringZilla.Device` reports those masks for the host CPU, or for a GPU by its runtime's own ordinal:
 
 ```java
-System.out.println(StringZilla.backend()); // e.g. "serial,haswell,skylake,icelake"
+StringZilla.Device cpu = StringZilla.Device.cpu();
+long enabled = cpu.capabilitiesEnabled();                  // what dispatch uses
+System.out.println(StringZilla.capabilitiesName(enabled)); // e.g. "serial,haswell,skylake,icelake"
+cpu.capabilitiesEnable(1);                                 // dispatch to the serial kernels only
+cpu.capabilitiesEnable(enabled);                           // and back, returning what took effect
 System.out.println(StringZilla.version());
 ```
+
+`capabilitiesEnabled()` is the one you usually want, and derives from two independent axes:
+
+- `capabilitiesDetected()`: what this device can execute.
+- `capabilitiesCompiled()`: what this build contains for devices of its kind, from the ISA probes at build time.
+- `capabilitiesEnabled()`: what dispatch uses, both axes at once unless narrowed.
+- `capabilitiesEnable(wanted)`: makes `wanted` the CPU's enabled set, clamped to both axes, and returns what took effect.
+
+`capabilitiesDetected()` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
+The enabled set always keeps the serial fallback, bit `1`.
+`capabilitiesName(mask)` spells any mask as comma-separated capability names, like `"serial,neon"`.
+`configureThread(capabilities)` prepares the calling thread for the kernels of `capabilities`, usually `capabilitiesEnabled()`, and belongs at the start of every thread that runs them.
+
+GPUs only report their masks here, since no call of this binding runs on one:
+
+```java
+long gpus = StringZilla.Device.count(StringZilla.DeviceKind.METAL);        // throws without a Metal device
+StringZilla.Device gpu = new StringZilla.Device(StringZilla.DeviceKind.METAL, 0);
+System.out.println(StringZilla.capabilitiesName(gpu.capabilitiesEnabled())); // e.g. "metal"
+```
+
+`Device.count(kind)` is one for the CPU and whatever the GPU runtime counts otherwise.
+Constructing a `Device` past the last ordinal of its kind throws a `StatusException` with `sz_missing_gpu_k`.
+`capabilitiesEnable` and `configureThread` on a GPU throw one with `sz_missing_kernel_k`, as GPUs keep no enabled set or thread state of their own.

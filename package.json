@@ -30,16 +30,20 @@
     "node": ">=22.0.0"
   },
   "files": [
+    "CMakeLists.txt",
+    "cmake/",
+    "c/",
+    "include/",
+    "probes/*.c",
     "javascript/stringzilla.js",
     "javascript/stringzilla.c",
-    "include/",
-    "c/",
-    "binding.gyp",
+    "javascript/stage-prebuild.cjs",
+    "VERSION",
+    "LICENSE",
     "README.md"
   ],
   "dependencies": {
-    "bindings": "^1.5.0",
-    "node-addon-api": "^8.0.0",
+    "cmake-js": "^8.0.0",
     "node-gyp-build": "^4.8.4"
   },
   "optionalDependencies": {
@@ -54,8 +58,11 @@
     "@types/node": "^24.0.0"
   },
   "scripts": {
-    "test": "node --test ./test/main.js",
-    "build": "node-gyp rebuild",
-    "install": "node-gyp-build"
+    "install": "node -e \"require('@stringzilla/' + process.platform + '-' + process.arch)\" || node-gyp-build-test || npm run prebuild",
+    "build-native": "cmake-js compile --out build_node --CDSTRINGZILLA_BUILD_NODE=ON --CDCMAKE_OSX_DEPLOYMENT_TARGET=11.0 --target stringzilla_node",
+    "prebuild": "npm run build-native && node javascript/stage-prebuild.cjs build_node",
+    "prebuild-arm64": "cmake-js compile --out build_node_arm64 --arch arm64 --CDSTRINGZILLA_BUILD_NODE=ON --CDCMAKE_OSX_DEPLOYMENT_TARGET=11.0 --target stringzilla_node && node javascript/stage-prebuild.cjs build_node_arm64 arm64",
+    "prebuild-x64": "cmake-js compile --out build_node_x64 --arch x64 --CDSTRINGZILLA_BUILD_NODE=ON --CDCMAKE_OSX_DEPLOYMENT_TARGET=11.0 --target stringzilla_node && node javascript/stage-prebuild.cjs build_node_x64 x64",
+    "test": "node --test ./test/main.js"
   }
 }

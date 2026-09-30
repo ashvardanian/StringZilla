@@ -16,16 +16,18 @@ import (
 // HashSha256 computes the SHA-256 cryptographic hash of the input data.
 func HashSha256(data []byte) [32]byte {
 	var state C.sz_sha256_state_t
-	C.sz_sha256_state_init(&state)
+	check(C.sz_sha256_state_init_best(&state, capabilities(), nil))
 	if len(data) > 0 {
-		C.sz_sha256_state_update(&state, (*C.char)(unsafe.Pointer(&data[0])), C.ulong(len(data)))
+		check(C.sz_sha256_state_update_best(&state, (*C.char)(unsafe.Pointer(&data[0])), C.sz_size_t(len(data)),
+			capabilities(), nil))
 	}
 	var digest [32]byte
-	C.sz_sha256_state_digest(&state, (*C.uchar)(unsafe.Pointer(&digest[0])))
+	check(C.sz_sha256_state_digest_best(&state, (*C.uchar)(unsafe.Pointer(&digest[0])), capabilities(), nil))
 	return digest
 }
 
 // Sha256 is a streaming SHA-256 hasher that implements hash.Hash and io.Writer.
+// Create one with [NewSha256]; the zero value is not ready to use.
 type Sha256 struct {
 	state C.sz_sha256_state_t
 }
@@ -36,14 +38,17 @@ var _ io.Writer = (*Sha256)(nil)
 // NewSha256 creates a new streaming SHA-256 hasher.
 func NewSha256() *Sha256 {
 	h := &Sha256{}
-	C.sz_sha256_state_init(&h.state)
+	h.Reset()
 	return h
 }
 
 // Write adds data to the streaming SHA-256 hasher. Implements io.Writer.
 func (h *Sha256) Write(p []byte) (n int, err error) {
 	if len(p) > 0 {
-		C.sz_sha256_state_update(&h.state, (*C.char)(unsafe.Pointer(&p[0])), C.ulong(len(p)))
+		if err := statusError(C.sz_sha256_state_update_best(&h.state, (*C.char)(unsafe.Pointer(&p[0])),
+			C.sz_size_t(len(p)), capabilities(), nil)); err != nil {
+			return 0, err
+		}
 	}
 	return len(p), nil
 }
@@ -57,7 +62,7 @@ func (h *Sha256) Sum(b []byte) []byte {
 
 // Reset resets the hasher to its initial state. Implements hash.Hash.
 func (h *Sha256) Reset() {
-	C.sz_sha256_state_init(&h.state)
+	check(C.sz_sha256_state_init_best(&h.state, capabilities(), nil))
 }
 
 // Size returns the number of bytes Sum will return. Implements hash.Hash.
@@ -74,7 +79,7 @@ func (h *Sha256) BlockSize() int {
 // This is a convenience method in addition to the standard hash.Hash interface.
 func (h *Sha256) Digest() [32]byte {
 	var digest [32]byte
-	C.sz_sha256_state_digest(&h.state, (*C.uchar)(unsafe.Pointer(&digest[0])))
+	check(C.sz_sha256_state_digest_best(&h.state, (*C.uchar)(unsafe.Pointer(&digest[0])), capabilities(), nil))
 	return digest
 }
 

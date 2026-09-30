@@ -29,27 +29,66 @@ pub trait SegmenterKernel {
     ) -> usize;
 }
 
-/// Kernel behind [`Utf8SplitNewlines`] (`sz_utf8_newlines`).
+/// Kernel behind [`Utf8SplitNewlines`] (`sz_utf8_newlines_best`).
 pub struct Newlines;
 impl SegmenterKernel for Newlines {
     unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        sz_utf8_newlines(t, n, o, l, c, u)
+        let mut count = 0;
+        sz_utf8_newlines_best(
+            t,
+            n,
+            o,
+            l,
+            c,
+            &mut count,
+            u,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+        .infallible();
+        count
     }
 }
 
-/// Kernel behind [`Utf8SplitWhitespaces`] (`sz_utf8_whitespaces`).
+/// Kernel behind [`Utf8SplitWhitespaces`] (`sz_utf8_whitespaces_best`).
 pub struct Whitespaces;
 impl SegmenterKernel for Whitespaces {
     unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        sz_utf8_whitespaces(t, n, o, l, c, u)
+        let mut count = 0;
+        sz_utf8_whitespaces_best(
+            t,
+            n,
+            o,
+            l,
+            c,
+            &mut count,
+            u,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+        .infallible();
+        count
     }
 }
 
-/// Kernel behind [`Utf8SplitDelimiters`] (`sz_utf8_delimiters`).
+/// Kernel behind [`Utf8SplitDelimiters`] (`sz_utf8_delimiters_best`).
 pub struct Delimiters;
 impl SegmenterKernel for Delimiters {
     unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        sz_utf8_delimiters(t, n, o, l, c, u)
+        let mut count = 0;
+        sz_utf8_delimiters_best(
+            t,
+            n,
+            o,
+            l,
+            c,
+            &mut count,
+            u,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+        .infallible();
+        count
     }
 }
 
@@ -123,6 +162,7 @@ impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const
 {
     /// Constructs an iterator buffering up to `STEPS` separators per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
+        const { assert!(STEPS > 0, "STEPS must be positive") };
         let mut splits = Self {
             text,
             suffix: 0,
@@ -355,6 +395,7 @@ impl<'a, Kernel: SegmenterKernel> Utf8Segments<'a, Kernel, ITERATORS_DEFAULT_STE
 impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Utf8Segments<'a, Kernel, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` words per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
+        const { assert!(STEPS > 0, "STEPS must be positive") };
         let mut splits = Self {
             text,
             suffix: 0,
@@ -416,7 +457,6 @@ pub(crate) mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::sz::*;
 
     /// Segments tile the input, so the yielded segments must match regardless of the batch
     /// size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every boundary

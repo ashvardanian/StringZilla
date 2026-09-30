@@ -6,7 +6,26 @@
  */
 #include "stringzilla.h"
 
-PyObject *Utf8Boundaries_make_(PyTypeObject *type, PyObject *text_obj, sz_utf8_segmenter_t kernel) {
+PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segmenter_t segmenter, PyObject *const *args,
+                               Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
+
+    if (positional_args_count != 1) {
+        PyErr_Format(PyExc_TypeError, "%s() takes one positional argument, got %zd", name, positional_args_count);
+        return NULL;
+    }
+    PyObject *const text_obj = args[0];
+    PyObject *capabilities_object = NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
+        PyObject *const key = PyTuple_GET_ITEM(args_names_tuple, keyword_index);
+        if (PyUnicode_CompareWithASCIIString(key, "capabilities") != 0) {
+            PyErr_Format(PyExc_TypeError, "%s() got an unexpected keyword argument '%U'", name, key);
+            return NULL;
+        }
+        capabilities_object = args[positional_args_count + keyword_index];
+    }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     sz_string_view_t text_view;
     if (PyObject_TypeCheck(text_obj, &StrType)) {
@@ -35,7 +54,8 @@ PyObject *Utf8Boundaries_make_(PyTypeObject *type, PyObject *text_obj, sz_utf8_s
     Py_INCREF(text_obj);
     iter->start = text_view.start;
     iter->end = text_view.start + text_view.length;
-    iter->kernel = kernel;
+    iter->segmenter = segmenter;
+    iter->capabilities = capabilities;
     iter->batch_count = 0;
     iter->batch_index = 0;
 
@@ -49,9 +69,15 @@ PyObject *Utf8Boundaries_next_(Utf8Boundaries *self) {
     if (self->batch_index >= self->batch_count) {
         if (self->start >= self->end) return NULL;
         sz_size_t consumed = 0;
-        self->batch_count = self->kernel(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
-                                         self->batch_lengths, sz_iterators_default_steps_k, &consumed);
+        sz_status_t const status = self->segmenter(
+            self->start, (sz_size_t)(self->end - self->start), self->batch_starts, self->batch_lengths,
+            sz_iterators_default_steps_k, &self->batch_count, &consumed, self->capabilities, NULL);
         self->batch_index = 0;
+        if (status != sz_success_k) {
+            self->batch_count = 0;
+            sz_py_raise_status(status, "__next__()");
+            return NULL;
+        }
         if (self->batch_count == 0) return NULL;
     }
 

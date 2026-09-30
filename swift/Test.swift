@@ -9,6 +9,10 @@
 import StringZilla
 import Testing
 
+#if canImport(ObjectiveC)
+    import Foundation
+#endif
+
 /// Mixes ASCII with one astral codepoint, so runes and UTF-8 bytes disagree.
 let greeting = "Hello, world! Welcome to StringZilla. 👋"
 
@@ -67,6 +71,18 @@ func search(_ search: Search) throws {
 @Test func searchWithoutMatch() {
     #expect("aeiou".findLast(characterNotFrom: "aeiou") == nil)
 }
+
+#if canImport(ObjectiveC)
+    /// A lazily bridged `NSString` keeps UTF-16 storage, so its UTF-8 views are not contiguous.
+    @Test func nonContiguousStorage() throws {
+        let bridged = NSString(string: greeting) as String
+        try #require(bridged.utf8.withContiguousStorageIfAvailable { _ in true } == nil)
+        #expect(bridged.utf8.hash() == greeting.hash())
+        #expect(bridged[...].utf8.countRunes() == greeting.countRunes())
+        let found = try #require(bridged.utf8.findFirst(substring: "world".utf8))
+        #expect(bridged.utf8.distance(from: bridged.utf8.startIndex, to: found) == 7)
+    }
+#endif
 
 @Test func utf8UncasedFoldedBytes() {
     #expect("Straße".utf8UncasedFoldedBytes() == Array("strasse".utf8))
@@ -160,7 +176,9 @@ struct Split: Sendable, CustomTestStringConvertible {
     let split: @Sendable (String) -> [Range<String.Index>]
 
     init(
-        _ name: String, _ text: String, _ segments: [String],
+        _ name: String,
+        _ text: String,
+        _ segments: [String],
         _ split: @escaping @Sendable (String) -> [Range<String.Index>]
     ) {
         self.testDescription = name
@@ -236,4 +254,28 @@ let normalizationChecks: [(String, StringZillaNormalizationForm, Bool)] = [
 func detectNormalization(_ text: String, _ form: StringZillaNormalizationForm, _ isNormalized: Bool) {
     #expect(text.isUtf8Normalized(form) == isNormalized)
     #expect((text.utf8NormalizationViolation(form) == nil) == isNormalized)
+}
+
+@Test func capabilities() throws {
+    let cpu = Device.cpu
+    let enabled = try cpu.capabilitiesEnabled
+    let names: [(Capabilities, String)] = [
+        (.serial, "serial"), (.westmere, "westmere"), (.goldmont, "goldmont"), (.haswell, "haswell"),
+        (.skylake, "skylake"), (.icelake, "icelake"), (.neon, "neon"), (.neonAes, "neonaes"), (.neonSha, "neonsha"),
+        (.sve, "sve"), (.sve2, "sve2"), (.sve2Aes, "sve2aes"), (.rvv, "rvv"), (.rvvCrypto, "rvvcrypto"),
+        (.v128, "v128"), (.v128Relaxed, "v128relaxed"), (.loongsonAsx, "loongsonasx"), (.powerVsx, "powervsx"),
+        (.cuda, "cuda"), (.rocm, "rocm"), (.metal, "metal"),
+    ]
+    for (capability, name) in names { #expect(capability.description == name) }
+    #expect(Capabilities.cpus.union(.devices).isSubset(of: .any))
+    #expect(Capabilities.cpus.intersection(.devices).isEmpty)
+    #expect(enabled.contains(.serial))
+    #expect(enabled.isSubset(of: try cpu.capabilitiesDetected.intersection(cpu.capabilitiesCompiled)))
+    try cpu.configureThread(enabled)
+    if let gpu = try? Device(kind: .metal, ordinal: 0) {
+        #expect(throws: DeviceError.self) { try gpu.configureThread(.any) }
+    }
+    #expect(try Device.count(.cpu) == 1)
+    #expect(throws: DeviceError.self) { try Device(kind: .cpu, ordinal: 1) }
+    #expect(throws: DeviceError.self) { try Device(kind: .metal, ordinal: (try? Device.count(.metal)) ?? 0) }
 }

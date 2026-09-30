@@ -6,33 +6,29 @@
  */
 #include "stringzilla.h"
 
-char const doc_utf8_wordbreaks[] =                                                     //
-    "utf8_wordbreaks(string, /)\n"                                                     //
-    "\n"                                                                               //
-    "Return an iterator yielding words per Unicode UAX-29 word boundary rules.\n"      //
-    "Unlike str.split(), this is UAX-29 compliant and supports all Unicode scripts.\n" //
-    "\n"                                                                               //
-    "Args:\n"                                                                          //
-    "    string: The input UTF-8 string to split into words.\n"                        //
-    "\n"                                                                               //
-    "Returns:\n"                                                                       //
-    "    Iterator yielding Str objects for each word.\n\n"                             //
-    "\n"                                                                               //
-    "Example:\n"                                                                       //
-    "  >>> # Stream UAX-29 word tokens lazily:\n"                                      //
-    "  >>> 'world' in (str(w) for w in sz.utf8_wordbreaks('Hi, world'))\n"             //
+char const doc_utf8_wordbreaks[] =                                                                       //
+    "utf8_wordbreaks(string, /, *, capabilities=None)\n"                                                 //
+    "\n"                                                                                                 //
+    "Return an iterator yielding words per Unicode UAX-29 word boundary rules.\n"                        //
+    "Unlike str.split(), this is UAX-29 compliant and supports all Unicode scripts.\n"                   //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    string: The input UTF-8 string to split into words.\n"                                          //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Returns:\n"                                                                                         //
+    "    Iterator yielding Str objects for each word.\n\n"                                               //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "  >>> # Stream UAX-29 word tokens lazily:\n"                                                        //
+    "  >>> 'world' in (str(w) for w in sz.utf8_wordbreaks('Hi, world'))\n"                               //
     "  True";
 
 PyObject *Str_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                    PyObject *kwnames) {
-    int min_args = 1, max_args = 1;
-    if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_wordbreaks() requires %zd to %zd arguments", min_args, max_args);
-        return NULL;
-    }
-
     sz_unused_(self);
-    return Utf8Boundaries_make_(&Utf8WordbreaksType, args[0], sz_utf8_wordbreaks);
+    return Utf8Boundaries_make_(&Utf8WordbreaksType, "utf8_wordbreaks", sz_utf8_wordbreaks_best, args,
+                                positional_args_count, kwnames);
 }
 
 static char const doc_Utf8Wordbreaks[] =                                     //

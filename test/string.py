@@ -70,12 +70,8 @@ SPLITLINES_CASES = ["", "a", "a\n", "\n", "\n\n", "a\nb", "a\n\nb", "a\nb\n"]
 
 
 def test_library_properties():
-    """`sz.__version__` is a three-part semantic version, `serial` is always present in
-    `sz.__capabilities__`, and `reset_capabilities` accepts the current set without raising."""
+    """`sz.__version__` is a three-part semantic version."""
     assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
-    assert "serial" in sz.__capabilities__, "Serial backend must be present"
-    assert isinstance(sz.__capabilities_str__, str) and len(sz.__capabilities_str__) > 0
-    sz.reset_capabilities(sz.__capabilities__)  # Should not raise
 
 
 @pytest.mark.parametrize("native_type", [str, bytes, bytearray])
@@ -674,9 +670,9 @@ def test_translations_random(length: int, seed_value: int):
     """`sz.translate` matches a scalar lookup-table oracle across a random 256-byte permutation,
     over a range of input lengths."""
     seed_random_generators(seed_value)
-    body = get_random_string(length=length)
+    body = get_random_string(length=length).encode()
     lut = np.random.randint(0, 256, size=256, dtype=np.uint8)
-    assert sz.translate(body, memoryview(lut)) == baseline_translate(body, lut)
+    assert sz.translate(body, memoryview(lut)) == lookup_table_oracle(body, bytes(lut))
 
 
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
@@ -821,6 +817,18 @@ def test_unit_translate_degenerate_window(start):
     sz.translate(mutable, table, True, start)  # in-place: must not corrupt or crash
     assert len(mutable) == 6
     sz.translate("abcdef", table, False, start)  # copy: must not leak heap bytes
+
+
+def test_unit_translate_non_ascii():
+    """A `str` translates as its UTF-8 bytes and decodes back, and a dict entry names one byte below U+0100."""
+    assert sz.translate("café ∑", {"a": "A"}) == "cAfé ∑"
+    assert sz.translate(b"caf\xe9", {"\xe9": "e"}) == b"cafe"
+    with pytest.raises(UnicodeDecodeError):
+        sz.translate("abc", {"a": "\xe9"})
+    with pytest.raises(ValueError):
+        sz.translate("abc", {"∑": "a"})
+    with pytest.raises(ValueError):
+        sz.translate("abc", {"\ud800": "a"})
 
 
 @pytest.mark.parametrize(
@@ -1431,10 +1439,6 @@ def test_strs_from_arrow_with_nulls():
 
 
 # region Backend differential
-
-
-def baseline_translate(body: str, lut: Sequence) -> str:
-    return "".join([chr(lut[ord(c)]) for c in body])
 
 
 def long_repeated_string(ctypes, fill_char: str, string_size: int) -> str:

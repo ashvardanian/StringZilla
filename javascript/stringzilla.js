@@ -27,6 +27,78 @@ function loadNativeAddon() {
 
 const compiled = loadNativeAddon();
 
+/** The device kinds, in the order the addon numbers them. */
+const deviceKinds = ["cpu", "cuda", "rocm", "metal"];
+
+/** The addon's number for `kind`, throwing for an unknown one. */
+function deviceKindIndex(kind) {
+    const index = deviceKinds.indexOf(kind);
+    if (index < 0) throw new TypeError(`Unknown device kind: ${kind}`);
+    return index;
+}
+
+/** One device StringZilla knows: the host CPU, or a GPU by its runtime's own ordinal, the one
+ *  `cudaSetDevice` or `hipSetDevice` takes, or the position in Metal's device list.
+ *
+ *  Every call of this binding runs on the CPU and dispatches over its
+ *  {@link Device.capabilitiesEnabled}, so a GPU device only reports its masks here. Prefer that
+ *  one unless you specifically mean one of the raw axes: {@link Device.capabilitiesDetected}
+ *  describes the device and says nothing about whether a kernel was compiled into this build. */
+class Device {
+    /**
+     *  @param kind - The runtime the device belongs to: `"cpu"`, `"cuda"`, `"rocm"` or `"metal"`
+     *  @param ordinal - The runtime's own index of the device, below {@link Device.count}
+     *  @throws Without a device of `kind`, or past the last one
+     */
+    constructor(kind, ordinal = 0) {
+        if (!Number.isInteger(ordinal) || ordinal < 0 || ordinal >= Device.count(kind))
+            throw new RangeError(`No ${kind} device at ordinal ${ordinal}`);
+        this.kind = kind;
+        this.ordinal = ordinal;
+    }
+
+    /** The host CPU, which every build has. */
+    static cpu() {
+        return new Device("cpu", 0);
+    }
+
+    /**
+     *  How many devices of `kind` the process sees: one CPU, or the GPUs its runtime counts.
+     *  @throws Without a GPU of `kind`
+     */
+    static count(kind) {
+        return compiled.deviceCount(deviceKindIndex(kind));
+    }
+
+    /** The capabilities this device runs, compiled in or not, as a bitmask. */
+    capabilitiesDetected() {
+        return compiled.capabilitiesDetected(deviceKindIndex(this.kind), this.ordinal);
+    }
+
+    /** The capabilities compiled into this build for devices of this kind, as a bitmask. */
+    capabilitiesCompiled() {
+        return compiled.capabilitiesCompiled(deviceKindIndex(this.kind));
+    }
+
+    /** The capabilities this device's calls pass: detected and compiled at once, as a bitmask.
+     *  On the CPU it is what every call passes, narrowed by {@link Device.capabilitiesEnable},
+     *  and always includes `Capability.serial`. */
+    capabilitiesEnabled() {
+        return compiled.capabilitiesEnabled(deviceKindIndex(this.kind), this.ordinal);
+    }
+
+    /**
+     *  Makes `wanted` the CPU's enabled set, clamped to what it detects and this build compiled,
+     *  and keeping the serial fallback.
+     *  @param wanted - Bitmask of `Capability` bits
+     *  @returns The enabled set that took effect
+     *  @throws On a GPU, which keeps no such set
+     */
+    capabilitiesEnable(wanted) {
+        return compiled.capabilitiesEnable(deviceKindIndex(this.kind), wanted);
+    }
+}
+
 /** Wraps a native segmenter class into a JS iterable, yielding zero-copy `subarray` views
  *  of the source Buffer, one per TR29/UAX14 segment. */
 function makeSegmenterIterable(NativeSegmenter, name) {
@@ -177,12 +249,12 @@ export default {
      */
     byteSum: compiled.byteSum,
 
-    /**
-     *  Returns a comma-separated string of backend capabilities, e.g. "serial,haswell".
-     *  Use this to inspect which SIMD/GPU backends are active.
-     *  @returns The comma-separated capability names.
-     */
-    capabilities: compiled.capabilities,
+    /** The CPU or a GPU, whose capabilities it reports; every call dispatches over the CPU's. */
+    Device,
+
+    /** Lowercase capability names, like `haswell`, `neon` or `cuda`, mapped to their `BigInt` bits,
+     *  and the `cpus`, `devices` and `any` groups to theirs. */
+    Capability: Object.freeze(compiled.Capability),
 
     /**
      *  Applies full Unicode case folding to a UTF-8 buffer.

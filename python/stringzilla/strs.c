@@ -807,8 +807,14 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
             Py_XDECREF(result);
             return NULL;
         }
-        sz_copy(result->data.fragmented.spans, self->data.fragmented.spans + start,
-                sizeof(sz_string_view_t) * result_count);
+        sz_status_t const status = sz_copy_best(
+            (sz_ptr_t)result->data.fragmented.spans, (sz_cptr_t)(self->data.fragmented.spans + start),
+            sizeof(sz_string_view_t) * result_count, sz_py_enabled_capabilities, NULL);
+        if (status != sz_success_k) {
+            Py_XDECREF(result);
+            sz_py_raise_status(status, "Strs slicing");
+            return NULL;
+        }
         break;
     }
 
@@ -850,7 +856,15 @@ static int Strs_in(Str *self, PyObject *needle_obj) {
         sz_cptr_t start = NULL;
         sz_size_t length = 0;
         getter(self, i, count, &parent, &start, &length);
-        if (length == needle.length && sz_equal(start, needle.start, needle.length) == sz_true_k) return 1;
+        if (length != needle.length) continue;
+        sz_bool_t equal = sz_false_k;
+        sz_status_t const status = sz_equal_best(start, needle.start, needle.length, &equal, sz_py_enabled_capabilities,
+                                                 NULL);
+        if (status != sz_success_k) {
+            sz_py_raise_status(status, "in");
+            return -1;
+        }
+        if (equal == sz_true_k) return 1;
     }
 
     return 0;
@@ -889,13 +903,20 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
         Py_ssize_t min_length = sz_min_of_two(a_length, b_length);
         for (Py_ssize_t i = 0; i < min_length; i++) {
             PyObject *ai_parent = NULL, *bi_parent = NULL;
-            sz_cptr_t ai_start = NULL, *bi_start = NULL;
+            sz_cptr_t ai_start = NULL, bi_start = NULL;
             sz_size_t ai_length = 0, bi_length = 0;
             a_getter(a, i, a_length, &ai_parent, &ai_start, &ai_length);
             b_getter(b, i, b_length, &bi_parent, &bi_start, &bi_length);
 
             // When dealing with arrays, early exists make sense only in some cases
-            int order = (int)sz_order(ai_start, ai_length, bi_start, bi_length);
+            sz_ordering_t ordering = sz_equal_k;
+            sz_status_t const status = sz_order_best(ai_start, ai_length, bi_start, bi_length, &ordering,
+                                                     sz_py_enabled_capabilities, NULL);
+            if (status != sz_success_k) {
+                sz_py_raise_status(status, "Strs comparison");
+                return NULL;
+            }
+            int const order = (int)ordering;
             switch (op) {
             case Py_LT:
             case Py_LE:
@@ -972,7 +993,16 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
         a_getter(a, i, a_length, &ai_parent, &ai_start, &ai_length);
 
         // When dealing with arrays, early exists make sense only in some cases
-        int order = (int)sz_order(ai_start, ai_length, bi.start, bi.length);
+        sz_ordering_t ordering = sz_equal_k;
+        sz_status_t const status = sz_order_best(ai_start, ai_length, bi.start, bi.length, &ordering,
+                                                 sz_py_enabled_capabilities, NULL);
+        if (status != sz_success_k) {
+            Py_DECREF(other_item);
+            Py_DECREF(other_iter);
+            sz_py_raise_status(status, "Strs comparison");
+            return NULL;
+        }
+        int const order = (int)ordering;
         switch (op) {
         case Py_LT:
         case Py_LE:
@@ -1150,20 +1180,21 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     return result;
 }
 
-static char const doc_sorted[] =                                                             //
-    "sorted(*, reverse=False, uncased=False, top=None) -> Strs\n"                            //
-    "\n"                                                                                     //
-    "Return a new, stably sorted Strs; the original is unchanged.\n"                         //
-    "\n"                                                                                     //
-    "Args:\n"                                                                                //
-    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"             //
-    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"        //
-    "  top (int, optional): Keep only the `top` smallest elements, or largest if reversed. " //
-    "Defaults to None, keeping all.\n"                                                       //
-    "Returns:\n"                                                                             //
-    "  Strs: A new, sorted collection.\n"                                                    //
-    "Example:\n"                                                                             //
-    "  >>> list(map(str, sz.Strs(['banana', 'apple', 'cherry']).sorted()))\n"                //
+static char const doc_sorted[] =                                                                          //
+    "sorted(*, reverse=False, uncased=False, top=None, capabilities=None) -> Strs\n"                      //
+    "\n"                                                                                                  //
+    "Return a new, stably sorted Strs; the original is unchanged.\n"                                      //
+    "\n"                                                                                                  //
+    "Args:\n"                                                                                             //
+    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"                          //
+    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"                     //
+    "  top (int, optional): Keep only the `top` smallest elements, or largest if reversed. "              //
+    "Defaults to None, keeping all.\n"                                                                    //
+    "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
+    "Returns:\n"                                                                                          //
+    "  Strs: A new, sorted collection.\n"                                                                 //
+    "Example:\n"                                                                                          //
+    "  >>> list(map(str, sz.Strs(['banana', 'apple', 'cherry']).sorted()))\n"                             //
     "  ['apple', 'banana', 'cherry']";
 
 /**
@@ -1187,7 +1218,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         return NULL;
     }
 
-    PyObject *reverse_obj = NULL, *uncased_obj = NULL, *top_obj = NULL;
+    PyObject *reverse_obj = NULL, *uncased_obj = NULL, *top_obj = NULL, *capabilities_object = NULL;
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
     for (Py_ssize_t i = 0; i < args_names_count; ++i) {
         PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
@@ -1195,11 +1226,14 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse_obj = value; }
         else if (PyUnicode_CompareWithASCIIString(key, "uncased") == 0) { uncased_obj = value; }
         else if (PyUnicode_CompareWithASCIIString(key, "top") == 0) { top_obj = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) { capabilities_object = value; }
         else {
             PyErr_Format(PyExc_TypeError, "sorted() got an unexpected keyword argument '%U'", key);
             return NULL;
         }
     }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
     if (reverse_obj) {
         if (!PyBool_Check(reverse_obj)) {
             PyErr_SetString(PyExc_TypeError, "sorted(): reverse must be a bool");
@@ -1295,14 +1329,18 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     }
 
     // Call our sorting algorithm (`reverse` and `uncased` are handled natively).
-    sz_sequence_t sequence;
-    sz_fill(&sequence, sizeof(sequence), 0);
+    sz_sequence_t sequence = {0};
     sequence.count = substrings_count;
     sequence.handle = (void *)self;
     sequence.get_start = Strs_get_start_;
     sequence.get_length = Strs_get_length_;
-    sz_status_t status = Strs_run_argsort_(uncased, &sequence, order, top, reverse);
-    sz_unused_(status);
+    sz_status_t status = Strs_run_argsort_(uncased, &sequence, order, top, reverse, capabilities);
+    if (status != sz_success_k) {
+        free(order);
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        sz_py_raise_status(status, "sorted()");
+        return NULL;
+    }
 
     // With `top` set, only the leading `top` elements are ordered, so the result keeps just those.
     sz_size_t const result_count = (top != 0 && top < substrings_count) ? top : substrings_count;
@@ -1517,8 +1555,8 @@ static sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_
             *(buffer_ptr++) = '\'';
         }
         else {
-            sz_copy(buffer_ptr, cstr, rune_length);
-            buffer_ptr += rune_length;
+            // At most 4 bytes, too few to be worth a dispatched copy
+            for (sz_size_t byte_index = 0; byte_index != rune_length; ++byte_index) *(buffer_ptr++) = cstr[byte_index];
         }
         cstr += rune_length;
     }
@@ -1584,7 +1622,11 @@ static PyObject *Strs_repr(Strs *self) {
     sz_cptr_t const repr_buffer_end = repr_buffer_ptr + 1024;
 
     // Start of the array
-    sz_copy(repr_buffer_ptr, "sz.Strs([", 9);
+    sz_status_t status = sz_copy_best(repr_buffer_ptr, "sz.Strs([", 9, sz_py_enabled_capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "repr()");
+        return NULL;
+    }
     repr_buffer_ptr += 9;
 
     sz_size_t count = Strs_len(self);
@@ -1616,7 +1658,12 @@ static PyObject *Strs_repr(Strs *self) {
 
         // If it didn't fit, let's put an ellipsis
         if (!did_fit) {
-            sz_copy(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length);
+            status = sz_copy_best(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length,
+                                  sz_py_enabled_capabilities, NULL);
+            if (status != sz_success_k) {
+                sz_py_raise_status(status, "repr()");
+                return NULL;
+            }
             repr_buffer_ptr += non_fitting_array_tail_length;
             return PyUnicode_FromStringAndSize(repr_buffer, repr_buffer_ptr - repr_buffer);
         }
@@ -1658,7 +1705,13 @@ static PyObject *Strs_str(Strs *self) {
             sz_size_t scan_length = cstr_length;
             while (scan_length) {
                 char quote = '\'';
-                sz_cptr_t next_quote = sz_find_byte(scan_ptr, scan_length, &quote);
+                sz_cptr_t next_quote = NULL;
+                sz_status_t const status = sz_find_byte_best(scan_ptr, scan_length, &quote, &next_quote,
+                                                             sz_py_enabled_capabilities, NULL);
+                if (status != sz_success_k) {
+                    sz_py_raise_status(status, "str()");
+                    return NULL;
+                }
                 if (next_quote == NULL) break;
                 total_bytes++; // Extra byte for escaping
                 scan_length -= next_quote - scan_ptr + 1;
@@ -1760,7 +1813,9 @@ static PyGetSetDef Strs_getsetters[] = {
 /** The efficient @c Strs_init path initializing from PyArrow array capsules. */
 static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) {
     // Handle Arrow array
-    PyObject *capsules = PyObject_CallMethod(sequence_obj, "__arrow_c_array__", NULL);
+    PyObject *const method_name = PyUnicode_FromString("__arrow_c_array__");
+    PyObject *capsules = method_name ? PyObject_CallMethodNoArgs(sequence_obj, method_name) : NULL;
+    Py_XDECREF(method_name);
     if (!capsules || !PyTuple_Check(capsules) || PyTuple_Size(capsules) != 2) {
         Py_XDECREF(capsules);
         PyErr_SetString(PyExc_ValueError, "__arrow_c_array__ must return a tuple of 2 capsules");
@@ -1852,7 +1907,16 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
 
             // Copy data and adjust offsets (Apache Arrow format)
             sz_size_t actual_bytes = offsets_64[length] - offsets_64[0];
-            if (actual_bytes > 0) sz_copy(new_data, data_buffer + offsets_64[0], actual_bytes);
+            sz_status_t const status = actual_bytes ? sz_copy_best(new_data, data_buffer + offsets_64[0], actual_bytes,
+                                                                   sz_py_enabled_capabilities, NULL)
+                                                    : sz_success_k;
+            if (status != sz_success_k) {
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
+                allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle);
+                Py_DECREF(capsules);
+                sz_py_raise_status(status, "Strs()");
+                return -1;
+            }
             new_offsets[0] = 0; // First offset is always 0
             for (sz_size_t i = 0; i < length; i++) {
                 // Handle null values by checking validity bitmap
@@ -1885,7 +1949,16 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
 
             // Copy data and adjust offsets (Apache Arrow format)
             sz_size_t actual_bytes = offsets_32[length] - offsets_32[0];
-            if (actual_bytes > 0) sz_copy(new_data, data_buffer + offsets_32[0], actual_bytes);
+            sz_status_t const status = actual_bytes ? sz_copy_best(new_data, data_buffer + offsets_32[0], actual_bytes,
+                                                                   sz_py_enabled_capabilities, NULL)
+                                                    : sz_success_k;
+            if (status != sz_success_k) {
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
+                allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle);
+                Py_DECREF(capsules);
+                sz_py_raise_status(status, "Strs()");
+                return -1;
+            }
             new_offsets[0] = 0; // First offset is always 0
             for (sz_size_t i = 0; i < length; i++) {
                 // Handle null values by checking validity bitmap
@@ -2000,7 +2073,14 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 sz_size_t item_length;
                 sz_py_export_string_like(item, &item_start, &item_length);
 
-                sz_copy(data_buffer + offset, item_start, item_length);
+                sz_status_t const status = sz_copy_best(data_buffer + offset, item_start, item_length,
+                                                        sz_py_enabled_capabilities, NULL);
+                if (status != sz_success_k) {
+                    allocator.free(offsets, (count + 1) * sizeof(offsets[0]), allocator.handle);
+                    if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
+                    sz_py_raise_status(status, "Strs()");
+                    return -1;
+                }
                 offset += item_length;
                 offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }
@@ -2028,7 +2108,14 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 sz_size_t item_length;
                 sz_py_export_string_like(item, &item_start, &item_length);
 
-                sz_copy(data_buffer + offset, item_start, item_length);
+                sz_status_t const status = sz_copy_best(data_buffer + offset, item_start, item_length,
+                                                        sz_py_enabled_capabilities, NULL);
+                if (status != sz_success_k) {
+                    allocator.free(offsets, (count + 1) * sizeof(offsets[0]), allocator.handle);
+                    if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
+                    sz_py_raise_status(status, "Strs()");
+                    return -1;
+                }
                 offset += item_length;
                 offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }

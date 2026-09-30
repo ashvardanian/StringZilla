@@ -10,9 +10,13 @@
 //! ## Features
 //! - `std`: standard-library integration, such as `BuildSzHasher` for `HashMap`; without it the
 //!   crate is `no_std`.
-//! - `dynamic-dispatch`: compile every ISA tier and pick one at load through a dispatch table;
-//!   without it the tier is resolved at compile time and baked in.
-//! - `cuda`: compile the CUDA backend, which is what the engines' `new_on_gpu` constructors need.
+//! - `cuda`, `rocm`, `metal`: build the library through CMake with that GPU backend, so that
+//!   vendor's devices count and the engines' `new_on` constructors can prepare a batch on one.
+//!
+//! Every call dispatches on the CPU's
+//! [`Device::capabilities_enabled`](stringzilla::Device::capabilities_enabled), which
+//! [`Device::capabilities_enable`](stringzilla::Device::capabilities_enable) narrows for the whole
+//! process.
 //!
 //! File: rust/lib.rs
 //! Author: Ash Vardanian

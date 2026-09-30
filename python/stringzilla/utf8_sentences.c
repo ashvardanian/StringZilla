@@ -6,33 +6,29 @@
  */
 #include "stringzilla.h"
 
-char const doc_utf8_sentences[] =                                                         //
-    "utf8_sentences(string, /)\n"                                                         //
-    "\n"                                                                                  //
-    "Return an iterator yielding sentences per Unicode UAX-29 sentence boundary rules.\n" //
-    "UAX-29 compliant and Unicode-script aware, unlike naive period splitting.\n"         //
-    "\n"                                                                                  //
-    "Args:\n"                                                                             //
-    "    string: The input UTF-8 string to split into sentences.\n"                       //
-    "\n"                                                                                  //
-    "Returns:\n"                                                                          //
-    "    Iterator yielding Str objects for each sentence.\n\n"                            //
-    "\n"                                                                                  //
-    "Example:\n"                                                                          //
-    "  >>> # Stream UAX-29 sentences lazily:\n"                                           //
-    "  >>> len(list(sz.utf8_sentences('Hi. Bye.'))) >= 2\n"                               //
+char const doc_utf8_sentences[] =                                                                        //
+    "utf8_sentences(string, /, *, capabilities=None)\n"                                                  //
+    "\n"                                                                                                 //
+    "Return an iterator yielding sentences per Unicode UAX-29 sentence boundary rules.\n"                //
+    "UAX-29 compliant and Unicode-script aware, unlike naive period splitting.\n"                        //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    string: The input UTF-8 string to split into sentences.\n"                                      //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Returns:\n"                                                                                         //
+    "    Iterator yielding Str objects for each sentence.\n\n"                                           //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "  >>> # Stream UAX-29 sentences lazily:\n"                                                          //
+    "  >>> len(list(sz.utf8_sentences('Hi. Bye.'))) >= 2\n"                                              //
     "  True";
 
 PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                   PyObject *kwnames) {
-    int min_args = 1, max_args = 1;
-    if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_sentences() requires %zd to %zd arguments", min_args, max_args);
-        return NULL;
-    }
-
     sz_unused_(self);
-    return Utf8Boundaries_make_(&Utf8SentencesType, args[0], sz_utf8_sentences);
+    return Utf8Boundaries_make_(&Utf8SentencesType, "utf8_sentences", sz_utf8_sentences_best, args,
+                                positional_args_count, kwnames);
 }
 
 static char const doc_Utf8Sentences[] =                                              //

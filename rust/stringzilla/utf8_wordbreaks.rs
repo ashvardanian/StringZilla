@@ -5,11 +5,24 @@
 
 use super::*;
 
-/// Kernel behind [`Utf8Wordbreaks`] (`sz_utf8_wordbreaks`).
+/// Kernel behind [`Utf8Wordbreaks`] (`sz_utf8_wordbreaks_best`).
 pub struct Wordbreaks;
 impl SegmenterKernel for Wordbreaks {
     unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        sz_utf8_wordbreaks(t, n, o, l, c, u)
+        let mut count = 0;
+        sz_utf8_wordbreaks_best(
+            t,
+            n,
+            o,
+            l,
+            c,
+            &mut count,
+            u,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+        .infallible();
+        count
     }
 }
 
@@ -34,7 +47,6 @@ mod tests {
     use super::*;
     use crate::stringzilla::fixtures::*;
     use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
-    use crate::sz::*;
 
     // A U+2019 contraction tiles as a single word, like the ASCII apostrophe.
     const PROSE_MICRO_APOSTROPHE: &str = "it\u{2019}s worth it";

@@ -7,7 +7,7 @@
 #include "stringzilla.h"
 
 /** Iterator that yields all uncased matches of a needle in a haystack. Uses
- *  @c sz_utf8_uncased_search for Unicode-aware case folding. */
+ *  @c sz_utf8_uncased_search_best for Unicode-aware case folding. */
 typedef struct {
     PyObject ob_base;
 
@@ -25,34 +25,38 @@ typedef struct {
     /// @brief  Whether to allow overlapping matches.
     sz_bool_t include_overlapping;
 
+    /// @brief  The mask every search dispatches with.
+    sz_capability_t capabilities;
+
 } Utf8UncasedMatches;
 
-char const doc_utf8_uncased_search[] =                                                  //
-    "Find substring using Unicode uncased matching.\n"                                  //
-    "\n"                                                                                //
-    "Performs a uncased search using Unicode case folding rules,\n"                     //
-    "correctly handling one-to-many expansions, like 'ß' matching 'SS'.\n"              //
-    "\n"                                                                                //
-    "IMPORTANT - Type-dependent behavior:\n"                                            //
-    "  - str input:   start/end are CODEPOINT offsets, returns CODEPOINT offset\n"      //
-    "  - bytes input: start/end are BYTE offsets, returns BYTE offset\n"                //
-    "\n"                                                                                //
-    "Args:\n"                                                                           //
-    "    haystack (Str or str or bytes): The string to search in.\n"                    //
-    "    needle (Str or str or bytes): The substring to find.\n"                        //
-    "    start (int, optional): Starting index, defaulting to 0.\n"                     //
-    "    end (int, optional): Ending index, defaulting to length.\n"                    //
-    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n" //
-    "\n"                                                                                //
-    "Returns:\n"                                                                        //
-    "    int: Index of the first match, or -1 if not found.\n"                          //
-    "\n"                                                                                //
-    "Example:\n"                                                                        //
-    "    >>> sz.utf8_uncased_search('Hello World', 'WORLD')  # str: codepoint offset\n" //
-    "    6\n"                                                                           //
-    "    >>> sz.utf8_uncased_search('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"        //
-    "    0\n"                                                                           //
-    "    >>> sz.utf8_uncased_search(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n" //
+char const doc_utf8_uncased_search[] =                                                                   //
+    "Find substring using Unicode uncased matching.\n"                                                   //
+    "\n"                                                                                                 //
+    "Performs a uncased search using Unicode case folding rules,\n"                                      //
+    "correctly handling one-to-many expansions, like 'ß' matching 'SS'.\n"                               //
+    "\n"                                                                                                 //
+    "IMPORTANT - Type-dependent behavior:\n"                                                             //
+    "  - str input:   start/end are CODEPOINT offsets, returns CODEPOINT offset\n"                       //
+    "  - bytes input: start/end are BYTE offsets, returns BYTE offset\n"                                 //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    haystack (Str or str or bytes): The string to search in.\n"                                     //
+    "    needle (Str or str or bytes): The substring to find.\n"                                         //
+    "    start (int, optional): Starting index, defaulting to 0.\n"                                      //
+    "    end (int, optional): Ending index, defaulting to length.\n"                                     //
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Returns:\n"                                                                                         //
+    "    int: Index of the first match, or -1 if not found.\n"                                           //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "    >>> sz.utf8_uncased_search('Hello World', 'WORLD')  # str: codepoint offset\n"                  //
+    "    6\n"                                                                                            //
+    "    >>> sz.utf8_uncased_search('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"                         //
+    "    0\n"                                                                                            //
+    "    >>> sz.utf8_uncased_search(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n"                  //
     "    0";
 
 PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -64,13 +68,14 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
     PyObject *needle_obj = NULL;
     PyObject *start_obj = NULL;
     PyObject *end_obj = NULL;
+    PyObject *capabilities_object = NULL;
     int validate = 0;
 
     // Argument count validation
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
     Py_ssize_t const total_args = positional_args_count + args_names_count;
     Py_ssize_t const expected_min = is_member ? 1 : 2; // needle required
-    Py_ssize_t const expected_max = expected_min + 3;  // + start + end + validate
+    Py_ssize_t const expected_max = expected_min + 4;  // + start + end + validate + capabilities
 
     if (total_args < expected_min || total_args > expected_max) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
@@ -114,11 +119,14 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
             validate = PyObject_IsTrue(val);
             if (validate < 0) return NULL;
         }
+        else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) { capabilities_object = val; }
         else {
             PyErr_Format(PyExc_TypeError, "utf8_uncased_search() got unexpected keyword argument '%U'", key);
             return NULL;
         }
     }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     // Determine if input is Unicode (str) or bytes - affects offset semantics
     int const is_unicode = PyUnicode_Check(haystack_obj);
@@ -150,10 +158,16 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
     sz_size_t byte_length = haystack_full.length;
     sz_size_t codepoint_offset_start = 0; // Only used for str return value
     sz_bool_t window_valid = sz_true_k;   // A degenerate [start, end) window can't hold even an empty needle
+    sz_status_t status = sz_success_k;
 
     if (is_unicode) {
         // For str: start/end are codepoint offsets, convert to byte offsets
-        sz_size_t total_codepoints = sz_utf8_count(haystack_full.start, haystack_full.length);
+        sz_size_t total_codepoints = 0;
+        status = sz_utf8_count_best(haystack_full.start, haystack_full.length, &total_codepoints, capabilities, NULL);
+        if (status != sz_success_k) {
+            sz_py_raise_status(status, "utf8_uncased_search()");
+            return NULL;
+        }
 
         // Clamp codepoint offsets with CPython slice semantics (negatives count from the end)
         sz_ssize_t signed_start = start, signed_end = end;
@@ -167,18 +181,20 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
 
         codepoint_offset_start = codepoint_start;
 
-        // Convert codepoint start to byte offset
-        if (codepoint_start > 0) {
-            sz_cptr_t start_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, codepoint_start);
-            byte_offset_start = start_ptr ? (sz_size_t)(start_ptr - haystack_full.start) : haystack_full.length;
+        // Convert codepoint offsets to byte offsets, a null seek landing past the last rune
+        sz_cptr_t start_ptr = haystack_full.start, end_ptr = NULL;
+        if (codepoint_start > 0)
+            status = sz_utf8_seek_best(haystack_full.start, haystack_full.length, codepoint_start, &start_ptr,
+                                       capabilities, NULL);
+        if (codepoint_end < total_codepoints && status == sz_success_k)
+            status = sz_utf8_seek_best(haystack_full.start, haystack_full.length, codepoint_end, &end_ptr, capabilities,
+                                       NULL);
+        if (status != sz_success_k) {
+            sz_py_raise_status(status, "utf8_uncased_search()");
+            return NULL;
         }
-
-        // Convert codepoint end to byte offset
-        sz_size_t byte_offset_end = haystack_full.length;
-        if (codepoint_end < total_codepoints) {
-            sz_cptr_t end_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, codepoint_end);
-            byte_offset_end = end_ptr ? (sz_size_t)(end_ptr - haystack_full.start) : haystack_full.length;
-        }
+        byte_offset_start = start_ptr ? (sz_size_t)(start_ptr - haystack_full.start) : haystack_full.length;
+        sz_size_t byte_offset_end = end_ptr ? (sz_size_t)(end_ptr - haystack_full.start) : haystack_full.length;
 
         byte_length = (byte_offset_end > byte_offset_start) ? (byte_offset_end - byte_offset_start) : 0;
     }
@@ -213,10 +229,15 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
         }
     }
 
-    sz_size_t matched_length = 0;
+    sz_size_t match_length = 0;
     sz_utf8_uncased_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
-    sz_cptr_t result = sz_utf8_uncased_search(haystack.start, haystack.length, needle.start, needle.length,
-                                              &needle_metadata, &matched_length);
+    sz_cptr_t result = NULL;
+    status = sz_utf8_uncased_search_best(haystack.start, haystack.length, needle.start, needle.length, &needle_metadata,
+                                         &result, &match_length, capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "utf8_uncased_search()");
+        return NULL;
+    }
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 
@@ -225,7 +246,13 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
 
     if (is_unicode) {
         // For str: return codepoint offset
-        sz_size_t result_codepoint_offset = sz_utf8_count(haystack_full.start, result_byte_offset);
+        sz_size_t result_codepoint_offset = 0;
+        status = sz_utf8_count_best(haystack_full.start, result_byte_offset, &result_codepoint_offset, capabilities,
+                                    NULL);
+        if (status != sz_success_k) {
+            sz_py_raise_status(status, "utf8_uncased_search()");
+            return NULL;
+        }
         return PyLong_FromSsize_t((Py_ssize_t)result_codepoint_offset);
     }
     else {
@@ -234,24 +261,25 @@ PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py
     }
 }
 
-char const doc_utf8_uncased_order[] =                                                      //
-    "Compare two UTF-8 strings uncasedly.\n"                                               //
-    "\n"                                                                                   //
-    "Performs lexicographical comparison using Unicode case folding, correctly handling\n" //
-    "one-to-many expansions, like 'Straße' equaling 'STRASSE'.\n"                          //
-    "\n"                                                                                   //
-    "Args:\n"                                                                              //
-    "    a (Str or str or bytes): First string to compare.\n"                              //
-    "    b (Str or str or bytes): Second string to compare.\n"                             //
-    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"    //
-    "\n"                                                                                   //
-    "Returns:\n"                                                                           //
-    "    int: Negative if a < b, zero if equal, positive if a > b.\n"                      //
-    "\n"                                                                                   //
-    "Example:\n"                                                                           //
-    "    >>> sz.utf8_uncased_order('hello', 'HELLO')\n"                                    //
-    "    0\n"                                                                              //
-    "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                                   //
+char const doc_utf8_uncased_order[] =                                                                    //
+    "Compare two UTF-8 strings uncasedly.\n"                                                             //
+    "\n"                                                                                                 //
+    "Performs lexicographical comparison using Unicode case folding, correctly handling\n"               //
+    "one-to-many expansions, like 'Straße' equaling 'STRASSE'.\n"                                        //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    a (Str or str or bytes): First string to compare.\n"                                            //
+    "    b (Str or str or bytes): Second string to compare.\n"                                           //
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Returns:\n"                                                                                         //
+    "    int: Negative if a < b, zero if equal, positive if a > b.\n"                                    //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "    >>> sz.utf8_uncased_order('hello', 'HELLO')\n"                                                  //
+    "    0\n"                                                                                            //
+    "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                                                 //
     "    -1";
 
 PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -259,6 +287,7 @@ PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = is_member ? 1 : 2; // b if method, a+b if function
     int validate = 0;                              // Default: no validation
+    PyObject *capabilities_object = NULL;
 
     if (positional_args_count != nargs_expected) {
         PyErr_Format(PyExc_TypeError, "utf8_uncased_order() takes exactly %zd positional argument(s)", nargs_expected);
@@ -275,12 +304,17 @@ PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_
                 validate = PyObject_IsTrue(val);
                 if (validate < 0) return NULL;
             }
+            else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) {
+                capabilities_object = args[positional_args_count + i];
+            }
             else {
                 PyErr_Format(PyExc_TypeError, "utf8_uncased_order() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
     }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     PyObject *a_obj = is_member ? self : args[0];
     PyObject *b_obj = is_member ? args[0] : args[1];
@@ -307,31 +341,38 @@ PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_
         }
     }
 
-    sz_ordering_t order = sz_utf8_uncased_order(a.start, a.length, b.start, b.length);
+    sz_ordering_t order = sz_equal_k;
+    sz_status_t const status = sz_utf8_uncased_order_best(a.start, a.length, b.start, b.length, &order, capabilities,
+                                                          NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "utf8_uncased_order()");
+        return NULL;
+    }
     return PyLong_FromLong((long)order);
 }
 
-char const doc_utf8_uncased_matches[] =                                                           //
-    "utf8_uncased_matches(haystack, needle, /, include_overlapping=False)\n"                      //
-    "\n"                                                                                          //
-    "Iterate over all uncased matches of needle in haystack.\n"                                   //
-    "\n"                                                                                          //
-    "This function uses Unicode case folding for proper handling of\n"                            //
-    "international text. The matched region length may differ from the\n"                         //
-    "needle length due to case folding expansions, like 'ß' matching 'SS'.\n"                     //
-    "\n"                                                                                          //
-    "Args:\n"                                                                                     //
-    "    haystack (Str or str or bytes): The string to search in.\n"                              //
-    "    needle (Str or str or bytes): The pattern to find.\n"                                    //
-    "    include_overlapping (bool, optional): Allow overlapping matches, defaulting to False.\n" //
-    "\n"                                                                                          //
-    "Yields:\n"                                                                                   //
-    "    Str: Each matched region as a view into the original haystack.\n"                        //
-    "\n"                                                                                          //
-    "Examples:\n"                                                                                 //
-    "    >>> list(sz.utf8_uncased_matches('Hello HELLO hello', 'hello'))\n"                       //
-    "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                                   //
-    "    >>> list(sz.utf8_uncased_matches('Straße STRASSE', 'strasse'))\n"                        //
+char const doc_utf8_uncased_matches[] =                                                                  //
+    "utf8_uncased_matches(haystack, needle, /, include_overlapping=False, *, capabilities=None)\n"       //
+    "\n"                                                                                                 //
+    "Iterate over all uncased matches of needle in haystack.\n"                                          //
+    "\n"                                                                                                 //
+    "This function uses Unicode case folding for proper handling of\n"                                   //
+    "international text. The matched region length may differ from the\n"                                //
+    "needle length due to case folding expansions, like 'ß' matching 'SS'.\n"                            //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    haystack (Str or str or bytes): The string to search in.\n"                                     //
+    "    needle (Str or str or bytes): The pattern to find.\n"                                           //
+    "    include_overlapping (bool, optional): Allow overlapping matches, defaulting to False.\n"        //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Yields:\n"                                                                                          //
+    "    Str: Each matched region as a view into the original haystack.\n"                               //
+    "\n"                                                                                                 //
+    "Examples:\n"                                                                                        //
+    "    >>> list(sz.utf8_uncased_matches('Hello HELLO hello', 'hello'))\n"                              //
+    "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                                          //
+    "    >>> list(sz.utf8_uncased_matches('Straße STRASSE', 'strasse'))\n"                               //
     "    [sz.Str('Straße'), sz.Str('STRASSE')]";
 
 PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -350,6 +391,7 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
     PyObject *haystack_obj = is_member ? self : args[0];
     PyObject *needle_obj = is_member ? args[0] : args[1];
     int include_overlapping = 0;
+    PyObject *capabilities_object = NULL;
 
     // Parse keyword arguments
     if (kwnames) {
@@ -360,12 +402,15 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
             if (PyUnicode_CompareWithASCIIString(key, "include_overlapping") == 0) {
                 include_overlapping = PyObject_IsTrue(value);
             }
+            else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) { capabilities_object = value; }
             else {
                 PyErr_Format(PyExc_TypeError, "utf8_uncased_matches() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
     }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     // Check positional include_overlapping argument
     if (positional_args_count > max_args - 1) include_overlapping = PyObject_IsTrue(args[is_member ? 1 : 2]);
@@ -392,6 +437,7 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
         iter->needle = needle_view;
         memset(&iter->metadata, 0, sizeof(iter->metadata));
         iter->include_overlapping = sz_false_k;
+        iter->capabilities = capabilities;
 
         return (PyObject *)iter;
     }
@@ -409,6 +455,7 @@ PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, P
     iter->needle = needle_view;
     memset(&iter->metadata, 0, sizeof(iter->metadata));
     iter->include_overlapping = include_overlapping ? sz_true_k : sz_false_k;
+    iter->capabilities = capabilities;
 
     return (PyObject *)iter;
 }
@@ -419,9 +466,15 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
     if (remaining == 0) return NULL;
 
     // Search for next match
-    sz_size_t matched_length = 0;
-    sz_cptr_t match = sz_utf8_uncased_search(self->current, remaining, self->needle.start, self->needle.length,
-                                             &self->metadata, &matched_length);
+    sz_size_t match_length = 0;
+    sz_cptr_t match = NULL;
+    sz_status_t const status = sz_utf8_uncased_search_best(self->current, remaining, self->needle.start,
+                                                           self->needle.length, &self->metadata, &match, &match_length,
+                                                           self->capabilities, NULL);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "__next__()");
+        return NULL;
+    }
 
     if (!match) return NULL;
 
@@ -430,7 +483,7 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
     if (result_obj == NULL) return PyErr_NoMemory();
 
     result_obj->memory.start = match;
-    result_obj->memory.length = matched_length;
+    result_obj->memory.length = match_length;
     result_obj->parent = self->haystack_obj;
     Py_INCREF(self->haystack_obj);
 
@@ -438,12 +491,12 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
     if (self->include_overlapping) {
         // Move forward by one UTF-8 codepoint to allow overlapping matches
         sz_size_t pos = 0;
-        sz_utf8_next_rune_(match, matched_length, &pos);
+        sz_utf8_next_rune_(match, match_length, &pos);
         self->current = match + (pos > 0 ? pos : 1);
     }
     else {
         // Move past the entire matched region (non-overlapping)
-        self->current = match + matched_length;
+        self->current = match + match_length;
     }
 
     return (PyObject *)result_obj;

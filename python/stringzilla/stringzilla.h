@@ -85,6 +85,9 @@ extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_all
 
 /* shared.c */
 
+/** Overwrites @p length bytes at @p start with zeros, in a way a compiler may not elide. */
+extern void sz_py_wipe_bytes(void *start, sz_size_t length);
+
 /** Whether a buffer-like object is writable; sets a @c TypeError and returns false if not. */
 extern sz_bool_t sz_py_is_mutable(PyObject *object);
 
@@ -123,6 +126,14 @@ extern PyTypeObject Aes256GcmDecryptorType;
 extern PyTypeObject LevenshteinEngineType;
 extern PyTypeObject OverlapEngineType;
 extern PyTypeObject SubstringsEngineType;
+extern PyTypeObject DeviceType;
+
+/** A @c stringzilla.Device: a kind of runtime from the table in `stringzilla.c`, and an ordinal. */
+typedef struct Device {
+    PyObject ob_base;
+    struct DeviceKind const *kind;
+    sz_size_t ordinal;
+} Device;
 
 extern struct PyModuleDef stringzilla_module;
 
@@ -159,6 +170,11 @@ typedef struct {
     sz_string_view_t memory;
 } Str;
 
+/** The shape of every segmenter's dispatch point, like @c sz_utf8_wordbreaks_best. */
+typedef sz_status_t (*sz_py_segmenter_t)(sz_cptr_t text, sz_size_t length, sz_size_t *starts, sz_size_t *lengths,
+                                         sz_size_t capacity, sz_size_t *count, sz_size_t *bytes_consumed,
+                                         sz_capability_t capabilities, void *stream);
+
 /**
  *  @brief Iterator for finding UAX segment boundaries in UTF-8 text - words, grapheme clusters,
  *      sentences, and line-break opportunities.
@@ -170,18 +186,19 @@ typedef struct {
 typedef struct {
     PyObject ob_base;
 
-    PyObject *text_obj; //< For reference counting
+    PyObject *text_obj;
 
-    sz_cptr_t start; //< Start of the not-yet-segmented suffix (a boundary); advances forward as batches drain.
-    sz_cptr_t end;   //< End of the original text; immutable.
+    sz_cptr_t start;
+    sz_cptr_t end;
 
-    sz_utf8_segmenter_t kernel; //< Segmenting kernel this iterator was constructed with.
+    sz_py_segmenter_t segmenter;
+    sz_capability_t capabilities;
 
     /// @brief  Inline batch of segment offsets relative to @c start, refilled on demand.
     sz_size_t batch_starts[sz_iterators_default_steps_k];
     sz_size_t batch_lengths[sz_iterators_default_steps_k];
-    sz_size_t batch_count; //< Number of segments currently buffered.
-    sz_size_t batch_index; //< Index of the next segment to yield from the buffer.
+    sz_size_t batch_count;
+    sz_size_t batch_index;
 
 } Utf8Boundaries;
 
@@ -268,15 +285,15 @@ typedef struct {
  *  four fields are guarded by @c freelist_lock: without it, concurrent @c alloc_ and @c dealloc
  *  calls race on the same linked list and can hand out one header to two live objects at once.
  */
-enum { sz_freelist_capacity_k = 64 }; //< Headers retained per interpreter, per type.
+enum { sz_freelist_capacity_k = 64 };
 
 typedef struct {
-    Str *str_freelist_head;        //< Intrusive list of dead `Str` headers (link via `parent`).
-    sz_size_t str_freelist_count;  //< Cached `Str` headers, never exceeds `sz_freelist_capacity_k`.
-    Strs *strs_freelist_head;      //< Intrusive list of dead `Strs` headers (link via `data`).
-    sz_size_t strs_freelist_count; //< Cached `Strs` headers, never exceeds `sz_freelist_capacity_k`.
+    Str *str_freelist_head;
+    sz_size_t str_freelist_count;
+    Strs *strs_freelist_head;
+    sz_size_t strs_freelist_count;
 #if defined(Py_GIL_DISABLED)
-    PyMutex freelist_lock; //< Guards the four fields above; zero-initialized, so starts unlocked.
+    PyMutex freelist_lock;
 #endif
 } stringzilla_state_t;
 
@@ -448,7 +465,7 @@ extern PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_s
 /* sort.c */
 extern char const doc_argsort[];
 extern sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
-                                     sz_size_t top, sz_bool_t reverse);
+                                     sz_size_t top, sz_bool_t reverse, sz_capability_t capabilities);
 extern PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple);
 
@@ -482,8 +499,11 @@ extern PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args,
 
 /* utf8_boundaries.c */
 
-/** Builds a @c Utf8Boundaries iterator of @p type over @p text_obj, segmented by @p kernel. */
-extern PyObject *Utf8Boundaries_make_(PyTypeObject *type, PyObject *text_obj, sz_utf8_segmenter_t kernel);
+/** Builds a @c Utf8Boundaries iterator of @p type, segmented by @p segmenter, over the one
+ *  positional argument of a `Str_like_*` call named @p name, reading its `capabilities=`. */
+extern PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segmenter_t segmenter,
+                                      PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple);
 
 /** Yields the next segment as a @c Str view, refilling the inline batch when it drains. */
 extern PyObject *Utf8Boundaries_next_(Utf8Boundaries *self);
@@ -537,6 +557,18 @@ extern PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const
 
 /* stringzilla.c */
 
+/** The CPU capabilities a call dispatches with unless it passes its own, which
+ *  @c capabilities_enable sets for the whole process. */
+extern sz_capability_t sz_py_enabled_capabilities;
+
+/**
+ *  @brief Reads the `capabilities=` keyword of a call that runs kernels.
+ *  @param[in] capabilities_object A @c Capability mask, or @c NULL or None for the enabled mask.
+ *  @param[out] capabilities The mask to dispatch with, kept to CPU capabilities this machine has.
+ *  @return 0 on success, or -1 with a Python exception set.
+ */
+extern int sz_py_export_capabilities(PyObject *capabilities_object, sz_capability_t *capabilities);
+
 /** Raises the Python exception @p status names, blaming @p context; never called on success. */
 extern void sz_py_raise_status(sz_status_t status, char const *context);
 
@@ -544,7 +576,21 @@ extern void sz_py_raise_status(sz_status_t status, char const *context);
 extern int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_t *sequence);
 
 /** Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
-extern int sz_py_export_stream(PyObject *stream_obj, void **stream);
+extern int sz_py_export_stream(PyObject *stream_object, void **stream);
+
+/**
+ *  @brief Reads where an engine is built: its `device=`, `capabilities=` and `stream=` keywords.
+ *  @param[in] device_object A @c Device, or @c NULL or None for the CPU.
+ *  @param[in] capabilities_object A mask narrowing the device's enabled one, or @c NULL or None.
+ *  @param[out] capabilities The mask to build the engine with.
+ *  @param[out] ordinal The device's ordinal within its kind.
+ *  @param[out] stream A stream of that device, @c NULL when absent.
+ *  @return 0 on success, or -1 with a Python exception set, refusing a device this build has no
+ *      kernels for, capabilities beyond the device's, and a CPU engine given a stream.
+ */
+extern int sz_py_export_engine_placement(PyObject *device_object, PyObject *capabilities_object,
+                                         PyObject *stream_object, sz_capability_t *capabilities, sz_size_t *ordinal,
+                                         void **stream);
 
 /**
  *  @brief Binds @p object as a writable output of @p rank axes, each at least @p extents wide.

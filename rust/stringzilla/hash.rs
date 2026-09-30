@@ -76,26 +76,45 @@ impl Hasher {
             ins_length: 0,
         };
         unsafe {
-            sz_hash_state_init(&mut state as *mut _ as *mut c_void, seed);
+            sz_hash_state_init_best(
+                &mut state as *mut _ as *mut c_void,
+                seed,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
         }
+        .infallible();
         state
     }
 
     /// Updates the hasher with more data.
     pub fn update(&mut self, data: &[u8]) -> &mut Self {
         unsafe {
-            sz_hash_state_update(
+            sz_hash_state_update_best(
                 self as *mut _ as *mut c_void,
                 data.as_ptr() as *const c_void,
                 data.len(),
-            );
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
         }
+        .infallible();
         self
     }
 
     /// Returns the current hash value without consuming the state.
     pub fn digest(&self) -> u64 {
-        unsafe { sz_hash_state_digest(self as *const _ as *const c_void) }
+        let mut hash = 0;
+        unsafe {
+            sz_hash_state_digest_best(
+                self as *const _ as *const c_void,
+                &mut hash,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
+        }
+        .infallible();
+        hash
     }
 }
 
@@ -117,20 +136,28 @@ impl Sha256 {
     pub fn new() -> Self {
         let mut state = Sha256([0; 128]);
         unsafe {
-            sz_sha256_state_init(&mut state as *mut _ as *mut c_void);
+            sz_sha256_state_init_best(
+                &mut state as *mut _ as *mut c_void,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
         }
+        .infallible();
         state
     }
 
     /// Updates the hasher with more data.
     pub fn update(&mut self, data: &[u8]) -> &mut Self {
         unsafe {
-            sz_sha256_state_update(
+            sz_sha256_state_update_best(
                 self as *mut _ as *mut c_void,
                 data.as_ptr() as *const c_void,
                 data.len(),
-            );
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
         }
+        .infallible();
         self
     }
 
@@ -138,8 +165,14 @@ impl Sha256 {
     pub fn digest(&self) -> Sha256Digest {
         let mut digest = [0u8; SHA256_DIGEST_LENGTH];
         unsafe {
-            sz_sha256_state_digest(self as *const _ as *const c_void, digest.as_mut_ptr());
+            sz_sha256_state_digest_best(
+                self as *const _ as *const c_void,
+                digest.as_mut_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
         }
+        .infallible();
         digest
     }
 
@@ -172,7 +205,7 @@ impl Default for Sha256 {
 ///
 /// # Errors
 ///
-/// Returns [`Status::BadAlloc`] if `chunks` does not have exactly one entry per lane.
+/// Returns [`Status::UnexpectedDimensions`] if `chunks` does not have exactly one entry per lane.
 ///
 /// # Examples
 ///
@@ -191,18 +224,17 @@ impl Default for Sha256 {
 /// assert_eq!(digests[1], sz::Sha256::hash(b"Goodbye, world!"));
 /// ```
 pub fn sha256_multistate_update<Element: AsRef<[u8]>>(states: &mut [Sha256], chunks: &[Element]) -> Result<(), Status> {
-    if chunks.len() != states.len() {
-        return Err(Status::BadAlloc);
-    }
-    sha256_multistate_update_by(states, |lane_index| chunks[lane_index].as_ref())
+    sha256_multistate_update_by(states, chunks, |chunk| chunk.as_ref())
 }
 
-/// Advances many independent SHA256 states at once, taking each lane's next chunk from
-/// a caller-provided key.
+/// Advances many independent SHA256 states at once, taking each lane's next chunk as a byte-slice
+/// `key` of the matching element of `chunks`.
+///
+/// `key` runs inside the C call, where a panic cannot unwind and aborts the process.
 ///
 /// # Errors
 ///
-/// Returns [`Status::BadAlloc`] if `mapper` cannot serve one chunk per lane.
+/// Returns [`Status::UnexpectedDimensions`] if `chunks` does not have exactly one entry per lane.
 ///
 /// # Examples
 ///
@@ -213,48 +245,35 @@ pub fn sha256_multistate_update<Element: AsRef<[u8]>>(states: &mut [Sha256], chu
 /// let records = [Record { payload: "alpha" }, Record { payload: "beta" }];
 ///
 /// let mut states = vec![sz::Sha256::new(); 2];
-/// sz::sha256_multistate_update_by(&mut states, |lane| records[lane].payload.as_bytes()).unwrap();
+/// sz::sha256_multistate_update_by(&mut states, &records, |record| record.payload.as_bytes()).unwrap();
 ///
 /// let mut digests = vec![[0u8; 32]; 2];
 /// sz::sha256_multistate_digest(&states, &mut digests).unwrap();
 /// assert_eq!(digests[0], sz::Sha256::hash(b"alpha"));
 /// ```
-pub fn sha256_multistate_update_by<Mapper, Key>(states: &mut [Sha256], mapper: Mapper) -> Result<(), Status>
+pub fn sha256_multistate_update_by<Element, Key>(
+    states: &mut [Sha256],
+    chunks: &[Element],
+    key: Key,
+) -> Result<(), Status>
 where
-    Mapper: Fn(usize) -> Key,
-    Key: AsRef<[u8]>,
+    Key: Fn(&Element) -> &[u8],
 {
+    if chunks.len() != states.len() {
+        return Err(Status::UnexpectedDimensions);
+    }
     if states.is_empty() {
         return Ok(());
     }
-
-    // Same adapter as `argsort_by`: relabel each borrowed chunk `'static` so it can cross the C
-    // ABI. Safe because the kernel reads the chunks only during this synchronous call.
-    let adapter = move |lane_index: usize| -> &'static [u8] {
-        let binding = mapper(lane_index);
-        let slice = binding.as_ref();
-        unsafe { core::mem::transmute(slice) }
-    };
-    _sha256_multistate_update_impl(adapter, states)
-}
-
-/// Helper that takes an adapter of a concrete type and performs the FFI call.
-fn _sha256_multistate_update_impl<Adapter>(adapter: Adapter, states: &mut [Sha256]) -> Result<(), Status>
-where
-    Adapter: Fn(usize) -> &'static [u8],
-{
-    let wrapper = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<Adapter>() },
-        data: &adapter as *const Adapter as *const c_void,
-    };
-    let texts = _SzSequence {
-        handle: &wrapper as *const _ as *const c_void,
-        count: states.len(),
-        get_start: Some(_slice_get_start_punned),
-        get_length: Some(_slice_get_length_punned),
-    };
-    unsafe { sz_sha256_multistate_update(states.as_mut_ptr() as *mut c_void, &texts) };
-    Ok(())
+    with_sequence_by(chunks, key, |texts| unsafe {
+        sz_sha256_multistate_update_best(
+            states.as_mut_ptr() as *mut c_void,
+            texts,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    })
+    .check()
 }
 
 /// Writes each lane's digest into caller-provided storage, leaving every lane able to
@@ -262,22 +281,24 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`Status::BadAlloc`] if `digests` does not have exactly one entry per lane.
+/// Returns [`Status::UnexpectedDimensions`] if `digests` does not have exactly one entry per lane.
 pub fn sha256_multistate_digest(states: &[Sha256], digests: &mut [Sha256Digest]) -> Result<(), Status> {
     if digests.len() != states.len() {
-        return Err(Status::BadAlloc);
+        return Err(Status::UnexpectedDimensions);
     }
     if states.is_empty() {
         return Ok(());
     }
     unsafe {
-        sz_sha256_multistate_digest(
+        sz_sha256_multistate_digest_best(
             states.as_ptr() as *const c_void,
             states.len(),
             digests.as_mut_ptr() as *mut u8,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
         )
-    };
-    Ok(())
+    }
+    .check()
 }
 
 /// Computes HMAC-SHA256, the Hash-based Message Authentication Code, for the given key and message.
@@ -364,7 +385,8 @@ fn _hmac_sha256_wrap(inner: &Sha256, outer: &Sha256) -> Sha256Digest {
 ///
 /// # Errors
 ///
-/// Returns [`Status::BadAlloc`] unless `messages`, `states` and `tags` all have the same length.
+/// Returns [`Status::UnexpectedDimensions`] unless `messages`, `states` and `tags` all have the
+/// same length.
 ///
 /// # Examples
 ///
@@ -385,7 +407,7 @@ pub fn hmac_sha256_multistate<Element: AsRef<[u8]>>(
     tags: &mut [Sha256Digest],
 ) -> Result<(), Status> {
     if messages.len() != states.len() || messages.len() != tags.len() {
-        return Err(Status::BadAlloc);
+        return Err(Status::UnexpectedDimensions);
     }
     if messages.is_empty() {
         return Ok(());
@@ -402,10 +424,7 @@ pub fn hmac_sha256_multistate<Element: AsRef<[u8]>>(
     for state in states.iter_mut() {
         *state = outer;
     }
-    {
-        let inner_digests = &*tags;
-        sha256_multistate_update_by(states, |lane_index| &inner_digests[lane_index][..])?;
-    }
+    sha256_multistate_update(states, tags)?;
 
     // Safe to overwrite in place: every inner digest has already been absorbed into its lane.
     sha256_multistate_digest(states, tags)
@@ -519,9 +538,18 @@ where
     Text: AsRef<[u8]>,
 {
     let text_ref = text.as_ref();
-    let text_pointer = text_ref.as_ptr() as _;
-    let text_length = text_ref.len();
-    unsafe { sz_bytesum(text_pointer, text_length) }
+    let mut checksum = 0;
+    unsafe {
+        sz_bytesum_best(
+            text_ref.as_ptr() as *const c_void,
+            text_ref.len(),
+            &mut checksum,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
+    checksum
 }
 
 /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
@@ -543,9 +571,19 @@ where
     Text: AsRef<[u8]>,
 {
     let text_ref = text.as_ref();
-    let text_pointer = text_ref.as_ptr() as _;
-    let text_length = text_ref.len();
-    unsafe { sz_hash(text_pointer, text_length, seed) }
+    let mut hash = 0;
+    unsafe {
+        sz_hash_best(
+            text_ref.as_ptr() as *const c_void,
+            text_ref.len(),
+            seed,
+            &mut hash,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
+    hash
 }
 
 /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
@@ -579,25 +617,30 @@ where
 /// - `seeds`: The 64-bit seeds to hash under.
 /// - `out`: The output buffer, filled with one hash per seed. Must be the same length as `seeds`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `out.len() != seeds.len()`.
+/// Returns [`Status::UnexpectedDimensions`] if `out.len() != seeds.len()`.
 #[inline(always)]
-pub fn hash_multiseed_into<Text>(text: Text, seeds: &[u64], out: &mut [u64])
+pub fn hash_multiseed_into<Text>(text: Text, seeds: &[u64], out: &mut [u64]) -> Result<(), Status>
 where
     Text: AsRef<[u8]>,
 {
-    assert_eq!(seeds.len(), out.len(), "`out` must have one slot per seed");
+    if seeds.len() != out.len() {
+        return Err(Status::UnexpectedDimensions);
+    }
     let text_ref = text.as_ref();
     unsafe {
-        sz_hash_multiseed(
-            text_ref.as_ptr() as _,
+        sz_hash_multiseed_best(
+            text_ref.as_ptr() as *const c_void,
             text_ref.len(),
             seeds.as_ptr(),
             seeds.len(),
             out.as_mut_ptr(),
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
         )
     }
+    .check()
 }
 
 #[cfg(test)]
@@ -607,13 +650,12 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::hash::Hasher as _;
-    // `HashMap`/`HashSet` have no `alloc`-only equivalent (unlike `Vec`/`String`/`BTreeMap`),
+    // `HashMap`/`HashSet` have no `allocator`-only equivalent (unlike `Vec`/`String`/`BTreeMap`),
     // so the handful of tests that need them stay behind `feature = "std"`; everything else
     // here runs no_std.
     #[cfg(feature = "std")]
     use std::collections::{HashMap, HashSet};
 
-    use super::*;
     use crate::sz;
 
     #[test]
@@ -674,7 +716,7 @@ mod tests {
         for text in texts {
             for k in 0..=seeds.len() {
                 let mut out = vec![0u64; k];
-                sz::hash_multiseed_into(text, &seeds[..k], &mut out);
+                sz::hash_multiseed_into(text, &seeds[..k], &mut out).expect("one slot per seed");
                 for i in 0..k {
                     assert_eq!(
                         out[i],
@@ -687,6 +729,10 @@ mod tests {
                 }
             }
         }
+        assert_eq!(
+            sz::hash_multiseed_into("token", &seeds, &mut [0u64; 2]),
+            Err(sz::Status::UnexpectedDimensions)
+        );
     }
 
     #[test]
@@ -699,7 +745,7 @@ mod tests {
         assert_eq!(map.get("a"), Some(&1));
         assert_eq!(map.get("b"), Some(&2));
         assert_eq!(map.get("c"), Some(&3));
-        assert!(map.get("z").is_none());
+        assert!(!map.contains_key("z"));
     }
 
     #[test]
@@ -762,20 +808,17 @@ mod tests {
             // Feed each lane in three uneven slices, so partial blocks carry across calls
             let mut offsets = vec![0usize; lanes_count];
             for slice_index in 0..3 {
-                let ranges: Vec<(usize, usize)> = (0..lanes_count)
+                let lanes: Vec<(&[u8], usize, usize)> = (0..lanes_count)
                     .map(|lane_index| {
                         let remaining = messages[lane_index].len() - offsets[lane_index];
                         let take = if slice_index == 2 { remaining } else { remaining / 3 };
                         let start = offsets[lane_index];
                         offsets[lane_index] += take;
-                        (start, start + take)
+                        (&messages[lane_index][..], start, start + take)
                     })
                     .collect();
-                sz::sha256_multistate_update_by(&mut states, |lane_index| {
-                    let (start, end) = ranges[lane_index];
-                    &messages[lane_index][start..end]
-                })
-                .expect("one chunk per lane");
+                sz::sha256_multistate_update_by(&mut states, &lanes, |&(message, start, end)| &message[start..end])
+                    .expect("one chunk per lane");
             }
 
             let mut digests = vec![[0u8; 32]; lanes_count];
@@ -808,13 +851,13 @@ mod tests {
         let too_few: Vec<&[u8]> = vec![b"a".as_slice(), b"b".as_slice()];
         assert_eq!(
             sz::sha256_multistate_update(&mut states, &too_few),
-            Err(sz::Status::BadAlloc)
+            Err(sz::Status::UnexpectedDimensions)
         );
 
         let mut too_few_digests = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 2];
         assert_eq!(
             sz::sha256_multistate_digest(&states, &mut too_few_digests),
-            Err(sz::Status::BadAlloc)
+            Err(sz::Status::UnexpectedDimensions)
         );
     }
 
@@ -874,7 +917,7 @@ mod tests {
         let mut too_few = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 1];
         assert_eq!(
             sz::hmac_sha256_multistate(b"k", &messages, &mut states, &mut too_few),
-            Err(sz::Status::BadAlloc)
+            Err(sz::Status::UnexpectedDimensions)
         );
     }
 

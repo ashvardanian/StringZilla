@@ -180,6 +180,15 @@ sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t
     }
 }
 
+/** A plain @c memset over storage that is dead immediately afterwards is precisely the store an
+ *  optimizer is licensed to drop, and a dispatched fill can miss its kernel under a narrowed mask.
+ *  Writing through a @c volatile pointer makes every byte an observable side effect, so no key
+ *  material survives in memory an object or a frame once held. */
+void sz_py_wipe_bytes(void *start, sz_size_t length) {
+    volatile sz_u8_t *cursor = (volatile sz_u8_t *)start;
+    while (length--) *cursor++ = 0;
+}
+
 /** Helper function to wrap the current exception with a custom prefix message. An example is
  *  augmenting an argument parsing error with the name of the variable that failed validation. */
 void wrap_current_exception(sz_cptr_t comment) {

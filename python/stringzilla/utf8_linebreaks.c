@@ -6,34 +6,30 @@
  */
 #include "stringzilla.h"
 
-char const doc_utf8_linebreaks[] =                                                   //
-    "utf8_linebreaks(string, /)\n"                                                   //
-    "\n"                                                                             //
-    "Return an iterator yielding segments at line-break opportunities per UAX-14.\n" //
-    "Each segment ends at a line-break opportunity, a soft wrap point.\n"            //
-    "For hard-line splitting (str.splitlines()), use utf8_split_newlines().\n"       //
-    "\n"                                                                             //
-    "Args:\n"                                                                        //
-    "    string: The input UTF-8 string to split at line-break opportunities.\n"     //
-    "\n"                                                                             //
-    "Returns:\n"                                                                     //
-    "    Iterator yielding Str objects for each line-break-opportunity segment.\n\n" //
-    "\n"                                                                             //
-    "Example:\n"                                                                     //
-    "  >>> # Stream UAX-14 line-break opportunities lazily:\n"                       //
-    "  >>> len(list(sz.utf8_linebreaks('a\\nb'))) >= 2\n"                            //
+char const doc_utf8_linebreaks[] =                                                                       //
+    "utf8_linebreaks(string, /, *, capabilities=None)\n"                                                 //
+    "\n"                                                                                                 //
+    "Return an iterator yielding segments at line-break opportunities per UAX-14.\n"                     //
+    "Each segment ends at a line-break opportunity, a soft wrap point.\n"                                //
+    "For hard-line splitting (str.splitlines()), use utf8_split_newlines().\n"                           //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "    string: The input UTF-8 string to split at line-break opportunities.\n"                         //
+    "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
+    "\n"                                                                                                 //
+    "Returns:\n"                                                                                         //
+    "    Iterator yielding Str objects for each line-break-opportunity segment.\n\n"                     //
+    "\n"                                                                                                 //
+    "Example:\n"                                                                                         //
+    "  >>> # Stream UAX-14 line-break opportunities lazily:\n"                                           //
+    "  >>> len(list(sz.utf8_linebreaks('a\\nb'))) >= 2\n"                                                //
     "  True";
 
 PyObject *Str_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                    PyObject *kwnames) {
-    int min_args = 1, max_args = 1;
-    if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_linebreaks() requires %zd to %zd arguments", min_args, max_args);
-        return NULL;
-    }
-
     sz_unused_(self);
-    return Utf8Boundaries_make_(&Utf8LinebreaksType, args[0], sz_utf8_linebreaks);
+    return Utf8Boundaries_make_(&Utf8LinebreaksType, "utf8_linebreaks", sz_utf8_linebreaks_best, args,
+                                positional_args_count, kwnames);
 }
 
 static char const doc_Utf8Linebreaks[] =                                          //

@@ -91,6 +91,16 @@ test("Buffer Hash - Different Seeds Different Output", () => {
     assert.notStrictEqual(hash1, hash2);
 });
 
+test("Buffer Hash - Number Seeds Match BigInt Seeds", () => {
+    const buffer = Buffer.from("hello world");
+
+    assert.strictEqual(stringzilla.hash(buffer, 123), stringzilla.hash(buffer, 123n));
+    assert.strictEqual(new stringzilla.Hasher(123).update(buffer).digest(), stringzilla.hash(buffer, 123n));
+    assert.throws(() => stringzilla.hash(buffer, -1), RangeError);
+    assert.throws(() => stringzilla.hash(buffer, 1.5), RangeError);
+    assert.throws(() => new stringzilla.Hasher(2n ** 64n), RangeError);
+});
+
 test("Hasher Class - Single Buffer", () => {
     const buffer = Buffer.from("hello world");
 
@@ -545,4 +555,47 @@ test("Utf8 Segmentation - Batch Refill Beyond 64 Segments", () => {
     assert.strictEqual(words[0], "w0");
     assert.strictEqual(words[words.length - 1], `w${count - 1}`);
     assert.strictEqual(words.join(""), text.toString());
+});
+
+test("Capabilities - Enable Clamps, Keeps Serial, and Restores", () => {
+    const { Capability, Device } = stringzilla;
+    const cpu = Device.cpu();
+    const enabled = cpu.capabilitiesEnabled();
+    assert.strictEqual(enabled, cpu.capabilitiesDetected() & cpu.capabilitiesCompiled());
+    assert.strictEqual(enabled & Capability.serial, Capability.serial);
+    try {
+        assert.strictEqual(cpu.capabilitiesEnable(0n), Capability.serial);
+        assert.strictEqual(cpu.capabilitiesEnabled(), Capability.serial);
+        assert.strictEqual(stringzilla.find(Buffer.from("hello world"), Buffer.from("world")), 6n);
+    } finally {
+        assert.strictEqual(cpu.capabilitiesEnable(Capability.any), enabled);
+    }
+});
+
+test("Capabilities - Names, Groups, and Devices", () => {
+    const { Capability, Device } = stringzilla;
+    assert(Object.isFrozen(Capability));
+    assert.strictEqual(Capability.serial, 1n);
+    assert.strictEqual(Capability.cuda, 1n << 48n);
+    assert.strictEqual(Capability.cpus & Capability.devices, 0n);
+    assert.strictEqual(Capability.devices & Capability.metal, Capability.metal);
+    assert.strictEqual(Capability.any, (1n << 64n) - 1n);
+
+    // One CPU, refusing the ordinal past it, and GPUs counted by their runtimes where any exist.
+    assert.strictEqual(Device.count("cpu"), 1);
+    assert.throws(() => new Device("cpu", 1), RangeError);
+    assert.throws(() => Device.count("tpu"), TypeError);
+    for (const kind of ["cuda", "rocm", "metal"]) {
+        let count = 0;
+        try {
+            count = Device.count(kind);
+        } catch {
+            assert.throws(() => new Device(kind, 0));
+            continue;
+        }
+        assert.throws(() => new Device(kind, count), RangeError);
+        const gpu = new Device(kind, 0);
+        assert.strictEqual(gpu.capabilitiesCompiled() & Capability.cpus, 0n);
+        assert.throws(() => gpu.capabilitiesEnable(Capability.any));
+    }
 });

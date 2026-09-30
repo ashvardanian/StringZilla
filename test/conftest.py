@@ -63,7 +63,7 @@ def log_test_environment():
     print(f"Processor: {platform.processor()}")
     print(f"Python: {platform.python_version()}")
     print(f"StringZilla version: {sz.__version__}")
-    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
+    print(f"StringZilla capabilities: {sz.Device.cpu().capabilities_enabled()!r}")
     print(f"NumPy available: {numpy_available}")
     if numpy_available:
         print(f"NumPy version: {np.__version__}")
@@ -74,12 +74,11 @@ def log_test_environment():
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("STRINGZILLA_IN_QEMU", "") not in ("", "0", "false")
     if is_qemu:
-        sve_like = {"sve", "sve2", "sve2aes"}
-        current = list(getattr(sz, "__capabilities__", ()))
-        desired = tuple(c for c in current if c.lower() not in sve_like)
-        if len(desired) != len(current):
-            print(f"QEMU env detected; disabling {sve_like} for stability")
-            sz.reset_capabilities(desired)
+        sve_like = sz.Capability.SVE | sz.Capability.SVE2 | sz.Capability.SVE2AES
+        current = sz.Device.cpu().capabilities_enabled()
+        if current & sve_like:
+            print(f"QEMU env detected; disabling {sve_like!r} for stability")
+            sz.Device.cpu().capabilities_enable(current & ~sve_like)
 
     print()  # New line for better readability
 

@@ -4,7 +4,6 @@
 //! Author: Ash Vardanian
 
 use super::*;
-use core::ffi::c_void;
 
 /// Knobs for [`argsort`] and [`argsort_by`].
 ///
@@ -51,9 +50,9 @@ impl ArgsortOptions {
 
 /// Computes the permutation that sorts `data` by its byte-slice representations.
 ///
-/// The caller supplies an output buffer `order` of length at least `data.len()`; on success the
-/// sorted permutation indices are written into its first `data.len()` slots. See [`ArgsortOptions`]
-/// for descending, uncased, and top-K variants.
+/// The caller supplies an output buffer `order` of length at least `data.len()`, or gets
+/// [`Status::UnexpectedDimensions`]; on success the sorted permutation indices are written into its
+/// first `data.len()` slots. See [`ArgsortOptions`] for descending, uncased, and top-K variants.
 ///
 /// # Example
 ///
@@ -76,14 +75,13 @@ pub fn argsort<Element: AsRef<[u8]>>(
     order: &mut [SortedIdx],
     options: ArgsortOptions,
 ) -> Result<(), Status> {
-    if data.len() > order.len() {
-        return Err(Status::BadAlloc);
-    }
-    argsort_by(|i| data[i].as_ref(), &mut order[..data.len()], options)
+    argsort_by(data, |item| item.as_ref(), order, options)
 }
 
-/// Computes the permutation that sorts items by a caller-provided byte-slice key.
-/// The number of items is inferred from the length of the `order` slice.
+/// Computes the permutation that sorts `data` by a byte-slice `key` of each element.
+///
+/// `order` must hold at least `data.len()` entries, as in [`argsort`]. `key` runs inside the C
+/// call, where a panic cannot unwind and aborts the process.
 ///
 /// # Example
 ///
@@ -97,55 +95,38 @@ pub fn argsort<Element: AsRef<[u8]>>(
 ///     Person { name: "Bob", age: 30 },
 /// ];
 /// let mut order = [0; 3];
-/// sz::argsort_by(|i| people[i].name.as_bytes(), &mut order, Default::default()).expect("sort failed");
+/// sz::argsort_by(&people, |person| person.name.as_bytes(), &mut order, Default::default()).expect("sort failed");
 /// assert_eq!(&order, &[1, 2, 0]); // "Alice", "Bob", "Charlie"
 /// ```
-pub fn argsort_by<Mapper, Key>(mapper: Mapper, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
+pub fn argsort_by<Element, Key>(
+    data: &[Element],
+    key: Key,
+    order: &mut [SortedIdx],
+    options: ArgsortOptions,
+) -> Result<(), Status>
 where
-    Mapper: Fn(usize) -> Key,
-    Key: AsRef<[u8]>,
+    Key: Fn(&Element) -> &[u8],
 {
-    // Adapter closure: given an index, call the provided mapper and then transmute the
-    // resulting slice to have a `'static` lifetime. This transmute is safe as long as
-    // the FFI call is synchronous and the returned slices are only used during the call.
-    let adapter = move |i: usize| -> &'static [u8] {
-        let binding = mapper(i);
-        let slice = binding.as_ref();
-        unsafe { core::mem::transmute(slice) }
-    };
-
-    _argsort_impl(adapter, order, options)
-}
-
-/// Helper that takes an adapter of a concrete type and performs the FFI call.
-fn _argsort_impl<Adapter>(adapter: Adapter, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
-where
-    Adapter: Fn(usize) -> &'static [u8],
-{
-    let wrapper = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<Adapter>() },
-        data: &adapter as *const Adapter as *const c_void,
-    };
-    let seq = _SzSequence {
-        handle: &wrapper as *const _ as *const c_void,
-        count: order.len(),
-        get_start: Some(_slice_get_start_punned),
-        get_length: Some(_slice_get_length_punned),
-    };
+    let order = order.get_mut(..data.len()).ok_or(Status::UnexpectedDimensions)?;
     let top_count = options.top.unwrap_or(0);
     let reverse = options.reverse as i32;
-    let status = unsafe {
-        if options.uncased {
-            sz_sequence_argsort_uncased(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
-        } else {
-            sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
-        }
-    };
-    if status == Status::Success {
-        Ok(())
+    let argsort = if options.uncased {
+        sz_sequence_argsort_uncased_best
     } else {
-        Err(status)
-    }
+        sz_sequence_argsort_best
+    };
+    with_sequence_by(data, key, |sequence| unsafe {
+        argsort(
+            sequence,
+            top_count,
+            reverse,
+            core::ptr::null(),
+            order.as_mut_ptr(),
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    })
+    .check()
 }
 
 #[cfg(test)]
@@ -154,7 +135,6 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use super::*;
     use crate::sz;
 
     #[test]
@@ -172,6 +152,12 @@ mod tests {
         expected.sort();
 
         assert_eq!(sorted_from_api, expected);
+
+        let mut short_order = [0; 2];
+        assert_eq!(
+            sz::argsort(&fruits, &mut short_order, Default::default()),
+            Err(sz::Status::UnexpectedDimensions)
+        );
     }
 
     #[test]
@@ -193,7 +179,7 @@ mod tests {
             Person { name: "Bob", age: 40 },
         ];
         let mut order = [0; 3];
-        sz::argsort_by(|i: usize| people[i].name.as_bytes(), &mut order, Default::default())
+        sz::argsort_by(&people, |person| person.name.as_bytes(), &mut order, Default::default())
             .expect("argsort_by failed");
 
         let sorted_from_api: Vec<_> = order.iter().map(|&i| people[i].name).collect();

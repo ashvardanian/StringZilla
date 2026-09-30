@@ -18,7 +18,7 @@ func isValidUTF8String(s string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	return C.sz_utf8_find_malformed((*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.ulong(len(s))) == nil
+	return C.sz_utf8_find_malformed((*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.sz_size_t(len(s))) == nil
 }
 
 // Utf8CaseFold applies full Unicode case folding to a UTF-8 string.
@@ -32,9 +32,13 @@ func Utf8CaseFold(str string, validate bool) (string, error) {
 	}
 
 	srcPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
-	srcLen := C.ulong(len(str))
+	srcLen := C.sz_size_t(len(str))
 	dst := make([]byte, len(str)*3)
-	outLen := int(C.sz_utf8_uncased_fold(srcPtr, srcLen, (*C.char)(unsafe.Pointer(&dst[0]))))
+	var outLen C.sz_size_t
+	if err := statusError(C.sz_utf8_uncased_fold_best(srcPtr, srcLen, (*C.char)(unsafe.Pointer(&dst[0])), &outLen,
+		capabilities(), nil)); err != nil {
+		return "", err
+	}
 	return string(dst[:outLen]), nil
 }
 
@@ -47,7 +51,9 @@ func Utf8Count(str string) int {
 		return 0
 	}
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
-	return int(C.sz_utf8_count(strPtr, C.ulong(len(str))))
+	var count C.sz_size_t
+	check(C.sz_utf8_count_best(strPtr, C.sz_size_t(len(str)), &count, capabilities(), nil))
+	return int(count)
 }
 
 // NormalForm selects a Unicode normalization form for Utf8Normalize.
@@ -73,35 +79,40 @@ func Utf8Normalize(str string, form NormalForm) string {
 	}
 	srcPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	dst := make([]byte, len(str)*18)
-	outLen := int(C.sz_utf8_norm(srcPtr, C.ulong(len(str)),
-		C.sz_normal_form_t(form), (*C.char)(unsafe.Pointer(&dst[0]))))
+	var outLen C.sz_size_t
+	check(C.sz_utf8_norm_best(srcPtr, C.sz_size_t(len(str)), C.sz_normal_form_t(form),
+		(*C.char)(unsafe.Pointer(&dst[0])), &outLen, capabilities(), nil))
 	return string(dst[:outLen])
 }
 
 // Utf8CaseInsensitiveFind finds the first case-insensitive occurrence of `needle` in `haystack`
 // using full Unicode case folding and returns byte offsets.
 func Utf8CaseInsensitiveFind(haystack, needle string, validate bool) (index int64, length int64, err error) {
-	if len(needle) == 0 {
-		return 0, 0, nil
-	}
 	if validate {
 		if !isValidUTF8String(haystack) || !isValidUTF8String(needle) {
 			return -1, 0, ErrInvalidUTF8
 		}
 	}
+	if len(needle) == 0 {
+		return 0, 0, nil
+	}
 
 	hPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(haystack)))
-	hLen := C.ulong(len(haystack))
+	hLen := C.sz_size_t(len(haystack))
 	nPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(needle)))
-	nLen := C.ulong(len(needle))
+	nLen := C.sz_size_t(len(needle))
 
 	var meta C.sz_utf8_uncased_needle_metadata_t
-	var matchedLen C.ulong
-	matchPtr := unsafe.Pointer(C.sz_utf8_uncased_search(hPtr, hLen, nPtr, nLen, &meta, (*C.ulong)(unsafe.Pointer(&matchedLen))))
+	var matchPtr C.sz_cptr_t
+	var matchedLen C.sz_size_t
+	if err := statusError(C.sz_utf8_uncased_search_best(hPtr, hLen, nPtr, nLen, &meta, &matchPtr, &matchedLen,
+		capabilities(), nil)); err != nil {
+		return -1, 0, err
+	}
 	if matchPtr == nil {
 		return -1, 0, nil
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(hPtr))), int64(matchedLen), nil
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(hPtr))), int64(matchedLen), nil
 }
 
 // Utf8CaseInsensitiveNeedle caches metadata for efficient repeated case-insensitive UTF-8 searches.
@@ -125,27 +136,28 @@ func (n *Utf8CaseInsensitiveNeedle) FindIn(haystack string, validate bool) (inde
 	if n == nil {
 		return -1, 0, errors.New("nil Utf8CaseInsensitiveNeedle")
 	}
-	if len(n.needle) == 0 {
-		return 0, 0, nil
-	}
 	if validate {
 		if !isValidUTF8String(haystack) {
 			return -1, 0, ErrInvalidUTF8
 		}
 	}
+	if len(n.needle) == 0 {
+		return 0, 0, nil
+	}
 
 	hPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(haystack)))
-	hLen := C.ulong(len(haystack))
+	hLen := C.sz_size_t(len(haystack))
 	nPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(n.needle)))
-	nLen := C.ulong(len(n.needle))
+	nLen := C.sz_size_t(len(n.needle))
 
-	var matchedLen C.ulong
-	matchPtr := unsafe.Pointer(
-		C.sz_utf8_uncased_search(hPtr, hLen, nPtr, nLen, &n.metadata, (*C.ulong)(unsafe.Pointer(&matchedLen))),
-	)
-
+	var matchPtr C.sz_cptr_t
+	var matchedLen C.sz_size_t
+	if err := statusError(C.sz_utf8_uncased_search_best(hPtr, hLen, nPtr, nLen, &n.metadata, &matchPtr, &matchedLen,
+		capabilities(), nil)); err != nil {
+		return -1, 0, err
+	}
 	if matchPtr == nil {
 		return -1, 0, nil
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(hPtr))), int64(matchedLen), nil
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(hPtr))), int64(matchedLen), nil
 }

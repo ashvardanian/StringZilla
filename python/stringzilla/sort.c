@@ -8,27 +8,28 @@
 
 /** Dispatches to the byte-wise or Unicode case-folded argsort backend. */
 sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order, sz_size_t top,
-                              sz_bool_t reverse) {
-    return uncased ? sz_sequence_argsort_uncased(sequence, NULL, order, top, reverse)
-                   : sz_sequence_argsort(sequence, NULL, order, top, reverse);
+                              sz_bool_t reverse, sz_capability_t capabilities) {
+    return uncased ? sz_sequence_argsort_uncased_best(sequence, top, reverse, NULL, order, capabilities, NULL)
+                   : sz_sequence_argsort_best(sequence, top, reverse, NULL, order, capabilities, NULL);
 }
 
-char const doc_argsort[] =                                                                         //
-    "argsort(*, reverse=False, uncased=False, top=None, out=None) -> tuple[int, ...] | buffer\n"   //
-    "\n"                                                                                           //
-    "Return the stable permutation of indices that sorts the Strs.\n"                              //
-    "\n"                                                                                           //
-    "Args:\n"                                                                                      //
-    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"                   //
-    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"              //
-    "  top (int, optional): Keep only the `top` leading indices. Defaults to None, keeping all.\n" //
-    "  out (buffer, optional): Writable, C-contiguous buffer of pointer-width unsigned integers "  //
-    "like numpy.uintp to receive the indices with zero allocation. "                               //
-    "Defaults to None.\n"                                                                          //
-    "Returns:\n"                                                                                   //
-    "  tuple[int, ...]: The sorting permutation, or `out` itself when an `out` buffer is given.\n" //
-    "Example:\n"                                                                                   //
-    "  >>> sz.Strs(['banana', 'apple', 'cherry']).argsort()\n"                                     //
+char const doc_argsort[] =                                                                                //
+    "argsort(*, reverse=False, uncased=False, top=None, out=None, capabilities=None) -> tuple | buffer\n" //
+    "\n"                                                                                                  //
+    "Return the stable permutation of indices that sorts the Strs.\n"                                     //
+    "\n"                                                                                                  //
+    "Args:\n"                                                                                             //
+    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"                          //
+    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"                     //
+    "  top (int, optional): Keep only the `top` leading indices. Defaults to None, keeping all.\n"        //
+    "  out (buffer, optional): Writable, C-contiguous buffer of pointer-width unsigned integers "         //
+    "like numpy.uintp to receive the indices with zero allocation. "                                      //
+    "Defaults to None.\n"                                                                                 //
+    "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
+    "Returns:\n"                                                                                          //
+    "  tuple[int, ...]: The sorting permutation, or `out` itself when an `out` buffer is given.\n"        //
+    "Example:\n"                                                                                          //
+    "  >>> sz.Strs(['banana', 'apple', 'cherry']).argsort()\n"                                            //
     "  (1, 0, 2)";
 
 /** Returns the tuple of indices permuting a @c Strs object into sorted order. With `top=k`, returns
@@ -44,7 +45,7 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
         return NULL;
     }
 
-    PyObject *reverse_obj = NULL, *uncased_obj = NULL, *top_obj = NULL;
+    PyObject *reverse_obj = NULL, *uncased_obj = NULL, *top_obj = NULL, *capabilities_object = NULL;
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
     for (Py_ssize_t i = 0; i < args_names_count; ++i) {
         PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
@@ -53,11 +54,14 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
         else if (PyUnicode_CompareWithASCIIString(key, "uncased") == 0) { uncased_obj = value; }
         else if (PyUnicode_CompareWithASCIIString(key, "top") == 0) { top_obj = value; }
         else if (PyUnicode_CompareWithASCIIString(key, "out") == 0) { out_obj = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) { capabilities_object = value; }
         else {
             PyErr_Format(PyExc_TypeError, "argsort() got an unexpected keyword argument '%U'", key);
             return NULL;
         }
     }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
     if (reverse_obj) {
         if (!PyBool_Check(reverse_obj)) {
             PyErr_SetString(PyExc_TypeError, "argsort(): reverse must be a bool");
@@ -126,21 +130,27 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
     }
 
     // Call our sorting algorithm (`reverse` and `uncased` are handled natively).
-    sz_sequence_t sequence;
-    sz_fill(&sequence, sizeof(sequence), 0);
+    sz_sequence_t sequence = {0};
     sequence.count = count;
     sequence.handle = self;
     sequence.get_start = Strs_get_start_;
     sequence.get_length = Strs_get_length_;
-    sz_status_t status = Strs_run_argsort_(uncased, &sequence, order, top, reverse);
-    sz_unused_(status);
+    // Skip an empty sequence: the kernels report its zero-byte scratch as a failed allocation.
+    sz_status_t status = count ? Strs_run_argsort_(uncased, &sequence, order, top, reverse, capabilities)
+                               : sz_success_k;
+    if (status == sz_success_k && have_out && !sort_into_out)
+        status = sz_copy_best((sz_ptr_t)out_view.buf, (sz_cptr_t)order, result_count * sizeof(sz_sorted_idx_t),
+                              capabilities, NULL);
+    if (status != sz_success_k) {
+        if (!sort_into_out) free(order);
+        if (have_out) PyBuffer_Release(&out_view);
+        sz_py_raise_status(status, "argsort()");
+        return NULL;
+    }
 
     // Caller buffer path: indices are already in (or now copied into) `out`; hand the buffer back.
     if (have_out) {
-        if (!sort_into_out) {
-            sz_copy((sz_ptr_t)out_view.buf, (sz_cptr_t)order, result_count * sizeof(sz_sorted_idx_t));
-            free(order);
-        }
+        if (!sort_into_out) free(order);
         PyBuffer_Release(&out_view);
         Py_INCREF(out_obj);
         return out_obj;

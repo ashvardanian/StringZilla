@@ -11,25 +11,29 @@ use core::ffi::c_void;
 /// Moves the contents of `source` into `target`, overwriting the existing contents of `target`.
 /// This function is useful for scenarios where you need to replace the contents of a byte slice
 /// with the contents of another byte slice.
+///
+/// Returns [`Status::UnexpectedDimensions`] if `target` is shorter than `source`.
 #[inline(always)]
-pub fn move_<Target, Source>(target: &mut Target, source: &Source)
+pub fn move_<Target, Source>(target: &mut Target, source: &Source) -> Result<(), Status>
 where
     Target: AsMut<[u8]> + ?Sized,
     Source: AsRef<[u8]> + ?Sized,
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
-    assert!(
-        target_slice.len() >= source_slice.len(),
-        "target must be at least as long as source"
-    );
+    if target_slice.len() < source_slice.len() {
+        return Err(Status::UnexpectedDimensions);
+    }
     unsafe {
-        sz_move(
-            target_slice.as_mut_ptr() as *const c_void,
+        sz_move_best(
+            target_slice.as_mut_ptr() as *mut c_void,
             source_slice.as_ptr() as *const c_void,
             source_slice.len(),
-        );
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
     }
+    .check()
 }
 
 /// Fills the contents of `target` with the specified `value`. This function is useful for
@@ -42,32 +46,43 @@ where
 {
     let target_slice = target.as_mut();
     unsafe {
-        sz_fill(target_slice.as_ptr() as *const c_void, target_slice.len(), value);
+        sz_fill_best(
+            target_slice.as_mut_ptr() as *mut c_void,
+            target_slice.len(),
+            value,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
     }
+    .infallible();
 }
 
 /// Copies the contents of `source` into `target`, overwriting the existing contents of `target`.
 /// This function is useful for scenarios where you need to replace the contents of a byte slice
 /// with the contents of another byte slice.
+///
+/// Returns [`Status::UnexpectedDimensions`] if `target` is shorter than `source`.
 #[inline(always)]
-pub fn copy<Target, Source>(target: &mut Target, source: &Source)
+pub fn copy<Target, Source>(target: &mut Target, source: &Source) -> Result<(), Status>
 where
     Target: AsMut<[u8]> + ?Sized,
     Source: AsRef<[u8]> + ?Sized,
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
-    assert!(
-        target_slice.len() >= source_slice.len(),
-        "target must be at least as long as source"
-    );
+    if target_slice.len() < source_slice.len() {
+        return Err(Status::UnexpectedDimensions);
+    }
     unsafe {
-        sz_copy(
+        sz_copy_best(
             target_slice.as_mut_ptr() as *mut c_void,
             source_slice.as_ptr() as *const c_void,
             source_slice.len(),
-        );
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
     }
+    .check()
 }
 
 /// Performs a lookup-table transformation, mapping contents of a buffer into the same or other
@@ -78,6 +93,8 @@ where
 /// - `target`: A mutable buffer to populate.
 /// - `source`: An immutable buffer to map from.
 /// - `table`: Lookup table of 256 substitution values.
+///
+/// Returns [`Status::UnexpectedDimensions`] if `target` is shorter than `source`.
 ///
 /// # Examples
 ///
@@ -91,30 +108,32 @@ where
 /// }
 /// let source = "HELLO WORLD!";
 /// let mut target = vec![0u8; source.len()];
-/// sz::lookup(&mut target, &source, to_lower);
+/// sz::lookup(&mut target, &source, to_lower).unwrap();
 /// let result = String::from_utf8(target).expect("Invalid UTF-8 sequence");
 /// assert_eq!(result, "hello world!");
 /// ```
 ///
-pub fn lookup<Target, Source>(target: &mut Target, source: &Source, table: [u8; 256])
+pub fn lookup<Target, Source>(target: &mut Target, source: &Source, table: [u8; 256]) -> Result<(), Status>
 where
     Target: AsMut<[u8]> + ?Sized,
     Source: AsRef<[u8]> + ?Sized,
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
-    assert!(
-        target_slice.len() >= source_slice.len(),
-        "target must be at least as long as source"
-    );
-    unsafe {
-        sz_lookup(
-            target_slice.as_mut_ptr() as *mut c_void,
-            source_slice.len(),
-            source_slice.as_ptr() as *const c_void,
-            table.as_ptr() as _,
-        );
+    if target_slice.len() < source_slice.len() {
+        return Err(Status::UnexpectedDimensions);
     }
+    unsafe {
+        sz_lookup_best(
+            target_slice.as_mut_ptr() as *mut c_void,
+            source_slice.as_ptr() as *const c_void,
+            source_slice.len(),
+            table.as_ptr(),
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .check()
 }
 
 /// Performs a lookup-table transformation, mapping contents of a buffer into the same or other
@@ -144,13 +163,16 @@ where
 {
     let buffer_slice = buffer.as_mut();
     unsafe {
-        sz_lookup(
+        sz_lookup_best(
             buffer_slice.as_mut_ptr() as *mut c_void,
-            buffer_slice.len(),
             buffer_slice.as_ptr() as *const c_void,
-            table.as_ptr() as _,
-        );
+            buffer_slice.len(),
+            table.as_ptr(),
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
     }
+    .infallible();
 }
 
 /// Randomizes the contents of a given byte slice `text` using characters from a specified
@@ -179,8 +201,15 @@ where
 {
     let buffer_slice = buffer.as_mut();
     unsafe {
-        sz_fill_random(buffer_slice.as_ptr() as _, buffer_slice.len(), nonce);
+        sz_fill_random_best(
+            buffer_slice.as_mut_ptr() as *mut c_void,
+            buffer_slice.len(),
+            nonce,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
     }
+    .infallible();
 }
 
 #[cfg(feature = "std")]
@@ -204,7 +233,7 @@ where
         let mut replaced = 0;
         let mut search_from = 0;
         while let Some(pos) = find_next(buffer.as_slice(), search_from) {
-            copy(&mut buffer[pos..pos + needle_length], &replacement);
+            copy(&mut buffer[pos..pos + needle_length], replacement)?;
             search_from = pos + needle_length;
             replaced += 1;
         }
@@ -222,15 +251,18 @@ where
             if pos > read {
                 let chunk = pos - read;
                 unsafe {
-                    sz_move(
-                        buffer.as_mut_ptr().add(write) as *const c_void,
+                    sz_move_best(
+                        buffer.as_mut_ptr().add(write) as *mut c_void,
                         buffer.as_ptr().add(read) as *const c_void,
                         chunk,
-                    );
+                        enabled_cpu_capabilities_mask(),
+                        core::ptr::null_mut(),
+                    )
                 }
+                .check()?;
                 write += chunk;
             }
-            copy(&mut buffer[write..write + replacement.len()], replacement);
+            copy(&mut buffer[write..write + replacement.len()], replacement)?;
             write += replacement.len();
             read = pos + needle_length;
             replaced += 1;
@@ -239,12 +271,15 @@ where
         if read < len {
             let chunk = len - read;
             unsafe {
-                sz_move(
-                    buffer.as_mut_ptr().add(write) as *const c_void,
+                sz_move_best(
+                    buffer.as_mut_ptr().add(write) as *mut c_void,
                     buffer.as_ptr().add(read) as *const c_void,
                     chunk,
-                );
+                    enabled_cpu_capabilities_mask(),
+                    core::ptr::null_mut(),
+                )
             }
+            .check()?;
             write += len - read;
         }
         buffer.truncate(write);
@@ -274,7 +309,7 @@ where
         Some(v) => v,
         None => return Err(Status::OverflowRisk),
     };
-    if let Err(_) = buffer.try_reserve_exact(added) {
+    if buffer.try_reserve_exact(added).is_err() {
         return Err(Status::BadAlloc);
     }
     buffer.resize(new_len, 0);
@@ -287,16 +322,19 @@ where
         let tail_len = read_end - match_end;
         if tail_len > 0 {
             unsafe {
-                sz_move(
-                    buffer.as_mut_ptr().add(write_end - tail_len) as *const c_void,
+                sz_move_best(
+                    buffer.as_mut_ptr().add(write_end - tail_len) as *mut c_void,
                     buffer.as_ptr().add(match_end) as *const c_void,
                     tail_len,
-                );
+                    enabled_cpu_capabilities_mask(),
+                    core::ptr::null_mut(),
+                )
             }
+            .check()?;
         }
         write_end -= tail_len;
         write_end -= replacement.len();
-        copy(&mut buffer[write_end..write_end + replacement.len()], replacement);
+        copy(&mut buffer[write_end..write_end + replacement.len()], replacement)?;
         read_end = pos;
     }
 
@@ -304,7 +342,7 @@ where
     Ok(match_count)
 }
 
-/// Tries to replace all non-overlapping occurrences of `needle` inside `buffer` in place.
+/// Replaces all non-overlapping occurrences of `needle` inside `buffer` in place.
 ///
 /// - equal-length replacements simply overwrite matches,
 /// - shorter replacements compact forward without allocating,
@@ -312,7 +350,7 @@ where
 ///
 /// Returns the number of replacements performed.
 #[cfg(feature = "std")]
-pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status> {
+pub fn replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status> {
     replace_all_with_finder(
         buffer,
         needle.len(),
@@ -334,13 +372,12 @@ pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) 
     )
 }
 
-/// Tries to replace all non-overlapping bytes in `buffer` that belong to
-/// `byteset` with `replacement`.
+/// Replaces all non-overlapping bytes in `buffer` that belong to `byteset` with `replacement`.
 ///
-/// Uses the same three-way strategy as [`try_replace_all`]. If the byteset is empty, the buffer is
+/// Uses the same three-way strategy as [`replace_all`]. If the byteset is empty, the buffer is
 /// left untouched. Returns the number of replacements performed.
 #[cfg(feature = "std")]
-pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status> {
+pub fn replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status> {
     if byteset.bits.iter().all(|&b| b == 0) {
         return Ok(0);
     }
@@ -372,7 +409,6 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use super::*;
     use crate::sz;
 
     #[test]
@@ -387,30 +423,20 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "target must be at least as long as source")]
-    fn copy_size_checks() {
-        let long: Vec<u8> = vec![0; 20];
+    fn size_checks() {
+        let long: Vec<u8> = vec![7; 20];
         let mut less_long: Vec<u8> = vec![0; 10];
+        let lut: [u8; 256] = core::array::from_fn(|i| i as u8);
 
-        sz::copy(&mut less_long, &long);
-    }
+        assert_eq!(sz::copy(&mut less_long, &long), Err(sz::Status::UnexpectedDimensions));
+        assert_eq!(sz::move_(&mut less_long, &long), Err(sz::Status::UnexpectedDimensions));
+        assert_eq!(
+            sz::lookup(&mut less_long, &long, lut),
+            Err(sz::Status::UnexpectedDimensions)
+        );
+        assert_eq!(less_long, vec![0; 10]);
 
-    #[test]
-    #[should_panic(expected = "target must be at least as long as source")]
-    fn move_size_checks() {
-        let long: Vec<u8> = vec![0; 20];
-        let mut less_long: Vec<u8> = vec![0; 10];
-
-        sz::move_(&mut less_long, &long);
-    }
-
-    #[test]
-    #[should_panic(expected = "target must be at least as long as source")]
-    fn lookup_size_checks() {
-        let long: Vec<u8> = vec![0; 20];
-        let mut less_long: Vec<u8> = vec![0; 10];
-
-        let lut: [u8; 256] = (0..=255u8).collect::<Vec<_>>().try_into().unwrap();
-        sz::lookup(&mut less_long, &long, lut);
+        assert_eq!(sz::copy(&mut less_long, &long[..10]), Ok(()));
+        assert_eq!(less_long, vec![7; 10]);
     }
 }

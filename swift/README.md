@@ -5,6 +5,7 @@ Its SIMD-accelerated string kernels are built directly on the C core, so the sam
 There is no dependency on Foundation, `Darwin`, or any Apple-only runtime, which keeps binaries small and portable.
 
 The package adds these methods directly to `String`, `String.UTF8View`, and `Substring.UTF8View`, all operating on the underlying UTF-8 bytes without intermediate copies.
+The one exception is a lazily bridged `NSString`, whose UTF-8 bytes are not contiguous, so each call copies them first.
 All operations are exposed through the `StringZillaViewable` protocol, which every supported string type conforms to.
 Search methods return native Swift `String.Index` values or a `Range<Index>`, so results splice cleanly back into your strings.
 
@@ -29,8 +30,14 @@ let package = Package(
 )
 ```
 
-SwiftPM is the only build path on every platform, and it is the same `swift build` on Linux and embedded targets as on Apple hardware.
-Linux needs no special configuration: the package compiles the C kernels directly and links against `Glibc` instead of `Darwin` automatically.
+SwiftPM downloads the C kernels prebuilt, as the release's `StringZillaC` XCFramework on Apple platforms and as its artifact bundle on Linux, Android, Windows and WebAssembly, so no C toolchain is needed.
+A checkout builds its own with CMake and points `STRINGZILLA_SWIFT_ARTIFACT` at it, relative to the package root:
+
+```sh
+cmake --preset swift
+cmake --build --preset swift
+STRINGZILLA_SWIFT_ARTIFACT=build_swift/StringZillaC.xcframework swift test # StringZillaC.artifactbundle off Apple platforms
+```
 
 Then import the module where you need it.
 
@@ -178,3 +185,44 @@ sha.update("hello, ").update("world")
 let hex = sha.hexdigest()  // 64-char hex string
 assert(hex.count == 64)
 ```
+
+## Devices and Capabilities
+
+Every call runs on the CPU and dispatches to the best kernel of `Device.cpu.capabilitiesEnabled`, a `Capabilities` `OptionSet`:
+
+```swift
+import StringZilla
+
+// `enabled` is what dispatch uses: detected on this CPU AND compiled into the binary.
+let cpu = Device.cpu
+print(try cpu.capabilitiesEnabled)                 // like "serial,neon,neonaes,neonsha"
+print(try cpu.capabilitiesEnabled.contains(.neon)) // `Capabilities` is an `OptionSet`
+
+// The two raw axes, when you specifically mean one of them:
+let onThisCpu = try cpu.capabilitiesDetected
+let inThisBinary = cpu.capabilitiesCompiled
+
+// Narrow dispatch before starting threads, and prepare each thread that runs kernels:
+try cpu.capabilitiesEnable(cpu.capabilitiesEnabled.subtracting(.neon))
+try cpu.configureThread(cpu.capabilitiesEnabled)
+```
+
+- `capabilitiesDetected` is what the device can execute, from CPUID or HWCAP on the CPU.
+- `capabilitiesCompiled` is what this binary contains for devices of its kind, from the ISA probes at build time.
+- `capabilitiesEnabled` is what dispatch uses, both axes at once unless narrowed, and on the CPU always contains `.serial`.
+- `capabilitiesEnable(_:)` makes its argument the CPU's enabled set, clamped to both axes, and returns what took effect.
+- `configureThread(_:)` prepares the calling thread for the kernels of its argument, once per thread that runs them.
+
+Reach for `capabilitiesEnabled` unless you specifically mean one of the raw axes.
+`capabilitiesDetected` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
+
+A `Device` is the host CPU or one GPU of a runtime, named by that runtime's own ordinal:
+
+```swift
+let gpus = try Device.count(.metal)            // throws without a Metal device
+let gpu = try Device(kind: .metal, ordinal: 0) // throws past the last one
+print(try gpu.capabilitiesEnabled)             // like "metal"
+```
+
+`capabilitiesEnable(_:)` and `configureThread(_:)` throw a `DeviceError` on a GPU, which keeps no enabled set or thread state of its own: this package only reports GPU capabilities.
+`.cpus`, `.devices` and `.any` group the CPU capabilities, the GPU ones, and all of them.

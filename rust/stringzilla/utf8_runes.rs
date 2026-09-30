@@ -22,9 +22,9 @@ use core::ffi::c_void;
 ///
 /// # Returns
 ///
-/// A tuple `(bytes_consumed, runes_unpacked)` where:
+/// A tuple `(bytes_consumed, runes_count)` where:
 /// - `bytes_consumed` is the number of bytes processed from `text`
-/// - `runes_unpacked` is the number of codepoints written to `runes`
+/// - `runes_count` is the number of codepoints written to `runes`
 ///
 /// # Examples
 ///
@@ -58,25 +58,22 @@ use core::ffi::c_void;
 /// ```
 ///
 pub fn utf8_decode(text: &[u8], runes: &mut [u32]) -> (usize, usize) {
-    let mut runes_unpacked: usize = 0;
-
-    let result = unsafe {
-        sz_utf8_decode(
+    let mut runes_count: usize = 0;
+    let mut bytes_consumed: usize = 0;
+    unsafe {
+        sz_utf8_decode_best(
             text.as_ptr() as *const c_void,
             text.len(),
             runes.as_mut_ptr(),
             runes.len(),
-            &mut runes_unpacked,
+            &mut runes_count,
+            &mut bytes_consumed,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
         )
-    };
-
-    let bytes_consumed = if result.is_null() {
-        0
-    } else {
-        unsafe { result.offset_from(text.as_ptr() as *const c_void) as usize }
-    };
-
-    (bytes_consumed, runes_unpacked)
+    }
+    .infallible();
+    (bytes_consumed, runes_count)
 }
 
 /// Counts the number of UTF-8 characters in the text.
@@ -111,10 +108,18 @@ where
     Text: AsRef<[u8]>,
 {
     let text_ref = text.as_ref();
-    let text_pointer = text_ref.as_ptr() as *const c_void;
-    let text_length = text_ref.len();
-
-    unsafe { sz_utf8_count(text_pointer, text_length) }
+    let mut count = 0;
+    unsafe {
+        sz_utf8_count_best(
+            text_ref.as_ptr() as *const c_void,
+            text_ref.len(),
+            &mut count,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
+    count
 }
 
 /// Finds the byte offset of the Nth UTF-8 character (0-indexed).
@@ -154,15 +159,23 @@ where
     let text_pointer = text_ref.as_ptr() as *const c_void;
     let text_length = text_ref.len();
 
-    let result = unsafe { sz_utf8_seek(text_pointer, text_length, n) };
+    let mut result = core::ptr::null();
+    unsafe {
+        sz_utf8_seek_best(
+            text_pointer,
+            text_length,
+            n,
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
 
     if result.is_null() {
         None
     } else {
-        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
-            .try_into()
-            .unwrap();
-        Some(offset)
+        Some(match_offset(result, text_pointer))
     }
 }
 
@@ -230,10 +243,10 @@ impl<'a> Utf8View<'a> {
 
 /// Iterator over UTF-8 characters using batched decoding.
 ///
-/// Each refill decodes up to `STEPS` codepoints in a single `sz_utf8_decode` FFI call (the decoder
-/// fills the whole buffer regardless of script width), then yields them one at a time - far cheaper
-/// than decoding character-by-character. Ill-formed bytes decode to the replacement character
-/// U+FFFD, so iteration is total and never silently truncates.
+/// Each refill decodes up to `STEPS` codepoints in a single `sz_utf8_decode_best` FFI call (the
+/// decoder fills the whole buffer regardless of script width), then yields them one at a time -
+/// far cheaper than decoding character-by-character. Ill-formed bytes decode to the replacement
+/// character U+FFFD, so iteration is total and never silently truncates.
 ///
 /// Typically created through [`Utf8View::iter()`].
 ///
@@ -267,6 +280,7 @@ impl<'a> Utf8Runes<'a, ITERATORS_DEFAULT_STEPS> {
 impl<'a, const STEPS: usize> Utf8Runes<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` codepoints per FFI call.
     pub fn with_steps(octets: &'a [u8]) -> Self {
+        const { assert!(STEPS > 0, "STEPS must be positive") };
         let mut iter = Self {
             octets,
             octets_offset: 0,
@@ -288,21 +302,21 @@ impl<'a, const STEPS: usize> Utf8Runes<'a, STEPS> {
 
         let octets_ptr = unsafe { self.octets.as_ptr().add(self.octets_offset) as *const c_void };
         let mut unpacked_count: usize = 0;
-        let next_ptr = unsafe {
-            sz_utf8_decode(
+        let mut bytes_consumed: usize = 0;
+        unsafe {
+            sz_utf8_decode_best(
                 octets_ptr,
                 self.octets.len() - self.octets_offset,
                 self.runes.as_mut_ptr(),
                 STEPS,
-                &mut unpacked_count as *mut usize,
+                &mut unpacked_count,
+                &mut bytes_consumed,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
 
-        let bytes_consumed: usize = unsafe {
-            let offset = (next_ptr as *const u8).offset_from(octets_ptr as *const u8);
-            debug_assert!(offset >= 0, "sz_utf8_decode returned a pointer before the input");
-            offset.try_into().expect("offset should be non-negative")
-        };
         self.octets_offset += bytes_consumed;
         self.runes_offset = 0;
 
@@ -334,8 +348,8 @@ impl<'a, const STEPS: usize> Iterator for Utf8Runes<'a, STEPS> {
 
         let codepoint = self.runes[self.runes_offset];
         self.runes_offset += 1;
-        // Safety: `sz_utf8_decode` only emits valid Unicode scalar values (ill-formed input becomes
-        // U+FFFD), so the conversion never sees a surrogate or an out-of-range value - no
+        // Safety: `sz_utf8_decode_best` only emits valid Unicode scalar values (ill-formed input
+        // becomes U+FFFD), so the conversion never sees a surrogate or an out-of-range value - no
         // per-codepoint re-validation needed.
         Some(unsafe { char::from_u32_unchecked(codepoint) })
     }
@@ -355,7 +369,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::sz::{self, *};
+    use crate::sz;
 
     #[test]
     fn utf8_runes_match_std_chars() {

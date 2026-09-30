@@ -1,9 +1,0 @@
-include README.md
-include VERSION
-include LICENSE
-include setup.py
-
-graft include
-graft c
-graft python
-

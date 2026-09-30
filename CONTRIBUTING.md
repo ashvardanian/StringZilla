@@ -676,14 +676,23 @@ Still, you need a virtual environment, and it's recommended to use `uv` to creat
 ```bash
 uv venv --python 3.12                   # or your preferred Python version
 source .venv/bin/activate               # to activate the virtual environment
-uv pip install setuptools wheel         # to pull the latest build tools
-uv pip install -e . --force-reinstall   # to build locally from source
+uv pip install . --force-reinstall      # to build locally from source
+```
+
+The build goes through `CMakeLists.txt`: scikit-build-core turns `STRINGZILLA_BUILD_PYTHON` on and builds the `stringzilla_python` target, the extension over `stringzilla_static`, in `build_python/<wheel tag>`.
+The ISA probes pick the SIMD kits exactly as they do for the C library.
+CMake options pass through `-C`:
+
+```bash
+uv pip install . -C cmake.build-type=Debug -C cmake.define.STRINGZILLA_USE_SANITIZERS=OFF # debug asserts on
+uv pip install . -C cmake.define.STRINGZILLA_BUILD_CUDA=ON                               # CUDA backends too
+STRINGZILLA_TARGET_ARCH=native uv pip install .                                           # tuned for this machine
 ```
 
 To check the installed version and capabilities, try:
 
 ```bash
-uv run --no-project python -c "import stringzilla as sz; print(sz.__capabilities__)"
+uv run --no-project python -c "import stringzilla as sz; print(sz.__version__, repr(sz.Device.cpu().capabilities_enabled()))"
 ```
 
 To clean up code before pushing:
@@ -719,7 +728,7 @@ uv pip install pycryptodome uniseg grapheme pysbd pyicu # oracles for the cipher
 
 ### Packaging
 
-For source distributions, make sure `MANIFEST.in` is up-to-date.
+Source distributions carry every file Git doesn't ignore, minus the `sdist.exclude` list in `pyproject.toml`.
 
 ```bash
 uv pip install build
@@ -773,8 +782,12 @@ If you want to run benchmarks against third-party implementations, check out the
 
 ## JavaScript
 
+The addon is the `stringzilla_node` target, which `cmake-js` builds through `CMakeLists.txt` over `stringzilla_static`.
+`npm run prebuild` builds it into `build_node/` and stages it under `prebuilds/`, where the loader finds it before any published `@stringzilla/*` package, which `--omit=optional` keeps out:
+
 ```bash
-npm install
+npm install --ignore-scripts --omit=optional
+npm run prebuild
 npm test
 ```
 
@@ -782,7 +795,7 @@ Log capabilities:
 
 ```bash
 npm link stringzilla
-node --input-type=module -e "import('stringzilla').then(m=>console.log(m.default.capabilities))"
+node --input-type=module -e "import('stringzilla').then(m=>console.log(m.default.Device.cpu().capabilitiesEnabled()))"
 ```
 
 Check files that would be included in the package:
@@ -793,9 +806,16 @@ npm pack --dry-run
 
 ## Swift
 
+SwiftPM links the C library prebuilt, as the `StringZillaC` XCFramework on Apple platforms and as an SE-0482 artifact bundle elsewhere, which the `swift` preset builds for the host.
+`STRINGZILLA_SWIFT_ARTIFACT` points `Package.swift` at it, relative to the package root; without it, SwiftPM downloads the release's:
+
 ```bash
-swift build && swift test
+cmake --preset swift
+cmake --build --preset swift
+STRINGZILLA_SWIFT_ARTIFACT=build_swift/StringZillaC.xcframework swift test # StringZillaC.artifactbundle off Apple platforms
 ```
+
+Each build adds its slice or variant to the artifact in `STRINGZILLA_SWIFT_DIRECTORY`, so the release fills one XCFramework and one bundle from a build per target, as `.github/workflows/_swift.yml` does.
 
 Running Swift on Linux requires a couple of extra steps - [`swift.org/install` page](https://www.swift.org/install).
 Alternatively, on Linux, the official Swift Docker image can be used for builds and tests:
@@ -816,15 +836,25 @@ StringZilla's Rust crate supports both `std` and `no_std` builds.
 Other options include:
 
 - `std`, on by default: enables standard library support.
-- `dynamic-dispatch`, on by default: compiles every ISA tier and picks one at load.
-- `cuda`: unlocks each engine's `new_on_gpu` constructor, which implies `std`.
+- `cuda`: the CUDA backend for NVIDIA GPUs, which implies `std`.
 - `rocm`: the AMD counterpart, which implies `std`.
+- `metal`: the Metal backend for Apple GPUs, which implies `std`.
+
+Each GPU feature unlocks every engine's `new_on` constructor.
+`build.rs` builds `stringzilla_static` through CMake, with every capability the toolchain can emit, picked per call by the capability mask, and each GPU feature switches on its `STRINGZILLA_BUILD_*` option.
+It forwards `STRINGZILLA_TARGET_ARCH`, the `STRINGZILLA_TARGET_<KIT>` overrides and the GPU architecture lists from the environment, rebuilding when one changes.
+`STRINGZILLA_LIBRARY_DIR=<directory>` links an archive CMake already built there instead:
+
+```bash
+cmake --preset release_shared && cmake --build --preset release_shared --target stringzilla_static
+STRINGZILLA_LIBRARY_DIR=$PWD/build_release_shared cargo test
+```
 
 ```bash
 cargo test --no-default-features                # verify `no_std` build
-cargo test --no-default-features --features std # only test with `std`
 cargo test                                      # default tests with `std`
 cargo test --features cuda                      # for the Nvidia GPU engines
+cargo test --features metal                     # with the Metal backend
 ```
 
 If you need to isolate a failing test:
@@ -852,30 +882,28 @@ If you want to run benchmarks against third-party implementations, check out the
 
 ## GoLang
 
-First, precompile the C library:
+The binding links the static library, so first build it and copy it next to the Go sources:
 
 ```bash
-cmake -D STRINGZILLA_BUILD_SHARED=1 -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCH=0 -B build_golang
-cmake --build build_golang --parallel
+cmake --preset release_shared
+cmake --build --preset release_shared --target stringzilla_static
+cp build_release_shared/libstringzilla_static.a golang/
 ```
 
 Then, navigate to the GoLang module root directory and run the tests from there:
 
 ```bash
 cd golang
-CGO_CFLAGS="-I$(pwd)/../include" \
-CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
-LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
 go test
 ```
+
+An archive elsewhere, like a Debug one, links through `CGO_LDFLAGS="-L<its directory>"`.
+cGo links no sanitizer runtime, so build that one with `-D STRINGZILLA_USE_SANITIZERS=OFF`.
 
 To benchmark:
 
 ```bash
 cd golang
-CGO_CFLAGS="-I$(pwd)/../include" \
-CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
-LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
 go run ../bench/stringzilla.go --input ../leipzig1M.txt
 ```
 

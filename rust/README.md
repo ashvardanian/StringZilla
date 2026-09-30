@@ -24,18 +24,18 @@ Or declare it in `Cargo.toml`:
 stringzilla = "5"
 ```
 
-The crate ships the C/C++ sources and compiles them through a `build.rs` via `cc`, so no system StringZilla install is required.
+The crate ships the C sources, and its `build.rs` builds them into `stringzilla_static` through CMake, so no system StringZilla install is required, but CMake and a C and C++ compiler are.
+`STRINGZILLA_LIBRARY_DIR` names a directory holding a `stringzilla_static` CMake already built, like a parent project's build tree, and skips that build.
 
 ### Feature Flags
 
-| Feature            | Default | Effect                                             |
-| :----------------- | :-----: | :------------------------------------------------- |
-| `std`              |   yes   | `std` support, else `no_std`                       |
-| `dynamic-dispatch` |   yes   | Runtime SIMD dispatch; disable to bake in one tier |
-| `cuda`             |   no    | CUDA GPU backend, behind every `new_on_gpu`        |
+- `std`, on by default: `std` support, without which the crate is `no_std`.
+- `cuda`: the CUDA backend, so `DeviceKind::Cuda` devices count and engines can be built on them.
+- `rocm`: the ROCm backend, compiled through HIP, so `DeviceKind::Rocm` devices count and engines can be built on them.
+- `metal`: the Metal backend on Apple platforms, linking the Metal and Foundation frameworks, so `DeviceKind::Metal` devices count and engines can be built on them.
 
-Without `std` the crate is `no_std`; `std` is also required for the `BuildSzHasher` integration with `HashMap`/`HashSet`.
-The `cuda` feature compiles the CUDA backend and unlocks each engine's `new_on_gpu` constructor; without it the engines are host-only and every other verb is unchanged:
+Every GPU feature implies `std`, which is also required for the `BuildSzHasher` integration with `HashMap`/`HashSet`.
+Without one, the engines are host-only and every other verb is unchanged:
 
 ```toml
 [dependencies]
@@ -50,40 +50,22 @@ use stringzilla::sz::StringZillableBinary; // search/split extension methods
 use stringzilla::sz::StringZillableUnary;  // hash/segmentation extension methods
 ```
 
-### Dynamic vs Compile-Time Dispatch
+### SIMD Dispatch
 
-The `dynamic-dispatch` feature (on by default) controls how the C kernels select a SIMD backend, mirroring the C library's `STRINGZILLA_RUNTIME_DISPATCH` macro.
-The build script decides which ISA tiers to enable from two independently probed facts, using the same checked-in `probes/` sources as the CMake build:
+Every call picks its kernel from the capability mask it passes, the CPU's `capabilities_enabled()` (see [Runtime Dispatch and Capabilities](#runtime-dispatch-and-capabilities)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
+One binary runs optimally on any CPU of the target architecture, at the cost of one pick per operation.
+CMake decides which capabilities to compile in, as for every other binding, by try-compiling `probes/<kit>.c` — tiny programs calling one of the kit's real kernels header-only at the baseline flags, so broken or old toolchains are caught up front.
+Every capability the toolchain can emit is built, and the enabled mask leaves out whatever the CPU lacks.
+Where the OS cannot be asked, as on OS-less targets, the CPU reports only the capabilities the C compiler's own flags guarantee.
+A WebAssembly module carries the one SIMD kit the Rust target declares: `+relaxed-simd` gives `v128relaxed`, `+simd128` gives `v128`, and neither gives `serial`.
 
-- the __compile set__ — tiers this toolchain can emit, learned by try-compiling `probes/<arch>_<tier>.c` (tiny programs reusing the real kernels' `target` pragmas and intrinsics, so broken or old toolchains are caught up front);
-- the __run set__ — tiers this machine can execute, learned by compiling and _running_ `probes/run_capabilities.c` on native builds.
-  When cross-compiling, the target description (`-C target-cpu=…` / `-C target-feature=+…`, surfaced as `CARGO_CFG_TARGET_FEATURE`) stands in for the machine.
+The build script forwards these environment variables to CMake, and rebuilds when one changes:
 
-The two sets are independent — an old compiler on a new CPU misses tiers the machine could run, a new compiler on an old CPU can emit tiers the machine would trap on — and the dispatch mode picks the gate:
+- `STRINGZILLA_TARGET_<KIT>`, like `STRINGZILLA_TARGET_SVE2=0 cargo build`, forces one capability on or off, though never past what the toolchain can compile.
+- `STRINGZILLA_TARGET_ARCH=native` tunes the library for the building machine.
+- `STRINGZILLA_CUDA_ARCHITECTURES` and `STRINGZILLA_ROCM_ARCHITECTURES` narrow the GPU code the features compile.
 
-- __On (default):__ every tier in the _compile set_ is built, and the best one is chosen _at load_ through a dispatch table — the same model as the precompiled `stringzilla_shared` C library.
-  One binary runs optimally on any CPU of the target architecture, at the cost of one indirect call per operation.
-  Two constraints bound the optimism, both expressed in the probes rather than in build-system code: the SVE probes refuse Apple targets outright (no Apple CPU implements SVE, so the kernels could compile but never dispatch), and targets whose built library performs no runtime CPU detection — WebAssembly and OS-less exotica, inferred by compile-probing the header's own `STRINGZILLA_HAS_RUNTIME_DETECTION_` — stay within the target description, since no load-time masking exists there.
-- __Off:__ each function is resolved _at compile time_ to the newest tier in the _intersection_ of the compile and run sets — the analog of including the header-only `stringzilla_header` in your own translation unit with `-march` describing the deployment CPU.
-  There is no table and no constructor, the unused tiers are dead-code-stripped, and the call goes straight to the kernel.
-
-Removing the indirection trades flexibility for speed.
-A compile-time binary built natively is __tuned to the build machine__ ("build where you run"): the run probe may enable tiers beyond the declared target features, and the build prints a warning when it does, because the result is not portable to older CPUs.
-In exchange, call-bound operations get faster: a short-input `sz_find` microbenchmark on this machine ran ~15% more calls per second without the table (≈205 → ≈240 Mcalls/s for 8–64 B inputs).
-The win shrinks as inputs grow and the SIMD kernel, rather than the call overhead, dominates.
-
-Disable it by opting out of default features (re-adding the ones you still want):
-
-```toml
-[dependencies]
-# Compile-time dispatch: smaller, faster, but pinned to the build machine's best ISA.
-stringzilla = { version = "5", default-features = false, features = ["std"] }
-```
-
-Every tier can be forced on or off with its `STRINGZILLA_TARGET_*` environment variable (`STRINGZILLA_TARGET_SVE2=0 cargo build`), overriding the run gate but never the compile gate; the CMake build honors the same names as cache options (`-D STRINGZILLA_TARGET_SVE2=0`).
-For a portable compile-time build, cross-describe the floor instead of probing the machine: pin `-C target-feature=…` (or `-C target-cpu=…`) to the oldest deployment CPU.
-`sz::dynamic_dispatch()` reports which mode the crate was built with.
-An engine resolves its ISA tier once, when it is constructed, under either mode — so the table costs it one branch per round rather than one per call.
+An engine fixes its capability once, when it is constructed, and every round dispatches on that.
 
 ## Types
 
@@ -96,8 +78,14 @@ The `sz` module exposes a handful of public value types used throughout the API.
 - `BuildSzHasher` — a `std::hash::BuildHasher`, gated on feature `std`, for using `Hasher` with `HashMap`/`HashSet`.
 - `Utf8View`, `Utf8Runes`, `Utf8SplitNewlines`, `Utf8SplitWhitespaces`, `Utf8Wordbreaks`, `Utf8Graphemes`, `Utf8Sentences`, `Utf8Linebreaks` — lazy UTF-8 views and iterators.
 - `Utf8UncasedNeedle`, `Utf8UncasedMatches`, `Utf8NormalForm` — uncased search and Unicode normalization helpers.
-- `SemVer`, `Status`, `SmallCString` — version, error, and capability-string types.
+- `SemVer`, `Status` — version and error types.
+- `Device`, `DeviceKind` — the host CPU or one GPU, by its runtime's ordinal.
+- `Capability`, `Capabilities` — one CPU or GPU capability, and a set of them printed as their names.
 - `ArgsortOptions` — knobs for sorting.
+
+`Status` is the error of every fallible call: one variant per failure code of C's `sz_status_t`, plus `Unrecognized` for a code this crate's header does not list.
+Success has no variant, being the `Ok` side of the `Result`, and `Status` implements `Display` and `core::error::Error`.
+A buffer of the wrong length is reported as `Status::UnexpectedDimensions` rather than asserted.
 
 `Byteset` is constructed from bytes and supports inversion, useful for "not from" semantics:
 
@@ -106,16 +94,17 @@ use stringzilla::sz::{self, Byteset};
 
 let vowels = Byteset::from("aeiou");
 let mut punct = Byteset::new();
-punct.add(',');
-punct.add('.');
+punct.add(b',');
+punct.add(b'.');
 let everything = Byteset::new_ascii();         // all ASCII bytes set
 let not_vowels = vowels.inverted();            // leaves `vowels` unchanged
 let _ = (everything, not_vowels, punct);
 ```
 
-`Byteset` API: `new()`, `new_ascii()`, `from_bytes(&[u8])` / `From<T: AsRef<[u8]>>`, `add(char)`, `add_u8(u8)`, `invert(&mut self)`, `inverted(&self) -> Byteset`.
+`Byteset` API: `new()`, `new_ascii()`, `from_bytes(&[u8])` / `From<T: AsRef<[u8]>>`, `add(u8)`, `invert(&mut self)`, `inverted(&self) -> Byteset`.
 
-`IndexSpan` API: `new(offset, length)`, `range() -> Range<usize>`, `extract<'a>(&self, &'a [u8]) -> &'a [u8]`, `end() -> usize`, plus public `offset` and `length` fields.
+`IndexSpan` API: `new(offset, length)`, `range() -> Range<usize>`, `extract<'a>(&self, &'a [u8]) -> Option<&'a [u8]>`, `end() -> usize`, plus public `offset` and `length` fields.
+`end` saturates rather than overflowing, and `extract` returns `None` for a span that runs past the text.
 
 ```rust
 use stringzilla::sz::IndexSpan;
@@ -123,7 +112,8 @@ use stringzilla::sz::IndexSpan;
 let span = IndexSpan::new(6, 5);
 assert_eq!(span.range(), 6..11);
 assert_eq!(span.end(), 11);
-assert_eq!(span.extract(b"Hello World"), b"World");
+assert_eq!(span.extract(b"Hello World"), Some(&b"World"[..]));
+assert_eq!(span.extract(b"Hello"), None);
 ```
 
 ## Searching and Counting
@@ -201,8 +191,8 @@ assert_eq!(sz::find_nth_utf8("Hello", 5), None);
 `order` and `equal` are SIMD byte comparisons, while `utf8_uncased_order` compares under Unicode case folding.
 
 ```rust
-pub fn order<A: AsRef<[u8]>, B: AsRef<[u8]>>(a: A, b: B) -> core::cmp::Ordering; // SIMD sz_order
-pub fn equal<A: AsRef<[u8]>, B: AsRef<[u8]>>(a: A, b: B) -> bool;               // SIMD sz_equal
+pub fn order<A: AsRef<[u8]>, B: AsRef<[u8]>>(a: A, b: B) -> core::cmp::Ordering; // SIMD sz_order_best
+pub fn equal<A: AsRef<[u8]>, B: AsRef<[u8]>>(a: A, b: B) -> bool;               // SIMD sz_equal_best
 pub fn utf8_uncased_order<A, B>(a: A, b: B) -> core::cmp::Ordering;             // Unicode case-folded
 ```
 
@@ -300,10 +290,10 @@ The crate provides byte-level buffer transforms, lookup-table translation, in-pl
 
 ### Lookup Table Translation
 
-`lookup` maps every byte of a source through a 256-entry table into a destination, while `lookup_inplace` rewrites a buffer in place.
+`lookup` maps every byte of a source through a 256-entry table into a target, while `lookup_inplace` rewrites a buffer in place.
 
 ```rust
-pub fn lookup<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S, table: [u8; 256]);
+pub fn lookup<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S, table: [u8; 256]) -> Result<(), Status>;
 pub fn lookup_inplace<T: AsMut<[u8]>>(buffer: &mut T, table: [u8; 256]);
 ```
 
@@ -327,19 +317,19 @@ assert_eq!(&text, b"hello world!");
 
 ```rust
 pub fn fill<T: AsMut<[u8]>>(target: &mut T, value: u8);
-pub fn copy<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S);
-pub fn move_<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S);
+pub fn copy<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S) -> Result<(), Status>;
+pub fn move_<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S) -> Result<(), Status>;
 ```
 
-`copy` and `move_` assert the target is at least as long as the source; `move_` tolerates overlapping regions.
+`copy`, `move_` and `lookup` return `Status::UnexpectedDimensions`, writing nothing, when the target is shorter than the source; `move_` tolerates overlapping regions.
 
 ### In Place Replacement
 
 These rewrite a `Vec<u8>` in place, replacing either a literal needle or any byte from a `Byteset` with a replacement slice.
 
 ```rust
-pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status>;
-pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status>;
+pub fn replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status>;
+pub fn replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status>;
 ```
 
 Both replace all non-overlapping occurrences in place, returning the replacement count.
@@ -349,22 +339,22 @@ Equal-length replacements overwrite, shorter ones compact forward without alloca
 use stringzilla::sz::{self, Byteset};
 
 let mut buffer = b"a-b-c".to_vec();
-let n = sz::try_replace_all(&mut buffer, b"-", b"__").unwrap();
+let n = sz::replace_all(&mut buffer, b"-", b"__").unwrap();
 assert_eq!(n, 2);
 assert_eq!(buffer, b"a__b__c");
 
 let mut spaced = b"a, b ,c".to_vec();
-sz::try_replace_all_byteset(&mut spaced, Byteset::from(", "), b"").unwrap();
+sz::replace_all_byteset(&mut spaced, Byteset::from(", "), b"").unwrap();
 assert_eq!(spaced, b"abc");
 ```
 
 ### Case Folding and Normalization
 
-`utf8_uncased_fold` case-folds into a destination buffer, `utf8_norm` applies a Unicode normal form, and `utf8_find_denormalized` checks conformance without rewriting.
+`utf8_uncased_fold` case-folds into a target buffer, `utf8_norm` applies a Unicode normal form, and `utf8_find_denormalized` checks conformance without rewriting.
 
 ```rust
-pub fn utf8_uncased_fold<T: AsRef<[u8]>, D: AsMut<[u8]>>(source: T, destination: &mut D) -> usize;
-pub fn utf8_norm<T: AsRef<[u8]>, D: AsMut<[u8]>>(source: T, form: Utf8NormalForm, destination: &mut D) -> usize;
+pub fn utf8_uncased_fold<S: AsRef<[u8]>, T: AsMut<[u8]>>(source: S, target: &mut T) -> Result<usize, Status>;
+pub fn utf8_norm<S: AsRef<[u8]>, T: AsMut<[u8]>>(source: S, form: Utf8NormalForm, target: &mut T) -> Result<usize, Status>;
 pub fn utf8_find_denormalized<T: AsRef<[u8]>>(source: T, form: Utf8NormalForm) -> Option<usize>;
 ```
 
@@ -375,8 +365,8 @@ pub fn utf8_find_denormalized<T: AsRef<[u8]>>(source: T, form: Utf8NormalForm) -
 ```rust
 use stringzilla::sz::{self, Utf8NormalForm};
 
-let mut dest = [0u8; 32];
-let len = sz::utf8_uncased_fold("HELLO WORLD", &mut dest);
+let mut dest = [0u8; 33];
+let len = sz::utf8_uncased_fold("HELLO WORLD", &mut dest).unwrap();
 assert_eq!(&dest[..len], b"hello world");
 
 // NFC check: a decomposed "café" (e + combining acute) violates NFC.
@@ -384,11 +374,12 @@ assert!(sz::utf8_find_denormalized("cafe\u{0301}", Utf8NormalForm::Nfc).is_some(
 assert!(sz::utf8_find_denormalized("caf\u{00E9}", Utf8NormalForm::Nfc).is_none());
 
 let mut out = vec![0u8; "cafe\u{0301}".len() * 18];
-let n = sz::utf8_norm("cafe\u{0301}", Utf8NormalForm::Nfc, &mut out);
+let n = sz::utf8_norm("cafe\u{0301}", Utf8NormalForm::Nfc, &mut out).unwrap();
 assert_eq!(&out[..n], "caf\u{00E9}".as_bytes());
 ```
 
-Destination buffers must be sized for worst-case expansion: `source.len() * 3` for folding and `source.len() * 18` for normalization.
+The C kernels write without a capacity, so target buffers must hold the worst-case expansion whatever the input: `source.len() * 3` for folding and `source.len() * 18` for normalization.
+A shorter one is refused with `Status::UnexpectedDimensions` before anything is written.
 
 ### Uncased UTF-8 Search
 
@@ -398,7 +389,7 @@ Destination buffers must be sized for worst-case expansion: `source.len() * 3` f
 pub fn utf8_uncased_search<H: AsRef<[u8]>, N: Utf8UncasedNeedleArg>(haystack: H, needle: N) -> Option<(usize, usize)>;
 ```
 
-Returns `Some((offset, matched_length))`, where the matched length may differ from the needle length due to case folding — `ß` matching `SS`, for instance.
+Returns `Some((offset, match_length))`, where the matched length may differ from the needle length due to case folding — `ß` matching `SS`, for instance.
 A reusable `Utf8UncasedNeedle` caches needle metadata across searches, and `Utf8UncasedMatches` iterates all matches as `IndexSpan`s:
 
 ```rust
@@ -421,11 +412,11 @@ These free functions cover a byte checksum, seeded and unseeded 64-bit hashes, a
 pub fn bytesum<T: AsRef<[u8]>>(text: T) -> u64;
 pub fn hash<T: AsRef<[u8]>>(text: T) -> u64;
 pub fn hash_with_seed<T: AsRef<[u8]>>(text: T, seed: u64) -> u64;
-pub fn hash_multiseed_into<T: AsRef<[u8]>>(text: T, seeds: &[u64], out: &mut [u64]);
+pub fn hash_multiseed_into<T: AsRef<[u8]>>(text: T, seeds: &[u64], out: &mut [u64]) -> Result<(), Status>;
 ```
 
 `bytesum` is an order-insensitive byte sum; `hash` / `hash_with_seed` are order-sensitive AES-based 64-bit hashes.
-`hash_multiseed_into` hashes one input under many seeds in a single pass, handy for MinHash, Count-Min sketches, and Bloom/cuckoo filters; it panics if `out.len() != seeds.len()`:
+`hash_multiseed_into` hashes one input under many seeds in a single pass, handy for MinHash, Count-Min sketches, and Bloom/cuckoo filters; it returns `Status::UnexpectedDimensions` if `out.len() != seeds.len()`:
 
 ```rust
 use stringzilla::sz;
@@ -436,7 +427,7 @@ assert_eq!(sz::hash_with_seed("Hello", 42), sz::hash_with_seed("Hello", 42));
 
 let seeds = [1u64, 2, 3, 4];
 let mut out = [0u64; 4];
-sz::hash_multiseed_into("token", &seeds, &mut out);
+sz::hash_multiseed_into("token", &seeds, &mut out).unwrap();
 ```
 
 These are also available as `StringZillableUnary` methods on any `AsRef<[u8]>`:
@@ -517,7 +508,7 @@ assert_eq!(mac.len(), 32);
 
 Digesting one message is a serial dependency chain, but independent messages compress in parallel lanes — sixteen at a time on AVX-512, eight on AVX2.
 `sha256_multistate_update` advances one hasher per message, taking anything that dereferences to bytes, so a `Vec<String>` needs no intermediate slice of slices.
-Use `sha256_multistate_update_by` when the messages are not in one contiguous slice.
+Use `sha256_multistate_update_by(&mut states, &records, |record| record.payload.as_bytes())` when each message is a field of a larger element.
 
 Lanes advance in lockstep within a group, so a group costs as much as its longest message.
 Every length is handled correctly, but throughput is best when messages of similar length share a group, which `argsort` arranges.
@@ -538,16 +529,17 @@ assert_eq!(digests[0], sz::Sha256::hash(b"alpha"));
 
 ### Argsort
 
-`argsort` writes the sorted permutation of a slice into a caller-provided `order` slice, while `argsort_by` sorts by a byte-slice key extracted from each index.
+`argsort` writes the sorted permutation of a slice into a caller-provided `order` slice, while `argsort_by` sorts by a byte-slice key extracted from each element.
 
 ```rust
 pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>;
-pub fn argsort_by<F, A>(mapper: F, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
-where F: Fn(usize) -> A, A: AsRef<[u8]>;
+pub fn argsort_by<T, K>(data: &[T], key: K, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
+where K: Fn(&T) -> &[u8];
 ```
 
-`argsort` writes the sorting permutation of `data` into a caller-supplied `order` buffer of length at least `data.len()`.
-`argsort_by` infers the element count from the `order` slice and sorts by a caller-provided byte-slice key, ideal for sorting structs by a field.
+Both write the sorting permutation of `data` into a caller-supplied `order` buffer of length at least `data.len()`, or return `Status::UnexpectedDimensions`.
+`argsort_by` sorts by a byte-slice key of each element, ideal for sorting structs by a field.
+The binding indexes `data` itself, so the key only projects an element onto its bytes; it runs inside the C call, where a panic cannot unwind and aborts the process.
 `SortedIdx` is an alias for `usize`.
 
 `ArgsortOptions` is a builder; the default is a full, ascending, byte-lexicographic, __stable__ sort:
@@ -573,23 +565,24 @@ sz::argsort(&labels, &mut order, ArgsortOptions::default().reversed().uncased())
 struct Person { name: &'static str }
 let people = [Person { name: "Charlie" }, Person { name: "Alice" }, Person { name: "Bob" }];
 let mut order = [0; 3];
-sz::argsort_by(|i| people[i].name.as_bytes(), &mut order, Default::default()).unwrap();
+sz::argsort_by(&people, |person| person.name.as_bytes(), &mut order, Default::default()).unwrap();
 assert_eq!(&order, &[1, 2, 0]); // Alice, Bob, Charlie
 ```
 
 ### Intersection, an Inner Join
 
-`intersection` matches two collections directly, while `intersection_by` matches by a byte-slice key extracted from each index, both writing the matched positions of each side.
+`intersection` matches two collections directly, while `intersection_by` matches by a byte-slice key extracted from each element, both writing the matched positions of each side.
 
 ```rust
 pub fn intersection<T: AsRef<[u8]>>(data1: &[T], data2: &[T], seed: u64,
     positions1: &mut [SortedIdx], positions2: &mut [SortedIdx]) -> Result<usize, Status>;
-pub fn intersection_by<F, G, A, B>(mapper1: F, mapper2: G, seed: u64,
+pub fn intersection_by<T, U, K, L>(data1: &[T], key1: K, data2: &[U], key2: L, seed: u64,
     positions1: &mut [SortedIdx], positions2: &mut [SortedIdx]) -> Result<usize, Status>
-where F: Fn(usize) -> A, A: AsRef<[u8]>, G: Fn(usize) -> B, B: AsRef<[u8]>;
+where K: Fn(&T) -> &[u8], L: Fn(&U) -> &[u8];
 ```
 
-Both compute the intersection of two collections, writing the matching positions into output buffers each sized at least `min(len1, len2)`, and returning the intersection size:
+Both compute the intersection of two collections, which may differ in length and, for `intersection_by`, in element type.
+They write the matching positions into output buffers each sized at least `min(data1.len(), data2.len())`, or return `Status::UnexpectedDimensions`, and return the intersection size:
 
 ```rust
 use stringzilla::sz;
@@ -623,13 +616,13 @@ assert_eq!(a, b); // identical nonce → identical bytes
 
 ## Edit Distances
 
-`LevenshteinEngine` prepares a batch of queries once — Myers' bit-parallel masks, the ISA tier, and on a device the launch geometry — then scores as many batches of candidates against it as a caller has.
+`LevenshteinEngine` prepares a batch of queries once — Myers' bit-parallel masks, the capability, and on a device the launch geometry — then scores as many batches of candidates against it as a caller has.
 Preparation is the expensive half, so a long-lived engine amortizes it across every later round, and the round's scratch grows to fit the widest batch it has seen and is never shrunk.
 
 ```rust
 fn new<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol) -> Result<LevenshteinEngine, Status>;
-unsafe fn new_on_gpu<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol, stream: *mut c_void)
-    -> Result<LevenshteinEngine, Status>;                                      // needs `cuda`
+unsafe fn new_on<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol,
+    device: Device, stream: *mut c_void) -> Result<LevenshteinEngine, Status>;
 
 fn distances<C: AsRef<[u8]>>(&mut self, candidates: &[C], distances: &mut [usize],
     distances_stride: usize) -> Result<(), Status>;
@@ -670,8 +663,8 @@ Nothing is stored per candidate, so the candidates may change round to round whi
 
 ```rust
 fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize]) -> Result<OverlapEngine, Status>;
-unsafe fn new_on_gpu<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], stream: *mut c_void)
-    -> Result<OverlapEngine, Status>;                                          // needs `cuda`
+unsafe fn new_on<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget: usize,
+    device: Device, stream: *mut c_void) -> Result<OverlapEngine, Status>;
 
 fn scores<C: AsRef<[u8]>>(&mut self, candidates: &[C], scores: &mut [f32],
     scores_query_stride: usize, scores_candidate_stride: usize) -> Result<(), Status>;
@@ -700,15 +693,15 @@ Building it is the expensive half and the engine is reusable, so a long-lived on
 fn new<N: AsRef<[u8]>>(needles: &[N], case_sensitivity: CaseSensitivity,
     overlap_policy: SubstringsOverlapPolicy, hot_states: usize, matches_budget: usize)
     -> Result<SubstringsEngine, Status>;
-unsafe fn new_on_gpu<N: AsRef<[u8]>>(/* the same, plus */ stream: *mut c_void)
-    -> Result<SubstringsEngine, Status>;                                       // needs `cuda`
+unsafe fn new_on<N: AsRef<[u8]>>(/* the same, plus */ haystacks_budget: usize,
+    device: Device, stream: *mut c_void) -> Result<SubstringsEngine, Status>;
 
 fn counts<H: AsRef<[u8]>>(&mut self, haystacks: &[H], counts: &mut [usize],
     counts_stride: usize) -> Result<(), Status>;
 fn find<H: AsRef<[u8]>>(&mut self, haystacks: &[H], matches: &mut [SubstringsMatch],
     matches_offsets: &mut [usize]) -> Result<(), Status>;
 fn replace<H: AsRef<[u8]>, R: AsRef<[u8]>>(&mut self, haystacks: &[H], replacements: &[R],
-    tape: &mut [u8], offsets: &mut [usize]) -> Result<(), Status>;
+    target: &mut [u8], offsets: &mut [usize]) -> Result<(), Status>;
 fn bm25_scores<H: AsRef<[u8]>>(&mut self, haystacks: &[H], document_lengths: Option<&[f32]>,
     parameters: &Bm25Params, needle_weights: &[f32], scores: &mut [f32],
     scores_stride: usize) -> Result<(), Status>;
@@ -729,7 +722,7 @@ Folding is not a byte-length-preserving operation, so a 1-byte needle can match 
 - `LeftmostFirst` — a cover taking the lowest needle index at the earliest start.
 
 A capacity shortfall is not an error.
-The sizing walk always runs, so `report()` names `matches_emitted`, the true total; `matches_stored`, what was written; `tape_bytes`, what a rewrite needs; and `shortfall`, what did not fit.
+The sizing walk always runs, so `report()` names `matches_emitted`, the true total; `matches_stored`, what was written; `target_length`, what a rewrite needs; and `shortfall`, what did not fit.
 That is what lets one call with an empty output size the next one, with no walk in between.
 
 ```rust
@@ -770,9 +763,9 @@ Term frequencies are raw overlapping counts, which is classic BM25, so the engin
 `Bm25Params` has no `Default`, because a corpus mean has no correct default value.
 Its two constructors name the two configurations that exist: `Bm25Params::normalized(mean)` is the literature's `k1 = 1.2` and `b = 0.75` against a corpus whose mean document length you know, and `Bm25Params::unnormalized()` switches length normalization off and leaves `document_lengths` unread.
 
-`replace` takes one replacement per needle, inserted verbatim, an empty one deleting its match, and writes one output tape beside its boundaries.
+`replace` takes one replacement per needle, inserted verbatim, an empty one deleting its match, and writes every rewritten haystack into one `target` buffer beside their boundaries.
 Rewriting is defined only under a cover, so an engine built with `SubstringsOverlapPolicy::Overlapping` is refused there — an overlapping rewrite is not a function.
-A tape too small is not an error either: `report().tape_bytes` names the bytes the rewrite needed and the tape's contents are then unspecified, so an empty tape is how the next call is sized.
+A `target` too small is not an error either: `report().target_length` names the bytes the rewrite needed and the buffer's contents are then unspecified, so an empty `target` is how the next call is sized.
 
 ```rust
 use stringzilla::sz::{Bm25Params, CaseSensitivity, SubstringsEngine, SubstringsOverlapPolicy,
@@ -795,13 +788,13 @@ engine
     .unwrap();
 assert_eq!(scores[1], 0.0);
 
-// One replacement per needle: an empty tape sizes the rewrite, a second call performs it.
+// One replacement per needle: an empty target sizes the rewrite, a second call performs it.
 let replacements = ["feline", "canine"];
 let mut offsets = [0usize; 3];
 engine.replace(&documents, &replacements, &mut [], &mut offsets).unwrap();
-let mut tape = vec![0u8; engine.report().tape_bytes];
-engine.replace(&documents, &replacements, &mut tape, &mut offsets).unwrap();
-assert_eq!(&tape[offsets[0]..offsets[1]], b"feline and canine");
+let mut target = vec![0u8; engine.report().target_length];
+engine.replace(&documents, &replacements, &mut target, &mut offsets).unwrap();
+assert_eq!(&target[offsets[0]..offsets[1]], b"feline and canine");
 ```
 
 ## UTF-8 Segmentation
@@ -881,7 +874,7 @@ The default batch size is the public constant `ITERATORS_DEFAULT_STEPS = 64`.
 `utf8_decode` unpacks UTF-8 bytes into a UTF-32 `runes` buffer, returning how many bytes were consumed and codepoints written.
 
 ```rust
-pub fn utf8_decode(text: &[u8], runes: &mut [u32]) -> (usize, usize); // (bytes_consumed, runes_unpacked)
+pub fn utf8_decode(text: &[u8], runes: &mut [u32]) -> (usize, usize); // (bytes_consumed, runes_count)
 ```
 
 `utf8_decode` decodes UTF-8 into UTF-32 codepoints, filling the output buffer or draining the input per call.
@@ -899,46 +892,62 @@ assert_eq!(runes[0], 'H' as u32);
 
 ## Runtime Dispatch and Capabilities
 
-The `sz` module reports the compiled version and the SIMD capabilities chosen at runtime:
+A `Device` is the host CPU or one GPU, named by its `DeviceKind` and its runtime's own ordinal.
 
 ```rust
-pub fn dynamic_dispatch() -> bool;        // was the library built with runtime dispatch?
-pub fn version() -> SemVer;               // { major, minor, patch }
-pub fn capabilities() -> SmallCString;    // human-readable list of active backends
-```
-
-```rust
-use stringzilla::sz;
+use stringzilla::sz::{self, Capability, Device, DeviceKind};
 
 let v = sz::version();
 println!("StringZilla {}.{}.{}", v.major, v.minor, v.patch);
-println!("dynamic dispatch: {}", sz::dynamic_dispatch());
-println!("capabilities: {}", sz::capabilities().as_str());
+
+let cpu = Device::cpu();
+let enabled = cpu.capabilities_enabled()?;
+cpu.configure_thread(enabled)?;
+println!("dispatching to {enabled}"); // like "serial,neon,neonaes,neonsha"
+
+for ordinal in 0..Device::count(DeviceKind::Cuda).unwrap_or(0) {
+    let gpu = Device::new(DeviceKind::Cuda, ordinal)?;
+    println!("CUDA device {ordinal} runs {}", gpu.capabilities_enabled()?); // like "cuda"
+}
 ```
 
-### Engines on a GPU
+A device reports its `Capabilities`, a set of `Capability` bits, along two independent axes, plus the set dispatch uses:
 
-With the `cuda` feature every engine gains a `new_on_gpu` constructor taking a `cudaStream_t` — or null for the current device's default stream — beside the arguments its host constructor takes.
-That constructor is the only place a stream is ever named: it prepares the batch where a kernel reaches it and resolves the launch geometry once, and every compute verb of that engine then enqueues on the same stream and returns without joining.
+- `capabilities_detected()`: what the device can execute, from CPUID or HWCAP on the CPU and from the runtime on a GPU
+- `capabilities_compiled()`: what this binary contains, from the probes at build time
+- `capabilities_enabled()`: what dispatch uses, i.e. both axes at once unless narrowed
 
-It is `unsafe` for three reasons no type system checks.
-The stream has to be live and belong to the current context.
-Every output buffer has to be device-reachable memory — unified or plain device memory, never page-locked host memory, and a host buffer is refused with `Status::DeviceMemoryMismatch` rather than copied behind your back — and it has to outlive the launch.
-And because a verb returns before the device has written anything, nothing it produced, `SubstringsEngine::report` included, may be read until the caller has joined the stream itself.
+Reach for `capabilities_enabled()` unless you specifically mean one of the raw axes.
+`capabilities_detected()` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
+Narrow CPU dispatch with `cpu.capabilities_enable(enabled.without(Capability::Haswell))`, which clamps to both axes, always keeps `Capability::Serial`, and returns the set that stuck; on a GPU it fails with `Status::MissingKernel`.
+It is the one piece of process state the crate keeps: every call passes the CPU's `capabilities_enabled()` as its capability mask, while an engine keeps the capability it was built with.
+`Device::count` is 1 for the CPU and fails with `Status::MissingGpu` for a vendor this build or machine has no device of, and `Device::new` fails the same way past the last device.
+
+Call `configure_thread` at the start of every thread that runs kernels, to prepare it for the capabilities it passes.
+In a thread-pool setting, each worker thread needs its own call.
+The function is idempotent and cheap to call more than once on the same thread, and fails with `Status::MissingKernel` on a GPU.
+
+### Engines on a Device
+
+Every engine has a `new_on` constructor taking a `Device` and a stream beside the arguments its host constructor takes, plus `candidates_budget` for `OverlapEngine` and `haystacks_budget` for `SubstringsEngine`.
+It prepares the batch on that device with its `capabilities_enabled()` and fixes the launch geometry once, sizing a round's device memory from its budget where it takes one, and uses the stream for that work alone, so the engine keeps its device but no stream.
+The stream is a `cudaStream_t` or `hipStream_t` of that device, or null for its default one, on Metal a `sz_metal_device_t *` that the C library's `sz_metal_device_init(ordinal, arena_bytes, &device)` opened on it, which this crate does not wrap yet, and null on the CPU.
+
+It is `unsafe` because no type system checks that the stream is live and belongs to the device, and the constructor may join it.
 
 ```rust
-use stringzilla::sz::{LevenshteinEngine, LevenshteinSymbol};
+use stringzilla::sz::{Device, DeviceKind, LevenshteinEngine, LevenshteinSymbol};
 
-// SAFETY: `stream` is live, `distances` is unified memory, and the caller joins before reading it.
-let mut engine = unsafe {
-    LevenshteinEngine::new_on_gpu(&["kitten", "saturday"], LevenshteinSymbol::Bytes, stream)?
-};
-engine.distances(&["sitting", "sunday"], distances, 2)?;
-// cudaStreamSynchronize(stream) belongs here, before `distances` is read.
+let gpu = Device::new(DeviceKind::Cuda, 0)?;
+// SAFETY: `stream` is a live stream of CUDA device 0.
+let mut engine = unsafe { LevenshteinEngine::new_on(&["kitten", "saturday"], LevenshteinSymbol::Bytes, gpu, stream)? };
+let mut distances = [0usize; 4];
+assert!(engine.distances(&["sitting", "sunday"], &mut distances, 2).is_err());
 ```
 
 __One gap worth naming.__
-A device engine's compute verbs also need a candidate sequence whose accessors run on the device, over device-resident texts, and the C tier builds one only inside a CUDA translation unit rather than exporting a symbol for it — so this crate can construct a device engine but cannot yet drive it, and a verb handed the host-side sequence the safe methods build answers `Status::DeviceMemoryMismatch` rather than letting a kernel read host memory.
-The device allocators are unexported for the same reason, so nothing here hands back the unified memory those output buffers would have to live in.
+A device engine's rounds need candidates whose texts and accessors the device reaches, and outputs in memory it can write, which this crate cannot build yet.
+The C library exports what that takes, `sz_cuda_memory_allocator_init_unified` and `sz_cuda_sequence_from_string_views` with their ROCm twins, but this crate does not wrap them.
+Its verbs pass a null stream and host memory, so a device engine answers them with an error status such as `Status::DeviceMemoryMismatch`: this crate can construct a device engine but cannot yet drive it.
 
 A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and every one of them has returned by the time it answers.

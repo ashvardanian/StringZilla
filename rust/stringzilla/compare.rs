@@ -9,7 +9,7 @@ use core::ffi::c_void;
 
 /// Lexicographic byte-order comparison of two strings, SIMD-accelerated.
 ///
-/// Mirrors `Ord` on `&[u8]` but uses StringZilla's vectorized `sz_order`.
+/// Mirrors `Ord` on `&[u8]` but uses StringZilla's vectorized `sz_order_best`.
 ///
 /// # Examples
 ///
@@ -27,14 +27,19 @@ where
 {
     let first_ref = first.as_ref();
     let second_ref = second.as_ref();
-    let result = unsafe {
-        sz_order(
+    let mut result = 0;
+    unsafe {
+        sz_order_best(
             first_ref.as_ptr() as *const c_void,
             first_ref.len(),
             second_ref.as_ptr() as *const c_void,
             second_ref.len(),
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
         )
-    };
+    }
+    .infallible();
     match result {
         x if x < 0 => Ordering::Less,
         0 => Ordering::Equal,
@@ -42,7 +47,7 @@ where
     }
 }
 
-/// Byte-level equality of two strings, SIMD-accelerated via `sz_equal`.
+/// Byte-level equality of two strings, SIMD-accelerated via `sz_equal_best`.
 ///
 /// # Examples
 ///
@@ -59,24 +64,30 @@ where
 {
     let first_ref = first.as_ref();
     let second_ref = second.as_ref();
-    // `sz_equal` assumes equal lengths; differing lengths can never be byte-equal.
-    first_ref.len() == second_ref.len()
-        && unsafe {
-            sz_equal(
-                first_ref.as_ptr() as *const c_void,
-                second_ref.as_ptr() as *const c_void,
-                first_ref.len(),
-            ) != 0
-        }
+    // `sz_equal_best` assumes equal lengths; differing lengths can never be byte-equal.
+    if first_ref.len() != second_ref.len() {
+        return false;
+    }
+    let mut result = 0;
+    unsafe {
+        sz_equal_best(
+            first_ref.as_ptr() as *const c_void,
+            second_ref.as_ptr() as *const c_void,
+            first_ref.len(),
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
+    result != 0
 }
 
 #[cfg(test)]
 mod tests {
     extern crate alloc;
-    use alloc::string::String;
     use core::cmp::Ordering;
 
-    use super::*;
     use crate::sz;
 
     #[test]
@@ -88,7 +99,7 @@ mod tests {
         assert!(!sz::equal("", "a"));
 
         // Long enough to reach the vectorized path, differing only in the final byte.
-        let long: String = core::iter::repeat('z').take(1000).collect();
+        let long = "z".repeat(1000);
         let mut altered = long.clone();
         altered.pop();
         altered.push('y');

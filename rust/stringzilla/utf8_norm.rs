@@ -7,7 +7,7 @@ use super::*;
 use core::ffi::c_void;
 
 /// Normalizes a UTF-8 string to the requested Unicode Normal Form, writing the result to a
-/// destination buffer.
+/// target buffer.
 ///
 /// Covers all four standard forms: NFD, NFC, NFKD, and NFKC. NFC is the most common form on the
 /// web; NFD is useful for collation. Compatibility forms (NFKD/NFKC) additionally decompose
@@ -16,17 +16,17 @@ use core::ffi::c_void;
 /// # Arguments
 ///
 /// - `source`: The UTF-8 string to normalize.
-/// - `form`: The target Unicode normalization form.
-/// - `destination`: The destination buffer to write the normalized string.
+/// - `form`: The Unicode normalization form to produce.
+/// - `target`: The target buffer to write the normalized string.
 ///
 /// # Returns
 ///
-/// Returns the number of bytes written to the destination buffer.
+/// Returns the number of bytes written to the target buffer.
 ///
-/// # Safety
+/// # Errors
 ///
-/// The caller must ensure the destination buffer is large enough.
-/// Use `source.len() * 18` bytes for the worst-case expansion of canonical decomposition.
+/// The C kernel writes without a capacity, so `target` must hold the worst-case expansion of
+/// `source.len() * 18` bytes whatever the input, or [`Status::UnexpectedDimensions`] is returned.
 ///
 /// # Examples
 ///
@@ -35,26 +35,36 @@ use core::ffi::c_void;
 /// use sz::Utf8NormalForm;
 /// let source = "caf\u{00E9}"; // "café" NFC (precomposed é)
 /// let mut dest = vec![0u8; source.len() * 18];
-/// let len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut dest);
+/// let len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut dest).unwrap();
 /// assert_eq!(&dest[..len], "caf\u{00E9}".as_bytes()); // unchanged — already NFC
 /// ```
 ///
-pub fn utf8_norm<Source, Destination>(source: Source, form: Utf8NormalForm, destination: &mut Destination) -> usize
+pub fn utf8_norm<Source, Target>(source: Source, form: Utf8NormalForm, target: &mut Target) -> Result<usize, Status>
 where
     Source: AsRef<[u8]>,
-    Destination: AsMut<[u8]> + ?Sized,
+    Target: AsMut<[u8]> + ?Sized,
 {
     let source_ref = source.as_ref();
-    let dest_slice = destination.as_mut();
+    let target_slice = target.as_mut();
+    let worst_case = source_ref.len().checked_mul(18).ok_or(Status::OverflowRisk)?;
+    if target_slice.len() < worst_case {
+        return Err(Status::UnexpectedDimensions);
+    }
 
+    let mut written = 0;
     unsafe {
-        sz_utf8_norm(
+        sz_utf8_norm_best(
             source_ref.as_ptr() as *const c_void,
             source_ref.len(),
-            form as i32,
-            dest_slice.as_mut_ptr() as *mut c_void,
+            form,
+            target_slice.as_mut_ptr() as *mut c_void,
+            &mut written,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
         )
     }
+    .check()?;
+    Ok(written)
 }
 
 /// Returns the byte offset of the first byte in `source` that violates the given Unicode Normal
@@ -89,12 +99,22 @@ where
     Source: AsRef<[u8]>,
 {
     let source_ref = source.as_ref();
-    let ptr = unsafe { sz_utf8_find_denormalized(source_ref.as_ptr() as *const c_void, source_ref.len(), form as i32) };
+    let mut ptr = core::ptr::null();
+    unsafe {
+        sz_utf8_find_denormalized_best(
+            source_ref.as_ptr() as *const c_void,
+            source_ref.len(),
+            form,
+            &mut ptr,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+    }
+    .infallible();
     if ptr.is_null() {
         None
     } else {
-        let offset = unsafe { (ptr as *const u8).offset_from(source_ref.as_ptr()) } as usize;
-        Some(offset)
+        Some(match_offset(ptr as *const u8, source_ref.as_ptr()))
     }
 }
 
@@ -102,10 +122,9 @@ where
 mod tests {
     extern crate alloc;
     use alloc::vec;
-    use alloc::vec::Vec;
 
     use super::*;
-    use crate::sz::{self, *};
+    use crate::sz;
 
     // "cafe": precomposed e-acute U+00E9 in NFC vs. base 'e' + combining acute U+0301 in NFD - the
     // shared NFC/NFD fixture pair for the UTF-8 normalization tests.
@@ -123,14 +142,14 @@ mod tests {
         ] {
             let source = "Hello, world! 123";
             let mut dest = vec![0u8; source.len() * 18];
-            let len = sz::utf8_norm(source, form, &mut dest);
+            let len = sz::utf8_norm(source, form, &mut dest).unwrap();
             assert_eq!(&dest[..len], source.as_bytes(), "ASCII unchanged under {:?}", form);
         }
 
         // CAFE_NFC has precomposed é, U+00E9; NFC → NFC is a no-op, emitting the same bytes.
         {
             let mut dest = vec![0u8; CAFE_NFC.len() * 18];
-            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfc, &mut dest);
+            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfc, &mut dest).unwrap();
             assert_eq!(&dest[..len], CAFE_NFC.as_bytes(), "café NFC→NFC unchanged");
         }
 
@@ -138,14 +157,14 @@ mod tests {
         // the precomposed form.
         {
             let mut dest = vec![0u8; CAFE_NFD.len() * 18];
-            let len = sz::utf8_norm(CAFE_NFD, Utf8NormalForm::Nfc, &mut dest);
+            let len = sz::utf8_norm(CAFE_NFD, Utf8NormalForm::Nfc, &mut dest).unwrap();
             assert_eq!(&dest[..len], CAFE_NFC.as_bytes(), "café NFD→NFC gives precomposed form");
         }
 
         // NFD of the precomposed form must give the decomposed form.
         {
             let mut dest = vec![0u8; CAFE_NFC.len() * 18];
-            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfd, &mut dest);
+            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfd, &mut dest).unwrap();
             assert_eq!(&dest[..len], CAFE_NFD.as_bytes(), "café NFC→NFD gives decomposed form");
         }
 
@@ -153,12 +172,12 @@ mod tests {
         let ligature = "\u{FB03}"; // 3 bytes: 0xEF 0xAC 0x83
         {
             let mut dest = vec![0u8; ligature.len() * 18];
-            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkd, &mut dest);
+            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkd, &mut dest).unwrap();
             assert_eq!(&dest[..len], b"ffi", "ligature NFKD → ffi");
         }
         {
             let mut dest = vec![0u8; ligature.len() * 18];
-            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkc, &mut dest);
+            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkc, &mut dest).unwrap();
             assert_eq!(&dest[..len], b"ffi", "ligature NFKC → ffi");
         }
 
@@ -166,13 +185,20 @@ mod tests {
         {
             let source = CAFE_NFD;
             let mut first = vec![0u8; source.len() * 18];
-            let first_len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut first);
+            let first_len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut first).unwrap();
             let first_result = first[..first_len].to_vec();
 
             let mut second = vec![0u8; first_len * 18];
-            let second_len = sz::utf8_norm(&first_result[..], Utf8NormalForm::Nfc, &mut second);
+            let second_len = sz::utf8_norm(&first_result[..], Utf8NormalForm::Nfc, &mut second).unwrap();
             assert_eq!(&second[..second_len], &first_result[..], "NFC is idempotent");
         }
+
+        // Refused below the worst case although this input fits, as the kernel takes no capacity.
+        let mut short = vec![0u8; CAFE_NFC.len() * 18 - 1];
+        assert_eq!(
+            sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfc, &mut short),
+            Err(sz::Status::UnexpectedDimensions)
+        );
     }
 
     #[test]

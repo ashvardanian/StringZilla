@@ -22,6 +22,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 namespace StringZilla;
 
@@ -37,7 +38,9 @@ public static unsafe class Sz {
         if (needle.Length > haystack.Length) return -1;
         fixed (byte* h = haystack)
         fixed (byte* n = needle) {
-            nint r = Native.sz_find((nint)h, (nuint)haystack.Length, (nint)n, (nuint)needle.Length);
+            nint r;
+            Check("sz_find_best", Native.sz_find_best(
+                (nint)h, (nuint)haystack.Length, (nint)n, (nuint)needle.Length, &r, CpuEnabled, nint.Zero));
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
     }
@@ -47,21 +50,27 @@ public static unsafe class Sz {
         if (needle.Length > haystack.Length) return -1;
         fixed (byte* h = haystack)
         fixed (byte* n = needle) {
-            nint r = Native.sz_rfind((nint)h, (nuint)haystack.Length, (nint)n, (nuint)needle.Length);
+            nint r;
+            Check("sz_rfind_best", Native.sz_rfind_best(
+                (nint)h, (nuint)haystack.Length, (nint)n, (nuint)needle.Length, &r, CpuEnabled, nint.Zero));
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
     }
 
     public static long IndexOf(ReadOnlySpan<byte> haystack, byte needle) {
         fixed (byte* h = haystack) {
-            nint r = Native.sz_find_byte((nint)h, (nuint)haystack.Length, (nint)(&needle));
+            nint r;
+            Check("sz_find_byte_best", Native.sz_find_byte_best(
+                (nint)h, (nuint)haystack.Length, (nint)(&needle), &r, CpuEnabled, nint.Zero));
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
     }
 
     public static long LastIndexOf(ReadOnlySpan<byte> haystack, byte needle) {
         fixed (byte* h = haystack) {
-            nint r = Native.sz_rfind_byte((nint)h, (nuint)haystack.Length, (nint)(&needle));
+            nint r;
+            Check("sz_rfind_byte_best", Native.sz_rfind_byte_best(
+                (nint)h, (nuint)haystack.Length, (nint)(&needle), &r, CpuEnabled, nint.Zero));
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
     }
@@ -70,7 +79,9 @@ public static unsafe class Sz {
     public static long IndexOfAny(ReadOnlySpan<byte> haystack, ref Byteset set) {
         fixed (byte* h = haystack)
         fixed (Byteset* s = &set) {
-            nint r = Native.sz_find_byteset((nint)h, (nuint)haystack.Length, (nint)s);
+            nint r;
+            Check("sz_find_byteset_best", Native.sz_find_byteset_best(
+                (nint)h, (nuint)haystack.Length, (nint)s, &r, CpuEnabled, nint.Zero));
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
     }
@@ -79,7 +90,9 @@ public static unsafe class Sz {
     public static long LastIndexOfAny(ReadOnlySpan<byte> haystack, ref Byteset set) {
         fixed (byte* h = haystack)
         fixed (Byteset* s = &set) {
-            nint r = Native.sz_rfind_byteset((nint)h, (nuint)haystack.Length, (nint)s);
+            nint r;
+            Check("sz_rfind_byteset_best", Native.sz_rfind_byteset_best(
+                (nint)h, (nuint)haystack.Length, (nint)s, &r, CpuEnabled, nint.Zero));
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
     }
@@ -93,17 +106,22 @@ public static unsafe class Sz {
     public static bool Equal(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b) {
         if (a.Length != b.Length) return false;
         if (a.Length == 0) return true;
+        int equal;
         fixed (byte* pa = a)
         fixed (byte* pb = b)
-            return Native.sz_equal((nint)pa, (nint)pb, (nuint)a.Length) != 0;
+            Check("sz_equal_best", Native.sz_equal_best((nint)pa, (nint)pb, (nuint)a.Length, &equal, CpuEnabled, nint.Zero));
+        return equal != 0;
     }
 
     /// <summary>Lexicographic byte comparison: -1, 0, or 1.</summary>
     /// <remarks>Like <see cref="System.MemoryExtensions.SequenceCompareTo{T}(System.ReadOnlySpan{T},System.ReadOnlySpan{T})"/>.</remarks>
     public static int Compare(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b) {
+        int ordering;
         fixed (byte* pa = a)
         fixed (byte* pb = b)
-            return Native.sz_order((nint)pa, (nuint)a.Length, (nint)pb, (nuint)b.Length);
+            Check("sz_order_best", Native.sz_order_best(
+                (nint)pa, (nuint)a.Length, (nint)pb, (nuint)b.Length, &ordering, CpuEnabled, nint.Zero));
+        return ordering;
     }
 
     #endregion
@@ -114,13 +132,17 @@ public static unsafe class Sz {
     /// <remarks>Unlike <see cref="string.GetHashCode()"/>, this is stable across runs/processes and
     /// identical across all StringZilla bindings. For cryptographic hashing use <see cref="Sha256"/>.</remarks>
     public static ulong Hash(ReadOnlySpan<byte> data, ulong seed = 0) {
+        ulong hash;
         fixed (byte* p = data)
-            return Native.sz_hash((nint)p, (nuint)data.Length, seed);
+            Check("sz_hash_best", Native.sz_hash_best((nint)p, (nuint)data.Length, seed, &hash, CpuEnabled, nint.Zero));
+        return hash;
     }
 
     public static ulong ByteSum(ReadOnlySpan<byte> data) {
+        ulong checksum;
         fixed (byte* p = data)
-            return Native.sz_bytesum((nint)p, (nuint)data.Length);
+            Check("sz_bytesum_best", Native.sz_bytesum_best((nint)p, (nuint)data.Length, &checksum, CpuEnabled, nint.Zero));
+        return checksum;
     }
 
     #endregion
@@ -133,15 +155,19 @@ public static unsafe class Sz {
     /// <example><c>CountRunes("你好世界"u8)</c> is 4; <c>CountRunes("Hello🌍"u8)</c> is 6 — the astral
     /// emoji is a single scalar.</example>
     public static long CountRunes(ReadOnlySpan<byte> text) {
+        nuint count;
         fixed (byte* p = text)
-            return (long)Native.sz_utf8_count((nint)p, (nuint)text.Length);
+            Check("sz_utf8_count_best", Native.sz_utf8_count_best((nint)p, (nuint)text.Length, &count, CpuEnabled, nint.Zero));
+        return (long)count;
     }
 
     /// <summary>Byte offset of the <paramref name="index"/>-th codepoint (0-based), or -1 if fewer exist.</summary>
     /// <remarks>Analogous to <see cref="string.EnumerateRunes"/> positioning, on UTF-8 bytes.</remarks>
     public static long SeekRune(ReadOnlySpan<byte> text, long index) {
         fixed (byte* p = text) {
-            nint r = Native.sz_utf8_seek((nint)p, (nuint)text.Length, (nuint)index);
+            nint r;
+            Check("sz_utf8_seek_best", Native.sz_utf8_seek_best(
+                (nint)p, (nuint)text.Length, (nuint)index, &r, CpuEnabled, nint.Zero));
             return r == 0 ? -1 : (long)((byte*)r - p);
         }
     }
@@ -157,9 +183,11 @@ public static unsafe class Sz {
     public static int Decode(ReadOnlySpan<byte> text, Span<int> destination, out long bytesConsumed) {
         fixed (byte* p = text)
         fixed (int* d = destination) {
-            nuint unpacked;
-            nint cursor = Native.sz_utf8_decode((nint)p, (nuint)text.Length, (nint)d, (nuint)destination.Length, (nint)(&unpacked));
-            bytesConsumed = cursor == 0 ? text.Length : (long)((byte*)cursor - p);
+            nuint unpacked, consumed;
+            Check("sz_utf8_decode_best", Native.sz_utf8_decode_best(
+                (nint)p, (nuint)text.Length, (nint)d, (nuint)destination.Length, (nint)(&unpacked), &consumed,
+                CpuEnabled, nint.Zero));
+            bytesConsumed = (long)consumed;
             return (int)unpacked;
         }
     }
@@ -194,24 +222,28 @@ public static unsafe class Sz {
         fixed (byte* t = text)
         fixed (long* s = starts)
         fixed (long* l = lengths) {
-            nuint consumed;
-            nuint count = SegmentChunk(kind, (nint)t, (nuint)text.Length, (nint)s, (nint)l, (nuint)cap, (nint)(&consumed));
+            nuint count, consumed;
+            SegmentChunk(kind, (nint)t, (nuint)text.Length, (nint)s, (nint)l, (nuint)cap, &count, (nint)(&consumed));
             bytesConsumed = (long)consumed;
             return (int)count;
         }
     }
 
-    private static nuint SegmentChunk(SegmentKind kind, nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed) =>
-        kind switch {
-            SegmentKind.Graphemes => Native.sz_utf8_graphemes(text, len, starts, lengths, cap, consumed),
-            SegmentKind.Words => Native.sz_utf8_wordbreaks(text, len, starts, lengths, cap, consumed),
-            SegmentKind.Sentences => Native.sz_utf8_sentences(text, len, starts, lengths, cap, consumed),
-            SegmentKind.LineBreaks => Native.sz_utf8_linebreaks(text, len, starts, lengths, cap, consumed),
-            SegmentKind.Newlines => Native.sz_utf8_newlines(text, len, starts, lengths, cap, consumed),
-            SegmentKind.Whitespaces => Native.sz_utf8_whitespaces(text, len, starts, lengths, cap, consumed),
-            SegmentKind.Delimiters => Native.sz_utf8_delimiters(text, len, starts, lengths, cap, consumed),
+    private static void SegmentChunk(
+        SegmentKind kind, nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed) {
+        ulong caps = CpuEnabled;
+        (string function, int status) = kind switch {
+            SegmentKind.Graphemes => ("sz_utf8_graphemes_best", Native.sz_utf8_graphemes_best(text, len, starts, lengths, cap, count, consumed, caps, nint.Zero)),
+            SegmentKind.Words => ("sz_utf8_wordbreaks_best", Native.sz_utf8_wordbreaks_best(text, len, starts, lengths, cap, count, consumed, caps, nint.Zero)),
+            SegmentKind.Sentences => ("sz_utf8_sentences_best", Native.sz_utf8_sentences_best(text, len, starts, lengths, cap, count, consumed, caps, nint.Zero)),
+            SegmentKind.LineBreaks => ("sz_utf8_linebreaks_best", Native.sz_utf8_linebreaks_best(text, len, starts, lengths, cap, count, consumed, caps, nint.Zero)),
+            SegmentKind.Newlines => ("sz_utf8_newlines_best", Native.sz_utf8_newlines_best(text, len, starts, lengths, cap, count, consumed, caps, nint.Zero)),
+            SegmentKind.Whitespaces => ("sz_utf8_whitespaces_best", Native.sz_utf8_whitespaces_best(text, len, starts, lengths, cap, count, consumed, caps, nint.Zero)),
+            SegmentKind.Delimiters => ("sz_utf8_delimiters_best", Native.sz_utf8_delimiters_best(text, len, starts, lengths, cap, count, consumed, caps, nint.Zero)),
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
+        Check(function, status);
+    }
 
     #endregion
 
@@ -221,11 +253,14 @@ public static unsafe class Sz {
     /// bytes) and returns the bytes written. Allocation-free.</summary>
     public static int CaseFold(ReadOnlySpan<byte> text, Span<byte> destination) {
         if (text.Length == 0) return 0;
-        if (destination.Length < text.Length * 3)
+        if (destination.Length < (long)text.Length * 3)
             throw new ArgumentException("destination must hold at least text.Length*3 bytes", nameof(destination));
+        nuint written;
         fixed (byte* s = text)
         fixed (byte* d = destination)
-            return (int)Native.sz_utf8_uncased_fold((nint)s, (nuint)text.Length, (nint)d);
+            Check("sz_utf8_uncased_fold_best", Native.sz_utf8_uncased_fold_best(
+                (nint)s, (nuint)text.Length, (nint)d, &written, CpuEnabled, nint.Zero));
+        return (int)written;
     }
 
     /// <summary>Full Unicode case folding (UAX #21, one-to-many, e.g. ß → "ss"). Returns folded UTF-8.</summary>
@@ -233,11 +268,13 @@ public static unsafe class Sz {
     /// ToLower/ToUpper). Use for caseless matching/indexing. Keywords: case fold, caseless, casefold.</remarks>
     public static byte[] CaseFold(ReadOnlySpan<byte> text) {
         if (text.Length == 0) return Array.Empty<byte>();
-        byte[] rent = ArrayPool<byte>.Shared.Rent(text.Length * 3); // worst-case 3x expansion
+        byte[] rent = ArrayPool<byte>.Shared.Rent(checked(text.Length * 3)); // worst-case 3x expansion
         try {
             fixed (byte* s = text)
             fixed (byte* d = rent) {
-                nuint n = Native.sz_utf8_uncased_fold((nint)s, (nuint)text.Length, (nint)d);
+                nuint n;
+                Check("sz_utf8_uncased_fold_best", Native.sz_utf8_uncased_fold_best(
+                    (nint)s, (nuint)text.Length, (nint)d, &n, CpuEnabled, nint.Zero));
                 return rent.AsSpan(0, (int)n).ToArray();
             }
         }
@@ -257,7 +294,10 @@ public static unsafe class Sz {
         fixed (byte* h = haystack)
         fixed (byte* n = needle) {
             nuint ml;
-            nint r = Native.sz_utf8_uncased_search((nint)h, (nuint)haystack.Length, (nint)n, (nuint)needle.Length, (nint)m, (nint)(&ml));
+            nint r;
+            Check("sz_utf8_uncased_search_best", Native.sz_utf8_uncased_search_best(
+                (nint)h, (nuint)haystack.Length, (nint)n, (nuint)needle.Length, (nint)m, &r, (nint)(&ml),
+                CpuEnabled, nint.Zero));
             matchedLength = (long)ml;
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
@@ -266,9 +306,12 @@ public static unsafe class Sz {
     /// <summary>Case-insensitive (full-fold) lexicographic comparison: -1, 0, or 1.</summary>
     /// <remarks>Fills a gap: no .NET Unicode case-folded ordinal comparison.</remarks>
     public static int UncasedCompare(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b) {
+        int ordering;
         fixed (byte* pa = a)
         fixed (byte* pb = b)
-            return Native.sz_utf8_uncased_order((nint)pa, (nuint)a.Length, (nint)pb, (nuint)b.Length);
+            Check("sz_utf8_uncased_order_best", Native.sz_utf8_uncased_order_best(
+                (nint)pa, (nuint)a.Length, (nint)pb, (nuint)b.Length, &ordering, CpuEnabled, nint.Zero));
+        return ordering;
     }
 
     #endregion
@@ -283,7 +326,8 @@ public static unsafe class Sz {
         fixed (byte* p = data)
         fixed (ulong* s = seeds)
         fixed (ulong* o = hashes)
-            Native.sz_hash_multiseed((nint)p, (nuint)data.Length, (nint)s, (nuint)seeds.Length, (nint)o);
+            Check("sz_hash_multiseed_best", Native.sz_hash_multiseed_best(
+                (nint)p, (nuint)data.Length, (nint)s, (nuint)seeds.Length, (nint)o, CpuEnabled, nint.Zero));
     }
 
     /// <summary>Allocating convenience: returns a fresh array of one hash per seed.</summary>
@@ -301,7 +345,7 @@ public static unsafe class Sz {
     /// <paramref name="nonce"/> (AES-CTR-style; reproducible for the same nonce).</summary>
     public static void FillRandom(Span<byte> buffer, ulong nonce) {
         fixed (byte* p = buffer)
-            Native.sz_fill_random((nint)p, (nuint)buffer.Length, nonce);
+            Check("sz_fill_random_best", Native.sz_fill_random_best((nint)p, (nuint)buffer.Length, nonce, CpuEnabled, nint.Zero));
     }
 
     /// <summary>Byte-wise table transform: destination[i] = lut[source[i]]. <paramref name="lut"/>
@@ -312,7 +356,8 @@ public static unsafe class Sz {
         fixed (byte* d = destination)
         fixed (byte* s = source)
         fixed (byte* l = lut)
-            Native.sz_lookup((nint)d, (nuint)source.Length, (nint)s, (nint)l);
+            Check("sz_lookup_best", Native.sz_lookup_best(
+                (nint)d, (nint)s, (nuint)source.Length, (nint)l, CpuEnabled, nint.Zero));
     }
 
     #endregion
@@ -325,11 +370,14 @@ public static unsafe class Sz {
     /// bytes) and returns the bytes written. Allocation-free.</summary>
     public static int Normalize(ReadOnlySpan<byte> text, NormalForm form, Span<byte> destination) {
         if (text.Length == 0) return 0;
-        if (destination.Length < text.Length * 18)
+        if (destination.Length < (long)text.Length * 18)
             throw new ArgumentException("destination must hold at least text.Length*18 bytes", nameof(destination));
+        nuint written;
         fixed (byte* s = text)
         fixed (byte* d = destination)
-            return (int)Native.sz_utf8_norm((nint)s, (nuint)text.Length, (int)form, (nint)d);
+            Check("sz_utf8_norm_best", Native.sz_utf8_norm_best(
+                (nint)s, (nuint)text.Length, (int)form, (nint)d, &written, CpuEnabled, nint.Zero));
+        return (int)written;
     }
 
     /// <summary>Normalizes UTF-8 <paramref name="text"/> to the given form. Returns normalized UTF-8.</summary>
@@ -339,11 +387,13 @@ public static unsafe class Sz {
     /// <see cref="NormalForm.Nfd"/>); expands the ligature "ﬁ" into "fi" under <see cref="NormalForm.Nfkc"/>.</example>
     public static byte[] Normalize(ReadOnlySpan<byte> text, NormalForm form) {
         if (text.Length == 0) return Array.Empty<byte>();
-        byte[] rent = ArrayPool<byte>.Shared.Rent(text.Length * 18); // worst-case per-codepoint expansion
+        byte[] rent = ArrayPool<byte>.Shared.Rent(checked(text.Length * 18)); // worst-case per-codepoint expansion
         try {
             fixed (byte* s = text)
             fixed (byte* d = rent) {
-                nuint n = Native.sz_utf8_norm((nint)s, (nuint)text.Length, (int)form, (nint)d);
+                nuint n;
+                Check("sz_utf8_norm_best", Native.sz_utf8_norm_best(
+                    (nint)s, (nuint)text.Length, (int)form, (nint)d, &n, CpuEnabled, nint.Zero));
                 return rent.AsSpan(0, (int)n).ToArray();
             }
         }
@@ -353,8 +403,11 @@ public static unsafe class Sz {
     /// <summary>True if <paramref name="text"/> is already in the given normalization form.</summary>
     /// <remarks>Equivalent to <see cref="string.IsNormalized(System.Text.NormalizationForm)"/>.</remarks>
     public static bool IsNormalized(ReadOnlySpan<byte> text, NormalForm form) {
+        nint violation;
         fixed (byte* s = text)
-            return Native.sz_utf8_find_denormalized((nint)s, (nuint)text.Length, (int)form) == 0;
+            Check("sz_utf8_find_denormalized_best", Native.sz_utf8_find_denormalized_best(
+                (nint)s, (nuint)text.Length, (int)form, &violation, CpuEnabled, nint.Zero));
+        return violation == 0;
     }
 
     #endregion
@@ -383,12 +436,8 @@ public static unsafe class Sz {
             seq.Count = (nuint)n;
             seq.GetStart = &SeqCallbacks.GetStart;
             seq.GetLength = &SeqCallbacks.GetLength;
-            fixed (long* ord = order) {
-                int status = uncased
-                    ? Native.sz_sequence_argsort_uncased((nint)(&seq), nint.Zero, (nint)ord, (nuint)top, reverse ? 1 : 0)
-                    : Native.sz_sequence_argsort((nint)(&seq), nint.Zero, (nint)ord, (nuint)top, reverse ? 1 : 0);
-                if (status != 0) throw new InvalidOperationException($"sz_sequence_argsort failed with status {status}");
-            }
+            fixed (long* ord = order)
+                ArgSortSequence(&seq, ord, top, reverse, uncased);
             return top > 0 ? (int)Math.Min(top, n) : n;
         }
         finally {
@@ -422,6 +471,9 @@ public static unsafe class Sz {
         if (n == 0) return 0;
         if (lengths.Length < n) throw new ArgumentException($"lengths must hold at least {n} entries", nameof(lengths));
         if (order.Length < n) throw new ArgumentException($"order must hold at least {n} entries", nameof(order));
+        for (int i = 0; i < n; i++)
+            if (starts[i] < 0 || lengths[i] < 0 || starts[i] > text.Length - lengths[i])
+                throw new ArgumentOutOfRangeException(nameof(starts), $"segment {i} falls outside the text");
         fixed (byte* basePtr = text)
         fixed (long* segmentStarts = starts)
         fixed (long* segmentLengths = lengths)
@@ -435,12 +487,18 @@ public static unsafe class Sz {
             seq.Count = (nuint)n;
             seq.GetStart = &SeqCallbacks.GetRangeStart;
             seq.GetLength = &SeqCallbacks.GetRangeLength;
-            int status = uncased
-                ? Native.sz_sequence_argsort_uncased((nint)(&seq), nint.Zero, (nint)ord, (nuint)top, reverse ? 1 : 0)
-                : Native.sz_sequence_argsort((nint)(&seq), nint.Zero, (nint)ord, (nuint)top, reverse ? 1 : 0);
-            if (status != 0) throw new InvalidOperationException($"sz_sequence_argsort failed with status {status}");
+            ArgSortSequence(&seq, ord, top, reverse, uncased);
         }
         return top > 0 ? (int)Math.Min(top, n) : n;
+    }
+
+    private static void ArgSortSequence(SzSequence* seq, long* order, long top, bool reverse, bool uncased) {
+        if (uncased)
+            Check("sz_sequence_argsort_uncased_best", Native.sz_sequence_argsort_uncased_best(
+                (nint)seq, (nuint)top, reverse ? 1 : 0, nint.Zero, (nint)order, CpuEnabled, nint.Zero));
+        else
+            Check("sz_sequence_argsort_best", Native.sz_sequence_argsort_best(
+                (nint)seq, (nuint)top, reverse ? 1 : 0, nint.Zero, (nint)order, CpuEnabled, nint.Zero));
     }
 
     /// <summary>Inner-joins two de-duplicated sequences, writing matching index pairs into
@@ -471,10 +529,10 @@ public static unsafe class Sz {
             seqB.Handle = &ctxB; seqB.Count = (nuint)nb; seqB.GetStart = &SeqCallbacks.GetStart; seqB.GetLength = &SeqCallbacks.GetLength;
             nuint size;
             fixed (long* fp = firstPositions)
-            fixed (long* sp = secondPositions) {
-                int status = Native.sz_sequence_intersect((nint)(&seqA), (nint)(&seqB), nint.Zero, seed, (nint)(&size), (nint)fp, (nint)sp);
-                if (status != 0) throw new InvalidOperationException($"sz_sequence_intersect failed with status {status}");
-            }
+            fixed (long* sp = secondPositions)
+                Check("sz_sequence_intersect_best", Native.sz_sequence_intersect_best(
+                    (nint)(&seqA), (nint)(&seqB), nint.Zero, seed, (nint)(&size), (nint)fp, (nint)sp,
+                    CpuEnabled, nint.Zero));
             return (int)size;
         }
         finally {
@@ -585,16 +643,153 @@ public static unsafe class Sz {
 
     #endregion
 
-    #region Library Metadata
+    #region Capabilities and Library Metadata
 
-    /// <summary>Active SIMD backend(s), e.g. "serial,haswell,skylake,icelake".</summary>
-    public static string Backend =>
-        Marshal.PtrToStringUTF8(Native.sz_capabilities_to_string(Native.sz_capabilities())) ?? "";
+    /// <summary>The CPU mask every call passes, which <see cref="Device.CapabilitiesEnable"/> narrows.</summary>
+    internal static ulong CpuEnabled {
+        get => Volatile.Read(ref _cpuEnabled);
+        set => Volatile.Write(ref _cpuEnabled, value);
+    }
+
+    private static ulong _cpuEnabled = CpuAvailable();
+
+    /// <summary>The capabilities this CPU runs and this binary holds kernels for, before any narrowing.</summary>
+    internal static ulong CpuAvailable() {
+        ulong capabilities = 1;
+        Check("sz_cpu_capabilities_enabled", Native.sz_cpu_capabilities_enabled(&capabilities));
+        return capabilities;
+    }
+
+    /// <summary>Names the capabilities in <paramref name="capabilities"/>, comma-separated, like "serial,haswell".</summary>
+    public static string CapabilitiesName(ulong capabilities) {
+        const int capacity = 256; // `STRINGZILLA_CAPABILITIES_NAME_CAPACITY`
+        byte* names = stackalloc byte[capacity];
+        nuint written = Native.sz_capabilities_name(capabilities, names, capacity);
+        return Marshal.PtrToStringUTF8((nint)names, (int)written);
+    }
 
     public static Version Version =>
         new(Native.sz_version_major(), Native.sz_version_minor(), Native.sz_version_patch());
 
+    /// <summary>Throws a <see cref="StatusException"/> naming <paramref name="function"/> unless <paramref name="status"/> succeeded.</summary>
+    internal static void Check(string function, int status) {
+        if (status != 0) throw new StatusException(function, status);
+    }
+
     #endregion
+}
+
+/// <summary>Which runtime a device belongs to, as the <c>sz_&lt;kind&gt;_*</c> C functions name it.</summary>
+public enum DeviceKind { Cpu, Cuda, Rocm, Metal }
+
+/// <summary>One device StringZilla can run kernels on: the host CPU, or a GPU by its runtime's own ordinal,
+/// the one <c>cudaSetDevice</c> or <c>hipSetDevice</c> takes, or the position in Metal's device list.</summary>
+/// <remarks>Prefer <see cref="CapabilitiesEnabled"/> unless you specifically mean one of the raw axes:
+/// <see cref="CapabilitiesDetected"/> describes the device and says nothing about whether a kernel was compiled
+/// into this binary, so selecting on it alone claims support for code that may not exist. Every call of this
+/// binding dispatches over the CPU's enabled set; a GPU device only reports its masks here.</remarks>
+public readonly unsafe record struct Device {
+    private const int MissingGpu = -16; // `sz_missing_gpu_k`
+    private const int MissingKernel = -20; // `sz_missing_kernel_k`
+
+    /// <summary>The runtime this device belongs to.</summary>
+    public DeviceKind Kind { get; }
+
+    /// <summary>The runtime's own index of this device, below <see cref="Count"/>.</summary>
+    public ulong Ordinal { get; }
+
+    /// <summary>Device <paramref name="ordinal"/> of <paramref name="kind"/>.</summary>
+    /// <exception cref="StatusException">Without a device of <paramref name="kind"/>, or past the last one.</exception>
+    public Device(DeviceKind kind, ulong ordinal = 0) {
+        if (ordinal >= Count(kind)) throw new StatusException($"Device({kind}, {ordinal})", MissingGpu);
+        Kind = kind;
+        Ordinal = ordinal;
+    }
+
+    /// <summary>The host CPU, which every build has.</summary>
+    public static Device Cpu => default;
+
+    /// <summary>How many devices of <paramref name="kind"/> the process sees: one CPU, or the GPUs its runtime counts.</summary>
+    /// <exception cref="StatusException">Without a GPU of <paramref name="kind"/>.</exception>
+    public static ulong Count(DeviceKind kind) {
+        nuint count = 1;
+        switch (kind) {
+            case DeviceKind.Cpu: break;
+            case DeviceKind.Cuda: Sz.Check("sz_cuda_count_devices", Native.sz_cuda_count_devices(&count)); break;
+            case DeviceKind.Rocm: Sz.Check("sz_rocm_count_devices", Native.sz_rocm_count_devices(&count)); break;
+            case DeviceKind.Metal: Sz.Check("sz_metal_count_devices", Native.sz_metal_count_devices(&count)); break;
+            default: throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+        return count;
+    }
+
+    /// <summary>What this device runs, whether or not this binary holds kernels for it.</summary>
+    /// <exception cref="StatusException">When the runtime can't be queried.</exception>
+    public ulong CapabilitiesDetected {
+        get {
+            ulong mask = 0;
+            nuint device = (nuint)Ordinal;
+            switch (Kind) {
+                case DeviceKind.Cpu: Sz.Check("sz_cpu_capabilities_detected", Native.sz_cpu_capabilities_detected(&mask)); break;
+                case DeviceKind.Cuda: Sz.Check("sz_cuda_capabilities_detected", Native.sz_cuda_capabilities_detected(device, &mask)); break;
+                case DeviceKind.Rocm: Sz.Check("sz_rocm_capabilities_detected", Native.sz_rocm_capabilities_detected(device, &mask)); break;
+                case DeviceKind.Metal: Sz.Check("sz_metal_capabilities_detected", Native.sz_metal_capabilities_detected(device, &mask)); break;
+            }
+            return mask;
+        }
+    }
+
+    /// <summary>What this binary holds kernels for on devices of this kind, whether or not this one runs them.</summary>
+    public ulong CapabilitiesCompiled {
+        get {
+            ulong mask = 0;
+            switch (Kind) {
+                case DeviceKind.Cpu: Sz.Check("sz_cpu_capabilities_compiled", Native.sz_cpu_capabilities_compiled(&mask)); break;
+                case DeviceKind.Cuda: Sz.Check("sz_cuda_capabilities_compiled", Native.sz_cuda_capabilities_compiled(&mask)); break;
+                case DeviceKind.Rocm: Sz.Check("sz_rocm_capabilities_compiled", Native.sz_rocm_capabilities_compiled(&mask)); break;
+                case DeviceKind.Metal: Sz.Check("sz_metal_capabilities_compiled", Native.sz_metal_capabilities_compiled(&mask)); break;
+            }
+            return mask;
+        }
+    }
+
+    /// <summary>What this device's calls pass: <see cref="CapabilitiesDetected"/> and <see cref="CapabilitiesCompiled"/>
+    /// at once. On the CPU it is what every call of this binding passes, narrowed by <see cref="CapabilitiesEnable"/>,
+    /// and always contains the serial fallback, bit 0.</summary>
+    /// <exception cref="StatusException">When the runtime can't be queried.</exception>
+    public ulong CapabilitiesEnabled {
+        get {
+            ulong mask = 0;
+            nuint device = (nuint)Ordinal;
+            switch (Kind) {
+                case DeviceKind.Cpu: return Sz.CpuEnabled;
+                case DeviceKind.Cuda: Sz.Check("sz_cuda_capabilities_enabled", Native.sz_cuda_capabilities_enabled(device, &mask)); break;
+                case DeviceKind.Rocm: Sz.Check("sz_rocm_capabilities_enabled", Native.sz_rocm_capabilities_enabled(device, &mask)); break;
+                case DeviceKind.Metal: Sz.Check("sz_metal_capabilities_enabled", Native.sz_metal_capabilities_enabled(device, &mask)); break;
+            }
+            return mask;
+        }
+    }
+
+    /// <summary>Makes <paramref name="wanted"/> the CPU's <see cref="CapabilitiesEnabled"/> set, clamped to what it
+    /// detects and this binary compiled and keeping the serial fallback.</summary>
+    /// <returns>The enabled set that took effect.</returns>
+    /// <exception cref="StatusException">On a GPU, which keeps no such set.</exception>
+    /// <example><c>Device.Cpu.CapabilitiesEnable(1)</c> runs every later call on the serial kernels.</example>
+    public ulong CapabilitiesEnable(ulong wanted) {
+        if (Kind != DeviceKind.Cpu) throw new StatusException($"CapabilitiesEnable on {this}", MissingKernel);
+        ulong enabled = (wanted & Sz.CpuAvailable()) | 1;
+        Sz.CpuEnabled = enabled;
+        return enabled;
+    }
+
+    /// <summary>Prepares the calling thread for the kernels of <paramref name="capabilities"/>, usually
+    /// <see cref="CapabilitiesEnabled"/>; call it once on every thread that runs them.</summary>
+    /// <exception cref="StatusException">On a GPU, which has no thread state to configure.</exception>
+    public void ConfigureThread(ulong capabilities) {
+        if (Kind != DeviceKind.Cpu) throw new StatusException($"ConfigureThread on {this}", MissingKernel);
+        Sz.Check("sz_cpu_configure_thread", Native.sz_cpu_configure_thread(capabilities));
+    }
 }
 
 /// <summary>Stack-only batch buffer of 64 longs for the segmentation/split enumerators.</summary>
@@ -1085,16 +1280,17 @@ public unsafe ref struct UncasedMatchEnumerator {
     public UncasedMatch Current { get; private set; }
 
     public bool MoveNext() {
-        if (_cursor > _haystack.Length) return false;
+        if (_needle.Length == 0 || _cursor > _haystack.Length) return false;
         Span<byte> meta = _meta[..];
         fixed (byte* hayBase = _haystack)
         fixed (byte* needlePtr = _needle)
         fixed (byte* metaPtr = meta) {
             nuint matchedLength;
-            nint found = Native.sz_utf8_uncased_search(
+            nint found;
+            Sz.Check("sz_utf8_uncased_search_best", Native.sz_utf8_uncased_search_best(
                 (nint)(hayBase + _cursor), (nuint)(_haystack.Length - _cursor),
                 (nint)needlePtr, (nuint)_needle.Length,
-                (nint)metaPtr, (nint)(&matchedLength));
+                (nint)metaPtr, &found, (nint)(&matchedLength), Sz.CpuEnabled, nint.Zero));
             if (found == 0) {
                 _cursor = _haystack.Length + 1;
                 return false;
@@ -1112,6 +1308,34 @@ public unsafe ref struct UncasedMatchEnumerator {
         (lead & 0x80) == 0 ? 1 : (lead & 0xE0) == 0xC0 ? 2 : (lead & 0xF0) == 0xE0 ? 3 : (lead & 0xF8) == 0xF0 ? 4 : 1;
 
     public UncasedMatchEnumerator GetEnumerator() => this;
+}
+
+/// <summary>A native call returned a non-success <c>sz_status_t</c>, kept in <see cref="Status"/>.</summary>
+public sealed class StatusException : InvalidOperationException {
+    /// <summary>The raw <c>sz_status_t</c> code, e.g. -10 for <c>sz_bad_alloc_k</c>.</summary>
+    public int Status { get; }
+
+    /// <summary>The C enumerator name of <see cref="Status"/>, e.g. <c>"sz_bad_alloc_k"</c>.</summary>
+    public string StatusName => NameOf(Status);
+
+    internal StatusException(string function, int status)
+        : base($"{function} failed with {NameOf(status)} ({status})") => Status = status;
+
+    private static string NameOf(int status) =>
+        status switch {
+            -10 => "sz_bad_alloc_k",
+            -12 => "sz_invalid_utf8_k",
+            -13 => "sz_contains_duplicates_k",
+            -14 => "sz_overflow_risk_k",
+            -15 => "sz_unexpected_dimensions_k",
+            -16 => "sz_missing_gpu_k",
+            -17 => "sz_device_code_mismatch_k",
+            -18 => "sz_device_memory_mismatch_k",
+            -19 => "sz_authentication_failed_k",
+            -20 => "sz_missing_kernel_k",
+            -21 => "sz_missing_library_k",
+            _ => "sz_status_unknown_k",
+        };
 }
 
 /// <summary>A 256-bit set of byte values.</summary>
@@ -1145,19 +1369,22 @@ public sealed unsafe class Hasher : IDisposable {
 
     public Hasher(ulong seed = 0) {
         _state = NativeMemory.AlignedAlloc(256, 64);
-        Native.sz_hash_state_init((nint)_state, seed);
+        Sz.Check("sz_hash_state_init_best", Native.sz_hash_state_init_best((nint)_state, seed, Sz.CpuEnabled, nint.Zero));
     }
 
     public void Update(ReadOnlySpan<byte> data) {
         if (_state == null) throw new ObjectDisposedException(nameof(Hasher));
         fixed (byte* p = data)
-            Native.sz_hash_state_update((nint)_state, (nint)p, (nuint)data.Length);
+            Sz.Check("sz_hash_state_update_best", Native.sz_hash_state_update_best(
+                (nint)_state, (nint)p, (nuint)data.Length, Sz.CpuEnabled, nint.Zero));
     }
 
     /// <summary>Finalize without mutating state (may be called repeatedly).</summary>
     public ulong Digest() {
         if (_state == null) throw new ObjectDisposedException(nameof(Hasher));
-        return Native.sz_hash_state_digest((nint)_state);
+        ulong hash;
+        Sz.Check("sz_hash_state_digest_best", Native.sz_hash_state_digest_best((nint)_state, &hash, Sz.CpuEnabled, nint.Zero));
+        return hash;
     }
 
     public void Dispose() {
@@ -1184,7 +1411,10 @@ public sealed unsafe class UncasedNeedle : IDisposable {
         fixed (byte* h = haystack)
         fixed (byte* n = _needle) {
             nuint ml;
-            nint r = Native.sz_utf8_uncased_search((nint)h, (nuint)haystack.Length, (nint)n, (nuint)_needle.Length, (nint)_meta, (nint)(&ml));
+            nint r;
+            Sz.Check("sz_utf8_uncased_search_best", Native.sz_utf8_uncased_search_best(
+                (nint)h, (nuint)haystack.Length, (nint)n, (nuint)_needle.Length, (nint)_meta, &r, (nint)(&ml),
+                Sz.CpuEnabled, nint.Zero));
             matchedLength = (long)ml;
             return r == 0 ? -1 : (long)((byte*)r - h);
         }
@@ -1205,13 +1435,14 @@ public sealed unsafe class Sha256 : IDisposable {
 
     public Sha256() {
         _state = NativeMemory.AlignedAlloc(128, 64);
-        Native.sz_sha256_state_init((nint)_state);
+        Sz.Check("sz_sha256_state_init_best", Native.sz_sha256_state_init_best((nint)_state, Sz.CpuEnabled, nint.Zero));
     }
 
     public void Update(ReadOnlySpan<byte> data) {
         if (_state == null) throw new ObjectDisposedException(nameof(Sha256));
         fixed (byte* p = data)
-            Native.sz_sha256_state_update((nint)_state, (nint)p, (nuint)data.Length);
+            Sz.Check("sz_sha256_state_update_best", Native.sz_sha256_state_update_best(
+                (nint)_state, (nint)p, (nuint)data.Length, Sz.CpuEnabled, nint.Zero));
     }
 
     /// <summary>Writes the 32-byte digest into <paramref name="destination"/> (must be ≥ 32 bytes;
@@ -1220,7 +1451,8 @@ public sealed unsafe class Sha256 : IDisposable {
         if (_state == null) throw new ObjectDisposedException(nameof(Sha256));
         if (destination.Length < 32) throw new ArgumentException("destination must hold at least 32 bytes", nameof(destination));
         fixed (byte* o = destination)
-            Native.sz_sha256_state_digest((nint)_state, (nint)o);
+            Sz.Check("sz_sha256_state_digest_best", Native.sz_sha256_state_digest_best(
+                (nint)_state, (nint)o, Sz.CpuEnabled, nint.Zero));
     }
 
     /// <summary>Finalize into a fresh 32-byte digest (non-mutating; may be called repeatedly).</summary>
@@ -1249,10 +1481,7 @@ public sealed unsafe class Sha256 : IDisposable {
 internal static unsafe partial class Native {
     private const string Lib = "stringzilla";
 
-    static Native() {
-        NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolve);
-        sz_dispatch_cpu_table_init(); // idempotent; the lib also self-initializes on load
-    }
+    static Native() => NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolve);
 
     private static nint Resolve(string name, Assembly assembly, DllImportSearchPath? searchPath) {
         if (name != Lib) return nint.Zero;
@@ -1295,92 +1524,99 @@ internal static unsafe partial class Native {
     }
 
     #region Find
-    [LibraryImport(Lib)] internal static partial nint sz_find(nint haystack, nuint hLen, nint needle, nuint nLen);
-    [LibraryImport(Lib)] internal static partial nint sz_rfind(nint haystack, nuint hLen, nint needle, nuint nLen);
-    [LibraryImport(Lib)] internal static partial nint sz_find_byte(nint haystack, nuint hLen, nint needle);
-    [LibraryImport(Lib)] internal static partial nint sz_rfind_byte(nint haystack, nuint hLen, nint needle);
-    [LibraryImport(Lib)] internal static partial nint sz_find_byteset(nint text, nuint len, nint set);
-    [LibraryImport(Lib)] internal static partial nint sz_rfind_byteset(nint text, nuint len, nint set);
+    [LibraryImport(Lib)] internal static partial int sz_find_best(nint haystack, nuint hLen, nint needle, nuint nLen, nint* match, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_rfind_best(nint haystack, nuint hLen, nint needle, nuint nLen, nint* match, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_find_byte_best(nint haystack, nuint hLen, nint needle, nint* match, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_rfind_byte_best(nint haystack, nuint hLen, nint needle, nint* match, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_find_byteset_best(nint haystack, nuint hLen, nint set, nint* match, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_rfind_byteset_best(nint haystack, nuint hLen, nint set, nint* match, ulong caps, nint stream);
 
     #endregion
 
     #region Compare
-    [LibraryImport(Lib)] internal static partial int sz_equal(nint a, nint b, nuint len);
-    [LibraryImport(Lib)] internal static partial int sz_order(nint a, nuint aLen, nint b, nuint bLen);
+    [LibraryImport(Lib)] internal static partial int sz_equal_best(nint a, nint b, nuint len, int* equal, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_order_best(nint a, nuint aLen, nint b, nuint bLen, int* ordering, ulong caps, nint stream);
 
     #endregion
 
     #region Hash
-    [LibraryImport(Lib)] internal static partial ulong sz_hash(nint text, nuint len, ulong seed);
-    [LibraryImport(Lib)] internal static partial ulong sz_bytesum(nint text, nuint len);
-    [LibraryImport(Lib)] internal static partial void sz_hash_state_init(nint state, ulong seed);
-    [LibraryImport(Lib)] internal static partial void sz_hash_state_update(nint state, nint text, nuint len);
-    [LibraryImport(Lib)] internal static partial ulong sz_hash_state_digest(nint state);
+    [LibraryImport(Lib)] internal static partial int sz_hash_best(nint text, nuint len, ulong seed, ulong* hash, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_bytesum_best(nint text, nuint len, ulong* checksum, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_hash_state_init_best(nint state, ulong seed, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_hash_state_update_best(nint state, nint text, nuint len, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_hash_state_digest_best(nint state, ulong* hash, ulong caps, nint stream);
 
     #endregion
 
-    #region Memory
-    [LibraryImport(Lib)] internal static partial void sz_copy(nint target, nint source, nuint len);
-    [LibraryImport(Lib)] internal static partial void sz_move(nint target, nint source, nuint len);
-    [LibraryImport(Lib)] internal static partial void sz_fill(nint target, nuint len, byte value);
-
-    #endregion
-
-    #region Metadata
-    [LibraryImport(Lib)] internal static partial int sz_capabilities();
-    [LibraryImport(Lib)] internal static partial nint sz_capabilities_to_string(int caps);
+    #region Capabilities and Metadata
+    [LibraryImport(Lib)] internal static partial int sz_cpu_capabilities_detected(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_cpu_capabilities_compiled(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_cpu_capabilities_enabled(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_cpu_configure_thread(ulong capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_cuda_count_devices(nuint* count);
+    [LibraryImport(Lib)] internal static partial int sz_cuda_capabilities_detected(nuint device, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_cuda_capabilities_compiled(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_cuda_capabilities_enabled(nuint device, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_rocm_count_devices(nuint* count);
+    [LibraryImport(Lib)] internal static partial int sz_rocm_capabilities_detected(nuint device, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_rocm_capabilities_compiled(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_rocm_capabilities_enabled(nuint device, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_metal_count_devices(nuint* count);
+    [LibraryImport(Lib)] internal static partial int sz_metal_capabilities_detected(nuint device, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_metal_capabilities_compiled(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_metal_capabilities_enabled(nuint device, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial nuint sz_capabilities_name(ulong capabilities, byte* buffer, nuint capacity);
     [LibraryImport(Lib)] internal static partial int sz_version_major();
     [LibraryImport(Lib)] internal static partial int sz_version_minor();
     [LibraryImport(Lib)] internal static partial int sz_version_patch();
-    [LibraryImport(Lib)] internal static partial void sz_dispatch_cpu_table_init();
 
     #endregion
 
     #region UTF-8 Codepoints
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_count(nint text, nuint len);
-    [LibraryImport(Lib)] internal static partial nint sz_utf8_seek(nint text, nuint len, nuint n);
-    [LibraryImport(Lib)] internal static partial nint sz_utf8_decode(nint text, nuint len, nint runes, nuint cap, nint unpacked);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_count_best(nint text, nuint len, nuint* count, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_seek_best(nint text, nuint len, nuint n, nint* position, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_decode_best(nint text, nuint len, nint runes, nuint cap, nint unpacked, nuint* consumed, ulong caps, nint stream);
 
     #endregion
 
     #region UTF-8 Segmentation
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_graphemes(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_wordbreaks(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_sentences(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_linebreaks(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_newlines(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_whitespaces(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_delimiters(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_graphemes_best(nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_wordbreaks_best(nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_sentences_best(nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_linebreaks_best(nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_newlines_best(nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_whitespaces_best(nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_delimiters_best(nint text, nuint len, nint starts, nint lengths, nuint cap, nuint* count, nint consumed, ulong caps, nint stream);
 
     #endregion
 
     #region UTF-8 Case Folding and Uncased
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_uncased_fold(nint src, nuint len, nint dst);
-    [LibraryImport(Lib)] internal static partial nint sz_utf8_uncased_search(nint hay, nuint hLen, nint needle, nuint nLen, nint meta, nint matchedLen);
-    [LibraryImport(Lib)] internal static partial int sz_utf8_uncased_order(nint a, nuint aLen, nint b, nuint bLen);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_uncased_fold_best(nint src, nuint len, nint dst, nuint* written, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_uncased_search_best(nint hay, nuint hLen, nint needle, nuint nLen, nint meta, nint* match, nint matchedLen, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_uncased_order_best(nint a, nuint aLen, nint b, nuint bLen, int* ordering, ulong caps, nint stream);
 
     #endregion
 
     #region Hash Extras, SHA-256, Random and Lookup
-    [LibraryImport(Lib)] internal static partial void sz_hash_multiseed(nint text, nuint len, nint seeds, nuint count, nint hashes);
-    [LibraryImport(Lib)] internal static partial void sz_sha256_state_init(nint state);
-    [LibraryImport(Lib)] internal static partial void sz_sha256_state_update(nint state, nint data, nuint len);
-    [LibraryImport(Lib)] internal static partial void sz_sha256_state_digest(nint state, nint digest);
-    [LibraryImport(Lib)] internal static partial void sz_fill_random(nint text, nuint len, ulong nonce);
-    [LibraryImport(Lib)] internal static partial void sz_lookup(nint target, nuint len, nint source, nint lut);
+    [LibraryImport(Lib)] internal static partial int sz_hash_multiseed_best(nint text, nuint len, nint seeds, nuint count, nint hashes, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_sha256_state_init_best(nint state, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_sha256_state_update_best(nint state, nint data, nuint len, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_sha256_state_digest_best(nint state, nint digest, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_fill_random_best(nint text, nuint len, ulong nonce, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_lookup_best(nint target, nint source, nuint len, nint lut, ulong caps, nint stream);
 
     #endregion
 
     #region UTF-8 Normalization
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_norm(nint src, nuint len, int form, nint dst);
-    [LibraryImport(Lib)] internal static partial nint sz_utf8_find_denormalized(nint src, nuint len, int form);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_norm_best(nint src, nuint len, int form, nint dst, nuint* written, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_utf8_find_denormalized_best(nint src, nuint len, int form, nint* violation, ulong caps, nint stream);
 
     #endregion
 
     #region Collections (Sequence Callbacks)
-    [LibraryImport(Lib)] internal static partial int sz_sequence_argsort(nint sequence, nint alloc, nint order, nuint top, int reverse);
-    [LibraryImport(Lib)] internal static partial int sz_sequence_argsort_uncased(nint sequence, nint alloc, nint order, nuint top, int reverse);
-    [LibraryImport(Lib)] internal static partial int sz_sequence_intersect(nint first, nint second, nint alloc, ulong seed, nint size, nint firstPos, nint secondPos);
+    [LibraryImport(Lib)] internal static partial int sz_sequence_argsort_best(nint sequence, nuint top, int reverse, nint allocator, nint order, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_sequence_argsort_uncased_best(nint sequence, nuint top, int reverse, nint allocator, nint order, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_sequence_intersect_best(nint first, nint second, nint allocator, ulong seed, nint size, nint firstPos, nint secondPos, ulong caps, nint stream);
 
     #endregion
 }

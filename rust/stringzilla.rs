@@ -49,326 +49,565 @@ pub use utf8_uncased::*;
 pub use utf8_uncased_fold::*;
 pub use utf8_wordbreaks::*;
 
-use core::ffi::c_void;
+use core::ffi::{c_char, c_int, c_void};
 
-// Import the functions from the StringZillable C library.
+// Import the functions from the StringZillable C library. Every dispatch point takes the capability
+// mask to pick a kernel from and a stream, null on the CPU, and reports an `sz_status_t`.
 extern "C" {
 
-    pub(crate) fn sz_dynamic_dispatch() -> i32;
-    pub(crate) fn sz_version_major() -> i32;
-    pub(crate) fn sz_version_minor() -> i32;
-    pub(crate) fn sz_version_patch() -> i32;
-    pub(crate) fn sz_capabilities() -> u32;
-    pub(crate) fn sz_capabilities_to_string(caps: u32) -> *const c_void;
+    pub(crate) fn sz_version_major() -> c_int;
+    pub(crate) fn sz_version_minor() -> c_int;
+    pub(crate) fn sz_version_patch() -> c_int;
+    pub(crate) fn sz_status_name(status: sz_status_t) -> *const c_char;
+    pub(crate) fn sz_capabilities_name(
+        capabilities: sz_capability_t,
+        buffer: *mut c_char,
+        capacity: sz_size_t,
+    ) -> sz_size_t;
+    pub(crate) fn sz_cpu_capabilities_detected(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cpu_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cpu_capabilities_enabled(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cpu_configure_thread(capabilities: sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cuda_count_devices(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_cuda_capabilities_detected(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cuda_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cuda_capabilities_enabled(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_rocm_count_devices(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_rocm_capabilities_detected(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_rocm_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_rocm_capabilities_enabled(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_metal_count_devices(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_metal_capabilities_detected(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_metal_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_metal_capabilities_enabled(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
 
-    pub(crate) fn sz_copy(target: *const c_void, source: *const c_void, length: usize);
-    pub(crate) fn sz_fill(target: *const c_void, length: usize, value: u8);
-    pub(crate) fn sz_move(target: *const c_void, source: *const c_void, length: usize);
-    pub(crate) fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
-    pub(crate) fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8);
-
-    pub(crate) fn sz_find(
-        haystack: *const c_void,
-        haystack_length: usize,
-        needle: *const c_void,
-        needle_length: usize,
-    ) -> *const c_void;
-
-    pub(crate) fn sz_rfind(
-        haystack: *const c_void,
-        haystack_length: usize,
-        needle: *const c_void,
-        needle_length: usize,
-    ) -> *const c_void;
-
-    pub(crate) fn sz_find_byteset(
-        haystack: *const c_void,
-        haystack_length: usize,
-        byteset: *const c_void,
-    ) -> *const c_void;
-    pub(crate) fn sz_rfind_byteset(
-        haystack: *const c_void,
-        haystack_length: usize,
-        byteset: *const c_void,
-    ) -> *const c_void;
-
-    pub(crate) fn sz_utf8_count(text: *const c_void, length: usize) -> usize;
-    pub(crate) fn sz_utf8_seek(text: *const c_void, length: usize, n: usize) -> *const c_void;
-    pub(crate) fn sz_utf8_decode(
-        text: *const c_void,
-        length: usize,
-        runes: *mut u32,
-        runes_capacity: usize,
-        runes_unpacked: *mut usize,
-    ) -> *const c_void;
-    pub(crate) fn sz_utf8_newlines(
-        text: *const c_void,
-        length: usize,
-        match_offsets: *mut usize,
-        match_lengths: *mut usize,
-        matches_capacity: usize,
-        bytes_consumed: *mut usize,
-    ) -> usize;
-    pub(crate) fn sz_utf8_whitespaces(
-        text: *const c_void,
-        length: usize,
-        match_offsets: *mut usize,
-        match_lengths: *mut usize,
-        matches_capacity: usize,
-        bytes_consumed: *mut usize,
-    ) -> usize;
-    pub(crate) fn sz_utf8_delimiters(
-        text: *const c_void,
-        length: usize,
-        match_offsets: *mut usize,
-        match_lengths: *mut usize,
-        matches_capacity: usize,
-        bytes_consumed: *mut usize,
-    ) -> usize;
-    pub(crate) fn sz_utf8_uncased_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
-    pub(crate) fn sz_utf8_norm(
+    pub(crate) fn sz_copy_best(
+        target: *mut c_void,
         source: *const c_void,
-        source_length: usize,
-        form: i32,
-        destination: *mut c_void,
-    ) -> usize;
-    pub(crate) fn sz_utf8_find_denormalized(source: *const c_void, source_length: usize, form: i32) -> *const c_void;
-    pub(crate) fn sz_utf8_uncased_search(
+        length: sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_fill_best(
+        target: *mut c_void,
+        length: sz_size_t,
+        value: u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_move_best(
+        target: *mut c_void,
+        source: *const c_void,
+        length: sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_fill_random_best(
+        text: *mut c_void,
+        length: sz_size_t,
+        nonce: u64,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_lookup_best(
+        target: *mut c_void,
+        source: *const c_void,
+        length: sz_size_t,
+        lut: *const u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+
+    pub(crate) fn sz_find_best(
         haystack: *const c_void,
-        haystack_length: usize,
+        haystack_length: sz_size_t,
         needle: *const c_void,
-        needle_length: usize,
+        needle_length: sz_size_t,
+        found: *mut *const c_void,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_rfind_best(
+        haystack: *const c_void,
+        haystack_length: sz_size_t,
+        needle: *const c_void,
+        needle_length: sz_size_t,
+        found: *mut *const c_void,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_find_byteset_best(
+        haystack: *const c_void,
+        haystack_length: sz_size_t,
+        byteset: *const c_void,
+        found: *mut *const c_void,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_rfind_byteset_best(
+        haystack: *const c_void,
+        haystack_length: sz_size_t,
+        byteset: *const c_void,
+        found: *mut *const c_void,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+
+    pub(crate) fn sz_utf8_count_best(
+        text: *const c_void,
+        length: sz_size_t,
+        count: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_seek_best(
+        text: *const c_void,
+        length: sz_size_t,
+        n: sz_size_t,
+        position: *mut *const c_void,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_decode_best(
+        text: *const c_void,
+        length: sz_size_t,
+        runes: *mut u32,
+        runes_capacity: sz_size_t,
+        runes_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_newlines_best(
+        text: *const c_void,
+        length: sz_size_t,
+        match_offsets: *mut sz_size_t,
+        match_lengths: *mut sz_size_t,
+        matches_capacity: sz_size_t,
+        matches_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_whitespaces_best(
+        text: *const c_void,
+        length: sz_size_t,
+        match_offsets: *mut sz_size_t,
+        match_lengths: *mut sz_size_t,
+        matches_capacity: sz_size_t,
+        matches_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_delimiters_best(
+        text: *const c_void,
+        length: sz_size_t,
+        match_offsets: *mut sz_size_t,
+        match_lengths: *mut sz_size_t,
+        matches_capacity: sz_size_t,
+        matches_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_uncased_fold_best(
+        source: *const c_void,
+        source_length: sz_size_t,
+        target: *mut c_void,
+        target_length: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_norm_best(
+        source: *const c_void,
+        source_length: sz_size_t,
+        form: Utf8NormalForm,
+        target: *mut c_void,
+        target_length: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_find_denormalized_best(
+        source: *const c_void,
+        source_length: sz_size_t,
+        form: Utf8NormalForm,
+        found: *mut *const c_void,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_uncased_search_best(
+        haystack: *const c_void,
+        haystack_length: sz_size_t,
+        needle: *const c_void,
+        needle_length: sz_size_t,
         needle_metadata: *mut Utf8UncasedNeedleMetadata,
-        matched_length: *mut usize,
-    ) -> *const c_void;
-    pub(crate) fn sz_utf8_uncased_order(a: *const c_void, a_length: usize, b: *const c_void, b_length: usize) -> i32;
+        found: *mut *const c_void,
+        match_length: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_uncased_order_best(
+        a: *const c_void,
+        a_length: sz_size_t,
+        b: *const c_void,
+        b_length: sz_size_t,
+        ordering: *mut sz_ordering_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
 
-    pub(crate) fn sz_utf8_wordbreaks(
+    pub(crate) fn sz_utf8_wordbreaks_best(
         text: *const c_void,
-        length: usize,
-        word_starts: *mut usize,
-        word_lengths: *mut usize,
-        words_capacity: usize,
-        bytes_consumed: *mut usize,
-    ) -> usize;
+        length: sz_size_t,
+        word_starts: *mut sz_size_t,
+        word_lengths: *mut sz_size_t,
+        words_capacity: sz_size_t,
+        words_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_graphemes_best(
+        text: *const c_void,
+        length: sz_size_t,
+        cluster_starts: *mut sz_size_t,
+        cluster_lengths: *mut sz_size_t,
+        clusters_capacity: sz_size_t,
+        clusters_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_sentences_best(
+        text: *const c_void,
+        length: sz_size_t,
+        sentence_starts: *mut sz_size_t,
+        sentence_lengths: *mut sz_size_t,
+        sentences_capacity: sz_size_t,
+        sentences_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_linebreaks_best(
+        text: *const c_void,
+        length: sz_size_t,
+        line_starts: *mut sz_size_t,
+        line_lengths: *mut sz_size_t,
+        lines_capacity: sz_size_t,
+        lines_count: *mut sz_size_t,
+        bytes_consumed: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
 
-    pub(crate) fn sz_utf8_graphemes(
-        text: *const c_void,
-        length: usize,
-        starts: *mut usize,
-        lengths: *mut usize,
-        cap: usize,
-        consumed: *mut usize,
-    ) -> usize;
-    pub(crate) fn sz_utf8_sentences(
-        text: *const c_void,
-        length: usize,
-        starts: *mut usize,
-        lengths: *mut usize,
-        cap: usize,
-        consumed: *mut usize,
-    ) -> usize;
-    pub(crate) fn sz_utf8_linebreaks(
-        text: *const c_void,
-        length: usize,
-        starts: *mut usize,
-        lengths: *mut usize,
-        cap: usize,
-        consumed: *mut usize,
-    ) -> usize;
+    pub(crate) fn sz_equal_best(
+        a: *const c_void,
+        b: *const c_void,
+        length: sz_size_t,
+        equal: *mut sz_bool_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_order_best(
+        a: *const c_void,
+        a_length: sz_size_t,
+        b: *const c_void,
+        b_length: sz_size_t,
+        ordering: *mut sz_ordering_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
 
-    pub(crate) fn sz_equal(a: *const c_void, b: *const c_void, length: usize) -> i32;
-    pub(crate) fn sz_order(a: *const c_void, a_length: usize, b: *const c_void, b_length: usize) -> i32;
-
-    pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
-    pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
-    pub(crate) fn sz_hash_multiseed(
+    pub(crate) fn sz_bytesum_best(
         text: *const c_void,
-        length: usize,
+        length: sz_size_t,
+        checksum: *mut u64,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_hash_best(
+        text: *const c_void,
+        length: sz_size_t,
+        seed: u64,
+        hash: *mut u64,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_hash_multiseed_best(
+        text: *const c_void,
+        length: sz_size_t,
         seeds: *const u64,
-        seeds_count: usize,
+        seeds_count: sz_size_t,
         hashes: *mut u64,
-    );
-    pub(crate) fn sz_hash_state_init(state: *const c_void, seed: u64);
-    pub(crate) fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
-    pub(crate) fn sz_hash_state_digest(state: *const c_void) -> u64;
-    pub(crate) fn sz_sha256_state_init(state: *const c_void);
-    pub(crate) fn sz_sha256_state_update(state: *const c_void, data: *const c_void, length: usize);
-    pub(crate) fn sz_sha256_state_digest(state: *const c_void, digest: *mut u8);
-    pub(crate) fn sz_sha256_multistate_update(states: *mut c_void, texts: *const _SzSequence);
-    pub(crate) fn sz_sha256_multistate_digest(states: *const c_void, states_count: usize, digests: *mut u8);
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_hash_state_init_best(
+        state: *mut c_void,
+        seed: u64,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_hash_state_update_best(
+        state: *mut c_void,
+        text: *const c_void,
+        length: sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_hash_state_digest_best(
+        state: *const c_void,
+        hash: *mut u64,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_sha256_state_init_best(
+        state: *mut c_void,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_sha256_state_update_best(
+        state: *mut c_void,
+        data: *const c_void,
+        length: sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_sha256_state_digest_best(
+        state: *const c_void,
+        digest: *mut u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_sha256_multistate_update_best(
+        states: *mut c_void,
+        texts: *const _SzSequence,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_sha256_multistate_digest_best(
+        states: *const c_void,
+        states_count: sz_size_t,
+        digests: *mut u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
 
-    pub(crate) fn sz_aes256_key_init(key: *mut c_void, secret: *const u8);
-    pub(crate) fn sz_aes256_ctr_xor(
+    pub(crate) fn sz_aes256_key_init_best(
+        key: *mut c_void,
+        secret: *const u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_ctr_xor_best(
         key: *const c_void,
         nonce: *const u8,
         byte_offset: u64,
         text: *const c_void,
-        length: usize,
+        length: sz_size_t,
         output: *mut c_void,
-    );
-    pub(crate) fn sz_aes256_gcm_key_init(key: *mut c_void, secret: *const u8);
-    pub(crate) fn sz_aes256_gcm_encrypt(
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_key_init_best(
+        key: *mut c_void,
+        secret: *const u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_encrypt_best(
         key: *const c_void,
         nonce: *const u8,
         associated: *const c_void,
-        associated_length: usize,
+        associated_length: sz_size_t,
         text: *const c_void,
-        length: usize,
+        length: sz_size_t,
         output: *mut c_void,
         tag: *mut u8,
-    );
-    /// Returns `sz_status_t` as a raw code, because a value outside `Status` would be undefined
-    /// behavior to receive as that enum, and a decryption must never mistake one for success.
-    pub(crate) fn sz_aes256_gcm_decrypt(
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_decrypt_best(
         key: *const c_void,
         nonce: *const u8,
         associated: *const c_void,
-        associated_length: usize,
+        associated_length: sz_size_t,
         text: *const c_void,
-        length: usize,
+        length: sz_size_t,
         output: *mut c_void,
         tag: *const u8,
-    ) -> i32;
-    pub(crate) fn sz_aes256_gcm_encryptor_init(encryptor: *mut c_void, key: *const c_void, nonce: *const u8);
-    pub(crate) fn sz_aes256_gcm_encryptor_associate(encryptor: *mut c_void, text: *const c_void, length: usize);
-    pub(crate) fn sz_aes256_gcm_encryptor_update(
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_encryptor_init_best(
+        encryptor: *mut c_void,
+        key: *const c_void,
+        nonce: *const u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_encryptor_associate_best(
         encryptor: *mut c_void,
         text: *const c_void,
-        length: usize,
+        length: sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_encryptor_update_best(
+        encryptor: *mut c_void,
+        text: *const c_void,
+        length: sz_size_t,
         output: *mut c_void,
-    );
-    pub(crate) fn sz_aes256_gcm_encryptor_digest(encryptor: *const c_void, tag: *mut u8);
-    pub(crate) fn sz_aes256_gcm_decryptor_init(decryptor: *mut c_void, key: *const c_void, nonce: *const u8);
-    pub(crate) fn sz_aes256_gcm_decryptor_associate(decryptor: *mut c_void, text: *const c_void, length: usize);
-    pub(crate) fn sz_aes256_gcm_decryptor_update_unverified(
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_encryptor_digest_best(
+        encryptor: *const c_void,
+        tag: *mut u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_decryptor_init_best(
+        decryptor: *mut c_void,
+        key: *const c_void,
+        nonce: *const u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_decryptor_associate_best(
         decryptor: *mut c_void,
         text: *const c_void,
-        length: usize,
+        length: sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_decryptor_update_unverified_best(
+        decryptor: *mut c_void,
+        text: *const c_void,
+        length: sz_size_t,
         output: *mut c_void,
-    );
-    /// Returns `sz_status_t` as a raw code, for the same reason as `sz_aes256_gcm_decrypt`.
-    pub(crate) fn sz_aes256_gcm_decryptor_verify(decryptor: *const c_void, tag: *const u8) -> i32;
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_aes256_gcm_decryptor_verify_best(
+        decryptor: *const c_void,
+        tag: *const u8,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
 
-    pub(crate) fn sz_sequence_argsort(
-        //
+    pub(crate) fn sz_sequence_argsort_best(
         sequence: *const _SzSequence,
-        alloc: *const c_void,
+        top_count: sz_size_t,
+        reverse: sz_bool_t,
+        allocator: *const c_void,
         order: *mut SortedIdx,
-        top_count: usize,
-        reverse: i32,
-    ) -> Status;
-
-    pub(crate) fn sz_sequence_argsort_uncased(
-        //
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_sequence_argsort_uncased_best(
         sequence: *const _SzSequence,
-        alloc: *const c_void,
+        top_count: sz_size_t,
+        reverse: sz_bool_t,
+        allocator: *const c_void,
         order: *mut SortedIdx,
-        top_count: usize,
-        reverse: i32,
-    ) -> Status;
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
 
-    pub(crate) fn sz_sequence_intersect(
+    pub(crate) fn sz_sequence_intersect_best(
         first_sequence: *const _SzSequence,
         second_sequence: *const _SzSequence,
-        alloc: *const c_void,
+        allocator: *const c_void,
         seed: u64,
-        intersection_size: *mut usize,
+        intersection_count: *mut sz_size_t,
         first_positions: *mut SortedIdx,
         second_positions: *mut SortedIdx,
-    ) -> Status;
-
-    // Cross-product engines. Each takes a null allocator, which resolves to the default host one on
-    // a `_cpu` init and to a stream-derived unified one on a `_gpu` init.
-    pub(crate) fn sz_levenshtein_engine_init_cpu(
-        queries: *const _SzSequence,
-        symbol: LevenshteinSymbol,
-        alloc: *const c_void,
-        engine: *mut LevenshteinEngine,
-    ) -> Status;
-    #[cfg(feature = "cuda")]
-    pub(crate) fn sz_levenshtein_engine_init_gpu(
-        queries: *const _SzSequence,
-        symbol: LevenshteinSymbol,
-        alloc: *const c_void,
+        capabilities: sz_capability_t,
         stream: *mut c_void,
+    ) -> sz_status_t;
+
+    // Cross-product engines. The capability group picks the CPU or one GPU vendor and `ordinal` the
+    // device within it; a null allocator resolves to that device's default one.
+    pub(crate) fn sz_levenshtein_engine_init(
         engine: *mut LevenshteinEngine,
-    ) -> Status;
+        queries: *const _SzSequence,
+        symbol: LevenshteinSymbol,
+        capabilities: sz_capability_t,
+        ordinal: sz_size_t,
+        allocator: *const c_void,
+        stream: *mut c_void,
+    ) -> sz_status_t;
     pub(crate) fn sz_levenshtein_engine_free(engine: *mut LevenshteinEngine);
     pub(crate) fn sz_levenshtein_distances(
         engine: *mut LevenshteinEngine,
         candidates: *const _SzSequence,
-        distances: *mut usize,
-        distances_stride: usize,
-    ) -> Status;
-
-    pub(crate) fn sz_overlap_engine_init_cpu(
-        queries: *const _SzSequence,
-        window_widths: *const usize,
-        window_widths_count: usize,
-        alloc: *const c_void,
-        engine: *mut OverlapEngine,
-    ) -> Status;
-    #[cfg(feature = "cuda")]
-    pub(crate) fn sz_overlap_engine_init_gpu(
-        queries: *const _SzSequence,
-        window_widths: *const usize,
-        window_widths_count: usize,
-        alloc: *const c_void,
+        distances: *mut sz_size_t,
+        distances_stride: sz_size_t,
         stream: *mut c_void,
+    ) -> sz_status_t;
+
+    pub(crate) fn sz_overlap_engine_init(
         engine: *mut OverlapEngine,
-    ) -> Status;
+        queries: *const _SzSequence,
+        window_widths: *const sz_size_t,
+        window_widths_count: sz_size_t,
+        candidates_budget: sz_size_t,
+        capabilities: sz_capability_t,
+        ordinal: sz_size_t,
+        allocator: *const c_void,
+        stream: *mut c_void,
+    ) -> sz_status_t;
     pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine);
     pub(crate) fn sz_overlap_scores(
         engine: *mut OverlapEngine,
         candidates: *const _SzSequence,
         scores: *mut f32,
-        scores_query_stride: usize,
-        scores_candidate_stride: usize,
-    ) -> Status;
-
-    pub(crate) fn sz_substrings_engine_init_cpu(
-        needles: *const _SzSequence,
-        case_sensitivity: CaseSensitivity,
-        overlap_policy: SubstringsOverlapPolicy,
-        hot_states: usize,
-        matches_budget: usize,
-        alloc: *const c_void,
-        engine: *mut SubstringsEngine,
-    ) -> Status;
-    #[cfg(feature = "cuda")]
-    pub(crate) fn sz_substrings_engine_init_gpu(
-        needles: *const _SzSequence,
-        case_sensitivity: CaseSensitivity,
-        overlap_policy: SubstringsOverlapPolicy,
-        hot_states: usize,
-        matches_budget: usize,
-        alloc: *const c_void,
+        scores_query_stride: sz_size_t,
+        scores_candidate_stride: sz_size_t,
         stream: *mut c_void,
+    ) -> sz_status_t;
+
+    pub(crate) fn sz_substrings_engine_init(
         engine: *mut SubstringsEngine,
-    ) -> Status;
+        needles: *const _SzSequence,
+        case_sensitivity: CaseSensitivity,
+        overlap_policy: SubstringsOverlapPolicy,
+        hot_states: sz_size_t,
+        matches_budget: sz_size_t,
+        haystacks_budget: sz_size_t,
+        capabilities: sz_capability_t,
+        ordinal: sz_size_t,
+        allocator: *const c_void,
+        stream: *mut c_void,
+    ) -> sz_status_t;
     pub(crate) fn sz_substrings_engine_free(engine: *mut SubstringsEngine);
     pub(crate) fn sz_substrings_counts(
         engine: *mut SubstringsEngine,
         haystacks: *const _SzSequence,
-        counts: *mut usize,
-        counts_stride: usize,
-    ) -> Status;
+        counts: *mut sz_size_t,
+        counts_stride: sz_size_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
     pub(crate) fn sz_substrings_find(
         engine: *mut SubstringsEngine,
         haystacks: *const _SzSequence,
         matches: *mut SubstringsMatch,
-        matches_capacity: usize,
-        matches_offsets: *mut usize,
-    ) -> Status;
+        matches_capacity: sz_size_t,
+        matches_offsets: *mut sz_size_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
     pub(crate) fn sz_substrings_replace(
         engine: *mut SubstringsEngine,
         haystacks: *const _SzSequence,
         replacements: *const _SzSequence,
-        tape: *mut u8,
-        tape_capacity: usize,
-        offsets: *mut usize,
-    ) -> Status;
+        target: *mut u8,
+        target_capacity: sz_size_t,
+        offsets: *mut sz_size_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
     pub(crate) fn sz_substrings_bm25_scores(
         engine: *mut SubstringsEngine,
         haystacks: *const _SzSequence,
@@ -376,8 +615,9 @@ extern "C" {
         parameters: *const Bm25Params,
         needle_weights: *const f32,
         scores: *mut f32,
-        scores_stride: usize,
-    ) -> Status;
+        scores_stride: sz_size_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
 
 }
 
@@ -400,33 +640,44 @@ pub(crate) fn with_sequence<Element, Return>(items: &[Element], call: impl FnOnc
 where
     Element: AsRef<[u8]>,
 {
-    // SAFETY: the slices outlive `call`, which is the only thing that reaches them.
-    let adapter = move |index: usize| -> &'static [u8] {
-        unsafe { core::mem::transmute::<&[u8], &'static [u8]>(items[index].as_ref()) }
-    };
-    _with_sequence_impl(adapter, items.len(), call)
+    with_sequence_by(items, |item| item.as_ref(), call)
 }
 
-/// Helper that takes an adapter with a concrete type, which is what `_get_slice_fn` needs to name.
-fn _with_sequence_impl<Adapter, Return>(
-    adapter: Adapter,
-    count: usize,
+/// Binds `items` as [`with_sequence`] does, reading each one's bytes through `key`.
+///
+/// The C side calls `key` from inside `call`, where a panic cannot unwind and aborts the process.
+pub(crate) fn with_sequence_by<Element, Key, Return>(
+    items: &[Element],
+    key: Key,
     call: impl FnOnce(&_SzSequence) -> Return,
 ) -> Return
 where
-    Adapter: Fn(usize) -> &'static [u8],
+    Key: Fn(&Element) -> &[u8],
 {
-    let wrapper = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<Adapter>() },
-        data: &adapter as *const Adapter as *const c_void,
-    };
+    let view = (items, key);
     let sequence = _SzSequence {
-        handle: &wrapper as *const _PunnedSliceLookupView as *const c_void,
-        count,
-        get_start: Some(_slice_get_start_punned),
-        get_length: Some(_slice_get_length_punned),
+        handle: &view as *const (&[Element], Key) as *const c_void,
+        count: items.len(),
+        get_start: Some(sequence_start::<Element, Key>),
+        get_length: Some(sequence_length::<Element, Key>),
     };
     call(&sequence)
+}
+
+unsafe extern "C" fn sequence_start<Element, Key>(handle: *const c_void, index: usize) -> *const c_void
+where
+    Key: Fn(&Element) -> &[u8],
+{
+    let (items, key) = &*(handle as *const (&[Element], Key));
+    key(&items[index]).as_ptr() as *const c_void
+}
+
+unsafe extern "C" fn sequence_length<Element, Key>(handle: *const c_void, index: usize) -> usize
+where
+    Key: Fn(&Element) -> &[u8],
+{
+    let (items, key) = &*(handle as *const (&[Element], Key));
+    key(&items[index]).len()
 }
 
 /// Trait for unary string operations that only operate on `self` without needle parameters.

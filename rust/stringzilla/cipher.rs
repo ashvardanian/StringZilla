@@ -22,16 +22,6 @@ const AES256_ROUND_KEYS: usize = 60;
 /// Bytes of Galois hash, or GHASH, subkey powers, holding H¹ through H⁸ ascending.
 const AES256_GALOIS_POWERS: usize = 8 * 16;
 
-/// Why an authenticated decryption refused to hand back plaintext.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuthenticationError {
-    /// The tag did not match the ciphertext and associated data, so the output holds zeros
-    /// rather than the plaintext an attacker chose.
-    TagMismatch,
-    /// The C core reported a status this binding does not model, so the output is untrusted.
-    UnexpectedStatus(i32),
-}
-
 /// Expanded AES-256 round-key schedule for counter mode, the construction named AES-256-CTR.
 ///
 /// Counter mode is unauthenticated and seekable: the keystream at a byte offset depends on nothing
@@ -103,44 +93,49 @@ pub struct Aes256GcmDecryptor {
     state: Aes256GcmState,
 }
 
-/// Maps the raw `sz_status_t` of an authenticated path onto a `Result` the caller cannot drop
-/// silently. Any status other than success refuses the plaintext rather than guessing at it.
-fn authentication_result_from_status(status: i32) -> Result<(), AuthenticationError> {
-    const SUCCESS: i32 = Status::Success as i32;
-    const AUTHENTICATION_FAILED: i32 = Status::AuthenticationFailed as i32;
-    match status {
-        SUCCESS => Ok(()),
-        AUTHENTICATION_FAILED => Err(AuthenticationError::TagMismatch),
-        other => Err(AuthenticationError::UnexpectedStatus(other)),
-    }
-}
-
 impl Aes256CtrKey {
     /// Expands a 32-byte secret into the AES-256 round-key schedule.
     pub fn new(secret: &[u8; AES256_KEY_LENGTH]) -> Self {
         let mut key = Aes256CtrKey::zeroed();
-        unsafe { sz_aes256_key_init(&mut key as *mut _ as *mut c_void, secret.as_ptr()) };
+        unsafe {
+            sz_aes256_key_init_best(
+                &mut key as *mut _ as *mut c_void,
+                secret.as_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
+        }
+        .infallible();
         key
     }
 
     /// Exclusive-ors `text` against the keystream starting at `byte_offset`, writing `output`.
     /// Counter mode is its own inverse, so this call both encrypts and decrypts.
     ///
-    /// # Panics
-    ///
-    /// Panics if `output` is not as long as `text`.
-    pub fn xor_into(&self, nonce: &[u8; AES256_NONCE_LENGTH], byte_offset: u64, text: &[u8], output: &mut [u8]) {
-        assert_eq!(text.len(), output.len(), "`output` must be as long as `text`");
+    /// Returns [`Status::UnexpectedDimensions`] if `output` is not as long as `text`.
+    pub fn xor_into(
+        &self,
+        nonce: &[u8; AES256_NONCE_LENGTH],
+        byte_offset: u64,
+        text: &[u8],
+        output: &mut [u8],
+    ) -> Result<(), Status> {
+        if text.len() != output.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
         unsafe {
-            sz_aes256_ctr_xor(
+            sz_aes256_ctr_xor_best(
                 self as *const _ as *const c_void,
                 nonce.as_ptr(),
                 byte_offset,
                 text.as_ptr() as *const c_void,
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
         }
+        .check()
     }
 
     /// Exclusive-ors `text` against the keystream starting at `byte_offset`, in place.
@@ -149,15 +144,18 @@ impl Aes256CtrKey {
         let length = text.len();
         let pointer = text.as_mut_ptr() as *mut c_void;
         unsafe {
-            sz_aes256_ctr_xor(
+            sz_aes256_ctr_xor_best(
                 self as *const _ as *const c_void,
                 nonce.as_ptr(),
                 byte_offset,
                 pointer as *const c_void,
                 length,
                 pointer,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
         }
+        .infallible();
     }
 
     /// An all-zero schedule, expanded in place by the C core before any caller sees it.
@@ -191,27 +189,35 @@ impl Aes256GcmKey {
     /// Expands a 32-byte secret into a schedule and the Galois hash subkey powers.
     pub fn new(secret: &[u8; AES256_KEY_LENGTH]) -> Self {
         let mut key = Aes256GcmKey::zeroed();
-        unsafe { sz_aes256_gcm_key_init(&mut key as *mut _ as *mut c_void, secret.as_ptr()) };
+        unsafe {
+            sz_aes256_gcm_key_init_best(
+                &mut key as *mut _ as *mut c_void,
+                secret.as_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
+        }
+        .infallible();
         key
     }
 
     /// Encrypts `text` into `output`, returning the tag over the ciphertext and `associated`.
     /// The associated bytes are authenticated but not encrypted, such as a routing header.
     ///
-    /// # Panics
-    ///
-    /// Panics if `output` is not as long as `text`.
+    /// Returns [`Status::UnexpectedDimensions`] if `output` is not as long as `text`.
     pub fn encrypt_into(
         &self,
         nonce: &[u8; AES256_NONCE_LENGTH],
         associated: &[u8],
         text: &[u8],
         output: &mut [u8],
-    ) -> [u8; AES256_TAG_LENGTH] {
-        assert_eq!(text.len(), output.len(), "`output` must be as long as `text`");
+    ) -> Result<[u8; AES256_TAG_LENGTH], Status> {
+        if text.len() != output.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
         let mut tag = [0u8; AES256_TAG_LENGTH];
         unsafe {
-            sz_aes256_gcm_encrypt(
+            sz_aes256_gcm_encrypt_best(
                 self as *const _ as *const c_void,
                 nonce.as_ptr(),
                 associated.as_ptr() as *const c_void,
@@ -220,9 +226,12 @@ impl Aes256GcmKey {
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
                 tag.as_mut_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
-        tag
+        }
+        .check()?;
+        Ok(tag)
     }
 
     /// Encrypts `text` in place, returning the tag over the ciphertext and `associated`.
@@ -236,7 +245,7 @@ impl Aes256GcmKey {
         let length = text.len();
         let pointer = text.as_mut_ptr() as *mut c_void;
         unsafe {
-            sz_aes256_gcm_encrypt(
+            sz_aes256_gcm_encrypt_best(
                 self as *const _ as *const c_void,
                 nonce.as_ptr(),
                 associated.as_ptr() as *const c_void,
@@ -245,18 +254,21 @@ impl Aes256GcmKey {
                 length,
                 pointer,
                 tag.as_mut_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
         tag
     }
 
     /// Verifies `tag` and decrypts `text` into `output`, which holds the plaintext only on success.
-    /// A rejected tag leaves `output` zeroed, so a caller who drops the error still cannot read
-    /// forged plaintext. The comparison takes the same time wherever the tag first differs.
+    /// A rejected tag, [`Status::AuthenticationFailed`], leaves `output` zeroed, so a caller who
+    /// drops the error still cannot read forged plaintext. The comparison takes the same time
+    /// wherever the tag first differs.
     ///
-    /// # Panics
-    ///
-    /// Panics if `output` is not as long as `text`.
+    /// Returns [`Status::UnexpectedDimensions`], writing nothing, if `output` is not as long as
+    /// `text`.
     pub fn decrypt_into(
         &self,
         nonce: &[u8; AES256_NONCE_LENGTH],
@@ -264,10 +276,12 @@ impl Aes256GcmKey {
         text: &[u8],
         output: &mut [u8],
         tag: &[u8; AES256_TAG_LENGTH],
-    ) -> Result<(), AuthenticationError> {
-        assert_eq!(text.len(), output.len(), "`output` must be as long as `text`");
-        let status = unsafe {
-            sz_aes256_gcm_decrypt(
+    ) -> Result<(), Status> {
+        if text.len() != output.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
+        unsafe {
+            sz_aes256_gcm_decrypt_best(
                 self as *const _ as *const c_void,
                 nonce.as_ptr(),
                 associated.as_ptr() as *const c_void,
@@ -276,24 +290,27 @@ impl Aes256GcmKey {
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
                 tag.as_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
-        authentication_result_from_status(status)
+        }
+        .check()
     }
 
     /// Verifies `tag` and decrypts `text` in place, which holds the plaintext only on success.
-    /// A rejected tag zeroes `text`, destroying the ciphertext it arrived with.
+    /// A rejected tag, [`Status::AuthenticationFailed`], zeroes `text`, destroying the ciphertext
+    /// it arrived with.
     pub fn decrypt_in_place(
         &self,
         nonce: &[u8; AES256_NONCE_LENGTH],
         associated: &[u8],
         text: &mut [u8],
         tag: &[u8; AES256_TAG_LENGTH],
-    ) -> Result<(), AuthenticationError> {
+    ) -> Result<(), Status> {
         let length = text.len();
         let pointer = text.as_mut_ptr() as *mut c_void;
-        let status = unsafe {
-            sz_aes256_gcm_decrypt(
+        unsafe {
+            sz_aes256_gcm_decrypt_best(
                 self as *const _ as *const c_void,
                 nonce.as_ptr(),
                 associated.as_ptr() as *const c_void,
@@ -302,9 +319,11 @@ impl Aes256GcmKey {
                 length,
                 pointer,
                 tag.as_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
-        authentication_result_from_status(status)
+        }
+        .check()
     }
 
     /// An all-zero key, expanded in place by the C core before any caller sees it.
@@ -380,12 +399,15 @@ impl Aes256GcmEncryptor {
             state: Aes256GcmState::zeroed(),
         };
         unsafe {
-            sz_aes256_gcm_encryptor_init(
+            sz_aes256_gcm_encryptor_init_best(
                 &mut encryptor as *mut _ as *mut c_void,
                 key as *const _ as *const c_void,
                 nonce.as_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
         encryptor
     }
 
@@ -393,31 +415,38 @@ impl Aes256GcmEncryptor {
     /// All of it must be absorbed before the first chunk of the message.
     pub fn associate(&mut self, associated: &[u8]) -> &mut Self {
         unsafe {
-            sz_aes256_gcm_encryptor_associate(
+            sz_aes256_gcm_encryptor_associate_best(
                 self as *mut _ as *mut c_void,
                 associated.as_ptr() as *const c_void,
                 associated.len(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
         self
     }
 
     /// Encrypts one chunk into `output` and folds its ciphertext into the running tag.
     ///
-    /// # Panics
-    ///
-    /// Panics if `output` is not as long as `text`.
-    pub fn encrypt_into(&mut self, text: &[u8], output: &mut [u8]) -> &mut Self {
-        assert_eq!(text.len(), output.len(), "`output` must be as long as `text`");
+    /// Returns [`Status::UnexpectedDimensions`], absorbing nothing, if `output` is not as long as
+    /// `text`.
+    pub fn encrypt_into(&mut self, text: &[u8], output: &mut [u8]) -> Result<&mut Self, Status> {
+        if text.len() != output.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
         unsafe {
-            sz_aes256_gcm_encryptor_update(
+            sz_aes256_gcm_encryptor_update_best(
                 self as *mut _ as *mut c_void,
                 text.as_ptr() as *const c_void,
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
-        self
+        }
+        .check()?;
+        Ok(self)
     }
 
     /// Encrypts one chunk in place and folds its ciphertext into the running tag.
@@ -425,15 +454,31 @@ impl Aes256GcmEncryptor {
         let length = text.len();
         let pointer = text.as_mut_ptr() as *mut c_void;
         unsafe {
-            sz_aes256_gcm_encryptor_update(self as *mut _ as *mut c_void, pointer as *const c_void, length, pointer)
-        };
+            sz_aes256_gcm_encryptor_update_best(
+                self as *mut _ as *mut c_void,
+                pointer as *const c_void,
+                length,
+                pointer,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
+        }
+        .infallible();
         self
     }
 
     /// Returns the tag over everything encrypted so far, leaving the encryptor ready for more.
     pub fn digest(&self) -> [u8; AES256_TAG_LENGTH] {
         let mut tag = [0u8; AES256_TAG_LENGTH];
-        unsafe { sz_aes256_gcm_encryptor_digest(self as *const _ as *const c_void, tag.as_mut_ptr()) };
+        unsafe {
+            sz_aes256_gcm_encryptor_digest_best(
+                self as *const _ as *const c_void,
+                tag.as_mut_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
+        }
+        .infallible();
         tag
     }
 }
@@ -446,12 +491,15 @@ impl Aes256GcmDecryptor {
             state: Aes256GcmState::zeroed(),
         };
         unsafe {
-            sz_aes256_gcm_decryptor_init(
+            sz_aes256_gcm_decryptor_init_best(
                 &mut decryptor as *mut _ as *mut c_void,
                 key as *const _ as *const c_void,
                 nonce.as_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
         decryptor
     }
 
@@ -459,12 +507,15 @@ impl Aes256GcmDecryptor {
     /// All of it must be absorbed before the first chunk of the message.
     pub fn associate(&mut self, associated: &[u8]) -> &mut Self {
         unsafe {
-            sz_aes256_gcm_decryptor_associate(
+            sz_aes256_gcm_decryptor_associate_best(
                 self as *mut _ as *mut c_void,
                 associated.as_ptr() as *const c_void,
                 associated.len(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
         self
     }
 
@@ -476,20 +527,24 @@ impl Aes256GcmDecryptor {
     /// says so. Callers who can hold the whole message should use [`Aes256GcmKey::decrypt_into`],
     /// which emits nothing until the tag has matched.
     ///
-    /// # Panics
-    ///
-    /// Panics if `output` is not as long as `text`.
-    pub fn decrypt_unverified_into(&mut self, text: &[u8], output: &mut [u8]) -> &mut Self {
-        assert_eq!(text.len(), output.len(), "`output` must be as long as `text`");
+    /// Returns [`Status::UnexpectedDimensions`], absorbing nothing, if `output` is not as long as
+    /// `text`.
+    pub fn decrypt_unverified_into(&mut self, text: &[u8], output: &mut [u8]) -> Result<&mut Self, Status> {
+        if text.len() != output.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
         unsafe {
-            sz_aes256_gcm_decryptor_update_unverified(
+            sz_aes256_gcm_decryptor_update_unverified_best(
                 self as *mut _ as *mut c_void,
                 text.as_ptr() as *const c_void,
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
-        self
+        }
+        .check()?;
+        Ok(self)
     }
 
     /// Decrypts one chunk in place and folds its ciphertext into the running tag.
@@ -501,21 +556,32 @@ impl Aes256GcmDecryptor {
         let length = text.len();
         let pointer = text.as_mut_ptr() as *mut c_void;
         unsafe {
-            sz_aes256_gcm_decryptor_update_unverified(
+            sz_aes256_gcm_decryptor_update_unverified_best(
                 self as *mut _ as *mut c_void,
                 pointer as *const c_void,
                 length,
                 pointer,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
         self
     }
 
-    /// Checks `tag` against everything absorbed so far, in time independent of where it differs.
+    /// Checks `tag` against everything absorbed so far, in time independent of where it differs,
+    /// returning [`Status::AuthenticationFailed`] on a mismatch.
     /// Until this returns `Ok`, every byte the decryptor emitted is an attacker's to choose.
-    pub fn verify(&self, tag: &[u8; AES256_TAG_LENGTH]) -> Result<(), AuthenticationError> {
-        let status = unsafe { sz_aes256_gcm_decryptor_verify(self as *const _ as *const c_void, tag.as_ptr()) };
-        authentication_result_from_status(status)
+    pub fn verify(&self, tag: &[u8; AES256_TAG_LENGTH]) -> Result<(), Status> {
+        unsafe {
+            sz_aes256_gcm_decryptor_verify_best(
+                self as *const _ as *const c_void,
+                tag.as_ptr(),
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
+            )
+        }
+        .check()
     }
 }
 
@@ -525,7 +591,6 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use super::*;
     use crate::sz;
 
     /// Decodes a hexadecimal literal into `output`, returning how many bytes were written.
@@ -611,12 +676,16 @@ mod tests {
         let plaintext = b"counter mode is its own inverse, so one call serves both directions";
 
         let mut ciphertext = vec![0u8; plaintext.len()];
-        key.xor_into(&nonce, 0, plaintext, &mut ciphertext);
+        key.xor_into(&nonce, 0, plaintext, &mut ciphertext).unwrap();
         assert_ne!(ciphertext.as_slice(), &plaintext[..]);
 
         let mut recovered = vec![0u8; plaintext.len()];
-        key.xor_into(&nonce, 0, &ciphertext, &mut recovered);
+        key.xor_into(&nonce, 0, &ciphertext, &mut recovered).unwrap();
         assert_eq!(recovered.as_slice(), &plaintext[..]);
+        assert_eq!(
+            key.xor_into(&nonce, 0, &ciphertext, &mut recovered[1..]),
+            Err(sz::Status::UnexpectedDimensions)
+        );
 
         // Transforming in place must agree with transforming into a separate buffer.
         let mut in_place = plaintext.to_vec();
@@ -632,13 +701,14 @@ mod tests {
         let whole: Vec<u8> = (0..512u32).map(|index| (index * 31 + 7) as u8).collect();
 
         let mut from_zero = vec![0u8; whole.len()];
-        key.xor_into(&nonce, 0, &whole, &mut from_zero);
+        key.xor_into(&nonce, 0, &whole, &mut from_zero).unwrap();
 
         // Seeking is the whole reason counter mode is exposed separately, so every offset - block
         // aligned or not - must land on the keystream the from-zero transformation used.
         for offset in 0..200usize {
             let mut sliced = vec![0u8; whole.len() - offset];
-            key.xor_into(&nonce, offset as u64, &whole[offset..], &mut sliced);
+            key.xor_into(&nonce, offset as u64, &whole[offset..], &mut sliced)
+                .unwrap();
             assert_eq!(sliced.as_slice(), &from_zero[offset..]);
         }
     }
@@ -662,7 +732,9 @@ mod tests {
 
             let key = sz::Aes256GcmKey::new(&secret);
             let mut produced = vec![0u8; length];
-            let tag = key.encrypt_into(&nonce, associated, &plaintext[..length], &mut produced);
+            let tag = key
+                .encrypt_into(&nonce, associated, &plaintext[..length], &mut produced)
+                .unwrap();
             assert_eq!(produced.as_slice(), &expected[..length]);
             assert_eq!(tag, expected_tag);
 
@@ -690,7 +762,9 @@ mod tests {
         let key = sz::Aes256GcmKey::new(&secret);
 
         let mut ciphertext = vec![0u8; plaintext.len()];
-        let tag = key.encrypt_into(&nonce, associated, plaintext, &mut ciphertext);
+        let tag = key
+            .encrypt_into(&nonce, associated, plaintext, &mut ciphertext)
+            .unwrap();
 
         // A single flipped tag bit must be refused, and a caller who drops the error must not find
         // forged plaintext waiting in the buffer.
@@ -699,7 +773,7 @@ mod tests {
         let mut recovered = vec![0xA5u8; plaintext.len()];
         assert_eq!(
             key.decrypt_into(&nonce, associated, &ciphertext, &mut recovered, &forged_tag),
-            Err(sz::AuthenticationError::TagMismatch)
+            Err(sz::Status::AuthenticationFailed)
         );
         assert!(recovered.iter().all(|byte| *byte == 0));
 
@@ -707,15 +781,20 @@ mod tests {
         let mut recovered = vec![0xA5u8; plaintext.len()];
         assert_eq!(
             key.decrypt_into(&nonce, b"forged header", &ciphertext, &mut recovered, &tag),
-            Err(sz::AuthenticationError::TagMismatch)
+            Err(sz::Status::AuthenticationFailed)
         );
         assert!(recovered.iter().all(|byte| *byte == 0));
 
-        // The genuine tag still recovers the message.
-        let mut recovered = vec![0u8; plaintext.len()];
-        key.decrypt_into(&nonce, associated, &ciphertext, &mut recovered, &tag)
+        // The genuine tag still recovers the message, but only into a buffer of the right length.
+        let mut recovered = vec![0u8; plaintext.len() + 1];
+        assert_eq!(
+            key.decrypt_into(&nonce, associated, &ciphertext, &mut recovered, &tag),
+            Err(sz::Status::UnexpectedDimensions)
+        );
+        let recovered = &mut recovered[..plaintext.len()];
+        key.decrypt_into(&nonce, associated, &ciphertext, recovered, &tag)
             .expect("the genuine tag must verify");
-        assert_eq!(recovered.as_slice(), &plaintext[..]);
+        assert_eq!(recovered, &plaintext[..]);
     }
 
     #[test]
@@ -727,7 +806,7 @@ mod tests {
         let key = sz::Aes256GcmKey::new(&secret);
 
         let mut whole = vec![0u8; plaintext.len()];
-        let whole_tag = key.encrypt_into(&nonce, associated, &plaintext, &mut whole);
+        let whole_tag = key.encrypt_into(&nonce, associated, &plaintext, &mut whole).unwrap();
 
         // A chunk boundary must be invisible: the keystream block and the hash block
         // both straddle it.
@@ -737,10 +816,12 @@ mod tests {
             encryptor.associate(associated);
             for offset in (0..plaintext.len()).step_by(chunk) {
                 let taken = chunk.min(plaintext.len() - offset);
-                encryptor.encrypt_into(
-                    &plaintext[offset..offset + taken],
-                    &mut streamed[offset..offset + taken],
-                );
+                encryptor
+                    .encrypt_into(
+                        &plaintext[offset..offset + taken],
+                        &mut streamed[offset..offset + taken],
+                    )
+                    .unwrap();
             }
             assert_eq!(streamed, whole);
             assert_eq!(encryptor.digest(), whole_tag);
@@ -751,7 +832,8 @@ mod tests {
             for offset in (0..plaintext.len()).step_by(chunk) {
                 let taken = chunk.min(plaintext.len() - offset);
                 decryptor
-                    .decrypt_unverified_into(&whole[offset..offset + taken], &mut recovered[offset..offset + taken]);
+                    .decrypt_unverified_into(&whole[offset..offset + taken], &mut recovered[offset..offset + taken])
+                    .unwrap();
             }
             decryptor.verify(&whole_tag).expect("the genuine tag must verify");
             assert_eq!(recovered, plaintext);
@@ -765,8 +847,8 @@ mod tests {
         let mut recovered = vec![0u8; plaintext.len()];
         let mut decryptor = sz::Aes256GcmDecryptor::new(&key, &nonce);
         decryptor.associate(associated);
-        decryptor.decrypt_unverified_into(&whole, &mut recovered);
-        assert_eq!(decryptor.verify(&forged_tag), Err(sz::AuthenticationError::TagMismatch));
+        decryptor.decrypt_unverified_into(&whole, &mut recovered).unwrap();
+        assert_eq!(decryptor.verify(&forged_tag), Err(sz::Status::AuthenticationFailed));
         assert_eq!(recovered, plaintext);
     }
 
@@ -810,7 +892,9 @@ mod tests {
         let key = sz::Aes256GcmKey::new(&secret);
 
         let mut ciphertext = vec![0u8; plaintext.len()];
-        let tag = key.encrypt_into(&nonce, associated, &plaintext, &mut ciphertext);
+        let tag = key
+            .encrypt_into(&nonce, associated, &plaintext, &mut ciphertext)
+            .unwrap();
 
         // The decryptor hashes the bytes it is given rather than the bytes it emits, so both emit
         // paths must reach the tag the one-shot call made, and the header may arrive in any pieces.
@@ -820,7 +904,9 @@ mod tests {
         decryptor.associate(&associated[17..]);
         for offset in (0..ciphertext.len()).step_by(23) {
             let taken = 23.min(ciphertext.len() - offset);
-            decryptor.decrypt_unverified_into(&ciphertext[offset..offset + taken], &mut opened[offset..offset + taken]);
+            decryptor
+                .decrypt_unverified_into(&ciphertext[offset..offset + taken], &mut opened[offset..offset + taken])
+                .unwrap();
         }
         decryptor.verify(&tag).expect("the genuine tag must verify");
         assert_eq!(opened, plaintext);
@@ -841,7 +927,7 @@ mod tests {
         let mut unassociated = ciphertext.clone();
         let mut decryptor = sz::Aes256GcmDecryptor::new(&key, &nonce);
         decryptor.decrypt_unverified_in_place(&mut unassociated);
-        assert_eq!(decryptor.verify(&tag), Err(sz::AuthenticationError::TagMismatch));
+        assert_eq!(decryptor.verify(&tag), Err(sz::Status::AuthenticationFailed));
 
         // A decryptor started on the wrong nonce emits neither the plaintext nor a matching tag.
         let mut wrong_nonce = nonce;
@@ -850,7 +936,7 @@ mod tests {
         let mut decryptor = sz::Aes256GcmDecryptor::new(&key, &wrong_nonce);
         decryptor.associate(associated);
         decryptor.decrypt_unverified_in_place(&mut mismatched);
-        assert_eq!(decryptor.verify(&tag), Err(sz::AuthenticationError::TagMismatch));
+        assert_eq!(decryptor.verify(&tag), Err(sz::Status::AuthenticationFailed));
         assert_ne!(mismatched, plaintext);
     }
 }

@@ -516,7 +516,7 @@ def test_unit_backend_differential_known_answers(vector):
     expected_ciphertext, expected_tag = bytes.fromhex(ciphertext_hex), bytes.fromhex(tag_hex)
 
     for config in capability_sweep():
-        with forced_capabilities(*config):
+        with forced_capabilities(config):
             # The schedule is expanded when the key is built, so the key must be built in here too.
             key = sz.Aes256GcmKey(secret)
             assert key.encrypt(plaintext, nonce, associated) == (expected_ciphertext, expected_tag)
@@ -602,7 +602,7 @@ def test_unit_backend_differential_ctr_seek(seed_value: int):
     body = random_bytes(span, seed_value)
 
     for config in capability_sweep():
-        with forced_capabilities(*config):
+        with forced_capabilities(config):
             key = sz.Aes256CtrKey(COUNTER_SECRET)
             whole = key.xor(body, COUNTER_NONCE)
             for offset in range(0, 130):

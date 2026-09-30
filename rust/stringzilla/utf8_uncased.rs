@@ -21,9 +21,9 @@ use core::marker::PhantomData;
 ///
 /// # Returns
 ///
-/// If found, returns `Some((offset, matched_length))` where:
+/// If found, returns `Some((offset, match_length))` where:
 /// - `offset` is the byte position in haystack where the match starts
-/// - `matched_length` is the number of bytes matched in haystack, which may differ from
+/// - `match_length` is the number of bytes matched in haystack, which may differ from
 ///   the needle length
 ///
 /// Returns `None` if no match is found.
@@ -114,6 +114,8 @@ impl Default for Utf8UncasedNeedleMetadata {
 ///
 /// Caches metadata for efficient repeated searches with the same needle.
 /// Useful when searching multiple haystacks for the same pattern.
+/// The cache fills lazily through `&self`, so a needle is `Send` but not `Sync`: give each thread
+/// its own.
 ///
 /// # Examples
 ///
@@ -173,11 +175,6 @@ impl<'a> Utf8UncasedNeedle<'a> {
     }
 }
 
-// Safety: The metadata is only mutated through FFI during search operations,
-// which internally synchronize access. The needle reference is immutable.
-unsafe impl<'a> Send for Utf8UncasedNeedle<'a> {}
-unsafe impl<'a> Sync for Utf8UncasedNeedle<'a> {}
-
 /// Trait for types that can be used as a uncased search needle.
 ///
 /// This trait is implemented for:
@@ -191,25 +188,29 @@ pub trait Utf8UncasedNeedleArg {
 impl<Source: AsRef<[u8]>> Utf8UncasedNeedleArg for Source {
     fn find_uncased_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
         let needle_ref = self.as_ref();
-        let mut matched_length: usize = 0;
+        let mut match_length: usize = 0;
         let mut needle_metadata = Utf8UncasedNeedleMetadata::default();
 
-        let result = unsafe {
-            sz_utf8_uncased_search(
+        let mut result = core::ptr::null();
+        unsafe {
+            sz_utf8_uncased_search_best(
                 haystack.as_ptr() as *const c_void,
                 haystack.len(),
                 needle_ref.as_ptr() as *const c_void,
                 needle_ref.len(),
                 &mut needle_metadata,
-                &mut matched_length,
+                &mut result,
+                &mut match_length,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
 
         if result.is_null() {
             None
         } else {
-            let offset = unsafe { result.offset_from(haystack.as_ptr() as *const c_void) };
-            Some((offset as usize, matched_length))
+            Some((match_offset(result, haystack.as_ptr() as *const c_void), match_length))
         }
     }
 }
@@ -217,24 +218,28 @@ impl<Source: AsRef<[u8]>> Utf8UncasedNeedleArg for Source {
 impl<'a, 'b> Utf8UncasedNeedleArg for &'b Utf8UncasedNeedle<'a> {
     fn find_uncased_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
         let needle_bytes = self.as_bytes();
-        let mut matched_length: usize = 0;
+        let mut match_length: usize = 0;
 
-        let result = unsafe {
-            sz_utf8_uncased_search(
+        let mut result = core::ptr::null();
+        unsafe {
+            sz_utf8_uncased_search_best(
                 haystack.as_ptr() as *const c_void,
                 haystack.len(),
                 needle_bytes.as_ptr() as *const c_void,
                 needle_bytes.len(),
                 &mut *self.metadata_ptr(),
-                &mut matched_length,
+                &mut result,
+                &mut match_length,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
 
         if result.is_null() {
             None
         } else {
-            let offset = unsafe { result.offset_from(haystack.as_ptr() as *const c_void) };
-            Some((offset as usize, matched_length))
+            Some((match_offset(result, haystack.as_ptr() as *const c_void), match_length))
         }
     }
 }
@@ -272,14 +277,19 @@ where
     let first_ref = first.as_ref();
     let second_ref = second.as_ref();
 
-    let result = unsafe {
-        sz_utf8_uncased_order(
+    let mut result = 0;
+    unsafe {
+        sz_utf8_uncased_order_best(
             first_ref.as_ptr() as *const c_void,
             first_ref.len(),
             second_ref.as_ptr() as *const c_void,
             second_ref.len(),
+            &mut result,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
         )
-    };
+    }
+    .infallible();
 
     match result {
         x if x < 0 => Ordering::Less,
@@ -364,37 +374,41 @@ impl<'a, O: Overlaps> Iterator for Utf8UncasedMatches<'a, O> {
         }
 
         let remaining = &self.haystack[self.position..];
-        let mut matched_length: usize = 0;
+        let mut match_length: usize = 0;
 
-        let result = unsafe {
-            sz_utf8_uncased_search(
+        let mut result = core::ptr::null();
+        unsafe {
+            sz_utf8_uncased_search_best(
                 remaining.as_ptr() as *const c_void,
                 remaining.len(),
                 self.needle.as_ptr() as *const c_void,
                 self.needle.len(),
                 &mut self.metadata,
-                &mut matched_length,
+                &mut result,
+                &mut match_length,
+                enabled_cpu_capabilities_mask(),
+                core::ptr::null_mut(),
             )
-        };
+        }
+        .infallible();
 
         if result.is_null() {
             self.position = self.haystack.len() + 1;
             None
         } else {
-            let offset_in_remaining = unsafe { result.offset_from(remaining.as_ptr() as *const c_void) } as usize;
-            let absolute_offset = self.position + offset_in_remaining;
+            let absolute_offset = self.position + match_offset(result, remaining.as_ptr() as *const c_void);
 
             // Advance position for next search. A zero-length match from an empty needle must still
-            // advance by at least one byte in the non-overlapping case, or this would loop
-            // forever re-matching the same position; the overlapping case already always
-            // advances by 1 regardless of `matched_length`.
+            // advance by at least one byte in the non-overlapping case, or this would loop forever
+            // re-matching the same position; the overlapping case already always advances by 1
+            // regardless of `match_length`.
             if O::OVERLAP {
                 self.position = absolute_offset + 1;
             } else {
-                self.position = absolute_offset + matched_length.max(1);
+                self.position = absolute_offset + match_length.max(1);
             }
 
-            Some(IndexSpan::new(absolute_offset, matched_length))
+            Some(IndexSpan::new(absolute_offset, match_length))
         }
     }
 }
@@ -416,8 +430,7 @@ mod tests {
         let mut source_buffer = [0u8; 4];
         let source = codepoint.encode_utf8(&mut source_buffer);
         let mut folded = [0u8; 16];
-        let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
-        debug_assert!(folded_length <= folded.len(), "fold expansion exceeded buffer");
+        let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]).unwrap();
         (folded, folded_length)
     }
 
@@ -442,9 +455,9 @@ mod tests {
             let codepoint_start = original_offset;
             let codepoint_end = original_offset + codepoint_length;
             let (folded, folded_length) = fold_codepoint(codepoint);
-            for byte_index in 0..folded_length {
+            for &byte in &folded[..folded_length] {
                 debug_assert!(haystack_folded_length < CAPACITY, "haystack fold overflow");
-                haystack_folded[haystack_folded_length] = folded[byte_index];
+                haystack_folded[haystack_folded_length] = byte;
                 source_starts[haystack_folded_length] = codepoint_start;
                 source_ends[haystack_folded_length] = codepoint_end;
                 haystack_folded_length += 1;
@@ -459,10 +472,10 @@ mod tests {
         for codepoint in needle.chars() {
             let source = codepoint.encode_utf8(&mut needle_buffer);
             let mut folded = [0u8; 16];
-            let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
-            for byte_index in 0..folded_length {
+            let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]).unwrap();
+            for &byte in &folded[..folded_length] {
                 debug_assert!(needle_folded_length < CAPACITY, "needle fold overflow");
-                needle_folded[needle_folded_length] = folded[byte_index];
+                needle_folded[needle_folded_length] = byte;
                 needle_folded_length += 1;
             }
         }

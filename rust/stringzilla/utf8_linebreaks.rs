@@ -5,11 +5,24 @@
 
 use super::*;
 
-/// Kernel behind [`Utf8Linebreaks`] (`sz_utf8_linebreaks`).
+/// Kernel behind [`Utf8Linebreaks`] (`sz_utf8_linebreaks_best`).
 pub struct Linebreaks;
 impl SegmenterKernel for Linebreaks {
     unsafe fn segment(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        sz_utf8_linebreaks(t, n, o, l, c, u)
+        let mut count = 0;
+        sz_utf8_linebreaks_best(
+            t,
+            n,
+            o,
+            l,
+            c,
+            &mut count,
+            u,
+            enabled_cpu_capabilities_mask(),
+            core::ptr::null_mut(),
+        )
+        .infallible();
+        count
     }
 }
 
@@ -38,7 +51,6 @@ mod tests {
     use super::*;
     use crate::stringzilla::fixtures::*;
     use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
-    use crate::sz::*;
 
     // Science abstract: NFKC ligatures/superscripts/Roman/full-width, Kelvin and Angstrom
     // singletons, NBSP, WJ + ZWSP.

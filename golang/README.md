@@ -1,7 +1,7 @@
 # StringZilla for Go
 
 StringZilla is a SIMD-accelerated string library for modern CPUs, written in C 99 and using AVX2, AVX-512, Arm NEON, and SVE intrinsics to accelerate processing.
-This package is a thin `cgo` binding, the `sz` package, over a precompiled StringZilla shared library.
+This package is a thin `cgo` binding, the `sz` package, over the precompiled StringZilla static library.
 
 Unlike the standard `strings` package, StringZilla primarily targets byte-level binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
 Where it does expose UTF-8 helpers, they are documented as such below.
@@ -17,8 +17,16 @@ Add the module to your project with `go get`:
 go get github.com/ashvardanian/stringzilla/golang
 ```
 
-The binding links against the StringZilla shared library `libstringzilla_shared`.
-Build it first, so that the linker can find it via the configured `LDFLAGS` search paths: `.`, `/usr/local/lib`, `../build_golang`, `../build_release`, and `../build_shared`.
+The binding links `libstringzilla_static` through `cgo`, so programs carry it whole and need no shared library at runtime.
+Build it with the `release_shared` preset and copy it next to the Go sources:
+
+```sh
+cmake --preset release_shared
+cmake --build --preset release_shared --target stringzilla_static
+cp build_release_shared/libstringzilla_static.a golang/
+```
+
+An archive elsewhere, like the one `STRINGZILLA_LIBRARY_DIR` names for the Rust crate, links through `CGO_LDFLAGS="-L$STRINGZILLA_LIBRARY_DIR"`.
 
 Import it as:
 
@@ -26,16 +34,39 @@ Import it as:
 import sz "github.com/ashvardanian/stringzilla/golang"
 ```
 
-The dispatch table is initialized automatically on package load.
-To inspect which SIMD backend was selected at runtime:
+## Devices and Capabilities
+
+Every call runs on the CPU and dispatches to the best kernel of its enabled capabilities, those it executes and this binary contains:
 
 ```go
-fmt.Println(sz.Capabilities()) // e.g. "serial,haswell,skylake,ice"
+cpu := sz.CPU()
+enabled, _ := cpu.CapabilitiesEnabled()       // what dispatch uses: detected on this CPU and compiled in
+fmt.Println(enabled)                          // like "serial,neon,neonaes,neonsha"
+fmt.Println(enabled.Has(sz.CapNeon))          // test one capability
+cpu.CapabilitiesEnable(enabled &^ sz.CapNeon) // narrow dispatch, returns what took effect
 ```
 
 ```go
-func Capabilities() string
+func CPU() Device
+func CountDevices(kind DeviceKind) (int, error)
+func NewDevice(kind DeviceKind, ordinal int) (Device, error)
+func (d Device) CapabilitiesDetected() (Capability, error)
+func (d Device) CapabilitiesCompiled() Capability
+func (d Device) CapabilitiesEnabled() (Capability, error)
+func (d Device) CapabilitiesEnable(wanted Capability) (Capability, error)
+func (d Device) ConfigureThread(capabilities Capability) (func(), error)
+func (c Capability) Has(capability Capability) bool
+func (c Capability) String() string
 ```
+
+A `Device` is the host CPU or one GPU of a runtime, `DeviceCUDA`, `DeviceROCm` or `DeviceMetal`, named by that runtime's own ordinal.
+`CountDevices` counts them and fails without a GPU of that kind, and `NewDevice` fails past the last one.
+`CapabilitiesDetected` and `CapabilitiesCompiled` report the two raw axes, what the device executes and what this binary contains for its kind.
+`CapabilitiesEnable` makes its argument the CPU's enabled set, clamped to both axes and always keeping `CapSerial`, and returns what took effect.
+It fails on a GPU, which keeps no enabled set of its own: this package only reports GPU capabilities.
+`ConfigureThread` pins the goroutine to an OS thread and prepares it for the kernels of its argument, returning the function that unpins it; it fails on a GPU, which has no thread state to configure.
+Every capability is a typed `Capability` constant, like `CapSerial`, `CapHaswell`, `CapNeon`, `CapSve2` or `CapCuda`, and `CapCpus`, `CapDevices` and `CapAny` group them.
+A call that reports a failure status returns it as an `error` where the function has one, and panics otherwise.
 
 ## Searching and Counting
 
@@ -94,6 +125,7 @@ func (h *Hasher) BlockSize() int
 ```
 
 `Sum64` and its alias `Digest` return the current digest without consuming the state.
+Create a `Hasher` with `NewHasher(seed)`; its zero value is not ready to use.
 
 ```go
 h := sz.NewHasher(0)
@@ -120,6 +152,7 @@ func (h *Sha256) BlockSize() int
 ```
 
 `Digest` returns the raw 32-byte hash and `Hexdigest` returns its lowercase hex string, both without consuming the state.
+Create a `Sha256` with `NewSha256()`; its zero value is not ready to use.
 
 ```go
 sum := sz.HashSha256([]byte("hello"))

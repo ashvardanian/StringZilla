@@ -2,9 +2,9 @@
 
 StringZilla for Python wraps SIMD- and SWAR-accelerated native kernels behind `str`- and `bytes`-shaped types that avoid copies wherever possible.
 The `stringzilla` module covers single-string search, slicing, splitting, trimming, translation, hashing, checksums, sorting, sampling, random generation, UTF-8 segmentation, Unicode case-folding, and Unicode normalization.
-The same module also carries the batch engines, each preparing one set of queries once and scoring it against many collections of candidates, on the host or on a CUDA device.
+The same module also carries the batch engines, each preparing one set of queries once and scoring it against many collections of candidates, on the host or on a CUDA or ROCm device.
 
-Every kernel selects the fastest backend for the running CPU at import time, and the batch engines release the GIL around native work.
+Every call runs the best kernel of the capabilities it is given, by default `sz.Device.cpu().capabilities_enabled()`, which `sz.Device.cpu().capabilities_enable` narrows for the whole process, and the batch engines release the GIL around native work.
 The module is also marked safe for free-threaded `Py_GIL_DISABLED` CPython builds.
 
 Throughout this document the `stringzilla` package is imported as `sz`, and NumPy as `np`:
@@ -27,6 +27,15 @@ pip install stringzilla
 
 NumPy is not required, since every engine writes into any writable buffer the caller supplies, including a plain `memoryview`.
 It is the convenient way to produce one, though, so most of the examples below reach for it.
+
+Building from source goes through CMake, which scikit-build-core drives, so it needs a C compiler and pulls CMake and Ninja from PyPI when the system has none recent enough.
+The build probes the compiler for every SIMD kit it can emit and compiles them all, and every call picks among them by its capability mask, as [Runtime Dispatch and Capabilities](#runtime-dispatch-and-capabilities) describes.
+Build parallelism follows `CMAKE_BUILD_PARALLEL_LEVEL`, which should be lowered in memory-constrained containers.
+`STRINGZILLA_TARGET_ARCH=native` in the environment tunes the build for the machine it runs on, and `-C cmake.define.STRINGZILLA_BUILD_CUDA=ON` adds the CUDA backends of the batch engines, as `STRINGZILLA_BUILD_ROCM=ON` does the ROCm ones.
+
+```sh
+CMAKE_BUILD_PARALLEL_LEVEL=2 pip install .
+```
 
 ## Types
 
@@ -260,7 +269,8 @@ assert sz.Str("hi!!").rstrip("!") == "hi"
 ### Translating
 
 `translate(table, inplace=False, start=0, end=len)` applies a byte-to-byte mapping in a single pass.
-`table` is either a 256-byte string/bytes lookup table or a `dict` mapping bytes to bytes.
+`table` is either a 256-byte string/bytes lookup table or a `dict` mapping bytes to bytes, spelled as characters below U+0100.
+A `str` input is translated as its UTF-8 bytes and decoded back, so a table that breaks the encoding raises `UnicodeDecodeError`.
 With `inplace=True` the buffer is rewritten in place and `None` is returned; otherwise a new `bytes`/`str` is returned.
 A non-256-byte table raises `ValueError`; a non-string, non-dict table raises `TypeError`.
 
@@ -518,12 +528,12 @@ Four verbs share the compiled automaton:
 | :---------------------------------------------------- | :------------------------------------------------------------------------------------ |
 | `counts(haystacks, out)`                              | One pointer-width count per haystack.                                                 |
 | `find(haystacks, matches, offsets)`                   | One `(haystack, needle, offset, length)` row per match, plus one boundary per haystack. |
-| `replace(haystacks, replacements, tape, offsets)`     | The rewritten haystacks onto one tape, plus one boundary per haystack.                 |
+| `replace(haystacks, replacements, target, offsets)`   | The rewritten haystacks into one target buffer, plus one boundary per haystack.        |
 | `bm25_scores(haystacks, needle_weights, out, ...)`    | One 32-bit score per haystack, the vocabulary being the query.                          |
 
 A capacity too small is not an error for `find` or `replace`: the boundaries and the `report` are filled either way, which is what sizes the next call.
-Passing `None` for `matches` or `tape` makes the call a pure size query.
-`engine.report` is a dict of four counts from the last round — `matches_emitted` is the truth whatever the outputs could hold, `matches_stored` what was written, `tape_bytes` what a rewrite needs, and `shortfall` what did not fit.
+Passing `None` for `matches` or `target` makes the call a pure size query.
+`engine.report` is a dict of four counts from the last round — `matches_emitted` is the truth whatever the outputs could hold, `matches_stored` what was written, `target_length` what a rewrite needs, and `shortfall` what did not fit.
 
 ```python
 import stringzilla as sz
@@ -540,10 +550,10 @@ offsets = memoryview(bytearray(3 * 8)).cast("Q")
 engine.find(haystacks, matches, offsets)
 
 cover = sz.SubstringsEngine(sz.Strs(["he", "she"]), overlap_policy="leftmost-longest")
-tape = memoryview(bytearray(32))
+target = memoryview(bytearray(32))
 offsets = memoryview(bytearray(3 * 8)).cast("Q")
-cover.replace(haystacks, sz.Strs(["HE", "SHE"]), tape, offsets)
-assert bytes(tape[offsets[1]:offsets[2]]) == b"HErSHEy"
+cover.replace(haystacks, sz.Strs(["HE", "SHE"]), target, offsets)
+assert bytes(target[offsets[1]:offsets[2]]) == b"HErSHEy"
 ```
 
 `bm25_scores` treats the vocabulary itself as the query, `needle_weights[i]` carrying needle `i`'s IDF or boost, and writes one score per haystack without ever materializing a per-term frequency row.
@@ -563,20 +573,29 @@ assert out[1] == 0.0
 
 ### Engines on a GPU
 
-Every engine has an `on_gpu` classmethod taking the same arguments as its constructor plus a `stream`, which is a `cudaStream_t` as an integer, or `0` for the current device's default stream.
+Every engine constructor takes keyword-only `device=`, `capabilities=` and `stream=`.
+`device=` is an `sz.Device`, `sz.Device.cpu()` by default, or `sz.Device("cuda", n)` or `sz.Device("rocm", n)` for a GPU.
+`capabilities=` defaults to that device's `capabilities_enabled()` and may only narrow it, so a mask of another device's capabilities raises `ValueError`, and a CPU engine takes no stream.
 Choosing a device is choosing that constructor: it prepares the batch where a kernel reaches it and resolves the launch geometry once, and every later round of that engine runs there.
+`stream=` is a `cudaStream_t` or `hipStream_t` of that device as an integer, or `None` for its default stream, and it carries only the preparation: the engine does not keep it.
+`SubstringsEngine` also takes a `haystacks_budget` and `OverlapEngine` a `candidates_budget`, the most one round may carry on a device, which the CPU ignores.
+The device arena is sized once from those budgets and no verb allocates, so a substrings round past its budget is refused, while CUDA overlap keeps no per-candidate arena and ignores its budget.
+
+Every verb then takes its own keyword-only `stream`, so one engine can be scored from several streams.
+`LevenshteinEngine` and `OverlapEngine` keep no round state on the device, so their rounds may run on any number of streams at once.
+`SubstringsEngine` rounds share one arena and one report, so the caller orders them, on one stream or with events between two.
 
 ```python
 import stringzilla as sz
 
-engine = sz.LevenshteinEngine.on_gpu(sz.Strs(["kitten", "saturday"]), stream=handle)
-engine.distances(sz.Strs(["sitting", "sunday"]), device_out)
+engine = sz.LevenshteinEngine(sz.Strs(["kitten", "saturday"]), device=sz.Device("cuda", 0))
+engine.distances(sz.Strs(["sitting", "sunday"]), device_out, stream=handle)
 # cudaStreamSynchronize(handle) belongs here, before `device_out` is read.
 ```
 
 A device round enqueues and returns, so its `out` buffer has to be memory the device reaches, has to outlive the launch, and must not be read before the caller joins the stream itself.
 `SubstringsEngine.report` is written by the device too, so it obeys the same rule.
-A host engine imposes no such requirement, and has always finished writing by the time it answers.
+A host engine ignores `stream`, imposes no such requirement, and has always finished writing by the time it answers.
 
 ## UTF-8 Segmentation
 
@@ -662,18 +681,33 @@ assert sz.utf8_find_denormalized("café", "NFC") is None   # already NFC
 
 ## Runtime Dispatch and Capabilities
 
-StringZilla detects the running CPU's SIMD features at import time and routes every kernel to the fastest available backend without recompilation.
+StringZilla detects the running CPU's SIMD features and routes every kernel to the fastest capability both the CPU and this build have, without recompilation.
+Capabilities are `sz.Capability` flags, one member per CPU capability, like `sz.Capability.HASWELL` or `sz.Capability.NEON`; GPU bits sit above every member, so a GPU mask prints as a number.
+
+An `sz.Device` names where kernels run: a kind, `"cpu"`, `"cuda"`, `"rocm"` or `"metal"`, and an ordinal among the devices of that kind.
 
 - `sz.__version__` — the package version string.
-- `sz.__capabilities__` — a tuple of the detected backends, e.g. `('serial', 'haswell', 'skylake', 'ice')`.
-- `sz.reset_capabilities(names)` — restrict the active backends to `names`, intersected with the hardware's actual capabilities; if the intersection is empty it falls back to `'serial'`.
-  This updates `sz.__capabilities__` and re-points the dispatch table, which is useful for testing, benchmarking one backend, or reproducibility.
+- `sz.Device.cpu()` — the CPU, the one device every process has; `sz.Device(kind, ordinal=0)` names another and raises `ValueError` for a negative or past-the-end ordinal.
+- `sz.Device.count(kind)` — one for the CPU and the number of GPUs of that kind; it raises `RuntimeError` when no device of that kind answers, as when this build lacks its kernels, and so does `sz.Device(kind, ...)`.
+- `device.kind`, `device.ordinal` — which device it is; devices compare and hash by value.
+- `device.capabilities_detected()` — what the device can execute, whether or not its kernels were compiled in.
+- `device.capabilities_compiled()` — what this build holds kernels for, whether or not the device runs them.
+- `device.capabilities_enabled()` — what calls dispatch with, both of the above; on the CPU it changes only through `capabilities_enable` and always has `SERIAL`.
+- `device.capabilities_enable(wanted)` — make `wanted` the process-wide CPU default, dropping what this CPU or build lacks and always keeping `SERIAL`, and return what stuck; it raises `ValueError` on a GPU.
+- `device.configure_thread(capabilities)` — prepare the calling thread for the kernels of `capabilities`, as `capabilities_enable` does for its own; call it on every other thread that runs kernels, and it raises `ValueError` on a GPU.
+
+Every function that runs kernels also takes a keyword-only `capabilities=`, narrowing that one call and leaving the default of every other call alone.
+Unlike `capabilities_enable`, the keyword keeps no serial fallback, so a mask with no kernel for the call raises `LookupError`.
 
 ```python
 import stringzilla as sz
 
-sz.__capabilities__               # e.g. ('serial', 'haswell', 'skylake', 'ice')
-sz.reset_capabilities(["serial"]) # force the scalar backend for this module
+cpu = sz.Device.cpu()
+cpu.capabilities_enabled()                                   # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
+sz.find("haystack", "st", capabilities=sz.Capability.SERIAL) # one call on the scalar kernel
+cpu.capabilities_enable(sz.Capability.SERIAL)                # every later call on the scalar kernels
+cpu.configure_thread(cpu.capabilities_enabled())             # on another thread that runs kernels
+[sz.Device("cuda", ordinal) for ordinal in range(sz.Device.count("cuda"))]  # raises without CUDA
 ```
 
-An engine resolves its tier once, when it is constructed, and records it, so `sz.reset_capabilities` affects the engines built after the call rather than the ones already holding a batch.
+Engines and the stateful objects, like `Hasher`, `Sha256` and the AES keys, dispatch every call with the capabilities they were constructed with, so `capabilities_enable` affects the ones built after the call rather than the ones already holding state.

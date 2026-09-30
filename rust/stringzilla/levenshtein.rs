@@ -22,8 +22,8 @@ pub enum LevenshteinSymbol {
 /// A batch of prepared queries, scored against as many batches of candidates as a caller has.
 ///
 /// Myers' bit-parallel masks are built once per batch and reused by every round, so the preparation
-/// a one-shot distance repeats per pair is paid here exactly once. Construction also fixes the ISA
-/// tier and, under `new_on_gpu`, the launch geometry.
+/// a one-shot distance repeats per pair is paid here exactly once. Construction also fixes the
+/// capability and, under `new_on`, the device and its launch geometry.
 ///
 /// The fields mirror `sz_levenshtein_engine_t` one for one and only `count` and `symbol` are read
 /// from Rust, so the layout is load-bearing and the engine travels to C by pointer. Owning raw
@@ -53,8 +53,9 @@ pub struct LevenshteinEngine {
     lengths: *const u32,
     count: usize,
     symbol: LevenshteinSymbol,
-    capability: i32,
-    alloc: _SzMemoryAllocator,
+    capability: u64,
+    ordinal: usize,
+    allocator: _SzMemoryAllocator,
     memory: *mut c_void,
     memory_bytes: usize,
     scratch: *mut c_void,
@@ -62,57 +63,85 @@ pub struct LevenshteinEngine {
 }
 
 impl LevenshteinEngine {
-    /// Prepares `queries` on the host, resolving the CPU tier once for every round that follows.
+    /// Prepares `queries` on the host, on the CPU's [`Device::capabilities_enabled`], fixing the
+    /// CPU capability once for every round that follows.
     ///
-    /// Under [`LevenshteinSymbol::Runes`] the batch resolves to Skylake however capable the machine
-    /// is, because Ice Lake's byte lanes have no rune arm.
+    /// Ice Lake answers a [`LevenshteinSymbol::Runes`] batch through its Skylake kernel, because
+    /// Ice Lake's byte lanes have no rune arm.
     pub fn new<Query>(queries: &[Query], symbol: LevenshteinSymbol) -> Result<Self, Status>
     where
         Query: AsRef<[u8]>,
     {
         let mut engine = MaybeUninit::<Self>::uninit();
-        let status = with_sequence(queries, |sequence| unsafe {
-            sz_levenshtein_engine_init_cpu(sequence, symbol, core::ptr::null(), engine.as_mut_ptr())
-        });
-        match status {
-            Status::Success => Ok(unsafe { engine.assume_init() }),
-            error => Err(error),
-        }
+        with_sequence(queries, |sequence| unsafe {
+            sz_levenshtein_engine_init(
+                engine.as_mut_ptr(),
+                sequence,
+                symbol,
+                enabled_cpu_capabilities_mask(),
+                0,
+                core::ptr::null(),
+                core::ptr::null_mut(),
+            )
+        })
+        .check()?;
+        Ok(unsafe { engine.assume_init() })
     }
 
-    /// Prepares `queries` on `stream`'s device, resolving the launch geometry once.
+    /// Prepares `queries` on `device`, with its [`Device::capabilities_enabled`], fixing the
+    /// capability and launch geometry once; the engine keeps the device.
     ///
-    /// `stream` is a `cudaStream_t`, or null for the current device's default one. The queries
-    /// themselves are read on the host, so they need no device residency; everything the engine
-    /// builds from them does.
+    /// The queries themselves are read on the host, so they need no device residency; everything
+    /// the engine builds from them does.
     ///
-    /// A compute verb of a device engine also needs a candidate sequence whose accessors run on the
-    /// device, which this crate cannot build yet, so such an engine is constructible here before it
-    /// is drivable and every verb below answers `Status::DeviceMemoryMismatch` for it.
+    /// `stream` serves this call's own work alone: a `cudaStream_t` or `hipStream_t` of `device`,
+    /// or null for its default one, on Metal a `sz_metal_device_t *` opened on `device`, and null
+    /// on the CPU. The verbs below pass a null stream and host candidates, so a GPU engine answers
+    /// them with an error status such as `Status::DeviceMemoryMismatch` until this crate can build
+    /// device-resident candidates.
     ///
     /// # Safety
     ///
-    /// `stream` must be a live stream of the current context, and it makes every later verb of this
-    /// engine asynchronous: [`LevenshteinEngine::distances`] enqueues and returns, so its output
-    /// slice has to be device-reachable, has to outlive the launch, and must not be read before the
-    /// caller joins `stream` itself.
-    #[cfg(feature = "cuda")]
-    pub unsafe fn new_on_gpu<Query>(
+    /// `stream` must be a live stream or Metal device of `device`, or null; this call may join it.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use stringzilla::sz::{Device, LevenshteinEngine, LevenshteinSymbol};
+    ///
+    /// // SAFETY: the CPU takes a null stream.
+    /// let mut engine = unsafe {
+    ///     LevenshteinEngine::new_on(&["kitten"], LevenshteinSymbol::Bytes, Device::cpu(), core::ptr::null_mut())
+    /// }?;
+    /// let mut distances = [0usize; 1];
+    /// engine.distances(&["sitting"], &mut distances, 1)?;
+    /// assert_eq!(distances[0], 3);
+    /// # Ok::<(), stringzilla::sz::Status>(())
+    /// ```
+    pub unsafe fn new_on<Query>(
         queries: &[Query],
         symbol: LevenshteinSymbol,
+        device: Device,
         stream: *mut c_void,
     ) -> Result<Self, Status>
     where
         Query: AsRef<[u8]>,
     {
+        let capabilities = device.capabilities_enabled()?;
         let mut engine = MaybeUninit::<Self>::uninit();
-        let status = with_sequence(queries, |sequence| unsafe {
-            sz_levenshtein_engine_init_gpu(sequence, symbol, core::ptr::null(), stream, engine.as_mut_ptr())
-        });
-        match status {
-            Status::Success => Ok(unsafe { engine.assume_init() }),
-            error => Err(error),
-        }
+        with_sequence(queries, |sequence| unsafe {
+            sz_levenshtein_engine_init(
+                engine.as_mut_ptr(),
+                sequence,
+                symbol,
+                capabilities.bits(),
+                device.ordinal(),
+                core::ptr::null(),
+                stream,
+            )
+        })
+        .check()?;
+        Ok(unsafe { engine.assume_init() })
     }
 
     /// Queries the batch holds, which is the first axis of every output.
@@ -125,7 +154,7 @@ impl LevenshteinEngine {
         self.symbol
     }
 
-    /// Edit distances from every prepared query to every candidate, on the tier
+    /// Edit distances from every prepared query to every candidate, on the capability
     /// the constructor fixed.
     ///
     /// `distances` receives a `[queries, candidates]` block: query `q` against candidate `c` lands
@@ -157,13 +186,10 @@ impl LevenshteinEngine {
 
         let engine = self as *mut Self;
         let output = distances.as_mut_ptr();
-        let status = with_sequence(candidates, |sequence| unsafe {
-            sz_levenshtein_distances(engine, sequence, output, distances_stride)
-        });
-        match status {
-            Status::Success => Ok(()),
-            error => Err(error),
-        }
+        with_sequence(candidates, |sequence| unsafe {
+            sz_levenshtein_distances(engine, sequence, output, distances_stride, core::ptr::null_mut())
+        })
+        .check()
     }
 }
 

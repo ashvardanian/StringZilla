@@ -56,6 +56,15 @@ func TestUtf8CaseInsensitiveFind(t *testing.T) {
 	if secondMatch != "ein Maß von etwa 20 μK" {
 		t.Fatalf("second match = %q, want %q", secondMatch, "ein Maß von etwa 20 μK")
 	}
+
+	// An empty needle still validates the haystack
+	if _, _, err := sz.Utf8CaseInsensitiveFind("\xff", "", true); err != sz.ErrInvalidUTF8 {
+		t.Fatalf("Utf8CaseInsensitiveFind with an empty needle returned %v, want ErrInvalidUTF8", err)
+	}
+	emptyNeedle, _ := sz.NewUtf8CaseInsensitiveNeedle("", true)
+	if _, _, err := emptyNeedle.FindIn("\xff", true); err != sz.ErrInvalidUTF8 {
+		t.Fatalf("FindIn with an empty needle returned %v, want ErrInvalidUTF8", err)
+	}
 }
 
 // TestUtf8Count verifies SIMD codepoint counting across byte widths.

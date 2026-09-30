@@ -732,10 +732,12 @@ Similarly, in Python, `sz.Capability` flags carry the same masks, and one call o
 
 ```python
 import stringzilla as sz
-sz.reset_capabilities(('serial',))          # Force SWAR backend
-sz.reset_capabilities(('haswell',))         # Force AVX2 backend
-sz.reset_capabilities(('neon',))            # Force NEON backend
-sz.reset_capabilities(sz.__capabilities__)  # Reset to auto-dispatch
+
+cpu = sz.Device.cpu()
+cpu.capabilities_enabled()                                   # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
+sz.find("haystack", "st", capabilities=sz.Capability.SERIAL) # one call on the scalar kernel
+cpu.capabilities_enable(sz.Capability.SERIAL)                # every later call on the scalar kernels
+cpu.capabilities_enable(cpu.capabilities_detected())         # back to everything this CPU and build run
 ```
 
 ## Contributing 👾

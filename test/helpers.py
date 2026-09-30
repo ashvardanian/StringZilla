@@ -1394,61 +1394,57 @@ non-negative."""
 
 # region Backend differential sweep
 #
-# StringZilla picks a SIMD backend at runtime via a dispatch table. `reset_capabilities([...])`
-# re-points that table, so running the same input under `["serial"]` and under `["serial", "neon"]`
-# exercises different kernel code through one binding, and any divergence is a kernel bug, not a
-# binding bug. The helpers below drive that comparison over inputs engineered to stress the SIMD
-# tail/boundary logic.
+# Every call dispatches on the CPU's `capabilities_enabled()`, which `capabilities_enable(...)`
+# narrows, so running the same input under `SERIAL` and under `SERIAL | NEON` exercises different
+# kernel code through one binding, and any divergence is a kernel bug, not a binding bug. The
+# helpers below drive that comparison over inputs engineered to stress the SIMD tail/boundary logic.
 
 
 def capability_sweep():
     """All capability configurations every differential test should sweep over, the same list for every
     API, derived from the live hardware so no test hardcodes which backend its kernel uses.
 
-    Returns: the serial baseline, then each available SIMD backend on its own (atop serial), then the full
-    hardware set (``"any"``). Built from ``sz.__capabilities__``, so it adapts to the host (NEON / NEON-AES /
-    NEON-SHA on Arm; Westmere/Haswell/Skylake/Ice Lake on x86) and collapses to just ``("serial",)`` on a
-    machine with no SIMD backend. Each config is a tuple of capability names suitable for both
-    ``forced_capabilities(*config)`` (single-string `sz`) and the ``capabilities=config`` engine argument
-    (parallel `szs`). Sweeping every config across every API means an API whose kernel ignores a given
-    backend simply re-runs the serial path under that config, harmless redundancy, while the config
-    that does enable its SIMD path exercises it. Any divergence across the sweep is a kernel bug.
+    Returns: the serial baseline, then each enabled SIMD capability on its own (atop serial), then all of
+    them together. Built from the CPU's ``capabilities_enabled()``, so it adapts to the host (NEON / NEON-AES /
+    NEON-SHA on Arm; Westmere/Haswell/Skylake/Ice Lake on x86) and collapses to just ``SERIAL`` on a
+    machine with no SIMD capability. Each config is one ``sz.Capability`` mask, suitable for both
+    ``forced_capabilities(config)`` and a ``capabilities=config`` argument. Sweeping every config across
+    every API means an API whose kernel ignores a given capability simply re-runs the serial path under
+    that config, harmless redundancy, while the config that does enable its SIMD path exercises it. Any
+    divergence across the sweep is a kernel bug.
     """
     import stringzilla as sz
 
-    simd_backends = [capability for capability in sz.__capabilities__ if capability != "serial"]
-    sweep = [("serial",)] + [("serial", backend) for backend in simd_backends]
-    if len(simd_backends) > 1:
-        sweep.append(("any",))  # all SIMD backends enabled together
+    enabled = sz.Device.cpu().capabilities_enabled()
+    simd = [capability for capability in sz.Capability if capability in enabled and capability != sz.Capability.SERIAL]
+    sweep = [sz.Capability.SERIAL] + [sz.Capability.SERIAL | capability for capability in simd]
+    if len(simd) > 1:
+        sweep.append(enabled)
     return sweep
 
 
 @contextlib.contextmanager
-def forced_capabilities(*names):
-    """Temporarily restrict StringZilla's dispatch to `names`, restoring full hardware dispatch on exit.
+def forced_capabilities(capabilities):
+    """Temporarily make `capabilities` what StringZilla dispatches with, restoring the previous mask on exit.
 
-    Yields the capability tuple active inside the block (which may be smaller than requested, since
-    `reset_capabilities` drops backends the hardware lacks). The `finally` always restores via `["any"]`
-    so a failing assertion cannot leak a reduced backend into later tests. We restore with `["any"]`
-    rather than the captured set because the `neonaes`/`neonsha` names do not round-trip through
-    `reset_capabilities` (re-applying them yields only `("serial", "neon")`), which would otherwise erode
-    capabilities test-over-test. Assumes the session baseline is full hardware (true except under the
-    conftest QEMU SVE mask, which these NEON differential tests are not concerned with).
+    Yields the mask active inside the block, which may be smaller than requested, since
+    `capabilities_enable` drops capabilities the hardware lacks. The `finally` restores the mask found on
+    entry, so a failing assertion cannot leak a reduced mask into later tests.
     """
     import stringzilla as sz
 
+    previous = sz.Device.cpu().capabilities_enabled()
     try:
-        sz.reset_capabilities(list(names))
-        yield tuple(sz.__capabilities__)
+        yield sz.Device.cpu().capabilities_enable(capabilities)
     finally:
-        sz.reset_capabilities(["any"])
+        sz.Device.cpu().capabilities_enable(previous)
 
 
-def run_across_backends(operation) -> Dict[tuple, object]:
+def run_across_backends(operation) -> dict[object, object]:
     """Run ``operation()`` under every :func:`capability_sweep` config, returning ``{config: result}``."""
     results = {}
     for config in capability_sweep():
-        with forced_capabilities(*config):
+        with forced_capabilities(config):
             results[config] = operation()
     return results
 

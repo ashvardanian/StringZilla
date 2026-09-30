@@ -31,8 +31,8 @@ public enum StringZillaOrdering: Sendable {
 
 /// Unicode normalization form selector.
 public enum StringZillaNormalizationForm: RawRepresentable, Sendable {
-    case nfd   // Canonical decomposition.
-    case nfc   // Canonical decomposition + canonical composition.
+    case nfd  // Canonical decomposition.
+    case nfc  // Canonical decomposition + canonical composition.
     case nfkd  // Compatibility decomposition.
     case nfkc  // Compatibility decomposition + canonical composition.
 
@@ -64,19 +64,31 @@ private protocol SingleByte {}
 extension UInt8: SingleByte {}
 extension Int8: SingleByte {}  // This would match `CChar` as well.
 
-@usableFromInline
-enum StringZillaError: Error {
-    case contiguousStorageUnavailable
-    case memoryAllocationFailed
+/// Passes UTF-8 code units to `body` as a C pointer and length, lending a valid pointer even for
+/// an empty buffer, whose `baseAddress` may be `nil`.
+@inlinable
+func withStringZillaBuffer<R>(
+    _ buffer: UnsafeBufferPointer<UInt8>,
+    _ body: (sz_cptr_t, sz_size_t) throws -> R
+) rethrows -> R {
+    guard let baseAddress = buffer.baseAddress else { return try "".withCString { try body($0, 0) } }
+    return try body(UnsafeRawPointer(baseAddress).assumingMemoryBound(to: CChar.self), sz_size_t(buffer.count))
+}
 
-    var localizedDescription: String {
-        switch self {
-        case .contiguousStorageUnavailable:
-            return "Contiguous storage for the sequence is unavailable."
-        case .memoryAllocationFailed:
-            return "Memory allocation failed."
-        }
+/// Traps when a call reports a failure, which no CPU call can, as every enabled set keeps serial.
+func stringZillaCheck(_ status: sz_status_t) {
+    precondition(status == sz_success_k, String(cString: sz_status_name(status)))
+}
+
+/// Collects the UTF-8 code units of `characters` into a byte set, complemented when `inverted`.
+private func stringZillaByteset<S: StringZillaViewable>(_ characters: S, inverted: Bool) -> sz_byteset_t {
+    var set = sz_byteset_t()
+    characters.withStringZillaScope { pointer, length in
+        let bytes = UnsafeRawPointer(pointer).assumingMemoryBound(to: UInt8.self)
+        for offset in 0 ..< Int(length) { sz_byteset_add_u8(&set, bytes[offset]) }
     }
+    if inverted { sz_byteset_invert(&set) }
+    return set
 }
 
 /// Protocol defining the interface for StringZilla-compatible byte-spans.
@@ -130,20 +142,14 @@ extension Substring.UTF8View: StringZillaViewable {
     public typealias Index = Substring.UTF8View.Index
 
     /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte
-    /// elements, the UTF-8 code units.
+    /// elements, the UTF-8 code units, copying them first when the storage is not contiguous,
+    /// as for a lazily bridged `NSString`.
     /// - Parameters:
     ///   - body: A closure that takes a pointer to the contiguous storage and its size.
-    /// - Throws: An error if the storage is not contiguous.
     @_transparent
     public func withStringZillaScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R {
-        return try withContiguousStorageIfAvailable { bufferPointer -> R in
-            let cLength = sz_size_t(bufferPointer.count)
-            let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
-            return try body(cString, cLength)
-        }
-            ?? {
-                throw StringZillaError.contiguousStorageUnavailable
-            }()
+        if let result = try withContiguousStorageIfAvailable({ try withStringZillaBuffer($0, body) }) { return result }
+        return try Array(self).withUnsafeBufferPointer { try withStringZillaBuffer($0, body) }
     }
 
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
@@ -163,19 +169,13 @@ extension String.UTF8View: StringZillaViewable {
     public typealias Index = String.UTF8View.Index
 
     /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte
-    /// elements, the UTF-8 code units.
+    /// elements, the UTF-8 code units, copying them first when the storage is not contiguous,
+    /// as for a lazily bridged `NSString`.
     /// - Parameters:
     ///   - body: A closure that takes a pointer to the contiguous storage and its size.
-    /// - Throws: An error if the storage is not contiguous.
     public func withStringZillaScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R {
-        return try withContiguousStorageIfAvailable { bufferPointer -> R in
-            let cLength = sz_size_t(bufferPointer.count)
-            let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
-            return try body(cString, cLength)
-        }
-            ?? {
-                throw StringZillaError.contiguousStorageUnavailable
-            }()
+        if let result = try withContiguousStorageIfAvailable({ try withStringZillaBuffer($0, body) }) { return result }
+        return try Array(self).withUnsafeBufferPointer { try withStringZillaBuffer($0, body) }
     }
 
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
@@ -195,9 +195,11 @@ extension StringZillaViewable {
     /// - Parameter seed: Optional seed value for the hash function, defaulting to 0.
     /// - Returns: A 64-bit unsigned integer hash value.
     public func hash(seed: UInt64 = 0) -> UInt64 {
-        return withStringZillaScope { pointer, length in
-            sz_hash(pointer, length, seed)
+        var hash = sz_u64_t()
+        withStringZillaScope { pointer, length in
+            stringZillaCheck(sz_hash_best(pointer, length, sz_u64_t(seed), &hash, Device.cpuEnabled.native, nil))
         }
+        return UInt64(hash)
     }
 
     /// Counts the Unicode codepoints in the receiver's UTF-8 bytes.
@@ -205,9 +207,11 @@ extension StringZillaViewable {
     @_specialize(where Self == String)
     @_specialize(where Self == String.UTF8View)
     public func countRunes() -> Int {
-        return withStringZillaScope { pointer, length in
-            Int(sz_utf8_count(pointer, length))
+        var count: sz_size_t = 0
+        withStringZillaScope { pointer, length in
+            stringZillaCheck(sz_utf8_count_best(pointer, length, &count, Device.cpuEnabled.native, nil))
         }
+        return Int(count)
     }
 
     /// Resolves a zero-based codepoint index to a position in the receiver.
@@ -219,7 +223,11 @@ extension StringZillaViewable {
         guard runeIndex >= 0 else { return nil }
         var result: Index?
         withStringZillaScope { pointer, length in
-            if let runePointer = sz_utf8_seek(pointer, length, sz_size_t(runeIndex)) {
+            var position: sz_cptr_t?
+            stringZillaCheck(
+                sz_utf8_seek_best(pointer, length, sz_size_t(runeIndex), &position, Device.cpuEnabled.native, nil)
+            )
+            if let runePointer = position {
                 result = self.stringZillaByteOffset(forByte: runePointer, after: pointer)
             }
         }
@@ -235,7 +243,11 @@ extension StringZillaViewable {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_find(hPointer, hLength, nPointer, nLength) {
+                var match: sz_cptr_t?
+                stringZillaCheck(
+                    sz_find_best(hPointer, hLength, nPointer, nLength, &match, Device.cpuEnabled.native, nil)
+                )
+                if let matchPointer = match {
                     result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                 }
             }
@@ -252,7 +264,11 @@ extension StringZillaViewable {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_rfind(hPointer, hLength, nPointer, nLength) {
+                var match: sz_cptr_t?
+                stringZillaCheck(
+                    sz_rfind_best(hPointer, hLength, nPointer, nLength, &match, Device.cpuEnabled.native, nil)
+                )
+                if let matchPointer = match {
                     result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                 }
             }
@@ -267,11 +283,12 @@ extension StringZillaViewable {
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
     public func findFirst<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
         var result: Index?
+        var set = stringZillaByteset(characters, inverted: false)
         withStringZillaScope { hPointer, hLength in
-            characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_find_byte_from(hPointer, hLength, nPointer, nLength) {
-                    result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
-                }
+            var match: sz_cptr_t?
+            stringZillaCheck(sz_find_byteset_best(hPointer, hLength, &set, &match, Device.cpuEnabled.native, nil))
+            if let matchPointer = match {
+                result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
             }
         }
         return result
@@ -284,11 +301,12 @@ extension StringZillaViewable {
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
     public func findLast<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
         var result: Index?
+        var set = stringZillaByteset(characters, inverted: false)
         withStringZillaScope { hPointer, hLength in
-            characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_rfind_byte_from(hPointer, hLength, nPointer, nLength) {
-                    result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
-                }
+            var match: sz_cptr_t?
+            stringZillaCheck(sz_rfind_byteset_best(hPointer, hLength, &set, &match, Device.cpuEnabled.native, nil))
+            if let matchPointer = match {
+                result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
             }
         }
         return result
@@ -302,11 +320,12 @@ extension StringZillaViewable {
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
     public func findFirst<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
         var result: Index?
+        var set = stringZillaByteset(characters, inverted: true)
         withStringZillaScope { hPointer, hLength in
-            characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_find_byte_not_from(hPointer, hLength, nPointer, nLength) {
-                    result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
-                }
+            var match: sz_cptr_t?
+            stringZillaCheck(sz_find_byteset_best(hPointer, hLength, &set, &match, Device.cpuEnabled.native, nil))
+            if let matchPointer = match {
+                result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
             }
         }
         return result
@@ -320,11 +339,12 @@ extension StringZillaViewable {
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
     public func findLast<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
         var result: Index?
+        var set = stringZillaByteset(characters, inverted: true)
         withStringZillaScope { hPointer, hLength in
-            characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_rfind_byte_not_from(hPointer, hLength, nPointer, nLength) {
-                    result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
-                }
+            var match: sz_cptr_t?
+            stringZillaCheck(sz_rfind_byteset_best(hPointer, hLength, &set, &match, Device.cpuEnabled.native, nil))
+            if let matchPointer = match {
+                result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
             }
         }
         return result
@@ -341,8 +361,18 @@ extension StringZillaViewable {
             }
             let capacity = Int(length) * 3
             var destination = [UInt8](repeating: 0, count: capacity)
-            let outLen: sz_size_t = destination.withUnsafeMutableBufferPointer { bufferPointer in
-                sz_utf8_uncased_fold(pointer, length, bufferPointer.baseAddress)
+            var outLen: sz_size_t = 0
+            destination.withUnsafeMutableBufferPointer { bufferPointer in
+                stringZillaCheck(
+                    sz_utf8_uncased_fold_best(
+                        pointer,
+                        length,
+                        bufferPointer.baseAddress,
+                        &outLen,
+                        Device.cpuEnabled.native,
+                        nil
+                    )
+                )
             }
             let actual = Int(outLen)
             if actual < destination.count { destination.removeLast(destination.count - actual) }
@@ -365,8 +395,19 @@ extension StringZillaViewable {
             }
             let capacity = Int(length) * 18
             var destination = [UInt8](repeating: 0, count: capacity)
-            let outLen: sz_size_t = destination.withUnsafeMutableBufferPointer { bufferPointer in
-                sz_utf8_norm(pointer, length, form.rawValue, bufferPointer.baseAddress)
+            var outLen: sz_size_t = 0
+            destination.withUnsafeMutableBufferPointer { bufferPointer in
+                stringZillaCheck(
+                    sz_utf8_norm_best(
+                        pointer,
+                        length,
+                        form.rawValue,
+                        bufferPointer.baseAddress,
+                        &outLen,
+                        Device.cpuEnabled.native,
+                        nil
+                    )
+                )
             }
             let actual = Int(outLen)
             if actual < destination.count { destination.removeLast(destination.count - actual) }
@@ -383,7 +424,18 @@ extension StringZillaViewable {
     public func utf8NormalizationViolation(_ form: StringZillaNormalizationForm) -> Index? {
         var result: Index?
         withStringZillaScope { pointer, length in
-            if let violationPointer = sz_utf8_find_denormalized(pointer, length, form.rawValue) {
+            var violation: sz_cptr_t?
+            stringZillaCheck(
+                sz_utf8_find_denormalized_best(
+                    pointer,
+                    length,
+                    form.rawValue,
+                    &violation,
+                    Device.cpuEnabled.native,
+                    nil
+                )
+            )
+            if let violationPointer = violation {
                 result = self.stringZillaByteOffset(forByte: violationPointer, after: pointer)
             }
         }
@@ -406,19 +458,26 @@ extension StringZillaViewable {
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
                 var metadata = sz_utf8_uncased_needle_metadata_t()
+                var match: sz_cptr_t?
                 var matchedLength: sz_size_t = 0
-                if let matchPointer = sz_utf8_uncased_search(
-                    hPointer,
-                    hLength,
-                    nPointer,
-                    nLength,
-                    &metadata,
-                    &matchedLength
-                ) {
+                stringZillaCheck(
+                    sz_utf8_uncased_search_best(
+                        hPointer,
+                        hLength,
+                        nPointer,
+                        nLength,
+                        &metadata,
+                        &match,
+                        &matchedLength,
+                        Device.cpuEnabled.native,
+                        nil
+                    )
+                )
+                if let matchPointer = match {
                     let start = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                     let endPointer = matchPointer.advanced(by: Int(matchedLength))
                     let end = self.stringZillaByteOffset(forByte: endPointer, after: hPointer)
-                    result = start..<end
+                    result = start ..< end
                 }
             }
         }
@@ -433,15 +492,29 @@ extension StringZillaViewable {
         withStringZillaScope { pointer, length in
             var cursor: sz_size_t = 0
             while cursor < length {
-                var wordStart: sz_size_t = 0, wordLength: sz_size_t = 0, consumed: sz_size_t = 0
-                let count = sz_utf8_wordbreaks(
-                    pointer.advanced(by: Int(cursor)), length - cursor, &wordStart, &wordLength, 1, &consumed)
+                var wordStart: sz_size_t = 0
+                var wordLength: sz_size_t = 0
+                var count: sz_size_t = 0
+                var consumed: sz_size_t = 0
+                stringZillaCheck(
+                    sz_utf8_wordbreaks_best(
+                        pointer.advanced(by: Int(cursor)),
+                        length - cursor,
+                        &wordStart,
+                        &wordLength,
+                        1,
+                        &count,
+                        &consumed,
+                        Device.cpuEnabled.native,
+                        nil
+                    )
+                )
                 if count == 0 { break }
-                let begin = cursor + wordStart // The first word of the suffix starts at offset 0.
+                let begin = cursor + wordStart  // The first word of the suffix starts at offset 0.
                 let end = begin + wordLength
                 let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(begin)), after: pointer)
                 let hi = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(end)), after: pointer)
-                ranges.append(lo..<hi)
+                ranges.append(lo ..< hi)
                 cursor = end
             }
         }
@@ -491,7 +564,7 @@ extension StringZillaViewable {
     ///
     /// - Parameters:
     ///   - skipEmpty: When `true`, zero-length segments are omitted.
-    ///   - onNewlines: When `true`, drives `sz_utf8_newlines`; otherwise `sz_utf8_whitespaces`.
+    ///   - onNewlines: When `true`, calls `sz_utf8_newlines_best`, else `sz_utf8_whitespaces_best`.
     /// - Returns: Byte-accurate ranges into the receiver, one per segment.
     private func utf8Split(skipEmpty: Bool, onNewlines: Bool) -> [Range<Index>] {
         var ranges: [Range<Index>] = []
@@ -500,7 +573,7 @@ extension StringZillaViewable {
             let steps = Int(sz_iterators_default_steps_k)
             var offsets = [sz_size_t](repeating: 0, count: steps)
             var lengths = [sz_size_t](repeating: 0, count: steps)
-            var suffix: sz_size_t = 0 // Byte offset of the not-yet-segmented suffix within `pointer`.
+            var suffix: sz_size_t = 0  // Byte offset of the not-yet-segmented suffix within `pointer`.
 
             // Emits one segment `[begin, end)`, with offsets relative to
             // `pointer`, honoring `skipEmpty`.
@@ -508,28 +581,46 @@ extension StringZillaViewable {
                 if skipEmpty && end == begin { return }
                 let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(begin)), after: pointer)
                 let hi = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(end)), after: pointer)
-                ranges.append(lo..<hi)
+                ranges.append(lo ..< hi)
             }
 
             while suffix <= length {
                 let region = length - suffix
+                var delimiters: sz_size_t = 0
                 var consumed: sz_size_t = 0
-                let delimiters = offsets.withUnsafeMutableBufferPointer { offsetsBuffer in
+                let status = offsets.withUnsafeMutableBufferPointer { offsetsBuffer in
                     lengths.withUnsafeMutableBufferPointer { lengthsBuffer in
                         onNewlines
-                            ? sz_utf8_newlines(
-                                pointer.advanced(by: Int(suffix)), region, offsetsBuffer.baseAddress,
-                                lengthsBuffer.baseAddress, sz_size_t(steps), &consumed)
-                            : sz_utf8_whitespaces(
-                                pointer.advanced(by: Int(suffix)), region, offsetsBuffer.baseAddress,
-                                lengthsBuffer.baseAddress, sz_size_t(steps), &consumed)
+                            ? sz_utf8_newlines_best(
+                                pointer.advanced(by: Int(suffix)),
+                                region,
+                                offsetsBuffer.baseAddress,
+                                lengthsBuffer.baseAddress,
+                                sz_size_t(steps),
+                                &delimiters,
+                                &consumed,
+                                Device.cpuEnabled.native,
+                                nil
+                            )
+                            : sz_utf8_whitespaces_best(
+                                pointer.advanced(by: Int(suffix)),
+                                region,
+                                offsetsBuffer.baseAddress,
+                                lengthsBuffer.baseAddress,
+                                sz_size_t(steps),
+                                &delimiters,
+                                &consumed,
+                                Device.cpuEnabled.native,
+                                nil
+                            )
                     }
                 }
+                stringZillaCheck(status)
                 // Each delimiter's gap, the segment before it, becomes one output range;
                 // offsets are relative to `pointer.advanced(by: suffix)`, so re-base them onto
                 // `pointer` via `suffix`.
                 var previousEnd: sz_size_t = 0
-                for delimiter in 0..<Int(delimiters) {
+                for delimiter in 0 ..< Int(delimiters) {
                     let delimiterStart = offsets[delimiter]
                     let delimiterLength = lengths[delimiter]
                     appendSegment(suffix + previousEnd, suffix + delimiterStart)
@@ -541,14 +632,14 @@ extension StringZillaViewable {
                     appendSegment(suffix + previousEnd, suffix + region)
                     break
                 }
-                if consumed == 0 { break } // Defensive: never spin in place on a non-advancing batch.
+                if consumed == 0 { break }  // Defensive: never spin in place on a non-advancing batch.
                 suffix += consumed
             }
         }
         return ranges
     }
 
-    /// Lexicographic byte-order comparison, SIMD-accelerated via `sz_order`.
+    /// Lexicographic byte-order comparison, SIMD-accelerated via `sz_order_best`.
     /// - Parameter other: The string to compare against.
     /// - Returns: `.ascending`, `.equal`, or `.descending`.
     @_specialize(where Self == String, S == String)
@@ -557,7 +648,9 @@ extension StringZillaViewable {
         var ordering = sz_equal_k
         withStringZillaScope { aPointer, aLength in
             other.withStringZillaScope { bPointer, bLength in
-                ordering = sz_order(aPointer, aLength, bPointer, bLength)
+                stringZillaCheck(
+                    sz_order_best(aPointer, aLength, bPointer, bLength, &ordering, Device.cpuEnabled.native, nil)
+                )
             }
         }
         if ordering == sz_less_k { return .ascending }
@@ -565,7 +658,7 @@ extension StringZillaViewable {
         return .equal
     }
 
-    /// Uncased comparison using full Unicode case folding, via `sz_utf8_uncased_order`.
+    /// Uncased comparison using full Unicode case folding, via `sz_utf8_uncased_order_best`.
     /// - Parameter other: The string to compare against.
     /// - Returns: `.ascending`, `.equal`, or `.descending`.
     @_specialize(where Self == String, S == String)
@@ -574,7 +667,17 @@ extension StringZillaViewable {
         var ordering = sz_equal_k
         withStringZillaScope { aPointer, aLength in
             other.withStringZillaScope { bPointer, bLength in
-                ordering = sz_utf8_uncased_order(aPointer, aLength, bPointer, bLength)
+                stringZillaCheck(
+                    sz_utf8_uncased_order_best(
+                        aPointer,
+                        aLength,
+                        bPointer,
+                        bLength,
+                        &ordering,
+                        Device.cpuEnabled.native,
+                        nil
+                    )
+                )
             }
         }
         if ordering == sz_less_k { return .ascending }
@@ -582,19 +685,20 @@ extension StringZillaViewable {
         return .equal
     }
 
-    /// Byte-level equality, SIMD-accelerated via `sz_equal`; differing lengths are never equal.
+    /// Byte-level equality, SIMD-accelerated by `sz_equal_best`; unequal lengths never match.
     /// - Parameter other: The string to compare against.
     /// - Returns: `true` if the byte contents are identical.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
     public func equals<S: StringZillaViewable>(_ other: S) -> Bool {
-        var result = false
+        var equal = sz_false_k
         withStringZillaScope { aPointer, aLength in
             other.withStringZillaScope { bPointer, bLength in
-                result = aLength == bLength && sz_equal(aPointer, bPointer, aLength) == sz_true_k
+                guard aLength == bLength else { return }
+                stringZillaCheck(sz_equal_best(aPointer, bPointer, aLength, &equal, Device.cpuEnabled.native, nil))
             }
         }
-        return result
+        return equal == sz_true_k
     }
 }
 
@@ -621,7 +725,7 @@ public final class Utf8UncasedNeedle {
     /// Note: not safe for concurrent use. The internal metadata is computed lazily and
     /// mutated during searches.
     public func findFirst<S: StringZillaViewable>(in haystack: S) -> Range<S.Index>? {
-        if needleBytes.isEmpty { return haystack.startIndex..<haystack.startIndex }
+        if needleBytes.isEmpty { return haystack.startIndex ..< haystack.startIndex }
 
         var result: Range<S.Index>?
         haystack.withStringZillaScope { hPointer, hLength in
@@ -629,19 +733,26 @@ public final class Utf8UncasedNeedle {
                 let nPointer = UnsafeRawPointer(needleBuffer.baseAddress!).assumingMemoryBound(to: CChar.self)
                 let nLength = sz_size_t(needleBuffer.count)
 
+                var match: sz_cptr_t?
                 var matchedLength: sz_size_t = 0
-                if let matchPointer = sz_utf8_uncased_search(
-                    hPointer,
-                    hLength,
-                    nPointer,
-                    nLength,
-                    &metadata,
-                    &matchedLength
-                ) {
+                stringZillaCheck(
+                    sz_utf8_uncased_search_best(
+                        hPointer,
+                        hLength,
+                        nPointer,
+                        nLength,
+                        &metadata,
+                        &match,
+                        &matchedLength,
+                        Device.cpuEnabled.native,
+                        nil
+                    )
+                )
+                if let matchPointer = match {
                     let start = haystack.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                     let endPointer = matchPointer.advanced(by: Int(matchedLength))
                     let end = haystack.stringZillaByteOffset(forByte: endPointer, after: hPointer)
-                    result = start..<end
+                    result = start ..< end
                 }
             }
         }
@@ -659,7 +770,7 @@ public class StringZillaHasher {
     /// - Parameter seed: The seed value for the hash function, defaulting to 0.
     public init(seed: UInt64 = 0) {
         state = sz_hash_state_t()
-        sz_hash_state_init(&state, seed)
+        stringZillaCheck(sz_hash_state_init_best(&state, sz_u64_t(seed), Device.cpuEnabled.native, nil))
     }
 
     deinit {
@@ -672,7 +783,7 @@ public class StringZillaHasher {
     @discardableResult
     public func update<S: StringZillaViewable>(_ content: S) -> StringZillaHasher {
         content.withStringZillaScope { pointer, length in
-            sz_hash_state_update(&state, pointer, length)
+            stringZillaCheck(sz_hash_state_update_best(&state, pointer, length, Device.cpuEnabled.native, nil))
         }
         return self
     }
@@ -681,7 +792,9 @@ public class StringZillaHasher {
     /// - Returns: The computed 64-bit hash value.
     /// - Note: This is a non-consuming operation and can be called multiple times.
     public func finalize() -> UInt64 {
-        return sz_hash_state_digest(&state)
+        var hash = sz_u64_t()
+        stringZillaCheck(sz_hash_state_digest_best(&state, &hash, Device.cpuEnabled.native, nil))
+        return UInt64(hash)
     }
 
     /// Alias for `finalize()`.
@@ -692,7 +805,7 @@ public class StringZillaHasher {
     ///   re-seeds with 0.
     public func reset(seed: UInt64? = nil) {
         let newSeed = seed ?? 0  // Default to 0 if no seed provided
-        sz_hash_state_init(&state, newSeed)
+        stringZillaCheck(sz_hash_state_init_best(&state, sz_u64_t(newSeed), Device.cpuEnabled.native, nil))
     }
 }
 
@@ -704,7 +817,7 @@ public class StringZillaSha256 {
     /// Creates a new SHA-256 hasher.
     public init() {
         state = sz_sha256_state_t()
-        sz_sha256_state_init(&state)
+        stringZillaCheck(sz_sha256_state_init_best(&state, Device.cpuEnabled.native, nil))
     }
 
     deinit {
@@ -717,7 +830,7 @@ public class StringZillaSha256 {
     @discardableResult
     public func update<S: StringZillaViewable>(_ content: S) -> StringZillaSha256 {
         content.withStringZillaScope { pointer, length in
-            sz_sha256_state_update(&state, pointer, length)
+            stringZillaCheck(sz_sha256_state_update_best(&state, pointer, length, Device.cpuEnabled.native, nil))
         }
         return self
     }
@@ -728,8 +841,9 @@ public class StringZillaSha256 {
     @discardableResult
     public func update(_ data: [UInt8]) -> StringZillaSha256 {
         data.withUnsafeBufferPointer { bufferPointer in
-            let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
-            sz_sha256_state_update(&state, cString, sz_size_t(bufferPointer.count))
+            withStringZillaBuffer(bufferPointer) { pointer, length in
+                stringZillaCheck(sz_sha256_state_update_best(&state, pointer, length, Device.cpuEnabled.native, nil))
+            }
         }
         return self
     }
@@ -740,7 +854,9 @@ public class StringZillaSha256 {
     public func finalize() -> [UInt8] {
         var digest = [UInt8](repeating: 0, count: 32)
         digest.withUnsafeMutableBufferPointer { bufferPointer in
-            sz_sha256_state_digest(&state, bufferPointer.baseAddress!)
+            stringZillaCheck(
+                sz_sha256_state_digest_best(&state, bufferPointer.baseAddress!, Device.cpuEnabled.native, nil)
+            )
         }
         return digest
     }
@@ -764,7 +880,7 @@ public class StringZillaSha256 {
 
     /// Resets the hasher to its initial state.
     public func reset() {
-        sz_sha256_state_init(&state)
+        stringZillaCheck(sz_sha256_state_init_best(&state, Device.cpuEnabled.native, nil))
     }
 }
 
@@ -773,14 +889,194 @@ extension StringZillaViewable {
     /// - Returns: A 32-byte array containing the SHA-256 digest.
     public func sha256() -> [UInt8] {
         var state = sz_sha256_state_t()
-        sz_sha256_state_init(&state)
+        stringZillaCheck(sz_sha256_state_init_best(&state, Device.cpuEnabled.native, nil))
         withStringZillaScope { pointer, length in
-            sz_sha256_state_update(&state, pointer, length)
+            stringZillaCheck(sz_sha256_state_update_best(&state, pointer, length, Device.cpuEnabled.native, nil))
         }
         var digest = [UInt8](repeating: 0, count: 32)
         digest.withUnsafeMutableBufferPointer { bufferPointer in
-            sz_sha256_state_digest(&state, bufferPointer.baseAddress!)
+            stringZillaCheck(
+                sz_sha256_state_digest_best(&state, bufferPointer.baseAddress!, Device.cpuEnabled.native, nil)
+            )
         }
         return digest
+    }
+}
+
+// MARK: - Capabilities and Devices
+
+/// A set of capabilities of a CPU or a GPU, as a ``Device`` reports them.
+public struct Capabilities: OptionSet, Sendable, CustomStringConvertible {
+    public let rawValue: UInt64
+    public init(rawValue: UInt64) { self.rawValue = rawValue }
+
+    /// The C API's mask: `UInt` on Linux, where `sz_capability_t` is `unsigned long`.
+    var native: sz_capability_t { sz_capability_t(rawValue) }
+
+    public static let serial = Capabilities(rawValue: 1 << 0)
+    public static let westmere = Capabilities(rawValue: 1 << 1)
+    public static let goldmont = Capabilities(rawValue: 1 << 2)
+    public static let haswell = Capabilities(rawValue: 1 << 3)
+    public static let skylake = Capabilities(rawValue: 1 << 4)
+    public static let icelake = Capabilities(rawValue: 1 << 5)
+    public static let neon = Capabilities(rawValue: 1 << 6)
+    public static let neonAes = Capabilities(rawValue: 1 << 7)
+    public static let neonSha = Capabilities(rawValue: 1 << 8)
+    public static let sve = Capabilities(rawValue: 1 << 9)
+    public static let sve2 = Capabilities(rawValue: 1 << 10)
+    public static let sve2Aes = Capabilities(rawValue: 1 << 11)
+    public static let rvv = Capabilities(rawValue: 1 << 12)
+    public static let rvvCrypto = Capabilities(rawValue: 1 << 13)
+    public static let v128 = Capabilities(rawValue: 1 << 14)
+    public static let v128Relaxed = Capabilities(rawValue: 1 << 15)
+    public static let loongsonAsx = Capabilities(rawValue: 1 << 16)
+    public static let powerVsx = Capabilities(rawValue: 1 << 17)
+
+    public static let cuda = Capabilities(rawValue: 1 << 48)
+    public static let rocm = Capabilities(rawValue: 1 << 56)
+    public static let metal = Capabilities(rawValue: 1 << 60)
+
+    /// Every CPU capability, the bits below the first GPU vendor's.
+    public static let cpus = Capabilities(rawValue: (1 << 48) - 1)
+    /// Every GPU capability.
+    public static let devices: Capabilities = [.cuda, .rocm, .metal]
+    /// Every capability.
+    public static let any = Capabilities(rawValue: .max)
+
+    /// The capability names, comma-separated, like "serial,neon".
+    public var description: String {
+        String(unsafeUninitializedCapacity: Int(STRINGZILLA_CAPABILITIES_NAME_CAPACITY)) { names in
+            names.withMemoryRebound(to: CChar.self) {
+                Int(sz_capabilities_name(native, $0.baseAddress, sz_size_t($0.count)))
+            }
+        }
+    }
+}
+
+/// Which runtime a device belongs to, as the `sz_<kind>_*` C functions name it.
+public enum DeviceKind: Sendable {
+    case cpu, cuda, rocm, metal
+}
+
+/// Why a ``Device`` query failed, as `sz_status_name` spells the C status.
+public struct DeviceError: Error, CustomStringConvertible {
+    public let description: String
+    init(_ status: sz_status_t) { description = String(cString: sz_status_name(status)) }
+}
+
+/// One device StringZilla knows: the host CPU, or a GPU by its runtime's own ordinal, the one
+/// `cudaSetDevice` or `hipSetDevice` takes, or the position in Metal's device list.
+///
+/// Every call of this module runs on the CPU and dispatches over its ``capabilitiesEnabled``, so a
+/// GPU device only reports its capabilities here. Prefer ``capabilitiesEnabled`` unless you
+/// specifically mean one of the raw axes: ``capabilitiesDetected`` describes the device and says
+/// nothing about whether a kernel was compiled into this binary.
+public struct Device: Sendable, Equatable {
+    public let kind: DeviceKind
+    public let ordinal: Int
+
+    /// The host CPU, which every build has.
+    public static let cpu = Device(kind: .cpu, unchecked: 0)
+
+    /// The CPU mask every call passes; ``capabilitiesEnable(_:)`` writes it unsynchronized, so
+    /// narrow before threads start.
+    nonisolated(unsafe) static var cpuEnabled: Capabilities = {
+        var mask = Capabilities.serial.native
+        _ = sz_cpu_capabilities_enabled(&mask)
+        return Capabilities(rawValue: UInt64(mask))
+    }()
+
+    private init(kind: DeviceKind, unchecked ordinal: Int) {
+        self.kind = kind
+        self.ordinal = ordinal
+    }
+
+    /// Device `ordinal` of `kind`.
+    /// - Throws: ``DeviceError`` past the last device of `kind`.
+    public init(kind: DeviceKind, ordinal: Int) throws {
+        guard ordinal >= 0, ordinal < (try Device.count(kind)) else { throw DeviceError(sz_missing_gpu_k) }
+        self.init(kind: kind, unchecked: ordinal)
+    }
+
+    /// How many devices of `kind` the process sees: one CPU, or the GPUs its runtime counts.
+    /// - Throws: ``DeviceError`` without a GPU of `kind`.
+    public static func count(_ kind: DeviceKind) throws -> Int {
+        var count: sz_size_t = 1
+        switch kind {
+        case .cpu: break
+        case .cuda: try check(sz_cuda_count_devices(&count))
+        case .rocm: try check(sz_rocm_count_devices(&count))
+        case .metal: try check(sz_metal_count_devices(&count))
+        }
+        return Int(count)
+    }
+
+    /// What this device runs, whether or not this binary holds kernels for it.
+    public var capabilitiesDetected: Capabilities {
+        get throws {
+            var mask: sz_capability_t = 0
+            let device = sz_size_t(ordinal)
+            switch kind {
+            case .cpu: try Device.check(sz_cpu_capabilities_detected(&mask))
+            case .cuda: try Device.check(sz_cuda_capabilities_detected(device, &mask))
+            case .rocm: try Device.check(sz_rocm_capabilities_detected(device, &mask))
+            case .metal: try Device.check(sz_metal_capabilities_detected(device, &mask))
+            }
+            return Capabilities(rawValue: UInt64(mask))
+        }
+    }
+
+    /// What this binary holds kernels for on devices of this kind, whether or not this one runs.
+    public var capabilitiesCompiled: Capabilities {
+        var mask: sz_capability_t = 0
+        switch kind {
+        case .cpu: _ = sz_cpu_capabilities_compiled(&mask)
+        case .cuda: _ = sz_cuda_capabilities_compiled(&mask)
+        case .rocm: _ = sz_rocm_capabilities_compiled(&mask)
+        case .metal: _ = sz_metal_capabilities_compiled(&mask)
+        }
+        return Capabilities(rawValue: UInt64(mask))
+    }
+
+    /// What this device's calls pass: ``capabilitiesDetected`` and ``capabilitiesCompiled`` at
+    /// once. On the CPU it is what every call of this module passes, narrowed by
+    /// ``capabilitiesEnable(_:)``, and always contains ``Capabilities/serial``.
+    public var capabilitiesEnabled: Capabilities {
+        get throws {
+            var mask: sz_capability_t = 0
+            let device = sz_size_t(ordinal)
+            switch kind {
+            case .cpu: return Device.cpuEnabled
+            case .cuda: try Device.check(sz_cuda_capabilities_enabled(device, &mask))
+            case .rocm: try Device.check(sz_rocm_capabilities_enabled(device, &mask))
+            case .metal: try Device.check(sz_metal_capabilities_enabled(device, &mask))
+            }
+            return Capabilities(rawValue: UInt64(mask))
+        }
+    }
+
+    /// Makes `wanted` the CPU's ``capabilitiesEnabled`` set, clamped to what it detects and this
+    /// binary compiled and keeping ``Capabilities/serial``.
+    /// - Returns: The set that took effect.
+    /// - Throws: ``DeviceError`` on a GPU, which keeps no such set.
+    @discardableResult
+    public func capabilitiesEnable(_ wanted: Capabilities) throws -> Capabilities {
+        guard kind == .cpu else { throw DeviceError(sz_missing_kernel_k) }
+        var mask = Capabilities.serial.native
+        _ = sz_cpu_capabilities_enabled(&mask)
+        Device.cpuEnabled = wanted.intersection(Capabilities(rawValue: UInt64(mask))).union(.serial)
+        return Device.cpuEnabled
+    }
+
+    /// Configures the current thread for `capabilities`, usually ``capabilitiesEnabled``. Call it
+    /// once on every thread that runs kernels.
+    /// - Throws: ``DeviceError`` on a GPU, which has no thread state to configure.
+    public func configureThread(_ capabilities: Capabilities) throws {
+        guard kind == .cpu else { throw DeviceError(sz_missing_kernel_k) }
+        try Device.check(sz_cpu_configure_thread(capabilities.native))
+    }
+
+    private static func check(_ status: sz_status_t) throws {
+        guard status == sz_success_k else { throw DeviceError(status) }
     }
 }

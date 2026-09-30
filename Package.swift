@@ -1,6 +1,42 @@
 // swift-tools-version:6.4
 import PackageDescription
 
+// CMake builds and probes the C library, as for every other binding, and SwiftPM links what it
+// produced: an XCFramework on Apple platforms and an artifact bundle elsewhere. A checkout points
+// `STRINGZILLA_SWIFT_ARTIFACT` at the one `cmake --build --preset swift` wrote, relative to this
+// directory; everyone else downloads the release's, whose checksums the release workflow writes.
+let release = "https://github.com/ashvardanian/StringZilla/releases/download/v5.1.2"
+let appleChecksum = "0000000000000000000000000000000000000000000000000000000000000000"
+let portableChecksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+let library: [Target]
+let libraryDependencies: [Target.Dependency]
+if let artifact = Context.environment["STRINGZILLA_SWIFT_ARTIFACT"] {
+    library = [.binaryTarget(name: "StringZillaC", path: artifact)]
+    libraryDependencies = ["StringZillaC"]
+}
+else {
+    library = [
+        .binaryTarget(
+            name: "StringZillaCApple",
+            url: "\(release)/StringZillaC.xcframework.zip",
+            checksum: appleChecksum
+        ),
+        .binaryTarget(
+            name: "StringZillaCPortable",
+            url: "\(release)/StringZillaC.artifactbundle.zip",
+            checksum: portableChecksum
+        ),
+    ]
+    libraryDependencies = [
+        .target(
+            name: "StringZillaCApple",
+            condition: .when(platforms: [.macOS, .macCatalyst, .iOS, .tvOS, .watchOS, .visionOS])
+        ),
+        .target(name: "StringZillaCPortable", condition: .when(platforms: [.linux, .android, .windows, .wasi])),
+    ]
+}
+
 let package = Package(
     name: "StringZilla",
     platforms: [
@@ -11,53 +47,12 @@ let package = Package(
         .visionOS(.v1),
     ],
     products: [
-        .library(
-            name: "StringZilla",
-            targets: ["StringZillaC", "StringZilla"]
-        )
+        .library(name: "StringZilla", targets: ["StringZilla"])
     ],
-    targets: [
-        .target(
-            name: "StringZillaC",
-            // The target is rooted at the repository so every source stays inside `path`,
-            // otherwise SwiftPM silently drops entries that escape it and links nothing.
-            path: ".",
-            sources: [
-                "c/stringzilla/runtime.c",
-                "c/stringzilla/compare.c",
-                "c/stringzilla/memory.c",
-                "c/stringzilla/hash.c",
-                "c/stringzilla/cipher.c",
-                "c/stringzilla/find.c",
-                "c/stringzilla/sort.c",
-                "c/stringzilla/intersect.c",
-                "c/stringzilla/levenshtein.c",
-                "c/stringzilla/overlap.c",
-                "c/stringzilla/substrings.c",
-                "c/stringzilla/utf8_norm.c",
-                "c/stringzilla/utf8_runes.c",
-                "c/stringzilla/utf8_tokens.c",
-                "c/stringzilla/utf8_wordbreaks.c",
-                "c/stringzilla/utf8_graphemes.c",
-                "c/stringzilla/utf8_sentences.c",
-                "c/stringzilla/utf8_linebreaks.c",
-                "c/stringzilla/utf8_uncased_fold.c",
-                "c/stringzilla/utf8_uncased.c",
-            ],
-            // `include/` is the module header root, so the `module.modulemap` umbrella and the
-            // `#include "stringzilla/<...>.h"` chain resolve exactly as `-I include` does in the
-            // CMake, Rust, and Python builds.
-            publicHeadersPath: "include",
-            cSettings: [
-                .define("STRINGZILLA_RUNTIME_DISPATCH", to: "1"),
-                .define("STRINGZILLA_WITH_LIBC", to: "1"),
-                .define("STRINGZILLA_DEBUG", to: "0"),
-                .unsafeFlags(["-Wall"]),
-            ]
-        ),
+    targets: library + [
         .target(
             name: "StringZilla",
-            dependencies: ["StringZillaC"],
+            dependencies: libraryDependencies,
             path: "swift",
             exclude: ["Test.swift", "README.md"],
             sources: ["StringProtocol+StringZilla.swift"]
@@ -69,6 +64,5 @@ let package = Package(
             exclude: ["StringProtocol+StringZilla.swift", "README.md"],
             sources: ["Test.swift"]
         ),
-    ],
-    cLanguageStandard: CLanguageStandard.c99
+    ]
 )

@@ -33,6 +33,7 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -51,115 +52,178 @@ public final class StringZilla {
     private static final Linker LINKER = Linker.nativeLinker();
     private static final SymbolLookup LOOKUP = NativeLoader.load();
 
-    private static final MethodHandle STRINGZILLA_FIND =
-            down("sz_find", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_RFIND =
-            down("sz_rfind", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_FIND_BYTESET =
-            down("sz_find_byteset", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
-    private static final MethodHandle STRINGZILLA_RFIND_BYTESET =
-            down("sz_rfind_byteset", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+    // `critical(true)` reads on-heap arrays and fills one-element out-arrays in place; upcalling handles can't use it.
+    private static final MethodHandle STRINGZILLA_FIND = downCritical(
+            "sz_find_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_RFIND = downCritical(
+            "sz_rfind_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_FIND_BYTESET = downCritical(
+            "sz_find_byteset_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_RFIND_BYTESET = downCritical(
+            "sz_rfind_byteset_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
 
-    // Value-returning ops: `critical(true)` so on-heap byte[] is read with no copy and no
-    // thread-state transition.
-    private static final MethodHandle STRINGZILLA_HASH =
-            downCritical("sz_hash", FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_BYTESUM =
-            downCritical("sz_bytesum", FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_EQUAL =
-            downCritical("sz_equal", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_ORDER =
-            downCritical("sz_order", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG));
+    private static final MethodHandle STRINGZILLA_HASH = downCritical(
+            "sz_hash_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_BYTESUM = downCritical(
+            "sz_bytesum_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_EQUAL = downCritical(
+            "sz_equal_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_ORDER = downCritical(
+            "sz_order_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
 
     private static final MethodHandle STRINGZILLA_HASH_STATE_INIT =
-            down("sz_hash_state_init", FunctionDescriptor.ofVoid(ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_HASH_STATE_UPDATE =
-            downCritical("sz_hash_state_update", FunctionDescriptor.ofVoid(ADDRESS, ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_HASH_STATE_DIGEST =
-            down("sz_hash_state_digest", FunctionDescriptor.of(JAVA_LONG, ADDRESS));
+            down("sz_hash_state_init_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_HASH_STATE_UPDATE = downCritical(
+            "sz_hash_state_update_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_HASH_STATE_DIGEST = downCritical(
+            "sz_hash_state_digest_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
 
-    private static final MethodHandle STRINGZILLA_CAPABILITIES = down("sz_capabilities", FunctionDescriptor.of(JAVA_INT));
-    private static final MethodHandle STRINGZILLA_CAPABILITIES_TO_STRING =
-            down("sz_capabilities_to_string", FunctionDescriptor.of(ADDRESS, JAVA_INT));
-    private static final MethodHandle STRINGZILLA_VERSION_MAJOR = down("sz_version_major", FunctionDescriptor.of(JAVA_INT));
-    private static final MethodHandle STRINGZILLA_VERSION_MINOR = down("sz_version_minor", FunctionDescriptor.of(JAVA_INT));
-    private static final MethodHandle STRINGZILLA_VERSION_PATCH = down("sz_version_patch", FunctionDescriptor.of(JAVA_INT));
+    // Device queries: a status and one out-word, some after a device ordinal. GPU runtimes can take long to
+    // initialize, so none of these is `critical(true)`.
+    private static final FunctionDescriptor QUERY = FunctionDescriptor.of(JAVA_INT, ADDRESS);
+    private static final FunctionDescriptor DEVICE_QUERY = FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
+    private static final MethodHandle STRINGZILLA_CPU_CAPABILITIES_DETECTED =
+            down("sz_cpu_capabilities_detected", QUERY);
+    private static final MethodHandle STRINGZILLA_CPU_CAPABILITIES_COMPILED =
+            down("sz_cpu_capabilities_compiled", QUERY);
+    private static final MethodHandle STRINGZILLA_CPU_CAPABILITIES_ENABLED = down("sz_cpu_capabilities_enabled", QUERY);
+    private static final MethodHandle STRINGZILLA_CPU_CONFIGURE_THREAD =
+            down("sz_cpu_configure_thread", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
+    private static final MethodHandle STRINGZILLA_CUDA_COUNT_DEVICES = down("sz_cuda_count_devices", QUERY);
+    private static final MethodHandle STRINGZILLA_CUDA_CAPABILITIES_DETECTED =
+            down("sz_cuda_capabilities_detected", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_CUDA_CAPABILITIES_COMPILED =
+            down("sz_cuda_capabilities_compiled", QUERY);
+    private static final MethodHandle STRINGZILLA_CUDA_CAPABILITIES_ENABLED =
+            down("sz_cuda_capabilities_enabled", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_ROCM_COUNT_DEVICES = down("sz_rocm_count_devices", QUERY);
+    private static final MethodHandle STRINGZILLA_ROCM_CAPABILITIES_DETECTED =
+            down("sz_rocm_capabilities_detected", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_ROCM_CAPABILITIES_COMPILED =
+            down("sz_rocm_capabilities_compiled", QUERY);
+    private static final MethodHandle STRINGZILLA_ROCM_CAPABILITIES_ENABLED =
+            down("sz_rocm_capabilities_enabled", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_METAL_COUNT_DEVICES = down("sz_metal_count_devices", QUERY);
+    private static final MethodHandle STRINGZILLA_METAL_CAPABILITIES_DETECTED =
+            down("sz_metal_capabilities_detected", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_METAL_CAPABILITIES_COMPILED =
+            down("sz_metal_capabilities_compiled", QUERY);
+    private static final MethodHandle STRINGZILLA_METAL_CAPABILITIES_ENABLED =
+            down("sz_metal_capabilities_enabled", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_NAME_CAPABILITIES =
+            downCritical("sz_capabilities_name", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG));
+
+    /** {@code STRINGZILLA_CAPABILITIES_NAME_CAPACITY}, which fits every capability name list. */
+    private static final int CAPABILITIES_NAME_CAPACITY = 256;
+
+    /** {@code sz_missing_gpu_k}, past the last device of a kind. */
+    private static final int STATUS_MISSING_GPU = -16;
+
+    /** {@code sz_missing_kernel_k}, for a CPU-only call on a GPU. */
+    private static final int STATUS_MISSING_KERNEL = -20;
+
+    private static final MethodHandle STRINGZILLA_VERSION_MAJOR =
+            down("sz_version_major", FunctionDescriptor.of(JAVA_INT));
+    private static final MethodHandle STRINGZILLA_VERSION_MINOR =
+            down("sz_version_minor", FunctionDescriptor.of(JAVA_INT));
+    private static final MethodHandle STRINGZILLA_VERSION_PATCH =
+            down("sz_version_patch", FunctionDescriptor.of(JAVA_INT));
 
     // region UTF-8 Codepoints
-    private static final MethodHandle STRINGZILLA_UTF8_COUNT =
-            downCritical("sz_utf8_count", FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_UTF8_SEEK =
-            down("sz_utf8_seek", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, JAVA_LONG));
+    private static final MethodHandle STRINGZILLA_UTF8_COUNT = downCritical(
+            "sz_utf8_count_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_UTF8_SEEK = down(
+            "sz_utf8_seek_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_UTF8_DECODE = downCritical(
-            "sz_utf8_decode", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+            "sz_utf8_decode_best",
+            FunctionDescriptor.of(
+                    JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
 
     // endregion
 
     // region UTF-8 Segmentation
-    private static final MethodHandle STRINGZILLA_UTF8_GRAPHEMES = downSeg("sz_utf8_graphemes");
-    private static final MethodHandle STRINGZILLA_UTF8_WORDBREAKS = downSeg("sz_utf8_wordbreaks");
-    private static final MethodHandle STRINGZILLA_UTF8_SENTENCES = downSeg("sz_utf8_sentences");
-    private static final MethodHandle STRINGZILLA_UTF8_LINEBREAKS = downSeg("sz_utf8_linebreaks");
-    private static final MethodHandle STRINGZILLA_UTF8_NEWLINES = downSeg("sz_utf8_newlines");
-    private static final MethodHandle STRINGZILLA_UTF8_WHITESPACES = downSeg("sz_utf8_whitespaces");
-    private static final MethodHandle STRINGZILLA_UTF8_DELIMITERS = downSeg("sz_utf8_delimiters");
+    private static final MethodHandle STRINGZILLA_UTF8_GRAPHEMES = downSeg(SegmentKind.GRAPHEMES);
+    private static final MethodHandle STRINGZILLA_UTF8_WORDBREAKS = downSeg(SegmentKind.WORDS);
+    private static final MethodHandle STRINGZILLA_UTF8_SENTENCES = downSeg(SegmentKind.SENTENCES);
+    private static final MethodHandle STRINGZILLA_UTF8_LINEBREAKS = downSeg(SegmentKind.LINE_BREAKS);
+    private static final MethodHandle STRINGZILLA_UTF8_NEWLINES = downSeg(SegmentKind.NEWLINES);
+    private static final MethodHandle STRINGZILLA_UTF8_WHITESPACES = downSeg(SegmentKind.WHITESPACES);
+    private static final MethodHandle STRINGZILLA_UTF8_DELIMITERS = downSeg(SegmentKind.DELIMITERS);
 
     // endregion
 
     // region UTF-8 Case Folding and Uncased
-    private static final MethodHandle STRINGZILLA_UTF8_UNCASED_FOLD =
-            downCritical("sz_utf8_uncased_fold", FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
-    private static final MethodHandle STRINGZILLA_UTF8_UNCASED_SEARCH = down(
-            "sz_utf8_uncased_search",
-            FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS));
+    private static final MethodHandle STRINGZILLA_UTF8_UNCASED_FOLD = downCritical(
+            "sz_utf8_uncased_fold_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_UTF8_UNCASED_SEARCH = downCritical(
+            "sz_utf8_uncased_search_best",
+            FunctionDescriptor.of(
+                    JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_UTF8_UNCASED_ORDER = downCritical(
-            "sz_utf8_uncased_order", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG));
+            "sz_utf8_uncased_order_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
 
     // endregion
 
     // region Hash Extras, SHA-256, Random and Lookup
     private static final MethodHandle STRINGZILLA_HASH_MULTISEED = downCritical(
-            "sz_hash_multiseed", FunctionDescriptor.ofVoid(ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
-    private static final MethodHandle STRINGZILLA_SHA256_INIT = down("sz_sha256_state_init", FunctionDescriptor.ofVoid(ADDRESS));
-    private static final MethodHandle STRINGZILLA_SHA256_UPDATE =
-            downCritical("sz_sha256_state_update", FunctionDescriptor.ofVoid(ADDRESS, ADDRESS, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_SHA256_DIGEST =
-            downCritical("sz_sha256_state_digest", FunctionDescriptor.ofVoid(ADDRESS, ADDRESS));
-    private static final MethodHandle STRINGZILLA_FILL_RANDOM =
-            downCritical("sz_fill_random", FunctionDescriptor.ofVoid(ADDRESS, JAVA_LONG, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_LOOKUP =
-            downCritical("sz_lookup", FunctionDescriptor.ofVoid(ADDRESS, JAVA_LONG, ADDRESS, ADDRESS));
+            "sz_hash_multiseed_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_SHA256_INIT =
+            down("sz_sha256_state_init_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_SHA256_UPDATE = downCritical(
+            "sz_sha256_state_update_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_SHA256_DIGEST = downCritical(
+            "sz_sha256_state_digest_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_FILL_RANDOM = downCritical(
+            "sz_fill_random_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_LOOKUP = downCritical(
+            "sz_lookup_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
 
-    private static MethodHandle downSeg(String name) {
+    private static MethodHandle downSeg(SegmentKind kind) {
         return downCritical(
-                name, FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+                kind.function,
+                FunctionDescriptor.of(
+                        JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG,
+                        ADDRESS));
     }
 
     // endregion
 
     // region Normalization and Collections
-    private static final MethodHandle STRINGZILLA_UTF8_NORM =
-            downCritical("sz_utf8_norm", FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS));
-    private static final MethodHandle STRINGZILLA_UTF8_FIND_DENORMALIZED =
-            downCritical("sz_utf8_find_denormalized", FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG, JAVA_INT));
+    private static final MethodHandle STRINGZILLA_UTF8_NORM = downCritical(
+            "sz_utf8_norm_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_UTF8_FIND_DENORMALIZED = downCritical(
+            "sz_utf8_find_denormalized_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_SEQUENCE_ARGSORT = down(
-            "sz_sequence_argsort", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, JAVA_INT));
+            "sz_sequence_argsort_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_SEQUENCE_ARGSORT_UNCASED = down(
-            "sz_sequence_argsort_uncased",
-            FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, JAVA_INT));
+            "sz_sequence_argsort_uncased_best",
+            FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_SEQUENCE_INTERSECT = down(
-            "sz_sequence_intersect",
-            FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS));
+            "sz_sequence_intersect_best",
+            FunctionDescriptor.of(
+                    JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
 
     // endregion
 
-    static {
-        try {
-            down("sz_dispatch_cpu_table_init", FunctionDescriptor.ofVoid()).invokeExact();
-        } catch (Throwable t) {
-            throw new ExceptionInInitializerError(t);
-        }
-    }
+    /** The mask every call dispatches on; see {@link Device#capabilitiesEnabled()}. */
+    private static volatile long enabledCapabilities =
+            query(STRINGZILLA_CPU_CAPABILITIES_ENABLED, "sz_cpu_capabilities_enabled");
 
     private static MethodHandle down(String name, FunctionDescriptor desc, Linker.Option... opts) {
         MemorySegment addr = LOOKUP.find(name).orElseThrow(() -> new UnsatisfiedLinkError("missing symbol: " + name));
@@ -170,28 +234,51 @@ public final class StringZilla {
         return down(name, desc, Linker.Option.critical(true));
     }
 
+    private static void check(String function, int status) {
+        if (status != 0) throw new StatusException(function, status);
+    }
+
     // region Search (MemorySegment)
 
-    /** First byte offset of {@code needle} in {@code haystack}, or -1. */
+    /** First byte offset of {@code needle} in the off-heap {@code haystack}, or -1. */
     public static long indexOf(MemorySegment haystack, MemorySegment needle) {
         long n = needle.byteSize();
         if (n == 0) return 0;
         if (n > haystack.byteSize()) return -1;
+        requireNative(haystack);
         try {
-            MemorySegment r = (MemorySegment) STRINGZILLA_FIND.invokeExact(haystack, haystack.byteSize(), needle, n);
-            return r.address() == 0 ? -1 : r.address() - haystack.address();
+            long[] match = new long[1];
+            check("sz_find_best", (int) STRINGZILLA_FIND.invokeExact(
+                    haystack,
+                    haystack.byteSize(),
+                    needle,
+                    n,
+                    MemorySegment.ofArray(match),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
         }
     }
 
+    /** Last byte offset of {@code needle} in the off-heap {@code haystack}, or -1. */
     public static long lastIndexOf(MemorySegment haystack, MemorySegment needle) {
         long n = needle.byteSize();
         if (n == 0) return haystack.byteSize();
         if (n > haystack.byteSize()) return -1;
+        requireNative(haystack);
         try {
-            MemorySegment r = (MemorySegment) STRINGZILLA_RFIND.invokeExact(haystack, haystack.byteSize(), needle, n);
-            return r.address() == 0 ? -1 : r.address() - haystack.address();
+            long[] match = new long[1];
+            check("sz_rfind_best", (int) STRINGZILLA_RFIND.invokeExact(
+                    haystack,
+                    haystack.byteSize(),
+                    needle,
+                    n,
+                    MemorySegment.ofArray(match),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -236,11 +323,7 @@ public final class StringZilla {
         try (Arena a = Arena.ofConfined()) {
             MemorySegment h = a.allocate(haystack.length == 0 ? 1 : haystack.length);
             MemorySegment.copy(haystack, 0, h, JAVA_BYTE, 0, haystack.length);
-            MemorySegment s = set.toSegment(a);
-            MemorySegment r = (MemorySegment) STRINGZILLA_FIND_BYTESET.invokeExact(h, (long) haystack.length, s);
-            return r.address() == 0 ? -1 : r.address() - h.address();
-        } catch (Throwable t) {
-            throw rethrow(t);
+            return findByteset(h.asSlice(0, haystack.length), set.toSegment(a));
         }
     }
 
@@ -248,11 +331,7 @@ public final class StringZilla {
         try (Arena a = Arena.ofConfined()) {
             MemorySegment h = a.allocate(haystack.length == 0 ? 1 : haystack.length);
             MemorySegment.copy(haystack, 0, h, JAVA_BYTE, 0, haystack.length);
-            MemorySegment s = set.toSegment(a);
-            MemorySegment r = (MemorySegment) STRINGZILLA_RFIND_BYTESET.invokeExact(h, (long) haystack.length, s);
-            return r.address() == 0 ? -1 : r.address() - h.address();
-        } catch (Throwable t) {
-            throw rethrow(t);
+            return rfindByteset(h.asSlice(0, haystack.length), set.toSegment(a));
         }
     }
 
@@ -265,8 +344,15 @@ public final class StringZilla {
         if (a.length != b.length) return false;
         if (a.length == 0) return true;
         try {
-            int eq = (int) STRINGZILLA_EQUAL.invokeExact(MemorySegment.ofArray(a), MemorySegment.ofArray(b), (long) a.length);
-            return eq != 0;
+            int[] equal = new int[1];
+            check("sz_equal_best", (int) STRINGZILLA_EQUAL.invokeExact(
+                    MemorySegment.ofArray(a),
+                    MemorySegment.ofArray(b),
+                    (long) a.length,
+                    MemorySegment.ofArray(equal),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return equal[0] != 0;
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -275,8 +361,16 @@ public final class StringZilla {
     /** Lexicographic byte comparison: -1, 0, or 1. Like {@link java.util.Arrays#compare(byte[], byte[])}. */
     public static int compare(byte[] a, byte[] b) {
         try {
-            return (int) STRINGZILLA_ORDER.invokeExact(
-                    MemorySegment.ofArray(a), (long) a.length, MemorySegment.ofArray(b), (long) b.length);
+            int[] ordering = new int[1];
+            check("sz_order_best", (int) STRINGZILLA_ORDER.invokeExact(
+                    MemorySegment.ofArray(a),
+                    (long) a.length,
+                    MemorySegment.ofArray(b),
+                    (long) b.length,
+                    MemorySegment.ofArray(ordering),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return ordering[0];
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -293,16 +387,15 @@ public final class StringZilla {
     }
 
     public static long hash(byte[] data, long seed) {
-        try {
-            return (long) STRINGZILLA_HASH.invokeExact(MemorySegment.ofArray(data), (long) data.length, seed);
-        } catch (Throwable t) {
-            throw rethrow(t);
-        }
+        return hash(MemorySegment.ofArray(data), seed);
     }
 
     public static long hash(MemorySegment data, long seed) {
         try {
-            return (long) STRINGZILLA_HASH.invokeExact(data, data.byteSize(), seed);
+            long[] hash = new long[1];
+            check("sz_hash_best", (int) STRINGZILLA_HASH.invokeExact(
+                    data, data.byteSize(), seed, MemorySegment.ofArray(hash), enabledCapabilities, MemorySegment.NULL));
+            return hash[0];
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -310,7 +403,14 @@ public final class StringZilla {
 
     public static long byteSum(byte[] data) {
         try {
-            return (long) STRINGZILLA_BYTESUM.invokeExact(MemorySegment.ofArray(data), (long) data.length);
+            long[] checksum = new long[1];
+            check("sz_bytesum_best", (int) STRINGZILLA_BYTESUM.invokeExact(
+                    MemorySegment.ofArray(data),
+                    (long) data.length,
+                    MemorySegment.ofArray(checksum),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return checksum[0];
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -329,7 +429,10 @@ public final class StringZilla {
 
     public static long countRunes(MemorySegment text) {
         try {
-            return (long) STRINGZILLA_UTF8_COUNT.invokeExact(text, text.byteSize());
+            long[] count = new long[1];
+            check("sz_utf8_count_best", (int) STRINGZILLA_UTF8_COUNT.invokeExact(
+                    text, text.byteSize(), MemorySegment.ofArray(count), enabledCapabilities, MemorySegment.NULL));
+            return count[0];
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -340,8 +443,11 @@ public final class StringZilla {
         try (Arena a = Arena.ofConfined()) {
             MemorySegment t = a.allocate(Math.max(text.length, 1));
             MemorySegment.copy(text, 0, t, JAVA_BYTE, 0, text.length);
-            MemorySegment r = (MemorySegment) STRINGZILLA_UTF8_SEEK.invokeExact(t, (long) text.length, index);
-            return r.address() == 0 ? -1 : r.address() - t.address();
+            MemorySegment position = a.allocate(ADDRESS);
+            check("sz_utf8_seek_best", (int) STRINGZILLA_UTF8_SEEK.invokeExact(
+                    t, (long) text.length, index, position, enabledCapabilities, MemorySegment.NULL));
+            long found = position.get(ADDRESS, 0).address();
+            return found == 0 ? -1 : found - t.address();
         } catch (Throwable e) {
             throw rethrow(e);
         }
@@ -355,13 +461,17 @@ public final class StringZilla {
 
     public static int decode(MemorySegment text, int[] destination) {
         long[] unpacked = new long[1];
+        long[] consumedIgnored = new long[1];
         try {
-            MemorySegment cursorIgnored = (MemorySegment) STRINGZILLA_UTF8_DECODE.invokeExact(
+            check("sz_utf8_decode_best", (int) STRINGZILLA_UTF8_DECODE.invokeExact(
                     text,
                     text.byteSize(),
                     MemorySegment.ofArray(destination),
                     (long) destination.length,
-                    MemorySegment.ofArray(unpacked));
+                    MemorySegment.ofArray(unpacked),
+                    MemorySegment.ofArray(consumedIgnored),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
             return (int) unpacked[0];
         } catch (Throwable t) {
             throw rethrow(t);
@@ -384,13 +494,19 @@ public final class StringZilla {
     // region UTF-8 Segmentation
 
     public enum SegmentKind {
-        GRAPHEMES,
-        WORDS,
-        SENTENCES,
-        LINE_BREAKS,
-        NEWLINES,
-        WHITESPACES,
-        DELIMITERS
+        GRAPHEMES("sz_utf8_graphemes_best"),
+        WORDS("sz_utf8_wordbreaks_best"),
+        SENTENCES("sz_utf8_sentences_best"),
+        LINE_BREAKS("sz_utf8_linebreaks_best"),
+        NEWLINES("sz_utf8_newlines_best"),
+        WHITESPACES("sz_utf8_whitespaces_best"),
+        DELIMITERS("sz_utf8_delimiters_best");
+
+        private final String function;
+
+        SegmentKind(String function) {
+            this.function = function;
+        }
     }
 
     private static MethodHandle segHandle(SegmentKind k) {
@@ -435,14 +551,18 @@ public final class StringZilla {
         MethodHandle h = segHandle(kind);
         MemorySegment slice = text.asSlice(textOffset, textLength);
         try {
-            long count = (long) h.invokeExact(
+            long[] count = new long[1];
+            check(kind.function, (int) h.invokeExact(
                     slice,
                     (long) textLength,
                     MemorySegment.ofArray(starts),
                     MemorySegment.ofArray(lengths),
                     (long) cap,
-                    MemorySegment.ofArray(bytesConsumed));
-            return (int) count;
+                    MemorySegment.ofArray(count),
+                    MemorySegment.ofArray(bytesConsumed),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return (int) count[0];
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -455,11 +575,18 @@ public final class StringZilla {
     /** Folds into the caller's {@code destination} (must hold ≥ text.length*3 bytes) and returns the
      *  bytes written. Allocation-free. */
     public static int caseFold(byte[] text, byte[] destination) {
-        if (destination.length < text.length * 3)
+        if (destination.length < (long) text.length * 3)
             throw new IllegalArgumentException("destination must hold at least text.length*3 bytes");
         try {
-            return (int) (long) STRINGZILLA_UTF8_UNCASED_FOLD.invokeExact(
-                    MemorySegment.ofArray(text), (long) text.length, MemorySegment.ofArray(destination));
+            long[] written = new long[1];
+            check("sz_utf8_uncased_fold_best", (int) STRINGZILLA_UTF8_UNCASED_FOLD.invokeExact(
+                    MemorySegment.ofArray(text),
+                    (long) text.length,
+                    MemorySegment.ofArray(destination),
+                    MemorySegment.ofArray(written),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return (int) written[0];
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -469,14 +596,8 @@ public final class StringZilla {
      *  no case folding (only locale {@code toLowerCase}/{@code toUpperCase}). */
     public static byte[] caseFold(byte[] text) {
         if (text.length == 0) return new byte[0];
-        byte[] dst = new byte[text.length * 3]; // worst-case 3x expansion
-        try {
-            long n = (long) STRINGZILLA_UTF8_UNCASED_FOLD.invokeExact(
-                    MemorySegment.ofArray(text), (long) text.length, MemorySegment.ofArray(dst));
-            return java.util.Arrays.copyOf(dst, (int) n);
-        } catch (Throwable t) {
-            throw rethrow(t);
-        }
+        byte[] dst = new byte[Math.multiplyExact(text.length, 3)]; // worst-case 3x expansion
+        return java.util.Arrays.copyOf(dst, caseFold(text, dst));
     }
 
     /** Result of a case-insensitive search: byte {@code offset} (-1 if not found) and the matched
@@ -492,13 +613,7 @@ public final class StringZilla {
             MemorySegment n = a.allocate(Math.max(needle.length, 1));
             MemorySegment.copy(needle, 0, n, JAVA_BYTE, 0, needle.length);
             MemorySegment meta = a.allocate(64); // zeroed; the native dereferences it (NULL is unsafe)
-            MemorySegment ml = a.allocate(JAVA_LONG.byteSize());
-            MemorySegment r = (MemorySegment)
-                    STRINGZILLA_UTF8_UNCASED_SEARCH.invokeExact(h, (long) haystack.length, n, (long) needle.length, meta, ml);
-            long off = r.address() == 0 ? -1 : r.address() - h.address();
-            return new Match(off, off < 0 ? 0 : ml.get(JAVA_LONG, 0));
-        } catch (Throwable e) {
-            throw rethrow(e);
+            return uncasedSearch(h.asSlice(0, haystack.length), n.asSlice(0, needle.length), meta);
         }
     }
 
@@ -506,8 +621,37 @@ public final class StringZilla {
      *  Unicode case-folded ordinal comparison. */
     public static int uncasedCompare(byte[] a, byte[] b) {
         try {
-            return (int) STRINGZILLA_UTF8_UNCASED_ORDER.invokeExact(
-                    MemorySegment.ofArray(a), (long) a.length, MemorySegment.ofArray(b), (long) b.length);
+            int[] ordering = new int[1];
+            check("sz_utf8_uncased_order_best", (int) STRINGZILLA_UTF8_UNCASED_ORDER.invokeExact(
+                    MemorySegment.ofArray(a),
+                    (long) a.length,
+                    MemorySegment.ofArray(b),
+                    (long) b.length,
+                    MemorySegment.ofArray(ordering),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return ordering[0];
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Searches the off-heap {@code haystack} for {@code needle}, caching its folding in {@code meta}. */
+    private static Match uncasedSearch(MemorySegment haystack, MemorySegment needle, MemorySegment meta) {
+        try {
+            long[] match = new long[1];
+            long[] matchedLength = new long[1];
+            check("sz_utf8_uncased_search_best", (int) STRINGZILLA_UTF8_UNCASED_SEARCH.invokeExact(
+                    haystack,
+                    haystack.byteSize(),
+                    needle,
+                    needle.byteSize(),
+                    meta,
+                    MemorySegment.ofArray(match),
+                    MemorySegment.ofArray(matchedLength),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return match[0] == 0 ? new Match(-1, 0) : new Match(match[0] - haystack.address(), matchedLength[0]);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -522,12 +666,14 @@ public final class StringZilla {
         if (hashes.length < seeds.length)
             throw new IllegalArgumentException("hashes must hold at least seeds.length entries");
         try {
-            STRINGZILLA_HASH_MULTISEED.invokeExact(
+            check("sz_hash_multiseed_best", (int) STRINGZILLA_HASH_MULTISEED.invokeExact(
                     MemorySegment.ofArray(data),
                     (long) data.length,
                     MemorySegment.ofArray(seeds),
                     (long) seeds.length,
-                    MemorySegment.ofArray(hashes));
+                    MemorySegment.ofArray(hashes),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -543,7 +689,12 @@ public final class StringZilla {
     /** Fills {@code buffer} with deterministic pseudo-random bytes derived from {@code nonce}. */
     public static void fillRandom(byte[] buffer, long nonce) {
         try {
-            STRINGZILLA_FILL_RANDOM.invokeExact(MemorySegment.ofArray(buffer), (long) buffer.length, nonce);
+            check("sz_fill_random_best", (int) STRINGZILLA_FILL_RANDOM.invokeExact(
+                    MemorySegment.ofArray(buffer),
+                    (long) buffer.length,
+                    nonce,
+                    enabledCapabilities,
+                    MemorySegment.NULL));
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -554,11 +705,13 @@ public final class StringZilla {
         if (lut.length != 256) throw new IllegalArgumentException("LUT must be 256 bytes");
         if (destination.length < source.length) throw new IllegalArgumentException("destination too small");
         try {
-            STRINGZILLA_LOOKUP.invokeExact(
+            check("sz_lookup_best", (int) STRINGZILLA_LOOKUP.invokeExact(
                     MemorySegment.ofArray(destination),
-                    (long) source.length,
                     MemorySegment.ofArray(source),
-                    MemorySegment.ofArray(lut));
+                    (long) source.length,
+                    MemorySegment.ofArray(lut),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -587,14 +740,19 @@ public final class StringZilla {
     /** Normalizes into the caller's {@code destination} (must hold ≥ text.length*18 bytes) and returns
      *  the bytes written. Allocation-free. */
     public static int normalize(byte[] text, NormalForm form, byte[] destination) {
-        if (destination.length < text.length * 18)
+        if (destination.length < (long) text.length * 18)
             throw new IllegalArgumentException("destination must hold at least text.length*18 bytes");
         try {
-            return (int) (long) STRINGZILLA_UTF8_NORM.invokeExact(
+            long[] written = new long[1];
+            check("sz_utf8_norm_best", (int) STRINGZILLA_UTF8_NORM.invokeExact(
                     MemorySegment.ofArray(text),
                     (long) text.length,
                     formCode(form),
-                    MemorySegment.ofArray(destination));
+                    MemorySegment.ofArray(destination),
+                    MemorySegment.ofArray(written),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return (int) written[0];
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -605,22 +763,22 @@ public final class StringZilla {
      *  under {@code NFC} (and back under {@code NFD}); the ligature "ﬁ" expands into "fi" under {@code NFKC}. */
     public static byte[] normalize(byte[] text, NormalForm form) {
         if (text.length == 0) return new byte[0];
-        byte[] dst = new byte[text.length * 18]; // worst-case per-codepoint expansion
-        try {
-            long n = (long) STRINGZILLA_UTF8_NORM.invokeExact(
-                    MemorySegment.ofArray(text), (long) text.length, formCode(form), MemorySegment.ofArray(dst));
-            return java.util.Arrays.copyOf(dst, (int) n);
-        } catch (Throwable t) {
-            throw rethrow(t);
-        }
+        byte[] dst = new byte[Math.multiplyExact(text.length, 18)]; // worst-case per-codepoint expansion
+        return java.util.Arrays.copyOf(dst, normalize(text, form, dst));
     }
 
     /** True if {@code text} is already in the given form. Like {@link java.text.Normalizer#isNormalized}. */
     public static boolean isNormalized(byte[] text, NormalForm form) {
         try {
-            MemorySegment r = (MemorySegment) STRINGZILLA_UTF8_FIND_DENORMALIZED.invokeExact(
-                    MemorySegment.ofArray(text), (long) text.length, formCode(form));
-            return r.address() == 0;
+            long[] violation = new long[1];
+            check("sz_utf8_find_denormalized_best", (int) STRINGZILLA_UTF8_FIND_DENORMALIZED.invokeExact(
+                    MemorySegment.ofArray(text),
+                    (long) text.length,
+                    formCode(form),
+                    MemorySegment.ofArray(violation),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return violation[0] == 0;
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -644,8 +802,14 @@ public final class StringZilla {
             SeqTable t = new SeqTable(items, a);
             MemorySegment orderSeg = a.allocate(JAVA_LONG.byteSize() * n);
             MethodHandle mh = uncased ? STRINGZILLA_SEQUENCE_ARGSORT_UNCASED : STRINGZILLA_SEQUENCE_ARGSORT;
-            int status = (int) mh.invokeExact(t.sequence, MemorySegment.NULL, orderSeg, top, reverse ? 1 : 0);
-            if (status != 0) throw new IllegalStateException("sz_sequence_argsort failed with status " + status);
+            check(uncased ? "sz_sequence_argsort_uncased_best" : "sz_sequence_argsort_best", (int) mh.invokeExact(
+                    t.sequence,
+                    top,
+                    reverse ? 1 : 0,
+                    MemorySegment.NULL,
+                    orderSeg,
+                    enabledCapabilities,
+                    MemorySegment.NULL));
             int count = top > 0 ? (int) Math.min(top, n) : n;
             MemorySegment.copy(orderSeg, JAVA_LONG, 0, order, 0, count);
             return count;
@@ -677,12 +841,20 @@ public final class StringZilla {
         if (n == 0) return 0;
         if (lengths.length < n) throw new IllegalArgumentException("lengths must hold at least " + n + " entries");
         if (order.length < n) throw new IllegalArgumentException("order must hold at least " + n + " entries");
+        // A range past the text would throw inside the FFM upcall, and that terminates the JVM.
+        for (int i = 0; i < n; i++) java.util.Objects.checkFromIndexSize(starts[i], lengths[i], text.length);
         try (Arena a = Arena.ofConfined()) {
             SeqTable t = new SeqTable(text, starts, lengths, n, a);
             MemorySegment orderSeg = a.allocate(JAVA_LONG.byteSize() * n);
             MethodHandle mh = uncased ? STRINGZILLA_SEQUENCE_ARGSORT_UNCASED : STRINGZILLA_SEQUENCE_ARGSORT;
-            int status = (int) mh.invokeExact(t.sequence, MemorySegment.NULL, orderSeg, top, reverse ? 1 : 0);
-            if (status != 0) throw new IllegalStateException("sz_sequence_argsort failed with status " + status);
+            check(uncased ? "sz_sequence_argsort_uncased_best" : "sz_sequence_argsort_best", (int) mh.invokeExact(
+                    t.sequence,
+                    top,
+                    reverse ? 1 : 0,
+                    MemorySegment.NULL,
+                    orderSeg,
+                    enabledCapabilities,
+                    MemorySegment.NULL));
             int count = top > 0 ? (int) Math.min(top, n) : n;
             MemorySegment.copy(orderSeg, JAVA_LONG, 0, order, 0, count);
             return count;
@@ -713,9 +885,16 @@ public final class StringZilla {
             MemorySegment size = ar.allocate(JAVA_LONG.byteSize());
             MemorySegment fp = ar.allocate(JAVA_LONG.byteSize() * minN);
             MemorySegment sp = ar.allocate(JAVA_LONG.byteSize() * minN);
-            int status = (int)
-                    STRINGZILLA_SEQUENCE_INTERSECT.invokeExact(ta.sequence, tb.sequence, MemorySegment.NULL, seed, size, fp, sp);
-            if (status != 0) throw new IllegalStateException("sz_sequence_intersect failed with status " + status);
+            check("sz_sequence_intersect_best", (int) STRINGZILLA_SEQUENCE_INTERSECT.invokeExact(
+                    ta.sequence,
+                    tb.sequence,
+                    MemorySegment.NULL,
+                    seed,
+                    size,
+                    fp,
+                    sp,
+                    enabledCapabilities,
+                    MemorySegment.NULL));
             int count = (int) size.get(JAVA_LONG, 0);
             MemorySegment.copy(fp, JAVA_LONG, 0, firstPositions, 0, count);
             MemorySegment.copy(sp, JAVA_LONG, 0, secondPositions, 0, count);
@@ -906,12 +1085,131 @@ public final class StringZilla {
 
     // region Library Metadata
 
-    /** Active SIMD backend(s), e.g. "serial,haswell,skylake,icelake". */
-    public static String backend() {
+    /** Which runtime a device belongs to, as the {@code sz_<kind>_*} C functions name it. */
+    public enum DeviceKind {
+        CPU,
+        CUDA,
+        ROCM,
+        METAL
+    }
+
+    /** One device StringZilla can run on: the host CPU, or a GPU by its runtime's own ordinal, the one
+     *  {@code cudaSetDevice} or {@code hipSetDevice} takes, or the position in Metal's device list. Every call
+     *  of this class dispatches over the CPU's {@link #capabilitiesEnabled()}; GPUs only report their masks.
+     *
+     *  <p>Prefer {@link #capabilitiesEnabled()} unless you specifically mean one of the raw axes:
+     *  {@link #capabilitiesDetected()} describes the device and says nothing about whether a kernel was compiled
+     *  into this binary, so selecting on it alone claims support for code that may not exist. */
+    public record Device(DeviceKind kind, long ordinal) {
+
+        /** Device {@code ordinal} of {@code kind}, throwing {@link StatusException} past the last one. */
+        public Device {
+            java.util.Objects.requireNonNull(kind);
+            if (ordinal < 0 || ordinal >= count(kind))
+                throw new StatusException("Device(" + kind + ", " + ordinal + ")", STATUS_MISSING_GPU);
+        }
+
+        /** The host CPU, which every build has. */
+        public static Device cpu() {
+            return new Device(DeviceKind.CPU, 0);
+        }
+
+        /** How many devices of {@code kind} the process sees: one CPU, or the GPUs its runtime counts. Throws
+         *  {@link StatusException} without a GPU of {@code kind}. */
+        public static long count(DeviceKind kind) {
+            return switch (kind) {
+                case CPU -> 1;
+                case CUDA -> query(STRINGZILLA_CUDA_COUNT_DEVICES, "sz_cuda_count_devices");
+                case ROCM -> query(STRINGZILLA_ROCM_COUNT_DEVICES, "sz_rocm_count_devices");
+                case METAL -> query(STRINGZILLA_METAL_COUNT_DEVICES, "sz_metal_count_devices");
+            };
+        }
+
+        /** What this device runs, as a bitmask, whether or not this binary holds kernels for it. */
+        public long capabilitiesDetected() {
+            return switch (kind) {
+                case CPU -> query(STRINGZILLA_CPU_CAPABILITIES_DETECTED, "sz_cpu_capabilities_detected");
+                case CUDA -> query(STRINGZILLA_CUDA_CAPABILITIES_DETECTED, "sz_cuda_capabilities_detected", ordinal);
+                case ROCM -> query(STRINGZILLA_ROCM_CAPABILITIES_DETECTED, "sz_rocm_capabilities_detected", ordinal);
+                case METAL -> query(STRINGZILLA_METAL_CAPABILITIES_DETECTED, "sz_metal_capabilities_detected", ordinal);
+            };
+        }
+
+        /** What this binary holds kernels for on devices of this kind, as a bitmask, whether or not this one runs
+         *  them. Decided at build time. */
+        public long capabilitiesCompiled() {
+            return switch (kind) {
+                case CPU -> query(STRINGZILLA_CPU_CAPABILITIES_COMPILED, "sz_cpu_capabilities_compiled");
+                case CUDA -> query(STRINGZILLA_CUDA_CAPABILITIES_COMPILED, "sz_cuda_capabilities_compiled");
+                case ROCM -> query(STRINGZILLA_ROCM_CAPABILITIES_COMPILED, "sz_rocm_capabilities_compiled");
+                case METAL -> query(STRINGZILLA_METAL_CAPABILITIES_COMPILED, "sz_metal_capabilities_compiled");
+            };
+        }
+
+        /** What this device's calls pass, as a bitmask: {@link #capabilitiesDetected()} and
+         *  {@link #capabilitiesCompiled()} at once. On the CPU it is what every call of this class passes,
+         *  narrowed by {@link #capabilitiesEnable(long)}, and always includes the serial bit, {@code 1}. */
+        public long capabilitiesEnabled() {
+            return switch (kind) {
+                case CPU -> enabledCapabilities;
+                case CUDA -> query(STRINGZILLA_CUDA_CAPABILITIES_ENABLED, "sz_cuda_capabilities_enabled", ordinal);
+                case ROCM -> query(STRINGZILLA_ROCM_CAPABILITIES_ENABLED, "sz_rocm_capabilities_enabled", ordinal);
+                case METAL -> query(STRINGZILLA_METAL_CAPABILITIES_ENABLED, "sz_metal_capabilities_enabled", ordinal);
+            };
+        }
+
+        /** Makes {@code wanted} the CPU's {@link #capabilitiesEnabled()} set, clamped to what it detects and this
+         *  binary compiled and keeping the serial bit, and returns the set that took effect. Throws
+         *  {@link StatusException} on a GPU, which keeps no such set. */
+        public long capabilitiesEnable(long wanted) {
+            if (kind != DeviceKind.CPU) throw new StatusException(this + ".capabilitiesEnable", STATUS_MISSING_KERNEL);
+            long enabled = (wanted & query(STRINGZILLA_CPU_CAPABILITIES_ENABLED, "sz_cpu_capabilities_enabled")) | 1;
+            enabledCapabilities = enabled;
+            return enabled;
+        }
+
+        /** Prepares the calling thread for the kernels of {@code capabilities}, usually
+         *  {@link #capabilitiesEnabled()}; call it once on every thread that runs them. Throws
+         *  {@link StatusException} on a GPU, which has no thread state to configure. */
+        public void configureThread(long capabilities) {
+            if (kind != DeviceKind.CPU) throw new StatusException(this + ".configureThread", STATUS_MISSING_KERNEL);
+            try {
+                check("sz_cpu_configure_thread", (int) STRINGZILLA_CPU_CONFIGURE_THREAD.invokeExact(capabilities));
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+    }
+
+    /** Names the bits of {@code capabilities}, comma-separated, like {@code "serial,haswell,skylake"}. */
+    public static String capabilitiesName(long capabilities) {
+        byte[] names = new byte[CAPABILITIES_NAME_CAPACITY];
         try {
-            int caps = (int) STRINGZILLA_CAPABILITIES.invokeExact();
-            MemorySegment s = (MemorySegment) STRINGZILLA_CAPABILITIES_TO_STRING.invokeExact(caps);
-            return s.reinterpret(Long.MAX_VALUE).getString(0);
+            long written = (long) STRINGZILLA_NAME_CAPABILITIES.invokeExact(
+                    capabilities, MemorySegment.ofArray(names), (long) names.length);
+            return new String(names, 0, (int) written, StandardCharsets.UTF_8);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Calls a device {@code query} for its one out-word, a count or a capability mask. */
+    private static long query(MethodHandle query, String function) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment word = arena.allocate(JAVA_LONG);
+            check(function, (int) query.invokeExact(word));
+            return word.get(JAVA_LONG, 0);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Calls a device {@code query} of GPU {@code ordinal} for its capability mask. */
+    private static long query(MethodHandle query, String function, long ordinal) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment word = arena.allocate(JAVA_LONG);
+            check(function, (int) query.invokeExact(ordinal, word));
+            return word.get(JAVA_LONG, 0);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -935,6 +1233,43 @@ public final class StringZilla {
     }
 
     // endregion
+
+    /** A native call returned a non-success {@code sz_status_t}, kept in {@link #status()}. */
+    public static final class StatusException extends IllegalStateException {
+        private final int status;
+
+        StatusException(String function, int status) {
+            super(function + " failed with " + statusName(status) + " (" + status + ")");
+            this.status = status;
+        }
+
+        /** The raw {@code sz_status_t} code, e.g. -10 for {@code sz_bad_alloc_k}. */
+        public int status() {
+            return status;
+        }
+
+        /** The C enumerator name of {@link #status()}, e.g. {@code "sz_bad_alloc_k"}. */
+        public String statusName() {
+            return statusName(status);
+        }
+
+        private static String statusName(int status) {
+            return switch (status) {
+                case -10 -> "sz_bad_alloc_k";
+                case -12 -> "sz_invalid_utf8_k";
+                case -13 -> "sz_contains_duplicates_k";
+                case -14 -> "sz_overflow_risk_k";
+                case -15 -> "sz_unexpected_dimensions_k";
+                case -16 -> "sz_missing_gpu_k";
+                case -17 -> "sz_device_code_mismatch_k";
+                case -18 -> "sz_device_memory_mismatch_k";
+                case -19 -> "sz_authentication_failed_k";
+                case -20 -> "sz_missing_kernel_k";
+                case -21 -> "sz_missing_library_k";
+                default -> "sz_status_unknown_k";
+            };
+        }
+    }
 
     /** A 256-bit set of byte values. */
     public static final class Byteset {
@@ -980,7 +1315,8 @@ public final class StringZilla {
             // sz_hash_state_t is 216 bytes; over-allocate and 64-byte align for SIMD safety.
             state = arena.allocate(256, 64);
             try {
-                STRINGZILLA_HASH_STATE_INIT.invokeExact(state, seed);
+                check("sz_hash_state_init_best", (int)
+                        STRINGZILLA_HASH_STATE_INIT.invokeExact(state, seed, enabledCapabilities, MemorySegment.NULL));
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -988,7 +1324,12 @@ public final class StringZilla {
 
         public Hasher update(byte[] data) {
             try {
-                STRINGZILLA_HASH_STATE_UPDATE.invokeExact(state, MemorySegment.ofArray(data), (long) data.length);
+                check("sz_hash_state_update_best", (int) STRINGZILLA_HASH_STATE_UPDATE.invokeExact(
+                        state,
+                        MemorySegment.ofArray(data),
+                        (long) data.length,
+                        enabledCapabilities,
+                        MemorySegment.NULL));
                 return this;
             } catch (Throwable t) {
                 throw rethrow(t);
@@ -998,7 +1339,10 @@ public final class StringZilla {
         /** Finalize without mutating state (may be called repeatedly). */
         public long digest() {
             try {
-                return (long) STRINGZILLA_HASH_STATE_DIGEST.invokeExact(state);
+                long[] hash = new long[1];
+                check("sz_hash_state_digest_best", (int) STRINGZILLA_HASH_STATE_DIGEST.invokeExact(
+                        state, MemorySegment.ofArray(hash), enabledCapabilities, MemorySegment.NULL));
+                return hash[0];
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -1029,13 +1373,7 @@ public final class StringZilla {
             try (Arena a = Arena.ofConfined()) {
                 MemorySegment h = a.allocate(Math.max(haystack.length, 1));
                 MemorySegment.copy(haystack, 0, h, JAVA_BYTE, 0, haystack.length);
-                MemorySegment ml = a.allocate(JAVA_LONG.byteSize());
-                MemorySegment r = (MemorySegment)
-                        STRINGZILLA_UTF8_UNCASED_SEARCH.invokeExact(h, (long) haystack.length, needle, needleLen, meta, ml);
-                long off = r.address() == 0 ? -1 : r.address() - h.address();
-                return new Match(off, off < 0 ? 0 : ml.get(JAVA_LONG, 0));
-            } catch (Throwable e) {
-                throw rethrow(e);
+                return uncasedSearch(h.asSlice(0, haystack.length), needle.asSlice(0, needleLen), meta);
             }
         }
 
@@ -1053,7 +1391,8 @@ public final class StringZilla {
         public Sha256() {
             state = arena.allocate(128, 64); // sz_sha256_state_t is 112 bytes
             try {
-                STRINGZILLA_SHA256_INIT.invokeExact(state);
+                check("sz_sha256_state_init_best", (int)
+                        STRINGZILLA_SHA256_INIT.invokeExact(state, enabledCapabilities, MemorySegment.NULL));
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -1061,7 +1400,12 @@ public final class StringZilla {
 
         public Sha256 update(byte[] data) {
             try {
-                STRINGZILLA_SHA256_UPDATE.invokeExact(state, MemorySegment.ofArray(data), (long) data.length);
+                check("sz_sha256_state_update_best", (int) STRINGZILLA_SHA256_UPDATE.invokeExact(
+                        state,
+                        MemorySegment.ofArray(data),
+                        (long) data.length,
+                        enabledCapabilities,
+                        MemorySegment.NULL));
                 return this;
             } catch (Throwable t) {
                 throw rethrow(t);
@@ -1072,7 +1416,8 @@ public final class StringZilla {
         public void digest(byte[] destination) {
             if (destination.length < 32) throw new IllegalArgumentException("destination must hold at least 32 bytes");
             try {
-                STRINGZILLA_SHA256_DIGEST.invokeExact(state, MemorySegment.ofArray(destination));
+                check("sz_sha256_state_digest_best", (int) STRINGZILLA_SHA256_DIGEST.invokeExact(
+                        state, MemorySegment.ofArray(destination), enabledCapabilities, MemorySegment.NULL));
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -1119,11 +1464,23 @@ public final class StringZilla {
         return length == copy.byteSize() ? copy : copy.asSlice(0, length); // keep byteSize() the logical length
     }
 
+    /** A match inside a heap segment is an address the JVM never exposes, so it can't become an offset. */
+    private static void requireNative(MemorySegment haystack) {
+        if (!haystack.isNative()) throw new IllegalArgumentException("haystack must be an off-heap segment");
+    }
+
     private static long findByteset(MemorySegment haystack, MemorySegment bytesetSeg) {
         if (haystack.byteSize() == 0) return -1;
         try {
-            MemorySegment r = (MemorySegment) STRINGZILLA_FIND_BYTESET.invokeExact(haystack, haystack.byteSize(), bytesetSeg);
-            return r.address() == 0 ? -1 : r.address() - haystack.address();
+            long[] match = new long[1];
+            check("sz_find_byteset_best", (int) STRINGZILLA_FIND_BYTESET.invokeExact(
+                    haystack,
+                    haystack.byteSize(),
+                    bytesetSeg,
+                    MemorySegment.ofArray(match),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -1132,8 +1489,15 @@ public final class StringZilla {
     private static long rfindByteset(MemorySegment haystack, MemorySegment bytesetSeg) {
         if (haystack.byteSize() == 0) return -1;
         try {
-            MemorySegment r = (MemorySegment) STRINGZILLA_RFIND_BYTESET.invokeExact(haystack, haystack.byteSize(), bytesetSeg);
-            return r.address() == 0 ? -1 : r.address() - haystack.address();
+            long[] match = new long[1];
+            check("sz_rfind_byteset_best", (int) STRINGZILLA_RFIND_BYTESET.invokeExact(
+                    haystack,
+                    haystack.byteSize(),
+                    bytesetSeg,
+                    MemorySegment.ofArray(match),
+                    enabledCapabilities,
+                    MemorySegment.NULL));
+            return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -1661,50 +2025,32 @@ public final class StringZilla {
         private final MemorySegment data;
         private final MemorySegment needle;
         private final MemorySegment meta; // populated on first search, reused thereafter
-        private final MemorySegment matchedLengthOut;
         private final boolean overlapping;
         private long cursor;
         private Match current;
 
-        UncasedMatcher(
-                MemorySegment data,
-                MemorySegment needle,
-                MemorySegment meta,
-                MemorySegment matchedLengthOut,
-                boolean overlapping) {
+        UncasedMatcher(MemorySegment data, MemorySegment needle, MemorySegment meta, boolean overlapping) {
             this.data = data;
             this.needle = needle;
             this.meta = meta;
-            this.matchedLengthOut = matchedLengthOut;
             this.overlapping = overlapping;
         }
 
         public boolean next() {
             long textLength = data.byteSize();
-            if (cursor > textLength) return false;
-            try {
-                MemorySegment found = (MemorySegment) STRINGZILLA_UTF8_UNCASED_SEARCH.invokeExact(
-                        data.asSlice(cursor, textLength - cursor),
-                        textLength - cursor,
-                        needle,
-                        needle.byteSize(),
-                        meta,
-                        matchedLengthOut);
-                if (found.address() == 0) {
-                    cursor = textLength + 1;
-                    return false;
-                }
-                long offset = found.address() - data.address();
-                long matchedLength = matchedLengthOut.get(JAVA_LONG, 0);
-                current = new Match(offset, matchedLength);
-                // Overlapping advances one codepoint (not one byte): caseless folding is Unicode-aware, so
-                // the next search must start on a UTF-8 boundary rather than mid-codepoint.
-                cursor = offset
-                        + (overlapping ? utf8LeadWidth(data.get(JAVA_BYTE, offset)) : Math.max(matchedLength, 1));
-                return true;
-            } catch (Throwable t) {
-                throw rethrow(t);
+            if (needle.byteSize() == 0 || cursor > textLength) return false;
+            Match found = uncasedSearch(data.asSlice(cursor, textLength - cursor), needle, meta);
+            if (found.offset() < 0) {
+                cursor = textLength + 1;
+                return false;
             }
+            long offset = cursor + found.offset();
+            long matchedLength = found.matchedLength();
+            current = new Match(offset, matchedLength);
+            // Overlapping advances one codepoint (not one byte): caseless folding is Unicode-aware, so
+            // the next search must start on a UTF-8 boundary rather than mid-codepoint.
+            cursor = offset + (overlapping ? utf8LeadWidth(data.get(JAVA_BYTE, offset)) : Math.max(matchedLength, 1));
+            return true;
         }
 
         public Match current() {
@@ -1734,8 +2080,7 @@ public final class StringZilla {
             MemorySegment data = nativeView(haystack, arena);
             MemorySegment needleSeg = nativeView(needle, arena);
             MemorySegment meta = arena.allocate(64); // zeroed; the native dereferences it (NULL is unsafe)
-            MemorySegment matchedLengthOut = arena.allocate(JAVA_LONG.byteSize());
-            return new UncasedMatcher(data, needleSeg, meta, matchedLengthOut, overlapping);
+            return new UncasedMatcher(data, needleSeg, meta, overlapping);
         }
 
         public java.util.List<Match> toList() {

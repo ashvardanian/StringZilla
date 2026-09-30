@@ -16,7 +16,8 @@ func Contains(str string, substr string) bool {
 	strLen := len(str)
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	substrLen := len(substr)
-	matchPtr := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+	var matchPtr C.sz_cptr_t
+	check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, capabilities(), nil))
 	return matchPtr != nil
 }
 
@@ -31,11 +32,12 @@ func Index(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
-	matchPtr := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+	var matchPtr C.sz_cptr_t
+	check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, capabilities(), nil))
 	if matchPtr == nil {
 		return -1
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(strPtr)))
 }
 
 // LastIndex returns the index of the last instance of `substr` in `str`, or -1 if `substr`
@@ -49,11 +51,12 @@ func LastIndex(str string, substr string) int64 {
 	}
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
-	matchPtr := unsafe.Pointer(C.sz_rfind(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+	var matchPtr C.sz_cptr_t
+	check(C.sz_rfind_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, capabilities(), nil))
 	if matchPtr == nil {
 		return -1
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(strPtr)))
 }
 
 // IndexByte returns the index of the first instance of a byte in `str`, or -1 if a byte
@@ -63,11 +66,12 @@ func IndexByte(str string, c byte) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
 	cPtr := (*C.char)(unsafe.Pointer(&c))
-	matchPtr := unsafe.Pointer(C.sz_find_byte(strPtr, C.ulong(strLen), cPtr))
+	var matchPtr C.sz_cptr_t
+	check(C.sz_find_byte_best(strPtr, C.sz_size_t(strLen), cPtr, &matchPtr, capabilities(), nil))
 	if matchPtr == nil {
 		return -1
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(strPtr)))
 }
 
 // LastIndexByte returns the index of the last instance of a byte in `str`, or -1 if a byte
@@ -77,11 +81,20 @@ func LastIndexByte(str string, c byte) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
 	cPtr := (*C.char)(unsafe.Pointer(&c))
-	matchPtr := unsafe.Pointer(C.sz_rfind_byte(strPtr, C.ulong(strLen), cPtr))
+	var matchPtr C.sz_cptr_t
+	check(C.sz_rfind_byte_best(strPtr, C.sz_size_t(strLen), cPtr, &matchPtr, capabilities(), nil))
 	if matchPtr == nil {
 		return -1
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(strPtr)))
+}
+
+// byteset packs the bytes of `set` into an sz_byteset_t's four words, like sz_byteset_add_u8.
+func byteset(set string) (words [4]uint64) {
+	for i := 0; i < len(set); i++ {
+		words[set[i]>>6] |= 1 << (set[i] & 63)
+	}
+	return words
 }
 
 // IndexAny returns the index of the first instance of any byte from `substr` in `str`, or -1
@@ -91,13 +104,14 @@ func LastIndexByte(str string, c byte) int64 {
 func IndexAny(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
-	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
-	substrLen := len(substr)
-	matchPtr := unsafe.Pointer(C.sz_find_byte_from(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+	set := byteset(substr)
+	var matchPtr C.sz_cptr_t
+	check(C.sz_find_byteset_best(strPtr, C.sz_size_t(strLen), (*C.sz_byteset_t)(unsafe.Pointer(&set)), &matchPtr,
+		capabilities(), nil))
 	if matchPtr == nil {
 		return -1
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(strPtr)))
 }
 
 // LastIndexAny returns the index of the last instance of any byte from `substr` in `str`, or
@@ -107,13 +121,14 @@ func IndexAny(str string, substr string) int64 {
 func LastIndexAny(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
-	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
-	substrLen := len(substr)
-	matchPtr := unsafe.Pointer(C.sz_rfind_byte_from(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+	set := byteset(substr)
+	var matchPtr C.sz_cptr_t
+	check(C.sz_rfind_byteset_best(strPtr, C.sz_size_t(strLen), (*C.sz_byteset_t)(unsafe.Pointer(&set)), &matchPtr,
+		capabilities(), nil))
 	if matchPtr == nil {
 		return -1
 	}
-	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
+	return int64(uintptr(unsafe.Pointer(matchPtr)) - uintptr(unsafe.Pointer(strPtr)))
 }
 
 // Count returns the number of overlapping or non-overlapping instances of `substr` in `str`.
@@ -132,27 +147,21 @@ func Count(str string, substr string, overlap bool) int64 {
 		return 0
 	}
 
+	step := substrLen
+	if overlap {
+		step = 1
+	}
 	count := int64(0)
-	if overlap == true {
-		for strLen > 0 {
-			matchPtr := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
-			if matchPtr == nil {
-				break
-			}
-			count += 1
-			strLen -= (1 + int64(uintptr(matchPtr)-uintptr(unsafe.Pointer(strPtr))))
-			strPtr = (*C.char)(unsafe.Add(matchPtr, 1))
+	for strLen > 0 {
+		var matchPtr C.sz_cptr_t
+		check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr,
+			capabilities(), nil))
+		if matchPtr == nil {
+			break
 		}
-	} else {
-		for strLen > 0 {
-			matchPtr := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
-			if matchPtr == nil {
-				break
-			}
-			count += 1
-			strLen -= (substrLen + int64(uintptr(matchPtr)-uintptr(unsafe.Pointer(strPtr))))
-			strPtr = (*C.char)(unsafe.Add(matchPtr, substrLen))
-		}
+		count += 1
+		strLen -= step + int64(uintptr(unsafe.Pointer(matchPtr))-uintptr(unsafe.Pointer(strPtr)))
+		strPtr = (*C.char)(unsafe.Add(unsafe.Pointer(matchPtr), step))
 	}
 
 	return count

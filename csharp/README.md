@@ -135,6 +135,8 @@ long[] secondPositions = new long[firstPositions.Length];
 int matches = Sz.Intersect(left, right, firstPositions, secondPositions); // matching index pairs
 ```
 
+A failed native call throws `StatusException`, whose `Status` is the C `sz_status_t` code and `StatusName` its enumerator name.
+
 ## Zero-Copy in Unity
 
 StringZilla's native byte kernels are a strong fit for Unity's `NativeArray<byte>` (loaded text assets, network buffers), searched and hashed without marshalling.
@@ -153,11 +155,32 @@ The managed package targets `net8.0`, which loads on Unity 6.2+ with the CoreCLR
 On older Unity (Mono/IL2CPP), drop the platform native library into `Assets/Plugins/<platform>/` and call the same API.
 The native binary itself is Unity-compatible; only the managed wrapper's target framework is the gate.
 
-## Runtime Dispatch
+## Capabilities and Runtime Selection
 
-The bundled library auto-selects the best SIMD backend for the host CPU at load time.
+A `Device` is the host CPU or one GPU, by its runtime's own ordinal, and reports capability bitmasks with the serial fallback at bit 0.
+Every call of this binding dispatches to the best kernel among the CPU's enabled capabilities; a GPU device only reports its masks here.
 
 ```csharp
-Console.WriteLine(Sz.Backend); // e.g. "serial,haswell,skylake,icelake"
+Device cpu = Device.Cpu;
+ulong enabled = cpu.CapabilitiesEnabled;                      // what dispatch uses
+Console.WriteLine(Sz.CapabilitiesName(enabled));              // like "serial,neon,neonaes,neonsha"
+cpu.CapabilitiesEnable(1);                                    // narrow dispatch to the serial kernels
+cpu.CapabilitiesEnable(ulong.MaxValue);                       // back to everything this CPU and binary support
+ulong gpus = Device.Count(DeviceKind.Metal);                  // throws StatusException without a Metal GPU
+ulong metal = new Device(DeviceKind.Metal, 0).CapabilitiesEnabled;
 Console.WriteLine(Sz.Version);
 ```
+
+- `Device.Cpu` is the host CPU, which every build has, and `new Device(kind, ordinal)` is device `ordinal` of `DeviceKind.Cuda`, `Rocm` or `Metal`.
+- `Device.Count(kind)` is how many devices of `kind` the process sees: one CPU, or the GPUs its runtime counts.
+- `CapabilitiesDetected` is what the device can execute, from CPUID or HWCAP on the CPU.
+- `CapabilitiesCompiled` is what this binary contains for devices of that kind, from the ISA probes at build time.
+- `CapabilitiesEnabled` is what calls pass, both axes at once; on the CPU it is what dispatch uses, narrowed by `CapabilitiesEnable`, and always contains serial.
+- `CapabilitiesEnable(wanted)` makes `wanted` the CPU's enabled set, clamped to both axes, and returns what took effect.
+- `ConfigureThread(capabilities)` prepares the calling thread for the kernels of `capabilities`, usually `CapabilitiesEnabled`, once per thread that runs them.
+- `Sz.CapabilitiesName(capabilities)` spells a mask as comma-separated capability names.
+
+Reach for `CapabilitiesEnabled` unless you specifically mean one of the raw axes.
+`CapabilitiesDetected` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
+The CPU's enabled set is process-wide and shared by every thread.
+A `StatusException` reports misuse: `sz_missing_gpu_k` for a GPU kind without devices or an ordinal past the last one, and `sz_missing_kernel_k` for `CapabilitiesEnable` or `ConfigureThread` on a GPU, which keeps no such set or thread state.

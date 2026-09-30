@@ -3,9 +3,7 @@ scripts/
 .github/
 .vscode/
 .releaserc
-CMakeLists.txt
 pyproject.toml
-setup.py
 stringzilla.jpeg
 .clang-format
 .gitignore

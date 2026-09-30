@@ -463,7 +463,7 @@ def test_unit_backend_differential_sha256(length, seed_value):
     expected_hex = expected_digest.hex()
 
     for config in capability_sweep():
-        with forced_capabilities(*config):
+        with forced_capabilities(config):
             assert sz.sha256(text) == expected_digest
             assert sz.sha256(text.encode()) == expected_digest
             assert Str(text).sha256() == expected_digest
@@ -484,7 +484,7 @@ def test_unit_backend_differential_sha256_chunked(length, seed_value):
     expected_digest = hashlib.sha256(text.encode()).digest()
 
     for config in capability_sweep():
-        with forced_capabilities(*config):
+        with forced_capabilities(config):
             chunk_size = max(1, length // 3)
 
             chunked = sz.Sha256()

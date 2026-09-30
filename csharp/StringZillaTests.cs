@@ -100,8 +100,41 @@ public class StringZillaTests {
 
     [Fact]
     public void Metadata_IsPopulated() {
-        Assert.False(string.IsNullOrEmpty(Sz.Backend));
+        Assert.Equal("serial", Sz.CapabilitiesName(1));
         Assert.True(Sz.Version.Major >= 4);
+    }
+
+    [Fact]
+    public void Capabilities_EnableClampsAndKeepsSerial() {
+        Device cpu = Device.Cpu;
+        ulong enabled = cpu.CapabilitiesEnabled;
+        try {
+            Assert.Equal(1UL, enabled & 1);
+            Assert.Equal(0UL, enabled & ~(cpu.CapabilitiesDetected & cpu.CapabilitiesCompiled));
+            Assert.Equal(1UL, cpu.CapabilitiesEnable(0));
+            Assert.Equal(1UL, cpu.CapabilitiesEnabled);
+            Assert.Equal(6L, Sz.IndexOf(B("hello world"), B("world")));
+        }
+        finally {
+            Assert.Equal(enabled, cpu.CapabilitiesEnable(enabled));
+        }
+    }
+
+    [Fact]
+    public void Devices_RefuseOrdinalsPastTheLastAndCpuOnlyCalls() {
+        Assert.Equal(1UL, Device.Count(DeviceKind.Cpu));
+        Assert.Throws<StatusException>(() => new Device(DeviceKind.Cpu, 1));
+        Device.Cpu.ConfigureThread(Device.Cpu.CapabilitiesEnabled);
+        foreach (DeviceKind kind in new[] { DeviceKind.Cuda, DeviceKind.Rocm, DeviceKind.Metal }) {
+            ulong count;
+            try { count = Device.Count(kind); }
+            catch (StatusException) { continue; }
+            Assert.Throws<StatusException>(() => new Device(kind, count));
+            Device gpu = new(kind, 0);
+            Assert.Equal(0UL, gpu.CapabilitiesCompiled & ((1UL << 48) - 1));
+            Assert.Throws<StatusException>(() => gpu.CapabilitiesEnable(ulong.MaxValue));
+            Assert.Throws<StatusException>(() => gpu.ConfigureThread(ulong.MaxValue));
+        }
     }
 
     #region Codepoints
@@ -285,6 +318,13 @@ public class StringZillaTests {
         byte[] precomposed = { 0xC3, 0xA9 }; // é U+00E9
         byte[] decomposed = Sz.Normalize(precomposed, Sz.NormalForm.Nfd);
         Assert.Equal(precomposed, Sz.Normalize(decomposed, Sz.NormalForm.Nfc)); // NFC ∘ NFD is identity here
+    }
+
+    [Fact]
+    public void Normalize_RejectsTextWhoseBoundOverflowsInt() {
+        byte[] text = new byte[int.MaxValue / 18 + 1]; // text.Length * 18 wraps past int.MaxValue
+        Assert.Throws<ArgumentException>(() => Sz.Normalize(text, Sz.NormalForm.Nfc, new byte[16]));
+        Assert.Throws<OverflowException>(() => Sz.Normalize(text, Sz.NormalForm.Nfc));
     }
 
     #endregion
@@ -524,6 +564,14 @@ public class StringZillaTests {
     }
 
     [Fact]
+    public void EnumerateUncasedMatches_EmptyNeedleYieldsNothing() {
+        int count = 0;
+        foreach (var _ in Sz.EnumerateUncasedMatches(B("abc"), default)) count++;
+        foreach (var _ in Sz.EnumerateUncasedMatches(B("abc"), default).Overlapping()) count++;
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
     public void Partition_SplitsAtFirst() {
         var (before, separator, after) = Sz.Partition(B("key=value=tail"), "="u8);
         Assert.Equal("key", Encoding.UTF8.GetString(before));
@@ -556,6 +604,14 @@ public class StringZillaTests {
         int count = Sz.ArgSort(text, starts, lengths, order);
         Assert.Equal(3, count);
         Assert.Equal(new long[] { 1, 0, 2 }, order.ToArray()); // apple, banana, cherry
+    }
+
+    [Fact]
+    public void ArgSort_RejectsSegmentsPastText() {
+        byte[] text = B("banana\napple");
+        long[] order = new long[2];
+        Assert.Throws<ArgumentOutOfRangeException>(() => Sz.ArgSort(text, new long[] { 0, 7 }, new long[] { 6, 6 }, order));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Sz.ArgSort(text, new long[] { -1, 7 }, new long[] { 6, 5 }, order));
     }
 
     #endregion
