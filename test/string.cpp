@@ -15,17 +15,6 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/*  Overload the following with caution. Those parameters must never be explicitly set during
- *  releases, but they come handy during development, to validate different ISA-specific backends:
- *
- *      #define STRINGZILLA_TARGET_WESTMERE 0
- *      #define STRINGZILLA_TARGET_HASWELL 0
- *      #define STRINGZILLA_TARGET_GOLDMONT 0
- *      #define STRINGZILLA_TARGET_SKYLAKE 0
- *      #define STRINGZILLA_TARGET_ICELAKE 0
- *      #define STRINGZILLA_TARGET_NEON 0
- *      #define STRINGZILLA_TARGET_SVE 0
- *      #define STRINGZILLA_TARGET_SVE2 0 */
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
 #endif
@@ -62,6 +51,7 @@
 
 #include <fmt/format.h>
 
+#include "cross.hpp"   // `check_memory_unit_`, `memory_backend_t`, `lookup_backend_t`
 #include "harness.hpp" // `randomize_string`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
@@ -99,7 +89,9 @@ inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size
 /** Stateful allocator charging each byte to its counter, so two over distinct counters differ. */
 struct accounting_allocator_t {
     using value_type = char;
-    std::size_t *live_bytes = nullptr;
+    std::size_t *live_bytes;
+
+    explicit accounting_allocator_t(std::size_t *live_bytes) noexcept : live_bytes(live_bytes) {}
 
     char *allocate(std::size_t count) {
         *live_bytes += count;
@@ -115,6 +107,14 @@ struct accounting_allocator_t {
     bool operator==(accounting_allocator_t const &) const noexcept = default;
 };
 
+/** Allocator that throws on every request, as @c std::allocator does once memory runs out. */
+struct throwing_allocator_t {
+    using value_type = char;
+    char *allocate(std::size_t) { throw std::bad_alloc(); }
+    void deallocate(char *, std::size_t) noexcept {}
+    bool operator==(throwing_allocator_t const &) const noexcept = default;
+};
+
 /** Runs @p callback and asserts that it leaves @p live_bytes unchanged. */
 template <typename callback_type_>
 void assert_balanced_memory(std::size_t const &live_bytes, callback_type_ callback) {
@@ -123,68 +123,12 @@ void assert_balanced_memory(std::size_t const &live_bytes, callback_type_ callba
     verify(live_bytes == before && "Callback leaked or double-freed tracked allocator bytes");
 }
 
-/**
- *  @brief Runs one movement backend (copy/move/fill) through hand-verifiable known-answer vectors.
- *
- *  Mirrors the SHA256 known-answer helper in `hash.cpp`: each ISA tier feeds its kernel pointers
- *  here, so the dispatched C API and every natively-compiled backend share a single ground-truth
- *  check. Guard bytes past @c length catch stray writes.
- */
-static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
+/** The copy, move and fill dispatch points, in the shape of their kernels. */
+static memory_backend_t const memory_dispatched {"dispatched", cpu_best<sz_copy_best>, cpu_best<sz_move_best>,
+                                                 cpu_best<sz_fill_best>};
 
-    // `copy` duplicates a known buffer byte-for-byte. We over-allocate the target so a stray write
-    // past `length` is visible as a corrupted guard byte.
-    {
-        char const source[] = "The quick brown fox"; // 19 bytes + terminator
-        sz_size_t const length = (sz_size_t)(sizeof(source) - 1);
-        char target[sizeof(source) + 1];
-        std::memset(target, '#', sizeof(target));
-        copy(target, source, length);
-        verify(std::memcmp(target, source, length) == 0 && "Copy backend diverged from the known-answer source");
-        verify(target[length] == '#' && "Copy backend wrote past the requested length");
-    }
-
-    // `move` handles overlapping regions. Shifting "abcdef" left-into-itself by two yields "cdef" at the front.
-    {
-        char const expected[] = "cdef"; // After moving "cdef" (offset 2, 4 bytes) to offset 0
-        char buffer[] = "abcdef";
-        move(buffer, buffer + 2, 4);
-        verify(std::memcmp(buffer, expected, 4) == 0 && "Move backend produced wrong bytes for overlapping shift");
-    }
-
-    // `fill` writes a known byte across a known span, leaving a guard byte untouched.
-    {
-        char const expected[] = "*****"; // Five asterisks
-        char target[5 + 1];
-        std::memset(target, '#', sizeof(target));
-        fill(target, 5, (sz_u8_t)'*');
-        verify(std::memcmp(target, expected, 5) == 0 && "Fill backend produced wrong bytes for the known pattern");
-        verify(target[5] == '#' && "Fill backend wrote past the requested length");
-    }
-}
-
-/**
- *  @brief Runs one byte-lookup backend through a hand-verifiable known-answer vector.
- *
- *  The upper-casing table maps "Hello, World!" to "HELLO, WORLD!" while leaving punctuation and
- *  digits intact; a guard byte past @c length catches stray writes.
- */
-static void check_lookup_unit_(sz_lookup_t lookup) {
-    // An ASCII upper-casing table, built locally so the known-answer is verified against an external ground truth.
-    char upper_table[256];
-    for (sz_size_t byte_value = 0; byte_value != 256; ++byte_value) {
-        char const character = (char)(unsigned char)byte_value;
-        upper_table[byte_value] = (character >= 'a' && character <= 'z') ? (char)(character - 'a' + 'A') : character;
-    }
-    char const source[] = "Hello, World!"; // 13 bytes
-    char const expected[] = "HELLO, WORLD!";
-    sz_size_t const length = (sz_size_t)(sizeof(source) - 1);
-    char target[sizeof(source) + 1];
-    std::memset(target, '#', sizeof(target));
-    lookup(target, length, source, upper_table);
-    verify(std::memcmp(target, expected, length) == 0 && "Lookup backend diverged from the known-answer upper-casing");
-    verify(target[length] == '#' && "Lookup backend wrote past the requested length");
-}
+/** The lookup dispatch point, in the shape of its kernels. */
+static lookup_backend_t const lookup_dispatched {"dispatched", cpu_best<sz_lookup_best>};
 
 #pragma endregion Helpers
 
@@ -310,15 +254,15 @@ void test_sequence_unit() {
     }
 }
 
-/** Validates that @c arrow_strings_tape::try_assign works with multi-pass forward iterators. It
+/** Validates that @c arrow_strings_tape::assign works with multi-pass forward iterators. It
  *  walks the range twice, once to measure and once to copy, so single-pass input iterators like
  *  @c std::istream_iterator are rejected at compile time. */
 void test_strings_tape_assign_unit() {
     sz::arrow_strings_tape<char, std::uint32_t, std::allocator<char>> tape;
 
-    // A forward list can only be walked forward, but any number of times - exactly what `try_assign` needs.
+    // A forward list is walked forward only, but any number of times - all that `assign` needs.
     std::forward_list<std::string> strings {"alpha", "", "gamma"};
-    verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::success_k);
+    verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::success_k);
     verify(tape.size() == 3);
     verify(sz::string_view_t(tape[0].data(), tape[0].size()) == "alpha"_sv);
     verify(tape[1].size() == 0);
@@ -334,9 +278,9 @@ void test_strings_tape_overflow_unit() {
     {
         tape_t tape;
         std::string const oversized_string(200, 'x');
-        verify(tape.try_append(sz::to_view(oversized_string)) == sz::status_t::success_k);
+        verify(tape.append(sz::to_view(oversized_string)) == sz::status_t::success_k);
         // Two 200-byte strings need 402 bytes of buffer, past the 255 maximum of 8-bit offsets.
-        verify(tape.try_append(sz::to_view(oversized_string)) == sz::status_t::overflow_risk_k);
+        verify(tape.append(sz::to_view(oversized_string)) == sz::status_t::overflow_risk_k);
         verify(tape.size() == 1);
         // The first string must still sit at offset 0, ending at 201 with its NULL terminator.
         verify(tape.offsets()[0] == 0);
@@ -348,9 +292,9 @@ void test_strings_tape_overflow_unit() {
     {
         tape_t tape;
         std::string const stored_string(10, 'z');
-        verify(tape.try_append(sz::to_view(stored_string)) == sz::status_t::success_k);
+        verify(tape.append(sz::to_view(stored_string)) == sz::status_t::success_k);
         std::vector<std::string> strings {std::string(200, 'x'), std::string(200, 'y')};
-        verify(tape.try_assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
+        verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
         // A rejected assignment releases the old contents, so the tape must not keep reporting them.
         verify(tape.size() == 0);
     }
@@ -365,28 +309,28 @@ void test_allocator_unit() {
     // Our behavior for `malloc(0)` is to return a NULL pointer,
     // while the standard is implementation-defined.
     {
-        sz_memory_allocator_t alloc;
-        sz_memory_allocator_init_default(&alloc);
-        verify(alloc.allocate(0, alloc.handle) == nullptr);
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_default(&allocator);
+        verify(allocator.allocate(0, allocator.handle) == nullptr);
     }
 
     // Non-NULL allocation
     {
-        sz_memory_allocator_t alloc;
-        sz_memory_allocator_init_default(&alloc);
-        void *byte = alloc.allocate(1, alloc.handle);
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_default(&allocator);
+        void *byte = allocator.allocate(1, allocator.handle);
         verify(byte != nullptr && "Default allocator returned NULL for a non-zero-length allocation");
-        alloc.free(byte, 1, alloc.handle);
+        allocator.free(byte, 1, allocator.handle);
     }
 
     // Use a fixed buffer
     {
         char buffer[1024];
-        sz_memory_allocator_t alloc;
-        sz_memory_allocator_init_fixed(&alloc, buffer, sizeof(buffer));
-        void *byte = alloc.allocate(1, alloc.handle);
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_fixed(&allocator, buffer, sizeof(buffer));
+        void *byte = allocator.allocate(1, allocator.handle);
         verify(byte != nullptr && "Fixed-buffer allocator returned NULL for an allocation that should fit");
-        alloc.free(byte, 1, alloc.handle);
+        allocator.free(byte, 1, allocator.handle);
     }
 }
 
@@ -469,79 +413,15 @@ void test_ascii_unit() {
 #pragma region Memory
 
 /**
- *  @brief Known-answer and coverage tests for the memory primitives, the C-level string blocks.
+ *  @brief Known-answer tests for the memory dispatch points and the C++ string wrappers.
  *
- *  Starts with known-answer vectors that exercise each function through the dispatched C API with
- *  automatic kernel resolution, through the natively-compiled backend kernels directly with manual
- *  propagation to a specific kernel, and through the C++ `sz::` wrappers, so a regression that the
- *  serial-vs-SIMD agreement tests would miss - because both share a wrong constant - is still
- *  caught against an external ground truth. It then mirrors a large set of @c sz::memcpy,
- *  @c sz::memset, and @c sz::memmove operations against their `std::` counterparts, using a large
- *  heap-allocated buffer to cover the larger-than-L2-cache code paths, various chunk sizes,
- *  overlapping regions, and both forward and backward traversals.
+ *  A regression that the serial-vs-SIMD agreement tests would miss - because both share a wrong
+ *  constant - is still caught against an external ground truth; the kernels of each capability face
+ *  the same vectors in `cross_<arch>.cpp`.
  */
-void test_memory_unit(std::size_t max_l2_size) {
-    // Movement known-answers, through the dispatched C API and every natively-compiled backend.
-    check_memory_unit_(sz_copy, sz_move, sz_fill);
-    check_memory_unit_(sz_copy_serial, sz_move_serial, sz_fill_serial);
-#if STRINGZILLA_TARGET_HASWELL
-    check_memory_unit_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    check_memory_unit_(sz_copy_skylake, sz_move_skylake, sz_fill_skylake);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    check_memory_unit_(sz_copy_neon, sz_move_neon, sz_fill_neon);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    check_memory_unit_(sz_copy_sve, sz_move_sve, sz_fill_sve);
-#endif
-#if STRINGZILLA_TARGET_V128
-    check_memory_unit_(sz_copy_v128, sz_move_v128, sz_fill_v128);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    check_memory_unit_(sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    check_memory_unit_(sz_copy_rvv, sz_move_rvv, sz_fill_rvv);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    check_memory_unit_(sz_copy_lasx, sz_move_lasx, sz_fill_lasx);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    check_memory_unit_(sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx);
-#endif
-
-    // Lookup known-answers, through the dispatched C API and every natively-compiled backend.
-    check_lookup_unit_(sz_lookup);
-    check_lookup_unit_(sz_lookup_serial);
-#if STRINGZILLA_TARGET_HASWELL
-    check_lookup_unit_(sz_lookup_haswell);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    check_lookup_unit_(sz_lookup_icelake);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    check_lookup_unit_(sz_lookup_neon);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    check_lookup_unit_(sz_lookup_sve);
-#endif
-#if STRINGZILLA_TARGET_V128
-    check_lookup_unit_(sz_lookup_v128);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    check_lookup_unit_(sz_lookup_v128relaxed);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    check_lookup_unit_(sz_lookup_rvv);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    check_lookup_unit_(sz_lookup_lasx);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    check_lookup_unit_(sz_lookup_powervsx);
-#endif
+void test_memory_unit() {
+    check_memory_unit_(memory_dispatched);
+    check_lookup_unit_(lookup_dispatched);
 
     // C++ wrapper sanity: a couple of `sz::string_t` / `sz::string_view_t` known-answer reads alongside the C API.
     {
@@ -556,22 +436,6 @@ void test_memory_unit(std::size_t max_l2_size) {
         verify(sz::string_t("apple").compare("banana") < 0);
     }
 
-    // The C++ movement wrappers must agree with the known-answers, including overlapping `memmove`.
-    {
-        char const fox[] = "The quick brown fox";
-        char target[sizeof(fox) + 1];
-        let_verify(std::memset(target, '#', sizeof(target)), //
-                   (sz::memcpy(target, fox, sizeof(fox) - 1), std::memcmp(target, fox, sizeof(fox) - 1) == 0) &&
-                       target[sizeof(fox) - 1] == '#');
-
-        char overlap[] = "abcdef";
-        let_verify(sz::memmove(overlap, overlap + 2, 4), std::memcmp(overlap, "cdef", 4) == 0);
-
-        char asterisks[5 + 1];
-        let_verify(std::memset(asterisks, '#', sizeof(asterisks)), //
-                   (sz::memset(asterisks, '*', 5), std::memcmp(asterisks, "*****", 5) == 0) && asterisks[5] == '#');
-    }
-
     // Embedded NUL must be preserved verbatim by a stored `sz::string_t`: the size is the full byte length, and
     // indexing past the interior NUL reaches the trailing bytes rather than stopping at the C-string boundary.
     {
@@ -583,156 +447,14 @@ void test_memory_unit(std::size_t max_l2_size) {
         verify(owned == sz::string_view_t(with_nul, sizeof(with_nul)));
     }
 
-    // We will be mirroring the operations on both standard and StringZilla strings.
-    std::string text_stl(max_l2_size, '-');
-    std::string text_sz(max_l2_size, '-');
-    expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
-
-    // The traditional `memset` and `memcpy` functions are undefined for zero-length buffers and NULL pointers
-    // for older C standards.  However, with the N3322 proposal for C2y, that issue has been resolved.
-    // https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
-    //
-    // Let's make sure, that our versions don't trigger any undefined behavior.
-    sz::memset(NULL, 0, 0);
-    sz::memcpy(NULL, NULL, 0);
-    sz::memmove(NULL, NULL, 0);
-
-    // First start with simple deterministic tests.
-    // Let's use `memset` to fill the strings with a pattern like "122333444455555...00000000000011111111111..."
-    std::size_t count_groups = 0;
-    for (std::size_t offset = 0, fill_length = 1; offset < max_l2_size;
-         offset += fill_length, ++fill_length, ++count_groups) {
-        char fill_value = '0' + fill_length % 10;
-        fill_length = offset + fill_length > max_l2_size ? max_l2_size - offset : fill_length;
-        std::memset((void *)(text_stl.data() + offset), fill_value, fill_length);
-        sz::memset((void *)(text_sz.data() + offset), fill_value, fill_length);
-        expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
-    }
-
-    // Let's copy those chunks to an empty buffer one by one, validating the overall equivalency after every copy.
-    std::string copy_stl(max_l2_size, '-');
-    std::string copy_sz(max_l2_size, '-');
-    for (std::size_t offset = 0, fill_length = 1; offset < max_l2_size; offset += fill_length, ++fill_length) {
-        fill_length = offset + fill_length > max_l2_size ? max_l2_size - offset : fill_length;
-        std::memcpy((void *)(copy_stl.data() + offset), (void *)(text_stl.data() + offset), fill_length);
-        sz::memcpy((void *)(copy_sz.data() + offset), (void *)(text_sz.data() + offset), fill_length);
-        expect_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
-    }
-    expect_equality(text_stl.data(), copy_stl.data(), max_l2_size);
-    expect_equality(text_sz.data(), copy_sz.data(), max_l2_size);
-
-    // Let's simulate a realistic `memmove` workloads, compacting parts of this buffer, removing all odd values,
-    // so the buffer will look like "224444666666..."
-    for (std::size_t offset = 0, fill_length = 1; offset < max_l2_size; offset += fill_length, ++fill_length) {
-        if (fill_length % 2 == 0) continue;             // Skip even chunks
-        if (offset + fill_length >= max_l2_size) break; // This is the last & there are no more even chunks to shift
-
-        // Make sure we don't overflow the buffer
-        std::size_t next_offset = offset + fill_length;
-        std::size_t next_fill_length = fill_length + 1;
-        next_fill_length = next_offset + next_fill_length > max_l2_size ? max_l2_size - next_offset : next_fill_length;
-
-        std::memmove((void *)(text_stl.data() + offset), (void *)(text_stl.data() + next_offset), next_fill_length);
-        sz::memmove((void *)(text_sz.data() + offset), (void *)(text_sz.data() + next_offset), next_fill_length);
-        expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
-    }
-
-    // Now the opposite workload, expanding the buffer, inserting a dash "-" before every group of equal characters.
-    // We will need to navigate right-to left to avoid overwriting the groups.
-    std::size_t dashed_capacity = copy_stl.size() + count_groups;
-    std::size_t dashed_length = 0;
-    copy_stl.resize(dashed_capacity);
-    copy_sz.resize(dashed_capacity);
-    for (std::size_t reverse_offset = 0; reverse_offset < max_l2_size;) {
-
-        // Walk backwards to find the length of the current group
-        std::size_t offset = max_l2_size - reverse_offset - 1;
-        std::size_t fill_length = 1;
-        while (offset > 0 && copy_stl[offset - 1] == copy_stl[offset]) --offset, ++fill_length;
-
-        std::size_t new_offset = dashed_capacity - dashed_length - fill_length;
-        std::memmove((void *)(copy_stl.data() + new_offset), (void *)(copy_stl.data() + offset), fill_length);
-        sz::memmove((void *)(copy_sz.data() + new_offset), (void *)(copy_sz.data() + offset), fill_length);
-        expect_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
-
-        copy_stl[new_offset] = '-';
-        copy_sz[new_offset] = '-';
-        dashed_length += fill_length + 1;
-        reverse_offset += fill_length;
-    }
-}
-
-/** Tests memory utilities on buffers over 1 MB, which take special code paths in the AVX2 and
- *  AVX-512 implementations: the bidirectional traversal optimization used for huge buffers. */
-void test_memory_large_unit() {
-    // Test sizes that trigger the "huge buffer" path (> 1MB)
-    std::vector<std::size_t> test_sizes = {
-        1024ull * 1024ull + 1,       // Just over 1MB
-        1024ull * 10ull * 103ull,    // From GitHub issue #228: 1,055,360 bytes
-        2ull * 1024ull * 1024ull,    // 2MB
-        3ull * 1024ull * 1024ull + 7 // 3MB + 7 (unaligned size)
-    };
-
-    for (std::size_t size : test_sizes) {
-        // Test memcpy with aligned buffers
-        {
-            std::vector<char> source(size);
-            std::vector<char> target_std(size);
-            std::vector<char> target_sz(size);
-
-            // Fill source with pattern to detect copying errors
-            for (std::size_t i = 0; i < size; i++) { source[i] = static_cast<char>('A' + (i % 26)); }
-
-            std::memcpy(target_std.data(), source.data(), size);
-            sz::memcpy(target_sz.data(), source.data(), size);
-
-            expect_equality(target_std.data(), target_sz.data(), size);
-        }
-
-        // Test memcpy with unaligned buffers
-        {
-            std::vector<char> source_buffer(size + 64);
-            std::vector<char> target_std_buffer(size + 64);
-            std::vector<char> target_sz_buffer(size + 64);
-
-            // Use unaligned pointers
-            char *source = source_buffer.data() + 7;
-            char *target_std = target_std_buffer.data() + 11;
-            char *target_sz = target_sz_buffer.data() + 11;
-
-            for (std::size_t i = 0; i < size; i++) { source[i] = static_cast<char>('a' + (i % 26)); }
-
-            std::memcpy(target_std, source, size);
-            sz::memcpy(target_sz, source, size);
-
-            expect_equality(target_std, target_sz, size);
-        }
-
-        // Test memset
-        {
-            std::vector<char> buf_std(size);
-            std::vector<char> buf_sz(size);
-
-            std::memset(buf_std.data(), 'Z', size);
-            sz::memset(buf_sz.data(), 'Z', size);
-
-            expect_equality(buf_std.data(), buf_sz.data(), size);
-        }
-
-        // Test memmove with overlapping regions
-        {
-            std::vector<char> buf_std(size);
-            std::vector<char> buf_sz(size);
-
-            for (std::size_t i = 0; i < size; i++) { buf_std[i] = buf_sz[i] = static_cast<char>('0' + (i % 10)); }
-
-            // Move overlapping region forward
-            std::size_t overlap_size = size / 2;
-            std::memmove(buf_std.data() + 100, buf_std.data(), overlap_size);
-            sz::memmove(buf_sz.data() + 100, buf_sz.data(), overlap_size);
-
-            expect_equality(buf_std.data(), buf_sz.data(), size);
-        }
+    // Copies past 1 MB run in both directions on Haswell and Skylake. The length is from
+    // GitHub issue #228, and the misaligned ends exercise the head and tail of that path.
+    {
+        std::size_t const length = 1024ull * 10ull * 103ull;
+        std::vector<char> source(length + 7), target(length + 11);
+        for (std::size_t i = 0; i != source.size(); ++i) source[i] = static_cast<char>('a' + i % 26);
+        verify(memory_dispatched.copy(target.data() + 11, source.data() + 7, length, nullptr) == sz_success_k);
+        expect_equality(source.data() + 7, target.data() + 11, length);
     }
 }
 
@@ -1098,13 +820,12 @@ void test_stl_updates_unit() {
                                         }),
                  s.size() == 5 && s == "ABCDE");
 
-    scope_verify(str s("orig"),
-                 s.try_resize_and_overwrite(6,
-                                            [](char *p, std::size_t count) noexcept {
-                                                std::strcpy(p, "works!");
-                                                return count;
-                                            }),
-                 s.size() == 6 && s == "works!");
+    let_verify(str s("orig"), sz::succeeded(s.try_resize_and_overwrite(6,
+                                                                       [](char *p, std::size_t count) noexcept {
+                                                                           std::strcpy(p, "works!");
+                                                                           return count;
+                                                                       })) &&
+                                  s.size() == 6 && s == "works!");
 #endif
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
@@ -1391,26 +1112,48 @@ void test_extensions_updates_unit() {
     using str = sz::string_t;
 
     // Try methods.
-    verify(str("obsolete").try_assign("hello"));
-    verify(str().try_reserve(10));
-    verify(str().try_resize(10));
-    verify(str("__").try_insert(1, "test"));
+    verify(sz::succeeded(str("obsolete").try_assign("hello")));
+    verify(sz::succeeded(str().try_reserve(10)));
+    verify(sz::succeeded(str().try_resize(10)));
+    verify(sz::succeeded(str("__").try_insert(1, "test")));
     verify(str("test").try_erase(1, 2));
-    verify(str("test").try_clear());
-    verify(str("test").try_replace(1, 2, "aaaa"));
-    verify(str("test").try_push_back('a'));
-    verify(str("test").try_shrink_to_fit());
+    verify(sz::succeeded(str("test").try_replace(1, 2, "aaaa")));
+    verify(sz::succeeded(str("test").try_push_back('a')));
+    verify(sz::succeeded(str("test").try_shrink_to_fit()));
+
+    // Growing through a concatenation must succeed and land exactly on the concatenation's length.
+    let_verify(str s = "ab", sz::succeeded(s.try_assign("hello"_sv | "world")) && s == "helloworld");
+
+    // A throwing allocator must surface as `bad_alloc_k` from the `noexcept` twins.
+    let_verify(sz::basic_string<throwing_allocator_t> s, s.try_reserve(1000) == sz::status_t::bad_alloc_k && s.empty());
 
     // Self-referencing methods.
-    scope_verify(str s = "test", s.try_assign(s.view()), s == "test");
-    scope_verify(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
-    scope_verify(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
+    let_verify(str s = "test", sz::succeeded(s.try_assign(s.view())) && s == "test");
+    let_verify(str s = "test", sz::succeeded(s.try_assign(s.view().sub(1, 2))) && s == "e");
+    let_verify(str s = "test", sz::succeeded(s.try_append(s.view().sub(1, 2))) && s == "teste");
 
     // Try methods going beyond and beneath capacity threshold.
-    scope_verify(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
-                 s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
-                     s.try_shrink_to_fit(),
-                 s.capacity() < sz::string_t::min_capacity);
+    {
+        str s = "0123456789012345678901234567890123456789012345678901234567890123"; // 64 symbols at start
+        for (int doubling = 0; doubling != 4; ++doubling) verify(sz::succeeded(s.try_append(s)));
+        s.clear();
+        verify(sz::succeeded(s.try_shrink_to_fit()));
+        verify(s.capacity() < sz::string_t::min_capacity);
+    }
+
+    // Folding and normalizing allocate through the string's allocator, not a default-made one.
+    {
+        std::size_t live_bytes = 0;
+        accounting_allocator_t const allocator {&live_bytes};
+        {
+            sz::basic_string<accounting_allocator_t> s(allocator);
+            verify(sz::succeeded(s.try_assign("STRASSE AND STRASSE")));
+            verify(sz::succeeded(s.try_utf8_uncased_fold()) && s == "strasse and strasse");
+            verify(sz::succeeded(s.try_utf8_normalize(sz_normal_form_nfd_k)) && s == "strasse and strasse");
+            verify(s.get_allocator() == allocator && live_bytes != 0);
+        }
+        verify(live_bytes == 0);
+    }
 
     // Same length replacements.
     scope_verify(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
@@ -1702,37 +1445,37 @@ void test_string_reserve_unit() {
     // C API: grow, shrink, then fit - the buffer, length, contents and terminator stay intact.
     {
         // Fresh blocks arrive full of noise, so a terminator never copied cannot read as one.
-        sz_memory_allocator_t alloc;
-        alloc.allocate = +[](sz_size_t length, void *) -> void * {
+        sz_memory_allocator_t allocator;
+        allocator.allocate = +[](sz_size_t length, void *) -> void * {
             void *const block = std::malloc(length);
             if (block) std::memset(block, '#', length);
             return block;
         };
-        alloc.free = +[](void *block, sz_size_t, void *) { std::free(block); };
-        alloc.handle = nullptr;
+        allocator.free = +[](void *block, sz_size_t, void *) { std::free(block); };
+        allocator.handle = nullptr;
 
         sz_string_t str;
-        sz_ptr_t start = sz_string_init_length(&str, 100, &alloc);
+        sz_ptr_t start = sz_string_init_length(&str, 100, &allocator);
         verify(start != nullptr);
         std::memset(start, 'a', 100);
 
-        sz_ptr_t grown = sz_string_reserve(&str, 200, &alloc);
+        sz_ptr_t grown = sz_string_reserve(&str, 200, &allocator);
         verify(grown != nullptr);
         verify(sz_string_length(&str) == 100);
         verify(grown[100] == '\0' && "Growing left the new buffer unterminated");
 
         // Shrinking must be a no-op: same buffer, same length, same contents.
-        sz_ptr_t shrunk = sz_string_reserve(&str, 50, &alloc);
+        sz_ptr_t shrunk = sz_string_reserve(&str, 50, &allocator);
         verify(shrunk == grown);
         verify(sz_string_length(&str) == 100);
         for (sz_size_t i = 0; i != 100; ++i) verify(shrunk[i] == 'a');
 
-        sz_ptr_t fitted = sz_string_shrink_to_fit(&str, &alloc);
+        sz_ptr_t fitted = sz_string_shrink_to_fit(&str, &allocator);
         verify(fitted != nullptr);
         verify(sz_string_length(&str) == 100);
         verify(fitted[100] == '\0' && "Fitting left the new buffer unterminated");
 
-        sz_string_free(&str, &alloc);
+        sz_string_free(&str, &allocator);
     }
     // C++ API: `sz::string_t::reserve` shrinking must match `std::string` behavior - keep the contents.
     {
@@ -1865,361 +1608,20 @@ void test_string_updates_equivalence(test_context_t &context, std::size_t repeti
 
 #pragma endregion String Class
 
-#pragma region Equivalence
-
-/** One backend's copy, move and fill primitives, stored by pointer so the differential driver can
- *  iterate a table. Its members are named for the call sites, as in `reference.copy(...)`. */
-struct memory_backend_t {
-    char const *name;
-    sz_copy_t copy;
-    sz_move_t move;
-    sz_fill_t fill;
-};
-
-/** One backend's byte-lookup kernel, stored by pointer; `reference.lookup(...)` invokes it. */
-struct lookup_backend_t {
-    char const *name;
-    sz_lookup_t lookup;
-};
-
-/** A representative spread of lengths covering 0, tiny, the SWAR/SIMD-width neighborhood, and
- *  larger, so a kernel's head/body/tail handling is exercised on every backend. */
-inline std::vector<sz_size_t> memory_equivalence_lengths() noexcept {
-    return {0,  1,  2,  3,  7,  8,  9,   15,  16,  17,  31,  32,  33,   47,
-            48, 63, 64, 65, 95, 96, 127, 128, 129, 255, 256, 257, 1024, 4096};
-}
-
-/**
- *  @brief Copies, moves or fills a buffer, comparing a reference and a candidate movement backend.
- *  @param[in] inputs Number of random source patterns fuzzed at each length.
- *
- *  Runs over @c for_each_cacheline_offset_ so the destination and source buffers are exercised at
- *  every sub-cache-line alignment, across the representative length set, with embedded-NUL content
- *  and overlapping @c move regions, so a misaligned head or tail bug on any backend is caught
- *  against the reference.
- */
-template <typename reference_, typename candidate_>
-void check_memory_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, sz_size_t inputs) {
-
-    std::vector<sz_size_t> const lengths = memory_equivalence_lengths();
-    sz_size_t const max_length = lengths.back();
-
-    for (sz_size_t length : lengths) {
-        for (sz_size_t input = 0; input != inputs; ++input) {
-
-            // A randomized source with embedded NULs - the byte primitives must stay length-driven.
-            // The source itself is read from a cache-line-shifted span so the load alignment varies too.
-            std::vector<char> source_storage(length + STRINGZILLA_CACHE_LINE_BYTES, '\0');
-            sz_cptr_t const source = source_storage.data() + (input % STRINGZILLA_CACHE_LINE_BYTES);
-            if (length) randomize_string(generator, {const_cast<char *>(source), length});
-
-            // `copy` and `fill`: place the destination at every sub-cache-line alignment, comparing the
-            // candidate output against a serial reference run at the same alignment.
-            sz_u8_t const fill_value = (sz_u8_t)(0xA5u ^ (sz_u8_t)length);
-            for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {
-                std::vector<char> reference_output(length, '\0');
-                reference.copy(reference_output.data(), source, length);
-                candidate.copy(target, source, length);
-                if (length)
-                    verify(std::memcmp(reference_output.data(), target, length) == 0 &&
-                           "Candidate copy backend diverged from the serial reference");
-
-                reference.fill(reference_output.data(), length, fill_value);
-                candidate.fill(target, length, fill_value);
-                if (length)
-                    verify(std::memcmp(reference_output.data(), target, length) == 0 &&
-                           "Candidate fill backend diverged from the serial reference");
-            });
-
-            // `move` with overlapping regions: shift the source pattern within one buffer by a small offset,
-            // both forwards and backwards, at every alignment of the buffer.
-            for (sz_size_t shift : {(sz_size_t)1, (sz_size_t)7, (sz_size_t)16}) {
-                if (length <= shift) continue;
-                sz_size_t const moved = length - shift;
-                for_each_cacheline_offset_(max_length + shift, [&](sz_ptr_t buffer, std::size_t) {
-                    std::vector<char> reference_buffer(length + shift, '\0');
-
-                    // Forward overlap: destination ahead of the source.
-                    std::memcpy(buffer, source, length);
-                    std::memcpy(reference_buffer.data(), source, length);
-                    candidate.move(buffer + shift, buffer, moved);
-                    reference.move(reference_buffer.data() + shift, reference_buffer.data(), moved);
-                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0 &&
-                           "Candidate move backend diverged from reference on forward overlap");
-
-                    // Backward overlap: destination behind the source.
-                    std::memcpy(buffer, source, length);
-                    std::memcpy(reference_buffer.data(), source, length);
-                    candidate.move(buffer, buffer + shift, moved);
-                    reference.move(reference_buffer.data(), reference_buffer.data() + shift, moved);
-                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0 &&
-                           "Candidate move backend diverged from reference on backward overlap");
-                });
-            }
-        }
-    }
-}
-
-/**
- *  @brief Applies a byte-lookup table, comparing the output of a reference and a candidate backend.
- *  @param[in] inputs Number of random source patterns fuzzed at each length.
- *
- *  Runs over @c for_each_cacheline_offset_ so the destination and source buffers are exercised at
- *  every sub-cache-line alignment, across the representative length set, against one case-mapping
- *  table they share.
- */
-template <typename reference_, typename candidate_>
-void check_lookup_equivalence_(std::mt19937 &generator, reference_ reference, candidate_ candidate, sz_size_t inputs) {
-
-    char upper_table[256], lower_table[256], ascii_table[256];
-    sz_lookup_init_upper(upper_table);
-    sz_lookup_init_lower(lower_table);
-    sz_lookup_init_ascii(ascii_table);
-    struct named_table_t {
-        char const *name;
-        char const *table;
-    };
-    named_table_t const named_tables[] = {
-        {"upper", upper_table},
-        {"lower", lower_table},
-        {"ascii", ascii_table},
-    };
-
-    std::vector<sz_size_t> const lengths = memory_equivalence_lengths();
-    sz_size_t const max_length = lengths.back();
-
-    for (named_table_t const &named_table : named_tables)
-        for (sz_size_t length : lengths) {
-            for (sz_size_t input = 0; input != inputs; ++input) {
-
-                std::vector<char> source_storage(length + STRINGZILLA_CACHE_LINE_BYTES, '\0');
-                sz_cptr_t const source = source_storage.data() + (input % STRINGZILLA_CACHE_LINE_BYTES);
-                if (length) randomize_string(generator, {const_cast<char *>(source), length});
-
-                for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {
-                    std::vector<char> reference_output(length, '\0');
-                    reference.lookup(reference_output.data(), length, source, named_table.table);
-                    candidate.lookup(target, length, source, named_table.table);
-                    if (length)
-                        verify(std::memcmp(reference_output.data(), target, length) == 0 &&
-                               "Candidate lookup output diverged from reference for this lookup table");
-                });
-            }
-        }
-}
-
-#pragma endregion Equivalence
-
-#pragma region Safety
-
-/** Runs one movement backend through adversarial inputs guarded by canary bytes, asserting no
- *  out-of-bounds write occurs (the canaries stay intact) and the operation does not crash. */
-static void check_memory_safety_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
-
-    // Zero-length: copy/move/fill must touch nothing, including NULL targets.
-    copy(nullptr, nullptr, 0);
-    move(nullptr, nullptr, 0);
-    fill(nullptr, 0, (sz_u8_t)'!');
-
-    // A canary-guarded destination: writes outside [0, length) corrupt a guard byte.
-    for (std::size_t length : {(std::size_t)1, (std::size_t)8, (std::size_t)64, (std::size_t)257})
-        with_guarded_buffer_(length, [&](sz_ptr_t destination, std::size_t usable_length) {
-            std::vector<char> source(usable_length, (char)0xC3);
-            copy(destination, source.data(), usable_length);
-            fill(destination, usable_length, (sz_u8_t)0x7E);
-            move(destination, source.data(), usable_length); // Non-overlapping move
-        });
-
-    // Overlapping move inside one canary-guarded buffer, plus embedded-NUL content. The usable window
-    // spans `length + shift` so both the shifted-forward and shifted-back overlaps stay inside the guards.
-    {
-        std::size_t const length = 257;
-        std::size_t const shift = 16;
-        with_guarded_buffer_(length + shift, [&](sz_ptr_t buffer, std::size_t) {
-            for (std::size_t byte = 0; byte != length; ++byte) buffer[byte] = (char)((byte % 2) ? (byte & 0xFF) : 0);
-            move(buffer + shift, buffer, length); // Forward overlap
-            move(buffer, buffer + shift, length); // Backward overlap
-        });
-    }
-}
-
-/** Runs one lookup backend through adversarial inputs guarded by canary bytes, asserting no
- *  out-of-bounds write occurs (the canaries stay intact) and the operation does not crash. */
-static void check_lookup_safety_(sz_lookup_t lookup) {
-
-    char upper_table[256], lower_table[256], ascii_table[256];
-    sz_lookup_init_upper(upper_table);
-    sz_lookup_init_lower(lower_table);
-    sz_lookup_init_ascii(ascii_table);
-    char const *const lookup_tables[] = {upper_table, lower_table, ascii_table};
-
-    for (char const *lookup_table : lookup_tables) {
-        lookup(nullptr, 0, nullptr, lookup_table); // Zero-length must touch nothing
-
-        for (std::size_t length : {(std::size_t)1, (std::size_t)8, (std::size_t)64, (std::size_t)257})
-            with_guarded_buffer_(length, [&](sz_ptr_t destination, std::size_t usable_length) {
-                std::vector<char> source(usable_length, '\0');
-                for (std::size_t byte = 0; byte != usable_length; ++byte)
-                    source[byte] = (char)((byte % 3) ? 'a' + (byte % 26) : 0);
-                lookup(destination, usable_length, source.data(), lookup_table);
-            });
-    }
-}
-
-/** Adversarial safety driver: feeds zero-length, tiny, overlapping, and embedded-NUL inputs through
- *  the dispatched, serial, and every natively-compiled movement/lookup kernel, asserting that
- *  canary bytes guarding both sides of the destination remain intact and that nothing crashes. */
-void test_memory_safety() {
-
-    // Dispatched (automatic kernel resolution).
-    check_memory_safety_(sz_copy, sz_move, sz_fill);
-
-    // Manual propagation to each natively-compiled backend kernel.
-    check_memory_safety_(sz_copy_serial, sz_move_serial, sz_fill_serial);
-#if STRINGZILLA_TARGET_HASWELL
-    check_memory_safety_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    check_memory_safety_(sz_copy_skylake, sz_move_skylake, sz_fill_skylake);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    check_memory_safety_(sz_copy_neon, sz_move_neon, sz_fill_neon);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    check_memory_safety_(sz_copy_sve, sz_move_sve, sz_fill_sve);
-#endif
-#if STRINGZILLA_TARGET_V128
-    check_memory_safety_(sz_copy_v128, sz_move_v128, sz_fill_v128);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    check_memory_safety_(sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    check_memory_safety_(sz_copy_rvv, sz_move_rvv, sz_fill_rvv);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    check_memory_safety_(sz_copy_lasx, sz_move_lasx, sz_fill_lasx);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    check_memory_safety_(sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx);
-#endif
-
-    // Dispatched (automatic kernel resolution).
-    check_lookup_safety_(sz_lookup);
-
-    // Manual propagation to each natively-compiled backend kernel.
-    check_lookup_safety_(sz_lookup_serial);
-#if STRINGZILLA_TARGET_HASWELL
-    check_lookup_safety_(sz_lookup_haswell);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    check_lookup_safety_(sz_lookup_icelake);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    check_lookup_safety_(sz_lookup_neon);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    check_lookup_safety_(sz_lookup_sve);
-#endif
-#if STRINGZILLA_TARGET_V128
-    check_lookup_safety_(sz_lookup_v128);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    check_lookup_safety_(sz_lookup_v128relaxed);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    check_lookup_safety_(sz_lookup_rvv);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    check_lookup_safety_(sz_lookup_lasx);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    check_lookup_safety_(sz_lookup_powervsx);
-#endif
-}
-
-#pragma endregion Safety
-
 #pragma region Drivers
 
-/** The copy, move and fill backends compiled on this target. The always-present @c dispatched entry
- *  keeps the table non-empty on a baseline build. This tier set has Skylake, but not Icelake. */
-static memory_backend_t const memory_backends[] = {
-    {"dispatched", sz_copy, sz_move, sz_fill},
-#if STRINGZILLA_TARGET_HASWELL
-    {"haswell", sz_copy_haswell, sz_move_haswell, sz_fill_haswell},
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    {"skylake", sz_copy_skylake, sz_move_skylake, sz_fill_skylake},
-#endif
-#if STRINGZILLA_TARGET_NEON
-    {"neon", sz_copy_neon, sz_move_neon, sz_fill_neon},
-#endif
-#if STRINGZILLA_TARGET_SVE
-    {"sve", sz_copy_sve, sz_move_sve, sz_fill_sve},
-#endif
-#if STRINGZILLA_TARGET_V128
-    {"v128", sz_copy_v128, sz_move_v128, sz_fill_v128},
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    {"v128relaxed", sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed},
-#endif
-#if STRINGZILLA_TARGET_RVV
-    {"rvv", sz_copy_rvv, sz_move_rvv, sz_fill_rvv},
-#endif
-#if STRINGZILLA_TARGET_LASX
-    {"lasx", sz_copy_lasx, sz_move_lasx, sz_fill_lasx},
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    {"powervsx", sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx},
-#endif
-};
+/** Adversarial safety driver: feeds zero-length, tiny, overlapping, and embedded-NUL inputs through
+ *  the movement and lookup dispatch points, asserting that canary bytes guarding both sides of the
+ *  destination remain intact and nothing crashes; the cross files do the same per capability. */
+void test_memory_safety() {
+    check_memory_safety_(memory_dispatched);
+    check_lookup_safety_(lookup_dispatched);
+}
 
-/** The byte-lookup transform backends compiled on this target. The always-present @c dispatched
- *  entry keeps the table non-empty on a baseline build. This tier set has Icelake, not Skylake. */
-static lookup_backend_t const lookup_backends[] = {
-    {"dispatched", sz_lookup},
-#if STRINGZILLA_TARGET_HASWELL
-    {"haswell", sz_lookup_haswell},
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    {"icelake", sz_lookup_icelake},
-#endif
-#if STRINGZILLA_TARGET_NEON
-    {"neon", sz_lookup_neon},
-#endif
-#if STRINGZILLA_TARGET_SVE
-    {"sve", sz_lookup_sve},
-#endif
-#if STRINGZILLA_TARGET_V128
-    {"v128", sz_lookup_v128},
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    {"v128relaxed", sz_lookup_v128relaxed},
-#endif
-#if STRINGZILLA_TARGET_RVV
-    {"rvv", sz_lookup_rvv},
-#endif
-#if STRINGZILLA_TARGET_LASX
-    {"lasx", sz_lookup_lasx},
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    {"powervsx", sz_lookup_powervsx},
-#endif
-};
-
-/** Drives the serial-vs-SIMD movement and lookup differential tests across every backend compiled
- *  on this target, dispatched first. Copy, move and fill carry a tier set differing from lookup. */
+/** Drives the movement and lookup differential tests of the dispatch points against serial. */
 void test_memory_all(test_context_t &context) {
-    sz_size_t const inputs = (sz_size_t)context.iterations(2);
-
-    memory_backend_t const memory_serial {"serial", sz_copy_serial, sz_move_serial, sz_fill_serial};
-    for (memory_backend_t const &backend : memory_backends)
-        check_memory_equivalence_(context.generator, memory_serial, backend, inputs);
-
-    lookup_backend_t const lookup_serial {"serial", sz_lookup_serial};
-    for (lookup_backend_t const &backend : lookup_backends)
-        check_lookup_equivalence_(context.generator, lookup_serial, backend, inputs);
+    check_memory_equivalence_(context, memory_dispatched);
+    check_lookup_equivalence_(context, lookup_dispatched);
 }
 
 #pragma endregion Drivers

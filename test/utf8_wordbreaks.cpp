@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date June 22, 2026
  *  @brief UAX-29 word-boundary (Word_Break) tests: known-answer goldens, malformed-input safety,
- *      and the serial-vs-ISA differential over hardened corpora.
+ *      and the serial-vs-dispatched differential over hardened corpora.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -16,30 +16,19 @@
 #endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-#include <cstddef> // `std::size_t`
+#include <stringzilla/stringzilla.hpp> // `sz::string_view_t`
 
-#include <random> // `std::mt19937`, `std::uniform_int_distribution`
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `harness.hpp`)
+#include "cross.hpp" // `check_utf8_wordbreaks_unit_` and the shared segmentation harness
 
 using namespace sz::test;
 
-#pragma region Unit
+/** The word-break dispatch point in the shape of a segmentation backend. */
+static utf8_segment_backend_t const utf8_wordbreaks_dispatched = {"dispatched", cpu_best<sz_utf8_wordbreaks_best>};
 
-/** Hand-checked UAX-29 word-break golden vectors: each source text and its expected words. */
-static utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
-    {""_sv, {}},
-    {"a"_sv, {"a"_sv}},
-    {"don't"_sv, {"don't"_sv}},                                              // WB6/7: apostrophe bridges letter runs
-    {"3,14"_sv, {"3,14"_sv}},                                                // WB11/12: comma between digits
-    {"3,"_sv, {"3"_sv, ","_sv}},                                             // digit then bare comma breaks
-    {"can't_stop"_sv, {"can't_stop"_sv}},                                    // WB13a/b: ExtendNumLet underscore
-    {"a\r\nb"_sv, {"a"_sv, "\r\n"_sv, "b"_sv}},                              // WB3: CR x LF stay together
-    {"\xE4\xBD\xA0\xE5\xA5\xBD"_sv, {"\xE4\xBD\xA0"_sv, "\xE5\xA5\xBD"_sv}}, // CJK: each ideograph is its own word
-    {"Hello, world!"_sv, {"Hello"_sv, ","_sv, " "_sv, "world"_sv, "!"_sv}},  // letter/punct/space boundaries
-};
+#pragma region Unit
 
 /** Known-answer table for @c sz_rune_is_word_char, the UAX-29 word-character classification. */
 static void check_utf8_wordbreaks_classification_() {
@@ -81,106 +70,10 @@ static void check_utf8_wordbreaks_classification_() {
     verify(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
 }
 
-/** The UTF-8 word-break segmenters compiled on this target. The always-present @c dispatched entry
- *  keeps the table non-empty on a baseline build, and the unit / rule-coverage / safety /
- *  equivalence drivers below all iterate this one ladder so their ISA coverage never drifts. */
-static utf8_segment_backend_t const utf8_wordbreaks_backends[] = {
-    {"dispatched", sz_utf8_wordbreaks},
-#if STRINGZILLA_TARGET_HASWELL
-    {"haswell", sz_utf8_wordbreaks_haswell},
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    {"icelake", sz_utf8_wordbreaks_icelake},
-#endif
-#if STRINGZILLA_TARGET_NEON
-    {"neon", sz_utf8_wordbreaks_neon},
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    {"sve2", sz_utf8_wordbreaks_sve2},
-#endif
-#if STRINGZILLA_TARGET_V128
-    {"v128", sz_utf8_wordbreaks_v128},
-#endif
-#if STRINGZILLA_TARGET_RVV
-    {"rvv", sz_utf8_wordbreaks_rvv},
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    {"powervsx", sz_utf8_wordbreaks_powervsx},
-#endif
-#if STRINGZILLA_TARGET_LASX
-    {"lasx", sz_utf8_wordbreaks_lasx},
-#endif
-};
-
-/** Segment @p text with @p forward at @p capacity and assert the (start, length) stream tiles the
- *  input into exactly @p expected_lengths. */
-static void check_utf8_wordbreaks_lengths_(char const *label, sz_utf8_segmenter_t forward, std::string const &text,
-                                           std::vector<sz_size_t> const &expected_lengths, sz_size_t capacity) {
-    utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(forward, text.data(), text.size(), capacity);
-    sz_size_t start = 0, length = 0, position = 0;
-    for (sz_size_t const expected : expected_lengths) {
-        sz_bool_t const more = utf8_segment_cursor_next_(cursor, start, length);
-        verify(more && label && "deferred-mid golden emitted fewer segments than expected");
-        verify(start == position && length == expected && label && "deferred-mid golden segment mismatch");
-        position += length;
-    }
-    verify(!utf8_segment_cursor_next_(cursor, start, length) && label && "deferred-mid golden emitted extra segments");
-}
-
-/** WB6/WB7/WB11/WB12 deferred-mid goldens: a Mid* (`,` `:` `'` `"`) whose WB4-ignorable lookahead
- *  run crosses every SIMD window width (16/64 bytes) before the bridge completes or fails on the
- *  far side. Regression corpus for the cross-window bridge-shadow carry: a failed bridge must still
- *  emit the break at the mid, keep WB7a's Hebrew x Single_Quote join, and leave the mid as the
- *  effective left context. */
-static void check_utf8_wordbreaks_deferred_mid_() {
-    static sz_size_t const run_lengths[] = {3, 8, 15, 31, 32, 33, 100};
-    static char const combining_grave[] = "\xCC\x80";   // U+0300, Word_Break=Extend
-    static char const hebrew_he[] = "\xD7\x94";         // U+05D4, Hebrew_Letter
-    static char const emoji[] = "\xF0\x9F\x98\x80";     // U+1F600, Extended_Pictographic
-    static char const zwj[] = "\xE2\x80\x8D";           // U+200D, ZWJ
-    static char const math_five[] = "\xF0\x9D\x9F\x97"; // U+1D7D7, astral Numeric
-
-    struct golden_t {
-        std::string text;
-        std::vector<sz_size_t> lengths;
-    };
-    std::vector<golden_t> goldens;
-    for (sz_size_t const run : run_lengths) {
-        std::string marks;
-        for (sz_size_t i = 0; i != run; ++i) marks += combining_grave;
-        sz_size_t const marks_size = marks.size();
-        goldens.push_back({"5," + marks + "6", {3 + marks_size}});                                // WB11 completes
-        goldens.push_back({"5," + marks + math_five, {6 + marks_size}});                          // WB11 astral Numeric
-        goldens.push_back({"a:" + marks + "b", {3 + marks_size}});                                // WB6 completes
-        goldens.push_back({hebrew_he + std::string("\"") + marks + hebrew_he, {5 + marks_size}}); // WB7b completes
-        goldens.push_back({"5," + marks + "a", {1, 1 + marks_size, 1}});                          // WB11 fails
-        goldens.push_back({"a:" + marks + "5", {1, 1 + marks_size, 1}});                          // WB6 fails
-        goldens.push_back({"5," + marks, {1, 1 + marks_size}});                               // fails at end-of-text
-        goldens.push_back({"5," + marks + ",5", {1, 1 + marks_size, 1, 1}});                  // fails into a 2nd mid
-        goldens.push_back({hebrew_he + std::string("'") + marks + "x", {4 + marks_size}});    // WB7 completes
-        goldens.push_back({hebrew_he + std::string("'") + marks + "5", {3 + marks_size, 1}}); // WB7a keeps the quote
-        goldens.push_back({hebrew_he + std::string("\"") + marks + "x", {2, 1 + marks_size, 1}}); // WB7b fails
-        goldens.push_back({"a:" + marks + zwj + emoji, {1, 8 + marks_size}}); // fails; WB3c joins the pictograph
-    }
-    goldens.push_back({std::string("5,") + emoji, {1, 1, 4}}); // astral lookahead right after the mid
-
-    static sz_size_t const capacities[] = {utf8_segment_batch_k, 1};
-    for (golden_t const &golden : goldens)
-        for (sz_size_t const capacity : capacities) {
-            check_utf8_wordbreaks_lengths_("serial", sz_utf8_wordbreaks_serial, golden.text, golden.lengths, capacity);
-            for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
-                check_utf8_wordbreaks_lengths_(backend.name, backend.finder, golden.text, golden.lengths, capacity);
-        }
-}
-
-/** Known-answer word-break vectors via dispatched, serial, each ISA, and the C++ range. */
+/** Known-answer word-break vectors via the dispatch point and the C++ range. */
 void test_utf8_wordbreaks_unit() {
     check_utf8_wordbreaks_classification_();
-    check_utf8_wordbreaks_deferred_mid_();
-
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_unit_cases));
-    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
-        check_utf8_segment_unit_("word", backend.finder, span_over(utf8_wordbreaks_unit_cases));
+    check_utf8_wordbreaks_unit_(utf8_wordbreaks_dispatched);
 
     // C++ range wrapper known-answer: `utf8_wordbreaks()` faithfully tiles the input into the UAX-29 segments
     // (words and the separators between them); concatenating them reconstructs the input.
@@ -194,233 +87,39 @@ void test_utf8_wordbreaks_unit() {
     }
 
     // Word-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
-    verify(utf8_prose_hotel_review().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 100 &&
-           "hotel_review wordbreaks");
-    verify(utf8_prose_news_lede().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 83 &&
-           "news_lede wordbreaks");
-    verify(utf8_prose_concert_post().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 69 &&
-           "concert_post wordbreaks");
-    verify(utf8_prose_rtl_scripts().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 98 &&
-           "rtl_scripts wordbreaks");
-    verify(utf8_prose_micro_apostrophe().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 5 &&
-           "micro_apostrophe wordbreaks");
+    auto count_wordbreaks = [](std::string_view text) {
+        return sz::string_view_t(text).utf8_wordbreaks().template to<std::vector<std::string>>().size();
+    };
+    verify(count_wordbreaks(utf8_prose_hotel_review()) == 100 && "hotel_review wordbreaks");
+    verify(count_wordbreaks(utf8_prose_news_lede()) == 83 && "news_lede wordbreaks");
+    verify(count_wordbreaks(utf8_prose_concert_post()) == 69 && "concert_post wordbreaks");
+    verify(count_wordbreaks(utf8_prose_rtl_scripts()) == 98 && "rtl_scripts wordbreaks");
+    verify(count_wordbreaks(utf8_prose_micro_apostrophe()) == 5 && "micro_apostrophe wordbreaks");
 }
 
 #pragma endregion Unit
 
-#pragma region Equivalence
-
-/** UAX-29 word-break corner motifs for the random corpus: Mid-bridges, MidNum, RI parity, etc. */
-static sz::string_view_t const utf8_wordbreaks_motifs[] = {
-    "don't"_sv,                                // WB6/7: apostrophe bridges two letter runs
-    "l'avion"_sv,                              // WB7a/b: leading apostrophe shape
-    "can't_stop"_sv,                           // WB13a/b: ExtendNumLet underscore keeps the word whole
-    "3,14"_sv,                                 // WB11/12: comma between digits stays one word
-    "1,2,3"_sv,                                // chained numeric MidNum grouping
-    "3,"_sv,                                   // digit then bare comma: break after the number
-    "Hello, world!"_sv,                        // punctuation/space boundaries between letter runs
-    "\xE4\xBD\xA0\xE5\xA5\xBD"_sv,             // CJK: each ideograph is its own word
-    "\xEC\x95\x88\xEB\x85\x95"_sv,             // Hangul syllables are word chars
-    "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"_sv,     // Hebrew letter run
-    "\xD7\x90\x27\xD7\x91"_sv,                 // Hebrew aleph + apostrophe + bet (WB7a single-quote)
-    "\xE3\x82\xAB\xE3\x82\xBF\xE3\x82\xAB"_sv, // Katakana run (WB13 Katakana x Katakana)
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv,     // Regional-Indicator pair (WB15/16 parity)
-    "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv, // RI ASCII RI: parity reset between flags
-    "word\xC2\xB7word"_sv,                     // U+00B7 MIDDLE DOT as MidLetter between letters
-};
-
-/** Multi-window seam regressions, each over 64 bytes: WB15/16 Regional_Indicator parity and the
- *  WB6/7/11/12 Mid-bridge carry state, pinned across the 64-byte window boundary. Stored as raw
- *  bytes for the differential driver to feed to serial-vs-ISA directly, with no inline asserts. */
-static sz::string_view_t const utf8_wordbreaks_seam_regressions[] = {
-    // ri_after_newline (65 bytes)
-    "\xE3\x82\xAB\x2D\x0A\xF0\x9F\x87\xA6\x62\xC2\xAD\xF0\x9F\x87\xA6\xCC\x80\x0A\x5F\xF0\x9F\x87\xA6" //
-    "\xF0\x9F\x87\xA6\xC2\xAD\x0A\xCC\x88\xF0\x9F\x87\xBA\xF0\x9F\x8F\xBB\xCC\x88\xC2\xAD\xE2\x81\xA0" //
-    "\xCC\x88\xF0\x9F\x87\xA6\xF0\x9F\x87\xA6\xE4\xB8\xAD\xE2\x81\xA0\x5F"_sv,
-    // ri_word_joiner (82 bytes)
-    "\x5F\x27\xF0\x9F\x87\xBA\xE4\xB8\xAD\xCC\x81\xF0\x9F\x87\xA6\xF0\x9F\x87\xA6\x5F\xCC\x88\x5F\xD7" //
-    "\x90\x2D\xE2\x93\x82\xCC\x80\x62\xF0\x9F\x87\xA6\xE2\x81\xA0\xF0\x9F\x87\xBA\xCC\x80\xCC\x88\xF0" //
-    "\x9F\x8F\xBB\xF0\x9F\x87\xBA\xCC\x81\xF0\x9F\x87\xBA\x0A\xC2\xAD\xF0\x9F\x87\xBA\xCC\x88\xE3\x82" //
-    "\xAB\x5F\x27\x2E\xCC\x88\x0A\xE4\xB8\xAD"_sv,
-    // wb12_bridge (78 bytes)
-    "\x5F\xE2\x81\xA0\x5F\x35\x2C\xF0\x9F\x98\x80\x27\xF0\x9F\x98\x80\x5F\xCC\x88\xCC\x81\xE4\xB8\xAD" //
-    "\xE2\x81\xA0\x5F\x62\xCC\x80\x61\xE4\xB8\xAD\xE3\x82\xAB\x35\xE2\x81\xA0\xCC\x88\xCC\x88\xF0\x9F" //
-    "\x8F\xBB\xCC\x88\xE2\x81\xA0\xCC\x80\xCC\x81\x27\x35\xCC\x80\xE4\xB8\xAD\xCC\x81\xE2\x80\x8D\xC3" //
-    "\xA9\xE3\x80\x80\x35\x27"_sv,
-};
-
-/** @p link_count Katakana codepoints (WB13 Katakana × Katakana), into @p out, cleared first. */
-static void utf8_wordbreaks_dense_katakana_(std::string &out, std::size_t link_count) {
-    out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(0x30AB)); // カ
-}
-
-/** Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend), to @p out. */
-static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_count) {
-    out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append("12");
-        out.append(encoded_rune_(0x0301)); // Extend combining mark inside a number
-        out.append(",34 ");                // MidNum comma
-    }
-}
-
-/** MidLetter (`'` and U+00B7) between letters, @p link_count dense groups (WB6/7), into @p out. */
-static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_count) {
-    out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append(encoded_rune_(0x0061));                         // 'a'
-        out.append(encoded_rune_((index & 1u) ? 0x00B7 : 0x0027)); // MIDDLE DOT or apostrophe
-        out.append(encoded_rune_(0x0062));                         // 'b'
-    }
-}
-
-/** Hebrew letters bridged by single-quote, @p link_count groups (WB7a Hebrew_Letter MidLetter),
- *  into @p out. */
-static void utf8_wordbreaks_dense_hebrew_quote_(std::string &out, std::size_t link_count) {
-    out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append(encoded_rune_(0x05D0)); // א
-        out.append(encoded_rune_(0x0027)); // single quote
-        out.append(encoded_rune_(0x05D1)); // ב
-    }
-}
-
-/** Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to
- *  @p sink. */
-static void utf8_wordbreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
-    std::string scratch;
-    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
-    utf8_dense_regional_indicators_(scratch, generator, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_wordbreaks_dense_katakana_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_wordbreaks_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_wordbreaks_dense_midletter_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_wordbreaks_dense_hebrew_quote_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-}
-
-/** Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_wordbreaks_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
-    std::string scratch;
-    utf8_dense_regional_indicators_(scratch, generator, gap);
-    scratch.append("a"); // ASCII tail forces the WB15/16 parity decision after the long run
-    sink(context, scratch.data(), scratch.size());
-    utf8_wordbreaks_dense_midletter_(scratch, gap), sink(context, scratch.data(), scratch.size());
-}
-
-/** Word snippets: apostrophe/underscore bridges, numeric groups, CJK/Hangul/Hebrew/Katakana. */
-static char const *const utf8_wordbreaks_snippets[] = {
-    "don't ",
-    "can't_stop ",
-    "3,14 ",
-    "1,2,3 ",
-    "Hello, world! ",
-    "\xE4\xBD\xA0\xE5\xA5\xBD",         // CJK ideographs
-    "\xEC\x95\x88\xEB\x85\x95",         // Hangul syllables
-    "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", // Hebrew run
-    "\xE3\x82\xAB\xE3\x82\xBF ",        // Katakana
-    "word\xC2\xB7word ",                // MIDDLE DOT MidLetter
-    "a b ",
-    "_a ",
-    "\xCE\xBA\xCE\xB1\xCE\xBB\xCE\xAC ",                 // Greek word carrying a tonos
-    "\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0 ", // Cyrillic word
-    "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7 ",         // Arabic word
-    "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7ok ",       // Arabic abutting Latin: WB5 across a bidi transition
-};
-
-/** Word alphabet, biased toward family snippets and motifs (WB6/7/11/12/13/15/16). */
-static utf8_corpus_alphabet_t const utf8_wordbreaks_alphabet = {
-    span_over(utf8_wordbreaks_snippets),
-    span_over(utf8_default_boundary_codepoints),
-    {{40, 15, 10, 30, 5}}, // snippet, boundary, astral, motif, malformed
-};
-
-/** Word differential corpora: motifs, dense runs, straddles, seam regressions, and the alphabet. */
-static utf8_segment_corpora_t utf8_wordbreaks_corpora_() {
-    utf8_segment_corpora_t corpora = {"word",
-                                      span_over(utf8_wordbreaks_motifs),
-                                      &utf8_wordbreaks_dense_runs_,
-                                      &utf8_wordbreaks_straddles_,
-                                      span_over(utf8_wordbreaks_seam_regressions),
-                                      &utf8_wordbreaks_alphabet};
-    return corpora;
-}
-
-#pragma endregion Equivalence
-
 #pragma region Rule coverage
 
-/** Rule-coverage gate: every WB rule motif runs and agrees serial-vs-ISA at window phases. */
-void test_utf8_wordbreaks_rules() {
-    // One motif per UAX-29 Word_Break rule, tagged with the direction it demonstrates; rules with both senses also
-    // carry an opposite-direction motif (the gate compares serial-vs-ISA on every motif).
-    utf8_rule_case_t const rule_cases[] = {
-        {"WB3", utf8_rule_joins_k, "\r\n"_sv},                          // CR x LF (no break)
-        {"WB3a", utf8_rule_breaks_k, "\rb"_sv},                         // (Newline|CR|LF) / break after CR
-        {"WB3b", utf8_rule_breaks_k, "a\n"_sv},                         // / (Newline|CR|LF) break before LF
-        {"WB3c", utf8_rule_joins_k, "\xE2\x80\x8D\xF0\x9F\x98\x80"_sv}, // ZWJ x Extended_Pictographic (no break)
-        {"WB3d", utf8_rule_joins_k, "  "_sv},                           // WSegSpace x WSegSpace (no break)
-        {"WB4", utf8_rule_joins_k, "a\xCC\x81"_sv},                     // X (Extend|Format|ZWJ)* absorbed
-        {"WB5", utf8_rule_joins_k, "ab"_sv},                            // AHLetter x AHLetter
-        {"WB6", utf8_rule_joins_k, "a'b"_sv},                           // AHLetter x (MidLetter) AHLetter
-        {"WB7", utf8_rule_joins_k, "a'b"_sv},                           // AHLetter (MidLetter) x AHLetter
-        {"WB7a", utf8_rule_joins_k, "\xD7\x90'"_sv},                    // Hebrew_Letter x Single_Quote
-        {"WB7b", utf8_rule_joins_k, "\xD7\x90\"\xD7\x90"_sv},           // Hebrew_Letter x Double_Quote Hebrew_Letter
-        {"WB7c", utf8_rule_joins_k, "\xD7\x90\"\xD7\x90"_sv},           // Hebrew_Letter Double_Quote x Hebrew_Letter
-        {"WB8", utf8_rule_joins_k, "12"_sv},                            // Numeric x Numeric
-        {"WB9", utf8_rule_joins_k, "a1"_sv},                            // AHLetter x Numeric
-        {"WB10", utf8_rule_joins_k, "1a"_sv},                           // Numeric x AHLetter
-        {"WB11", utf8_rule_joins_k, "1,2"_sv},                          // Numeric (MidNum) x Numeric
-        {"WB12", utf8_rule_joins_k, "1,2"_sv},                          // Numeric x (MidNum) Numeric
-        {"WB13", utf8_rule_joins_k, "\xE3\x82\xA2\xE3\x82\xA2"_sv},     // Katakana x Katakana
-        {"WB13a", utf8_rule_joins_k, "a_"_sv},                          // (AHLetter|Numeric|Katakana) x ExtendNumLet
-        {"WB13b", utf8_rule_joins_k, "_a"_sv},                          // ExtendNumLet x (AHLetter|Numeric|Katakana)
-        {"WB15", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},     // sot (RI RI)* RI x RI (even parity)
-        {"WB16", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv}, // [^RI] (RI RI)* RI x RI (parity reset)
-        {"WB999", utf8_rule_breaks_k, "a b"_sv}, // Any / Any (default break at the space)
-        // Opposite-direction motifs (E1): the same rule firing the other way.
-        {"WB6", utf8_rule_breaks_k, "a''b"_sv},           // two MidLetters: the bridge fails → break
-        {"WB6", utf8_rule_breaks_k, "a\"b"_sv},           // Double_Quote is not MidNumLetQ for Latin: break twice
-        {"WB11", utf8_rule_breaks_k, "1\"2"_sv},          // Double_Quote never bridges numerics either
-        {"WB11", utf8_rule_breaks_k, "1,,2"_sv},          // two MidNum: numeric bridge fails → break
-        {"WB13", utf8_rule_breaks_k, "\xE3\x82\xA2z"_sv}, // Katakana then Latin: script change → break
-        {"WB15", utf8_rule_breaks_k,
-         "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI: break after the pair
-    };
-    // Every Word_Break rule id the gate requires a motif for (spec-derived checklist).
-    char const *const required_rules[] = {
-        "WB3", "WB3a", "WB3b", "WB3c", "WB3d", "WB4",  "WB5",   "WB6",   "WB7",  "WB7a", "WB7b",  "WB7c",
-        "WB8", "WB9",  "WB10", "WB11", "WB12", "WB13", "WB13a", "WB13b", "WB15", "WB16", "WB999",
-    };
-    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
-        check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, backend.finder, span_over(rule_cases),
-                                  span_over(required_rules));
-}
+/** Rule-coverage gate: every WB motif agrees serial-vs-dispatched at window phases. */
+void test_utf8_wordbreaks_rules() { check_utf8_wordbreaks_rules_(utf8_wordbreaks_dispatched); }
 
 #pragma endregion Rule coverage
 
 #pragma region Safety
 
-/** Malformed-input safety of the UTF-8 word kernels (serial / dispatched / icelake). */
+/** Malformed-input safety of the word-break dispatch point. */
 void test_utf8_wordbreaks_safety(test_context_t &context) {
-    utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_wordbreaks_serial}};
-    check_utf8_segment_safety_(context, "word", span_over(serial_only));
-    check_utf8_segment_safety_(context, "word", span_over(utf8_wordbreaks_backends));
+    check_utf8_wordbreaks_safety_(context, utf8_wordbreaks_dispatched);
 }
 
 #pragma endregion Safety
 
 #pragma region Drivers
 
-/** Serial-vs-ISA word differential over the hardened high-density, long-range and seam corpora. */
+/** Serial-vs-dispatched word differential over the dense, long-range and seam corpora. */
 void test_utf8_wordbreaks_all(test_context_t &context) {
-    // The iteration count is this family's share of the suite budget, sized against its siblings.
-    check_utf8_segment_equivalence_(context, sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
-                                    utf8_wordbreaks_corpora_(), context.iterations(20));
-
-    // The streaming segmenter against the per-position WB1-WB16 transcription, which nothing else calls.
-    for (sz::string_view_t const motif : span_over(utf8_wordbreaks_motifs))
-        check_utf8_segment_against_oracle_("word", sz_utf8_wordbreaks_serial, sz_utf8_is_word_boundary_serial,
-                                           motif.data(), motif.size());
+    check_utf8_wordbreaks_equivalence_(context, utf8_wordbreaks_dispatched);
 }
 
 #pragma endregion Drivers

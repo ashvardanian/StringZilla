@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date June 22, 2026
  *  @brief UAX-29 grapheme-cluster (Grapheme_Cluster_Break) tests: known-answer goldens,
- *      malformed-input safety, and the serial-vs-ISA differential over hardened corpora.
+ *      malformed-input safety, and the serial-vs-dispatched differential over hardened corpora.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -16,61 +16,23 @@
 #endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-#include <cstddef> // `std::size_t`
+#include <stringzilla/stringzilla.hpp> // `sz::string_view_t`
 
-#include <random> // `std::mt19937`, `std::uniform_int_distribution`
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `harness.hpp`)
+#include "cross.hpp" // `check_utf8_graphemes_unit_` and the shared segmentation harness
 
 using namespace sz::test;
 
+/** The grapheme-cluster dispatch point in the shape of a segmentation backend. */
+static utf8_segment_backend_t const utf8_graphemes_dispatched = {"dispatched", cpu_best<sz_utf8_graphemes_best>};
+
 #pragma region Unit
 
-/** Hand-checked UAX-29 grapheme-cluster golden vectors: each source text and its clusters. */
-static utf8_unit_case_t const utf8_graphemes_unit_cases[] = {
-    {""_sv, {}},
-    {"a"_sv, {"a"_sv}},
-    {"abc"_sv, {"a"_sv, "b"_sv, "c"_sv}},
-    {"a\r\nb"_sv, {"a"_sv, "\r\n"_sv, "b"_sv}}, // GB3: CR x LF stay one cluster
-    {"e\xCC\x81"_sv, {"e\xCC\x81"_sv}},         // e + U+0301 combining acute → one cluster (GB9)
-    {"\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv, {"\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv}}, // RI pair → one cluster (GB12/13)
-    {"\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv,
-     {"\xF0\x9F\x87\xBA"_sv, "a"_sv, "\xF0\x9F\x87\xB8"_sv}}, // RI ASCII RI: parity reset
-    {"\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9"_sv,       // ZWJ joins → one cluster (GB11)
-     {"\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9"_sv}},
-    {"\xEA\xB0\x80"_sv, {"\xEA\xB0\x80"_sv}}, // Hangul LV syllable → one cluster
-    {"\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8"_sv,
-     {"\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8"_sv}}, // Hangul L+V+T jamo → one cluster (GB6/7/8)
-    {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7"_sv,
-     {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7"_sv}}, // Indic consonant + virama + consonant → one cluster (GB9c InCB)
-};
-
-/** The UTF-8 grapheme-cluster segmenters compiled on this target. The always-present @c dispatched
- *  entry keeps the table non-empty on a baseline build; the unit / rule-coverage / safety /
- *  equivalence drivers all iterate this one ladder so their ISA coverage stays in lockstep. */
-static utf8_segment_backend_t const utf8_graphemes_backends[] = {
-    {"dispatched", sz_utf8_graphemes},
-#if STRINGZILLA_TARGET_HASWELL
-    {"haswell", sz_utf8_graphemes_haswell},
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    {"icelake", sz_utf8_graphemes_icelake},
-#endif
-#if STRINGZILLA_TARGET_NEON
-    {"neon", sz_utf8_graphemes_neon},
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    {"sve2", sz_utf8_graphemes_sve2},
-#endif
-};
-
-/** Known-answer grapheme-cluster vectors via dispatched, serial, each ISA, and the C++ range. */
+/** Known-answer grapheme-cluster vectors via the dispatch point and the C++ range. */
 void test_utf8_graphemes_unit() {
-    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, span_over(utf8_graphemes_unit_cases));
-    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
-        check_utf8_segment_unit_("grapheme", backend.finder, span_over(utf8_graphemes_unit_cases));
+    check_utf8_graphemes_unit_(utf8_graphemes_dispatched);
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's clusters.
     std::vector<std::string> const clusters =
@@ -78,250 +40,45 @@ void test_utf8_graphemes_unit() {
     verify(clusters.size() == 2 && clusters[0] == "a" && clusters[1] == "b" && "C++ utf8_graphemes range");
 
     // Grapheme-cluster counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
-    verify(utf8_prose_pride_caption().utf8_graphemes().template to<std::vector<std::string>>().size() == 206 &&
-           "pride_caption graphemes");
-    verify(utf8_prose_devanagari_tip().utf8_graphemes().template to<std::vector<std::string>>().size() == 252 &&
-           "devanagari_tip graphemes");
-    verify(utf8_prose_concert_post().utf8_graphemes().template to<std::vector<std::string>>().size() == 134 &&
-           "concert_post graphemes");
-    verify(utf8_prose_rtl_scripts().utf8_graphemes().template to<std::vector<std::string>>().size() == 256 &&
-           "rtl_scripts graphemes");
-    verify(utf8_prose_micro_prepend().utf8_graphemes().template to<std::vector<std::string>>().size() == 3 &&
-           "micro_prepend graphemes");
+    auto count_graphemes = [](std::string_view text) {
+        return sz::string_view_t(text).utf8_graphemes().template to<std::vector<std::string>>().size();
+    };
+    verify(count_graphemes(utf8_prose_pride_caption()) == 206 && "pride_caption graphemes");
+    verify(count_graphemes(utf8_prose_devanagari_tip()) == 252 && "devanagari_tip graphemes");
+    verify(count_graphemes(utf8_prose_concert_post()) == 134 && "concert_post graphemes");
+    verify(count_graphemes(utf8_prose_rtl_scripts()) == 256 && "rtl_scripts graphemes");
+    verify(count_graphemes(utf8_prose_micro_prepend()) == 3 && "micro_prepend graphemes");
 
     // Codepoints are not clusters: the emoji paragraph has more runes than grapheme clusters.
-    verify(utf8_prose_pride_caption().utf8_runes().template to<std::vector<sz_rune_t>>().size() == 222 &&
-           "pride_caption runes");
-    verify(utf8_prose_pride_caption().utf8_runes().template to<std::vector<sz_rune_t>>().size() >
-               utf8_prose_pride_caption().utf8_graphemes().template to<std::vector<std::string>>().size() &&
-           "pride_caption runes exceed graphemes");
+    std::size_t const pride_caption_runes =
+        sz::string_view_t(utf8_prose_pride_caption()).utf8_runes().template to<std::vector<sz_rune_t>>().size();
+    verify(pride_caption_runes == 222 && "pride_caption runes");
+    verify(pride_caption_runes > count_graphemes(utf8_prose_pride_caption()) && "pride_caption runes exceed graphemes");
 }
 
 #pragma endregion Unit
 
-#pragma region Equivalence
-
-/** UAX-29 grapheme-cluster corner motifs (sprinkled into the random corpus): emoji-ZWJ chains,
- *  VS16, skin-tone modifiers, regional-indicator runs of varying parity, Indic virama clusters,
- *  Hangul jamo combinations, and bare CR/LF shapes. All non-ASCII bytes are `\xHH` escapes. */
-static sz::string_view_t const utf8_graphemes_motifs[] = {
-    "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D" // three-link ZWJ chain
-    "\xF0\x9F\x91\xA7"_sv,
-    "\xF0\x9F\x91\xA9\xE2\x80\x8D"_sv,     // dangling trailing ZWJ
-    "\xE2\x9C\x8B\xEF\xB8\x8F"_sv,         // emoji + VS16 (U+FE0F)
-    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD"_sv, // emoji + skin-tone modifier (U+1F3FD)
-    "\xF0\x9F\x87\xBA"_sv,                 // single regional indicator (run length 1)
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv, // regional-indicator run length 2
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"     // regional-indicator run length 3 (odd parity)
-    "\xF0\x9F\x87\xAB"_sv,
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8" // regional-indicator run length 5 (odd parity)
-    "\xF0\x9F\x87\xAB\xF0\x9F\x87\xB7\xF0\x9F\x87\xA9"_sv,
-    "\xE0\xA6\x95\xE0\xA7\x8D\xE0\xA6\x95"_sv, // Bengali consonant + virama + consonant (U+09CD)
-    "\xE0\xB4\x95\xE0\xB5\x8D\xE0\xB4\x95"_sv, // Malayalam consonant + virama + consonant (U+0D4D)
-    "\xE0\xAE\x95\xE0\xAF\x8D\xE0\xAE\x95"_sv, // Tamil consonant + virama + consonant (U+0BCD)
-    "\xEA\xB0\x80"_sv,                         // Hangul LV syllable
-    "\xEC\x95\x8A"_sv,                         // Hangul LVT syllable
-    "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8"_sv, // Hangul L+V+T jamo combination
-    "\r"_sv,                                   // CR alone
-    "\n"_sv,                                   // LF alone
-    "\r\r\n"_sv,                               // CR CR LF (parity of CR runs)
-    "a\xDF\xBF\xE0\xA0\x80z"_sv,               // ASCII + U+07FF (2-byte) + U+0800 (3-byte cold) + ASCII: every BMP gate
-    "x\xF0\x9F\x98\x80y"_sv,           // ASCII + astral emoji (U+1F600) + ASCII: ASCII and astral gates together
-    "\xD0\x90\xF0\x9F\x98\x80"_sv,     // Cyrillic (2-byte) + astral emoji: page LUT and astral, no cold cascade
-    "\xE0\xA0\x80\xF0\x9F\x98\x80"_sv, // U+0800 (cold 3-byte) + astral emoji: cold cascade and astral together
-    "\xDF\xBF\xE0\xA0\x80"_sv,         // page-LUT edge: last 2-byte U+07FF abutting first 3-byte U+0800
-};
-
-/** A pictograph ZWJ chain @p link_count deep, every other link followed by VS16 (GB11), into
- *  @p out, cleared first. */
-static void utf8_graphemes_dense_zwj_pictograph_chain_(std::string &out, std::size_t link_count) {
-    out.clear();
-    static sz_rune_t const pictographs[] = {0x1F468, 0x1F469, 0x1F467, 0x1F466}; // man, woman, girl, boy
-    out.append(encoded_rune_(pictographs[0]));
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append(encoded_rune_(0x200D));                          // ZWJ
-        out.append(encoded_rune_(pictographs[(index + 1) & 0x3u])); // next pictograph
-        if (index & 1u) out.append(encoded_rune_(0xFE0F));          // VS16 on alternating links
-    }
-}
-
-/** A base letter and @p link_count combining marks (GB9 Extend run), into @p out, cleared first. */
-static void utf8_graphemes_dense_combining_marks_(std::string &out, std::size_t link_count) {
-    out.clear();
-    static sz_rune_t const marks[] = {0x0301, 0x0300, 0x0308, 0x0327, 0x0323, // acute, grave, diaeresis, cedilla, dot
-                                      0x0651, 0x093C, 0x0E48, 0x1D16E};       // shadda, nukta, Thai mai ek, astral flag
-    out.append(encoded_rune_(0x0061));                                        // base 'a'
-    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(marks[index % 9u]));
-}
-
-/** @p link_count emoji with skin-tone modifiers from @p generator (GB9 Extend), into @p out. */
-static void utf8_graphemes_dense_skin_tone_run_(std::string &out, std::mt19937 &generator, std::size_t link_count) {
-    out.clear();
-    std::uniform_int_distribution<sz_rune_t> modifier(0x1F3FB, 0x1F3FF); // U+1F3FB..U+1F3FF
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append(encoded_rune_(0x1F44D)); // thumbs up
-        out.append(encoded_rune_(modifier(generator)));
-    }
-}
-
-/** @p link_count Indic consonant+virama links (GB9c InCB Consonant Linker chains), into @p out. */
-static void utf8_graphemes_dense_indic_conjunct_(std::string &out, std::size_t link_count) {
-    out.clear();
-    out.append(encoded_rune_(0x0915)); // Devanagari KA
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append(encoded_rune_(0x094D)); // virama (Linker)
-        out.append(encoded_rune_(0x0915)); // KA
-    }
-}
-
-/** @p link_count Hangul L/V/T jamo triples (GB6/7/8 runs), into @p out, cleared first. */
-static void utf8_graphemes_dense_hangul_jamo_(std::string &out, std::size_t link_count) {
-    out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append(encoded_rune_(0x1100)); // L (Choseong Kiyeok)
-        out.append(encoded_rune_(0x1161)); // V (Jungseong A)
-        out.append(encoded_rune_(0x11A8)); // T (Jongseong Kiyeok)
-    }
-}
-
-/** Stream the grapheme family's high-density homogeneous runs, each spanning several 64-byte
- *  windows, to @p sink. */
-static void utf8_graphemes_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
-    std::string scratch;
-    std::uniform_int_distribution<std::size_t> wide(60, 220);
-    std::uniform_int_distribution<std::size_t> chain(20, 80);
-    std::size_t const wide_count = wide(generator);
-    std::size_t const chain_count = chain(generator);
-    utf8_dense_regional_indicators_(scratch, generator, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_zwj_pictograph_chain_(scratch, chain_count), sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_combining_marks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_skin_tone_run_(scratch, generator, chain_count), sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_indic_conjunct_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_hangul_jamo_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-}
-
-/** Stream the grapheme family's long-range straddling constructions for @p gap to @p sink. */
-static void utf8_graphemes_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
-    std::string scratch;
-    utf8_dense_regional_indicators_(scratch, generator, gap);
-    scratch.append("a"); // ASCII tail forces the GB12/13 parity decision after the long run
-    sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_zwj_pictograph_chain_(scratch, gap);
-    scratch.append(encoded_rune_(0x0061)); // ASCII break after the chain
-    sink(context, scratch.data(), scratch.size());
-    utf8_graphemes_dense_indic_conjunct_(scratch, gap);
-    scratch.append(encoded_rune_(0x0061)); // ASCII break after the conjunct
-    sink(context, scratch.data(), scratch.size());
-    // A long RI run, then a ZWJ before a final RI: RI...RI ZWJ RI. The ZWJ does not bridge two RIs
-    // (GB11 bridges only Extended_Pictographic), so this must break after the ZWJ - and the ZWJ
-    // resets the GB12/13 RI parity. Straddles the 64-byte window so the parity carry and the
-    // post-ZWJ break are exercised across the edge.
-    utf8_dense_regional_indicators_(scratch, generator, gap);
-    scratch.append(encoded_rune_(0x200D));  // ZWJ
-    scratch.append(encoded_rune_(0x1F1E6)); // Regional_Indicator after the ZWJ
-    scratch.append(encoded_rune_(0x0061));  // ASCII tail
-    sink(context, scratch.data(), scratch.size());
-}
-
-/** Grapheme-biased snippets: ZWJ sequences, jamo, conjuncts, Arabic/Greek/Cyrillic/Thai marks. */
-static char const *const utf8_graphemes_snippets[] = {
-    "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9",     // woman ZWJ woman (GB11 emoji-ZWJ sequence)
-    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD",                 // thumbs-up + skin-tone modifier (GB9 Extend)
-    "e\xCC\x81",                                        // base 'e' + combining acute (GB9)
-    "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8",             // Hangul L+V+T jamo (GB6/7/8)
-    "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7",             // Devanagari consonant + virama + consonant (GB9c)
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8",                 // regional-indicator pair (GB12/13)
-    "\r\n",                                             // CRLF (GB3)
-    "abc",                                              // plain ASCII (GB999)
-    "\xD8\xA8\xD9\x91\xD9\x8E",                         // Arabic beh + shadda + fatha (stacked Extend marks)
-    "\xCE\xB1\xCC\x94\xCC\x81",                         // Greek alpha + rough breathing + acute
-    "\xD0\xB8\xCC\x86",                                 // Cyrillic i + combining breve
-    "\xE0\xB8\x81\xE0\xB8\xB4\xE0\xB9\x88",             // Thai ko kai + sara i + mai ek
-    "\xF0\x9D\x85\x97\xF0\x9D\x85\xA5\xF0\x9D\x85\xAE", // astral notehead + stem (SpacingMark) + flag (Extend)
-};
-
-/** Grapheme family alphabet: weights bias toward astral/motif clusters (GB9/9c/11/12/13). */
-static utf8_corpus_alphabet_t const utf8_graphemes_alphabet = {
-    span_over(utf8_graphemes_snippets),
-    span_over(utf8_default_boundary_codepoints),
-    {{35, 15, 25, 20, 5}}, // snippet, boundary, astral, motif, malformed
-};
-
-/** Grapheme differential corpora: motifs, dense runs and straddles, without seam regressions. */
-static utf8_segment_corpora_t utf8_graphemes_corpora_() {
-    utf8_segment_corpora_t corpora = {
-        "grapheme",
-        span_over(utf8_graphemes_motifs),
-        &utf8_graphemes_dense_runs_,
-        &utf8_graphemes_straddles_,
-        {}, // no fixed seam regressions for graphemes
-        &utf8_graphemes_alphabet,
-    };
-    return corpora;
-}
-
-#pragma endregion Equivalence
-
 #pragma region Rule coverage
 
-/** Rule-coverage gate: every GB rule motif runs and agrees serial-vs-ISA at window phases. */
-void test_utf8_graphemes_rules() {
-    // One motif per UAX-29 Grapheme_Cluster_Break rule (break or no-break direction).
-    utf8_rule_case_t const rule_cases[] = {
-        {"GB3", utf8_rule_joins_k, "\r\n"_sv},                                  // CR x LF (no break)
-        {"GB4", utf8_rule_breaks_k, "\na"_sv},                                  // (Control|CR|LF) / break after LF
-        {"GB5", utf8_rule_breaks_k, "a\n"_sv},                                  // / (Control|CR|LF) break before LF
-        {"GB6", utf8_rule_joins_k, "\xE1\x84\x80\xE1\x85\xA1"_sv},              // L x (L|V|LV|LVT): Hangul L + V
-        {"GB7", utf8_rule_joins_k, "\xEA\xB0\x80\xE1\x85\xA1"_sv},              // (LV|V) x (V|T): Hangul LV + V
-        {"GB8", utf8_rule_joins_k, "\xEA\xB0\x81\xE1\x86\xA8"_sv},              // (LVT|T) x T: Hangul LVT + T
-        {"GB9", utf8_rule_joins_k, "a\xCC\x81"_sv},                             // x (Extend|ZWJ)
-        {"GB9a", utf8_rule_joins_k, "\xE0\xA4\x95\xE0\xA4\xBE"_sv},             // x SpacingMark: consonant + vowel
-        {"GB9b", utf8_rule_joins_k, "\xD8\x80" "a"_sv},                         // Prepend x: U+0600 then letter
-        {"GB9c", utf8_rule_joins_k, "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"_sv}, // Indic conjunct: cons virama cons
-        {"GB11", utf8_rule_joins_k, "\xF0\x9F\x98\x80\xE2\x80\x8D\xF0\x9F\x98\x81"_sv}, // ExtPict Extend* ZWJ x ExtPict
-        {"GB12", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},             // sot (RI RI)* RI x RI
-        {"GB13", utf8_rule_joins_k, "a\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},            // [^RI] (RI RI)* RI x RI
-        {"GB999", utf8_rule_breaks_k, "ab"_sv},                                         // Any / Any (default break)
-        // Opposite-direction motifs (E1): the same rule firing the other way.
-        {"GB11", utf8_rule_breaks_k, "\xF0\x9F\x98\x80z"_sv}, // ExtPict then ASCII: no ZWJ bridge → break
-        {"GB12", utf8_rule_breaks_k,
-         "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI: break after the pair
-        {"GB6", utf8_rule_breaks_k, "\xE1\x84\x80z"_sv},         // Hangul L then ASCII: not L|V|LV|LVT → break
-    };
-    // Every Grapheme_Cluster_Break rule id the gate requires a motif for (spec-derived checklist).
-    char const *const required_rules[] = {
-        "GB3", "GB4", "GB5", "GB6", "GB7", "GB8", "GB9", "GB9a", "GB9b", "GB9c", "GB11", "GB12", "GB13", "GB999",
-    };
-    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
-        check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, backend.finder, span_over(rule_cases),
-                                  span_over(required_rules));
-}
+/** Rule-coverage gate: every GB motif agrees serial-vs-dispatched at window phases. */
+void test_utf8_graphemes_rules() { check_utf8_graphemes_rules_(utf8_graphemes_dispatched); }
 
 #pragma endregion Rule coverage
 
 #pragma region Safety
 
-/** Malformed-input safety of the UTF-8 grapheme kernels: serial and every compiled ISA. */
+/** Malformed-input safety of the grapheme-cluster dispatch point. */
 void test_utf8_graphemes_safety(test_context_t &context) {
-    utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_graphemes_serial}};
-    check_utf8_segment_safety_(context, "grapheme", span_over(serial_only));
-    check_utf8_segment_safety_(context, "grapheme", span_over(utf8_graphemes_backends));
+    check_utf8_graphemes_safety_(context, utf8_graphemes_dispatched);
 }
 
 #pragma endregion Safety
 
 #pragma region Drivers
 
-/** Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
+/** Serial-vs-dispatched grapheme differential over the dense and long-range corpora. */
 void test_utf8_graphemes_all(test_context_t &context) {
-    utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
-    check_utf8_segment_equivalence_(context, sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
-                                    context.iterations(8)); // This family's share of the suite budget
-
-    // The streaming segmenter against the per-position GB1-GB999 transcription, which nothing else calls.
-    for (sz::string_view_t const motif : span_over(utf8_graphemes_motifs))
-        check_utf8_segment_against_oracle_("grapheme", sz_utf8_graphemes_serial, sz_utf8_is_grapheme_boundary_serial,
-                                           motif.data(), motif.size());
+    check_utf8_graphemes_equivalence_(context, utf8_graphemes_dispatched);
 }
 
 #pragma endregion Drivers

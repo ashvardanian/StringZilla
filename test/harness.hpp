@@ -29,31 +29,36 @@
  *  - @c _unit : Known-answer vectors against an external ground truth. Fixed cost: it must run
  *    identically at every @c STRINGZILLA_SCALE, so no randomness and no sweeps.
  *  - @c _equivalence : A reference against a candidate over generated corpora - serial against
- *    each compiled backend, or the library against `std::`. This tier owns randomness.
+ *    a dispatch point or a capability's kernel, or the library against `std::`. This tier owns
+ *    randomness.
  *  - @c _safety : Malformed, adversarial and boundary inputs. Asserts survival, bounds and stated
  *    refusals - never answers, since a wrong answer is not what is under test here. Scales with
  *    @c STRINGZILLA_SCALE alongside @c _equivalence; only @c _unit is pinned.
- *  - @c _all : Walks the family's backend table and drives the tiers above. Holds no assertions
- *    of its own; a literal here belongs in @c _unit.
+ *  - @c _all : Drives the tiers above over the family's dispatch points. Holds no assertions of
+ *    its own; a literal here belongs in @c _unit.
  *  - @c _rules : Annex rule coverage, where a family transcribes a published spec: UAX-29, UAX-14.
+ *
+ *  The family files test the dispatch points and `stringzilla.hpp`. The kernel-level checks live in
+ *  `cross.hpp`, and each `cross_<arch>.cpp` runs them over that architecture's kernels by name, one
+ *  @c cross_section_t section per capability, as `test_<family>_<tier>_<capability>`.
  *
  *  @section test_example_usage Example Usage
  *
  *  @code{.sh}
  *  # Draw a fresh seed instead of the default 42
- *  STRINGZILLA_SEED=random ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_SEED=random ./build_release/stringzilla_cpu_test
  *
  *  # Quick smoke test (10% of normal iterations)
- *  STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_cpu_test
  *
  *  # Fast inner loop: only the UTF-8 tests, at 10% iterations
- *  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_cpu_test
  *
  *  # Thorough CI stress test (10x normal iterations)
- *  STRINGZILLA_SCALE=10 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_SCALE=10 ./build_release/stringzilla_cpu_test
  *
  *  # Combine both for CI fuzzing
- *  STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 ./build_release/stringzilla_test_cpp20
+ *  STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 ./build_release/stringzilla_cpu_test
  *  @endcode
  */
 #pragma once
@@ -74,7 +79,9 @@
 #include <string>       // `std::string`
 #include <string_view>  // `std::string_view`
 #include <system_error> // `std::errc`
+#include <tuple>        // `std::tuple`, for `call_best`
 #include <type_traits>  // `std::is_enum_v`
+#include <utility>      // `std::index_sequence`
 #include <vector>       // `std::vector`
 
 #if defined(_WIN32)
@@ -90,7 +97,29 @@
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 
+#include "stringzilla/metal.h" // `sz_metal_device_t`
 #include "stringzilla/types.hpp"
+
+/*  The GPU tests call the CUDA runtime by name, and HIP answers the same calls under its own. */
+#if STRINGZILLA_ARCH_ROCM_
+using cudaStream_t = hipStream_t;
+inline constexpr hipError_t cudaSuccess = hipSuccess, cudaErrorNotReady = hipErrorNotReady;
+inline constexpr unsigned cudaStreamNonBlocking = hipStreamNonBlocking;
+inline hipError_t cudaStreamCreate(hipStream_t *stream) { return hipStreamCreate(stream); }
+inline hipError_t cudaStreamCreateWithFlags(hipStream_t *stream, unsigned flags) {
+    return hipStreamCreateWithFlags(stream, flags);
+}
+inline hipError_t cudaStreamDestroy(hipStream_t stream) { return hipStreamDestroy(stream); }
+inline hipError_t cudaStreamQuery(hipStream_t stream) { return hipStreamQuery(stream); }
+inline hipError_t cudaStreamSynchronize(hipStream_t stream) { return hipStreamSynchronize(stream); }
+inline hipError_t cudaMallocAsync(void **pointer, std::size_t bytes, hipStream_t stream) {
+    return hipMallocAsync(pointer, bytes, stream);
+}
+inline hipError_t cudaFreeAsync(void *pointer, hipStream_t stream) { return hipFreeAsync(pointer, stream); }
+inline hipError_t cudaMemsetAsync(void *pointer, int value, std::size_t bytes, hipStream_t stream) {
+    return hipMemsetAsync(pointer, value, bytes, stream);
+}
+#endif
 
 #pragma region Assertion Helpers
 
@@ -267,9 +296,34 @@ backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], cha
 
 namespace ashvardanian::stringzilla::test {
 
+/** Calls the dispatch point @p best_ over @p capabilities with the arguments of its capability
+ *  kernels, whose last one, the stream, follows the mask. */
+template <auto best_, typename... arguments_types_>
+sz_status_t call_best(sz_capability_t capabilities, arguments_types_... arguments) noexcept {
+    std::tuple<arguments_types_...> const tuple {arguments...};
+    return [&]<std::size_t... indices_>(std::index_sequence<indices_...>) {
+        return best_(std::get<indices_>(tuple)..., capabilities, std::get<sizeof...(indices_)>(tuple));
+    }(std::make_index_sequence<sizeof...(arguments_types_) - 1> {});
+}
+
+/** The dispatch point @p best_ in the shape of its capability kernels, over the CPU capabilities
+ *  this process enables: callable like them, and convertible to their function pointers. */
+template <auto best_>
+inline constexpr auto cpu_best =
+    [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
+
+/** Calls @p kernel, a CPU capability kernel or a @c cpu_best, whose result is the out-parameter
+ *  just before the stream; verifies that it succeeded and returns that result. */
+template <typename result_type_, typename kernel_type_, typename... arguments_types_>
+result_type_ kernel_result(kernel_type_ const &kernel, arguments_types_... arguments) {
+    result_type_ result {};
+    verify(kernel(arguments..., &result, nullptr) == sz_success_k);
+    return result;
+}
+
 using arrow_strings_view_t = arrow_strings_view<char, sz_size_t>;
 
-#if !STRINGZILLA_TARGET_CUDA
+#if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
 using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, std::allocator<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
@@ -277,6 +331,40 @@ using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, unified_alloc<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
+#endif
+
+#if STRINGZILLA_WITH_METAL
+
+/** Memory in @c device's arena, which both sides address, so any @c std::vector can hold what a
+ *  kernel reads. */
+template <typename value_type_>
+struct metal_arena_alloc {
+    using value_type = value_type_;
+    using is_always_equal = std::false_type;
+
+    sz_metal_device_t *device;
+
+    explicit metal_arena_alloc(sz_metal_device_t &device) noexcept : device(&device) {}
+    template <typename other_type_>
+    metal_arena_alloc(metal_arena_alloc<other_type_> const &other) noexcept : device(other.device) {}
+    value_type *allocate(std::size_t count) {
+        sz_memory_allocator_t arena;
+        sz_memory_allocator_init_metal(&arena, device);
+        return static_cast<value_type *>(arena.allocate(count * sizeof(value_type), arena.handle));
+    }
+    void deallocate(value_type *pointer, std::size_t count) {
+        sz_memory_allocator_t arena;
+        sz_memory_allocator_init_metal(&arena, device);
+        arena.free(pointer, count * sizeof(value_type), arena.handle);
+    }
+    template <typename other_type_>
+    bool operator==(metal_arena_alloc<other_type_> const &other) const noexcept {
+        return device == other.device;
+    }
+};
+
+template <typename value_type_>
+using arena_vector = std::vector<value_type_, metal_arena_alloc<value_type_>>;
 #endif
 
 /**
@@ -359,8 +447,8 @@ inline test_environment_t read_test_environment(char const *program) {
  *  @brief The seed of the test named @p name in a run seeded with @p seed.
  *
  *  FNV-1a over @c std::uint32_t is exact on every platform, like @c std::seed_seq, and never
- *  touches the kernels under test, unlike @c sz_hash. The harness must not draw its inputs through
- *  the kernels it validates, and it must land on the same stream everywhere, or
+ *  touches the kernels under test, unlike @c sz_hash_best. The harness must not draw its inputs
+ *  through the kernels it validates, and it must land on the same stream everywhere, or
  *  `STRINGZILLA_SEED=7` stops meaning the same bytes on Arm as it does on x86.
  */
 constexpr std::uint32_t mix_seed(std::uint32_t seed, std::string_view name) noexcept {
@@ -641,21 +729,33 @@ inline void log_environment() {
     fmt::println("StringZilla {}.{}.{}", STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
                  STRINGZILLA_H_VERSION_PATCH);
     // The library already answers both questions; a wall of `STRINGZILLA_TARGET_*` echoes only repeats the first one.
-    fmt::println("- Compiled for: {}", sz_capabilities_to_string(sz_capabilities_comptime()));
-    fmt::println("- This machine: {}", sz_capabilities_to_string(sz_capabilities_runtime()));
+    sz_capability_t compiled = 0, detected = 0;
+    sz_cpu_capabilities_compiled(&compiled), sz_cpu_capabilities_detected(&detected);
+    char compiled_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
+    sz_capabilities_name(compiled, compiled_names, sizeof(compiled_names));
+    sz_capabilities_name(detected, detected_names, sizeof(detected_names));
+    fmt::println("- Compiled for: {}", compiled_names);
+    fmt::println("- This machine: {}", detected_names);
 }
 
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /**
- *  @brief Prints the "- CUDA:" line naming the first visible device and its compute capability,
- *      or "- CUDA: no device".
+ *  @brief Prints the "- CUDA:" or "- ROCm:" line naming the first visible device and its
+ *      architecture, or "no device" in its place.
  *  @return Whether a device is visible; without one, the GPU tests skip.
  */
 inline bool log_cuda_device() {
-    // The device is asked directly rather than through `sz_capabilities`: that verb answers for the library this
-    // binary links, and `define_stringzilla_library` compiles the core without CUDA, so it reports none.
     int device_count = 0;
+#if STRINGZILLA_ARCH_ROCM_
+    hipDeviceProp_t properties;
+    if (hipGetDeviceCount(&device_count) != hipSuccess || device_count == 0 ||
+        hipGetDeviceProperties(&properties, 0) != hipSuccess) {
+        fmt::println("- ROCm: no device");
+        return false;
+    }
+    fmt::println("- ROCm: {} {}", properties.name, properties.gcnArchName);
+#else
     cudaDeviceProp properties;
     if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0 ||
         cudaGetDeviceProperties(&properties, 0) != cudaSuccess) {
@@ -663,9 +763,47 @@ inline bool log_cuda_device() {
         return false;
     }
     fmt::println("- CUDA: {} sm_{}{}", properties.name, properties.major, properties.minor);
+#endif
     return true;
 }
-#endif // STRINGZILLA_TARGET_CUDA
+
+/** The baseline capability of the GPU vendor this translation unit is compiled for. */
+inline constexpr sz_capability_t gpu_baseline_k = STRINGZILLA_ARCH_ROCM_ ? sz_cap_rocm_k : sz_cap_cuda_k;
+
+/** The capabilities device 0 of this translation unit's GPU vendor runs, or zero without one. */
+inline sz_capability_t gpu_capabilities() {
+    sz_capability_t capabilities = 0;
+    if constexpr (STRINGZILLA_ARCH_ROCM_) sz_rocm_capabilities_enabled(0, &capabilities);
+    else sz_cuda_capabilities_enabled(0, &capabilities);
+    return capabilities;
+}
+
+/** The device exports of the GPU vendor this translation unit is compiled for. */
+inline constexpr auto gpu_sequence_from_string_views = STRINGZILLA_ARCH_ROCM_ ? &sz_rocm_sequence_from_string_views
+                                                                              : &sz_cuda_sequence_from_string_views;
+inline constexpr auto gpu_memory_allocator_init_unified = STRINGZILLA_ARCH_ROCM_
+                                                              ? &sz_rocm_memory_allocator_init_unified
+                                                              : &sz_cuda_memory_allocator_init_unified;
+inline constexpr auto gpu_memory_reaches_device = STRINGZILLA_ARCH_ROCM_ ? &sz_rocm_memory_reaches_device
+                                                                         : &sz_cuda_memory_reaches_device;
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+
+#if STRINGZILLA_WITH_METAL
+
+/**
+ *  @brief Prints the "- Metal:" line naming @p device, or "- Metal: no device" when none opened.
+ *  @return Whether @p device opened; without one, the GPU tests skip.
+ */
+inline bool log_metal_device(sz_metal_device_t const &device) {
+    if (!device.device) {
+        fmt::println("- Metal: no device");
+        return false;
+    }
+    void *const name = sz_metal_get_(device.device, "name");
+    fmt::println("- Metal: {}", static_cast<char const *>(sz_metal_get_(name, "UTF8String")));
+    return true;
+}
+#endif // STRINGZILLA_WITH_METAL
 
 /** Prints the run's seed, how to rerun one test under it, and its scale unless 1, below the lines
  *  of @c log_environment. */
@@ -747,13 +885,56 @@ inline std::size_t run_test(test_environment_t const &environment, std::string_v
     return 0;
 }
 
+/**
+ *  @brief Runs an architecture's kernel cross-checks via @c run_test, a section per capability.
+ *
+ *  `#if STRINGZILLA_TARGET_<KIT>` says a capability's kernels are built, and @c section says
+ *  whether this CPU runs them, announcing once a section it cannot run and skipping its checks.
+ */
+struct cross_section_t {
+    test_environment_t const &environment;
+    sz_capability_t detected = 0;
+    bool runnable = true;
+    std::size_t failures = 0;
+
+    explicit cross_section_t(test_environment_t const &environment) noexcept : environment(environment) {
+        sz_cpu_capabilities_detected(&detected);
+    }
+
+    /** Opens the section of the kernels that need @p capability. */
+    void section(std::string_view title, sz_capability_t capability) noexcept {
+        runnable = (detected & capability) != 0;
+        fmt::println("\n{}{}", title, runnable ? ":" : ": skipped, this CPU lacks it");
+    }
+
+    /** Runs @p test as @c run_test does, unless this CPU lacks the section's capability. */
+    template <typename function_type_>
+    void operator()(std::string_view name, function_type_ &&test) {
+        if (runnable) failures += run_test(environment, name, std::forward<function_type_>(test));
+    }
+};
+
 #pragma endregion Test Runner
 
 } // namespace ashvardanian::stringzilla::test
 
 /*  Cross-translation-unit test declarations. These live at global scope to match the TU
- *  definitions; the using-declaration names the context the drawing tests take. */
+ *  definitions; the using-declarations name the context the drawing tests take and the
+ *  environment the cross files run their sections in. */
 using ashvardanian::stringzilla::test::test_context_t;
+using ashvardanian::stringzilla::test::test_environment_t;
+
+#pragma region Kernel Cross Checks
+
+std::size_t test_cross_serial(test_environment_t const &environment);
+std::size_t test_cross_x8664(test_environment_t const &environment);
+std::size_t test_cross_arm64(test_environment_t const &environment);
+std::size_t test_cross_riscv64(test_environment_t const &environment);
+std::size_t test_cross_loongarch64(test_environment_t const &environment);
+std::size_t test_cross_ppc64(test_environment_t const &environment);
+std::size_t test_cross_wasm(test_environment_t const &environment);
+
+#pragma endregion Kernel Cross Checks
 
 #pragma region Basic Utilities
 
@@ -820,11 +1001,11 @@ void test_utf8_delimiters_all(test_context_t &context);
 
 #pragma region Uncased UTF8
 
-void test_uncased_unit();
-void test_uncased_scripts_unit();
-void test_uncased_regressions_unit();
-void test_uncased_all(test_context_t &context);
-void test_uncased_safety(test_context_t &context);
+void test_utf8_uncased_unit();
+void test_utf8_uncased_scripts_unit();
+void test_utf8_uncased_regressions_unit();
+void test_utf8_uncased_all(test_context_t &context);
+void test_utf8_uncased_safety(test_context_t &context);
 
 #pragma endregion Uncased UTF8
 
@@ -833,8 +1014,7 @@ void test_uncased_safety(test_context_t &context);
 template <typename string_type>
 void test_ascii_unit();
 
-void test_memory_unit(std::size_t max_l2_size = 1024ull * 1024ull);
-void test_memory_large_unit();
+void test_memory_unit();
 void test_memory_all(test_context_t &context);
 void test_memory_safety();
 

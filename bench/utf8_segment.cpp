@@ -2,12 +2,11 @@
  *  @file bench/utf8_segment.cpp
  *  @author Ash Vardanian
  *  @date June 8, 2026
- *  @brief Benchmarks the UTF-8 boundary-segmentation family against the serial baselines: the
- *      UAX-29 / UAX-14 boundary engines.
+ *  @brief Benchmarks the UTF-8 boundary-segmentation family: the UAX-29 / UAX-14 boundary engines.
  *
- *  Every kernel is benchmarked across all available SIMD backends side-by-side, and each backend's
- *  result is validated (via a per-call checksum) against the serial reference — so this file
- *  doubles as a differential correctness harness.
+ *  Times the segmentation dispatch points over the multilingual lines. Every capability's kernels
+ *  are timed and validated, through a per-call checksum, against the serial ones by the
+ *  `cross_<arch>.cpp` files.
  *
  *  Compute-bound: UTF-8 segmentation branches per codepoint, so a 64 MiB slice covers all paths.
  *
@@ -35,178 +34,46 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_utf8_segment_cpp20
+ *  cmake --build build_release --config Release --target stringzilla_cpu_bench
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines \
- *      build_release/stringzilla_bench_utf8_segment_cpp20
+ *      STRINGWARS_FILTER='utf8_(wordbreaks|graphemes|sentences|linebreaks)' build_release/stringzilla_cpu_bench
  *  @endcode
  *
  *  This file is the sibling of `utf8_traverse.cpp`, `utf8_scan.cpp`, and `utf8_uncased.cpp`.
  */
-#include <vector>
-
 #include <fmt/format.h>
 
-#include "harness.hpp"
-
-#include "stringzilla/utf8_wordbreaks.h" // `sz_utf8_wordbreaks`
-#include "stringzilla/utf8_graphemes.h"  // `sz_utf8_graphemes`
-#include "stringzilla/utf8_sentences.h"  // `sz_utf8_sentences`
-#include "stringzilla/utf8_linebreaks.h" // `sz_utf8_linebreaks`
+#include "cross.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
-#pragma region Wrappers
-
-/** Segments each token into UAX-29 words, graphemes, sentences, or UAX-14 line breaks forward; the
- *  checksum is the number of segments. */
-template <auto func_>
-struct utf8_word_forward_from_sz {
-    environment_t const &env;
-    utf8_word_forward_from_sz(environment_t const &env_) : env(env_) {}
-    inline call_result_t operator()(std::size_t i) const noexcept {
-        token_view_t token = env.tokens[i];
-        sz_cptr_t cursor = token.data();
-        sz_size_t remaining = token.size();
-        sz_size_t starts[16], lengths[16];
-        std::size_t words = 0;
-        while (remaining) {
-            sz_size_t consumed = 0;
-            sz_size_t produced = func_(cursor, remaining, starts, lengths, 16, &consumed);
-            words += static_cast<std::size_t>(produced);
-            if (produced == 0 || consumed >= remaining) break; // Whole suffix segmented.
-            cursor += consumed;                                // Resume from the first word that did not fit.
-            remaining -= consumed;
-        }
-        do_not_optimize(words);
-        return {token.size(), static_cast<check_value_t>(words)};
-    }
-};
-
-#pragma endregion
-
-#pragma region Benchmarks
+namespace {
 
 void bench_utf8_wordbreaks(environment_t const &env) {
-    auto base_v = utf8_word_forward_from_sz<sz_utf8_wordbreaks_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_wordbreaks_serial", base_v).log();
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_utf8_wordbreaks_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_haswell> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_utf8_wordbreaks_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_icelake> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_utf8_wordbreaks_neon", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_neon> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    bench_unary(env, "sz_utf8_wordbreaks_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_sve2> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_V128
-    bench_unary(env, "sz_utf8_wordbreaks_v128", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_v128> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    bench_unary(env, "sz_utf8_wordbreaks_rvv", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_rvv> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    bench_unary(env, "sz_utf8_wordbreaks_powervsx", base_v,
-                utf8_word_forward_from_sz<sz_utf8_wordbreaks_powervsx> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    bench_unary(env, "sz_utf8_wordbreaks_lasx", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_lasx> {env})
-        .log(base);
-#endif
+    bench_unary(env, "sz_utf8_wordbreaks_best", utf8_word_forward_from_sz<cpu_best<sz_utf8_wordbreaks_best>> {env})
+        .log();
 }
 
 void bench_utf8_graphemes(environment_t const &env) {
-    auto base_v = utf8_word_forward_from_sz<sz_utf8_graphemes_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_graphemes_serial", base_v).log();
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_utf8_graphemes_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_haswell> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_utf8_graphemes_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_icelake> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_utf8_graphemes_neon", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_neon> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    bench_unary(env, "sz_utf8_graphemes_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_sve2> {env})
-        .log(base);
-#endif
+    bench_unary(env, "sz_utf8_graphemes_best", utf8_word_forward_from_sz<cpu_best<sz_utf8_graphemes_best>> {env}).log();
 }
 
 void bench_utf8_sentences(environment_t const &env) {
-    auto base_v = utf8_word_forward_from_sz<sz_utf8_sentences_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_sentences_serial", base_v).log();
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_utf8_sentences_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_haswell> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_utf8_sentences_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_icelake> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_utf8_sentences_neon", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_neon> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    bench_unary(env, "sz_utf8_sentences_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_sve2> {env})
-        .log(base);
-#endif
+    bench_unary(env, "sz_utf8_sentences_best", utf8_word_forward_from_sz<cpu_best<sz_utf8_sentences_best>> {env}).log();
 }
 
 void bench_utf8_linebreaks(environment_t const &env) {
-    auto base_v = utf8_word_forward_from_sz<sz_utf8_linebreaks_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_linebreaks_serial", base_v).log();
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_utf8_linebreaks_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_haswell> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_utf8_linebreaks_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_icelake> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_utf8_linebreaks_neon", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_neon> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    bench_unary(env, "sz_utf8_linebreaks_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_sve2> {env})
-        .log(base);
-#endif
+    bench_unary(env, "sz_utf8_linebreaks_best", utf8_word_forward_from_sz<cpu_best<sz_utf8_linebreaks_best>> {env})
+        .log();
 }
 
-#pragma endregion
+} // namespace
 
-int main(int argc, char const **argv) {
-    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    log_environment();
-    print_bench_environment();
-
-    fmt::println("Building up the environment...");
-    environment_t env = build_environment( //
-        argc, argv,                        //
-        "xlsum.csv",                       // Default to xlsum for multilingual coverage
-        environment_t::tokenization_t::lines_k, compute_bound_slice_bytes_k);
-
+void bench_utf8_segment(corpora_t &corpora) {
+    environment_t const &env = corpora.multilingual_slice();
     fmt::println("Starting UTF-8 segmentation benchmarks...");
-
     bench_utf8_wordbreaks(env);
     bench_utf8_graphemes(env);
     bench_utf8_sentences(env);
     bench_utf8_linebreaks(env);
-
-    fmt::println("All benchmarks passed.");
-    return 0;
 }

@@ -4,8 +4,10 @@
  *  @date September 28, 2024
  *  @brief Benchmarks memory operations: copying, moving, resetting, and lookup-table conversion.
  *
- *  The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
- *  references to mimic real-world scenarios dealing with individual strings of different lengths.
+ *  Times the memory dispatch points over the English lines, against their LibC and STL analogs,
+ *  using the tokens only for size references to mimic real-world scenarios dealing with individual
+ *  strings of different lengths. Every capability's kernels are timed against the serial ones by
+ *  the `cross_<arch>.cpp` files.
  *
  *  Memory-bound: the copy, move, and fill primitives are pure bandwidth, so it reads the whole file
  *  by default and a larger buffer measures throughput truer.
@@ -31,8 +33,9 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_memory_cpp20
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_memory_cpp20
+ *  cmake --build build_release --config Release --target stringzilla_cpu_bench
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines STRINGWARS_FILTER='copy|move|fill|lookup' \
+ *  build_release/stringzilla_cpu_bench
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size
@@ -42,71 +45,29 @@
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
- *  build_release/stringzilla_bench_memory_cpp20
+ *  build_release/stringzilla_cpu_bench
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
  *  Google Benchmark. This file is the sibling of `find.cpp`, `token.cpp`, and `sequence.cpp`.
  */
-#include <memory>  // `std::unique_ptr`
-#include <numeric> // `std::iota`
-#include <string>  // `std::string`
-
-#ifdef _WIN32
-#include <malloc.h> // `_aligned_malloc`
-#else
-#include <cstdlib> // `std::aligned_alloc`
-#endif
+#include <algorithm> // `std::transform`, `std::generate`
+#include <random>    // `std::minstd_rand`
 
 #include <fmt/format.h>
 
-#include "harness.hpp"
+#include "cross.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
-constexpr std::size_t max_shift_length = 299;
 
-/** Wraps platform-specific @b aligned memory allocation and deallocation functions. Compatible with
- *  @c std::unique_ptr as the second template argument, to free the memory. */
-struct page_alloc_and_free_t {
-#ifdef _WIN32
-    inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
-        return reinterpret_cast<char *>(_aligned_malloc(size, alignment));
-    }
-    inline void operator()(char *page_pointer) const noexcept { _aligned_free(page_pointer); }
-#else
-    inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
-        return reinterpret_cast<char *>(std::aligned_alloc(alignment, size));
-    }
-    inline void operator()(char *page_pointer) const noexcept { std::free(page_pointer); }
-#endif
-};
+namespace {
 
 #pragma region MemCpy
 
-/** Wraps a hardware-specific @b memcpy-like backend into a callable for @c bench_unary. */
-template <sz_copy_t copy_func_, int page_misalignment_ = 0>
-struct copy_from_sz {
-
-    environment_t const &env;
-    sz_ptr_t output;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
-        // Round down to the nearest multiple of a cache line width for aligned writes
-        output_offset = round_up_to_multiple<STRINGZILLA_CACHE_LINE_BYTES>(output_offset) -
-                        STRINGZILLA_CACHE_LINE_BYTES;
-        // Ensure unaligned exports if needed
-        output_offset += page_misalignment_;
-        copy_func_(output + output_offset, slice.data(), slice.size());
-        return {slice.size()};
-    }
-};
-
-void memcpy_like_sz(sz_ptr_t output, sz_cptr_t input, std::size_t length) { std::memcpy(output, input, length); }
+sz_status_t memcpy_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, void *) {
+    std::memcpy(output, input, length);
+    return sz_success_k;
+}
 
 /**
  *  @brief Benchmarks @c memcpy -like operations into @b aligned and @b shifted misaligned output.
@@ -116,58 +77,15 @@ void memcpy_like_sz(sz_ptr_t output, sz_cptr_t input, std::size_t length) { std:
  *  but shift by one to guarantee unaligned writes.
  *
  *  Multiple calls to the provided functions even with the same arguments won't change the input or
- *  output. So the kernels can be compared against the baseline @c memcpy function.
+ *  output. So the dispatch point can be compared against the baseline @c memcpy function.
  */
 void bench_copy(environment_t const &env) {
+    dataset_copy_t output(env);
+    sz_ptr_t o = output.data();
 
-    // Create an aligned buffer for the output
-    std::unique_ptr<char, page_alloc_and_free_t> output_buffer;
-    // Add space for at least one cache line to simplify unaligned exports
-    std::size_t const output_length = round_up_to_multiple<4096>(env.dataset.size() + max_shift_length);
-    output_buffer.reset(page_alloc_and_free_t {}(4096, output_length));
-    sz_ptr_t o = output_buffer.get();
-
-    // Provide a baseline
-    bench_result_t align = bench_unary(env, "sz_copy_serial(align)", copy_from_sz<sz_copy_serial> {env, o}).log();
-    bench_result_t shift = bench_unary(env, "sz_copy_serial(shift)", copy_from_sz<sz_copy_serial, 1> {env, o}) //
-                               .log(align);
-
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_copy_haswell(align)", copy_from_sz<sz_copy_haswell> {env, o}).log(align);
-    bench_unary(env, "sz_copy_haswell(shift)", copy_from_sz<sz_copy_haswell, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    bench_unary(env, "sz_copy_skylake(align)", copy_from_sz<sz_copy_skylake> {env, o}).log(align);
-    bench_unary(env, "sz_copy_skylake(shift)", copy_from_sz<sz_copy_skylake, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_copy_neon(align)", copy_from_sz<sz_copy_neon> {env, o}).log(align);
-    bench_unary(env, "sz_copy_neon(shift)", copy_from_sz<sz_copy_neon, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    bench_unary(env, "sz_copy_sve(align)", copy_from_sz<sz_copy_sve> {env, o}).log(align);
-    bench_unary(env, "sz_copy_sve(shift)", copy_from_sz<sz_copy_sve, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_V128
-    bench_unary(env, "sz_copy_v128(align)", copy_from_sz<sz_copy_v128> {env, o}).log(align);
-    bench_unary(env, "sz_copy_v128(shift)", copy_from_sz<sz_copy_v128, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    bench_unary(env, "sz_copy_v128relaxed(align)", copy_from_sz<sz_copy_v128relaxed> {env, o}).log(align);
-    bench_unary(env, "sz_copy_v128relaxed(shift)", copy_from_sz<sz_copy_v128relaxed, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    bench_unary(env, "sz_copy_rvv(align)", copy_from_sz<sz_copy_rvv> {env, o}).log(align);
-    bench_unary(env, "sz_copy_rvv(shift)", copy_from_sz<sz_copy_rvv, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    bench_unary(env, "sz_copy_lasx(align)", copy_from_sz<sz_copy_lasx> {env, o}).log(align);
-    bench_unary(env, "sz_copy_lasx(shift)", copy_from_sz<sz_copy_lasx, 1> {env, o}).log(align, shift);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    bench_unary(env, "sz_copy_powervsx(align)", copy_from_sz<sz_copy_powervsx> {env, o}).log(align);
-    bench_unary(env, "sz_copy_powervsx(shift)", copy_from_sz<sz_copy_powervsx, 1> {env, o}).log(align, shift);
-#endif
+    bench_result_t align = bench_unary(env, "sz_copy_best(align)", copy_from_sz<cpu_best<sz_copy_best>> {env, o}).log();
+    bench_result_t shift =
+        bench_unary(env, "sz_copy_best(shift)", copy_from_sz<cpu_best<sz_copy_best>, 1> {env, o}).log(align);
 
     bench_unary(env, "std::memcpy(align)", copy_from_sz<memcpy_like_sz> {env, o}).log(align);
     bench_unary(env, "std::memcpy(shift)", copy_from_sz<memcpy_like_sz, 1> {env, o}).log(align, shift);
@@ -177,88 +95,26 @@ void bench_copy(environment_t const &env) {
 
 #pragma region MemMove
 
-/** Wraps a hardware-specific @b memmove-like backend into a callable for @c bench_unary. */
-template <sz_move_t move_func_, int shift_ = 0>
-struct move_from_sz {
-
-    environment_t const &env;
-    sz_ptr_t output;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
-        // Shift forward
-        move_func_(output + output_offset + shift_, output + output_offset, slice.size());
-        // Shift backward to revert the changes
-        move_func_(output + output_offset, output + output_offset + shift_, slice.size());
-        return {slice.size() * 2};
-    }
-};
-
-void memmove_like_sz(sz_ptr_t output, sz_cptr_t input, std::size_t length) { std::memmove(output, input, length); }
+sz_status_t memmove_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, void *) {
+    std::memmove(output, input, length);
+    return sz_success_k;
+}
 
 /**
  *  @brief Benchmarks @c memmove -like operations shuffling regions of output memory back and forth.
  *
  *  Multiple calls to the provided functions even with the same arguments won't change the input or
  *  output. This is achieved by performing a combination of a forward and a backward move. So the
- *  kernels can be compared against the baseline @c memmove function.
+ *  dispatch point can be compared against the baseline @c memmove function.
  */
 void bench_move(environment_t const &env) {
+    dataset_copy_t output(env);
+    sz_ptr_t o = output.data();
 
-    // Create an aligned buffer for the output
-    std::unique_ptr<char, page_alloc_and_free_t> output_buffer;
-    // Add space for at least one cache line to simplify unaligned exports
-    std::size_t const output_length = round_up_to_multiple<4096>(env.dataset.size() + max_shift_length);
-    output_buffer.reset(page_alloc_and_free_t {}(4096, output_length));
-    sz_ptr_t o = output_buffer.get();
-
-    // Copy the dataset to the output buffer
-    std::memcpy(o, env.dataset.data(), env.dataset.size());
-
-    // Provide a baseline for shifting forward by a single byte or a single cache line
-    bench_result_t byte = bench_unary(env, "sz_move_serial(by1)", move_from_sz<sz_move_serial, 1> {env, o}).log();
-    bench_result_t page = bench_unary(env, "sz_move_serial(by64)", move_from_sz<sz_move_serial, 64> {env, o}).log(byte);
-
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_move_haswell(by1)", move_from_sz<sz_move_haswell, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_haswell(by64)", move_from_sz<sz_move_haswell, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    bench_unary(env, "sz_move_skylake(by1)", move_from_sz<sz_move_skylake, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_skylake(by64)", move_from_sz<sz_move_skylake, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_move_neon(by1)", move_from_sz<sz_move_neon, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_neon(by64)", move_from_sz<sz_move_neon, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    bench_unary(env, "sz_move_sve(by1)", move_from_sz<sz_move_sve, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_sve(by64)", move_from_sz<sz_move_sve, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_V128
-    bench_unary(env, "sz_move_v128(by1)", move_from_sz<sz_move_v128, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_v128(by64)", move_from_sz<sz_move_v128, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    bench_unary(env, "sz_move_v128relaxed(by1)", move_from_sz<sz_move_v128relaxed, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_v128relaxed(by64)", move_from_sz<sz_move_v128relaxed, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    bench_unary(env, "sz_move_rvv(by1)", move_from_sz<sz_move_rvv, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_rvv(by64)", move_from_sz<sz_move_rvv, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    bench_unary(env, "sz_move_lasx(by1)", move_from_sz<sz_move_lasx, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_lasx(by64)", move_from_sz<sz_move_lasx, 64> {env, o}).log(byte, page);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    bench_unary(env, "sz_move_powervsx(by1)", move_from_sz<sz_move_powervsx, 1> {env, o}).log(byte);
-    bench_unary(env, "sz_move_powervsx(by64)", move_from_sz<sz_move_powervsx, 64> {env, o}).log(byte, page);
-#endif
+    // Shift forward by a single byte or a single cache line
+    bench_result_t byte = bench_unary(env, "sz_move_best(by1)", move_from_sz<cpu_best<sz_move_best>, 1> {env, o}).log();
+    bench_result_t page =
+        bench_unary(env, "sz_move_best(by64)", move_from_sz<cpu_best<sz_move_best>, 64> {env, o}).log(byte);
 
     bench_unary(env, "std::memmove(by1)", move_from_sz<memmove_like_sz, 1> {env, o}).log(byte);
     bench_unary(env, "std::memmove(by64)", move_from_sz<memmove_like_sz, 64> {env, o}).log(byte, page);
@@ -268,57 +124,23 @@ void bench_move(environment_t const &env) {
 
 #pragma region Broadcasting Constants with MemSet
 
-/** Wraps a hardware-specific @b memset-like backend into a callable for @c bench_unary. */
-template <sz_fill_t fill_func_>
-struct fill_from_sz {
-
-    environment_t const &env;
-    sz_ptr_t output;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
-        fill_func_(output + output_offset, slice.size(), slice.front());
-        return {slice.size(), static_cast<check_value_t>(slice.front())};
-    }
-};
-
-/** Wraps a hardware-specific @c std::generate -like backend into a callable for @c bench_unary. */
-template <sz_fill_random_t fill_func_>
-struct fill_random_from_sz {
-
-    environment_t const &env;
-    sz_ptr_t output;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
-        fill_func_(output + output_offset, slice.size(), slice.front());
-        char last_random_byte = output[output_offset + slice.size() - 1];
-        do_not_optimize(last_random_byte);
-        return {slice.size(), static_cast<check_value_t>(last_random_byte)};
-    }
-};
-
-void memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value) { std::memset(output, value, length); }
+sz_status_t memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value, void *) {
+    std::memset(output, value, length);
+    return sz_success_k;
+}
 
 /**
- *  @brief The `std::` baseline for @c sz_generate, measuring generator throughput alone.
+ *  @brief The `std::` baseline for @c sz_fill_random_best, measuring generator throughput alone.
  *
- *  Like the @c sz_generate kernels, the same nonce replays the same bytes: each call seeds a
+ *  Like the kernels behind it, the same nonce replays the same bytes: each call seeds a
  *  @c std::minstd_rand from it, whose one word of state keeps the reseed out of the measurement
  *  where a Mersenne-Twister state fill would not.
  */
-void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
+sz_status_t generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce, void *) {
     std::minstd_rand generator(static_cast<std::minstd_rand::result_type>(nonce));
     std::uniform_int_distribution<std::uint32_t> distribution(1, 255);
     std::generate(output, output + length, [&]() -> char { return static_cast<char>(distribution(generator)); });
+    return sz_success_k;
 }
 
 /**
@@ -326,81 +148,17 @@ void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
  *      with the first byte of the input regions or with random @b (reproducible) byte streams.
  *
  *  Multiple calls to the provided functions even with the same arguments won't change the input or
- *  output. So the kernels can be compared against the baseline @c memset function.
+ *  output. So the dispatch points can be compared against the baseline @c memset function.
  */
 void bench_fill(environment_t const &env) {
+    dataset_copy_t output(env);
+    sz_ptr_t o = output.data();
 
-    // Create an aligned buffer for the output
-    std::unique_ptr<char, page_alloc_and_free_t> output_buffer;
-    // Add space for at least one cache line to simplify unaligned exports
-    std::size_t const output_length = round_up_to_multiple<4096>(env.dataset.size() + max_shift_length);
-    output_buffer.reset(page_alloc_and_free_t {}(4096, output_length));
-    sz_ptr_t o = output_buffer.get();
+    bench_result_t zeros = bench_unary(env, "sz_fill_best", fill_from_sz<cpu_best<sz_fill_best>> {env, o}).log();
+    bench_result_t random =
+        bench_unary(env, "sz_fill_random_best", fill_random_from_sz<cpu_best<sz_fill_random_best>> {env, o}).log(zeros);
 
-    // Copy the dataset to the output buffer
-    std::memcpy(o, env.dataset.data(), env.dataset.size());
-
-    // Provide a baseline for overwriting the `output_buffer` memory
-    bench_result_t zeros = bench_unary(env, "sz_fill_serial", fill_from_sz<sz_fill_serial> {env, o}).log();
-    auto random_call = fill_random_from_sz<sz_fill_random_serial> {env, o};
-    bench_result_t random = bench_unary(env, "sz_fill_random_serial", random_call).log(zeros);
-
-#if STRINGZILLA_TARGET_WESTMERE
-    bench_unary(env, "sz_fill_random_westmere", random_call, fill_random_from_sz<sz_fill_random_westmere> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_fill_haswell", fill_from_sz<sz_fill_haswell> {env, o}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    bench_unary(env, "sz_fill_skylake", fill_from_sz<sz_fill_skylake> {env, o}).log(zeros);
-    bench_unary(env, "sz_fill_random_skylake", random_call, fill_random_from_sz<sz_fill_random_skylake> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_fill_random_icelake", random_call, fill_random_from_sz<sz_fill_random_icelake> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon> {env, o}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_NEONAES
-    bench_unary(env, "sz_fill_random_neonaes", random_call, fill_random_from_sz<sz_fill_random_neonaes> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve> {env, o}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_SVE2AES
-    bench_unary(env, "sz_fill_random_sve2aes", random_call, fill_random_from_sz<sz_fill_random_sve2aes> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_V128
-    bench_unary(env, "sz_fill_v128", fill_from_sz<sz_fill_v128> {env, o}).log(zeros);
-    bench_unary(env, "sz_fill_random_v128", random_call, fill_random_from_sz<sz_fill_random_v128> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    bench_unary(env, "sz_fill_v128relaxed", fill_from_sz<sz_fill_v128relaxed> {env, o}).log(zeros);
-    bench_unary(env, "sz_fill_random_v128relaxed", random_call,
-                fill_random_from_sz<sz_fill_random_v128relaxed> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    bench_unary(env, "sz_fill_rvv", fill_from_sz<sz_fill_rvv> {env, o}).log(zeros);
-    bench_unary(env, "sz_fill_random_rvv", random_call, fill_random_from_sz<sz_fill_random_rvv> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    bench_unary(env, "sz_fill_lasx", fill_from_sz<sz_fill_lasx> {env, o}).log(zeros);
-    bench_unary(env, "sz_fill_random_lasx", random_call, fill_random_from_sz<sz_fill_random_lasx> {env, o})
-        .log(zeros, random);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    bench_unary(env, "sz_fill_powervsx", fill_from_sz<sz_fill_powervsx> {env, o}).log(zeros);
-    bench_unary(env, "sz_fill_random_powervsx", random_call, fill_random_from_sz<sz_fill_random_powervsx> {env, o})
-        .log(zeros, random);
-#endif
+    // The generators differ, so the random baseline is timed but never validated.
     bench_unary(env, "fill<std::memset>", fill_from_sz<memset_like_sz> {env, o}).log(zeros);
     bench_unary(env, "fill<std::random_device>", fill_random_from_sz<generate_like_sz> {env, o}).log(zeros, random);
 }
@@ -409,27 +167,9 @@ void bench_fill(environment_t const &env) {
 
 #pragma region Lookup Transformations
 
-/** Wraps a hardware-specific lookup-table backend into something similar to @c std::transform. */
-template <sz_lookup_t lookup_func_>
-struct lookup_from_sz {
-
-    environment_t const &env;
-    sz_ptr_t output;
-    sz_cptr_t lookup_table;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
-        lookup_func_(output + output_offset, slice.size(), slice.data(), lookup_table);
-        return {slice.size(), static_cast<check_value_t>(slice.front())};
-    }
-};
-
-void transform_like_sz(sz_ptr_t output, sz_size_t length, sz_cptr_t input, sz_cptr_t lookup_table) {
+sz_status_t transform_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, sz_cptr_t lookup_table, void *) {
     std::transform(input, input + length, output, [=](char c) { return (char)lookup_table[(unsigned char)c]; });
+    return sz_success_k;
 }
 
 /**
@@ -439,75 +179,24 @@ void transform_like_sz(sz_ptr_t output, sz_size_t length, sz_cptr_t input, sz_cp
  *  "look-up table"-based transformations.
  */
 void bench_lookup(environment_t const &env) {
+    dataset_copy_t output(env);
+    sz_ptr_t o = output.data();
+    sz_cptr_t lut = rotated_alphabet();
 
-    // Create an aligned buffer for the output
-    std::unique_ptr<char, page_alloc_and_free_t> output_buffer;
-    // Add space for at least one cache line to simplify unaligned exports
-    std::size_t const output_length = round_up_to_multiple<4096>(env.dataset.size() + max_shift_length);
-    output_buffer.reset(page_alloc_and_free_t {}(4096, output_length));
-    sz_ptr_t o = output_buffer.get();
-
-    // Copy the dataset to the output buffer
-    std::memcpy(o, env.dataset.data(), env.dataset.size());
-
-    // Prepare cyclic rotation of the alphabet
-    static unsigned char lookup_table[256];
-    std::iota(std::begin(lookup_table), std::end(lookup_table), 0);
-    std::rotate(std::begin(lookup_table), std::begin(lookup_table) + 1, std::end(lookup_table));
-
-    // Provide a baseline for overwriting the `output_buffer` memory
-    sz_cptr_t lut = reinterpret_cast<sz_cptr_t>(lookup_table);
-    bench_result_t zeros = bench_unary(env, "sz_lookup_serial", lookup_from_sz<sz_lookup_serial> {env, o, lut}).log();
-
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_lookup_haswell", lookup_from_sz<sz_lookup_haswell> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_lookup_icelake", lookup_from_sz<sz_lookup_icelake> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_lookup_neon", lookup_from_sz<sz_lookup_neon> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    bench_unary(env, "sz_lookup_sve", lookup_from_sz<sz_lookup_sve> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_V128
-    bench_unary(env, "sz_lookup_v128", lookup_from_sz<sz_lookup_v128> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    bench_unary(env, "sz_lookup_v128relaxed", lookup_from_sz<sz_lookup_v128relaxed> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    bench_unary(env, "sz_lookup_rvv", lookup_from_sz<sz_lookup_rvv> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    bench_unary(env, "sz_lookup_lasx", lookup_from_sz<sz_lookup_lasx> {env, o, lut}).log(zeros);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    bench_unary(env, "sz_lookup_powervsx", lookup_from_sz<sz_lookup_powervsx> {env, o, lut}).log(zeros);
-#endif
+    bench_result_t zeros =
+        bench_unary(env, "sz_lookup_best", lookup_from_sz<cpu_best<sz_lookup_best>> {env, o, lut}).log();
     bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
 }
 
 #pragma endregion Lookup Transformations
 
-int main(int argc, char const **argv) {
-    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    log_environment();
-    print_bench_environment();
+} // namespace
 
-    fmt::println("Building up the environment...");
-    environment_t env = build_environment( //
-        argc, argv,                        //
-        "leipzig1M.txt",                   //
-        environment_t::tokenization_t::lines_k);
-
+void bench_memory(corpora_t &corpora) {
+    environment_t const &env = corpora.lines();
     fmt::println("Starting low-level memory-operation benchmarks...");
     bench_copy(env);
     bench_move(env);
     bench_fill(env);
     bench_lookup(env);
-
-    fmt::println("All benchmarks passed.");
-    return 0;
 }

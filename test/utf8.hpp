@@ -36,13 +36,13 @@
 #include <initializer_list> // `std::initializer_list`
 #include <random>           // `std::mt19937`, `std::uniform_int_distribution`, `std::discrete_distribution`
 #include <string>           // `std::string`
+#include <string_view>      // `std::string_view`
 #include <vector>           // `std::vector`
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <stringzilla/stringzilla.h>   // Primary C API
-#include <stringzilla/stringzilla.hpp> // `sz::string_view_t`
+#include <stringzilla/stringzilla.h> // Primary C API
 
 #include "harness.hpp" // `for_each_cacheline_offset_`, `test_context_t`
 
@@ -50,7 +50,7 @@ namespace sz = ashvardanian::stringzilla;
 
 namespace ashvardanian::stringzilla::test {
 
-using sz::literals::operator""_sv;
+using std::literals::string_view_literals::operator""sv;
 
 /*  Realistic multi-script paragraphs shared by the segmentation family tests. Each accessor returns
  *  an ASCII-source string view, with non-ASCII bytes spelled as \xHH so no editor or formatter can
@@ -71,7 +71,7 @@ using sz::literals::operator""_sv;
  *  東京タワー the next week, all 333 m of it, was breathtaking at dusk…
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_hotel_review() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_hotel_review() noexcept {
     static char const result[] =                                                                   //
         "Last spring we strolled down M\xC3\xBCnchner Stra\xC3\x9F"                                //
         "e; the cafe\xCC\x81 cortado cost 3,50\xC2\xA0\xE2\x82\xAC and was unreal. Dr. Vogel, our" //
@@ -94,7 +94,7 @@ using sz::literals::operator""_sv;
  *  ✈️ all day; 10/10, would march again.
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_pride_caption() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_pride_caption() noexcept {
     static char const result[] =                                                                   //
         "Best Pride yet \xF0\x9F\x8F\xB3\xEF\xB8\x8F\xE2\x80\x8D\xF0\x9F\x8C\x88 \xE2\x80\x94 the" //
         " whole crew showed up. Even my parents \xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9"      //
@@ -118,7 +118,7 @@ using sz::literals::operator""_sv;
  *  今日は最高だった。 We screamed 사랑해 till 11 p.m. sharp.
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_concert_post() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_concert_post() noexcept {
     static char const result[] =                                                                   //
         "\xEC\x98\xA4\xEB\x8A\x98 \xEC\xBD\x98\xEC\x84\x9C\xED\x8A\xB8, \xEC\xA7\x84\xEC\xA7\x9C " //
         "\xEB\xAF\xB8\xEC\xB3\xA4\xEB\x8B\xA4!! \xE1\x84\x92\xE1\x85\xA1\xE1\x86\xAB\xEA\xB5\xAD " //
@@ -143,7 +143,7 @@ using sz::literals::operator""_sv;
  *  signs like की. Renderers disagree, so test (½ the bugs are font bugs) before you ship!
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_devanagari_tip() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_devanagari_tip() noexcept {
     static char const result[] =                                                                   //
         "Quick Devanagari tip: \xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7 is one cluster (\xE0\xA4\x95 " //
         "+ \xE0\xA5\x8D + \xE0\xA4\xB7), not three. Force the half-form with ZWJ \xE2\x80\x94 "    //
@@ -168,7 +168,7 @@ using sz::literals::operator""_sv;
  *  transition. Full dataset: doi:10.1000⁠/​xyz (mirror in Box ②).
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_science_abstract() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_science_abstract() noexcept {
     static char const result[] =                                                                   //
         "The \xEF\xAC\x81lm grew at 300\xC2\xA0\xE2\x84\xAA on a 5\xC2\xA0\xE2\x84\xAB buffer ("   //
         "\xE2\x89\x88 2\xC2\xB2 monolayers). Section \xE2\x85\xAB covers the \xEF\xBC\xA1-phase; " //
@@ -190,7 +190,7 @@ using sz::literals::operator""_sv;
  *  knows for sure.
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_news_lede() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_news_lede() noexcept {
     static char const result[] =                                                                   //
         "The U.S.A. wasn't ready, analysts said. \xE2\x80\x9CWe lost 1,000 jobs,\xE2\x80\x9D the " //
         "mayor warned. \xE2\x80\x9CRecovery starts now.\xE2\x80\x9D Filings spiked 2024/06"        //
@@ -211,7 +211,7 @@ using sz::literals::operator""_sv;
  *  “straße” match STRASSE? Yes, once you fold.
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_language_lesson() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_language_lesson() noexcept {
     static char const result[] =                                                                   //
         "Greek lesson: \xCE\x9F\xCE\x94\xCE\x9F\xCE\xA3 becomes \xCE\xBF\xCE\xB4\xCF\x8C\xCF\x82 " //
         "when lowercased, ending in a final \xCF\x82. Russian's easy too \xE2\x80\x94 \xD0\x9C"    //
@@ -235,7 +235,7 @@ using sz::literals::operator""_sv;
  *  שָׁלוֹם must reorder under NFC. Malayalam even has a true prepend, the dot-reph ൎക.
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_rtl_scripts() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_rtl_scripts() noexcept {
     static char const result[] =                                                                   //
         "Hebrew acronyms take gershayim: \xD7\xA6\xD7\x94\xD7\xB4\xD7\x9C and \xD7\x90\xD7\xA8"    //
         "\xD7\x94\xD7\xB4\xD7\x91 aren't typos. Arabic flows right-to-left too \xE2\x80\x94 "      //
@@ -254,7 +254,7 @@ using sz::literals::operator""_sv;
  *  it’s worth it
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_micro_apostrophe() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_micro_apostrophe() noexcept {
     static char const result[] = //
         "it\xE2\x80\x99s worth it";
     return result;
@@ -269,7 +269,7 @@ using sz::literals::operator""_sv;
  *  ؀٤ ൎക
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_micro_prepend() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_micro_prepend() noexcept {
     static char const result[] = //
         "\xD8\x80\xD9\xA4 \xE0\xB5\x8E\xE0\xB4\x95";
     return result;
@@ -284,7 +284,7 @@ using sz::literals::operator""_sv;
  *  A.\r\nB.\u2028C.
  *  @endverbatim
  */
-[[maybe_unused]] static sz::string_view_t utf8_prose_micro_hardbreaks() noexcept {
+[[maybe_unused]] static std::string_view utf8_prose_micro_hardbreaks() noexcept {
     static char const result[] = //
         "A.\x0D\x0A"             //
         "B.\xE2\x80\xA8"         //
@@ -310,8 +310,8 @@ enum class utf8_corpus_flavor_t { valid_k, malformed_k };
 
 /** One hand-checked segmentation golden vector: source text and its borrowed expected segments. */
 struct utf8_unit_case_t {
-    sz::string_view_t text;
-    std::initializer_list<sz::string_view_t> expected;
+    std::string_view text;
+    std::initializer_list<std::string_view> expected;
 };
 
 /** Named weighted categories the random corpus draws from via a @c std::discrete_distribution. */
@@ -360,7 +360,7 @@ struct utf8_segment_corpora_t {
     char const *family_name;
 
     /** The family's own corner-case motifs. */
-    sz::span<sz::string_view_t const> motifs;
+    sz::span<std::string_view const> motifs;
 
     /** Streams the family's high-density runs, each over several 64-byte windows, to @p sink. */
     void (*dense_runs)(std::mt19937 &generator, utf8_run_sink_t sink, void *context);
@@ -369,7 +369,7 @@ struct utf8_segment_corpora_t {
     void (*straddles)(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context);
 
     /** Optional fixed hand-found regression inputs. */
-    sz::span<sz::string_view_t const> regressions;
+    sz::span<std::string_view const> regressions;
 
     /** Per-family random-corpus alphabet; null selects the shared default. */
     utf8_corpus_alphabet_t const *alphabet;
@@ -384,8 +384,8 @@ struct utf8_repro_t {
     utf8_corpus_flavor_t flavor;
 };
 
-/** A per-position boundary rule, as @c sz_utf8_is_word_boundary_serial and its grapheme twin spell
- *  it. Declared here rather than beside @c sz_utf8_segmenter_t because only the tests call one. */
+/** A per-position boundary rule, as the serial word and grapheme boundary checks spell it. Only
+ *  the tests call one, so it lives here rather than beside @c sz_kernel_utf8_segmenter_t. */
 typedef sz_bool_t (*utf8_boundary_oracle_t)(sz_cptr_t, sz_size_t, sz_size_t);
 
 #pragma endregion Shared constants and types
@@ -412,17 +412,17 @@ inline std::string encoded_rune_(sz_rune_t codepoint) {
 }
 
 /** SMP/astral fixtures the pure-BMP random corpora miss: Regional-Indicator pairs, ZWJ sequences,
- *  lone astral codepoints. A borrowed @c sz::string_view_t table, reused by every family's safety
+ *  lone astral codepoints. A borrowed @c std::string_view table, reused by every family's safety
  *  and differential layers. */
-static sz::string_view_t const utf8_astral_fixtures[] = {
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv,                                         // RI(U) RI(S) flag pair
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8\xF0\x9F\x87\xAB\xF0\x9F\x87\xB7"_sv,         // two flags
-    "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7"_sv, // family ZWJ sequence
-    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD"_sv,                                         // emoji + skin-tone modifier
-    "\xF0\x9F\x98\x80\xF0\x9F\x98\x81"_sv,                                         // two astral emoji
-    "a\xF0\x9F\x98\x80\x62"_sv,                                                    // ASCII around an astral codepoint
-    "\xF0\x90\x80\x80\xF0\x90\x80\x81"_sv,                                         // U+10000 U+10001 plain astral pair
-    "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv,                                     // RI ASCII RI - RI parity must reset
+static std::string_view const utf8_astral_fixtures[] = {
+    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"sv,                                         // RI(U) RI(S) flag pair
+    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8\xF0\x9F\x87\xAB\xF0\x9F\x87\xB7"sv,         // two flags
+    "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7"sv, // family ZWJ sequence
+    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD"sv,                                         // emoji + skin-tone modifier
+    "\xF0\x9F\x98\x80\xF0\x9F\x98\x81"sv,                                         // two astral emoji
+    "a\xF0\x9F\x98\x80\x62"sv,                                                    // ASCII around an astral codepoint
+    "\xF0\x90\x80\x80\xF0\x90\x80\x81"sv,                                         // U+10000 U+10001 plain astral pair
+    "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"sv,                                     // RI ASCII RI - RI parity must reset
 };
 
 /** Appends @p link_count Regional-Indicator codepoints to @p out, cleared first, for any family. */
@@ -572,7 +572,7 @@ static utf8_corpus_alphabet_t const utf8_default_alphabet = {
  *  an unpopulated category. */
 inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_length, utf8_corpus_flavor_t flavor,
                                              utf8_corpus_alphabet_t const &alphabet,
-                                             sz::span<sz::string_view_t const> motifs, std::mt19937 &generator) {
+                                             sz::span<std::string_view const> motifs, std::mt19937 &generator) {
     out.clear();
     std::array<double, utf8_corpus_category_count_k> weights;
     for (int category = 0; category != utf8_corpus_category_count_k; ++category)
@@ -597,11 +597,11 @@ inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_l
             out.append(encoded_rune_(alphabet.boundary_codepoints[boundary_pick(generator)]));
             break;
         case utf8_corpus_astral_k: {
-            sz::string_view_t const fixture = utf8_astral_fixtures[astral_pick(generator)];
+            std::string_view const fixture = utf8_astral_fixtures[astral_pick(generator)];
             out.append(fixture.data(), fixture.size());
         } break;
         case utf8_corpus_motif_k: {
-            sz::string_view_t const motif = motifs[motif_pick(generator)];
+            std::string_view const motif = motifs[motif_pick(generator)];
             out.append(motif.data(), motif.size());
         } break;
         case utf8_corpus_snippet_k:
@@ -618,7 +618,7 @@ inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_l
  *  start and a length, and refilling from the C finder with @c bytes_consumed resume. Bounded
  *  memory: a single batch buffer, no heap. */
 struct utf8_segment_cursor_t {
-    sz_utf8_segmenter_t finder;
+    sz_kernel_utf8_segmenter_t finder;
     sz_cptr_t data;
     sz_size_t length;
     sz_size_t capacity;   // caller capacity passed to the finder (<= utf8_segment_batch_k)
@@ -632,8 +632,8 @@ struct utf8_segment_cursor_t {
 };
 
 /** Makes a cursor over @p finder, clamping the caller @p capacity to the batch buffer. */
-inline utf8_segment_cursor_t utf8_segment_cursor_make_(sz_utf8_segmenter_t finder, sz_cptr_t data, sz_size_t length,
-                                                       sz_size_t capacity) {
+inline utf8_segment_cursor_t utf8_segment_cursor_make_(sz_kernel_utf8_segmenter_t finder, sz_cptr_t data,
+                                                       sz_size_t length, sz_size_t capacity) {
     utf8_segment_cursor_t cursor;
     cursor.finder = finder, cursor.data = data, cursor.length = length;
     cursor.capacity = capacity < utf8_segment_batch_k ? capacity : utf8_segment_batch_k;
@@ -648,8 +648,8 @@ inline sz_bool_t utf8_segment_cursor_next_(utf8_segment_cursor_t &cursor, sz_siz
         if (cursor.exhausted || cursor.next_base >= cursor.length) return sz_false_k;
         sz_size_t consumed = 0;
         cursor.batch_base = cursor.next_base;
-        cursor.count = cursor.finder(cursor.data + cursor.batch_base, cursor.length - cursor.batch_base, cursor.starts,
-                                     cursor.lengths, cursor.capacity, &consumed);
+        verify(cursor.finder(cursor.data + cursor.batch_base, cursor.length - cursor.batch_base, cursor.starts,
+                             cursor.lengths, cursor.capacity, &cursor.count, &consumed, nullptr) == sz_success_k);
         cursor.index = 0;
         if (cursor.count == 0 && consumed == 0) {
             cursor.exhausted = sz_true_k;
@@ -666,7 +666,7 @@ inline sz_bool_t utf8_segment_cursor_next_(utf8_segment_cursor_t &cursor, sz_siz
 /** Asserts one segmenter's output stands on its own: segments tile `[0, length)` and, for
  *  well-formed input, start on a codepoint boundary — needing no reference, so a rule both backends
  *  get wrong is still caught. */
-inline void utf8_check_segment_invariants_(sz_utf8_segmenter_t finder, sz_size_t capacity, sz_cptr_t data,
+inline void utf8_check_segment_invariants_(sz_kernel_utf8_segmenter_t finder, sz_size_t capacity, sz_cptr_t data,
                                            sz_size_t length, utf8_corpus_flavor_t flavor) {
     utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(finder, data, length, capacity);
     sz_size_t start = 0, segment_length = 0, running_cursor = 0;
@@ -703,8 +703,8 @@ inline void utf8_report_divergence_(utf8_repro_t const &repro, sz_cptr_t data, s
 /** Streams @p reference and @p candidate in lockstep, asserting an identical start and length per
  *  segment and emitting a full repro on the first divergence. No heap; stops at the first mismatch.
  *  The two may be distinct backends, or one finder at two capacities. */
-inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t reference,
-                                  sz_size_t reference_capacity, sz_utf8_segmenter_t candidate,
+inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_kernel_utf8_segmenter_t reference,
+                                  sz_size_t reference_capacity, sz_kernel_utf8_segmenter_t candidate,
                                   sz_size_t candidate_capacity, sz_cptr_t data, sz_size_t length) {
     utf8_segment_cursor_t reference_cursor = utf8_segment_cursor_make_(reference, data, length, reference_capacity);
     utf8_segment_cursor_t candidate_cursor = utf8_segment_cursor_make_(candidate, data, length, candidate_capacity);
@@ -726,7 +726,7 @@ inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t
 #pragma endregion Lazy streaming comparison
 
 /**
- *  @brief One segmentation backend, a named @c sz_utf8_segmenter_t, for a kernel family.
+ *  @brief One segmentation backend, a named @c sz_kernel_utf8_segmenter_t, for a kernel family.
  *
  *  Each family builds a file-local table of these — one entry per ISA compiled in, plus an
  *  always-present @c dispatched entry so the table is never empty on a baseline target — and its
@@ -736,7 +736,7 @@ inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t
  */
 struct utf8_segment_backend_t {
     char const *name;
-    sz_utf8_segmenter_t finder;
+    sz_kernel_utf8_segmenter_t finder;
 };
 
 #pragma region Unit driver
@@ -745,13 +745,13 @@ struct utf8_segment_backend_t {
  *  comparing each lazily against the next expected literal, with no materialized container. The
  *  caller invokes it once per backend, so a wrong constant shared by serial and SIMD is still
  *  caught against external ground truth. */
-inline void check_utf8_segment_unit_(char const *family, sz_utf8_segmenter_t forward,
+inline void check_utf8_segment_unit_(char const *family, sz_kernel_utf8_segmenter_t forward,
                                      sz::span<utf8_unit_case_t const> cases) {
     for (utf8_unit_case_t const &golden : cases) {
         utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(forward, golden.text.data(), golden.text.size(),
                                                                  utf8_segment_batch_k);
         sz_size_t start = 0, segment_length = 0;
-        for (sz::string_view_t const expected : golden.expected) {
+        for (std::string_view const expected : golden.expected) {
             sz_bool_t const more = utf8_segment_cursor_next_(cursor, start, segment_length);
             verify(more && family && "segment forward emitted fewer segments than the golden");
             verify(segment_length == expected.size() &&
@@ -781,7 +781,7 @@ struct utf8_rule_case_t {
     utf8_rule_direction_t direction;
 
     /** Short input that fires the rule. */
-    sz::string_view_t text;
+    std::string_view text;
 };
 
 /**
@@ -793,13 +793,13 @@ struct utf8_rule_case_t {
  *  2. Every id in @p required_rule_ids is exercised by at least one motif, so no rule of the spec
  *     is left untested.
  */
-inline void check_utf8_rule_coverage_(char const *family, sz_utf8_segmenter_t reference, sz_utf8_segmenter_t candidate,
-                                      sz::span<utf8_rule_case_t const> cases,
+inline void check_utf8_rule_coverage_(char const *family, sz_kernel_utf8_segmenter_t reference,
+                                      sz_kernel_utf8_segmenter_t candidate, sz::span<utf8_rule_case_t const> cases,
                                       sz::span<char const *const> required_rule_ids) {
     static sz_size_t const window_phases[] = {0, 61, 62, 63};
     std::string probe;
     for (std::size_t case_index = 0; case_index != cases.size(); ++case_index) {
-        sz::string_view_t const text = cases[case_index].text;
+        std::string_view const text = cases[case_index].text;
         for (sz_size_t phase : window_phases) {
             probe.assign((std::size_t)phase, 'a');
             probe.append(text.data(), text.size());
@@ -843,7 +843,7 @@ inline void for_each_adversarial_utf8_input_(test_context_t &context, std::size_
     callback("hello\xF0\x9F\x98", (std::size_t)8); // truncated 4-byte sequence at the very end
 
     // The SMP/astral fixtures the random corpora miss (RI parity, ZWJ, astral).
-    for (sz::string_view_t const fixture : span_over(utf8_astral_fixtures)) callback(fixture.data(), fixture.size());
+    for (std::string_view const fixture : span_over(utf8_astral_fixtures)) callback(fixture.data(), fixture.size());
 
     // All 256 single bytes, and all 65,536 byte pairs, strided so a low multiplier samples the whole space.
     std::size_t const byte_step = context.sweep_stride(256);
@@ -878,9 +878,10 @@ inline void check_utf8_segment_safety_(test_context_t &context, char const *fami
     sz_size_t offsets[utf8_unit_capacity_k + 1], lengths[utf8_unit_capacity_k + 1];
     auto probe = [&](char const *input, std::size_t input_length) {
         for (utf8_segment_backend_t const &backend : finders) {
-            sz_size_t bytes_consumed = 0;
-            sz_size_t const found = backend.finder(input, (sz_size_t)input_length, offsets, lengths,
-                                                   (sz_size_t)(utf8_unit_capacity_k + 1), &bytes_consumed);
+            sz_size_t found = 0, bytes_consumed = 0;
+            verify(backend.finder(input, (sz_size_t)input_length, offsets, lengths,
+                                  (sz_size_t)(utf8_unit_capacity_k + 1), &found, &bytes_consumed,
+                                  nullptr) == sz_success_k);
             verify(bytes_consumed <= input_length && "segment finder consumed past the input");
             for (sz_size_t index = 0; index != found; ++index) {
                 if (offsets[index] + lengths[index] <= input_length) continue;
@@ -902,12 +903,12 @@ inline void check_utf8_segment_safety_(test_context_t &context, char const *fami
  *  where that is checked. Inputs the segmenter could not drain in one call are skipped, since the
  *  oracle reads the whole text and a truncated prefix would ask the two a different question.
  */
-inline void check_utf8_segment_against_oracle_(char const *family, sz_utf8_segmenter_t segmenter,
+inline void check_utf8_segment_against_oracle_(char const *family, sz_kernel_utf8_segmenter_t segmenter,
                                                utf8_boundary_oracle_t oracle, char const *text, std::size_t length) {
     sz_size_t offsets[utf8_unit_capacity_k + 1], lengths[utf8_unit_capacity_k + 1];
-    sz_size_t bytes_consumed = 0;
-    sz_size_t const found = segmenter(text, (sz_size_t)length, offsets, lengths, (sz_size_t)(utf8_unit_capacity_k + 1),
-                                      &bytes_consumed);
+    sz_size_t found = 0, bytes_consumed = 0;
+    verify(segmenter(text, (sz_size_t)length, offsets, lengths, (sz_size_t)(utf8_unit_capacity_k + 1), &found,
+                     &bytes_consumed, nullptr) == sz_success_k);
     if (bytes_consumed != (sz_size_t)length || found > utf8_unit_capacity_k) return;
 
     // Segments tile the input, so a position is a boundary exactly when one starts there.
@@ -990,7 +991,7 @@ static sz_size_t const utf8_malformed_seam_phases[] = {0, 60, 61, 62, 63};
  *  generator and scale, and a reused corpus scratch. Each generated input is compared against all
  *  candidates before the next one is built. */
 struct utf8_differential_context_t {
-    sz_utf8_segmenter_t reference;
+    sz_kernel_utf8_segmenter_t reference;
     sz::span<utf8_segment_backend_t const> candidates;
     std::vector<std::string> labels; // "<family>:<candidate>" per candidate, named in the divergence record
     utf8_segment_corpora_t const *corpora;
@@ -1009,7 +1010,7 @@ inline void utf8_compare_candidates_(utf8_differential_context_t &context, char 
                                      sz_size_t capacity, sz_cptr_t data, sz_size_t length,
                                      utf8_corpus_flavor_t flavor) {
     for (std::size_t candidate_index = 0; candidate_index != context.candidates.size(); ++candidate_index) {
-        sz_utf8_segmenter_t const candidate = context.candidates[candidate_index].finder;
+        sz_kernel_utf8_segmenter_t const candidate = context.candidates[candidate_index].finder;
         utf8_repro_t const repro = {context.labels[candidate_index].c_str(), stressor, iteration, capacity, flavor};
         utf8_compare_streams_(repro, context.reference, capacity, candidate, capacity, data, length);
         if (capacity != utf8_segment_batch_k)
@@ -1060,7 +1061,7 @@ inline void utf8_differential_regressions_(utf8_differential_context_t &context)
  *  mutated copy, and a malformed corpus — each compared serial-vs-ISA across the capacity sweep. */
 inline void utf8_differential_fuzz_corpus_(utf8_differential_context_t &context, std::size_t iterations) {
     utf8_corpus_alphabet_t const &alphabet = utf8_context_alphabet_(context);
-    sz::span<sz::string_view_t const> const motifs = context.corpora->motifs;
+    sz::span<std::string_view const> const motifs = context.corpora->motifs;
     std::string mutated;
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
         utf8_random_segmentation_corpus_(context.scratch, 400, utf8_corpus_flavor_t::valid_k, alphabet, motifs,
@@ -1153,7 +1154,7 @@ inline void utf8_differential_marathon_runs_(utf8_differential_context_t &contex
  *  straddles the 64-byte window edge at every alignment; phase 0 lands it at true start-of-text. */
 inline void utf8_differential_phase_sweep_(utf8_differential_context_t &context) {
     for (std::size_t motif_index = 0; motif_index != context.corpora->motifs.size(); ++motif_index) {
-        sz::string_view_t const motif = context.corpora->motifs[motif_index];
+        std::string_view const motif = context.corpora->motifs[motif_index];
         for (std::size_t phase = 0; phase < utf8_window_k; phase += context.test->sweep_stride(utf8_window_k)) {
             context.scratch.assign(phase, 'a');
             context.scratch.append(motif.data(), motif.size());
@@ -1233,7 +1234,7 @@ inline void utf8_differential_byte_edge_exhaustive_(utf8_differential_context_t 
  *  @p candidates, asserting serial ≡ ISA, capacity-independence, and the reference's own tiling and
  *  alignment invariants, and fails with a full repro record at the first divergence.
  */
-inline void check_utf8_segment_equivalence_(test_context_t &test, sz_utf8_segmenter_t reference,
+inline void check_utf8_segment_equivalence_(test_context_t &test, sz_kernel_utf8_segmenter_t reference,
                                             sz::span<utf8_segment_backend_t const> candidates,
                                             utf8_segment_corpora_t const &corpora, std::size_t iterations) {
     utf8_differential_context_t context;

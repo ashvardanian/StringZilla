@@ -2,10 +2,10 @@
  *  @file bench/utf8_norm.cpp
  *  @author Ash Vardanian
  *  @date June 26, 2026
- *  @brief Benchmarks the @b sz_utf8_norm_* family — Unicode normalization and quick-check scanning.
+ *  @brief Benchmarks the @b sz_utf8_norm_* family: Unicode normalization and quick-check scans.
  *
- *  The program accepts a file path to a dataset and benchmarks the normalization operations,
- *  validating the SIMD-accelerated backends against the serial baselines.
+ *  Times the normalization dispatch points over the multilingual lines. Every capability's kernels
+ *  are timed and validated against the serial ones by the `cross_<arch>.cpp` files.
  *
  *  Compute-bound: Unicode normalization is table- and branch-heavy per codepoint, so a 64 MiB slice
  *  exercises every path on the multilingual corpus.
@@ -44,9 +44,9 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_utf8_norm_cpp20
+ *  cmake --build build_release --config Release --target stringzilla_cpu_bench
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_UNIQUE=1 \
- *      build_release/stringzilla_bench_utf8_norm_cpp20
+ *      STRINGWARS_FILTER='utf8_(norm|find_denormalized)' build_release/stringzilla_cpu_bench
  *  @endcode
  *
  *  This file is the sibling of `utf8_uncased.cpp`, `utf8_traverse.cpp`, `utf8_scan.cpp`,
@@ -54,194 +54,27 @@
  */
 #include <fmt/format.h>
 
-#include "harness.hpp"
+#include "cross.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
-#pragma region Normalization Functions
+namespace {
 
-/** Wraps a hardware-specific UTF-8 normalization backend (transforms to NFC). */
-template <sz_utf8_norm_t func_>
-struct utf8_norm_from_sz {
-
-    environment_t const &env;
-    mutable std::vector<char> output_buffer; // Reusable buffer to avoid repeated allocation
-
-    utf8_norm_from_sz(environment_t const &env_) : env(env_) {
-        // Pre-allocate worst-case buffer: 18x input size for the worst single-codepoint
-        // compatibility decomposition (see `sz_utf8_norm` buffer-sizing docs).
-        std::size_t max_token_size = 0;
-        for (auto const &token : env.tokens) max_token_size = std::max(max_token_size, token.size());
-        output_buffer.resize(max_token_size * 18 + 64); // Extra padding for safety
-    }
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view buffer) const noexcept {
-        // Ensure buffer is large enough
-        if (output_buffer.size() < buffer.size() * 18) output_buffer.resize(buffer.size() * 18 + 64);
-
-        sz_size_t result_length = func_(buffer.data(), buffer.size(), sz_normal_form_nfc_k, output_buffer.data());
-        do_not_optimize(output_buffer.data());
-        do_not_optimize(result_length);
-
-        // Use sz_bytesum for validation checksum
-        check_value_t checksum = sz_bytesum(output_buffer.data(), result_length);
-        return {buffer.size(), checksum};
-    }
-};
-
-void bench_utf8_norm(environment_t const &env) {
-
-    auto validator = utf8_norm_from_sz<sz_utf8_norm_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_norm_serial", validator).log();
-
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_utf8_norm_icelake", validator, utf8_norm_from_sz<sz_utf8_norm_icelake> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    bench_unary(env, "sz_utf8_norm_skylake", validator, utf8_norm_from_sz<sz_utf8_norm_skylake> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_utf8_norm_haswell", validator, utf8_norm_from_sz<sz_utf8_norm_haswell> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_utf8_norm_neon", validator, utf8_norm_from_sz<sz_utf8_norm_neon> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    bench_unary(env, "sz_utf8_norm_sve2", validator, utf8_norm_from_sz<sz_utf8_norm_sve2> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    bench_unary(env, "sz_utf8_norm_sve", validator, utf8_norm_from_sz<sz_utf8_norm_sve> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    bench_unary(env, "sz_utf8_norm_rvv", validator, utf8_norm_from_sz<sz_utf8_norm_rvv> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    bench_unary(env, "sz_utf8_norm_lasx", validator, utf8_norm_from_sz<sz_utf8_norm_lasx> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    bench_unary(env, "sz_utf8_norm_powervsx", validator, utf8_norm_from_sz<sz_utf8_norm_powervsx> {env}).log(base);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    bench_unary(env, "sz_utf8_norm_v128relaxed", validator, utf8_norm_from_sz<sz_utf8_norm_v128relaxed> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_V128
-    bench_unary(env, "sz_utf8_norm_v128", validator, utf8_norm_from_sz<sz_utf8_norm_v128> {env}).log(base);
-#endif
+void bench_utf8_normalize(environment_t const &env) {
+    bench_unary(env, "sz_utf8_norm_best", utf8_norm_from_sz<cpu_best<sz_utf8_norm_best>> {env}).log();
 }
-
-#pragma endregion
-
-#pragma region Violation Quick Check Functions
-
-/** Wraps a hardware-specific UTF-8 normalization-violation backend (quick-check scan for NFC). */
-template <sz_utf8_find_denormalized_t func_>
-struct utf8_find_denormalized_from_sz {
-
-    environment_t const &env;
-
-    utf8_find_denormalized_from_sz(environment_t const &env_) : env(env_) {}
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view buffer) const noexcept {
-        sz_cptr_t violation = func_(buffer.data(), buffer.size(), sz_normal_form_nfc_k);
-        do_not_optimize(violation);
-
-        // Encode the violation offset (or "no violation") as a validation checksum.
-        check_value_t offset = violation ? static_cast<check_value_t>(violation - buffer.data())
-                                         : static_cast<check_value_t>(buffer.size());
-        return {buffer.size(), offset};
-    }
-};
 
 void bench_utf8_find_denormalized(environment_t const &env) {
-
-    auto validator = utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_find_denormalized_serial", validator).log();
-
-#if STRINGZILLA_TARGET_ICELAKE
-    bench_unary(env, "sz_utf8_find_denormalized_icelake", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_icelake> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    bench_unary(env, "sz_utf8_find_denormalized_skylake", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_skylake> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_HASWELL
-    bench_unary(env, "sz_utf8_find_denormalized_haswell", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_haswell> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    bench_unary(env, "sz_utf8_find_denormalized_neon", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_neon> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    bench_unary(env, "sz_utf8_find_denormalized_sve2", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_sve2> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    bench_unary(env, "sz_utf8_find_denormalized_sve", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_sve> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    bench_unary(env, "sz_utf8_find_denormalized_rvv", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_rvv> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    bench_unary(env, "sz_utf8_find_denormalized_lasx", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_lasx> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    bench_unary(env, "sz_utf8_find_denormalized_powervsx", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_powervsx> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    bench_unary(env, "sz_utf8_find_denormalized_v128relaxed", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_v128relaxed> {env})
-        .log(base);
-#endif
-#if STRINGZILLA_TARGET_V128
-    bench_unary(env, "sz_utf8_find_denormalized_v128", validator,
-                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_v128> {env})
-        .log(base);
-#endif
+    bench_unary(env, "sz_utf8_find_denormalized_best",
+                utf8_find_denormalized_from_sz<cpu_best<sz_utf8_find_denormalized_best>> {env})
+        .log();
 }
 
-#pragma endregion
+} // namespace
 
-int main(int argc, char const **argv) {
-    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    log_environment();
-    print_bench_environment();
-
-    fmt::println("Building up the environment...");
-    environment_t env = build_environment( //
-        argc, argv,                        //
-        "xlsum.csv",                       // Default to xlsum for multilingual testing
-        environment_t::tokenization_t::lines_k, compute_bound_slice_bytes_k);
-
-    fmt::println("Starting Unicode benchmarks...");
-
-    // Unicode operations
-    bench_utf8_norm(env);
+void bench_utf8_norm(corpora_t &corpora) {
+    environment_t const &env = corpora.multilingual_slice();
+    fmt::println("Starting UTF-8 normalization benchmarks...");
+    bench_utf8_normalize(env);
     bench_utf8_find_denormalized(env);
-
-    fmt::println("All benchmarks passed.");
-    return 0;
 }

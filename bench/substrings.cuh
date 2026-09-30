@@ -180,10 +180,13 @@ struct substrings_dictionary_t {
     /** Needle bytes, which a compilation row is scaled by. */
     std::size_t needle_bytes = 0;
 
+    /** Haystacks one round carries: the whole corpus, which a device engine's arena must fit. */
+    std::size_t haystacks_budget = 0;
+
     substrings_dictionary_t(environment_t const &env, substrings_slice_t slice,
                             sz_substrings_case_sensitivity_t sensitivity, sz_memory_allocator_t const &memory)
         : needles(substrings_vocabulary(env, slice)), needle_views(needles.size()), replacement_views(needles.size()),
-          allocator(memory), sensitivity(sensitivity) {
+          allocator(memory), sensitivity(sensitivity), haystacks_budget(env.tokens.size()) {
         for (std::size_t index = 0; index != needles.size(); ++index) {
             std::string const replacement = index % 2 ? std::string() : "<" + std::to_string(index) + ">";
             replacement_bytes.insert(replacement_bytes.end(), replacement.begin(), replacement.end());
@@ -202,7 +205,7 @@ struct substrings_dictionary_t {
     substrings_dictionary_t &operator=(substrings_dictionary_t const &) = delete;
 };
 
-/** Where an engine's blocks live, which is also which of the two inits builds it. */
+/** Where an engine's blocks live, which is also which capabilities its init picks from. */
 enum class substrings_residency_t {
 
     /** Plain host memory, walked by the CPU tiers. */
@@ -217,23 +220,28 @@ inline sz_status_t substrings_init_host(substrings_dictionary_t const &dictionar
                                         sz_substrings_overlap_policy_t policy, sz_substrings_engine_t &engine) {
     sz_memory_allocator_t host;
     sz_memory_allocator_init_default(&host);
-    return sz_substrings_engine_init_cpu(&dictionary.needle_sequence, dictionary.sensitivity, policy,
-                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &host, &engine);
+    return sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity, policy,
+                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(), 0, &host,
+                                     nullptr);
 }
 
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /** Compiles @p dictionary where a kernel reads it, through the dictionary's unified allocator. */
 inline sz_status_t substrings_init_device(substrings_dictionary_t const &dictionary,
                                           sz_substrings_overlap_policy_t policy, sz_substrings_engine_t &engine) {
     sz_memory_allocator_t allocator = dictionary.allocator;
-    return sz_substrings_engine_init_gpu(&dictionary.needle_sequence, dictionary.sensitivity, policy,
-                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, &allocator, nullptr, &engine);
+    auto const [device, make_status] = sz::device_t::make(
+        STRINGZILLA_ARCH_ROCM_ ? sz::device_kind_t::rocm_k : sz::device_kind_t::cuda_k, 0);
+    if (sz::failed(make_status)) return static_cast<sz_status_t>(make_status);
+    return sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity, policy,
+                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, dictionary.haystacks_budget,
+                                     device.capabilities_enabled().value, 0, &allocator, nullptr);
 }
 
 /** Joins the default stream if a device engine could have enqueued on it; host engines never do. */
 inline void substrings_join(sz_substrings_engine_t const &engine) {
-    if (engine.capability & sz_caps_cuda_k) cudaStreamSynchronize(nullptr);
+    if (engine.capability & sz_cap_devices_k) sz_unused_(cudaStreamSynchronize(nullptr));
 }
 #else
 
@@ -305,7 +313,7 @@ struct substrings_corpus_t {
 #pragma region Arms
 
 /** Counts every match in the whole corpus, one call per round, into counts it owns. */
-template <sz_substrings_counts_t counts_>
+template <sz_kernel_substrings_counts_t counts_>
 struct substrings_counts_from_sz {
 
     /** The compiled vocabulary this arm walks, policy included. */
@@ -325,7 +333,7 @@ struct substrings_counts_from_sz {
         : engine(&engine.engine), corpus(corpus), haystacks(haystacks), counts(corpus.views.size()) {}
 
     call_result_t operator()(std::size_t) {
-        if (counts_(engine, &haystacks, counts.data(), 1) != sz_success_k)
+        if (counts_(engine, &haystacks, counts.data(), 1, nullptr) != sz_success_k)
             throw std::runtime_error("The counting round failed.");
         substrings_join(*engine);
         check_value_t mixed = 0;
@@ -335,7 +343,7 @@ struct substrings_counts_from_sz {
 };
 
 /** Reports every match in the whole corpus, into an array its own backend sized. */
-template <sz_substrings_find_t find_>
+template <sz_kernel_substrings_find_t find_>
 struct substrings_find_from_sz {
 
     /** The compiled vocabulary this arm walks, policy included. */
@@ -356,7 +364,7 @@ struct substrings_find_from_sz {
     substrings_find_from_sz(substrings_engine_t &engine, substrings_corpus_t const &corpus,
                             sz_sequence_t const &haystacks)
         : engine(&engine.engine), corpus(corpus), haystacks(haystacks), offsets(corpus.views.size() + 1) {
-        if (find_(this->engine, &haystacks, nullptr, 0, offsets.data()) != sz_success_k)
+        if (find_(this->engine, &haystacks, nullptr, 0, offsets.data(), nullptr) != sz_success_k)
             throw std::runtime_error("The reporting round could not be sized.");
         substrings_join(*this->engine);
         // The boundaries name the survivors, which a cover thins below what the sizing walk emitted.
@@ -364,7 +372,7 @@ struct substrings_find_from_sz {
     }
 
     call_result_t operator()(std::size_t) {
-        if (find_(engine, &haystacks, matches.data(), matches.size(), offsets.data()) != sz_success_k)
+        if (find_(engine, &haystacks, matches.data(), matches.size(), offsets.data(), nullptr) != sz_success_k)
             throw std::runtime_error("The reporting round failed.");
         substrings_join(*engine);
         return corpus.round((check_value_t)engine->report->matches_stored);
@@ -372,7 +380,7 @@ struct substrings_find_from_sz {
 };
 
 /** Rewrites the whole corpus onto one tape its own backend sized. */
-template <sz_substrings_replace_t replace_>
+template <sz_kernel_substrings_replace_t replace_>
 struct substrings_replace_from_sz {
 
     /** The compiled vocabulary this arm walks, policy included. */
@@ -397,22 +405,23 @@ struct substrings_replace_from_sz {
                                sz_sequence_t const &haystacks, sz_sequence_t const &replacements)
         : engine(&engine.engine), corpus(corpus), haystacks(haystacks), replacements(replacements),
           offsets(corpus.views.size() + 1) {
-        if (replace_(this->engine, &haystacks, &replacements, nullptr, 0, offsets.data()) != sz_success_k)
+        if (replace_(this->engine, &haystacks, &replacements, nullptr, 0, offsets.data(), nullptr) != sz_success_k)
             throw std::runtime_error("The rewriting round could not be sized.");
         substrings_join(*this->engine);
-        tape.resize(this->engine->report->tape_bytes);
+        tape.resize(this->engine->report->target_length);
     }
 
     call_result_t operator()(std::size_t) {
-        if (replace_(engine, &haystacks, &replacements, tape.data(), tape.size(), offsets.data()) != sz_success_k)
+        if (replace_(engine, &haystacks, &replacements, tape.data(), tape.size(), offsets.data(), nullptr) !=
+            sz_success_k)
             throw std::runtime_error("The rewriting round failed.");
         substrings_join(*engine);
-        return corpus.round((check_value_t)engine->report->tape_bytes);
+        return corpus.round((check_value_t)engine->report->target_length);
     }
 };
 
 /** Scores every haystack against the whole vocabulary as one BM25 query, into scores it owns. */
-template <sz_substrings_bm25_scores_t scores_>
+template <sz_kernel_substrings_bm25_scores_t scores_>
 struct substrings_bm25_from_sz {
 
     /** The compiled vocabulary, which is the query. */
@@ -440,7 +449,8 @@ struct substrings_bm25_from_sz {
           weights(this->engine->needles_count, 1.0f), scores(corpus.views.size()) {}
 
     call_result_t operator()(std::size_t) {
-        if (scores_(engine, &haystacks, nullptr, &parameters, weights.data(), scores.data(), 1) != sz_success_k)
+        if (scores_(engine, &haystacks, nullptr, &parameters, weights.data(), scores.data(), 1, nullptr) !=
+            sz_success_k)
             throw std::runtime_error("The scoring round failed.");
         substrings_join(*engine);
         // Backends round their sums differently, so the check is which haystacks scored rather than how much.

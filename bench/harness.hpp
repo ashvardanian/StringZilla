@@ -44,6 +44,7 @@
 #include <algorithm>
 #include <charconv>     // `std::from_chars`
 #include <chrono>       // `std::chrono::high_resolution_clock`
+#include <concepts>     // `std::predicate`
 #include <exception>    // `std::invalid_argument`
 #include <functional>   // `std::equal_to`
 #include <limits>       // `std::numeric_limits`
@@ -56,7 +57,9 @@
 #include <string_view>  // `std::string_view`
 #include <system_error> // `std::errc`
 #include <thread>       // `std::this_thread::sleep_for`, `std::thread::hardware_concurrency`
+#include <tuple>        // `std::tuple`, for `call_best`
 #include <type_traits>  // `std::invoke_result_t`
+#include <utility>      // `std::index_sequence`
 #include <vector>       // `std::vector`
 
 #if defined(_MSC_VER)
@@ -79,8 +82,33 @@
 #include <fmt/ranges.h>
 #include <fmt/std.h> // `std::byte`
 
+#include "stringzilla/metal.h" // `sz_metal_device_t`
 #include "stringzilla/stringzilla.h"
-#include "stringzilla/stringzilla.hpp"
+#include "stringzilla/types.hpp"
+#if !STRINGZILLA_HEADER_ONLY
+#include "stringzilla/stringzilla.hpp" // `sz::string_view_t::split`, which `tokenize` scans with
+#endif
+
+/*  The GPU benchmarks call the CUDA runtime by name, and HIP answers those calls under its own. */
+#if STRINGZILLA_ARCH_ROCM_
+using cudaError_t = hipError_t;
+using cudaDeviceProp = hipDeviceProp_t;
+inline constexpr hipError_t cudaSuccess = hipSuccess, cudaErrorInvalidValue = hipErrorInvalidValue;
+inline constexpr hipMemcpyKind cudaMemcpyHostToDevice = hipMemcpyHostToDevice;
+inline constexpr hipMemcpyKind cudaMemcpyDeviceToHost = hipMemcpyDeviceToHost;
+inline hipError_t cudaGetDevice(int *device) { return hipGetDevice(device); }
+inline hipError_t cudaGetDeviceCount(int *count) { return hipGetDeviceCount(count); }
+inline hipError_t cudaGetDeviceProperties(hipDeviceProp_t *properties, int device) {
+    return hipGetDeviceProperties(properties, device);
+}
+inline hipError_t cudaMemGetInfo(std::size_t *free_bytes, std::size_t *total_bytes) {
+    return hipMemGetInfo(free_bytes, total_bytes);
+}
+inline hipError_t cudaMemcpy(void *destination, void const *source, std::size_t bytes, hipMemcpyKind kind) {
+    return hipMemcpy(destination, source, bytes, kind);
+}
+inline hipError_t cudaStreamSynchronize(hipStream_t stream) { return hipStreamSynchronize(stream); }
+#endif
 
 namespace sz = ashvardanian::stringzilla;
 namespace stdc = std::chrono;
@@ -89,7 +117,23 @@ namespace ashvardanian::stringzilla::bench {
 
 using accurate_clock_t = stdc::high_resolution_clock;
 
-#if !STRINGZILLA_TARGET_CUDA
+/** Calls the dispatch point @p best_ over @p capabilities with the arguments of its capability
+ *  kernels, whose last one, the stream, follows the mask. */
+template <auto best_, typename... arguments_types_>
+sz_status_t call_best(sz_capability_t capabilities, arguments_types_... arguments) noexcept {
+    std::tuple<arguments_types_...> const tuple {arguments...};
+    return [&]<std::size_t... indices_>(std::index_sequence<indices_...>) {
+        return best_(std::get<indices_>(tuple)..., capabilities, std::get<sizeof...(indices_)>(tuple));
+    }(std::make_index_sequence<sizeof...(arguments_types_) - 1> {});
+}
+
+/** The dispatch point @p best_ in the shape of its capability kernels, over the CPU capabilities
+ *  this process enables: callable like them, and convertible to their function pointers. */
+template <auto best_>
+inline constexpr auto cpu_best =
+    [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
+
+#if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 #else
@@ -110,16 +154,28 @@ template <typename value_type_>
 using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
 
 /**
- *  @brief Drains a device-resident buffer into @p destination, forwarding the driver's status.
+ *  @brief Drains a device-resident buffer into @p destination, forwarding the runtime's status.
  *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
  */
 template <typename value_type_>
-inline CUresult copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
-    if (source.size() == 0) return CUDA_SUCCESS;
-    if (destination.size() < source.size()) return CUDA_ERROR_INVALID_VALUE;
-    return cuMemcpyDtoH(destination.data(), (CUdeviceptr)source.data(), source.size() * sizeof(value_type_));
+inline cudaError_t copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
+    if (source.size() == 0) return cudaSuccess;
+    if (destination.size() < source.size()) return cudaErrorInvalidValue;
+    return cudaMemcpy(destination.data(), source.data(), source.size() * sizeof(value_type_), cudaMemcpyDeviceToHost);
 }
-#endif // STRINGZILLA_TARGET_CUDA
+
+/**
+ *  @brief Fills a device-resident buffer from @p source, forwarding the runtime's status.
+ *  @param[in] source At least as many elements as @p destination holds; only that prefix is read.
+ */
+template <typename value_type_>
+inline cudaError_t copy_host_to_device(span<value_type_ const> source, device_vector<value_type_> &destination) {
+    if (destination.size() == 0) return cudaSuccess;
+    if (source.size() < destination.size()) return cudaErrorInvalidValue;
+    return cudaMemcpy(destination.data(), source.data(), destination.size() * sizeof(value_type_),
+                      cudaMemcpyHostToDevice);
+}
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /** Reads a file into a string via LibC @c <cstdio>. A non-zero @p max_bytes stops the read after
  *  that many bytes, so the file tail is never touched. */
@@ -167,31 +223,60 @@ template <typename value_type_>
 inline void log_environment() {
     fmt::println("StringZilla {}.{}.{}", STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
                  STRINGZILLA_H_VERSION_PATCH);
-    fmt::println("- Compiled for: {}", sz_capabilities_to_string(sz_capabilities_comptime()));
-    fmt::println("- This machine: {}", sz_capabilities_to_string(sz_capabilities_runtime()));
+    sz_capability_t compiled = 0, detected = 0;
+    sz_cpu_capabilities_compiled(&compiled), sz_cpu_capabilities_detected(&detected);
+    char compiled_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
+    sz_capabilities_name(compiled, compiled_names, sizeof(compiled_names));
+    sz_capabilities_name(detected, detected_names, sizeof(detected_names));
+    fmt::println("- Compiled for: {}", compiled_names);
+    fmt::println("- This machine: {}", detected_names);
 }
 
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /**
- *  @brief Prints the "- CUDA:" line naming the first visible device and its compute capability,
- *      or "- CUDA: no device".
+ *  @brief Prints the "- CUDA:" or "- ROCm:" line naming the first visible device and its
+ *      architecture, like @c sm_90 or @c gfx942, or that the runtime sees no device.
  *  @return Whether a device is visible; without one, the GPU benchmarks skip.
  */
 inline bool log_cuda_device() {
-    // The device is asked directly rather than through `sz_capabilities`: that verb answers for the
-    // library this binary links, and `define_stringzilla_library` compiles the core without CUDA.
+#if STRINGZILLA_ARCH_ROCM_
+    char const *const runtime = "ROCm";
+#else
+    char const *const runtime = "CUDA";
+#endif
     int device_count = 0;
     cudaDeviceProp properties;
     if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0 ||
         cudaGetDeviceProperties(&properties, 0) != cudaSuccess) {
-        fmt::println("- CUDA: no device");
+        fmt::println("- {}: no device", runtime);
         return false;
     }
-    fmt::println("- CUDA: {} sm_{}{}", properties.name, properties.major, properties.minor);
+#if STRINGZILLA_ARCH_ROCM_
+    fmt::println("- {}: {} {}", runtime, properties.name, properties.gcnArchName);
+#else
+    fmt::println("- {}: {} sm_{}{}", runtime, properties.name, properties.major, properties.minor);
+#endif
     return true;
 }
-#endif // STRINGZILLA_TARGET_CUDA
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+
+#if STRINGZILLA_WITH_METAL
+
+/**
+ *  @brief Prints the "- Metal:" line naming @p device, or "- Metal: no device" when none opened.
+ *  @return Whether @p device opened; without one, the GPU benchmarks skip.
+ */
+inline bool log_metal_device(sz_metal_device_t const &device) {
+    if (!device.device) {
+        fmt::println("- Metal: no device");
+        return false;
+    }
+    void *const name = sz_metal_get_(device.device, "name");
+    fmt::println("- Metal: {}", static_cast<char const *>(sz_metal_get_(name, "UTF8String")));
+    return true;
+}
+#endif // STRINGZILLA_WITH_METAL
 
 /** Prints a backtrace on a fatal signal, so a crashing kernel self-localizes instead of dying
  *  silently under output redirection. Writes raw, since the crashing thread may already hold the
@@ -224,7 +309,7 @@ inline void install_bench_signal_handlers() noexcept {
 
 template <std::size_t multiple_>
 std::size_t round_up_to_multiple(std::size_t n) {
-    return n == 0 ? multiple_ : ((n + multiple_ - 1) / multiple_) * multiple_;
+    return n == 0 ? multiple_ : sz::round_up_to_multiple(n, multiple_);
 }
 
 using check_value_t = std::uint64_t;
@@ -244,7 +329,7 @@ struct call_result_t {
     std::size_t inputs_processed = 1;
 
     call_result_t() = default;
-    call_result_t(std::size_t bytes_passed, std::size_t check_value = 0, std::size_t operations = 0)
+    call_result_t(std::size_t bytes_passed, check_value_t check_value = 0, std::size_t operations = 0)
         : bytes_passed(bytes_passed), check_value(check_value), operations(operations), inputs_processed(1) {}
 };
 
@@ -333,7 +418,7 @@ inline repeat_up_to_t repeat_up_to(double max_seconds) noexcept { return repeat_
 
 /** Stops compilers from optimizing out the expression, like Google Benchmark's @b DoNotOptimize. */
 template <typename argument_type_>
-static void do_not_optimize(argument_type_ &&value) noexcept {
+inline void do_not_optimize(argument_type_ &&value) noexcept {
 
 #if defined(_MSC_VER) // MSVC
     using plain_type = typename std::remove_reference<argument_type_>::type;
@@ -420,7 +505,7 @@ inline std::size_t parse_size(std::string const &text) {
  *  multilingual corpus. Memory-bound benches ignore it and read the whole file. */
 static constexpr std::size_t compute_bound_slice_bytes_k = 64ull * 1024ull * 1024ull;
 
-#if !STRINGZILLA_TARGET_CUDA
+#if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
 using dataset_t = std::string;
 using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
@@ -434,7 +519,7 @@ using tokens_t = std::vector<token_view_t, unified_alloc<token_view_t>>;
  *  @brief Tokenizes a string with the given separator predicate.
  *  @see For faster ways to tokenize a string with STL: https://ashvardanian.com/posts/splitting-strings-cpp/
  */
-template <typename is_separator_callback_type_>
+template <std::predicate<char> is_separator_callback_type_>
 tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separator) {
 
     std::size_t separator_count = 0;
@@ -457,22 +542,28 @@ tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separat
 }
 
 /**
- *  @brief Tokenizes a string around the given separator @p byteset in one lazy SIMD pass.
+ *  @brief Tokenizes a string around any of the @p separators bytes in one lazy SIMD pass.
  *
- *  Each step of the underlying @c split issues one @c sz_find_byteset scan. The whole corpus is
- *  already bounded by the dataset read, so the walk runs to the end without a cap of its own.
+ *  Each step of the underlying @c split issues one @c sz_find_byteset_best scan. The whole corpus
+ *  is already bounded by the dataset read, so the walk runs to the end without a cap of its own.
+ *  Header-only builds have no dispatch point to split with, so they test every byte instead.
  */
-inline tokens_t tokenize(std::string_view str, sz::byteset_t separators) {
+inline tokens_t tokenize(std::string_view str, std::string_view separators) {
+#if STRINGZILLA_HEADER_ONLY
+    return tokenize(str, [&](char c) { return separators.find(c) != std::string_view::npos; });
+#else
     tokens_t tokens;
-    for (auto token : sz::string_view_t {str.data(), str.size()}.split(separators)) {
+    sz::byteset_t const separators_set(separators.data(), separators.size());
+    for (auto token : sz::string_view_t {str.data(), str.size()}.split(separators_set)) {
         if (token.size() == 0) continue; // ? Runs of separators yield empty segments
         tokens.push_back({token.data(), token.size()});
     }
     return tokens;
+#endif
 }
 
 /** Splits a string into words around newlines, tabs, and other ASCII whitespaces. */
-inline tokens_t tokenize(std::string_view str) { return tokenize(str, sz::whitespaces_set()); }
+inline tokens_t tokenize(std::string_view str) { return tokenize(str, " \t\n\r\f\v"); }
 
 template <typename result_string_type_ = std::string_view, typename from_string_type_ = result_string_type_,
           typename comparator_type_ = std::equal_to<std::size_t>, typename allocator_type_ = std::allocator<char>>
@@ -675,7 +766,7 @@ inline environment_t build_environment(                                        /
     // Tokenize the dataset according to the tokenization mode. The corpus is already bounded by the read,
     // so each mode walks it to the end.
     if (env.tokenization == environment_t::file_k) { env.tokens.push_back({env.dataset.data(), env.dataset.size()}); }
-    else if (env.tokenization == environment_t::lines_k) { env.tokens = tokenize(env.dataset, sz::byteset_t {'\n'}); }
+    else if (env.tokenization == environment_t::lines_k) { env.tokens = tokenize(env.dataset, "\n"); }
     else if (env.tokenization == environment_t::words_k) { env.tokens = tokenize(env.dataset); }
     else {
         std::size_t n = static_cast<std::size_t>(env.tokenization);
@@ -736,6 +827,44 @@ inline environment_t build_environment(                                        /
     return env;
 }
 
+/**
+ *  @brief The corpora the families run on, each built by @c build_environment on first use and kept
+ *      for the rest of the run, so a family's kernels see the same tokens as its dispatch points.
+ *
+ *  The @b STRINGWARS_* variables override every corpus alike, so a run over one dataset loads it
+ *  once per tokenization and limit rather than once per family.
+ */
+class corpora_t {
+    int argc_;
+    char const **argv_;
+    std::optional<environment_t> words_, lines_, multilingual_lines_, multilingual_slice_;
+
+    environment_t const &build_(std::optional<environment_t> &corpus, char const *dataset,
+                                environment_t::tokenization_t tokenization, std::size_t limit_bytes) {
+        if (!corpus) corpus.emplace(build_environment(argc_, argv_, dataset, tokenization, limit_bytes));
+        return *corpus;
+    }
+
+  public:
+    corpora_t(int argc, char const **argv) noexcept : argc_(argc), argv_(argv) {}
+
+    /** English words of `leipzig1M.txt`: short tokens for search, sorting, and containers. */
+    environment_t const &words() { return build_(words_, "leipzig1M.txt", environment_t::words_k, 0); }
+
+    /** English lines of `leipzig1M.txt`: longer tokens for hashing, memory, and ciphers. */
+    environment_t const &lines() { return build_(lines_, "leipzig1M.txt", environment_t::lines_k, 0); }
+
+    /** Multilingual lines of the whole `xlsum.csv`: the engines' queries and candidates. */
+    environment_t const &multilingual_lines() {
+        return build_(multilingual_lines_, "xlsum.csv", environment_t::lines_k, 0);
+    }
+
+    /** Multilingual lines of a compute-bound `xlsum.csv` slice: the UTF-8 families' text. */
+    environment_t const &multilingual_slice() {
+        return build_(multilingual_slice_, "xlsum.csv", environment_t::lines_k, compute_bound_slice_bytes_k);
+    }
+};
+
 /** The slice's median token length in bytes: the short query, and the typical candidate. */
 inline std::size_t median_token_bytes(environment_t const &env) {
     std::vector<std::size_t> lengths(env.tokens.size());
@@ -752,7 +881,7 @@ inline std::size_t candidates_per_call(environment_t const &env) {
     return std::max<std::size_t>(1, env.specs.l1_bytes / median_token_bytes(env));
 }
 
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /** Candidates one device call scores: the first @c STRINGWARS_BATCH entry if set, else one per
  *  resident thread of the bound device. */
@@ -1231,3 +1360,28 @@ struct arrays_equality {
 };
 
 } // namespace ashvardanian::stringzilla::bench
+
+/*  The families, one file each, time the dispatch points against the standard baselines. */
+void bench_find(sz::bench::corpora_t &corpora);
+void bench_token(sz::bench::corpora_t &corpora);
+void bench_sequence(sz::bench::corpora_t &corpora);
+void bench_memory(sz::bench::corpora_t &corpora);
+void bench_cipher(sz::bench::corpora_t &corpora);
+void bench_container(sz::bench::corpora_t &corpora);
+void bench_levenshtein(sz::bench::corpora_t &corpora);
+void bench_overlap(sz::bench::corpora_t &corpora);
+void bench_substrings(sz::bench::corpora_t &corpora);
+void bench_utf8_traverse(sz::bench::corpora_t &corpora);
+void bench_utf8_scan(sz::bench::corpora_t &corpora);
+void bench_utf8_segment(sz::bench::corpora_t &corpora);
+void bench_utf8_norm(sz::bench::corpora_t &corpora);
+void bench_utf8_uncased(sz::bench::corpora_t &corpora);
+
+/*  The kernels by name, one file per architecture, each against its operation's serial kernel. */
+void bench_cross_serial(sz::bench::corpora_t &corpora);
+void bench_cross_x8664(sz::bench::corpora_t &corpora);
+void bench_cross_arm64(sz::bench::corpora_t &corpora);
+void bench_cross_riscv64(sz::bench::corpora_t &corpora);
+void bench_cross_loongarch64(sz::bench::corpora_t &corpora);
+void bench_cross_ppc64(sz::bench::corpora_t &corpora);
+void bench_cross_wasm(sz::bench::corpora_t &corpora);

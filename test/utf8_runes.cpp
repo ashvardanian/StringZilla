@@ -12,17 +12,6 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/*  ! Overload the following with caution. Those parameters must never be explicitly set during
- *  releases, but they come handy during development to validate ISA-specific implementations.
- *
- *  #define STRINGZILLA_TARGET_WESTMERE 0
- *  #define STRINGZILLA_TARGET_HASWELL 0
- *  #define STRINGZILLA_TARGET_GOLDMONT 0
- *  #define STRINGZILLA_TARGET_SKYLAKE 0
- *  #define STRINGZILLA_TARGET_ICELAKE 0
- *  #define STRINGZILLA_TARGET_NEON 0
- *  #define STRINGZILLA_TARGET_SVE 0
- *  #define STRINGZILLA_TARGET_SVE2 0 */
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
 #endif
@@ -45,210 +34,32 @@
 #include <string>    // Baseline
 #include <vector>    // `std::vector`
 
-#include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
+#include "cross.hpp" // `check_utf8_runes_unit_`, `utf8_runes_backend_t`, `random_valid_utf8_`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::test;
 using sz::literals::operator""_sv; // for `sz::string_view_t`
 
-#pragma region Helpers
-
-/** Repeats one UTF-8 encoded codepoint @p repeats times, giving a run of a single byte-width. */
-static std::string uniform_utf8_run_(char const *encoded_rune, std::size_t repeats) {
-    std::string text;
-    text.reserve(std::strlen(encoded_rune) * repeats);
-    for (std::size_t repeat = 0; repeat != repeats; ++repeat) text += encoded_rune;
-    return text;
-}
-
-/**
- *  @brief Streams @c unpack over the entire @p text, collecting every decoded rune.
- *
- *  Mirrors the documented streaming contract: each call decodes a prefix of the remaining bytes and
- *  reports how many runes it produced and how far the cursor advanced; on valid UTF-8 every call
- *  must advance, so the loop terminates.
- *
- *  A small @p chunk_capacity forces the capacity-limited resume path, where the decoder fills the
- *  buffer, returns mid-input, and restarts from the reported cursor.
- */
-static void collect_unpacked_runes_(sz_utf8_decode_t unpack, sz_cptr_t text, sz_size_t length, sz_size_t chunk_capacity,
-                                    std::vector<sz_rune_t> &out) {
-    out.clear();
-    verify(chunk_capacity <= 64u); // The stack buffer below
-    sz_cptr_t position = text;
-    sz_cptr_t const end = text + length;
-    while (position < end) {
-        sz_rune_t chunk_runes[64];
-        sz_size_t chunk_count = 0;
-        sz_cptr_t const next = unpack(position, (sz_size_t)(end - position), chunk_runes, chunk_capacity, &chunk_count);
-        verify(next > position); // Must advance, otherwise the streaming loop would never terminate
-        // Fill-or-drain contract: a call that did not reach the end must have filled the capacity, so an iterator
-        // issues one decode per buffer regardless of script width (no early stop after a single register-worth).
-        verify((next == end || chunk_count == chunk_capacity) && "Unpack stopped before filling capacity");
-        for (sz_size_t index = 0; index != chunk_count; ++index) out.push_back(chunk_runes[index]);
-        position = next;
-    }
-}
-
-/**
- *  @brief Runs one UTF-8 codepoint backend (count, nth-finder, chunk-unpacker) over the
- *      known-answer anchor and asserts the produced count, byte offsets, and decoded runes.
- *
- *  Mirrors @c check_sha256_unit_ in `hash.cpp`: the caller drives it once per backend (dispatched,
- *  serial, and each natively-compiled kernel), so a wrong constant shared by the serial-vs-SIMD
- *  agreement tests is still caught against an external ground truth.
- *
- *  @param[in] count Codepoint counter under test.
- *  @param[in] find_nth Nth-codepoint byte-offset finder under test.
- *  @param[in] unpack Streaming chunk decoder under test, or NULL when this backend has none.
- *  @param[in] text Anchor text whose codepoints are counted / located / decoded.
- *  @param[in] length Byte length of @p text.
- *  @param[in] expected_count Expected codepoint count of @p text.
- *  @param[in] expected_runes Expected decoded codepoints, in order.
- */
-static void check_utf8_runes_unit_(                                          //
-    sz_utf8_count_t count, sz_utf8_seek_t find_nth, sz_utf8_decode_t unpack, //
-    sz_cptr_t text, sz_size_t length, sz_size_t expected_count,              //
-    std::vector<sz_rune_t> const &expected_runes) {
-
-    // Codepoint count is the external ground truth - not derived from a sibling kernel.
-    verify(count(text, length) == expected_count);
-
-    // `sz_utf8_seek`: codepoint starts land at the byte offset of each rune; the one-past-the-end
-    // index returns the NUL sentinel.
-    sz_size_t byte_offset = 0;
-    for (sz_size_t rune_index = 0; rune_index != expected_count; ++rune_index) {
-        verify(find_nth(text, length, rune_index) == text + byte_offset);
-        sz_u8_t bytes[4];
-        byte_offset += (sz_size_t)sz_rune_encode(expected_runes[rune_index], bytes);
-    }
-    verify(find_nth(text, length, expected_count) == STRINGZILLA_NULL_CHAR); // Beyond the last codepoint
-
-    // `sz_utf8_decode`: streaming the decoder must reproduce exactly the expected runes at every caller
-    // capacity, the tiny ones landing mid-rune-sequence on each resume.
-    if (unpack) {
-        sz_size_t const capacities[] = {1u, 2u, 3u, 16u, 64u};
-        std::vector<sz_rune_t> decoded;
-        for (sz_size_t capacity : capacities) {
-            collect_unpacked_runes_(unpack, text, length, capacity, decoded);
-            verify(decoded.size() == expected_count);
-            for (sz_size_t index = 0; index != expected_count; ++index) verify(decoded[index] == expected_runes[index]);
-        }
-    }
-}
-
-/** One UTF-8 codepoint backend: its three kernels plus whether its streaming decoder is hardened
- *  against malformed input. Built once here and iterated by every driver, so the unit/safety and
- *  equivalence passes can never drift apart in which ISAs they cover. The always-present
- *  @c dispatched entry keeps the table non-empty (and the helpers live) even on a baseline target
- *  with no SIMD tier compiled in. */
-struct utf8_runes_backend_t {
-    char const *name;
-    sz_utf8_count_t count;
-    sz_utf8_seek_t seek;
-    sz_utf8_decode_t decode; // Streaming decoder, or `STRINGZILLA_NULL` when the backend has none (e.g. `v128relaxed`).
-};
-
-static utf8_runes_backend_t const utf8_runes_backends[] = {
-    {"dispatched", sz_utf8_count, sz_utf8_seek, sz_utf8_decode},
-#if STRINGZILLA_TARGET_HASWELL
-    {"haswell", sz_utf8_count_haswell, sz_utf8_seek_haswell, sz_utf8_decode_haswell},
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    {"icelake", sz_utf8_count_icelake, sz_utf8_seek_icelake, sz_utf8_decode_icelake},
-#endif
-#if STRINGZILLA_TARGET_NEON
-    {"neon", sz_utf8_count_neon, sz_utf8_seek_neon, sz_utf8_decode_neon},
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    {"sve2", sz_utf8_count_sve2, sz_utf8_seek_sve2, sz_utf8_decode_sve2},
-#endif
-#if STRINGZILLA_TARGET_V128
-    {"v128", sz_utf8_count_v128, sz_utf8_seek_v128, sz_utf8_decode_v128},
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    {"v128relaxed", sz_utf8_count_v128relaxed, sz_utf8_seek_v128relaxed, STRINGZILLA_NULL},
-#endif
-#if STRINGZILLA_TARGET_RVV
-    {"rvv", sz_utf8_count_rvv, sz_utf8_seek_rvv, sz_utf8_decode_rvv},
-#endif
-#if STRINGZILLA_TARGET_LASX
-    {"lasx", sz_utf8_count_lasx, sz_utf8_seek_lasx, sz_utf8_decode_lasx},
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    {"powervsx", sz_utf8_count_powervsx, sz_utf8_seek_powervsx, sz_utf8_decode_powervsx},
-#endif
-};
-
-#pragma endregion Helpers
+/** The dispatch points in the shape of a codepoint backend. */
+static utf8_runes_backend_t const utf8_runes_dispatched = {"dispatched", cpu_best<sz_utf8_count_best>,
+                                                           cpu_best<sz_utf8_seek_best>, cpu_best<sz_utf8_decode_best>};
 
 #pragma region Unit
 
 /**
  *  @brief Known-answer unit tests for the UTF-8 codepoint family on simple, hand-verifiable inputs.
  *
- *  Exercises each function through the dispatched C API (automatic kernel resolution), through the
- *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and
- *  through the C++ @c sz::string_view_t wrappers, so a regression that the serial-vs-SIMD agreement
- *  tests would miss - because both share a wrong constant - is still caught against an external
- *  ground truth. This is the isolated coverage for @c sz_utf8_seek and @c sz_utf8_decode, whose
- *  SIMD variants are otherwise only fuzzed against serial.
+ *  Exercises each function through the dispatched C API and through the C++ @c sz::string_view_t
+ *  wrappers, so a regression that the serial-vs-SIMD agreement tests would miss - because both
+ *  share a wrong constant - is still caught against an external ground truth. The same anchor
+ *  holds every capability's kernels in the cross files.
  */
 void test_utf8_runes_unit() {
-    // The mixed-script anchor: "a\xC3\x9F\xE4\xB8\xAD" is `a` (1 byte) + U+00DF (2 bytes) + U+4E2D (3 bytes),
-    // so 6 bytes encode exactly 3 codepoints {0x61, 0xDF, 0x4E2D}.
-    char const mixed[] = "a\xC3\x9F\xE4\xB8\xAD";
-    sz_size_t const mixed_length = (sz_size_t)(sizeof(mixed) - 1);
-    verify(mixed_length == 6u);
-    std::vector<sz_rune_t> const mixed_runes = {0x61u, 0xDFu, 0x4E2Du};
-
-    // Drive the count + find-nth + unpack known-answer through the dispatched, serial, and native kernels.
-    check_utf8_runes_unit_(sz_utf8_count, sz_utf8_seek, sz_utf8_decode, mixed, mixed_length, 3u, mixed_runes);
-    check_utf8_runes_unit_(sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial, // serial
-                           mixed, mixed_length, 3u, mixed_runes);
-#if STRINGZILLA_TARGET_HASWELL
-    check_utf8_runes_unit_(sz_utf8_count_haswell, sz_utf8_seek_haswell,
-                           sz_utf8_decode_haswell, // haswell
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    check_utf8_runes_unit_(sz_utf8_count_icelake, sz_utf8_seek_icelake,
-                           sz_utf8_decode_icelake, // icelake
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    check_utf8_runes_unit_(sz_utf8_count_neon, sz_utf8_seek_neon,
-                           sz_utf8_decode_neon, // neon
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    check_utf8_runes_unit_(sz_utf8_count_sve2, sz_utf8_seek_sve2,
-                           sz_utf8_decode_sve2, // sve2
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
-#if STRINGZILLA_TARGET_V128
-    check_utf8_runes_unit_(sz_utf8_count_v128, sz_utf8_seek_v128,
-                           sz_utf8_decode_v128, // v128
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    check_utf8_runes_unit_(sz_utf8_count_rvv, sz_utf8_seek_rvv,
-                           sz_utf8_decode_rvv, // rvv
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    check_utf8_runes_unit_(sz_utf8_count_powervsx, sz_utf8_seek_powervsx,
-                           sz_utf8_decode_powervsx, // powervsx
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
-#if STRINGZILLA_TARGET_LASX
-    check_utf8_runes_unit_(sz_utf8_count_lasx, sz_utf8_seek_lasx,
-                           sz_utf8_decode_lasx, // lasx
-                           mixed, mixed_length, 3u, mixed_runes);
-#endif
+    // The count + find-nth + unpack known-answer through the dispatch points.
+    check_utf8_runes_unit_(utf8_runes_dispatched);
 
     // C++ API: character counting vs byte length through the `sz::string_view_t` wrappers.
-    verify(sz::string_view_t(mixed, mixed_length).utf8_count() == 3u);
+    verify(sz::string_view_t("a\xC3\x9F\xE4\xB8\xAD").utf8_count() == 3u); // `a` + U+00DF + U+4E2D
     verify("hello"_sv.utf8_count() == 5);
     verify("hello"_sv.size() == 5);
     verify("Hello World"_sv.utf8_count() == 11);
@@ -483,79 +294,6 @@ void test_utf8_runes_scripts_unit() {
 
 #pragma region Equivalence
 
-/**
- *  @brief Cross-checks the serial UTF-8 codepoint kernels against every candidate backend on
- *      random, well-formed inputs: chunk-unpacked runes, nth-codepoint byte offsets, and counts.
- *
- *  The known-answer anchors live in @c test_utf8_runes_unit; this is the serial-vs-ISA
- *  differential, the only coverage that exercises the SIMD @c sz_utf8_decode and @c sz_utf8_seek
- *  variants. Each input is generated once and driven through all @p candidates, so every backend
- *  sees byte-identical bytes and a divergence reproduces on the next ladder entry.
- */
-static inline void check_utf8_runes_equivalence_(                                                 //
-    std::mt19937 &generator,                                                                      //
-    sz_utf8_count_t count_serial, sz_utf8_seek_t find_nth_serial, sz_utf8_decode_t unpack_serial, //
-    sz::span<utf8_runes_backend_t const> candidates, sz_size_t inputs) {
-
-    std::vector<sz_rune_t> runes_serial, runes_candidate;
-    std::vector<sz_cptr_t> offsets_serial;
-
-    auto check = [&](sz_cptr_t data, sz_size_t length) {
-        sz_size_t const count_reference = count_serial(data, length);
-
-        // `sz_utf8_seek`: sweep every codepoint index plus a couple past the end.
-        offsets_serial.clear();
-        for (sz_size_t rune_index = 0; rune_index <= count_reference + 2u; ++rune_index)
-            offsets_serial.push_back(find_nth_serial(data, length, rune_index));
-
-        collect_unpacked_runes_(unpack_serial, data, length, 64u, runes_serial);
-        verify(runes_serial.size() == count_reference);
-
-        // `sz_utf8_decode`: streaming both backends must decode identical runes, and the candidate must decode
-        // the same sequence at every caller capacity - a capacity below the input's rune count exercises the
-        // fill-return-resume path that a whole-input capacity never reaches.
-        sz_size_t const capacities[] = {1u, 2u, 3u, 17u, 64u};
-        for (utf8_runes_backend_t const &candidate : candidates) {
-            verify(candidate.count(data, length) == count_reference);
-            for (sz_size_t rune_index = 0; rune_index <= count_reference + 2u; ++rune_index)
-                verify(candidate.seek(data, length, rune_index) == offsets_serial[rune_index]);
-            if (!candidate.decode) continue;
-            for (sz_size_t capacity : capacities) {
-                collect_unpacked_runes_(candidate.decode, data, length, capacity, runes_candidate);
-                verify(runes_candidate == runes_serial);
-            }
-        }
-    };
-    auto check_text_ = [&](std::string const &text) { check(text.data(), (sz_size_t)text.size()); };
-
-    // Structured length ladder around the SIMD window boundaries, every codepoint count exercised.
-    sz_size_t const ladder[] = {0u, 1u, 2u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 100u, 200u};
-    for (sz_size_t codepoints : ladder) check_text_(random_valid_utf8_(codepoints, generator));
-
-    // Byte-exact ladder: the codepoint ladder above lands on arbitrary byte lengths, so the 16/32/64-byte
-    // vector widths and their neighbours are otherwise only hit by chance.
-    sz_size_t const byte_ladder[] = {15u, 16u, 17u, 31u, 32u, 33u, 47u, 48u, 63u, 64u, 65u, 127u, 128u, 129u};
-    for (sz_size_t bytes : byte_ladder) check_text_(random_valid_utf8_bytes_(bytes, generator));
-
-    // Homogeneous runs spanning several windows: the mixed generator never emits a long single-width stretch,
-    // where a width-specialized fast path runs unbroken.
-    char const *const uniform_runes[] = {"x", "\xD0\x9F", "\xE4\xB8\x96", "\xF0\x9F\x98\x80"};
-    sz_size_t const uniform_repeats[] = {17u, 65u, 200u};
-    for (char const *encoded_rune : uniform_runes)
-        for (sz_size_t repeats : uniform_repeats) check_text_(uniform_utf8_run_(encoded_rune, repeats));
-
-    // Fuzzed inputs of random codepoint counts, each placed at every sub-cache-line offset so serial-vs-ISA
-    // agreement is checked across all alignments the SIMD kernels may hit.
-    std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 96);
-    for (sz_size_t iteration = 0; iteration != inputs; ++iteration) {
-        std::string const text = random_valid_utf8_(codepoint_distribution(generator), generator);
-        for_each_cacheline_offset_(text.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
-            std::memcpy(buffer, text.data(), text.size());
-            check(buffer, (sz_size_t)text.size());
-        });
-    }
-}
-
 /** Large-buffer count agreement: a few hundred KB of mixed-width codepoints where the dispatched
  *  and C++ counts must equal the serial reference and the exact known total. */
 static void check_utf8_runes_large_count_(test_context_t &context) {
@@ -568,9 +306,9 @@ static void check_utf8_runes_large_count_(test_context_t &context) {
     for (std::size_t repeat = 0; repeat != repeats; ++repeat) mixed.append(unit, sizeof(unit) - 1);
 
     sz_size_t const expected_codepoints = (sz_size_t)(repeats * 4);
-    sz_size_t const count_serial = sz_utf8_count_serial(mixed.data(), mixed.size());
+    sz_size_t const count_serial = kernel_result<sz_size_t>(sz_utf8_count_serial, mixed.data(), mixed.size());
     verify(count_serial == expected_codepoints);
-    verify(sz_utf8_count(mixed.data(), mixed.size()) == count_serial);
+    verify(kernel_result<sz_size_t>(cpu_best<sz_utf8_count_best>, mixed.data(), mixed.size()) == count_serial);
     verify(sz::string_view_t(mixed).utf8_count() == count_serial); // C++ wrapper matches serial
 }
 
@@ -578,102 +316,17 @@ static void check_utf8_runes_large_count_(test_context_t &context) {
 
 #pragma region Safety
 
-/**
- *  @brief Feeds malformed / invalid UTF-8 through one backend's counting and streaming-unpack
- *      kernels, asserting no crash, in-bounds output, and a cursor that never escapes the input.
- *
- *  Counting is bounds-safe on arbitrary bytes, so it faces the full malformed battery: it must
- *  merely survive. @c sz_utf8_decode documents a valid-UTF-8 precondition (the decoder "performs no
- *  validity checks") and asserts internally on garbage, so it is only exercised on the
- *  @c sz_utf8_find_malformed subset; each call must report no more runes than the destination holds
- *  and never let its cursor run past the input.
- *
- *  @param[in] count Codepoint counter under test.
- *  @param[in] unpack Streaming chunk decoder under test, or NULL when this backend has none.
- */
-static void check_utf8_runes_safety_(test_context_t &context, sz_utf8_count_t count, sz_utf8_decode_t unpack) {
-    std::size_t const random_inputs = context.iterations(4000);
-
-    std::size_t const max_input_length = utf8_unit_capacity_k;
-    std::vector<sz_rune_t> rune_destination;
-
-    auto check = [&](char const *input, std::size_t input_length) {
-        // Counting must survive arbitrary bytes and never report more runes than the input holds bytes.
-        sz_size_t const counted = count(input, (sz_size_t)input_length);
-        verify(counted <= input_length && "Count reported more runes than the input holds bytes");
-
-        // Streaming unpack is total under the unified contract: it runs on arbitrary bytes, substituting U+FFFD
-        // for ill-formed input. Each call must report no more runes than the destination holds, a cursor that
-        // never runs past the input, and only valid Unicode scalar values (no surrogate, none beyond U+10FFFF) -
-        // the precondition every binding relies on to convert runes without re-validation. A well-formed but
-        // truncated trailing sequence legitimately stalls (returns the same cursor) - so we stop rather than spin.
-        if (unpack) {
-            // The tiny capacities force the fill-and-resume path to restart inside malformed bytes, which the
-            // whole-input capacity never does.
-            std::size_t const capacities[] = {1, 3, max_input_length + 4};
-            for (std::size_t rune_capacity : capacities) {
-                rune_destination.assign(rune_capacity, (sz_rune_t)0);
-                sz_cptr_t cursor = input;
-                sz_cptr_t const end = input + input_length;
-                while (cursor < end) {
-                    sz_size_t produced = 0;
-                    sz_cptr_t const next = unpack(cursor, (sz_size_t)(end - cursor), rune_destination.data(),
-                                                  (sz_size_t)rune_capacity, &produced);
-                    verify(produced <= rune_capacity && "Unpack reported more runes than the destination holds");
-                    verify(next >= cursor && next <= end && "Unpack cursor escaped the input");
-                    for (sz_size_t rune_index = 0; rune_index != produced; ++rune_index) {
-                        sz_rune_t const rune = rune_destination[rune_index];
-                        verify(rune <= 0x10FFFFu && !(rune >= 0xD800u && rune <= 0xDFFFu) &&
-                               "Unpack emitted a non-scalar value (surrogate or out of range)");
-                    }
-                    if (next == cursor) break; // Stalled on a truncated trailing sequence - the caller would refill
-                    cursor = next;
-                }
-            }
-        }
-    };
-
-    std::mt19937 &generator = context.generator;
-    for_each_adversarial_utf8_input_(context, random_inputs, check);
-
-    // Valid text with a few bytes overwritten: damage surrounded by long well-formed runs, which neither the
-    // battery's uniform garbage nor the well-formed equivalence corpus produces.
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
-    std::uniform_int_distribution<int> byte_distribution(0, 255);
-    std::uniform_int_distribution<std::size_t> codepoint_distribution(1, max_input_length / 4);
-    for (std::size_t iteration = 0; iteration != random_inputs / 8 + 1; ++iteration) {
-        std::string text = random_valid_utf8_(codepoint_distribution(generator), generator);
-        if (text.size() > max_input_length) text.resize(max_input_length);
-        for (std::size_t corruption = 0; corruption != 3; ++corruption)
-            text[length_distribution(generator) % text.size()] = (char)byte_distribution(generator);
-        check(text.data(), text.size());
-    }
-}
-
-/** Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
-void test_utf8_runes_safety(test_context_t &context) {
-    // Serial is the reference contract; the dispatched and native backends below face the same probe.
-    check_utf8_runes_safety_(context, sz_utf8_count_serial, sz_utf8_decode_serial);
-    for (utf8_runes_backend_t const &backend : utf8_runes_backends)
-        check_utf8_runes_safety_(context, backend.count, backend.decode);
-}
+/** Drive the malformed-input safety probe through the dispatch points. */
+void test_utf8_runes_safety(test_context_t &context) { check_utf8_runes_safety_(context, utf8_runes_dispatched); }
 
 #pragma endregion Safety
 
 #pragma region Drivers
 
-/** Drives the serial-vs-SIMD UTF-8 codepoint differential (unpack + find-nth + count) across every
- *  backend compiled on this target, plus the large-buffer count agreement. */
+/** Drives the serial-vs-dispatched UTF-8 codepoint differential (unpack + find-nth + count), plus
+ *  the large-buffer count agreement. */
 void test_utf8_runes_all(test_context_t &context) {
-    // This family's share of the suite budget: each input is checked at 11 cache-line offsets, over 5 decoder
-    // capacities, per backend.
-    sz_size_t const inputs = (sz_size_t)context.iterations(1000);
-
-    // Serial is the reference; the dispatched entry and every native backend are differenced
-    // against it. A `STRINGZILLA_NULL` decoder (e.g. `v128relaxed`) simply skips the
-    // streaming-decode leg inside the helper.
-    check_utf8_runes_equivalence_(context.generator, sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial,
-                                  span_over(utf8_runes_backends), inputs);
+    check_utf8_runes_equivalence_(context, utf8_runes_dispatched);
 
     // Large-buffer count agreement: serial == dispatched == C++ wrapper == known total.
     check_utf8_runes_large_count_(context);

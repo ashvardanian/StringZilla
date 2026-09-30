@@ -12,17 +12,6 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-/*  Overload the following with caution. Those parameters must never be explicitly set during
- *  releases, but they come handy during development, to validate different ISA-specific backends:
- *
- *      #define STRINGZILLA_TARGET_WESTMERE 0
- *      #define STRINGZILLA_TARGET_HASWELL 0
- *      #define STRINGZILLA_TARGET_GOLDMONT 0
- *      #define STRINGZILLA_TARGET_SKYLAKE 0
- *      #define STRINGZILLA_TARGET_ICELAKE 0
- *      #define STRINGZILLA_TARGET_NEON 0
- *      #define STRINGZILLA_TARGET_SVE 0
- *      #define STRINGZILLA_TARGET_SVE2 0 */
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
 #endif
@@ -57,6 +46,7 @@
 
 #include <fmt/format.h>
 
+#include "cross.hpp"   // `sort_backend_t`, `check_sort_unit_`, `check_intersect_unit_`
 #include "harness.hpp" // `random_string`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
@@ -68,51 +58,9 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/** Runs one sequence arg-sort backend over @c sequence and asserts the produced permutation matches
- *  @c expected. */
-static void check_sort_unit_(sz_sequence_argsort_t argsort, sz_sequence_t const *sequence,
-                             std::vector<sz_sorted_idx_t> const &expected) {
-    std::vector<sz_sorted_idx_t> order(expected.size());
-    handle_checked_heap_t heap;
-    verify(argsort(sequence, &heap.allocator, order.data(), 0, sz_false_k) == sz_success_k && "Kernel call failed");
-    verify(heap.live_allocations == 0);
-    verify(order == expected);
-}
-
-/** One matched pair from an intersection: @c first_index into the first sequence, @c second_index
- *  into the second. */
-struct intersect_match_t {
-    std::size_t first_index;
-    std::size_t second_index;
-
-    bool operator<(intersect_match_t const &other) const noexcept {
-        return first_index != other.first_index ? first_index < other.first_index : second_index < other.second_index;
-    }
-    bool operator==(intersect_match_t const &other) const noexcept {
-        return first_index == other.first_index && second_index == other.second_index;
-    }
-};
-
-/** Runs one sequence intersect backend over both inputs, asserting the matched index pairs. */
-static void check_intersect_unit_(sz_sequence_intersect_t intersect, sz_sequence_t const *first_sequence,
-                                  sz_sequence_t const *second_sequence,
-                                  std::set<intersect_match_t> const &expected_pairs) {
-    sz_size_t const capacity = first_sequence->count < second_sequence->count ? //
-                                   first_sequence->count
-                                                                              : second_sequence->count;
-    std::vector<sz_sorted_idx_t> first_positions(capacity), second_positions(capacity);
-    sz_size_t intersection_size = 0;
-    handle_checked_heap_t heap;
-    verify(intersect(first_sequence, second_sequence, &heap.allocator, 0u, &intersection_size, //
-                     first_positions.data(), second_positions.data()) == sz_success_k &&
-           "Kernel call failed");
-    verify(heap.live_allocations == 0);
-    verify(intersection_size == expected_pairs.size() && "Kernel reported the wrong intersection size");
-    std::set<intersect_match_t> produced;
-    for (sz_size_t index = 0; index != intersection_size; ++index)
-        produced.insert({(std::size_t)first_positions[index], (std::size_t)second_positions[index]});
-    verify(produced == expected_pairs);
-}
+/** The dispatched byte and uncased arg-sorts, in the shape of their capability kernels. */
+static sort_backend_t const sort_dispatched {"dispatched", cpu_best<sz_sequence_argsort_best>,
+                                             cpu_best<sz_sequence_argsort_uncased_best>};
 
 #pragma endregion Helpers
 
@@ -121,8 +69,7 @@ static void check_intersect_unit_(sz_sequence_intersect_t intersect, sz_sequence
 /**
  *  @brief Known-answer and coverage tests for the sequence sort and intersect family.
  *
- *  Exercises each function through the dispatched C API with automatic kernel resolution, through
- *  the natively-compiled backend kernels directly with manual propagation to a specific kernel, and
+ *  Exercises each function through the dispatched C API with automatic kernel resolution and
  *  through the C++ @c sz::argsort and @c sz::intersect wrappers, so a regression that the
  *  serial-vs-SIMD agreement tests would miss - because both share the same wrong ordering - is
  *  still caught against an external ground truth. The randomized sweeps against @c std::stable_sort
@@ -132,82 +79,23 @@ void test_sort_unit() {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
 
-    // Byte arg-sort: {"banana","apple","cherry"} sorts lexicographically to {"apple","banana","cherry"},
-    // so the permutation is {1, 0, 2}. Check the dispatched API and every natively-compiled kernel.
-    {
-        std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
-        sz_sequence_t const sequence = sequence_from_(fruits);
-        std::vector<sz_sorted_idx_t> const expected = {1u, 0u, 2u};
-
-        check_sort_unit_(sz_sequence_argsort, &sequence, expected);
-        check_sort_unit_(sz_sequence_argsort_serial, &sequence, expected);
-#if STRINGZILLA_TARGET_HASWELL
-        check_sort_unit_(sz_sequence_argsort_haswell, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-        check_sort_unit_(sz_sequence_argsort_skylake, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_SVE
-        check_sort_unit_(sz_sequence_argsort_sve, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_NEON
-        check_sort_unit_(sz_sequence_argsort_neon, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_RVV
-        check_sort_unit_(sz_sequence_argsort_rvv, &sequence, expected);
-#endif
-
-        verify(sz::argsort(fruits) == std::vector<sz::sorted_idx_t>({1u, 0u, 2u}));
-    }
-
-    // Uncased UTF-8 arg-sort: {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}.
-    {
-        std::vector<std::string> const words = {"Banana", "apple"};
-        sz_sequence_t const sequence = sequence_from_(words);
-        std::vector<sz_sorted_idx_t> const expected = {1u, 0u};
-
-        check_sort_unit_(sz_sequence_argsort_uncased, &sequence, expected);
-        check_sort_unit_(sz_sequence_argsort_uncased_serial, &sequence, expected);
-#if STRINGZILLA_TARGET_HASWELL
-        check_sort_unit_(sz_sequence_argsort_uncased_haswell, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-        check_sort_unit_(sz_sequence_argsort_uncased_skylake, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_SVE
-        check_sort_unit_(sz_sequence_argsort_uncased_sve, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_NEON
-        check_sort_unit_(sz_sequence_argsort_uncased_neon, &sequence, expected);
-#endif
-#if STRINGZILLA_TARGET_RVV
-        check_sort_unit_(sz_sequence_argsort_uncased_rvv, &sequence, expected);
-#endif
-
-        verify(sz::argsort_utf8_uncased(words) == std::vector<sz::sorted_idx_t>({1u, 0u}));
-    }
+    // Byte arg-sort: {"banana","apple","cherry"} sorts lexicographically to {1, 0, 2}, and uncased
+    // {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}.
+    check_sort_unit_(sort_dispatched);
+    verify(sz::argsort(strs_t {"banana", "apple", "cherry"}).value == order_t({1u, 0u, 2u}));
+    verify(sz::argsort_utf8_uncased(strs_t {"Banana", "apple"}).value == order_t({1u, 0u}));
 
     // Intersection: {"apple","banana","cherry"} vs {"cherry","date","banana"} share {"banana","cherry"}.
     {
         std::vector<std::string> const first = {"apple", "banana", "cherry"};
         std::vector<std::string> const second = {"cherry", "date", "banana"};
-        sz_sequence_t const first_sequence = sequence_from_(first);
-        sz_sequence_t const second_sequence = sequence_from_(second);
 
-        // The matched pairs by (first index, second index): banana=(1,2) and cherry=(2,0). Output order is
-        // unspecified, so the helper collects pairs into a set before comparing against the known intersection.
+        // The matched pairs by (first index, second index) are banana=(1,2) and cherry=(2,0), in an
+        // unspecified order, so they are compared as a set.
         std::set<intersect_match_t> const expected_pairs = {{1u, 2u}, {2u, 0u}};
 
-        check_intersect_unit_(sz_sequence_intersect, &first_sequence, &second_sequence, expected_pairs);
-        check_intersect_unit_(sz_sequence_intersect_serial, &first_sequence, &second_sequence, expected_pairs);
-#if STRINGZILLA_TARGET_ICELAKE
-        check_intersect_unit_(sz_sequence_intersect_icelake, &first_sequence, &second_sequence, expected_pairs);
-#endif
-#if STRINGZILLA_TARGET_SVE
-        check_intersect_unit_(sz_sequence_intersect_sve, &first_sequence, &second_sequence, expected_pairs);
-#endif
-
-        sz::intersect_result_t const result = sz::intersect(first, second);
+        auto const [result, status] = sz::intersect(first, second);
+        verify(sz::succeeded(status));
         verify(result.first_offsets.size() == 2u && result.second_offsets.size() == 2u);
         std::set<intersect_match_t> wrapper_pairs;
         for (std::size_t index = 0; index != result.first_offsets.size(); ++index)
@@ -215,62 +103,72 @@ void test_sort_unit() {
         verify(wrapper_pairs == expected_pairs);
     }
 
-    // Low-level `try_*` API takes sized `sz::span` outputs and returns the count via `sz::expected`.
+    // The span overloads fill caller-sized outputs; `intersect` also returns its match count.
     {
         auto as_view = [](std::string const &s) -> sz::string_view_t { return {s.data(), s.size()}; };
 
         std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
         order_t order(fruits.size());
-        verify(sz::try_argsort(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
+        verify(sz::argsort(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
         verify(order == order_t({1u, 0u, 2u}));
-        verify(sz::try_argsort_utf8_uncased(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
+        verify(sz::argsort_utf8_uncased(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
         verify(order == order_t({1u, 0u, 2u}));
+
+        // An output shorter than the collection is refused in release builds too, not written past.
+        order_t short_order(fruits.size() - 1);
+        verify(sz::argsort(fruits, as_view, {short_order.data(), short_order.size()}) ==
+               sz::status_t::unexpected_dimensions_k);
 
         std::vector<std::string> const first = {"apple", "banana", "cherry"};
         std::vector<std::string> const second = {"cherry", "date", "banana"};
         std::size_t const capacity = (std::min)(first.size(), second.size());
         order_t first_positions(capacity), second_positions(capacity);
-        sz::expected<std::size_t, sz::status_t> const matched = sz::try_intersect( //
-            first, as_view, second, as_view, /*seed*/ 0u,                          //
-            {first_positions.data(), first_positions.size()}, {second_positions.data(), second_positions.size()});
-        verify(matched.status == sz::status_t::success_k);
-        verify(matched.value == 2u);
+        auto const [matched, status] = sz::intersect( //
+            first, as_view, second, as_view, /*seed*/ 0u, {first_positions.data(), first_positions.size()},
+            {second_positions.data(), second_positions.size()});
+        verify(sz::succeeded(status));
+        verify(matched == 2u);
         std::set<intersect_match_t> low_level_pairs;
-        for (std::size_t index = 0; index != matched.value; ++index)
+        for (std::size_t index = 0; index != matched; ++index)
             low_level_pairs.insert({first_positions[index], second_positions[index]});
         std::set<intersect_match_t> const expected_low_level = {{1u, 2u}, {2u, 0u}};
         verify(low_level_pairs == expected_low_level);
     }
 
     // Basic tests with predetermined orders.
-    let_verify(auto result = sz::argsort(strs_t({"a", "b", "c", "d"})), result == order_t({0u, 1u, 2u, 3u}));
-    let_verify(auto result = sz::argsort(strs_t({"b", "c", "d", "a"})), result == order_t({3u, 0u, 1u, 2u}));
-    let_verify(auto result = sz::argsort(strs_t({"b", "a", "d", "c"})), result == order_t({1u, 0u, 3u, 2u}));
+    let_verify(auto result = sz::argsort(strs_t({"a", "b", "c", "d"})).value, result == order_t({0u, 1u, 2u, 3u}));
+    let_verify(auto result = sz::argsort(strs_t({"b", "c", "d", "a"})).value, result == order_t({3u, 0u, 1u, 2u}));
+    let_verify(auto result = sz::argsort(strs_t({"b", "a", "d", "c"})).value, result == order_t({1u, 0u, 3u, 2u}));
 
     // Single character vs multi-character strings
-    let_verify(auto result = sz::argsort(strs_t({"aa", "a", "aaa", "aa"})), result == order_t({1u, 0u, 3u, 2u}));
+    let_verify(auto result = sz::argsort(strs_t({"aa", "a", "aaa", "aa"})).value, result == order_t({1u, 0u, 3u, 2u}));
 
     // Mix of short and long strings with common prefixes
-    let_verify(auto result = sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})),
-               result == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+    let_verify(
+        auto result = sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})).value,
+        result == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
 
     // Single character vs multi-character strings with varied patterns
-    let_verify(auto result = sz::argsort(
-                   strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"})),
+    let_verify(auto result = sz::argsort(strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango",
+                                                 "m", "maple"}))
+                                 .value,
                result == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
 
     // Numeric-like strings of varying lengths
-    let_verify(auto result = sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})),
+    let_verify(auto result = sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})).value,
                result == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
 
     // Real names with varied lengths and prefixes
-    let_verify(auto result = sz::argsort(
-                   strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"})),
-               result == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
+    let_verify(
+        auto result =
+            sz::argsort(strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"})).value,
+        result == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 }
 
-/** Known-answer intersection pairs through the dispatched API, native kernels, and C++ wrapper. */
+/** Known-answer intersection pairs through the dispatched API and the C++ wrapper. */
 void test_intersect_unit() {
+    check_intersect_unit_(cpu_best<sz_sequence_intersect_best>);
+
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
 
@@ -292,52 +190,28 @@ void test_intersect_unit() {
         result_t result;
         // Empty sets
         {
-            result = sz::intersect(empty, empty);
+            result = sz::intersect(empty, empty).value;
             verify(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
-            result = sz::intersect(abcd, empty);
+            result = sz::intersect(abcd, empty).value;
             verify(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
         }
-        // Each predetermined non-empty case is verified through the C++ wrapper and through the dispatched API plus
-        // every natively-compiled kernel, so a serial/SIMD consensus that disagrees with the known answer is caught.
-        using kernel_pairs_t = std::set<intersect_match_t>;
-        auto check_all_intersect_kernels_ = [](sz_sequence_t const *first_sequence,
-                                               sz_sequence_t const *second_sequence,
-                                               kernel_pairs_t const &expected_pairs) {
-            // Dispatched (automatic kernel resolution).
-            check_intersect_unit_(sz_sequence_intersect, first_sequence, second_sequence, expected_pairs);
-            // Manual propagation to each natively-compiled backend kernel.
-            check_intersect_unit_(sz_sequence_intersect_serial, first_sequence, second_sequence, expected_pairs);
-#if STRINGZILLA_TARGET_ICELAKE
-            check_intersect_unit_(sz_sequence_intersect_icelake, first_sequence, second_sequence, expected_pairs);
-#endif
-#if STRINGZILLA_TARGET_SVE
-            check_intersect_unit_(sz_sequence_intersect_sve, first_sequence, second_sequence, expected_pairs);
-#endif
-        };
-        sz_sequence_t const abcd_sequence = sequence_from_(abcd);
-        sz_sequence_t const dcba_sequence = sequence_from_(dcba);
-        sz_sequence_t const abs_sequence = sequence_from_(abs);
-
         // Identity check
         {
-            result = sz::intersect(abcd, abcd);
+            result = sz::intersect(abcd, abcd).value;
             verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
             verify(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
-            check_all_intersect_kernels_(&abcd_sequence, &abcd_sequence, {{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}});
         }
         // Identical size, different order
         {
-            result = sz::intersect(abcd, dcba);
+            result = sz::intersect(abcd, dcba).value;
             verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
             verify(to_pairs(result) == idx_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
-            check_all_intersect_kernels_(&abcd_sequence, &dcba_sequence, {{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}});
         }
         // Different sets
         {
-            result = sz::intersect(abcd, abs);
+            result = sz::intersect(abcd, abs).value;
             verify(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
             verify(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}}));
-            check_all_intersect_kernels_(&abcd_sequence, &abs_sequence, {{0u, 0u}, {1u, 1u}});
         }
     }
 }
@@ -374,8 +248,7 @@ void test_intersect_equivalence(test_context_t &context) {
         strs_t first_half(all_strings.begin(), all_strings.begin() + all_strings.size() / 2);
 
         // Try different joins
-        result_t result;
-        result = sz::intersect(all_strings, first_half);
+        result_t const result = sz::intersect(all_strings, first_half).value;
         verify(result.first_offsets.size() == first_half.size() && result.second_offsets.size() == first_half.size() &&
                "A subset intersected with its superset must recover the whole subset");
     }
@@ -410,7 +283,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
 
             for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
                 std::shuffle(dataset.begin(), dataset.end(), generator);
-                auto order = sz::argsort(dataset);
+                auto order = sz::argsort(dataset).value;
                 for (std::size_t i = 1; i < dataset.size(); ++i)
                     verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
             }
@@ -426,7 +299,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
-            auto order = sz::argsort(dataset);
+            auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
             }
@@ -443,7 +316,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
-            auto order = sz::argsort(dataset);
+            auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
             }
@@ -459,7 +332,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
 
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
-            auto order = sz::argsort(dataset);
+            auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
             }
@@ -477,7 +350,8 @@ void test_sort_reference_equivalence(test_context_t &context) {
     };
     auto fold_string = [](std::string const &s) -> std::string {
         std::vector<char> destination(s.size() * 3 + 4);
-        std::size_t const folded_length = sz_utf8_uncased_fold(s.data(), s.size(), destination.data());
+        std::size_t const folded_length = kernel_result<sz_size_t>(cpu_best<sz_utf8_uncased_fold_best>, s.data(),
+                                                                   s.size(), destination.data());
         return std::string(destination.data(), folded_length);
     };
 
@@ -513,17 +387,17 @@ void test_sort_reference_equivalence(test_context_t &context) {
     };
 
     // Ascending and descending must match a byte-key stable sort exactly.
-    verify(is_permutation(sz::argsort(mixed)) && "argsort output is not a permutation");
-    verify(sz::argsort(mixed) == reference_order(mixed, sort_direction_t::ascending_k) &&
+    verify(is_permutation(sz::argsort(mixed).value) && "argsort output is not a permutation");
+    verify(sz::argsort(mixed).value == reference_order(mixed, sort_direction_t::ascending_k) &&
            "Ascending argsort disagrees with the stable-sort reference");
-    verify(sz::argsort(mixed, 0, true) == reference_order(mixed, sort_direction_t::descending_k) &&
+    verify(sz::argsort(mixed, 0, true).value == reference_order(mixed, sort_direction_t::descending_k) &&
            "Descending argsort disagrees with the stable-sort reference");
 
     // Top-K must reproduce the value-prefix of the full sort and stay a permutation.
     for (std::size_t top_count : {std::size_t(1), std::size_t(50), std::size_t(777), mixed_count}) {
         for (sort_direction_t direction : {sort_direction_t::ascending_k, sort_direction_t::descending_k}) {
             bool const reverse = direction == sort_direction_t::descending_k;
-            order_t const got = sz::argsort(mixed, top_count, reverse);
+            order_t const got = sz::argsort(mixed, top_count, reverse).value;
             order_t const reference = reference_order(mixed, direction);
             verify(is_permutation(got) && "Top-K argsort output is not a permutation");
             std::size_t const head = top_count < mixed_count ? top_count : mixed_count;
@@ -535,205 +409,22 @@ void test_sort_reference_equivalence(test_context_t &context) {
     // Uncased sort must match folding every string then byte-stable-sorting.
     std::vector<std::string> folded(mixed_count);
     for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
-    verify(sz::argsort_utf8_uncased(mixed) == reference_order(folded, sort_direction_t::ascending_k) &&
+    verify(sz::argsort_utf8_uncased(mixed).value == reference_order(folded, sort_direction_t::ascending_k) &&
            "Ascending uncased argsort disagrees with the folded stable-sort reference");
-    verify(sz::argsort_utf8_uncased(mixed, 0, true) == reference_order(folded, sort_direction_t::descending_k) &&
+    verify(sz::argsort_utf8_uncased(mixed, 0, true).value == reference_order(folded, sort_direction_t::descending_k) &&
            "Descending uncased argsort disagrees with the folded stable-sort reference");
 }
 
-#pragma region Equivalence
-
-/** One backend's byte + uncased sequence arg-sort kernels, stored by pointer so the differential
- *  driver can iterate a table. */
-struct sort_backend_t {
-    char const *name;
-    sz_sequence_argsort_t argsort;
-    sz_sequence_argsort_t argsort_uncased;
-};
-
-/**
- *  @brief Demands a candidate sort backend produce results identical to the reference backend.
- *  @param[in] inputs Baseline repetition count, scaled by the context's @c iterations, not a size.
- *
- *  Both the byte and uncased arg-sorts are @b stable, so for any input the permutation is unique -
- *  the candidate and reference @c order arrays must match exactly across the ascending, descending,
- *  and top-K modes.
- */
-template <typename reference_, typename candidate_>
-void check_sort_equivalence_(test_context_t &context, reference_ reference, candidate_ candidate, sz_size_t inputs) {
-    std::size_t const repetition_count = context.iterations(inputs);
-
-    using strs_t = std::vector<std::string>;
-    std::mt19937 &generator = context.generator;
-    handle_checked_heap_t heap;
-
-    // Each repetition draws fresh random datasets and covers one top-K mode, so a larger `inputs` widens the
-    // fuzzing coverage rather than enlarging a fixed dataset. The datasets span the vectorized block, the scalar
-    // tail, and the slack-region boundaries, and the largest crosses into the large-input partitioning path.
-    for (std::size_t repetition = 0; repetition < repetition_count; ++repetition) {
-        std::vector<strs_t> datasets;
-        for (std::size_t full_count : {33u, 64u, 100u, 1000u, 5000u, 100000u}) {
-            // Only the repetition count rides the multiplier; scaling the sizes too would make the dial
-            // multiplicative, so a 10x run would cost a hundredfold. Never below 33, so the QuickSort partition
-            // rather than the insertion-sort fallback keeps running.
-            std::size_t const count = std::max<std::size_t>(33, full_count);
-            strs_t fixed_dups; // Short strings over a tiny alphabet => many exact duplicates (fills the equal region).
-            for (std::size_t i = 0; i < count; ++i)
-                fixed_dups.push_back(sz::test::random_string(generator, i % 5, "ab"));
-            datasets.push_back(fixed_dups);
-            strs_t varied; // Longer, common-prefix strings => deep pgram recursion.
-            for (std::size_t i = 0; i < count; ++i)
-                varied.push_back(sz::test::random_string(generator, 6 + i % 40, "abc"));
-            datasets.push_back(varied);
-        }
-        { // Deterministic mixed-case / multi-script set so the uncased path sees real folds.
-            char const *seed[] = {"Apple",   "apple",  "BANANA", "banana", "Straße",
-                                  "STRASSE", "Привет", "ПРИВЕТ", "Ab",     "aB"};
-            strs_t mixed;
-            for (std::size_t r = 0; r < 50; ++r)
-                for (char const *word : seed) mixed.push_back(word);
-            std::shuffle(mixed.begin(), mixed.end(), generator);
-            datasets.push_back(mixed);
-        }
-
-        for (strs_t const &dataset : datasets) {
-            std::size_t const count = dataset.size();
-            sz_sequence_t sequence;
-            sequence.handle = &dataset;
-            sequence.count = count;
-            sequence.get_start = sequence_get_start_;
-            sequence.get_length = sequence_get_length_;
-
-            std::vector<sz_sorted_idx_t> order_reference(count), order_candidate(count);
-            sz_size_t const top_modes[] = {0, 1, (sz_size_t)(count / 3), (sz_size_t)count};
-            sz_size_t const top = top_modes[repetition % 4];
-            for (sz_bool_t reverse : {sz_false_k, sz_true_k}) {
-                std::size_t const head = (top != 0 && top < count) ? top : count;
-
-                // Byte arg-sort: stable, so the permutations must match exactly over the ordered prefix.
-                reference.argsort(&sequence, &heap.allocator, order_reference.data(), top, reverse);
-                candidate.argsort(&sequence, &heap.allocator, order_candidate.data(), top, reverse);
-                for (std::size_t i = 0; i < head; ++i)
-                    verify(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
-
-                // Uncased arg-sort: also stable, same exact-match requirement.
-                reference.argsort_uncased(&sequence, &heap.allocator, order_reference.data(), top, reverse);
-                candidate.argsort_uncased(&sequence, &heap.allocator, order_candidate.data(), top, reverse);
-                for (std::size_t i = 0; i < head; ++i)
-                    verify(order_reference[i] == order_candidate[i] && "SIMD uncased arg-sort disagrees with serial");
-            }
-        }
-    }
-    verify(heap.live_allocations == 0);
-}
-
-#pragma endregion Equivalence
-
 #pragma region Safety
 
-/**
- *  @brief Degenerate sequences for the sorting family, asserting the output stays a permutation.
- *
- *  An empty sequence, a single element, and one where every string is identical each have a
- *  defensible answer, and what is asserted here is the shape of the reply rather than its order:
- *  the output must be a permutation of the input indices, every index present exactly once. An
- *  all-equal input is the one that catches a comparator returning a strict order where it should
- *  report a tie, since any ordering of it looks sorted and only the permutation property fails.
- */
-void test_sort_safety() {
-    using strs_t = std::vector<std::string>;
-
-    // Every compiled kernel is asked directly: going through `sz::argsort` would only ever reach whichever
-    // one the dispatcher picks on this machine, leaving the rest of the table unexercised.
-    auto check_is_permutation_ = [](char const *name, sz_sequence_argsort_t argsort, strs_t const &input) {
-        sz_sequence_t const sequence = sequence_from_(input);
-        std::vector<sz_sorted_idx_t> order(input.size());
-        handle_checked_heap_t heap;
-        verify(argsort(&sequence, &heap.allocator, order.data(), 0, sz_false_k) == sz_success_k &&
-               "Kernel call failed");
-        verify(heap.live_allocations == 0);
-        std::vector<bool> seen(input.size(), false);
-        for (sz_sorted_idx_t const index : order) {
-            if ((std::size_t)index >= input.size() || seen[(std::size_t)index]) {
-                fmt::println(stderr, "{}: argsort produced {} for a {}-element input", name,
-                             (std::size_t)index >= input.size() ? "an out-of-range index" : "a repeated index",
-                             input.size());
-                verify(false && "A sort's output must be a permutation of the input indices");
-            }
-            seen[(std::size_t)index] = true;
-        }
-    };
-
-    strs_t degenerate_inputs[] = {
-        strs_t {},                                  // Empty sequence
-        strs_t {"only"},                            // One element
-        strs_t(17, "same"),                         // All equal - any order looks sorted, so only the shape can fail
-        strs_t(129, "same"),                        // Past the insertion-sort cutover, still all equal
-        strs_t {"", "a", "", "aa", "a", "", "aaa"}, // Empty strings and prefixes, where a length tiebreak decides
-    };
-    // Differing only past an embedded NUL, which a length-truncating comparison would call equal.
-    strs_t embedded;
-    embedded.push_back(std::string("a\0b", 3));
-    embedded.push_back(std::string("a\0a", 3));
-
-    auto sweep = [&](char const *name, sz_sequence_argsort_t argsort) {
-        for (strs_t const &input : span_over(degenerate_inputs)) check_is_permutation_(name, argsort, input);
-        check_is_permutation_(name, argsort, embedded);
-    };
-
-    sweep("dispatched", sz_sequence_argsort);
-    sweep("serial", sz_sequence_argsort_serial);
-    sweep("dispatched uncased", sz_sequence_argsort_uncased);
-    sweep("serial uncased", sz_sequence_argsort_uncased_serial);
-#if STRINGZILLA_TARGET_HASWELL
-    sweep("haswell", sz_sequence_argsort_haswell);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    sweep("skylake", sz_sequence_argsort_skylake);
-#endif
-#if STRINGZILLA_TARGET_SVE
-    sweep("sve", sz_sequence_argsort_sve);
-#endif
-#if STRINGZILLA_TARGET_NEON
-    sweep("neon", sz_sequence_argsort_neon);
-#endif
-#if STRINGZILLA_TARGET_RVV
-    sweep("rvv", sz_sequence_argsort_rvv);
-#endif
-}
+/** Degenerate sequences through the dispatched arg-sorts, whose output must stay a permutation. */
+void test_sort_safety() { check_sort_safety_(sort_dispatched); }
 
 #pragma endregion Safety
 
 #pragma region Drivers
 
-/** The sequence arg-sort backends compiled on this target. The always-present @c dispatched entry
- *  keeps the table non-empty on a baseline build. */
-static sort_backend_t const sequence_sort_backends[] = {
-    {"dispatched", sz_sequence_argsort, sz_sequence_argsort_uncased},
-#if STRINGZILLA_TARGET_HASWELL
-    {"haswell", sz_sequence_argsort_haswell, sz_sequence_argsort_uncased_haswell},
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    {"skylake", sz_sequence_argsort_skylake, sz_sequence_argsort_uncased_skylake},
-#endif
-#if STRINGZILLA_TARGET_SVE
-    {"sve", sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve},
-#endif
-#if STRINGZILLA_TARGET_NEON
-    {"neon", sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon},
-#endif
-#if STRINGZILLA_TARGET_RVV
-    {"rvv", sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv},
-#endif
-};
-
-/** Runs @c check_sort_equivalence_ of serial against every compiled backend, dispatched first. */
-void test_sort_all(test_context_t &context) {
-    sort_backend_t const serial {"serial", sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial};
-    // Four repetitions at scale 1.0, one per top-K mode; `STRINGZILLA_SCALE` dials it either way.
-    constexpr sz_size_t repetitions = 4;
-    for (sort_backend_t const &backend : sequence_sort_backends)
-        check_sort_equivalence_(context, serial, backend, repetitions);
-}
+/** Holds the dispatched arg-sorts to serial across the ascending, descending, and top-K modes. */
+void test_sort_all(test_context_t &context) { check_sort_equivalence_(context, sort_dispatched); }
 
 #pragma endregion Drivers

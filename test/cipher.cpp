@@ -20,10 +20,9 @@
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
-#include <cstring> // `std::memcmp`
-#include <string>  // `std::string`
-#include <vector>  // `std::vector`
+#include <cstring> // `std::memcpy`
 
+#include "cross.hpp"   // `check_cipher_unit_`, `check_cipher_equivalence_`
 #include "harness.hpp" // `verify`, `randomize_string`, `test_context_t`
 
 namespace sz = ashvardanian::stringzilla;
@@ -31,507 +30,35 @@ using namespace sz::test;
 
 #pragma region Helpers
 
-/** Decodes a hexadecimal literal into bytes, returning how many were written. */
-static std::size_t bytes_from_hex_(char const *hex, sz_u8_t *output) noexcept {
-    auto nibble = [](char character) -> sz_u8_t {
-        return (sz_u8_t)(character <= '9' ? character - '0' : (character | 32) - 'a' + 10);
-    };
-    std::size_t written = 0;
-    for (; hex[written * 2] != '\0' && hex[written * 2 + 1] != '\0'; ++written)
-        output[written] = (sz_u8_t)((nibble(hex[written * 2]) << 4) | nibble(hex[written * 2 + 1]));
-    return written;
-}
+/** The dispatched counter-mode entry points, in the shape of their capability kernels. */
+static ctr_backend_t const ctr_dispatched {"dispatched", cpu_best<sz_aes256_key_init_best>,
+                                           cpu_best<sz_aes256_ctr_xor_best>};
 
-/** One published Galois/counter mode vector, spelled out rather than derived from any backend. */
-struct known_gcm_t {
-    char const *key_hex;
-    char const *nonce_hex;
-    char const *associated_hex;
-    char const *plaintext_hex;
-    char const *ciphertext_hex;
-    char const *tag_hex;
-};
-
-/**
- *  @brief Cases 13 through 16 of McGrew and Viega's Galois/counter mode note, the ones NIST's own
- *      validation suite is built from.
- *
- *  Values longer than a line are split into adjacent literals at 32-byte boundaries, so the
- *  formatter has no reason to re-break them somewhere less readable.
- */
-static known_gcm_t const known_gcm_vectors_[] = {
-    // Empty message, empty associated data.
-    {"0000000000000000000000000000000000000000000000000000000000000000", //
-     "000000000000000000000000",                                         //
-     "",                                                                 //
-     "",                                                                 //
-     "",                                                                 //
-     "530f8afbc74536b9a963b4f1c4cb738b"},
-    // One zero block, empty associated data.
-    {"0000000000000000000000000000000000000000000000000000000000000000", //
-     "000000000000000000000000",                                         //
-     "",                                                                 //
-     "00000000000000000000000000000000",                                 //
-     "cea7403d4d606b6e074ec5d3baf39d18",                                 //
-     "d0d1c8a799996bf0265b98b5d48ab919"},
-    // Four whole blocks, empty associated data.
-    {"feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308", //
-     "cafebabefacedbaddecaf888",                                         //
-     "",                                                                 //
-     "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"  //
-     "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255", //
-     "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"  //
-     "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad", //
-     "b094dac5d93471bdec1a502270e3cc6c"},
-    // A partial trailing block plus associated data, which exercises both zero pads.
-    {"feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308", //
-     "cafebabefacedbaddecaf888",                                         //
-     "feedfacedeadbeeffeedfacedeadbeefabaddad2",                         //
-     "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"  //
-     "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",         //
-     "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"  //
-     "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662",         //
-     "76fc6ece0f4e1768cddf8853bb2d551b"},
-};
-
-/**
- *  @brief NIST SP 800-38A F.5.5, the AES-256 counter mode encryption vector.
- *
- *  That vector names a full 128-bit initial counter block incremented across its whole width, while
- *  @c sz_aes256_ctr_xor builds its counter from a twelve-byte nonce and a 32-bit block index
- *  starting at zero. The two coincide exactly when the stream is entered at the block index the
- *  published counter spells out, which is what the byte offset reaches, and the low 32 bits carry
- *  nowhere across four blocks.
- */
-struct known_ctr_t {
-    char const *key_hex;
-    char const *nonce_hex;
-    sz_u64_t byte_offset;
-    char const *plaintext_hex;
-    char const *ciphertext_hex;
-};
-
-static known_ctr_t const known_ctr_vectors_[] = {
-    {"603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", //
-     "f0f1f2f3f4f5f6f7f8f9fafb",                                         //
-     (sz_u64_t)0xFCFDFEFFull * STRINGZILLA_AES_BLOCK_LENGTH,             //
-     "6bc1bee22e409f96e93d7e117393172a"                                  //
-     "ae2d8a571e03ac9c9eb76fac45af8e51"                                  //
-     "30c81c46a35ce411e5fbc1191a0a52ef"                                  //
-     "f69f2445df4f9b17ad2b417be66c3710",                                 //
-     "601ec313775789a5b7a7f504bbf3d228"                                  //
-     "f443e3ca4d62b59aca84e990cacaf5c5"                                  //
-     "2b0930daa23de94ce87017ba2d84988d"                                  //
-     "dfc9c58db67aada613c2dd08457941a6"},
-};
-
-/** One counter-mode backend, named so a failing check can say which one disagreed. */
-struct ctr_backend_t {
-    char const *name;
-    sz_aes256_key_init_t key_init;
-    sz_aes256_ctr_xor_t xor_bytes;
-};
-
-/** One authenticated backend, one-shot and streaming kernels alike. */
-struct gcm_backend_t {
-    char const *name;
-    sz_aes256_gcm_key_init_t key_init;
-    sz_aes256_gcm_encrypt_t encrypt;
-    sz_aes256_gcm_decrypt_t decrypt;
-    sz_aes256_gcm_encryptor_init_t sealer_init;
-    sz_aes256_gcm_encryptor_associate_t sealer_associate;
-    sz_aes256_gcm_encryptor_update_t sealer_update;
-    sz_aes256_gcm_encryptor_digest_t sealer_digest;
-    sz_aes256_gcm_decryptor_init_t opener_init;
-    sz_aes256_gcm_decryptor_associate_t opener_associate;
-    sz_aes256_gcm_decryptor_update_unverified_t opener_update;
-    sz_aes256_gcm_decryptor_verify_t opener_verify;
-};
-
-/**
- *  @brief Every counter-mode backend compiled into this translation unit, dispatched first.
- *
- *  The dispatched entry points lead, because a published vector has to reach whatever the
- *  dispatcher picks as well as each kernel named outright.
- */
-static ctr_backend_t const ctr_backends[] = {
-    {"dispatched", sz_aes256_key_init, sz_aes256_ctr_xor},
-    {"serial", sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial},
-#if STRINGZILLA_TARGET_WESTMERE
-    {"westmere", sz_aes256_key_init_westmere, sz_aes256_ctr_xor_westmere},
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    {"icelake", sz_aes256_key_init_icelake, sz_aes256_ctr_xor_icelake},
-#endif
-#if STRINGZILLA_TARGET_NEONAES
-    {"neonaes", sz_aes256_key_init_neonaes, sz_aes256_ctr_xor_neonaes},
-#endif
-#if STRINGZILLA_TARGET_SVE2AES
-    {"sve2aes", sz_aes256_key_init_sve2aes, sz_aes256_ctr_xor_sve2aes},
-#endif
-#if STRINGZILLA_TARGET_RVVCRYPTO
-    {"rvvcrypto", sz_aes256_key_init_rvvcrypto, sz_aes256_ctr_xor_rvvcrypto},
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    {"powervsx", sz_aes256_key_init_powervsx, sz_aes256_ctr_xor_powervsx},
-#endif
-#if STRINGZILLA_TARGET_V128
-    {"v128", sz_aes256_key_init_v128, sz_aes256_ctr_xor_v128},
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    {"v128relaxed", sz_aes256_key_init_v128relaxed, sz_aes256_ctr_xor_v128relaxed},
-#endif
-};
-
-/** Every authenticated backend compiled into this translation unit, dispatched first. */
-static gcm_backend_t const gcm_backends[] = {
-    {"dispatched", sz_aes256_gcm_key_init, sz_aes256_gcm_encrypt, sz_aes256_gcm_decrypt, sz_aes256_gcm_encryptor_init,
-     sz_aes256_gcm_encryptor_associate, sz_aes256_gcm_encryptor_update, sz_aes256_gcm_encryptor_digest,
-     sz_aes256_gcm_decryptor_init, sz_aes256_gcm_decryptor_associate, sz_aes256_gcm_decryptor_update_unverified,
-     sz_aes256_gcm_decryptor_verify},
-    {"serial", sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encrypt_serial, sz_aes256_gcm_decrypt_serial,
-     sz_aes256_gcm_encryptor_init_serial, sz_aes256_gcm_encryptor_associate_serial,
-     sz_aes256_gcm_encryptor_update_serial, sz_aes256_gcm_encryptor_digest_serial, sz_aes256_gcm_decryptor_init_serial,
-     sz_aes256_gcm_decryptor_associate_serial, sz_aes256_gcm_decryptor_update_unverified_serial,
-     sz_aes256_gcm_decryptor_verify_serial},
-#if STRINGZILLA_TARGET_WESTMERE
-    {"westmere", sz_aes256_gcm_key_init_westmere, sz_aes256_gcm_encrypt_westmere, sz_aes256_gcm_decrypt_westmere,
-     sz_aes256_gcm_encryptor_init_westmere, sz_aes256_gcm_encryptor_associate_westmere,
-     sz_aes256_gcm_encryptor_update_westmere, sz_aes256_gcm_encryptor_digest_westmere,
-     sz_aes256_gcm_decryptor_init_westmere, sz_aes256_gcm_decryptor_associate_westmere,
-     sz_aes256_gcm_decryptor_update_unverified_westmere, sz_aes256_gcm_decryptor_verify_westmere},
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    {"icelake", sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encrypt_icelake, sz_aes256_gcm_decrypt_icelake,
-     sz_aes256_gcm_encryptor_init_icelake, sz_aes256_gcm_encryptor_associate_icelake,
-     sz_aes256_gcm_encryptor_update_icelake, sz_aes256_gcm_encryptor_digest_icelake,
-     sz_aes256_gcm_decryptor_init_icelake, sz_aes256_gcm_decryptor_associate_icelake,
-     sz_aes256_gcm_decryptor_update_unverified_icelake, sz_aes256_gcm_decryptor_verify_icelake},
-#endif
-#if STRINGZILLA_TARGET_NEONAES
-    {"neonaes", sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encrypt_neonaes, sz_aes256_gcm_decrypt_neonaes,
-     sz_aes256_gcm_encryptor_init_neonaes, sz_aes256_gcm_encryptor_associate_neonaes,
-     sz_aes256_gcm_encryptor_update_neonaes, sz_aes256_gcm_encryptor_digest_neonaes,
-     sz_aes256_gcm_decryptor_init_neonaes, sz_aes256_gcm_decryptor_associate_neonaes,
-     sz_aes256_gcm_decryptor_update_unverified_neonaes, sz_aes256_gcm_decryptor_verify_neonaes},
-#endif
-#if STRINGZILLA_TARGET_SVE2AES
-    {"sve2aes", sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encrypt_sve2aes, sz_aes256_gcm_decrypt_sve2aes,
-     sz_aes256_gcm_encryptor_init_sve2aes, sz_aes256_gcm_encryptor_associate_sve2aes,
-     sz_aes256_gcm_encryptor_update_sve2aes, sz_aes256_gcm_encryptor_digest_sve2aes,
-     sz_aes256_gcm_decryptor_init_sve2aes, sz_aes256_gcm_decryptor_associate_sve2aes,
-     sz_aes256_gcm_decryptor_update_unverified_sve2aes, sz_aes256_gcm_decryptor_verify_sve2aes},
-#endif
-#if STRINGZILLA_TARGET_RVVCRYPTO
-    {"rvvcrypto", sz_aes256_gcm_key_init_rvvcrypto, sz_aes256_gcm_encrypt_rvvcrypto, sz_aes256_gcm_decrypt_rvvcrypto,
-     sz_aes256_gcm_encryptor_init_rvvcrypto, sz_aes256_gcm_encryptor_associate_rvvcrypto,
-     sz_aes256_gcm_encryptor_update_rvvcrypto, sz_aes256_gcm_encryptor_digest_rvvcrypto,
-     sz_aes256_gcm_decryptor_init_rvvcrypto, sz_aes256_gcm_decryptor_associate_rvvcrypto,
-     sz_aes256_gcm_decryptor_update_unverified_rvvcrypto, sz_aes256_gcm_decryptor_verify_rvvcrypto},
-#endif
-#if STRINGZILLA_TARGET_POWERVSX
-    {"powervsx", sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encrypt_powervsx, sz_aes256_gcm_decrypt_powervsx,
-     sz_aes256_gcm_encryptor_init_powervsx, sz_aes256_gcm_encryptor_associate_powervsx,
-     sz_aes256_gcm_encryptor_update_powervsx, sz_aes256_gcm_encryptor_digest_powervsx,
-     sz_aes256_gcm_decryptor_init_powervsx, sz_aes256_gcm_decryptor_associate_powervsx,
-     sz_aes256_gcm_decryptor_update_unverified_powervsx, sz_aes256_gcm_decryptor_verify_powervsx},
-#endif
-#if STRINGZILLA_TARGET_V128
-    {"v128", sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encrypt_v128, sz_aes256_gcm_decrypt_v128,
-     sz_aes256_gcm_encryptor_init_v128, sz_aes256_gcm_encryptor_associate_v128, sz_aes256_gcm_encryptor_update_v128,
-     sz_aes256_gcm_encryptor_digest_v128, sz_aes256_gcm_decryptor_init_v128, sz_aes256_gcm_decryptor_associate_v128,
-     sz_aes256_gcm_decryptor_update_unverified_v128, sz_aes256_gcm_decryptor_verify_v128},
-#endif
-#if STRINGZILLA_TARGET_V128RELAXED
-    {"v128relaxed", sz_aes256_gcm_key_init_v128relaxed, sz_aes256_gcm_encrypt_v128relaxed,
-     sz_aes256_gcm_decrypt_v128relaxed, sz_aes256_gcm_encryptor_init_v128relaxed,
-     sz_aes256_gcm_encryptor_associate_v128relaxed, sz_aes256_gcm_encryptor_update_v128relaxed,
-     sz_aes256_gcm_encryptor_digest_v128relaxed, sz_aes256_gcm_decryptor_init_v128relaxed,
-     sz_aes256_gcm_decryptor_associate_v128relaxed, sz_aes256_gcm_decryptor_update_unverified_v128relaxed,
-     sz_aes256_gcm_decryptor_verify_v128relaxed},
-#endif
+/** The dispatched authenticated entry points, one-shot and streaming alike. */
+static gcm_backend_t const gcm_dispatched {
+    "dispatched",
+    cpu_best<sz_aes256_gcm_key_init_best>,
+    cpu_best<sz_aes256_gcm_encrypt_best>,
+    cpu_best<sz_aes256_gcm_decrypt_best>,
+    cpu_best<sz_aes256_gcm_encryptor_init_best>,
+    cpu_best<sz_aes256_gcm_encryptor_associate_best>,
+    cpu_best<sz_aes256_gcm_encryptor_update_best>,
+    cpu_best<sz_aes256_gcm_encryptor_digest_best>,
+    cpu_best<sz_aes256_gcm_decryptor_init_best>,
+    cpu_best<sz_aes256_gcm_decryptor_associate_best>,
+    cpu_best<sz_aes256_gcm_decryptor_update_unverified_best>,
+    cpu_best<sz_aes256_gcm_decryptor_verify_best>,
 };
 
 #pragma endregion Helpers
 
 #pragma region Unit
 
-/** Checks one counter-mode backend against a published vector, seeking to its block index. */
-static void check_ctr_unit_(ctr_backend_t const &backend, known_ctr_t const &vector) {
-    sz_u8_t secret[32], nonce[12];
-    std::vector<sz_u8_t> plaintext(64), expected(64), produced(64), recovered(64);
-    bytes_from_hex_(vector.key_hex, secret);
-    bytes_from_hex_(vector.nonce_hex, nonce);
-    std::size_t const length = bytes_from_hex_(vector.plaintext_hex, plaintext.data());
-    bytes_from_hex_(vector.ciphertext_hex, expected.data());
-
-    sz_aes256_key_t key;
-    backend.key_init(&key, secret);
-    backend.xor_bytes(&key, nonce, vector.byte_offset, (sz_cptr_t)plaintext.data(), (sz_size_t)length,
-                      (sz_ptr_t)produced.data());
-    if (std::memcmp(produced.data(), expected.data(), length) != 0)
-        fail_backend_(backend.name, "counter mode ciphertext differs from NIST SP 800-38A F.5.5");
-
-    // Counter mode is its own inverse, so the same call must walk the vector back.
-    backend.xor_bytes(&key, nonce, vector.byte_offset, (sz_cptr_t)produced.data(), (sz_size_t)length,
-                      (sz_ptr_t)recovered.data());
-    if (std::memcmp(recovered.data(), plaintext.data(), length) != 0)
-        fail_backend_(backend.name, "counter mode did not recover its own plaintext");
-}
-
-/** Checks one authenticated backend on a published vector, both directions and a forged tag. */
-static void check_gcm_unit_(gcm_backend_t const &backend, known_gcm_t const &vector) {
-    sz_u8_t secret[32], nonce[12], associated[64], expected_tag[16], produced_tag[16];
-    std::vector<sz_u8_t> plaintext(256), expected(256), produced(256), recovered(256);
-    bytes_from_hex_(vector.key_hex, secret);
-    bytes_from_hex_(vector.nonce_hex, nonce);
-    std::size_t const associated_length = bytes_from_hex_(vector.associated_hex, associated);
-    std::size_t const length = bytes_from_hex_(vector.plaintext_hex, plaintext.data());
-    bytes_from_hex_(vector.ciphertext_hex, expected.data());
-    bytes_from_hex_(vector.tag_hex, expected_tag);
-
-    sz_aes256_gcm_key_t key;
-    backend.key_init(&key, secret);
-    backend.encrypt(&key, nonce, (sz_cptr_t)associated, (sz_size_t)associated_length, (sz_cptr_t)plaintext.data(),
-                    (sz_size_t)length, (sz_ptr_t)produced.data(), produced_tag);
-    if (std::memcmp(produced.data(), expected.data(), length) != 0)
-        fail_backend_(backend.name, "authenticated ciphertext differs from the published vector");
-    if (std::memcmp(produced_tag, expected_tag, 16) != 0)
-        fail_backend_(backend.name, "authentication tag differs from the published vector");
-
-    // The same vector must decrypt back, and a single flipped tag bit must be refused.
-    if (backend.decrypt(&key, nonce, (sz_cptr_t)associated, (sz_size_t)associated_length, (sz_cptr_t)produced.data(),
-                        (sz_size_t)length, (sz_ptr_t)recovered.data(), produced_tag) != sz_success_k)
-        fail_backend_(backend.name, "a genuine tag was refused");
-    if (std::memcmp(recovered.data(), plaintext.data(), length) != 0)
-        fail_backend_(backend.name, "decryption did not recover the published plaintext");
-
-    produced_tag[0] ^= 0x01;
-    for (std::size_t index = 0; index != recovered.size(); ++index) recovered[index] = 0xA5;
-    if (backend.decrypt(&key, nonce, (sz_cptr_t)associated, (sz_size_t)associated_length, (sz_cptr_t)produced.data(),
-                        (sz_size_t)length, (sz_ptr_t)recovered.data(), produced_tag) != sz_authentication_failed_k)
-        fail_backend_(backend.name, "a forged tag was accepted");
-    // A caller who drops the status must not find forged plaintext waiting in the buffer.
-    for (std::size_t index = 0; index != length; ++index)
-        if (recovered[index] != 0) fail_backend_(backend.name, "forged plaintext survived a failed authentication");
-}
-
-/**
- *  @brief Checks every compiled kernel against literal expectations only.
- *
- *  The counter-mode vector is NIST SP 800-38A F.5.5 and the four authenticated vectors are cases 13
- *  through 16 of McGrew and Viega's Galois/counter mode note, the ones NIST's own validation suite
- *  is built from. Nothing here is derived by calling another backend, so a shared mistake cannot
- *  hide. Every vector reaches the dispatched entry point, the serial kernel, and each per-ISA
- *  kernel in turn, because agreement between backends is blind to a mistake all of them share.
- */
-void test_cipher_unit() {
-
-    for (ctr_backend_t const &backend : ctr_backends)
-        for (known_ctr_t const &vector : known_ctr_vectors_) check_ctr_unit_(backend, vector);
-
-    for (gcm_backend_t const &backend : gcm_backends)
-        for (known_gcm_t const &vector : known_gcm_vectors_) check_gcm_unit_(backend, vector);
-}
+/** Holds the dispatched entry points to the published vectors, since a vector has to reach whatever
+ *  the dispatcher picks as well as each kernel `cross_<arch>.cpp` names outright. */
+void test_cipher_unit() { check_cipher_unit_(ctr_dispatched, gcm_dispatched); }
 
 #pragma endregion Unit
-
-#pragma region Equivalence
-
-/**
- *  @brief Cross-checks a counter-mode backend against a reference across lengths and seek offsets.
- *
- *  Seeking is the whole reason counter mode is exposed separately, so every offset is compared
- *  against the same bytes taken from a from-zero encryption, not just the reference backend.
- */
-void check_ctr_equivalence_(std::mt19937 &generator, ctr_backend_t const &reference, ctr_backend_t const &candidate,
-                            sz_size_t inputs) {
-    sz_u8_t secret[32], nonce[12];
-    for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 7 + 1);
-    for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index * 5 + 2);
-
-    sz_aes256_key_t reference_key, candidate_key;
-    reference.key_init(&reference_key, secret);
-    candidate.key_init(&candidate_key, secret);
-    if (std::memcmp(&reference_key, &candidate_key, sizeof(reference_key)) != 0)
-        fail_backend_(candidate.name, "expanded a different round-key schedule than serial");
-
-    std::string text, from_reference, from_candidate;
-    for (sz_size_t length = 0; length <= inputs; ++length) {
-        text.resize(length), from_reference.resize(length), from_candidate.resize(length);
-        randomize_string(generator, text);
-        reference.xor_bytes(&reference_key, nonce, 0, text.data(), length, &from_reference[0]);
-        candidate.xor_bytes(&candidate_key, nonce, 0, text.data(), length, &from_candidate[0]);
-        if (from_reference != from_candidate) fail_backend_(candidate.name, "counter mode disagreed with serial");
-    }
-
-    // Every offset must land on the same keystream the whole-stream encryption used.
-    std::size_t const span = 1024;
-    std::string whole(span, '\0'), sliced;
-    randomize_string(generator, whole);
-    std::string whole_out(span, '\0');
-    reference.xor_bytes(&reference_key, nonce, 0, whole.data(), span, &whole_out[0]);
-    for (std::size_t offset = 0; offset <= 200; ++offset) {
-        sliced.assign(span - offset, '\0');
-        candidate.xor_bytes(&candidate_key, nonce, offset, whole.data() + offset, span - offset, &sliced[0]);
-        if (std::memcmp(sliced.data(), whole_out.data() + offset, span - offset) != 0)
-            fail_backend_(candidate.name, "seeking into the keystream landed on different bytes");
-
-        // Passing one pointer for both sides is what lets a caller transform a buffer without a copy.
-        // The seeked entry is the interesting one: its head block is the byte the kernel is likeliest
-        // to overwrite before it has finished reading.
-        std::string aliased(whole, offset, span - offset);
-        candidate.xor_bytes(&candidate_key, nonce, offset, aliased.data(), span - offset, &aliased[0]);
-        if (std::memcmp(aliased.data(), whole_out.data() + offset, span - offset) != 0)
-            fail_backend_(candidate.name, "counter mode in place differs from out-of-place");
-    }
-}
-
-/**
- *  @brief Cross-checks an authenticated backend against a reference, one-shot and in chunks.
- *  @param[in] inputs The longest message fuzzed, inclusive.
- *
- *  Also asserts the aliasing permission the header grants, which holds independently of any
- *  reference: passing one pointer for both sides reaches the bytes and the tag two pointers would,
- *  and a rejected tag still clears the buffer it was handed.
- */
-void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const &reference, gcm_backend_t const &candidate,
-                            sz_size_t inputs) {
-    sz_u8_t secret[32], nonce[12], reference_tag[16], candidate_tag[16];
-    for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 3 + 5);
-    for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index + 9);
-
-    sz_aes256_gcm_key_t reference_key, candidate_key;
-    reference.key_init(&reference_key, secret);
-    candidate.key_init(&candidate_key, secret);
-    if (std::memcmp(&reference_key, &candidate_key, sizeof(reference_key)) != 0)
-        fail_backend_(candidate.name, "expanded a different schedule or different subkey powers than serial");
-
-    std::vector<std::size_t> const associated_lengths = {0, 1, 15, 16, 17, 40};
-    std::string text, from_reference, from_candidate, associated;
-
-    for (sz_size_t length = 0; length <= inputs; ++length) {
-        text.resize(length), from_reference.resize(length), from_candidate.resize(length);
-        randomize_string(generator, text);
-        std::size_t const associated_length = associated_lengths[length % associated_lengths.size()];
-        associated.resize(associated_length);
-        randomize_string(generator, associated);
-
-        reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)associated_length, text.data(), length,
-                          &from_reference[0], reference_tag);
-        candidate.encrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, text.data(), length,
-                          &from_candidate[0], candidate_tag);
-        if (from_reference != from_candidate) fail_backend_(candidate.name, "ciphertext disagreed with serial");
-        if (std::memcmp(reference_tag, candidate_tag, 16) != 0)
-            fail_backend_(candidate.name, "authentication tag disagreed with serial");
-
-        // Decryption must recover the plaintext and report success on the genuine tag.
-        std::string recovered(length, '\0');
-        if (candidate.decrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length,
-                              from_candidate.data(), length, &recovered[0], candidate_tag) != sz_success_k)
-            fail_backend_(candidate.name, "refused a tag it had just produced");
-        if (recovered != text) fail_backend_(candidate.name, "decryption did not recover its own plaintext");
-
-        // Sealing and opening inside the buffer a record arrived in is what lets a caller skip a copy
-        // per message, so one pointer for both sides must reach the bytes two pointers would.
-        std::string aliased = text;
-        sz_u8_t aliased_tag[16];
-        candidate.encrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, aliased.data(),
-                          length, &aliased[0], aliased_tag);
-        if (aliased != from_candidate) fail_backend_(candidate.name, "in-place sealing differs from out-of-place");
-        if (std::memcmp(aliased_tag, candidate_tag, 16) != 0)
-            fail_backend_(candidate.name, "in-place sealing produced a different tag than out-of-place");
-
-        if (candidate.decrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, aliased.data(),
-                              length, &aliased[0], candidate_tag) != sz_success_k)
-            fail_backend_(candidate.name, "in-place opening refused a tag it had just produced");
-        if (aliased != text) fail_backend_(candidate.name, "in-place opening recovered the wrong plaintext");
-
-        // A rejected tag clears the buffer even when that buffer is the ciphertext itself, so a caller
-        // who drops the status cannot act on forged data it opened in place.
-        aliased = from_candidate;
-        aliased_tag[0] = (sz_u8_t)(candidate_tag[0] ^ 0x01);
-        if (candidate.decrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, aliased.data(),
-                              length, &aliased[0], aliased_tag) != sz_authentication_failed_k)
-            fail_backend_(candidate.name, "in-place opening accepted a forged tag");
-        for (std::size_t index = 0; index != length; ++index)
-            if (aliased[index] != 0) fail_backend_(candidate.name, "forged plaintext survived opening in place");
-    }
-
-    // A chunk boundary must be invisible: the keystream block, the hash block, and the associated-data
-    // tail all straddle it, and the associated data is chunked on its own rhythm rather than the text's.
-    std::size_t const streamed_length = 512, streamed_associated_length = 37;
-    text.resize(streamed_length);
-    randomize_string(generator, text);
-    associated.resize(streamed_associated_length);
-    randomize_string(generator, associated);
-    from_reference.assign(streamed_length, '\0');
-    reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)streamed_associated_length, text.data(),
-                      streamed_length, &from_reference[0], reference_tag);
-    for (std::size_t chunk = 1; chunk <= 40; ++chunk) {
-        std::string streamed(streamed_length, '\0');
-        sz_aes256_gcm_encryptor_t encryptor;
-        candidate.sealer_init(&encryptor, &candidate_key, nonce);
-        for (std::size_t offset = 0; offset < streamed_associated_length; offset += chunk) {
-            std::size_t const taken = streamed_associated_length - offset < chunk ? streamed_associated_length - offset
-                                                                                  : chunk;
-            candidate.sealer_associate(&encryptor, associated.data() + offset, (sz_size_t)taken);
-        }
-        for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
-            std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            candidate.sealer_update(&encryptor, text.data() + offset, (sz_size_t)taken, &streamed[offset]);
-        }
-        candidate.sealer_digest(&encryptor, candidate_tag);
-        if (streamed != from_reference) fail_backend_(candidate.name, "chunked sealing differs from one-shot");
-        if (std::memcmp(reference_tag, candidate_tag, 16) != 0)
-            fail_backend_(candidate.name, "chunked sealing produced a different tag than one-shot");
-
-        // The opposite direction is a separate type, so it needs its own pass over the same chunking.
-        std::string reopened(streamed_length, '\0');
-        sz_aes256_gcm_decryptor_t decryptor;
-        candidate.opener_init(&decryptor, &candidate_key, nonce);
-        for (std::size_t offset = 0; offset < streamed_associated_length; offset += chunk) {
-            std::size_t const taken = streamed_associated_length - offset < chunk ? streamed_associated_length - offset
-                                                                                  : chunk;
-            candidate.opener_associate(&decryptor, associated.data() + offset, (sz_size_t)taken);
-        }
-        for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
-            std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            candidate.opener_update(&decryptor, from_reference.data() + offset, (sz_size_t)taken, &reopened[offset]);
-        }
-        if (reopened != text) fail_backend_(candidate.name, "chunked opening did not recover the plaintext");
-        if (candidate.opener_verify(&decryptor, reference_tag) != sz_success_k)
-            fail_backend_(candidate.name, "chunked opening refused a genuine tag");
-
-        // The streaming entries carry the same aliasing permission, and their mid-chunk resume path is
-        // where a kernel is likeliest to read a byte it has already overwritten.
-        std::string aliased = text;
-        sz_aes256_gcm_encryptor_t aliasing_encryptor;
-        candidate.sealer_init(&aliasing_encryptor, &candidate_key, nonce);
-        candidate.sealer_associate(&aliasing_encryptor, associated.data(), (sz_size_t)streamed_associated_length);
-        for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
-            std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            candidate.sealer_update(&aliasing_encryptor, aliased.data() + offset, (sz_size_t)taken, &aliased[offset]);
-        }
-        candidate.sealer_digest(&aliasing_encryptor, candidate_tag);
-        if (aliased != from_reference) fail_backend_(candidate.name, "chunked sealing in place differs from one-shot");
-        if (std::memcmp(reference_tag, candidate_tag, 16) != 0)
-            fail_backend_(candidate.name, "chunked sealing in place produced a different tag");
-
-        sz_aes256_gcm_decryptor_t aliasing_decryptor;
-        candidate.opener_init(&aliasing_decryptor, &candidate_key, nonce);
-        candidate.opener_associate(&aliasing_decryptor, associated.data(), (sz_size_t)streamed_associated_length);
-        for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
-            std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            candidate.opener_update(&aliasing_decryptor, aliased.data() + offset, (sz_size_t)taken, &aliased[offset]);
-        }
-        if (aliased != text) fail_backend_(candidate.name, "chunked opening in place did not recover the plaintext");
-        if (candidate.opener_verify(&aliasing_decryptor, reference_tag) != sz_success_k)
-            fail_backend_(candidate.name, "chunked opening in place refused a genuine tag");
-    }
-}
-
-#pragma endregion Equivalence
 
 #pragma region Drivers
 
@@ -549,51 +76,41 @@ void test_cipher_safety(test_context_t &context) {
 
     sz_aes256_key_t counter_key;
     sz_aes256_gcm_key_t authenticated_key;
-    sz_aes256_key_init(&counter_key, secret);
-    sz_aes256_gcm_key_init(&authenticated_key, secret);
+    sz_capability_t const capabilities = sz::default_capabilities();
+    verify(sz_aes256_key_init_best(&counter_key, secret, capabilities, nullptr) == sz_success_k);
+    verify(sz_aes256_gcm_key_init_best(&authenticated_key, secret, capabilities, nullptr) == sz_success_k);
 
     sz_size_t const longest = (sz_size_t)context.iterations(200);
     for (sz_size_t length = 0; length <= longest; ++length) {
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
             randomize_string(context.generator, {pointer, usable});
-            sz_aes256_ctr_xor(&counter_key, nonce, 0, pointer, (sz_size_t)usable, pointer);
+            verify(sz_aes256_ctr_xor_best(&counter_key, nonce, 0, pointer, (sz_size_t)usable, pointer, capabilities,
+                                          nullptr) == sz_success_k);
         });
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
             randomize_string(context.generator, {pointer, usable});
-            sz_aes256_gcm_encrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
-                                  tag);
+            verify(sz_aes256_gcm_encrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                              (sz_size_t)usable, pointer, tag, capabilities, nullptr) == sz_success_k);
         });
         // Opening in place has to stay inside the buffer on both outcomes, and the rejected
         // path writes the most: it clears every byte it was given.
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
             randomize_string(context.generator, {pointer, usable});
-            sz_aes256_gcm_encrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
-                                  tag);
-            sz_aes256_gcm_decrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
-                                  tag);
+            verify(sz_aes256_gcm_encrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                              (sz_size_t)usable, pointer, tag, capabilities, nullptr) == sz_success_k);
+            verify(sz_aes256_gcm_decrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                              (sz_size_t)usable, pointer, tag, capabilities, nullptr) == sz_success_k);
             sz_u8_t forged[16];
             std::memcpy(forged, tag, 16);
             forged[0] ^= 0x01;
-            sz_aes256_gcm_decrypt(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer, (sz_size_t)usable, pointer,
-                                  forged);
+            verify(sz_aes256_gcm_decrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                              (sz_size_t)usable, pointer, forged, capabilities,
+                                              nullptr) == sz_authentication_failed_k);
         });
     }
 }
 
-/** Drives the serial-versus-SIMD differential across every cipher backend compiled here. */
-void test_cipher_all(test_context_t &context) {
-
-    // Each length sweeps a fresh buffer, so the work grows with the square of the count.
-    sz_size_t const cipher_inputs = (sz_size_t)context.iterations_quadratic(160);
-
-    // Serial is the reference for everything, itself included: running it against itself catches a streaming
-    // path that disagrees with its own one-shot kernel.
-    ctr_backend_t const &ctr_reference = backend_named_(ctr_backends, "serial");
-    gcm_backend_t const &gcm_reference = backend_named_(gcm_backends, "serial");
-    for (ctr_backend_t const &candidate : ctr_backends)
-        check_ctr_equivalence_(context.generator, ctr_reference, candidate, cipher_inputs);
-    for (gcm_backend_t const &candidate : gcm_backends)
-        check_gcm_equivalence_(context.generator, gcm_reference, candidate, cipher_inputs);
-}
+/** Drives the serial-versus-dispatched differential over both cipher modes. */
+void test_cipher_all(test_context_t &context) { check_cipher_equivalence_(context, ctr_dispatched, gcm_dispatched); }
 
 #pragma endregion Drivers

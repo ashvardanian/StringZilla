@@ -4,7 +4,10 @@
  *  @date January 4, 2024
  *  @brief Benchmarks STL associative containers with @c std::string_view-compatible keys.
  *
- *  The program accepts a file path to a dataset, tokenizes it, and benchmarks lookups.
+ *  Times lookups of the English words in STL containers ordered, hashed, and compared through the
+ *  dispatch points, against the STL defaults and other key classes. The containers built on every
+ *  capability's kernels are timed against the serial ones by the `cross_<arch>.cpp` files, through
+ *  the adapters in `cross.hpp`.
  *
  *  Memory-bound: associative build and probe are latency-limited over the whole key set, so it
  *  reads the whole file by default.
@@ -26,8 +29,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_container_cpp20
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_container_cpp20
+ *  cmake --build build_release --config Release --target stringzilla_cpu_bench
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words STRINGWARS_FILTER=map build_release/stringzilla_cpu_bench
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size
@@ -36,7 +39,7 @@
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
- *  build_release/stringzilla_bench_container_cpp20
+ *  build_release/stringzilla_cpu_bench
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
@@ -47,142 +50,37 @@
 
 #include <fmt/format.h>
 
-#include "harness.hpp"
+#include "cross.hpp"
 
 using namespace ashvardanian::stringzilla::bench;
 
-template <typename string_type_, typename other_string_type_>
-string_type_ string_cast(other_string_type_ const &other) noexcept {
-    return string_type_(other.data(), other.size());
-}
+namespace {
 
-/**
- *  @brief Helper function-like object to order string-view convertible objects with StringZilla.
- *  @see Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
- *  @note Unlike the @c sz::less, the structure below supports different hardware backends.
- */
-template <sz_order_t order_>
-struct less_from_sz {
-    inline bool operator()(std::string_view a, std::string_view b) const noexcept {
-        return order_(a.data(), a.size(), b.data(), b.size()) < 0;
-    }
-};
-
-/**
- *  @brief Helper function-like object comparing string-view convertible objects with StringZilla.
- *  @see Similar to `std::equal_to<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/equal_to
- *  @note Unlike the @c sz::equal_to, the structure below supports different hardware backends.
- */
-template <sz_equal_t equal_>
-struct equal_to_from_sz {
-    inline bool operator()(std::string_view a, std::string_view b) const noexcept {
-        return a.size() == b.size() && equal_(a.data(), b.data(), b.size());
-    }
-};
-
-/**
- *  @brief Helper function-like object to hash string-view convertible objects with StringZilla.
- *  @see Similar to @c hash_through_std_t: https://en.cppreference.com/w/cpp/utility/functional/hash
- *  @note Unlike the @c sz::hash, the structure below supports different hardware backends.
- */
-template <sz_hash_t hash_>
-struct hash_from_sz {
-    inline std::size_t operator()(std::string_view str) const noexcept { return hash_(str.data(), str.size(), 0); }
-};
-
-template <typename container_type_>
-struct callable_for_associative_lookups {
-
-    container_type_ container;
-    environment_t const &env;
-
-    inline callable_for_associative_lookups(environment_t const &env) noexcept : env(env) {}
-    void preprocess() {
-        using key_type = typename container_type_::key_type;
-        for (std::string_view const &key : env.tokens) container[string_cast<key_type>(key)]++;
-    }
-
-    /** Helper API to produce a delayed construction lambda. */
-    inline auto preprocessor() {
-        return [this] { preprocess(); };
-    }
-
-    /** The actual lookup operation to be benchmarked. */
-    call_result_t operator()(std::size_t token_index) const {
-        std::string_view key = env.tokens[token_index];
-        auto counter = container.find(key)->second;
-        return {key.size(), static_cast<std::size_t>(counter)};
-    }
-};
-
-/** Find all inclusions of each given token in the dataset, using various search backends. */
+/** Times lookups through the dispatch points against the default STL comparison and hashes. The
+ *  containers fill lazily inside each run, so none of them can check another's lookups. */
 void bench_associative_lookups_with_different_simd_backends(environment_t const &env) {
-
-    // First, benchmark the default STL equality comparison and hashes
+    using map_best_t = std::map<std::string_view, unsigned, less_from_sz<cpu_best<sz_order_best>>>;
+    using umap_best_t = std::unordered_map<std::string_view, unsigned, hasher_from_sz<cpu_best<sz_hash_best>>,
+                                           equal_to_from_sz<cpu_best<sz_equal_best>>>;
     bench_result_t base_map, base_umap;
     {
-        auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(env);
-        base_map = bench_unary(env, "map::find", callable_no_op_t(), callable_map, callable_map.preprocessor()).log();
-        auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(env);
-        base_umap = bench_unary(env, "unordered_map::find", callable_no_op_t(), callable_umap,
-                                callable_umap.preprocessor())
+        auto callable_map = callable_for_associative_lookups<map_best_t>(env);
+        base_map = bench_unary(env, "map<sz_order_best>::find", callable_no_op_t(), callable_map,
+                               callable_map.preprocessor())
+                       .log();
+        auto callable_umap = callable_for_associative_lookups<umap_best_t>(env);
+        base_umap = bench_unary(env, "unordered_map<sz_hash_best, sz_equal_best>::find", callable_no_op_t(),
+                                callable_umap, callable_umap.preprocessor())
                         .log();
     }
 
-    // Conditionally include SIMD-accelerated backends
-#if STRINGZILLA_TARGET_SKYLAKE
     {
-        auto callable_map =
-            callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_skylake>>>(env);
-        bench_unary(env, "map<sz_order_skylake>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
-            .log(base_map);
-        auto callable_umap = callable_for_associative_lookups<std::unordered_map<
-            std::string_view, unsigned, hash_from_sz<sz_hash_skylake>, equal_to_from_sz<sz_equal_skylake>>>(env);
-        bench_unary(env, "unordered_map<sz_hash_skylake, sz_equal_skylake>::find", callable_no_op_t(), callable_umap,
-                    callable_umap.preprocessor())
+        auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(env);
+        bench_unary(env, "map::find", callable_no_op_t(), callable_map, callable_map.preprocessor()).log(base_map);
+        auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(env);
+        bench_unary(env, "unordered_map::find", callable_no_op_t(), callable_umap, callable_umap.preprocessor())
             .log(base_umap);
     }
-
-#endif
-#if STRINGZILLA_TARGET_HASWELL
-    {
-        auto callable_map =
-            callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_haswell>>>(env);
-        bench_unary(env, "map<sz_order_haswell>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
-            .log(base_map);
-    }
-#endif
-    // There is no AVX2 hasher, so the fastest x86 pairing mixes a Westmere hash with a Haswell comparator -
-    // and needs both guards, as either family can be compiled out on its own.
-#if STRINGZILLA_TARGET_WESTMERE && STRINGZILLA_TARGET_HASWELL
-    {
-        auto callable_umap = callable_for_associative_lookups<std::unordered_map<
-            std::string_view, unsigned, hash_from_sz<sz_hash_westmere>, equal_to_from_sz<sz_equal_haswell>>>(env);
-        bench_unary(env, "unordered_map<sz_hash_westmere, sz_equal_haswell>::find", callable_no_op_t(), callable_umap,
-                    callable_umap.preprocessor())
-            .log(base_umap);
-    }
-#endif
-    // The comparator and the hasher come from different families, so they carry different guards -
-    // one block under `STRINGZILLA_TARGET_NEONAES` would drop the ordered map on a NEON target that
-    // ships no crypto extension.
-#if STRINGZILLA_TARGET_NEON
-    {
-        auto callable_map =
-            callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_neon>>>(env);
-        bench_unary(env, "map<sz_order_neon>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
-            .log(base_map);
-    }
-#endif
-#if STRINGZILLA_TARGET_NEONAES
-    {
-        auto callable_umap = callable_for_associative_lookups<std::unordered_map<
-            std::string_view, unsigned, hash_from_sz<sz_hash_neonaes>, equal_to_from_sz<sz_equal_neon>>>(env);
-        bench_unary(env, "unordered_map<sz_hash_neonaes, sz_equal_neon>::find", callable_no_op_t(), callable_umap,
-                    callable_umap.preprocessor())
-            .log(base_umap);
-    }
-#endif
 }
 
 struct less_through_std_t {
@@ -262,21 +160,11 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
     }
 }
 
-int main(int argc, char const **argv) {
-    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    log_environment();
-    print_bench_environment();
+} // namespace
 
-    fmt::println("Building up the environment...");
-    environment_t env = build_environment( //
-        argc, argv,                        //
-        "leipzig1M.txt",                   //
-        environment_t::tokenization_t::words_k);
-
+void bench_container(corpora_t &corpora) {
+    environment_t const &env = corpora.words();
     fmt::println("Starting associative STL container benchmarks...");
     bench_associative_lookups_with_different_simd_backends(env);
     bench_associative_lookups_with_different_key_classes(env);
-
-    fmt::println("All benchmarks passed.");
-    return 0;
 }

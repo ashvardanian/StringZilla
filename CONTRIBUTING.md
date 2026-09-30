@@ -34,20 +34,18 @@ cmake/                    ISA probe modules, package config templates, and cross
 
 For minimal test coverage, check the following scripts:
 
-- `test/main.cpp` - drives every per-ISA C kernel directly, spot-checking the C++ wrappers in the `_unit` tier.
+- `test/main_cpu.cpp` - runs the family suites over the dispatch points and the C++ wrappers, and `test/cross_<arch>.cpp` hold every capability's kernels to the serial ones, built as `stringzilla_cpu_test`, `stringzilla_cpu_shared_test` and `stringzilla_cpu_header_test`.
+- `test/main_cuda.cu`, `test/main_rocm.hip` and `test/main_metal.cpp` - each GPU vendor's kernels against the serial answers, through `test/cross_simt.cuh` and `test/cross_metal.cpp`, built as `stringzilla_cuda_test`, `stringzilla_rocm_test` and `stringzilla_metal_test`.
 - `test/*.py` - tests the Python API against native strings, split per kernel family - `string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `utf8_*.py` - with shared helpers in `helpers.py` and `utf8_helpers.py`.
 - `test/main.js`.
 
-At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
+At the C++ level all benchmarks also validate the results against the serial kernels and the STL baselines, serving as tests on real-world data.
 They have the broadest coverage of the library, and are the most important to keep up-to-date:
 
-- `bench/token.cpp` - token-level ops, like hashing, ordering, equality checks.
-- `bench/find.cpp` - bidirectional substring search, both exact and fuzzy.
-- `bench/sequence.cpp` - sorting, partitioning, merging.
-- `bench/container.cpp` - STL containers with different string keys.
-- `bench/levenshtein.cpp` and `bench/levenshtein.cu` - benchmark every edit-distance backend, CPU beside GPU.
-- `bench/overlap.cpp` and `bench/overlap.cu` - benchmark every window-overlap backend.
-- `bench/substrings.cpp` and `bench/substrings.cu` - benchmark every multi-pattern-search backend.
+- `bench/main.cpp` - runs every family file, then every `bench/cross_<arch>.cpp`, built as `stringzilla_cpu_bench`, and header-only as `stringzilla_cpu_header_bench`.
+- `bench/token.cpp`, `bench/find.cpp`, `bench/sequence.cpp`, `bench/container.cpp`, and the other family files - the dispatch points against the STL and LibC baselines.
+- `bench/cross_<arch>.cpp` - every capability's kernels against the serial ones, through the adapters in `bench/cross.hpp`.
+- `bench/cross_cuda.cu`, `bench/cross_rocm.hip`, and `bench/cross_metal.cpp` - each GPU vendor's engines against the widest CPU tier the build carries.
 
 
 ## Benchmarking Datasets
@@ -151,7 +149,7 @@ On Linux, after that, if you want to compile the minimal set of tests, use the p
 
 ```bash
 cmake --preset release
-cmake --build --preset release --target stringzilla_test_cpp20
+cmake --build --preset release --target stringzilla_cpu_test
 ctest --preset release
 ```
 
@@ -191,7 +189,7 @@ For MSVC (Developer Prompt):
 ```bat
 cmake -B build_release -G "Visual Studio 17 2022" -A x64 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
 cmake --build build_release --config Release --parallel
-build_release\\Release\\stringzilla_test_cpp20.exe
+build_release\\Release\\stringzilla_cpu_test.exe
 ```
 
 For MinGW (MSYS2):
@@ -200,7 +198,7 @@ For MinGW (MSYS2):
 pacman -S --needed --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake make
 cmake -G "MinGW Makefiles" -B build_release -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
 cmake --build build_release --config Release --parallel
-./build_release/stringzilla_test_cpp20.exe
+./build_release/stringzilla_cpu_test.exe
 ```
 
 ### Testing
@@ -210,11 +208,16 @@ Using modern syntax, this is how you build and run the test suite:
 ```bash
 cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_USE_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug --parallel   # Which will produce the following targets:
-build_debug/stringzilla_test_cpp20            # Unit test for the entire library compiled for current hardware
+build_debug/stringzilla_cpu_test            # Dispatch points, C++ wrappers, and every kernel of the static library
+build_debug/stringzilla_cpu_shared_test     # Dispatch points alone, through the shared library
+build_debug/stringzilla_cpu_header_test     # Kernels compiled header-only, and the dispatch-point stubs
 ```
 
+Kernel cross-checks are named `test_<family>_<tier>_<capability>`, so `STRINGZILLA_FILTER='_neon$'` runs one capability.
+
 There is no separate SIMD-disabled target.
-To get a build with SIMD dispatch narrowed, pass `-D STRINGZILLA_TARGET_ARCH=<name>` at configure time, for example `ivybridge` for x86 without AVX2, or set the Arm equivalent through the same variable, then rebuild `stringzilla_test_cpp20` against that configuration.
+To get a build with SIMD dispatch narrowed, pass `-D STRINGZILLA_TARGET_<KIT>=0` at configure time for each kit to leave out, for example `-D STRINGZILLA_TARGET_SKYLAKE=0 -D STRINGZILLA_TARGET_ICELAKE=0` for x86 without AVX-512, then rebuild `stringzilla_cpu_test` against that configuration.
+`-D STRINGZILLA_TARGET_ARCH=<name>`, like `native`, tunes the libraries for one CPU in place of their portable floor, without narrowing the kits.
 
 Note, that Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
 
@@ -263,19 +266,19 @@ Each top-level test is also wall-clock timed and reported as `- name ... ok (N.N
 
 ```bash
 # Draw a fresh seed instead of the default 42; the run prints it
-STRINGZILLA_SEED=random build_debug/stringzilla_test_cpp20
+STRINGZILLA_SEED=random build_debug/stringzilla_cpu_test
 
 # Quick smoke test (10% of normal iterations)
-STRINGZILLA_SCALE=0.1 build_debug/stringzilla_test_cpp20
+STRINGZILLA_SCALE=0.1 build_debug/stringzilla_cpu_test
 
 # Fast inner loop: only the UTF-8 tests, at 10% iterations, reproducibly
-STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 STRINGZILLA_SEED=42 build_debug/stringzilla_test_cpp20
+STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 STRINGZILLA_SEED=42 build_debug/stringzilla_cpu_test
 
 # Thorough CI stress test (10x normal iterations)
-STRINGZILLA_SCALE=10 build_debug/stringzilla_test_cpp20
+STRINGZILLA_SCALE=10 build_debug/stringzilla_cpu_test
 
 # Combine both for CI fuzzing
-STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 build_debug/stringzilla_test_cpp20
+STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 build_debug/stringzilla_cpu_test
 
 # Python tests also respect STRINGZILLA_SEED and STRINGZILLA_SCALE
 STRINGZILLA_SEED=random pytest test/ -v
@@ -288,7 +291,7 @@ When a C++ test fails a `verify` or throws, the harness prints a `rerun:` line t
 
 ```text
 - test_utf8_runes_all ... FAILED: verification failed
-  rerun: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^test_utf8_runes_all$' build_debug/stringzilla_test_cpp20
+  rerun: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^test_utf8_runes_all$' build_debug/stringzilla_cpu_test
 ```
 
 The run still exits with 1 at the end.
@@ -296,7 +299,7 @@ A library assertion or a crash stops the run instead, printing a backtrace where
 
 ```text
 - Seed: 42
-- Rerun one test: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^<name>$' build_debug/stringzilla_test_cpp20
+- Rerun one test: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^<name>$' build_debug/stringzilla_cpu_test
 ```
 
 This is particularly useful for debugging SIMD edge cases that only manifest with specific input patterns.
@@ -313,11 +316,11 @@ sudo apt install qemu-user gcc-x86-64-linux-gnu gcc-riscv64-linux-gnu gcc-loonga
 
 # Sweep SVE vector lengths on the native Arm binary (sve-max-vq is VL/128)
 for vq in 1 2 4; do
-  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 qemu-aarch64 -cpu max,sve-max-vq=$vq build_release/stringzilla_test_cpp20
+  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 qemu-aarch64 -cpu max,sve-max-vq=$vq build_release/stringzilla_cpu_test
 done
 
 # NEON-only dispatch (otherwise SVE2 always wins and NEON is never exercised)
-qemu-aarch64 -cpu max,sve=off build_release/stringzilla_test_cpp20
+qemu-aarch64 -cpu max,sve=off build_release/stringzilla_cpu_test
 
 # Cross-compile a single-TU probe against another backend and run it emulated
 x86_64-linux-gnu-gcc -O2 -mavx2 -mbmi -mbmi2 -mpopcnt -DSTRINGZILLA_TARGET_HASWELL=1 -Iinclude probe.c -o probe -static
@@ -356,43 +359,37 @@ For benchmarks, you can use the following commands:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCH=1 -B build_release
-cmake --build build_release --config Release --parallel    # Produces the following targets:
-build_release/stringzilla_bench_find_cpp20          # - for substring search
-build_release/stringzilla_bench_sequence_cpp20      # - for sorting arrays of strings
-build_release/stringzilla_bench_token_cpp20         # - for hashing, equality comparisons, etc.
-build_release/stringzilla_bench_utf8_uncased_cpp20  # - for UTF-8 case-folding and case-insensitive comparisons
-build_release/stringzilla_bench_utf8_traverse_cpp20 # - for UTF-8 codepoint iteration
-build_release/stringzilla_bench_utf8_scan_cpp20     # - for UTF-8 validation and scanning
-build_release/stringzilla_bench_utf8_segment_cpp20  # - for UTF-8 grapheme, word, sentence, and linewrap segmentation
-build_release/stringzilla_bench_utf8_norm_cpp20     # - for UTF-8 normalization
-build_release/stringzilla_bench_container_cpp20     # - for STL containers with string keys
-build_release/stringzilla_bench_memory_cpp20        # - for string copies and fills
-build_release/stringzilla_bench_cipher_cpp20        # - for AES encryption and decryption
-build_release/stringzilla_bench_levenshtein_cpp20   # - for batch edit distances
-build_release/stringzilla_bench_overlap_cpp20       # - for window overlap between prepared queries and candidates
-build_release/stringzilla_bench_substrings_cpp20    # - for multi-pattern search over one compiled vocabulary
+cmake --build build_release --config Release --parallel # Produces the following targets:
+build_release/stringzilla_cpu_bench                     # - every family's dispatch points, then every capability's kernels
+build_release/stringzilla_cpu_header_bench              # - the kernels header-only, with the helpers the library keeps private
 ```
 
-Each engine family also has a CUDA launcher, built only when `STRINGZILLA_BUILD_CUDA` is on:
+Each family times its dispatch points, like `sz_find_best`, against the standard baselines, like `find<std::strstr>`.
+Each capability's kernels, like `sz_find_haswell`, are timed against the serial ones, like `sz_find_serial`, and skipped on a CPU that lacks the capability.
+The header-only twin has no dispatch points to time, but it reaches the private helpers, like the SIMD sorts of pgrams and the Levenshtein and overlap steps.
+
+Each GPU vendor has one launcher, built only when its `STRINGZILLA_BUILD_CUDA`, `STRINGZILLA_BUILD_ROCM`, or `STRINGZILLA_BUILD_METAL` option is on:
 
 ```sh
-build_release/stringzilla_bench_levenshtein_cu20    # - for batch edit distances on GPU
-build_release/stringzilla_bench_overlap_cu20        # - for window overlap on GPU
-build_release/stringzilla_bench_substrings_cu20     # - for multi-pattern search on GPU
+build_release/stringzilla_cuda_bench     # - for edit distances, window overlap, and multi-pattern search on Nvidia GPUs
+build_release/stringzilla_rocm_bench     # - for the same on AMD GPUs
+build_release/stringzilla_metal_bench    # - for window overlap on Apple GPUs
 ```
+
+Their rows are named after the kernel they time, like `sz_levenshtein_distances_cuda:q1024:w16:sorted` or `sz_overlap_scores_metal:w5`, which is what `STRINGWARS_FILTER` matches.
 
 All of them support customization via environment variables.
 Let's say you want to benchmark large-batch DNA edit distances:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCH=1 -B build_release
-cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cpp20 --parallel # CPU
-cmake --build build_release --config Release --target stringzilla_bench_levenshtein_cu20 --parallel  # GPU
-STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench_levenshtein_cpp20
-STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench_levenshtein_cu20
+cmake --build build_release --config Release --target stringzilla_cpu_bench --parallel  # CPU
+cmake --build build_release --config Release --target stringzilla_cuda_bench --parallel # GPU
+STRINGWARS_FILTER="sz_levenshtein_distances" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_cpu_bench
+STRINGWARS_FILTER="sz_levenshtein_distances" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_cuda_bench
 
-STRINGWARS_FILTER="cuda.*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench_levenshtein_cu20
-STRINGWARS_STRESS=0 STRINGWARS_FILTER="cuda.*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench_levenshtein_cu20
+STRINGWARS_FILTER="sz_levenshtein_distances_cuda:q[0-9]+:w" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_cuda_bench
+STRINGWARS_STRESS=0 STRINGWARS_FILTER="sz_levenshtein_distances_cuda:q1024:w16" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_cuda_bench
 ```
 
 The benchmark harness reads these environment variables:
@@ -418,14 +415,14 @@ For a fast inner loop, scope to one backend on a small dataset, cap the dataset 
 STRINGWARS_FILTER='sz_find' STRINGWARS_DATASET=leipzig1M.txt \
     STRINGWARS_DATASET_LIMIT=65536 STRINGWARS_BATCH=1024 \
     STRINGWARS_STRESS=0 STRINGWARS_MAX_SECONDS=1 \
-    build_release/stringzilla_bench_find_cpp20
+    build_release/stringzilla_cpu_bench
 ```
 
 Throughput is a time-bounded measurement: absolute GiB/s drifts ±10-15% on a loaded machine, while the ratio between two backends in the _same_ run stays stable.
 Compare A/B within one run; raise `STRINGWARS_MAX_SECONDS` and use a quiet machine when you need stable absolute numbers.
 The work itself is deterministic: without `STRINGWARS_SEED` the tokens keep their order, and a given seed always shuffles them the same way.
 
-Each benchmark originates from an identically named single-source file in the `bench/` directory.
+Each family's benchmarks live in an identically named file in the `bench/` directory, and their kernel adapters in `bench/cross.hpp`.
 All of them feature file-level documentation, and are designed to be self-explanatory.
 You can easily log their descriptions until the first `*/` with the following `sed` and `awk` commands:
 
@@ -469,7 +466,7 @@ cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BU
 ### Profiling
 
 To simplify tracing and profiling, build with symbols using the `RelWithDebInfo` configuration.
-Here is an example for profiling one target - `stringzilla_bench_token_cpp20`.
+Here is an example for profiling the hashing benchmarks of `stringzilla_cpu_bench`.
 
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCH=1 \
@@ -477,14 +474,14 @@ cmake -D STRINGZILLA_BUILD_BENCH=1 \
     -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_BUILD_TYPE=RelWithDebInfo \
     -B build_profile
-cmake --build build_profile --config Release --target stringzilla_bench_token_cpp20 --parallel
+cmake --build build_profile --config Release --target stringzilla_cpu_bench --parallel
 
 # Check that the debugging symbols are there with your favorite tool
-readelf --sections build_profile/stringzilla_bench_token_cpp20 | grep debug
-objdump -h build_profile/stringzilla_bench_token_cpp20 | grep debug
+readelf --sections build_profile/stringzilla_cpu_bench | grep debug
+objdump -h build_profile/stringzilla_cpu_bench | grep debug
 
 # Profile
-sudo env STRINGWARS_DATASET=./leipzig1M.txt perf record -g build_profile/stringzilla_bench_token_cpp20
+sudo env STRINGWARS_DATASET=./leipzig1M.txt STRINGWARS_FILTER='sz_hash' perf record -g build_profile/stringzilla_cpu_bench
 sudo perf report
 ```
 
@@ -504,7 +501,7 @@ cd /workspace/StringZilla
 apk add --update make cmake g++ gcc
 cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug --parallel
-build_debug/stringzilla_test_cpp20
+build_debug/stringzilla_cpu_test
 ```
 
 #### Intel Clear Linux
@@ -520,7 +517,7 @@ swupd update
 swupd bundle-add c-basic dev-utils
 cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug --parallel
-build_debug/stringzilla_test_cpp20
+build_debug/stringzilla_cpu_test
 ```
 
 For benchmarks:
@@ -541,8 +538,8 @@ yum install -y make cmake3 gcc g++
 cmake3 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug \
     -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc -D STRINGZILLA_TARGET_ARCH="ivybridge" \
     -B build_debug
-cmake3 --build build_debug --config Debug --target stringzilla_test_cpp20
-build_debug/stringzilla_test_cpp20
+cmake3 --build build_debug --config Debug --target stringzilla_cpu_test
+build_debug/stringzilla_cpu_test
 ```
 
 The CentOS-based __Amazon Linux 2__ is still used in older AWS Lambda functions.
@@ -555,8 +552,8 @@ yum install -y make cmake3 gcc10 gcc10-c++
 cmake3 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug \
     -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc -D STRINGZILLA_TARGET_ARCH="ivybridge" \
     -B build_debug
-cmake3 --build build_debug --config Debug --target stringzilla_test_cpp20
-build_debug/stringzilla_test_cpp20
+cmake3 --build build_debug --config Debug --target stringzilla_cpu_test
+build_debug/stringzilla_cpu_test
 ```
 
 > [!CAUTION]
@@ -631,21 +628,44 @@ Shared libraries stay off in both configurations, since WASI has no dynamic load
 
 ## CUDA
 
-The device backends of the engine families build into one launcher, `stringzilla_test_cu20`, which needs `STRINGZILLA_BUILD_CUDA` on and checks each kernel against the serial answers:
+`STRINGZILLA_BUILD_CUDA` adds `c/nvidia/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports, like `sz_cuda_memory_allocator_init_unified` and `sz_cuda_sequence_from_string_views`.
+`stringzilla_cuda_test`, built from `test/main_cuda.cu` and `test/cross_cuda.cu` over the static library, checks the CUDA kernels and the dispatch points over them against the serial answers:
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_CUDA=1 -B build_debug
-cmake --build build_debug --config Debug --target stringzilla_test_cu20 --parallel
+cmake --build build_debug --config Debug --target stringzilla_cuda_test --parallel
 ```
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_CUDA=1 -B build_release
-cmake --build build_release --config Release --target stringzilla_test_cu20 --parallel
+cmake --build build_release --config Release --target stringzilla_cuda_test --parallel
 ```
 
 ```sh
-cuda-gdb ./build_debug/stringzilla_test_cu20
-cuda-memcheck ./build_debug/stringzilla_test_cu20
+cuda-gdb ./build_debug/stringzilla_cuda_test
+cuda-memcheck ./build_debug/stringzilla_cuda_test
+```
+
+## Metal and ROCm
+
+`STRINGZILLA_BUILD_METAL` adds `c/apple/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `simt.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, `sz_metal_device_init(ordinal, arena_bytes, &device)` with its `synchronize` and `free` twins.
+`STRINGZILLA_BUILD_ROCM` adds `c/amd/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
+
+The Metal backends of all three engine families build into `stringzilla_metal_test` on Apple platforms, which needs `STRINGZILLA_BUILD_METAL` on and checks them against the serial answers:
+
+```sh
+cmake --preset metal
+cmake --build --preset metal
+ctest --preset metal
+```
+
+`stringzilla_rocm_test`, built under `STRINGZILLA_BUILD_ROCM` on Linux from `test/main_rocm.hip` and `test/cross_rocm.hip`, runs the checks `test/cross_simt.cuh` shares with the CUDA test, and exits zero without a device.
+It builds beside the CUDA test when both options are on:
+
+```sh
+cmake --preset rocm
+cmake --build --preset rocm
+ctest --preset rocm
 ```
 
 ## Python

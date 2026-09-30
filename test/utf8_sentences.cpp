@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date June 22, 2026
  *  @brief UAX-29 sentence-boundary (Sentence_Break) tests: known-answer goldens, malformed-input
- *      safety, and the serial-vs-ISA differential over hardened corpora.
+ *      safety, and the serial-vs-dispatched differential over hardened corpora.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -16,54 +16,23 @@
 #endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-#include <cstddef> // `std::size_t`
+#include <stringzilla/stringzilla.hpp> // `sz::string_view_t`
 
-#include <random> // `std::mt19937`, `std::uniform_int_distribution`
 #include <string> // `std::string`
 #include <vector> // `std::vector`
 
-#include "utf8.hpp" // shared segmentation harness (pulls in StringZilla + `harness.hpp`)
+#include "cross.hpp" // `check_utf8_sentences_unit_` and the shared segmentation harness
 
 using namespace sz::test;
 
+/** The sentence-break dispatch point in the shape of a segmentation backend. */
+static utf8_segment_backend_t const utf8_sentences_dispatched = {"dispatched", cpu_best<sz_utf8_sentences_best>};
+
 #pragma region Unit
 
-/** Hand-checked UAX-29 sentence-break golden vectors: each source text and its sentences. */
-static utf8_unit_case_t const utf8_sentences_unit_cases[] = {
-    {""_sv, {}},
-    {"Hello."_sv, {"Hello."_sv}},
-    {"Hello. World."_sv, {"Hello. "_sv, "World."_sv}}, // terminator + space ends the sentence
-    {"Mr. Smith went."_sv,
-     {"Mr. "_sv, "Smith went."_sv}},                // UAX-29 has no abbreviation list: '. ' before uppercase breaks
-    {"etc. and so on"_sv, {"etc. and so on"_sv}},   // SB8: '. ' before a lowercase word does not break
-    {"One.\nTwo."_sv, {"One.\n"_sv, "Two."_sv}},    // ParaSep after terminator
-    {"A! B? C."_sv, {"A! "_sv, "B? "_sv, "C."_sv}}, // multiple terminators
-};
-
-/** The UTF-8 sentence-break segmenters compiled on this target. The always-present @c dispatched
- *  entry keeps the table non-empty on a baseline build; the unit / rule-coverage / safety /
- *  equivalence drivers all iterate this one ladder so their ISA coverage stays in lockstep. */
-static utf8_segment_backend_t const utf8_sentences_backends[] = {
-    {"dispatched", sz_utf8_sentences},
-#if STRINGZILLA_TARGET_HASWELL
-    {"haswell", sz_utf8_sentences_haswell},
-#endif
-#if STRINGZILLA_TARGET_ICELAKE
-    {"icelake", sz_utf8_sentences_icelake},
-#endif
-#if STRINGZILLA_TARGET_NEON
-    {"neon", sz_utf8_sentences_neon},
-#endif
-#if STRINGZILLA_TARGET_SVE2
-    {"sve2", sz_utf8_sentences_sve2},
-#endif
-};
-
-/** Known-answer sentence-break vectors via dispatched, serial, each ISA, and the C++ range. */
+/** Known-answer sentence-break vectors via the dispatch point and the C++ range. */
 void test_utf8_sentences_unit() {
-    check_utf8_segment_unit_("sentence", sz_utf8_sentences_serial, span_over(utf8_sentences_unit_cases));
-    for (utf8_segment_backend_t const &backend : utf8_sentences_backends)
-        check_utf8_segment_unit_("sentence", backend.finder, span_over(utf8_sentences_unit_cases));
+    check_utf8_sentences_unit_(utf8_sentences_dispatched);
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's sentence segments.
     std::vector<std::string> const sentences =
@@ -71,192 +40,38 @@ void test_utf8_sentences_unit() {
     verify(sentences.size() == 2 && "C++ utf8_sentences range");
 
     // Sentence counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
-    verify(utf8_prose_hotel_review().utf8_sentences().template to<std::vector<std::string>>().size() == 5 &&
-           "hotel_review sentences");
-    verify(utf8_prose_concert_post().utf8_sentences().template to<std::vector<std::string>>().size() == 4 &&
-           "concert_post sentences");
-    verify(utf8_prose_news_lede().utf8_sentences().template to<std::vector<std::string>>().size() == 6 &&
-           "news_lede sentences");
-    verify(utf8_prose_micro_hardbreaks().utf8_sentences().template to<std::vector<std::string>>().size() == 3 &&
-           "micro_hardbreaks sentences");
+    auto count_sentences = [](std::string_view text) {
+        return sz::string_view_t(text).utf8_sentences().template to<std::vector<std::string>>().size();
+    };
+    verify(count_sentences(utf8_prose_hotel_review()) == 5 && "hotel_review sentences");
+    verify(count_sentences(utf8_prose_concert_post()) == 4 && "concert_post sentences");
+    verify(count_sentences(utf8_prose_news_lede()) == 6 && "news_lede sentences");
+    verify(count_sentences(utf8_prose_micro_hardbreaks()) == 3 && "micro_hardbreaks sentences");
 }
 
 #pragma endregion Unit
 
-#pragma region Equivalence
-
-/** UAX-29 sentence-break corner motifs (sprinkled into the random corpus): ATerm vs STerm,
- *  terminator + Close + Space + case, paragraph separators after a terminator, SContinue,
- *  abbreviation-like and numeric. */
-static sz::string_view_t const utf8_sentences_motifs[] = {
-    "End. Next"_sv,               // ATerm + space + uppercase (SB break)
-    "End! Next"_sv,               // STerm + space + uppercase (SB break)
-    "End? Next"_sv,               // STerm '?' + space + uppercase
-    "end. next"_sv,               // SB8: '. ' before lowercase does not break
-    "(End.) Next"_sv,             // terminator + Close ')' + space + uppercase
-    "\"End.\" Next"_sv,           // terminator + Close '"' + space + uppercase
-    "End.\xE2\x80\xA8" "Next"_sv, // ParaSep U+2028 after terminator
-    "End.\xE2\x80\xA9" "Next"_sv, // ParaSep U+2029 after terminator
-    "End.\xC2\x85" "Next"_sv,     // ParaSep U+0085 NEL after terminator
-    "Item, more"_sv,              // SContinue ',' continuation
-    "Item: more"_sv,              // SContinue ':' continuation
-    "Mr. Smith"_sv,               // abbreviation-like
-    "Dr. House"_sv,               // abbreviation-like
-    "U.S.A. ok"_sv,               // dotted acronym
-    "3.14 value"_sv,              // numeric ATerm (no break)
-    // Dense-decode edge motifs for SB5 Extend/Format transparency and cross-window SB8, sprinkled
-    // at window seams:
-    "End.\xCC\x88 next"_sv,      // ATerm + combining mark (Extend, SB5-transparent) before the space
-    "End\xCC\x88. Next"_sv,      // combining mark on the terminator's preceding letter
-    "End.\xE2\x80\x8B Next"_sv,  // ATerm + Format (U+200B ZWSP is Format here) transparency
-    "A.\xCC\x80\xCC\x80 b"_sv,   // ATerm + stacked Extend marks then lowercase (SB8 across transparents)
-    "End. \xE2\x80\x8C Next"_sv, // ATerm Sp then Format then Upper (SB8 neutral chain)
-};
-
-/** ATerm + Close* + Sp* run @p link_count wide, then a Lower (SB8: no break), into @p out. */
-static void utf8_sentences_dense_aterm_sp_lower_(std::string &out, std::size_t link_count) {
-    out.clear();
-    out.append(encoded_rune_(0x0055));                                                           // 'U' Upper
-    out.append(encoded_rune_(0x002E));                                                           // '.' ATerm
-    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(0x0020)); // Sp run
-    out.append(encoded_rune_(0x0061));                                                           // 'a' Lower
-}
-
-/** Terminator-dense `A. A. A. ...` repeated @p link_count times, one break each, into @p out. */
-static void utf8_sentences_dense_terminators_(std::string &out, std::size_t link_count) {
-    out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) out.append("A. ");
-}
-
-/** Ideographic full stop (U+3002) + Sp run + CJK, repeated @p link_count times (multibyte STerm),
- *  into @p out. */
-static void utf8_sentences_dense_cjk_term_(std::string &out, std::size_t link_count) {
-    out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) {
-        out.append(encoded_rune_(0x4E2D)); // 中
-        out.append(encoded_rune_(0x3002)); // 。 ideographic full stop (STerm)
-        out.append(encoded_rune_(0x0020)); // Sp
-    }
-}
-
-/** Stream the sentence family's high-density homogeneous runs (each spans several 64-byte windows)
- *  to @p sink. */
-static void utf8_sentences_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
-    std::string scratch;
-    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
-    utf8_sentences_dense_aterm_sp_lower_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_sentences_dense_terminators_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_sentences_dense_cjk_term_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-}
-
-/** SB8: `Upper ATerm Sp{gap} Lower` — long Sp run before a lowercase keeps one sentence,
- *  into @p out. */
-static void utf8_sentences_straddle_sb8_lower_(std::string &out, std::size_t gap) {
-    out.clear();
-    out.append(encoded_rune_(0x0055));                                                    // 'U'
-    out.append(encoded_rune_(0x002E));                                                    // '.'
-    for (std::size_t index = 0; index != gap; ++index) out.append(encoded_rune_(0x0020)); // Sp run across windows
-    out.append(encoded_rune_(0x0061));                                                    // 'a' Lower
-}
-
-/** SB11: `Upper ATerm Sp{gap} Upper` — same run before an uppercase must break, into @p out. */
-static void utf8_sentences_straddle_sb11_upper_(std::string &out, std::size_t gap) {
-    out.clear();
-    out.append(encoded_rune_(0x0055));                                                    // 'U'
-    out.append(encoded_rune_(0x002E));                                                    // '.'
-    for (std::size_t index = 0; index != gap; ++index) out.append(encoded_rune_(0x0020)); // Sp run across windows
-    out.append(encoded_rune_(0x0042));                                                    // 'B' Upper
-}
-
-/** Stream the sentence family's long-range straddling constructions for @p gap to @p sink. */
-static void utf8_sentences_straddles_(std::mt19937 & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
-                                      void *context) {
-    std::string scratch;
-    utf8_sentences_straddle_sb8_lower_(scratch, gap), sink(context, scratch.data(), scratch.size());
-    utf8_sentences_straddle_sb11_upper_(scratch, gap), sink(context, scratch.data(), scratch.size());
-}
-
-/** Sentence snippets: ATerm/STerm + space + case across scripts, numeric, CJK stop, ParaSep. */
-static char const *const utf8_sentences_snippets[] = {
-    "End. Next ",               // ATerm + space + Upper (SB break)
-    "end. next ",               // SB8: '. ' before Lower does not break
-    "3.14 ",                    // numeric ATerm (no break)
-    "Item, ",                   // SContinue ',' continuation
-    "\xE4\xB8\xAD\xE3\x80\x82", // CJK ideograph + ideographic full stop (STerm)
-    "\xE2\x80\xA8",             // ParaSep U+2028
-    "\xCE\x9A\xCE\xB1\xCE\xBB\xCE\xAC\xCD\xBE \xCE\x9D\xCE\xB1\xCE\xB9 ", // Greek question mark U+037E + Upper
-    "\xD9\x85\xD8\xB1\xDB\x94 \xD9\x85\xD8\xB1\xD8\x9F Hi. ",             // Arabic U+06D4 / U+061F, RTL then LTR
-    "\xE0\xA4\xA8\xE0\xA4\xAE\xE0\xA5\xA4 \xD0\x94\xD0\xB0. ",            // Devanagari danda U+0964 + Cyrillic
-};
-
-/** Sentence alphabet, biased toward family snippets and motifs (SB6/7/8/8a/9/10/11). */
-static utf8_corpus_alphabet_t const utf8_sentences_alphabet = {
-    span_over(utf8_sentences_snippets),
-    span_over(utf8_default_boundary_codepoints),
-    {{45, 15, 5, 30, 5}}, // snippet, boundary, astral, motif, malformed
-};
-
-/** Sentence differential corpora: motifs, dense runs, straddles, alphabet, no seam regressions. */
-static utf8_segment_corpora_t utf8_sentences_corpora_() {
-    utf8_segment_corpora_t corpora = {
-        "sentence", span_over(utf8_sentences_motifs), &utf8_sentences_dense_runs_, &utf8_sentences_straddles_,
-        {},         &utf8_sentences_alphabet};
-    return corpora;
-}
-
-#pragma endregion Equivalence
-
 #pragma region Rule coverage
 
-/** Rule-coverage gate: every SB rule motif runs and agrees serial-vs-ISA at window phases. */
-void test_utf8_sentences_rules() {
-    // One motif per UAX-29 Sentence_Break rule, tagged with the direction it demonstrates (break or no-break).
-    utf8_rule_case_t const rule_cases[] = {
-        {"SB3", utf8_rule_joins_k, "\r\n"_sv},      // CR x LF (no break)
-        {"SB4", utf8_rule_breaks_k, "a\nb"_sv},     // (Sep|CR|LF) / break after LF
-        {"SB5", utf8_rule_joins_k, "a\xCC\x81"_sv}, // X (Extend|Format)* absorbed (no break)
-        {"SB6", utf8_rule_joins_k, "3.4"_sv},       // ATerm x Numeric (no break)
-        {"SB7", utf8_rule_joins_k, "A.B"_sv},       // (Upper|Lower) ATerm x Upper (no break)
-        {"SB8", utf8_rule_joins_k, "A. a"_sv},      // ATerm Close* Sp* x (not stop)* Lower (no break)
-        {"SB8a", utf8_rule_joins_k, "a.,"_sv},      // (STerm|ATerm) Close* Sp* x (SContinue|STerm|ATerm) (no break)
-        {"SB9", utf8_rule_joins_k, "a.)"_sv},       // (STerm|ATerm) Close* x (Close|Sp|Sep|CR|LF) (no break)
-        {"SB10", utf8_rule_joins_k, "a. "_sv},      // (STerm|ATerm) Close* Sp* x (Sp|Sep|CR|LF) (no break)
-        {"SB11", utf8_rule_breaks_k, "A. B"_sv},    // (STerm|ATerm) Close* Sp* / break before the next sentence
-        {"SB998", utf8_rule_joins_k, "ab"_sv},      // Any x Any (no break by default)
-        // Opposite-direction motifs (E1): the same rule firing the other way (the gate compares serial-vs-ISA on each).
-        {"SB998", utf8_rule_breaks_k,
-         "ab cd"_sv}, // default no-break interior, but the terminator-less run still varies
-        {"SB5", utf8_rule_joins_k, "a\xE2\x80\x8B"_sv}, // Format (U+200B ZWSP) transparency absorbed (no break)
-    };
-    // Every Sentence_Break rule id the gate requires a motif for (spec-derived checklist).
-    char const *const required_rules[] = {
-        "SB3", "SB4", "SB5", "SB6", "SB7", "SB8", "SB8a", "SB9", "SB10", "SB11", "SB998",
-    };
-    for (utf8_segment_backend_t const &backend : utf8_sentences_backends)
-        check_utf8_rule_coverage_("sentence", sz_utf8_sentences_serial, backend.finder, span_over(rule_cases),
-                                  span_over(required_rules));
-}
+/** Rule-coverage gate: every SB motif agrees serial-vs-dispatched at window phases. */
+void test_utf8_sentences_rules() { check_utf8_sentences_rules_(utf8_sentences_dispatched); }
 
 #pragma endregion Rule coverage
 
 #pragma region Safety
 
-/** Malformed-input safety of the UTF-8 sentence kernels (serial / dispatched / icelake). */
+/** Malformed-input safety of the sentence-break dispatch point. */
 void test_utf8_sentences_safety(test_context_t &context) {
-    utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_sentences_serial}};
-    check_utf8_segment_safety_(context, "sentence", span_over(serial_only));
-    check_utf8_segment_safety_(context, "sentence", span_over(utf8_sentences_backends));
+    check_utf8_sentences_safety_(context, utf8_sentences_dispatched);
 }
 
 #pragma endregion Safety
 
 #pragma region Drivers
 
-/** Serial-vs-ISA sentence differential over the hardened corpora (high-density + long-range). */
+/** Serial-vs-dispatched sentence differential over the dense and long-range corpora. */
 void test_utf8_sentences_all(test_context_t &context) {
-    utf8_segment_corpora_t const corpora = utf8_sentences_corpora_();
-    check_utf8_segment_equivalence_(context, sz_utf8_sentences_serial, span_over(utf8_sentences_backends), corpora,
-                                    context.iterations(90)); // This family's share of the suite budget
+    check_utf8_sentences_equivalence_(context, utf8_sentences_dispatched);
 }
 
 #pragma endregion Drivers
